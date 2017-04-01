@@ -5,8 +5,10 @@
 package org.chromium.chrome.browser.signin;
 
 import android.app.Activity;
+import android.app.FragmentManager;
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
 import android.text.method.LinkMovementMethod;
 import android.util.AttributeSet;
@@ -15,6 +17,8 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
+
+import com.google.android.gms.common.ConnectionResult;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
@@ -27,7 +31,7 @@ import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.profiles.ProfileDownloader;
 import org.chromium.chrome.browser.signin.AccountTrackerService.OnSystemAccountsSeededListener;
 import org.chromium.chrome.browser.signin.ConfirmImportSyncDataDialog.ImportSyncType;
-import org.chromium.components.sync.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerHelper;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
 import org.chromium.ui.text.SpanApplier.SpanInfo;
@@ -45,6 +49,7 @@ import java.util.List;
  */
 
 public class AccountSigninView extends FrameLayout implements ProfileDownloader.Observer {
+
     /**
      * Callbacks for various account selection events.
      */
@@ -81,9 +86,17 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
      */
     public interface Delegate {
         /**
-         * Provides an Activity for the view to create dialogs.
+         * Provides an Activity for the View to check GMSCore version.
          */
         public Activity getActivity();
+
+        /**
+         * Provides a FragmentManager for the View to create dialogs. This is done through a
+         * different mechanism than getActivity().getFragmentManager() as a potential fix to
+         * https://crbug.com/646978 on the theory that getActivity() and getFragmentManager()
+         * return null at different times.
+         */
+        public FragmentManager getFragmentManager();
     }
 
     private static final String TAG = "AccountSigninView";
@@ -104,6 +117,8 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
     private boolean mSignedIn;
     private int mCancelButtonTextId;
     private boolean mIsChildAccount;
+    private boolean mIsGooglePlayServicesOutOfDate;
+    private UserRecoverableErrorHandler.ModalDialog mGooglePlayServicesUpdateErrorHandler;
 
     private AccountSigninConfirmationView mSigninConfirmationView;
     private ImageView mSigninAccountImage;
@@ -117,12 +132,16 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
     }
 
     /**
-     * Initializes this view with profile images and full names.
+     * Initializes this view with profile data cache, delegate and listener.
      * @param profileData ProfileDataCache that will be used to call to retrieve user account info.
+     * @param delegate    The UI object creation delegate.
+     * @param listener    The account selection event listener.
      */
-    public void init(ProfileDataCache profileData) {
+    public void init(ProfileDataCache profileData, Delegate delegate, Listener listener) {
         mProfileData = profileData;
         mProfileData.setObserver(this);
+        mDelegate = delegate;
+        mListener = listener;
         showSigninPage();
     }
 
@@ -179,6 +198,10 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
         super.onWindowVisibilityChanged(visibility);
         if (visibility == View.VISIBLE) {
             updateAccounts();
+            return;
+        }
+        if (visibility == View.INVISIBLE && mGooglePlayServicesUpdateErrorHandler != null) {
+            mGooglePlayServicesUpdateErrorHandler.cancelDialog();
         }
     }
 
@@ -203,68 +226,127 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
     }
 
     /**
-     * Set the account selection event listener.  See {@link Listener}
-     *
-     * @param listener The listener.
-     */
-    public void setListener(Listener listener) {
-        mListener = listener;
-    }
-
-    /**
-     * Set the UI object creation delegate. See {@link Delegate}
-     * @param delegate The delegate.
-     */
-    public void setDelegate(Delegate delegate) {
-        mDelegate = delegate;
-    }
-
-    /**
-     * Refresh the list of available system accounts.
+     * Refresh the list of available system accounts asynchronously. This is a convenience method
+     * that will ignore whether the accounts updating was actually successful.
      */
     private void updateAccounts() {
-        if (mSignedIn || mProfileData == null) return;
+        updateAccounts(new Callback<Boolean>() {
+            @Override
+            public void onResult(Boolean result) {}
+        });
+    }
 
-        List<String> oldAccountNames = mAccountNames;
-        mAccountNames = mAccountManagerHelper.getGoogleAccountNames();
-        int accountToSelect = 0;
-        if (isInForcedAccountMode()) {
-            accountToSelect = mAccountNames.indexOf(mForcedAccountName);
-            if (accountToSelect < 0) {
-                mListener.onFailedToSetForcedAccount(mForcedAccountName);
-                return;
-            }
-        } else {
-            accountToSelect = getIndexOfNewElement(
-                    oldAccountNames, mAccountNames, mSigninChooseView.getSelectedAccountPosition());
-        }
-
-        int oldSelectedAccount = mSigninChooseView.getSelectedAccountPosition();
-        mSigninChooseView.updateAccounts(mAccountNames, accountToSelect, mProfileData);
-        if (mAccountNames.isEmpty()) {
-            setUpSigninButton(false);
+    /**
+     * Refresh the list of available system accounts asynchronously.
+     *
+     * @param callback Called once the accounts have been refreshed. Boolean indicates whether the
+     *                 accounts haven been successfully updated.
+     */
+    private void updateAccounts(final Callback<Boolean> callback) {
+        if (mSignedIn || mProfileData == null) {
+            callback.onResult(false);
             return;
         }
-        setUpSigninButton(true);
 
-        mProfileData.update();
-
-        // Determine how the accounts have changed. Each list should only have unique elements.
-        if (oldAccountNames == null || oldAccountNames.isEmpty()) return;
-
-        if (!mAccountNames.get(accountToSelect).equals(oldAccountNames.get(oldSelectedAccount))) {
-            // Any dialogs that may have been showing are now invalid (they were created for the
-            // previously selected account).
-            ConfirmSyncDataStateMachine
-                    .cancelAllDialogs(mDelegate.getActivity().getFragmentManager());
-
-            if (mAccountNames.containsAll(oldAccountNames)) {
-                // A new account has been added and no accounts have been deleted. We will have
-                // changed the account selection to the newly added account, so shortcut to the
-                // confirm signin page.
-                showConfirmSigninPageAccountTrackerServiceCheck();
-            }
+        if (!checkGooglePlayServicesAvailable()) {
+            setUpSigninButton(false);
+            callback.onResult(false);
+            return;
         }
+
+        final List<String> oldAccountNames = mAccountNames;
+        final AlertDialog updatingGmsDialog;
+
+        if (mIsGooglePlayServicesOutOfDate) {
+            updatingGmsDialog = new AlertDialog.Builder(getContext())
+                    .setCancelable(false)
+                    .setView(R.layout.updating_gms_progress_view)
+                    .create();
+            updatingGmsDialog.show();
+        } else {
+            updatingGmsDialog = null;
+        }
+
+        mAccountManagerHelper.getGoogleAccountNames(new Callback<List<String>>() {
+            @Override
+            public void onResult(List<String> result) {
+                if (updatingGmsDialog != null) {
+                    updatingGmsDialog.dismiss();
+                }
+                mIsGooglePlayServicesOutOfDate = false;
+
+                if (mSignedIn) {
+                    // If sign-in completed in the mean time, return in order to avoid showing the
+                    // wrong state in the UI.
+                    return;
+                }
+
+                mAccountNames = result;
+
+                int accountToSelect = 0;
+                if (isInForcedAccountMode()) {
+                    accountToSelect = mAccountNames.indexOf(mForcedAccountName);
+                    if (accountToSelect < 0) {
+                        mListener.onFailedToSetForcedAccount(mForcedAccountName);
+                        callback.onResult(false);
+                        return;
+                    }
+                } else {
+                    accountToSelect = getIndexOfNewElement(
+                            oldAccountNames, mAccountNames,
+                            mSigninChooseView.getSelectedAccountPosition());
+                }
+
+                int oldSelectedAccount = mSigninChooseView.getSelectedAccountPosition();
+                mSigninChooseView.updateAccounts(mAccountNames, accountToSelect, mProfileData);
+                if (mAccountNames.isEmpty()) {
+                    setUpSigninButton(false);
+                    callback.onResult(true);
+                    return;
+                }
+                setUpSigninButton(true);
+
+                mProfileData.update();
+
+                // Determine how the accounts have changed. Each list should only have unique
+                // elements.
+                if (oldAccountNames == null || oldAccountNames.isEmpty()) {
+                    callback.onResult(true);
+                    return;
+                }
+
+                if (!mAccountNames.get(accountToSelect).equals(
+                        oldAccountNames.get(oldSelectedAccount))) {
+                    // Any dialogs that may have been showing are now invalid (they were created
+                    // for the previously selected account).
+                    ConfirmSyncDataStateMachine
+                            .cancelAllDialogs(mDelegate.getFragmentManager());
+
+                    if (mAccountNames.containsAll(oldAccountNames)) {
+                        // A new account has been added and no accounts have been deleted. We
+                        // will have changed the account selection to the newly added account, so
+                        // shortcut to the confirm signin page.
+                        showConfirmSigninPageAccountTrackerServiceCheck();
+                    }
+                }
+                callback.onResult(true);
+            }
+        });
+    }
+
+    private boolean checkGooglePlayServicesAvailable() {
+        ExternalAuthUtils extAuthUtils = ExternalAuthUtils.getInstance();
+        if (mGooglePlayServicesUpdateErrorHandler == null) {
+            boolean cancelable = !SigninManager.get(getContext()).isForceSigninEnabled();
+            mGooglePlayServicesUpdateErrorHandler = new UserRecoverableErrorHandler.ModalDialog(
+                    mDelegate.getActivity(), cancelable);
+        }
+        int resultCode = extAuthUtils.canUseGooglePlayServicesResultCode(
+                getContext(), mGooglePlayServicesUpdateErrorHandler);
+        if (extAuthUtils.isGooglePlayServicesUpdateRequiredError(resultCode)) {
+            mIsGooglePlayServicesOutOfDate = true;
+        }
+        return resultCode == ConnectionResult.SUCCESS;
     }
 
     /**
@@ -345,6 +427,7 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
             @Override
             public void onClick(View widget) {
                 mListener.onAccountSelected(getSelectedAccountName(), true);
+                RecordUserAction.record("Signin_Signin_WithAdvancedSyncSettings");
             }
         };
         mSigninSettingsControl.setText(
@@ -353,11 +436,6 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
     }
 
     private void showConfirmSigninPageAccountTrackerServiceCheck() {
-        if (!ExternalAuthUtils.getInstance().canUseGooglePlayServices(getContext(),
-                new UserRecoverableErrorHandler.ModalDialog(mDelegate.getActivity()))) {
-            return;
-        }
-
         // Disable the buttons to prevent them being clicked again while waiting for the callbacks.
         setButtonsEnabled(false);
 
@@ -385,7 +463,7 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
         String accountName = getSelectedAccountName();
         ConfirmSyncDataStateMachine.run(PrefServiceBridge.getInstance().getSyncLastAccountName(),
                 accountName, ImportSyncType.PREVIOUS_DATA_FOUND,
-                mDelegate.getActivity().getFragmentManager(),
+                mDelegate.getFragmentManager(),
                 getContext(), new ConfirmImportSyncDataDialog.Listener() {
                     @Override
                     public void onConfirm(boolean wipeData) {
@@ -432,6 +510,9 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
             mPositiveButton.setOnClickListener(new OnClickListener() {
                 @Override
                 public void onClick(View v) {
+                    if (!checkGooglePlayServicesAvailable()) {
+                        return;
+                    }
                     RecordUserAction.record("Signin_AddAccountToDevice");
                     mListener.onNewAccount();
                 }
@@ -460,6 +541,7 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
             @Override
             public void onClick(View v) {
                 mListener.onAccountSelected(getSelectedAccountName(), false);
+                RecordUserAction.record("Signin_Signin_WithDefaultSyncSettings");
             }
         });
         setUpMoreButtonVisible(true);
@@ -518,10 +600,15 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
      */
     public void switchToForcedAccountMode(String forcedAccountName) {
         mForcedAccountName = forcedAccountName;
-        updateAccounts();
-        assert TextUtils.equals(getSelectedAccountName(), mForcedAccountName);
-        switchToSignedMode();
-        assert TextUtils.equals(getSelectedAccountName(), mForcedAccountName);
+        updateAccounts(new Callback<Boolean>() {
+            @Override
+            public void onResult(Boolean result) {
+                if (!result) return;
+                assert TextUtils.equals(getSelectedAccountName(), mForcedAccountName);
+                switchToSignedMode();
+                assert TextUtils.equals(getSelectedAccountName(), mForcedAccountName);
+            }
+        });
     }
 
     /**

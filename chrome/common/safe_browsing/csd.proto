@@ -380,8 +380,43 @@ message ClientDownloadRequest {
   // PPAPI_SAVE_REQUEST type messages may have more than one suggested filetype.
   // Each element in this collection indicates an alternate extension including
   // the leading extension separator.
-  repeated string alternate_extensions = 32;
+  repeated string alternate_extensions = 35;
+
+  // URLs transitions from landing referrer to download in reverse chronological
+  // order, i.e. download url comes first in this list, and landing referrer
+  // comes last.
+  repeated ReferrerChainEntry referrer_chain = 36;
 }
+
+message ReferrerChainEntry {
+  enum URLType {
+    DOWNLOAD_URL = 1;
+    LANDING_PAGE = 2;
+    LANDING_REFERRER = 3;
+    CLIENT_REDIRECT = 4;
+    SERVER_REDIRECT = 5;
+  }
+
+  // [required] The url of this Entry.
+  optional string url = 1;
+
+  // Type of URLs, such as download url, download referrer, etc.
+  optional URLType type = 2;
+
+  // IP addresses corresponding to this host.
+  repeated string ip_addresses = 3;
+
+  // Referrer url of this entry.
+  optional string referrer_url = 4;
+
+  // Main frame URL of referrer.
+  optional string referrer_main_frame_url = 5;
+
+  // If this URL loads in a different tab/frame from previous one.
+  optional bool is_retargeting = 6;
+
+  optional double navigation_time_msec = 7;
+}  // End of URLChainEntry
 
 message ClientDownloadResponse {
   enum Verdict {
@@ -400,7 +435,7 @@ message ClientDownloadResponse {
     // Chrome should show the default warning if configured for this file type.
     UNKNOWN = 5;
   }
-  required Verdict verdict = 1;
+  optional Verdict verdict = 1 [default = SAFE];
 
   message MoreInfo {
     // A human-readable string describing the nature of the warning.
@@ -473,6 +508,8 @@ message ClientIncidentReport {
         WEAK_LEGACY_OBSOLETE = 2;
         CHANGED = 3;
         UNTRUSTED_UNKNOWN_VALUE = 4;
+        BYPASS_CLEARED = 5;
+        BYPASS_CHANGED = 6;
       }
 
       optional string path = 1;
@@ -797,4 +834,34 @@ message ClientSafeBrowsingReportRequest {
   // report type is DANGEROUS_DOWNLOAD_RECOVERY, DANGEROUS_DOWNLOAD_WARNING or
   // DANGEROUS_DOWNLOAD_BY_API.
   optional bytes token = 15;
+}
+
+// Canonical representation of raster image data.
+message ImageData {
+  // Image bitmap, after downscaling to <= 512x512.
+  optional bytes data = 1;
+
+  // Encoding scheme for the bitmap.
+  optional string mime_type = 2;
+
+  message Dimensions {
+    optional int32 width = 1;
+    optional int32 height = 2;
+  }
+
+  // Dimensions of the image stored in |data|.
+  optional Dimensions dimensions = 3;
+  optional Dimensions original_dimensions = 4;  // iff downscaled
+}
+
+// Reporting protobuf for an image served as part of a browser notification.
+// There is no response (an empty body) to this request.
+message NotificationImageReportRequest {
+  optional string notification_origin = 1;  // Src-origin of the notification.
+  optional ImageData image = 2;             // The bitmap of the image.
+
+  // Note that the image URL is deliberately omitted as it would be untrusted,
+  // since the notification image fetch may be intercepted by a Service Worker
+  // (even if the image URL is cross-origin). Otherwise a website could mislead
+  // Safe Browsing into associating phishing image bitmaps with safe image URLs.
 }

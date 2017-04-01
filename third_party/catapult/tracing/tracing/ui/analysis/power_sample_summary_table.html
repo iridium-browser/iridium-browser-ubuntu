@@ -6,13 +6,18 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/iteration_helpers.html">
+<link rel="import" href="/tracing/base/unit.html">
+<link rel="import" href="/tracing/base/unit_scale.html">
 <link rel="import" href="/tracing/model/event_set.html">
 <link rel="import" href="/tracing/ui/base/table.html">
-<link rel="import" href="/tracing/value/unit.html">
-<link rel="import" href="/tracing/value/unit_scale.html">
 
 <dom-module id='tr-ui-a-power-sample-summary-table'>
   <template>
+    <style>
+    tr-ui-b-table {
+      font-size: 12px;
+    }
+    </style>
     <tr-ui-b-table id="table"></tr-ui-b-table>
   </template>
 </dom-module>
@@ -28,21 +33,21 @@ Polymer({
         title: 'Min power',
         width: '100px',
         value: function(row) {
-          return tr.v.Unit.byName.powerInWatts.format(row.min);
+          return tr.b.Unit.byName.powerInWatts.format(row.min);
         }
       },
       {
         title: 'Max power',
         width: '100px',
         value: function(row) {
-          return tr.v.Unit.byName.powerInWatts.format(row.max);
+          return tr.b.Unit.byName.powerInWatts.format(row.max);
         }
       },
       {
         title: 'Time-weighted average',
         width: '100px',
         value: function(row) {
-          return tr.v.Unit.byName.powerInWatts.format(
+          return tr.b.Unit.byName.powerInWatts.format(
               row.timeWeightedAverageInW);
         }
       },
@@ -50,7 +55,7 @@ Polymer({
         title: 'Energy consumed',
         width: '100px',
         value: function(row) {
-          return tr.v.Unit.byName.energyInJoules.format(row.energyConsumedInJ);
+          return tr.b.Unit.byName.energyInJoules.format(row.energyConsumedInJ);
         }
       },
       {
@@ -113,8 +118,9 @@ Polymer({
     if (energyConsumedInJ === 'N/A')
       return 'N/A';
 
-    var durationInS = tr.v.convertUnit(this.samples.bounds.duration,
-        tr.v.UnitScale.Metric.MILLI, tr.v.UnitScale.Metric.NONE);
+    var durationInS = tr.b.convertUnit(this.samples.bounds.duration,
+        tr.b.UnitPrefixScale.METRIC.MILLI,
+        tr.b.UnitPrefixScale.METRIC.NONE);
 
     return energyConsumedInJ / durationInS;
   },

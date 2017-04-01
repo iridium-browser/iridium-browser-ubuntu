@@ -12,27 +12,32 @@ namespace blink {
 struct PaintInfo;
 
 class EllipsisBox;
-class FloatPoint;
-class Font;
-class GraphicsContext;
 class LayoutPoint;
 class LayoutUnit;
 class ComputedStyle;
 
 class EllipsisBoxPainter {
-    STACK_ALLOCATED();
-public:
-    EllipsisBoxPainter(const EllipsisBox& ellipsisBox) : m_ellipsisBox(ellipsisBox) { }
+  STACK_ALLOCATED();
 
-    void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
+ public:
+  EllipsisBoxPainter(const EllipsisBox& ellipsisBox)
+      : m_ellipsisBox(ellipsisBox) {}
 
-private:
-    void paintEllipsis(const PaintInfo&, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom, const ComputedStyle&);
-    void paintSelection(GraphicsContext&, const LayoutPoint&, const ComputedStyle&, const Font&);
+  void paint(const PaintInfo&,
+             const LayoutPoint&,
+             LayoutUnit lineTop,
+             LayoutUnit lineBottom);
 
-    const EllipsisBox& m_ellipsisBox;
+ private:
+  void paintEllipsis(const PaintInfo&,
+                     const LayoutPoint& paintOffset,
+                     LayoutUnit lineTop,
+                     LayoutUnit lineBottom,
+                     const ComputedStyle&);
+
+  const EllipsisBox& m_ellipsisBox;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // EllipsisBoxPainter_h
+#endif  // EllipsisBoxPainter_h

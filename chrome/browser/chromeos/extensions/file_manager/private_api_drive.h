@@ -20,7 +20,6 @@
 #include "components/drive/file_errors.h"
 
 namespace drive {
-class FileCacheEntry;
 class ResourceEntry;
 struct SearchResultInfo;
 }
@@ -170,7 +169,7 @@ class FileManagerPrivateSearchDriveMetadataFunction
 
 // Implements the chrome.fileManagerPrivate.getDriveConnectionState method.
 class FileManagerPrivateGetDriveConnectionStateFunction
-    : public ChromeSyncExtensionFunction {
+    : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION(
       "fileManagerPrivate.getDriveConnectionState",
@@ -179,7 +178,7 @@ class FileManagerPrivateGetDriveConnectionStateFunction
  protected:
   ~FileManagerPrivateGetDriveConnectionStateFunction() override {}
 
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 // Implements the chrome.fileManagerPrivate.requestAccessToken method.

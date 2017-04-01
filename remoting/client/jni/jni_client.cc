@@ -10,7 +10,6 @@
 #include "jni/Client_jni.h"
 #include "remoting/client/jni/chromoting_jni_instance.h"
 #include "remoting/client/jni/chromoting_jni_runtime.h"
-#include "remoting/client/jni/display_updater_factory.h"
 #include "remoting/client/jni/jni_gl_display_handler.h"
 #include "remoting/client/jni/jni_pairing_secret_fetcher.h"
 #include "remoting/client/jni/jni_touch_event_data.h"
@@ -39,8 +38,7 @@ JniClient::~JniClient() {
   DisconnectFromHost();
 }
 
-void JniClient::ConnectToHost(DisplayUpdaterFactory* updater_factory,
-                              const std::string& username,
+void JniClient::ConnectToHost(const std::string& username,
                               const std::string& auth_token,
                               const std::string& host_jid,
                               const std::string& host_id,
@@ -48,18 +46,27 @@ void JniClient::ConnectToHost(DisplayUpdaterFactory* updater_factory,
                               const std::string& pairing_id,
                               const std::string& pairing_secret,
                               const std::string& capabilities,
-                              const std::string& flags) {
+                              const std::string& flags,
+                              const std::string& host_version,
+                              const std::string& host_os,
+                              const std::string& host_os_version) {
   DCHECK(runtime_->ui_task_runner()->BelongsToCurrentThread());
+  DCHECK(!display_handler_);
   DCHECK(!session_);
   DCHECK(!secret_fetcher_);
+  display_handler_.reset(new JniGlDisplayHandler(runtime_, java_client_));
   secret_fetcher_.reset(new JniPairingSecretFetcher(runtime_, GetWeakPtr(),
                                                     host_id));
+  // TODO(BUG 680752): Create ClientTelemetryLogger here. No need to pass host
+  //     info all the way down. Currently we have to do that due to thread
+  //     restriction.
   session_.reset(new ChromotingJniInstance(
       runtime_, GetWeakPtr(), secret_fetcher_->GetWeakPtr(),
-      updater_factory->CreateCursorShapeStub(),
-      updater_factory->CreateVideoRenderer(),
+      display_handler_->CreateCursorShapeStub(),
+      display_handler_->CreateVideoRenderer(),
       username, auth_token, host_jid, host_id,
-      host_pubkey, pairing_id, pairing_secret, capabilities, flags));
+      host_pubkey, pairing_id, pairing_secret, capabilities, flags,
+      host_version, host_os, host_os_version));
   session_->Connect();
 }
 
@@ -74,10 +81,7 @@ void JniClient::DisconnectFromHost() {
     runtime_->network_task_runner()->DeleteSoon(FROM_HERE,
                                                 secret_fetcher_.release());
   }
-  if (display_handler_) {
-    runtime_->display_task_runner()->DeleteSoon(FROM_HERE,
-                                                display_handler_.release());
-  }
+  display_handler_.reset();
 }
 
 void JniClient::OnConnectionState(protocol::ConnectionToHost::State state,
@@ -161,12 +165,11 @@ void JniClient::Connect(
     const base::android::JavaParamRef<jstring>& pairId,
     const base::android::JavaParamRef<jstring>& pairSecret,
     const base::android::JavaParamRef<jstring>& capabilities,
-    const base::android::JavaParamRef<jstring>& flags) {
-  JniGlDisplayHandler* raw_display_handler = new JniGlDisplayHandler(runtime_);
-  raw_display_handler->InitializeClient(java_client_);
-  display_handler_.reset(raw_display_handler);
-  ConnectToHost(raw_display_handler,
-                ConvertJavaStringToUTF8(env, username),
+    const base::android::JavaParamRef<jstring>& flags,
+    const base::android::JavaParamRef<jstring>& host_version,
+    const base::android::JavaParamRef<jstring>& host_os,
+    const base::android::JavaParamRef<jstring>& host_os_version) {
+  ConnectToHost(ConvertJavaStringToUTF8(env, username),
                 ConvertJavaStringToUTF8(env, authToken),
                 ConvertJavaStringToUTF8(env, hostJid),
                 ConvertJavaStringToUTF8(env, hostId),
@@ -174,7 +177,10 @@ void JniClient::Connect(
                 ConvertJavaStringToUTF8(env, pairId),
                 ConvertJavaStringToUTF8(env, pairSecret),
                 ConvertJavaStringToUTF8(env, capabilities),
-                ConvertJavaStringToUTF8(env, flags));
+                ConvertJavaStringToUTF8(env, flags),
+                ConvertJavaStringToUTF8(env, host_version),
+                ConvertJavaStringToUTF8(env, host_os),
+                ConvertJavaStringToUTF8(env, host_os_version));
 }
 
 void JniClient::Disconnect(JNIEnv* env,

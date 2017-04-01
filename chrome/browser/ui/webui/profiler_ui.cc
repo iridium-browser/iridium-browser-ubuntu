@@ -14,13 +14,16 @@
 // #define USE_SOURCE_FILES_DIRECTLY
 
 #include "base/bind.h"
+#include "base/debug/debugging_flags.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/tracked_objects.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_profiler/task_profiler_data_serializer.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/url_data_source.h"
@@ -28,7 +31,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
 
 #ifdef USE_SOURCE_FILES_DIRECTLY
 #include "base/base_paths.h"
@@ -104,6 +106,10 @@ content::WebUIDataSource* CreateProfilerHTMLSource() {
   source->SetJsonPath("strings.js");
   source->AddResourcePath("profiler.js", IDR_PROFILER_JS);
   source->SetDefaultResource(IDR_PROFILER_HTML);
+  source->UseGzip(std::unordered_set<std::string>());
+  source->AddBoolean("enableMemoryTaskProfiler",
+                     BUILDFLAG(ENABLE_MEMORY_TASK_PROFILER));
+
   return source;
 }
 
@@ -143,7 +149,7 @@ void ProfilerMessageHandler::OnGetData(const base::ListValue* list) {
 ProfilerUI::ProfilerUI(content::WebUI* web_ui)
     : WebUIController(web_ui),
       weak_ptr_factory_(this) {
-  web_ui->AddMessageHandler(new ProfilerMessageHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<ProfilerMessageHandler>());
 
   // Set up the chrome://profiler/ source.
   Profile* profile = Profile::FromWebUI(web_ui);

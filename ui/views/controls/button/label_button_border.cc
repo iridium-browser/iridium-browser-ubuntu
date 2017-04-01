@@ -6,7 +6,6 @@
 
 #include "base/logging.h"
 #include "third_party/skia/include/core/SkPaint.h"
-#include "third_party/skia/include/effects/SkArithmeticMode.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/canvas.h"
@@ -139,20 +138,28 @@ void LabelButtonAssetBorder::Paint(const View& view, gfx::Canvas* canvas) {
 
   if (animation && animation->is_animating()) {
     // Linearly interpolate background and foreground painters during animation.
-    const SkRect sk_rect = gfx::RectToSkRect(rect);
-    canvas->sk_canvas()->saveLayer(&sk_rect, NULL);
-    state = native_theme_delegate->GetBackgroundThemeState(&extra);
-    PaintHelper(this, canvas, state, rect, extra);
+    uint8_t fg_alpha =
+        static_cast<uint8_t>(animation->CurrentValueBetween(0, 255));
 
+    const SkRect sk_rect = gfx::RectToSkRect(rect);
+    SkAutoCanvasRestore auto_restore(canvas->sk_canvas(), false);
+    canvas->sk_canvas()->saveLayer(&sk_rect, nullptr);
+
+    {
+      // First, modulate the background by 1 - alpha.
+      SkAutoCanvasRestore auto_restore(canvas->sk_canvas(), false);
+      canvas->sk_canvas()->saveLayerAlpha(&sk_rect, 255 - fg_alpha);
+      state = native_theme_delegate->GetBackgroundThemeState(&extra);
+      PaintHelper(this, canvas, state, rect, extra);
+    }
+
+    // Then modulate the foreground by alpha, and blend using kPlus_Mode.
     SkPaint paint;
-    double scale = animation->GetCurrentValue();
-    paint.setXfermode(SkArithmeticMode::Make(0.0f, scale, 1.0 - scale, 0.0));
+    paint.setAlpha(fg_alpha);
+    paint.setBlendMode(SkBlendMode::kPlus);
     canvas->sk_canvas()->saveLayer(&sk_rect, &paint);
     state = native_theme_delegate->GetForegroundThemeState(&extra);
     PaintHelper(this, canvas, state, rect, extra);
-    canvas->sk_canvas()->restore();
-
-    canvas->sk_canvas()->restore();
   } else {
     PaintHelper(this, canvas, state, rect, extra);
   }
@@ -176,8 +183,8 @@ Painter* LabelButtonAssetBorder::GetPainter(bool focused,
 
 void LabelButtonAssetBorder::SetPainter(bool focused,
                                         Button::ButtonState state,
-                                        Painter* painter) {
-  painters_[focused ? 1 : 0][state].reset(painter);
+                                        std::unique_ptr<Painter> painter) {
+  painters_[focused ? 1 : 0][state] = std::move(painter);
 }
 
 }  // namespace views

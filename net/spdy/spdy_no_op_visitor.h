@@ -24,18 +24,9 @@ class SpdyNoOpVisitor : public SpdyFramerVisitorInterface,
 
   // SpdyFramerVisitorInterface methods:
   void OnError(SpdyFramer* framer) override {}
-  void OnSynStream(SpdyStreamId stream_id,
-                   SpdyStreamId associated_stream_id,
-                   SpdyPriority priority,
-                   bool fin,
-                   bool unidirectional) override {}
-  void OnSynReply(SpdyStreamId stream_id, bool fin) override {}
   net::SpdyHeadersHandlerInterface* OnHeaderFrameStart(
       SpdyStreamId stream_id) override;
   void OnHeaderFrameEnd(SpdyStreamId stream_id, bool end_headers) override {}
-  bool OnControlFrameHeaderData(SpdyStreamId stream_id,
-                                const char* header_data,
-                                size_t header_data_len) override;
   void OnDataFrameHeader(SpdyStreamId stream_id,
                          size_t length,
                          bool fin) override {}
@@ -46,7 +37,7 @@ class SpdyNoOpVisitor : public SpdyFramerVisitorInterface,
   void OnStreamPadding(SpdyStreamId stream_id, size_t len) override {}
   void OnRstStream(SpdyStreamId stream_id,
                    SpdyRstStreamStatus status) override {}
-  void OnSetting(SpdySettingsIds id, uint8_t flags, uint32_t value) override {}
+  void OnSetting(SpdySettingsIds id, uint32_t value) override {}
   void OnPing(SpdyPingId unique_id, bool is_ack) override {}
   void OnSettingsEnd() override {}
   void OnSettingsAck() override {}
@@ -87,6 +78,8 @@ class SpdyNoOpVisitor : public SpdyFramerVisitorInterface,
   void OnHeaderBlockStart() override {}
   void OnHeader(base::StringPiece key, base::StringPiece value) override {}
   void OnHeaderBlockEnd(size_t uncompressed_header_bytes) override {}
+  void OnHeaderBlockEnd(size_t /* uncompressed_header_bytes */,
+                        size_t /* compressed_header_bytes */) override {}
 };
 
 }  // namespace test

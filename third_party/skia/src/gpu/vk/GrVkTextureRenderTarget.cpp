@@ -49,10 +49,13 @@ GrVkTextureRenderTarget* GrVkTextureRenderTarget::Create(GrVkGpu* gpu,
         msImageDesc.fLevels = 1;
         msImageDesc.fSamples = desc.fSampleCnt;
         msImageDesc.fImageTiling = VK_IMAGE_TILING_OPTIMAL;
-        msImageDesc.fUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        msImageDesc.fUsageFlags = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
         msImageDesc.fMemProps = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
         if (!GrVkImage::InitImageInfo(gpu, msImageDesc, &msInfo)) {
+            imageView->unref(gpu);
             return nullptr;
         }
 
@@ -132,11 +135,11 @@ GrVkTextureRenderTarget::CreateNewTextureRenderTarget(GrVkGpu* gpu,
     return trt;
 }
 
-GrVkTextureRenderTarget*
-GrVkTextureRenderTarget::CreateWrappedTextureRenderTarget(GrVkGpu* gpu,
-                                                          const GrSurfaceDesc& desc,
-                                                          GrWrapOwnership ownership,
-                                                          const GrVkImageInfo* info) {
+sk_sp<GrVkTextureRenderTarget>
+GrVkTextureRenderTarget::MakeWrappedTextureRenderTarget(GrVkGpu* gpu,
+                                                        const GrSurfaceDesc& desc,
+                                                        GrWrapOwnership ownership,
+                                                        const GrVkImageInfo* info) {
     SkASSERT(info);
     // Wrapped textures require both image and allocation (because they can be mapped)
     SkASSERT(VK_NULL_HANDLE != info->fImage && VK_NULL_HANDLE != info->fAlloc.fMemory);
@@ -144,9 +147,7 @@ GrVkTextureRenderTarget::CreateWrappedTextureRenderTarget(GrVkGpu* gpu,
     GrVkImage::Wrapped wrapped = kBorrow_GrWrapOwnership == ownership ? GrVkImage::kBorrowed_Wrapped
                                                                       : GrVkImage::kAdopted_Wrapped;
 
-    GrVkTextureRenderTarget* trt = Create(gpu, desc, *info, SkBudgeted::kNo, wrapped);
-
-    return trt;
+    return sk_sp<GrVkTextureRenderTarget>(Create(gpu, desc, *info, SkBudgeted::kNo, wrapped));
 }
 
 bool GrVkTextureRenderTarget::updateForMipmap(GrVkGpu* gpu, const GrVkImageInfo& newInfo) {

@@ -54,10 +54,8 @@ class EnrollmentScreen
       pairing_chromeos::ControllerPairingController* shark_controller);
 
   // BaseScreen implementation:
-  void PrepareToShow() override;
   void Show() override;
   void Hide() override;
-  std::string GetName() const override;
 
   // EnrollmentScreenActor::Controller implementation:
   void OnLoginDone(const std::string& user,
@@ -65,6 +63,7 @@ class EnrollmentScreen
   void OnRetry() override;
   void OnCancel() override;
   void OnConfirmationClosed() override;
+  void OnAdJoined(const std::string& realm) override;
   void OnDeviceAttributeProvided(const std::string& asset_id,
                                  const std::string& location) override;
 
@@ -93,6 +92,7 @@ class EnrollmentScreen
                            TestAttributePromptPageGetsLoaded);
   FRIEND_TEST_ALL_PREFIXES(EnterpriseEnrollmentTest,
                            TestAuthCodeGetsProperlyReceivedFromGaia);
+  FRIEND_TEST_ALL_PREFIXES(HandsOffNetworkScreenTest, RequiresNoInput);
 
   // The authentication mechanisms that this class can use.
   enum Auth {
@@ -138,8 +138,8 @@ class EnrollmentScreen
   // Used as a callback to run after successful enrollment.
   void ShowAttributePromptScreen();
 
-  // Handle enrollment errors.
-  void OnAnyEnrollmentError();
+  // Record metrics when we encounter an enrollment error.
+  void RecordEnrollmentErrorMetrics();
 
   // Advance to the next authentication mechanism if possible.
   bool AdvanceToNextAuth();
@@ -153,6 +153,7 @@ class EnrollmentScreen
   Auth last_auth_ = AUTH_OAUTH;
   bool enrollment_failed_once_ = false;
   std::string enrolling_user_domain_;
+  std::string auth_code_;
   std::unique_ptr<base::ElapsedTimer> elapsed_timer_;
   std::unique_ptr<EnterpriseEnrollmentHelper> enrollment_helper_;
   base::WeakPtrFactory<EnrollmentScreen> weak_ptr_factory_;

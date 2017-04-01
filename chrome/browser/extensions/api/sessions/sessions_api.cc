@@ -13,7 +13,6 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/extensions/api/sessions/session_id.h"
@@ -30,7 +29,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/sessions/content/content_live_tab.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "components/sync_sessions/synced_session.h"
@@ -63,8 +62,8 @@ const char kRestoreInIncognitoError[] =
 
 // Comparator function for use with std::sort that will sort sessions by
 // descending modified_time (i.e., most recent first).
-bool SortSessionsByRecency(const sync_driver::SyncedSession* s1,
-                           const sync_driver::SyncedSession* s2) {
+bool SortSessionsByRecency(const sync_sessions::SyncedSession* s1,
+                           const sync_sessions::SyncedSession* s2) {
   return s1->modified_time > s2->modified_time;
 }
 
@@ -76,7 +75,6 @@ bool SortTabsByRecency(const sessions::SessionTab* t1,
 }
 
 tabs::Tab CreateTabModelHelper(
-    Profile* profile,
     const sessions::SerializedNavigationEntry& current_navigation,
     const std::string& session_id,
     int index,
@@ -146,8 +144,7 @@ bool is_window_entry(const sessions::TabRestoreService::Entry& entry) {
 tabs::Tab SessionsGetRecentlyClosedFunction::CreateTabModel(
     const sessions::TabRestoreService::Tab& tab,
     bool active) {
-  return CreateTabModelHelper(GetProfile(),
-                              tab.navigations[tab.current_navigation_index],
+  return CreateTabModelHelper(tab.navigations[tab.current_navigation_index],
                               base::IntToString(tab.id), tab.tabstrip_index,
                               tab.pinned, active, extension());
 }
@@ -188,7 +185,7 @@ SessionsGetRecentlyClosedFunction::CreateSessionModel(
                                   std::move(window));
 }
 
-bool SessionsGetRecentlyClosedFunction::RunSync() {
+ExtensionFunction::ResponseAction SessionsGetRecentlyClosedFunction::Run() {
   std::unique_ptr<GetRecentlyClosed::Params> params(
       GetRecentlyClosed::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -200,15 +197,15 @@ bool SessionsGetRecentlyClosedFunction::RunSync() {
 
   std::vector<api::sessions::Session> result;
   sessions::TabRestoreService* tab_restore_service =
-      TabRestoreServiceFactory::GetForProfile(GetProfile());
+      TabRestoreServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()));
 
   // TabRestoreServiceFactory::GetForProfile() can return NULL (i.e., when in
   // incognito mode)
   if (!tab_restore_service) {
-    DCHECK_NE(GetProfile(), GetProfile()->GetOriginalProfile())
+    DCHECK(browser_context()->IsOffTheRecord())
         << "sessions::TabRestoreService expected for normal profiles";
-    results_ = GetRecentlyClosed::Results::Create(result);
-    return true;
+    return RespondNow(ArgumentList(GetRecentlyClosed::Results::Create(result)));
   }
 
   // List of entries. They are ordered from most to least recent.
@@ -218,8 +215,7 @@ bool SessionsGetRecentlyClosedFunction::RunSync() {
     result.push_back(std::move(*CreateSessionModel(*entry)));
   }
 
-  results_ = GetRecentlyClosed::Results::Create(result);
-  return true;
+  return RespondNow(ArgumentList(GetRecentlyClosed::Results::Create(result)));
 }
 
 tabs::Tab SessionsGetDevicesFunction::CreateTabModel(
@@ -229,8 +225,8 @@ tabs::Tab SessionsGetDevicesFunction::CreateTabModel(
     bool active) {
   std::string session_id = SessionId(session_tag, tab.tab_id.id()).ToString();
   return CreateTabModelHelper(
-      GetProfile(), tab.navigations[tab.normalized_navigation_index()],
-      session_id, tab_index, tab.pinned, active, extension());
+      tab.navigations[tab.normalized_navigation_index()], session_id, tab_index,
+      tab.pinned, active, extension());
 }
 
 std::unique_ptr<windows::Window> SessionsGetDevicesFunction::CreateWindowModel(
@@ -242,12 +238,13 @@ std::unique_ptr<windows::Window> SessionsGetDevicesFunction::CreateWindowModel(
   // from most recent to least recent.
   std::vector<const sessions::SessionTab*> tabs_in_window;
   for (size_t i = 0; i < window.tabs.size(); ++i) {
-    const sessions::SessionTab* tab = window.tabs[i];
+    const sessions::SessionTab* tab = window.tabs[i].get();
     if (tab->navigations.empty())
       continue;
     const sessions::SerializedNavigationEntry& current_navigation =
         tab->navigations.at(tab->normalized_navigation_index());
-    if (search::IsNTPURL(current_navigation.virtual_url(), GetProfile())) {
+    if (search::IsNTPURL(current_navigation.virtual_url(),
+                         Profile::FromBrowserContext(browser_context()))) {
       continue;
     }
     tabs_in_window.push_back(tab);
@@ -278,6 +275,8 @@ std::unique_ptr<windows::Window> SessionsGetDevicesFunction::CreateWindowModel(
   windows::WindowState state = windows::WINDOW_STATE_NONE;
   switch (window.show_state) {
     case ui::SHOW_STATE_NORMAL:
+
+    // TODO(afakhry): Remove Docked Windows in M58.
     case ui::SHOW_STATE_DOCKED:
       state = windows::WINDOW_STATE_NORMAL;
       break;
@@ -323,7 +322,7 @@ SessionsGetDevicesFunction::CreateSessionModel(
 }
 
 api::sessions::Device SessionsGetDevicesFunction::CreateDeviceModel(
-    const sync_driver::SyncedSession* session) {
+    const sync_sessions::SyncedSession* session) {
   int max_results = api::sessions::MAX_SESSION_RESULTS;
   // Already validated in RunAsync().
   std::unique_ptr<GetDevices::Params> params(
@@ -335,8 +334,7 @@ api::sessions::Device SessionsGetDevicesFunction::CreateDeviceModel(
   device_struct.info = session->session_name;
   device_struct.device_name = session->session_name;
 
-  for (sync_driver::SyncedSession::SyncedWindowMap::const_iterator it =
-           session->windows.begin();
+  for (auto it = session->windows.begin();
        it != session->windows.end() &&
        static_cast<int>(device_struct.sessions.size()) < max_results;
        ++it) {
@@ -348,22 +346,22 @@ api::sessions::Device SessionsGetDevicesFunction::CreateDeviceModel(
   return device_struct;
 }
 
-bool SessionsGetDevicesFunction::RunSync() {
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetInstance()->GetForProfile(GetProfile());
+ExtensionFunction::ResponseAction SessionsGetDevicesFunction::Run() {
+  browser_sync::ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+          Profile::FromBrowserContext(browser_context()));
   if (!(service && service->GetPreferredDataTypes().Has(syncer::SESSIONS))) {
     // Sync not enabled.
-    results_ =
-        GetDevices::Results::Create(std::vector<api::sessions::Device>());
-    return true;
+    return RespondNow(ArgumentList(
+        GetDevices::Results::Create(std::vector<api::sessions::Device>())));
   }
 
-  sync_driver::OpenTabsUIDelegate* open_tabs = service->GetOpenTabsUIDelegate();
-  std::vector<const sync_driver::SyncedSession*> sessions;
+  sync_sessions::OpenTabsUIDelegate* open_tabs =
+      service->GetOpenTabsUIDelegate();
+  std::vector<const sync_sessions::SyncedSession*> sessions;
   if (!(open_tabs && open_tabs->GetAllForeignSessions(&sessions))) {
-    results_ =
-        GetDevices::Results::Create(std::vector<api::sessions::Device>());
-    return true;
+    return RespondNow(ArgumentList(
+        GetDevices::Results::Create(std::vector<api::sessions::Device>())));
   }
 
   std::unique_ptr<GetDevices::Params> params(
@@ -380,51 +378,46 @@ bool SessionsGetDevicesFunction::RunSync() {
   for (size_t i = 0; i < sessions.size(); ++i)
     result.push_back(CreateDeviceModel(sessions[i]));
 
-  results_ = GetDevices::Results::Create(result);
-  return true;
+  return RespondNow(ArgumentList(GetDevices::Results::Create(result)));
 }
 
-void SessionsRestoreFunction::SetInvalidIdError(const std::string& invalid_id) {
-  SetError(ErrorUtils::FormatErrorMessage(kInvalidSessionIdError, invalid_id));
-}
-
-
-void SessionsRestoreFunction::SetResultRestoredTab(
+ExtensionFunction::ResponseValue SessionsRestoreFunction::GetRestoredTabResult(
     content::WebContents* contents) {
   std::unique_ptr<tabs::Tab> tab(
       ExtensionTabUtil::CreateTabObject(contents, extension()));
   std::unique_ptr<api::sessions::Session> restored_session(
       CreateSessionModelHelper(base::Time::Now().ToTimeT(), std::move(tab),
                                std::unique_ptr<windows::Window>()));
-  results_ = Restore::Results::Create(*restored_session);
+  return ArgumentList(Restore::Results::Create(*restored_session));
 }
 
-bool SessionsRestoreFunction::SetResultRestoredWindow(int window_id) {
+ExtensionFunction::ResponseValue
+SessionsRestoreFunction::GetRestoredWindowResult(int window_id) {
   WindowController* controller = NULL;
-  if (!windows_util::GetWindowFromWindowID(this, window_id, 0, &controller)) {
-    // error_ is set by GetWindowFromWindowId function call.
-    return false;
+  std::string error;
+  if (!windows_util::GetWindowFromWindowID(this, window_id, 0, &controller,
+                                           &error)) {
+    return Error(error);
   }
   std::unique_ptr<base::DictionaryValue> window_value(
       controller->CreateWindowValueWithTabs(extension()));
   std::unique_ptr<windows::Window> window(
       windows::Window::FromValue(*window_value));
-  results_ = Restore::Results::Create(*CreateSessionModelHelper(
+  return ArgumentList(Restore::Results::Create(*CreateSessionModelHelper(
       base::Time::Now().ToTimeT(), std::unique_ptr<tabs::Tab>(),
-      std::move(window)));
-  return true;
+      std::move(window))));
 }
 
-bool SessionsRestoreFunction::RestoreMostRecentlyClosed(Browser* browser) {
+ExtensionFunction::ResponseValue
+SessionsRestoreFunction::RestoreMostRecentlyClosed(Browser* browser) {
   sessions::TabRestoreService* tab_restore_service =
-      TabRestoreServiceFactory::GetForProfile(GetProfile());
+      TabRestoreServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()));
   const sessions::TabRestoreService::Entries& entries =
       tab_restore_service->entries();
 
-  if (entries.empty()) {
-    SetError(kNoRecentlyClosedSessionsError);
-    return false;
-  }
+  if (entries.empty())
+    return Error(kNoRecentlyClosedSessionsError);
 
   bool is_window = is_window_entry(*entries.front());
   sessions::LiveTabContext* context =
@@ -437,25 +430,24 @@ bool SessionsRestoreFunction::RestoreMostRecentlyClosed(Browser* browser) {
   sessions::ContentLiveTab* first_tab =
       static_cast<sessions::ContentLiveTab*>(restored_tabs[0]);
   if (is_window) {
-    return SetResultRestoredWindow(
+    return GetRestoredWindowResult(
         ExtensionTabUtil::GetWindowIdOfTab(first_tab->web_contents()));
   }
 
-  SetResultRestoredTab(first_tab->web_contents());
-  return true;
+  return GetRestoredTabResult(first_tab->web_contents());
 }
 
-bool SessionsRestoreFunction::RestoreLocalSession(const SessionId& session_id,
-                                                  Browser* browser) {
+ExtensionFunction::ResponseValue SessionsRestoreFunction::RestoreLocalSession(
+    const SessionId& session_id,
+    Browser* browser) {
   sessions::TabRestoreService* tab_restore_service =
-      TabRestoreServiceFactory::GetForProfile(GetProfile());
+      TabRestoreServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(browser_context()));
   const sessions::TabRestoreService::Entries& entries =
       tab_restore_service->entries();
 
-  if (entries.empty()) {
-    SetInvalidIdError(session_id.ToString());
-    return false;
-  }
+  if (entries.empty())
+    return Error(kInvalidSessionIdError, session_id.ToString());
 
   // Check if the recently closed list contains an entry with the provided id.
   bool is_window = false;
@@ -472,39 +464,36 @@ bool SessionsRestoreFunction::RestoreLocalSession(const SessionId& session_id,
       BrowserLiveTabContext::FindContextForWebContents(
           browser->tab_strip_model()->GetActiveWebContents());
   std::vector<sessions::LiveTab*> restored_tabs =
-      tab_restore_service->RestoreEntryById(context, session_id.id(), UNKNOWN);
+      tab_restore_service->RestoreEntryById(context, session_id.id(),
+                                            WindowOpenDisposition::UNKNOWN);
   // If the ID is invalid, restored_tabs will be empty.
-  if (restored_tabs.empty()) {
-    SetInvalidIdError(session_id.ToString());
-    return false;
-  }
+  if (restored_tabs.empty())
+    return Error(kInvalidSessionIdError, session_id.ToString());
 
   sessions::ContentLiveTab* first_tab =
       static_cast<sessions::ContentLiveTab*>(restored_tabs[0]);
 
   // Retrieve the window through any of the tabs in restored_tabs.
   if (is_window) {
-    return SetResultRestoredWindow(
+    return GetRestoredWindowResult(
         ExtensionTabUtil::GetWindowIdOfTab(first_tab->web_contents()));
   }
 
-  SetResultRestoredTab(first_tab->web_contents());
-  return true;
+  return GetRestoredTabResult(first_tab->web_contents());
 }
 
-bool SessionsRestoreFunction::RestoreForeignSession(const SessionId& session_id,
-                                                    Browser* browser) {
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetInstance()->GetForProfile(GetProfile());
-  if (!(service && service->GetPreferredDataTypes().Has(syncer::SESSIONS))) {
-    SetError(kSessionSyncError);
-    return false;
-  }
-  sync_driver::OpenTabsUIDelegate* open_tabs = service->GetOpenTabsUIDelegate();
-  if (!open_tabs) {
-    SetError(kSessionSyncError);
-    return false;
-  }
+ExtensionFunction::ResponseValue SessionsRestoreFunction::RestoreForeignSession(
+    const SessionId& session_id,
+    Browser* browser) {
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  browser_sync::ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
+  if (!(service && service->GetPreferredDataTypes().Has(syncer::SESSIONS)))
+    return Error(kSessionSyncError);
+  sync_sessions::OpenTabsUIDelegate* open_tabs =
+      service->GetOpenTabsUIDelegate();
+  if (!open_tabs)
+    return Error(kSessionSyncError);
 
   const sessions::SessionTab* tab = NULL;
   if (open_tabs->GetForeignTab(session_id.session_tag(),
@@ -514,18 +503,15 @@ bool SessionsRestoreFunction::RestoreForeignSession(const SessionId& session_id,
     content::WebContents* contents = tab_strip->GetActiveWebContents();
 
     content::WebContents* tab_contents =
-        SessionRestore::RestoreForeignSessionTab(contents, *tab,
-                                                 NEW_FOREGROUND_TAB);
-    SetResultRestoredTab(tab_contents);
-    return true;
+        SessionRestore::RestoreForeignSessionTab(
+            contents, *tab, WindowOpenDisposition::NEW_FOREGROUND_TAB);
+    return GetRestoredTabResult(tab_contents);
   }
 
   // Restoring a full window.
   std::vector<const sessions::SessionWindow*> windows;
-  if (!open_tabs->GetForeignSession(session_id.session_tag(), &windows)) {
-    SetInvalidIdError(session_id.ToString());
-    return false;
-  }
+  if (!open_tabs->GetForeignSession(session_id.session_tag(), &windows))
+    return Error(kInvalidSessionIdError, session_id.ToString());
 
   std::vector<const sessions::SessionWindow*>::const_iterator window =
       windows.begin();
@@ -533,46 +519,39 @@ bool SessionsRestoreFunction::RestoreForeignSession(const SessionId& session_id,
          && (*window)->window_id.id() != session_id.id()) {
     ++window;
   }
-  if (window == windows.end()) {
-    SetInvalidIdError(session_id.ToString());
-    return false;
-  }
+  if (window == windows.end())
+    return Error(kInvalidSessionIdError, session_id.ToString());
 
   // Only restore one window at a time.
-  std::vector<Browser*> browsers = SessionRestore::RestoreForeignSessionWindows(
-      GetProfile(), window, window + 1);
+  std::vector<Browser*> browsers =
+      SessionRestore::RestoreForeignSessionWindows(profile, window, window + 1);
   // Will always create one browser because we only restore one window per call.
   DCHECK_EQ(1u, browsers.size());
-  return SetResultRestoredWindow(ExtensionTabUtil::GetWindowId(browsers[0]));
+  return GetRestoredWindowResult(ExtensionTabUtil::GetWindowId(browsers[0]));
 }
 
-bool SessionsRestoreFunction::RunSync() {
+ExtensionFunction::ResponseAction SessionsRestoreFunction::Run() {
   std::unique_ptr<Restore::Params> params(Restore::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  Browser* browser = chrome::FindBrowserWithProfile(GetProfile());
-  if (!browser) {
-    SetError(kNoBrowserToRestoreSession);
-    return false;
-  }
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  Browser* browser = chrome::FindBrowserWithProfile(profile);
+  if (!browser)
+    return RespondNow(Error(kNoBrowserToRestoreSession));
 
-  if (GetProfile() != GetProfile()->GetOriginalProfile()) {
-    SetError(kRestoreInIncognitoError);
-    return false;
-  }
+  if (profile != profile->GetOriginalProfile())
+    return RespondNow(Error(kRestoreInIncognitoError));
 
   if (!params->session_id)
-    return RestoreMostRecentlyClosed(browser);
+    return RespondNow(RestoreMostRecentlyClosed(browser));
 
   std::unique_ptr<SessionId> session_id(SessionId::Parse(*params->session_id));
-  if (!session_id) {
-    SetInvalidIdError(*params->session_id);
-    return false;
-  }
+  if (!session_id)
+    return RespondNow(Error(kInvalidSessionIdError, *params->session_id));
 
-  return session_id->IsForeign() ?
-      RestoreForeignSession(*session_id, browser)
-      : RestoreLocalSession(*session_id, browser);
+  return RespondNow(session_id->IsForeign()
+                        ? RestoreForeignSession(*session_id, browser)
+                        : RestoreLocalSession(*session_id, browser));
 }
 
 SessionsEventRouter::SessionsEventRouter(Profile* profile)
@@ -594,9 +573,9 @@ SessionsEventRouter::~SessionsEventRouter() {
 void SessionsEventRouter::TabRestoreServiceChanged(
     sessions::TabRestoreService* service) {
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  EventRouter::Get(profile_)->BroadcastEvent(base::WrapUnique(
-      new Event(events::SESSIONS_ON_CHANGED,
-                api::sessions::OnChanged::kEventName, std::move(args))));
+  EventRouter::Get(profile_)->BroadcastEvent(base::MakeUnique<Event>(
+      events::SESSIONS_ON_CHANGED, api::sessions::OnChanged::kEventName,
+      std::move(args)));
 }
 
 void SessionsEventRouter::TabRestoreServiceDestroyed(

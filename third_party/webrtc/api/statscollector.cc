@@ -17,7 +17,6 @@
 #include "webrtc/api/peerconnection.h"
 #include "webrtc/base/base64.h"
 #include "webrtc/base/checks.h"
-#include "webrtc/base/timing.h"
 #include "webrtc/pc/channel.h"
 
 namespace webrtc {
@@ -104,7 +103,9 @@ void SetAudioProcessingStats(StatsReport* report,
                              int echo_return_loss_enhancement,
                              int echo_delay_median_ms,
                              float aec_quality_min,
-                             int echo_delay_std_ms) {
+                             int echo_delay_std_ms,
+                             float residual_echo_likelihood,
+                             float residual_echo_likelihood_recent_max) {
   report->AddBoolean(StatsReport::kStatsValueNameTypingNoiseState,
                      typing_noise_detected);
   if (aec_quality_min >= 0.0f) {
@@ -124,6 +125,15 @@ void SetAudioProcessingStats(StatsReport* report,
   report->AddInt(StatsReport::kStatsValueNameEchoReturnLoss, echo_return_loss);
   report->AddInt(StatsReport::kStatsValueNameEchoReturnLossEnhancement,
                  echo_return_loss_enhancement);
+  if (residual_echo_likelihood >= 0.0f) {
+    report->AddFloat(StatsReport::kStatsValueNameResidualEchoLikelihood,
+                     residual_echo_likelihood);
+  }
+  if (residual_echo_likelihood_recent_max >= 0.0f) {
+    report->AddFloat(
+        StatsReport::kStatsValueNameResidualEchoLikelihoodRecentMax,
+        residual_echo_likelihood_recent_max);
+  }
 }
 
 void ExtractStats(const cricket::VoiceReceiverInfo& info, StatsReport* report) {
@@ -144,6 +154,8 @@ void ExtractStats(const cricket::VoiceReceiverInfo& info, StatsReport* report) {
     { StatsReport::kStatsValueNameDecodingCTN, info.decoding_calls_to_neteq },
     { StatsReport::kStatsValueNameDecodingCTSG,
       info.decoding_calls_to_silence_generator },
+    { StatsReport::kStatsValueNameDecodingMutedOutput,
+      info.decoding_muted_output },
     { StatsReport::kStatsValueNameDecodingNormal, info.decoding_normal },
     { StatsReport::kStatsValueNameDecodingPLC, info.decoding_plc },
     { StatsReport::kStatsValueNameDecodingPLCCNG, info.decoding_plc_cng },
@@ -180,7 +192,8 @@ void ExtractStats(const cricket::VoiceSenderInfo& info, StatsReport* report) {
   SetAudioProcessingStats(
       report, info.typing_noise_detected, info.echo_return_loss,
       info.echo_return_loss_enhancement, info.echo_delay_median_ms,
-      info.aec_quality_min, info.echo_delay_std_ms);
+      info.aec_quality_min, info.echo_delay_std_ms,
+      info.residual_echo_likelihood, info.residual_echo_likelihood_recent_max);
 
   RTC_DCHECK_GE(info.audio_level, 0);
   const IntForAdd ints[] = {
@@ -227,6 +240,7 @@ void ExtractStats(const cricket::VideoReceiverInfo& info, StatsReport* report) {
     { StatsReport::kStatsValueNamePlisSent, info.plis_sent },
     { StatsReport::kStatsValueNameRenderDelayMs, info.render_delay_ms },
     { StatsReport::kStatsValueNameTargetDelayMs, info.target_delay_ms },
+    { StatsReport::kStatsValueNameFramesDecoded, info.frames_decoded },
   };
 
   for (const auto& i : ints)
@@ -243,8 +257,8 @@ void ExtractStats(const cricket::VideoSenderInfo& info, StatsReport* report) {
                      (info.adapt_reason & 0x2) > 0);
   report->AddBoolean(StatsReport::kStatsValueNameCpuLimitedResolution,
                      (info.adapt_reason & 0x1) > 0);
-  report->AddBoolean(StatsReport::kStatsValueNameViewLimitedResolution,
-                     (info.adapt_reason & 0x4) > 0);
+  if (info.qp_sum)
+    report->AddInt(StatsReport::kStatsValueNameQpSum, *info.qp_sum);
 
   const IntForAdd ints[] = {
     { StatsReport::kStatsValueNameAdaptationChanges, info.adapt_changes },
@@ -260,6 +274,7 @@ void ExtractStats(const cricket::VideoSenderInfo& info, StatsReport* report) {
     { StatsReport::kStatsValueNamePacketsLost, info.packets_lost },
     { StatsReport::kStatsValueNamePacketsSent, info.packets_sent },
     { StatsReport::kStatsValueNamePlisReceived, info.plis_rcvd },
+    { StatsReport::kStatsValueNameFramesEncoded, info.frames_encoded },
   };
 
   for (const auto& i : ints)
@@ -342,7 +357,7 @@ const char* IceCandidateTypeToStatsType(const std::string& candidate_type) {
   if (candidate_type == cricket::RELAY_PORT_TYPE) {
     return STATSREPORT_RELAY_PORT_TYPE;
   }
-  RTC_DCHECK(false);
+  RTC_NOTREACHED();
   return "unknown";
 }
 
@@ -361,7 +376,7 @@ const char* AdapterTypeToStatsType(rtc::AdapterType type) {
     case rtc::ADAPTER_TYPE_LOOPBACK:
       return STATSREPORT_ADAPTER_TYPE_LOOPBACK;
     default:
-      RTC_DCHECK(false);
+      RTC_NOTREACHED();
       return "";
   }
 }
@@ -375,8 +390,10 @@ StatsCollector::~StatsCollector() {
   RTC_DCHECK(pc_->session()->signaling_thread()->IsCurrent());
 }
 
+// Wallclock time in ms.
 double StatsCollector::GetTimeNow() {
-  return rtc::Timing::WallTimeNow() * rtc::kNumMillisecsPerSec;
+  return rtc::TimeUTCMicros() /
+         static_cast<double>(rtc::kNumMicrosecsPerMillisec);
 }
 
 // Adds a MediaStream with tracks that can be used as a |selector| in a call
@@ -395,7 +412,7 @@ void StatsCollector::AddLocalAudioTrack(AudioTrackInterface* audio_track,
                                         uint32_t ssrc) {
   RTC_DCHECK(pc_->session()->signaling_thread()->IsCurrent());
   RTC_DCHECK(audio_track != NULL);
-#if (!defined(NDEBUG) || defined(DCHECK_ALWAYS_ON))
+#if RTC_DCHECK_IS_ON
   for (const auto& track : local_audio_tracks_)
     RTC_DCHECK(track.first != audio_track || track.second != ssrc);
 #endif
@@ -536,73 +553,39 @@ StatsReport* StatsCollector::PrepareReport(
   return report;
 }
 
-StatsReport* StatsCollector::AddOneCertificateReport(
-    const rtc::SSLCertificate* cert, const StatsReport* issuer) {
-  RTC_DCHECK(pc_->session()->signaling_thread()->IsCurrent());
-
-  // TODO(bemasc): Move this computation to a helper class that caches these
-  // values to reduce CPU use in GetStats.  This will require adding a fast
-  // SSLCertificate::Equals() method to detect certificate changes.
-
-  std::string digest_algorithm;
-  if (!cert->GetSignatureDigestAlgorithm(&digest_algorithm))
-    return nullptr;
-
-  std::unique_ptr<rtc::SSLFingerprint> ssl_fingerprint(
-      rtc::SSLFingerprint::Create(digest_algorithm, cert));
-
-  // SSLFingerprint::Create can fail if the algorithm returned by
-  // SSLCertificate::GetSignatureDigestAlgorithm is not supported by the
-  // implementation of SSLCertificate::ComputeDigest.  This currently happens
-  // with MD5- and SHA-224-signed certificates when linked to libNSS.
-  if (!ssl_fingerprint)
-    return nullptr;
-
-  std::string fingerprint = ssl_fingerprint->GetRfc4572Fingerprint();
-
-  rtc::Buffer der_buffer;
-  cert->ToDER(&der_buffer);
-  std::string der_base64;
-  rtc::Base64::EncodeFromArray(der_buffer.data(), der_buffer.size(),
-                               &der_base64);
-
-  StatsReport::Id id(StatsReport::NewTypedId(
-      StatsReport::kStatsReportTypeCertificate, fingerprint));
-  StatsReport* report = reports_.ReplaceOrAddNew(id);
-  report->set_timestamp(stats_gathering_started_);
-  report->AddString(StatsReport::kStatsValueNameFingerprint, fingerprint);
-  report->AddString(StatsReport::kStatsValueNameFingerprintAlgorithm,
-                    digest_algorithm);
-  report->AddString(StatsReport::kStatsValueNameDer, der_base64);
-  if (issuer)
-    report->AddId(StatsReport::kStatsValueNameIssuerId, issuer->id());
-  return report;
+bool StatsCollector::IsValidTrack(const std::string& track_id) {
+  return reports_.Find(StatsReport::NewTypedId(
+             StatsReport::kStatsReportTypeTrack, track_id)) != nullptr;
 }
 
 StatsReport* StatsCollector::AddCertificateReports(
     const rtc::SSLCertificate* cert) {
   RTC_DCHECK(pc_->session()->signaling_thread()->IsCurrent());
-  // Produces a chain of StatsReports representing this certificate and the rest
-  // of its chain, and adds those reports to |reports_|.  The return value is
-  // the id of the leaf report.  The provided cert must be non-null, so at least
-  // one report will always be provided and the returned string will never be
-  // empty.
   RTC_DCHECK(cert != NULL);
 
-  StatsReport* issuer = nullptr;
-  std::unique_ptr<rtc::SSLCertChain> chain = cert->GetChain();
-  if (chain) {
-    // This loop runs in reverse, i.e. from root to leaf, so that each
-    // certificate's issuer's report ID is known before the child certificate's
-    // report is generated.  The root certificate does not have an issuer ID
-    // value.
-    for (ptrdiff_t i = chain->GetSize() - 1; i >= 0; --i) {
-      const rtc::SSLCertificate& cert_i = chain->Get(i);
-      issuer = AddOneCertificateReport(&cert_i, issuer);
-    }
+  std::unique_ptr<rtc::SSLCertificateStats> first_stats = cert->GetStats();
+  StatsReport* first_report = nullptr;
+  StatsReport* prev_report = nullptr;
+  for (rtc::SSLCertificateStats* stats = first_stats.get(); stats;
+       stats = stats->issuer.get()) {
+    StatsReport::Id id(StatsReport::NewTypedId(
+        StatsReport::kStatsReportTypeCertificate, stats->fingerprint));
+
+    StatsReport* report = reports_.ReplaceOrAddNew(id);
+    report->set_timestamp(stats_gathering_started_);
+    report->AddString(StatsReport::kStatsValueNameFingerprint,
+                      stats->fingerprint);
+    report->AddString(StatsReport::kStatsValueNameFingerprintAlgorithm,
+                      stats->fingerprint_algorithm);
+    report->AddString(StatsReport::kStatsValueNameDer,
+                      stats->base64_certificate);
+    if (!first_report)
+      first_report = report;
+    else
+      prev_report->AddId(StatsReport::kStatsValueNameIssuerId, id);
+    prev_report = report;
   }
-  // Add the leaf certificate.
-  return AddOneCertificateReport(cert, issuer);
+  return first_report;
 }
 
 StatsReport* StatsCollector::AddConnectionInfoReport(
@@ -698,8 +681,8 @@ void StatsCollector::ExtractSessionInfo() {
   report->AddBoolean(StatsReport::kStatsValueNameInitiator,
                      pc_->session()->initial_offerer());
 
-  SessionStats stats;
-  if (!pc_->session()->GetTransportStats(&stats)) {
+  std::unique_ptr<SessionStats> stats = pc_->session()->GetStats_s();
+  if (!stats) {
     return;
   }
 
@@ -709,9 +692,9 @@ void StatsCollector::ExtractSessionInfo() {
   // the proxy map directly from the session stats.
   // As is, if GetStats() failed, we could be using old (incorrect?) proxy
   // data.
-  proxy_to_transport_ = stats.proxy_to_transport;
+  proxy_to_transport_ = stats->proxy_to_transport;
 
-  for (const auto& transport_iter : stats.transport_stats) {
+  for (const auto& transport_iter : stats->transport_stats) {
     // Attempt to get a copy of the certificates from the transport and
     // expose them in stats reports.  All channels in a transport share the
     // same local and remote certificates.
@@ -962,7 +945,9 @@ void StatsCollector::UpdateReportFromAudioTrack(AudioTrackInterface* track,
     SetAudioProcessingStats(
         report, stats.typing_noise_detected, stats.echo_return_loss,
         stats.echo_return_loss_enhancement, stats.echo_delay_median_ms,
-        stats.aec_quality_min, stats.echo_delay_std_ms);
+        stats.aec_quality_min, stats.echo_delay_std_ms,
+        stats.residual_echo_likelihood,
+        stats.residual_echo_likelihood_recent_max);
 
     report->AddFloat(StatsReport::kStatsValueNameAecDivergentFilterFraction,
                      stats.aec_divergent_filter_fraction);

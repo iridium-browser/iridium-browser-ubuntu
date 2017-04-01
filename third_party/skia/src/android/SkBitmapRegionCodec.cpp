@@ -52,12 +52,12 @@ bool SkBitmapRegionCodec::decodeRegion(SkBitmap* bitmap, SkBRDAllocator* allocat
     // Create the image info for the decode
     SkColorType dstColorType = fCodec->computeOutputColorType(prefColorType);
     SkAlphaType dstAlphaType = fCodec->computeOutputAlphaType(requireUnpremul);
-    SkImageInfo decodeInfo = fCodec->getInfo().makeWH(scaledSize.width(), scaledSize.height())
-                                              .makeColorType(dstColorType)
-                                              .makeAlphaType(dstAlphaType);
+    sk_sp<SkColorSpace> dstColorSpace = fCodec->computeOutputColorSpace(dstColorType);
+    SkImageInfo decodeInfo = SkImageInfo::Make(scaledSize.width(), scaledSize.height(),
+                                               dstColorType, dstAlphaType, dstColorSpace);
 
     // Construct a color table for the decode if necessary
-    SkAutoTUnref<SkColorTable> colorTable(nullptr);
+    sk_sp<SkColorTable> colorTable(nullptr);
     int maxColors = 256;
     SkPMColor colors[256];
     if (kIndex_8_SkColorType == dstColorType) {
@@ -132,5 +132,6 @@ bool SkBitmapRegionCodec::decodeRegion(SkBitmap* bitmap, SkBRDAllocator* allocat
 }
 
 bool SkBitmapRegionCodec::conversionSupported(SkColorType colorType) {
-    return conversion_possible(fCodec->getInfo().makeColorType(colorType), fCodec->getInfo());
+    SkImageInfo dstInfo = fCodec->getInfo().makeColorType(colorType);
+    return conversion_possible(dstInfo, fCodec->getInfo());
 }

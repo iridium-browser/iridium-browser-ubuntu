@@ -32,6 +32,7 @@
 #include "ui/base/dragdrop/cocoa_dnd_util.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
+#include "ui/gfx/mac/coordinate_conversion.h"
 
 using blink::WebDragOperation;
 using blink::WebDragOperationsMask;
@@ -40,6 +41,7 @@ using content::PopupMenuHelper;
 using content::RenderViewHostFactory;
 using content::RenderWidgetHostView;
 using content::RenderWidgetHostViewMac;
+using content::ScreenInfo;
 using content::WebContents;
 using content::WebContentsImpl;
 using content::WebContentsViewMac;
@@ -64,6 +66,7 @@ STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::WebDragOperationEvery);
 - (void)setCurrentDragOperation:(NSDragOperation)operation;
 - (DropData*)dropData;
 - (void)startDragWithDropData:(const DropData&)dropData
+                    sourceRWH:(content::RenderWidgetHostImpl*)sourceRWH
             dragOperationMask:(NSDragOperation)operationMask
                         image:(NSImage*)image
                        offset:(NSPoint)offset;
@@ -77,23 +80,20 @@ STATIC_ASSERT_ENUM(NSDragOperationEvery, blink::WebDragOperationEvery);
 
 namespace {
 
-blink::WebScreenInfo GetWebScreenInfo(NSView* view) {
+content::ScreenInfo GetNSViewScreenInfo(NSView* view) {
   display::Display display =
       display::Screen::GetScreen()->GetDisplayNearestWindow(view);
 
-  NSScreen* screen = [NSScreen deepestScreen];
-
-  blink::WebScreenInfo results;
-
-  results.deviceScaleFactor = static_cast<int>(display.device_scale_factor());
-  results.depth = NSBitsPerPixelFromDepth([screen depth]);
-  results.depthPerComponent = NSBitsPerSampleFromDepth([screen depth]);
-  results.isMonochrome =
-      [[screen colorSpace] colorSpaceModel] == NSGrayColorSpaceModel;
+  content::ScreenInfo results;
+  results.device_scale_factor = static_cast<int>(display.device_scale_factor());
+  results.icc_profile = display.icc_profile();
+  results.depth = display.color_depth();
+  results.depth_per_component = display.depth_per_component();
+  results.is_monochrome = display.is_monochrome();
   results.rect = display.bounds();
-  results.availableRect = display.work_area();
-  results.orientationAngle = display.RotationAsDegree();
-  results.orientationType =
+  results.available_rect = display.work_area();
+  results.orientation_angle = display.RotationAsDegree();
+  results.orientation_type =
       content::RenderWidgetHostViewBase::GetOrientationTypeForDesktop(display);
 
   return results;
@@ -104,9 +104,8 @@ blink::WebScreenInfo GetWebScreenInfo(NSView* view) {
 namespace content {
 
 // static
-void WebContentsView::GetDefaultScreenInfo(
-    blink::WebScreenInfo* results) {
-  *results = GetWebScreenInfo(NULL);
+void WebContentsView::GetDefaultScreenInfo(ScreenInfo* results) {
+  *results = GetNSViewScreenInfo(nil);
 }
 
 WebContentsView* CreateWebContentsView(
@@ -150,8 +149,8 @@ gfx::NativeWindow WebContentsViewMac::GetTopLevelNativeWindow() const {
   return window ? window : delegate_->GetNativeWindow();
 }
 
-void WebContentsViewMac::GetScreenInfo(blink::WebScreenInfo* results) const {
-  *results = GetWebScreenInfo(GetNativeView());
+void WebContentsViewMac::GetScreenInfo(ScreenInfo* results) const {
+  *results = GetNSViewScreenInfo(GetNativeView());
 }
 
 void WebContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
@@ -165,11 +164,7 @@ void WebContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
     bounds = [window convertRectToScreen:bounds];
   }
 
-  // Flip y to account for screen flip.
-  NSScreen* screen = [[NSScreen screens] firstObject];
-  bounds.origin.y = [screen frame].size.height - bounds.origin.y
-      - bounds.size.height;
-  *out = gfx::Rect(NSRectToCGRect(bounds));
+  *out = gfx::ScreenRectFromNSRect(bounds);
 }
 
 void WebContentsViewMac::StartDragging(
@@ -177,7 +172,8 @@ void WebContentsViewMac::StartDragging(
     WebDragOperationsMask allowed_operations,
     const gfx::ImageSkia& image,
     const gfx::Vector2d& image_offset,
-    const DragEventSourceInfo& event_info) {
+    const DragEventSourceInfo& event_info,
+    RenderWidgetHostImpl* source_rwh) {
   // By allowing nested tasks, the code below also allows Close(),
   // which would deallocate |this|.  The same problem can occur while
   // processing -sendEvent:, so Close() is deferred in that case.
@@ -193,6 +189,7 @@ void WebContentsViewMac::StartDragging(
   NSPoint offset = NSPointFromCGPoint(
       gfx::PointAtOffsetFromOrigin(image_offset).ToCGPoint());
   [cocoa_view_ startDragWithDropData:drop_data
+                           sourceRWH:source_rwh
                    dragOperationMask:mask
                                image:gfx::NSImageFromImageSkia(image)
                               offset:offset];
@@ -543,19 +540,22 @@ void WebContentsViewMac::CloseTab() {
 }
 
 - (void)startDragWithDropData:(const DropData&)dropData
+                    sourceRWH:(content::RenderWidgetHostImpl*)sourceRWH
             dragOperationMask:(NSDragOperation)operationMask
                         image:(NSImage*)image
                        offset:(NSPoint)offset {
   if (![self webContents])
     return;
+  [dragDest_ setDragStartTrackersForProcess:sourceRWH->GetProcess()->GetID()];
   dragSource_.reset([[WebDragSource alloc]
-      initWithContents:[self webContents]
-                  view:self
-              dropData:&dropData
-                 image:image
-                offset:offset
-            pasteboard:[NSPasteboard pasteboardWithName:NSDragPboard]
-     dragOperationMask:operationMask]);
+       initWithContents:[self webContents]
+                   view:self
+               dropData:&dropData
+              sourceRWH:sourceRWH
+                  image:image
+                 offset:offset
+             pasteboard:[NSPasteboard pasteboardWithName:NSDragPboard]
+      dragOperationMask:operationMask]);
   [dragSource_ startDrag];
 }
 
@@ -659,13 +659,20 @@ void WebContentsViewMac::CloseTab() {
   webContents->UpdateWebContentsVisibility(viewVisible);
 }
 
-// When the subviews require a layout, their size should be reset to the size
-// of this view. (It is possible for the size to get out of sync as an
-// optimization in preparation for an upcoming WebContentsView resize.
-// http://crbug.com/264207)
 - (void)resizeSubviewsWithOldSize:(NSSize)oldBoundsSize {
-  for (NSView* subview in self.subviews)
-    [subview setFrame:self.bounds];
+  // Subviews do not participate in auto layout unless the the size this view
+  // changes. This allows RenderWidgetHostViewMac::SetBounds(..) to select a
+  // size of the subview that differs from its superview in preparation for an
+  // upcoming WebContentsView resize.
+  // See http://crbug.com/264207 and http://crbug.com/655112.
+}
+
+- (void)setFrameSize:(NSSize)newSize {
+  [super setFrameSize:newSize];
+
+  // Perform manual layout of subviews, e.g., when the window size changes.
+  for (NSView* subview in [self subviews])
+    [subview setFrame:[self bounds]];
 }
 
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow {

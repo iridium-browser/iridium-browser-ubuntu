@@ -7,14 +7,11 @@
 #include <memory>
 
 #include "base/compiler_specific.h"
-#include "base/win/scoped_hdc.h"
-#include "base/win/wrapped_window_proc.h"
+#include "base/memory/ptr_util.h"
 #include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
-#include "ui/base/win/hidden_window.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/win/hwnd_util.h"
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_surface_egl.h"
@@ -22,61 +19,11 @@
 
 namespace gpu {
 
-namespace {
-
-ATOM g_window_class;
-
-LRESULT CALLBACK IntermediateWindowProc(HWND window,
-                                        UINT message,
-                                        WPARAM w_param,
-                                        LPARAM l_param) {
-  switch (message) {
-    case WM_ERASEBKGND:
-      // Prevent windows from erasing the background.
-      return 1;
-    case WM_PAINT:
-      PAINTSTRUCT paint;
-      if (BeginPaint(window, &paint)) {
-        ChildWindowSurfaceWin* window_surface =
-            reinterpret_cast<ChildWindowSurfaceWin*>(
-                gfx::GetWindowUserData(window));
-        DCHECK(window_surface);
-
-        // Wait to clear the contents until a GL draw occurs, as otherwise an
-        // unsightly black flash may happen if the GL contents are still
-        // transparent.
-        window_surface->InvalidateWindowRect(gfx::Rect(paint.rcPaint));
-        EndPaint(window, &paint);
-      }
-      return 0;
-    default:
-      return DefWindowProc(window, message, w_param, l_param);
-  }
-}
-
-void InitializeWindowClass() {
-  if (g_window_class)
-    return;
-
-  WNDCLASSEX intermediate_class;
-  base::win::InitializeWindowClass(
-      L"Intermediate D3D Window",
-      &base::win::WrappedWindowProc<IntermediateWindowProc>, CS_OWNDC, 0, 0,
-      nullptr, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)), nullptr,
-      nullptr, nullptr, &intermediate_class);
-  g_window_class = RegisterClassEx(&intermediate_class);
-  if (!g_window_class) {
-    LOG(ERROR) << "RegisterClass failed.";
-    return;
-  }
-}
-}
-
-ChildWindowSurfaceWin::ChildWindowSurfaceWin(GpuChannelManager* manager,
-                                             HWND parent_window)
+ChildWindowSurfaceWin::ChildWindowSurfaceWin(
+    base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
+    HWND parent_window)
     : gl::NativeViewGLSurfaceEGL(0),
-      parent_window_(parent_window),
-      manager_(manager),
+      child_window_(delegate, parent_window),
       alpha_(true),
       first_swap_(true) {
   // Don't use EGL_ANGLE_window_fixed_size so that we can avoid recreating the
@@ -117,21 +64,10 @@ EGLConfig ChildWindowSurfaceWin::GetConfig() {
 bool ChildWindowSurfaceWin::InitializeNativeWindow() {
   if (window_)
     return true;
-  InitializeWindowClass();
-  DCHECK(g_window_class);
 
-  RECT windowRect;
-  GetClientRect(parent_window_, &windowRect);
-
-  window_ = CreateWindowEx(
-      WS_EX_NOPARENTNOTIFY, reinterpret_cast<wchar_t*>(g_window_class), L"",
-      WS_CHILDWINDOW | WS_DISABLED | WS_VISIBLE, 0, 0,
-      windowRect.right - windowRect.left, windowRect.bottom - windowRect.top,
-      ui::GetHiddenWindow(), NULL, NULL, NULL);
-  gfx::SetWindowUserData(window_, this);
-  manager_->delegate()->SendAcceleratedSurfaceCreatedChildWindow(parent_window_,
-                                                                 window_);
-  return true;
+  bool result = child_window_.Initialize();
+  window_ = child_window_.window();
+  return result;
 }
 
 bool ChildWindowSurfaceWin::Resize(const gfx::Size& size,
@@ -191,7 +127,7 @@ gfx::SwapResult ChildWindowSurfaceWin::SwapBuffers() {
     glFinish();
     first_swap_ = false;
   }
-  ClearInvalidContents();
+  child_window_.ClearInvalidContents();
   return result;
 }
 
@@ -201,30 +137,11 @@ gfx::SwapResult ChildWindowSurfaceWin::PostSubBuffer(int x,
                                                      int height) {
   gfx::SwapResult result =
       NativeViewGLSurfaceEGL::PostSubBuffer(x, y, width, height);
-  ClearInvalidContents();
+  child_window_.ClearInvalidContents();
   return result;
 }
 
-void ChildWindowSurfaceWin::InvalidateWindowRect(const gfx::Rect& rect) {
-  rect_to_clear_.Union(rect);
-}
-
-void ChildWindowSurfaceWin::ClearInvalidContents() {
-  if (!rect_to_clear_.IsEmpty()) {
-    base::win::ScopedGetDC dc(window_);
-
-    RECT rect = rect_to_clear_.ToRECT();
-
-    // DirectComposition composites with the contents under the SwapChain,
-    // so ensure that's cleared. GDI treats black as transparent.
-    FillRect(dc, &rect, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-    rect_to_clear_ = gfx::Rect();
-  }
-}
-
 ChildWindowSurfaceWin::~ChildWindowSurfaceWin() {
-  gfx::SetWindowUserData(window_, nullptr);
-  DestroyWindow(window_);
 }
 
 }  // namespace gpu

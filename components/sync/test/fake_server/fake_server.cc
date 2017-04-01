@@ -4,25 +4,19 @@
 
 #include "components/sync/test/fake_server/fake_server.h"
 
-#include <stdint.h>
-
 #include <algorithm>
 #include <limits>
-#include <memory>
 #include <set>
-#include <string>
 #include <utility>
-#include <vector>
 
 #include "base/guid.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
-#include "components/sync/base/model_type.h"
-#include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/fake_server/bookmark_entity.h"
 #include "components/sync/test/fake_server/permanent_entity.h"
 #include "components/sync/test/fake_server/tombstone_entity.h"
@@ -32,7 +26,6 @@
 
 using std::string;
 using std::vector;
-
 using syncer::GetModelType;
 using syncer::GetModelTypeFromSpecifics;
 using syncer::ModelType;
@@ -60,100 +53,83 @@ static const char kSyncedBookmarksFolderServerTag[] = "synced_bookmarks";
 static const char kSyncedBookmarksFolderName[] = "Synced Bookmarks";
 
 // A filter used during GetUpdates calls to determine what information to
-// send back to the client. There is a 1:1 correspondence between any given
-// GetUpdates call and an UpdateSieve instance.
+// send back to the client; filtering out old entities and tracking versions to
+// use in response progress markers. Note that only the GetUpdatesMessage's
+// from_progress_marker is used to determine this; legacy fields are ignored.
 class UpdateSieve {
  public:
+  explicit UpdateSieve(const sync_pb::GetUpdatesMessage& message)
+      : UpdateSieve(MessageToVersionMap(message)) {}
   ~UpdateSieve() {}
 
-  // Factory method for creating an UpdateSieve.
-  static std::unique_ptr<UpdateSieve> Create(
-      const sync_pb::GetUpdatesMessage& get_updates_message);
-
-  // Sets the progress markers in |get_updates_response| given the progress
-  // markers from the original GetUpdatesMessage and |new_version| (the latest
-  // version in the entries sent back).
-  void UpdateProgressMarkers(
-      int64_t new_version,
+  // Sets the progress markers in |get_updates_response| based on the highest
+  // version between request progress markers and response entities.
+  void SetProgressMarkers(
       sync_pb::GetUpdatesResponse* get_updates_response) const {
-    ModelTypeToVersionMap::const_iterator it;
-    for (it = request_from_version_.begin(); it != request_from_version_.end();
-         ++it) {
+    for (const auto& kv : response_version_map_) {
       sync_pb::DataTypeProgressMarker* new_marker =
           get_updates_response->add_new_progress_marker();
       new_marker->set_data_type_id(
-          GetSpecificsFieldNumberFromModelType(it->first));
-
-      int64_t version = std::max(new_version, it->second);
-      new_marker->set_token(base::Int64ToString(version));
+          GetSpecificsFieldNumberFromModelType(kv.first));
+      new_marker->set_token(base::Int64ToString(kv.second));
     }
   }
 
   // Determines whether the server should send an |entity| to the client as
-  // part of a GetUpdatesResponse.
-  bool ClientWantsItem(const FakeServerEntity& entity) const {
+  // part of a GetUpdatesResponse. Update internal tracking of max versions as a
+  // side effect which will later be used to set response progress markers.
+  bool ClientWantsItem(const FakeServerEntity& entity) {
     int64_t version = entity.GetVersion();
-    if (version <= min_version_) {
-      return false;
-    } else if (entity.IsDeleted()) {
-      return true;
-    }
-
-    ModelTypeToVersionMap::const_iterator it =
-        request_from_version_.find(entity.GetModelType());
-
-    return it == request_from_version_.end() ? false : it->second < version;
+    ModelType type = entity.model_type();
+    response_version_map_[type] =
+        std::max(response_version_map_[type], version);
+    auto it = request_version_map_.find(type);
+    return it == request_version_map_.end() ? false : it->second < version;
   }
-
-  // Returns the minimum version seen across all types.
-  int64_t GetMinVersion() const { return min_version_; }
 
  private:
   typedef std::map<ModelType, int64_t> ModelTypeToVersionMap;
 
-  // Creates an UpdateSieve.
-  UpdateSieve(const ModelTypeToVersionMap request_from_version,
-              const int64_t min_version)
-      : request_from_version_(request_from_version),
-        min_version_(min_version) {}
+  static UpdateSieve::ModelTypeToVersionMap MessageToVersionMap(
+      const sync_pb::GetUpdatesMessage& get_updates_message) {
+    CHECK_GT(get_updates_message.from_progress_marker_size(), 0)
+        << "A GetUpdates request must have at least one progress marker.";
+    ModelTypeToVersionMap request_version_map;
 
-  // Maps data type IDs to the latest version seen for that type.
-  const ModelTypeToVersionMap request_from_version_;
+    for (int i = 0; i < get_updates_message.from_progress_marker_size(); i++) {
+      sync_pb::DataTypeProgressMarker marker =
+          get_updates_message.from_progress_marker(i);
 
-  // The minimum version seen among all data types.
-  const int min_version_;
-};
+      int64_t version = 0;
+      // Let the version remain zero if there is no token or an empty token (the
+      // first request for this type).
+      if (marker.has_token() && !marker.token().empty()) {
+        bool parsed = base::StringToInt64(marker.token(), &version);
+        CHECK(parsed) << "Unable to parse progress marker token.";
+      }
 
-std::unique_ptr<UpdateSieve> UpdateSieve::Create(
-    const sync_pb::GetUpdatesMessage& get_updates_message) {
-  CHECK_GT(get_updates_message.from_progress_marker_size(), 0)
-      << "A GetUpdates request must have at least one progress marker.";
-
-  UpdateSieve::ModelTypeToVersionMap request_from_version;
-  int64_t min_version = std::numeric_limits<int64_t>::max();
-  for (int i = 0; i < get_updates_message.from_progress_marker_size(); i++) {
-    sync_pb::DataTypeProgressMarker marker =
-        get_updates_message.from_progress_marker(i);
-
-    int64_t version = 0;
-    // Let the version remain zero if there is no token or an empty token (the
-    // first request for this type).
-    if (marker.has_token() && !marker.token().empty()) {
-      bool parsed = base::StringToInt64(marker.token(), &version);
-      CHECK(parsed) << "Unable to parse progress marker token.";
+      ModelType model_type =
+          syncer::GetModelTypeFromSpecificsFieldNumber(marker.data_type_id());
+      DCHECK(request_version_map.find(model_type) == request_version_map.end());
+      request_version_map[model_type] = version;
     }
-
-    ModelType model_type =
-        syncer::GetModelTypeFromSpecificsFieldNumber(marker.data_type_id());
-    request_from_version[model_type] = version;
-
-    if (version < min_version)
-      min_version = version;
+    return request_version_map;
   }
 
-  return std::unique_ptr<UpdateSieve>(
-      new UpdateSieve(request_from_version, min_version));
-}
+  explicit UpdateSieve(const ModelTypeToVersionMap request_version_map)
+      : request_version_map_(request_version_map),
+        response_version_map_(request_version_map) {}
+
+  // The largest versions the client has seen before this request, and is used
+  // to filter entities to send back to clients. The values in this map are not
+  // updated after being initially set. The presence of a type in this map is a
+  // proxy for the desire to receive results about this type.
+  const ModelTypeToVersionMap request_version_map_;
+
+  // The largest versions seen between client and server, ultimately used to
+  // send progress markers back to the client.
+  ModelTypeToVersionMap response_version_map_;
+};
 
 // Returns whether |entity| is deleted or permanent.
 bool IsDeletedOrPermanent(const FakeServerEntity& entity) {
@@ -232,7 +208,7 @@ void FakeServer::UpdateEntityVersion(FakeServerEntity* entity) {
 
 void FakeServer::SaveEntity(std::unique_ptr<FakeServerEntity> entity) {
   UpdateEntityVersion(entity.get());
-  entities_[entity->GetId()] = std::move(entity);
+  entities_[entity->id()] = std::move(entity);
 }
 
 void FakeServer::HandleCommand(const string& request,
@@ -346,7 +322,7 @@ bool FakeServer::HandleGetUpdatesRequest(
   // at once.
   response->set_changes_remaining(0);
 
-  std::unique_ptr<UpdateSieve> sieve = UpdateSieve::Create(get_updates);
+  auto sieve = base::MakeUnique<UpdateSieve>(get_updates);
 
   // This folder is called "Synced Bookmarks" by sync and is renamed
   // "Mobile Bookmarks" by the mobile client UIs.
@@ -357,7 +333,6 @@ bool FakeServer::HandleGetUpdatesRequest(
   }
 
   bool send_encryption_keys_based_on_nigori = false;
-  int64_t max_response_version = 0;
   for (EntityMap::const_iterator it = entities_.begin(); it != entities_.end();
        ++it) {
     const FakeServerEntity& entity = *it->second;
@@ -365,10 +340,7 @@ bool FakeServer::HandleGetUpdatesRequest(
       sync_pb::SyncEntity* response_entity = response->add_entries();
       entity.SerializeAsProto(response_entity);
 
-      max_response_version =
-          std::max(max_response_version, response_entity->version());
-
-      if (entity.GetModelType() == syncer::NIGORI) {
+      if (entity.model_type() == syncer::NIGORI) {
         send_encryption_keys_based_on_nigori =
             response_entity->specifics().nigori().passphrase_type() ==
             sync_pb::NigoriSpecifics::KEYSTORE_PASSPHRASE;
@@ -384,7 +356,7 @@ bool FakeServer::HandleGetUpdatesRequest(
     }
   }
 
-  sieve->UpdateProgressMarkers(max_response_version, response);
+  sieve->SetProgressMarkers(response);
   return true;
 }
 
@@ -399,7 +371,8 @@ string FakeServer::CommitEntity(
 
   std::unique_ptr<FakeServerEntity> entity;
   if (client_entity.deleted()) {
-    entity = TombstoneEntity::Create(client_entity.id_string());
+    entity = TombstoneEntity::Create(client_entity.id_string(),
+                                     client_entity.client_defined_unique_tag());
     DeleteChildren(client_entity.id_string());
   } else if (GetModelType(client_entity) == syncer::NIGORI) {
     // NIGORI is the only permanent item type that should be updated by the
@@ -427,7 +400,7 @@ string FakeServer::CommitEntity(
     return string();
   }
 
-  const std::string id = entity->GetId();
+  const std::string id = entity->id();
   SaveEntity(std::move(entity));
   BuildEntryResponseForSuccessfulCommit(id, entry_response);
   return id;
@@ -440,7 +413,7 @@ void FakeServer::BuildEntryResponseForSuccessfulCommit(
   CHECK(iter != entities_.end());
   const FakeServerEntity& entity = *iter->second;
   entry_response->set_response_type(sync_pb::CommitResponse::SUCCESS);
-  entry_response->set_id_string(entity.GetId());
+  entry_response->set_id_string(entity.id());
 
   if (entity.IsDeleted()) {
     entry_response->set_version(entity.GetVersion() + 1);
@@ -467,16 +440,17 @@ bool FakeServer::IsChild(const string& id, const string& potential_parent_id) {
 }
 
 void FakeServer::DeleteChildren(const string& id) {
-  std::set<string> tombstones_ids;
+  std::vector<std::unique_ptr<FakeServerEntity>> tombstones;
   // Find all the children of id.
-  for (auto& entity : entities_) {
+  for (const auto& entity : entities_) {
     if (IsChild(entity.first, id)) {
-      tombstones_ids.insert(entity.first);
+      tombstones.push_back(TombstoneEntity::Create(
+          entity.first, entity.second->client_defined_unique_tag()));
     }
   }
 
-  for (auto& tombstone_id : tombstones_ids) {
-    SaveEntity(TombstoneEntity::Create(tombstone_id));
+  for (auto& tombstone : tombstones) {
+    SaveEntity(std::move(tombstone));
   }
 }
 
@@ -512,11 +486,12 @@ bool FakeServer::HandleCommitRequest(const sync_pb::CommitMessage& commit,
 
     EntityMap::const_iterator iter = entities_.find(entity_id);
     CHECK(iter != entities_.end());
-    committed_model_types.Put(iter->second->GetModelType());
+    committed_model_types.Put(iter->second->model_type());
   }
 
-  FOR_EACH_OBSERVER(Observer, observers_,
-                    OnCommit(invalidator_client_id, committed_model_types));
+  for (auto& observer : observers_)
+    observer.OnCommit(invalidator_client_id, committed_model_types);
+
   return true;
 }
 
@@ -542,7 +517,7 @@ FakeServer::GetEntitiesAsDictionaryValue() {
       continue;
     }
     base::ListValue* list_value;
-    if (!dictionary->GetList(ModelTypeToString(entity.GetModelType()),
+    if (!dictionary->GetList(ModelTypeToString(entity.model_type()),
                              &list_value)) {
       return std::unique_ptr<base::DictionaryValue>();
     }
@@ -562,7 +537,7 @@ std::vector<sync_pb::SyncEntity> FakeServer::GetSyncEntitiesByModelType(
   for (EntityMap::const_iterator it = entities_.begin(); it != entities_.end();
        ++it) {
     const FakeServerEntity& entity = *it->second;
-    if (!IsDeletedOrPermanent(entity) && entity.GetModelType() == model_type) {
+    if (!IsDeletedOrPermanent(entity) && entity.model_type() == model_type) {
       sync_pb::SyncEntity sync_entity;
       entity.SerializeAsProto(&sync_entity);
       sync_entities.push_back(sync_entity);
@@ -581,7 +556,7 @@ bool FakeServer::ModifyEntitySpecifics(
     const sync_pb::EntitySpecifics& updated_specifics) {
   EntityMap::const_iterator iter = entities_.find(id);
   if (iter == entities_.end() ||
-      iter->second->GetModelType() !=
+      iter->second->model_type() !=
           GetModelTypeFromSpecifics(updated_specifics)) {
     return false;
   }
@@ -598,7 +573,7 @@ bool FakeServer::ModifyBookmarkEntity(
     const sync_pb::EntitySpecifics& updated_specifics) {
   EntityMap::const_iterator iter = entities_.find(id);
   if (iter == entities_.end() ||
-      iter->second->GetModelType() != syncer::BOOKMARKS ||
+      iter->second->model_type() != syncer::BOOKMARKS ||
       GetModelTypeFromSpecifics(updated_specifics) != syncer::BOOKMARKS) {
     return false;
   }
@@ -713,8 +688,8 @@ std::string FakeServer::GetBookmarkBarFolderId() const {
        ++it) {
     FakeServerEntity* entity = it->second.get();
     if (entity->GetName() == kBookmarkBarFolderName && entity->IsFolder() &&
-        entity->GetModelType() == syncer::BOOKMARKS) {
-      return entity->GetId();
+        entity->model_type() == syncer::BOOKMARKS) {
+      return entity->id();
     }
   }
   NOTREACHED() << "Bookmark Bar entity not found.";

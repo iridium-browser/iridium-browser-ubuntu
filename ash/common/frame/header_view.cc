@@ -6,7 +6,6 @@
 
 #include "ash/common/frame/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/common/frame/default_header_painter.h"
-#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/wm_lookup.h"
 #include "ash/common/wm_shell.h"
@@ -45,15 +44,18 @@ void HeaderView::ResetWindowControls() {
   caption_button_container_->ResetWindowControls();
 }
 
-int HeaderView::GetPreferredOnScreenHeight() const {
-  if (target_widget_->IsFullscreen()) {
+int HeaderView::GetPreferredOnScreenHeight() {
+  if (is_immersive_delegate_ && target_widget_->IsFullscreen()) {
     return static_cast<int>(GetPreferredHeight() *
                             fullscreen_visible_fraction_);
   }
   return GetPreferredHeight();
 }
 
-int HeaderView::GetPreferredHeight() const {
+int HeaderView::GetPreferredHeight() {
+  // Calculating the preferred height requires at least one Layout().
+  if (!did_layout_)
+    Layout();
   return header_painter_->GetHeaderHeightForPainting();
 }
 
@@ -94,10 +96,19 @@ void HeaderView::SetFrameColors(SkColor active_frame_color,
   header_painter_->SetFrameColors(active_frame_color, inactive_frame_color);
 }
 
+SkColor HeaderView::GetActiveFrameColor() const {
+  return header_painter_->GetActiveFrameColor();
+}
+
+SkColor HeaderView::GetInactiveFrameColor() const {
+  return header_painter_->GetInactiveFrameColor();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // HeaderView, views::View overrides:
 
 void HeaderView::Layout() {
+  did_layout_ = true;
   header_painter_->LayoutHeader();
 }
 
@@ -126,13 +137,11 @@ void HeaderView::ChildPreferredSizeChanged(views::View* child) {
 // HeaderView, ShellObserver overrides:
 
 void HeaderView::OnOverviewModeStarting() {
-  if (MaterialDesignController::IsOverviewMaterial())
-    caption_button_container_->SetVisible(false);
+  caption_button_container_->SetVisible(false);
 }
 
 void HeaderView::OnOverviewModeEnded() {
-  if (MaterialDesignController::IsOverviewMaterial())
-    caption_button_container_->SetVisible(true);
+  caption_button_container_->SetVisible(true);
 }
 
 void HeaderView::OnMaximizeModeStarted() {

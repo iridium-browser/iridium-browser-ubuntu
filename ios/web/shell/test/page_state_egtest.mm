@@ -7,10 +7,12 @@
 #import <Foundation/Foundation.h>
 #import <XCTest/XCTest.h>
 
+#include "base/ios/ios_util.h"
+#include "ios/testing/earl_grey/disabled_test_macros.h"
 #import "ios/web/public/test/http_server.h"
 #include "ios/web/public/test/http_server_util.h"
-#include "ios/web/shell/test/app/navigation_test_util.h"
 #import "ios/web/shell/test/earl_grey/shell_base_test_case.h"
+#import "ios/web/shell/test/earl_grey/shell_earl_grey.h"
 #import "ios/web/shell/test/earl_grey/shell_matchers.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -45,11 +47,32 @@ id<GREYMatcher> contentOffset(CGPoint offset) {
       nil);
 }
 
+// Waits for the web view scroll view is scrolled to |y_offset|.
+void WaitForOffset(CGFloat y_offset) {
+  CGPoint content_offset = CGPointMake(0.0, y_offset);
+  NSString* content_offset_string = NSStringFromCGPoint(content_offset);
+  NSString* name =
+      [NSString stringWithFormat:@"Wait for scroll view to scroll to %@.",
+                                 content_offset_string];
+  GREYCondition* condition = [GREYCondition
+      conditionWithName:name
+                  block:^BOOL {
+                    NSError* error = nil;
+                    [[EarlGrey
+                        selectElementWithMatcher:web::webViewScrollView()]
+                        assertWithMatcher:contentOffset(content_offset)
+                                    error:&error];
+                    return (error == nil);
+                  }];
+  NSString* error_text =
+      [NSString stringWithFormat:@"Scroll view did not scroll to %@",
+                                 content_offset_string];
+  GREYAssert([condition waitWithTimeout:10], error_text);
+}
+
 }  // namespace
 
-using web::shell_test_util::LoadUrl;
 using web::test::HttpServer;
-using web::webViewContainingText;
 
 // Page state test cases for the web shell.
 @interface PageStateTestCase : ShellBaseTestCase
@@ -63,11 +86,7 @@ using web::webViewContainingText;
   web::test::SetUpFileBasedHttpServer();
 
   // Load first URL which is a long page.
-  LoadUrl(HttpServer::MakeUrl(kLongPage1));
-  // TODO(crbug.com/629116): Remove this once |LoadUrl| waits for the load
-  // completion.
-  [[EarlGrey selectElementWithMatcher:webViewContainingText("List of numbers")]
-      assertWithMatcher:grey_notNil()];
+  [ShellEarlGrey loadURL:HttpServer::MakeUrl(kLongPage1)];
 
   // Scroll the first page and verify the offset.
   [[EarlGrey selectElementWithMatcher:web::webViewScrollView()]
@@ -76,14 +95,7 @@ using web::webViewContainingText;
       assertWithMatcher:contentOffset(CGPointMake(0, kScrollOffset1))];
 
   // Load second URL, which is also a long page.
-  GURL URL2 = HttpServer::MakeUrl(kLongPage2);
-  LoadUrl(URL2);
-  // TODO(crbug.com/629116): Remove these once |LoadUrl| waits for the load
-  // completion.
-  [[EarlGrey selectElementWithMatcher:web::addressFieldText(URL2.spec())]
-      assertWithMatcher:grey_notNil()];
-  [[EarlGrey selectElementWithMatcher:webViewContainingText("List of numbers")]
-      assertWithMatcher:grey_notNil()];
+  [ShellEarlGrey loadURL:HttpServer::MakeUrl(kLongPage2)];
 
   // Scroll the second page and verify the offset.
   [[EarlGrey selectElementWithMatcher:web::webViewScrollView()]
@@ -94,14 +106,12 @@ using web::webViewContainingText;
   // Go back and verify that the first page offset has been restored.
   [[EarlGrey selectElementWithMatcher:web::backButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:web::webViewScrollView()]
-      assertWithMatcher:contentOffset(CGPointMake(0, kScrollOffset1))];
+  WaitForOffset(kScrollOffset1);
 
   // Go forward and verify that the second page offset has been restored.
   [[EarlGrey selectElementWithMatcher:web::forwardButton()]
       performAction:grey_tap()];
-  [[EarlGrey selectElementWithMatcher:web::webViewScrollView()]
-      assertWithMatcher:contentOffset(CGPointMake(0, kScrollOffset2))];
+  WaitForOffset(kScrollOffset2);
 }
 
 @end

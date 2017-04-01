@@ -9,6 +9,7 @@
 {
   'variables': {
     'libyuv_disable_jpeg%': 0,
+    'mips_msa%': 0,  # Default to msa off.
   },
   'targets': [
     {
@@ -52,11 +53,6 @@
             '-fexceptions',
           ],
         }],
-        [ 'OS == "ios" and target_subarch == 64', {
-          'defines': [
-            'LIBYUV_DISABLE_NEON'
-          ],
-        }],
         [ 'OS == "ios"', {
           'xcode_settings': {
             'DEBUGGING_SYMBOLS': 'YES',
@@ -89,6 +85,12 @@
           and (arm_neon == 1 or arm_neon_optional == 1)', {
           'defines': [
             'LIBYUV_NEON'
+          ],
+        }],
+        [ '(target_arch == "mipsel" or target_arch == "mips64el") \
+          and (mips_msa == 1)', {
+          'defines': [
+            'LIBYUV_MSA'
           ],
         }],
       ], # conditions
@@ -151,12 +153,6 @@
         'libyuv.gyp:libyuv',
       ],
       'conditions': [
-        [ 'OS == "ios" and target_subarch == 64', {
-          'defines': [
-            'LIBYUV_DISABLE_NEON'
-          ],
-        }],
-
         [ 'OS != "ios" and libyuv_disable_jpeg != 1', {
           'defines': [
             'HAVE_JPEG',

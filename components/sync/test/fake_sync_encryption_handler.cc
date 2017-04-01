@@ -4,6 +4,7 @@
 
 #include "components/sync/test/fake_sync_encryption_handler.h"
 
+#include "components/sync/base/passphrase_type.h"
 #include "components/sync/protocol/nigori_specifics.pb.h"
 #include "components/sync/syncable/nigori_util.h"
 
@@ -12,7 +13,7 @@ namespace syncer {
 FakeSyncEncryptionHandler::FakeSyncEncryptionHandler()
     : encrypted_types_(SensitiveTypes()),
       encrypt_everything_(false),
-      passphrase_type_(IMPLICIT_PASSPHRASE),
+      passphrase_type_(PassphraseType::IMPLICIT_PASSPHRASE),
       cryptographer_(&encryptor_) {}
 FakeSyncEncryptionHandler::~FakeSyncEncryptionHandler() {}
 
@@ -28,7 +29,7 @@ void FakeSyncEncryptionHandler::ApplyNigoriUpdate(
   if (nigori.encrypt_everything())
     EnableEncryptEverything();
   if (nigori.keybag_is_frozen())
-    passphrase_type_ = CUSTOM_PASSPHRASE;
+    passphrase_type_ = PassphraseType::CUSTOM_PASSPHRASE;
 
   // TODO(zea): consider adding fake support for migration.
   if (cryptographer_.CanDecrypt(nigori.encryption_keybag()))
@@ -39,14 +40,15 @@ void FakeSyncEncryptionHandler::ApplyNigoriUpdate(
   if (cryptographer_.has_pending_keys()) {
     DVLOG(1) << "OnPassPhraseRequired Sent";
     sync_pb::EncryptedData pending_keys = cryptographer_.GetPendingKeys();
-    FOR_EACH_OBSERVER(SyncEncryptionHandler::Observer, observers_,
-                      OnPassphraseRequired(REASON_DECRYPTION, pending_keys));
+    for (auto& observer : observers_)
+      observer.OnPassphraseRequired(REASON_DECRYPTION, pending_keys);
   } else if (!cryptographer_.is_ready()) {
     DVLOG(1) << "OnPassphraseRequired sent because cryptographer is not "
              << "ready";
-    FOR_EACH_OBSERVER(
-        SyncEncryptionHandler::Observer, observers_,
-        OnPassphraseRequired(REASON_ENCRYPTION, sync_pb::EncryptedData()));
+    for (auto& observer : observers_) {
+      observer.OnPassphraseRequired(REASON_ENCRYPTION,
+                                    sync_pb::EncryptedData());
+    }
   }
 }
 
@@ -73,9 +75,9 @@ bool FakeSyncEncryptionHandler::SetKeystoreKeys(
   keystore_key_ = new_key;
 
   DVLOG(1) << "Keystore bootstrap token updated.";
-  FOR_EACH_OBSERVER(
-      SyncEncryptionHandler::Observer, observers_,
-      OnBootstrapTokenUpdated(keystore_key_, KEYSTORE_BOOTSTRAP_TOKEN));
+  for (auto& observer : observers_)
+    observer.OnBootstrapTokenUpdated(keystore_key_, KEYSTORE_BOOTSTRAP_TOKEN);
+
   return true;
 }
 
@@ -96,7 +98,7 @@ void FakeSyncEncryptionHandler::SetEncryptionPassphrase(
     const std::string& passphrase,
     bool is_explicit) {
   if (is_explicit)
-    passphrase_type_ = CUSTOM_PASSPHRASE;
+    passphrase_type_ = PassphraseType::CUSTOM_PASSPHRASE;
 }
 
 void FakeSyncEncryptionHandler::SetDecryptionPassphrase(
@@ -109,16 +111,16 @@ void FakeSyncEncryptionHandler::EnableEncryptEverything() {
     return;
   encrypt_everything_ = true;
   encrypted_types_ = ModelTypeSet::All();
-  FOR_EACH_OBSERVER(
-      Observer, observers_,
-      OnEncryptedTypesChanged(encrypted_types_, encrypt_everything_));
+  for (auto& observer : observers_)
+    observer.OnEncryptedTypesChanged(encrypted_types_, encrypt_everything_);
 }
 
 bool FakeSyncEncryptionHandler::IsEncryptEverythingEnabled() const {
   return encrypt_everything_;
 }
 
-PassphraseType FakeSyncEncryptionHandler::GetPassphraseType() const {
+PassphraseType FakeSyncEncryptionHandler::GetPassphraseType(
+    syncable::BaseTransaction* const trans) const {
   return passphrase_type_;
 }
 

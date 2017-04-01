@@ -17,18 +17,18 @@
 #include "base/time/time.h"
 #include "media/midi/midi_export.h"
 #include "media/midi/midi_port_info.h"
-#include "media/midi/result.h"
+#include "media/midi/midi_service.mojom.h"
 
 namespace base {
 class SingleThreadTaskRunner;
 }  // namespace base
 
-namespace media {
 namespace midi {
 
 // A MidiManagerClient registers with the MidiManager to receive MIDI data.
 // See MidiManager::RequestAccess() and MidiManager::ReleaseAccess()
 // for details.
+// TODO(toyoshim): Consider to have a MidiServiceClient interface.
 class MIDI_EXPORT MidiManagerClient {
  public:
   virtual ~MidiManagerClient() {}
@@ -41,12 +41,14 @@ class MIDI_EXPORT MidiManagerClient {
 
   // SetInputPortState() and SetOutputPortState() are called to notify a known
   // device gets disconnected, or connected again.
-  virtual void SetInputPortState(uint32_t port_index, MidiPortState state) = 0;
-  virtual void SetOutputPortState(uint32_t port_index, MidiPortState state) = 0;
+  virtual void SetInputPortState(uint32_t port_index,
+                                 mojom::PortState state) = 0;
+  virtual void SetOutputPortState(uint32_t port_index,
+                                  mojom::PortState state) = 0;
 
   // CompleteStartSession() is called when platform dependent preparation is
   // finished.
-  virtual void CompleteStartSession(Result result) = 0;
+  virtual void CompleteStartSession(mojom::Result result) = 0;
 
   // ReceiveMidiData() is called when MIDI data has been received from the
   // MIDI system.
@@ -89,8 +91,9 @@ class MIDI_EXPORT MidiManager {
   // A client calls StartSession() to receive and send MIDI data.
   // If the session is ready to start, the MIDI system is lazily initialized
   // and the client is registered to receive MIDI data.
-  // CompleteStartSession() is called with Result::OK if the session is started.
-  // Otherwise CompleteStartSession() is called with proper Result code.
+  // CompleteStartSession() is called with mojom::Result::OK if the session is
+  // started. Otherwise CompleteStartSession() is called with a proper
+  // mojom::Result code.
   // StartSession() and EndSession() can be called on the Chrome_IOThread.
   // CompleteStartSession() will be invoked on the same Chrome_IOThread.
   void StartSession(MidiManagerClient* client);
@@ -121,13 +124,14 @@ class MIDI_EXPORT MidiManager {
 
   // Initializes the platform dependent MIDI system. MidiManager class has a
   // default implementation that synchronously calls CompleteInitialization()
-  // with Result::NOT_SUPPORTED on the caller thread. A derived class for a
-  // specific platform should override this method correctly.
+  // with mojom::Result::NOT_SUPPORTED on the caller thread. A derived class for
+  // a specific platform should override this method correctly.
   // This method is called on Chrome_IOThread thread inside StartSession().
   // Platform dependent initialization can be processed synchronously or
   // asynchronously. When the initialization is completed,
   // CompleteInitialization() should be called with |result|.
-  // |result| should be Result::OK on success, otherwise a proper Result.
+  // |result| should be mojom::Result::OK on success, otherwise a proper
+  // mojom::Result.
   virtual void StartInitialization();
 
   // Finalizes the platform dependent MIDI system. Called on Chrome_IOThread
@@ -140,12 +144,12 @@ class MIDI_EXPORT MidiManager {
   // It invokes CompleteInitializationInternal() on the thread that calls
   // StartSession() and distributes |result| to MIDIManagerClient objects in
   // |pending_clients_|.
-  void CompleteInitialization(Result result);
+  void CompleteInitialization(mojom::Result result);
 
   void AddInputPort(const MidiPortInfo& info);
   void AddOutputPort(const MidiPortInfo& info);
-  void SetInputPortState(uint32_t port_index, MidiPortState state);
-  void SetOutputPortState(uint32_t port_index, MidiPortState state);
+  void SetInputPortState(uint32_t port_index, mojom::PortState state);
+  void SetOutputPortState(uint32_t port_index, mojom::PortState state);
 
   // Dispatches to all clients.
   // TODO(toyoshim): Fix the mac implementation to use
@@ -172,7 +176,13 @@ class MIDI_EXPORT MidiManager {
   const MidiPortInfoList& output_ports() const { return output_ports_; }
 
  private:
-  void CompleteInitializationInternal(Result result);
+  enum class InitializationState {
+    NOT_STARTED,
+    STARTED,
+    COMPLETED,
+  };
+
+  void CompleteInitializationInternal(mojom::Result result);
   void AddInitialPorts(MidiManagerClient* client);
   void ShutdownOnSessionThread();
 
@@ -187,22 +197,22 @@ class MIDI_EXPORT MidiManager {
   // order to invoke CompleteStartSession() on the thread.
   scoped_refptr<base::SingleThreadTaskRunner> session_thread_runner_;
 
-  // Keeps true if platform dependent initialization is already completed.
-  bool initialized_;
+  // Tracks platform dependent initialization state.
+  InitializationState initialization_state_;
 
   // Keeps false until Finalize() is called.
   bool finalized_;
 
   // Keeps the platform dependent initialization result if initialization is
-  // completed. Otherwise keeps Result::NOT_INITIALIZED.
-  Result result_;
+  // completed. Otherwise keeps mojom::Result::NOT_INITIALIZED.
+  mojom::Result result_;
 
   // Keeps all MidiPortInfo.
   MidiPortInfoList input_ports_;
   MidiPortInfoList output_ports_;
 
   // Protects access to |clients_|, |pending_clients_|,
-  // |session_thread_runner_|, |initialized_|, |finalize_|, |result_|,
+  // |session_thread_runner_|, |initialization_state_|, |finalize_|, |result_|,
   // |input_ports_| and |output_ports_|.
   base::Lock lock_;
 
@@ -210,6 +220,5 @@ class MIDI_EXPORT MidiManager {
 };
 
 }  // namespace midi
-}  // namespace media
 
 #endif  // MEDIA_MIDI_MIDI_MANAGER_H_

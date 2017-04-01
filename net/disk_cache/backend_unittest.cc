@@ -6,6 +6,7 @@
 
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
@@ -125,6 +126,7 @@ class DiskCacheBackendTest : public DiskCacheTestWithCache {
   void BackendDoomRecent();
   void BackendDoomBetween();
   void BackendCalculateSizeOfAllEntries();
+  void BackendCalculateSizeOfEntriesBetween();
   void BackendTransaction(const std::string& name, int num_entries, bool load);
   void BackendRecoverInsert();
   void BackendRecoverRemove();
@@ -595,15 +597,9 @@ TEST_F(DiskCacheBackendTest, MultipleInstancesWithPendingFileIO) {
 
   net::TestCompletionCallback cb;
   std::unique_ptr<disk_cache::Backend> extra_cache;
-  int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE,
-                                          net::CACHE_BACKEND_DEFAULT,
-                                          store.path(),
-                                          0,
-                                          false,
-                                          base::ThreadTaskRunnerHandle::Get(),
-                                          NULL,
-                                          &extra_cache,
-                                          cb.callback());
+  int rv = disk_cache::CreateCacheBackend(
+      net::DISK_CACHE, net::CACHE_BACKEND_DEFAULT, store.GetPath(), 0, false,
+      base::ThreadTaskRunnerHandle::Get(), NULL, &extra_cache, cb.callback());
   ASSERT_THAT(cb.GetResult(rv), IsOk());
   ASSERT_TRUE(extra_cache.get() != NULL);
 
@@ -1877,6 +1873,70 @@ TEST_F(DiskCacheBackendTest, SimpleCacheCalculateSizeOfAllEntries) {
   BackendCalculateSizeOfAllEntries();
 }
 
+void DiskCacheBackendTest::BackendCalculateSizeOfEntriesBetween() {
+  InitCache();
+
+  EXPECT_EQ(0, CalculateSizeOfEntriesBetween(base::Time(), base::Time::Max()));
+
+  Time start = Time::Now();
+
+  disk_cache::Entry* entry;
+  ASSERT_THAT(CreateEntry("first", &entry), IsOk());
+  entry->Close();
+  FlushQueueForTest();
+
+  AddDelay();
+  Time middle = Time::Now();
+  AddDelay();
+
+  ASSERT_THAT(CreateEntry("second", &entry), IsOk());
+  entry->Close();
+  ASSERT_THAT(CreateEntry("third_entry", &entry), IsOk());
+  entry->Close();
+  FlushQueueForTest();
+
+  AddDelay();
+  Time end = Time::Now();
+
+  int size_1 = GetEntryMetadataSize("first");
+  int size_2 = GetEntryMetadataSize("second");
+  int size_3 = GetEntryMetadataSize("third_entry");
+
+  ASSERT_EQ(3, cache_->GetEntryCount());
+  ASSERT_EQ(CalculateSizeOfAllEntries(),
+            CalculateSizeOfEntriesBetween(base::Time(), base::Time::Max()));
+
+  int start_end = CalculateSizeOfEntriesBetween(start, end);
+  ASSERT_EQ(CalculateSizeOfAllEntries(), start_end);
+  ASSERT_EQ(size_1 + size_2 + size_3, start_end);
+
+  ASSERT_EQ(size_1, CalculateSizeOfEntriesBetween(start, middle));
+  ASSERT_EQ(size_2 + size_3, CalculateSizeOfEntriesBetween(middle, end));
+
+  // After dooming the entries, the size should be back to zero.
+  ASSERT_THAT(DoomAllEntries(), IsOk());
+  EXPECT_EQ(0, CalculateSizeOfEntriesBetween(base::Time(), base::Time::Max()));
+}
+
+TEST_F(DiskCacheBackendTest, CalculateSizeOfEntriesBetween) {
+  InitCache();
+  ASSERT_EQ(net::ERR_NOT_IMPLEMENTED,
+            CalculateSizeOfEntriesBetween(base::Time(), base::Time::Max()));
+}
+
+TEST_F(DiskCacheBackendTest, MemoryOnlyCalculateSizeOfEntriesBetween) {
+  SetMemoryOnlyMode();
+  BackendCalculateSizeOfEntriesBetween();
+}
+
+TEST_F(DiskCacheBackendTest, SimpleCacheCalculateSizeOfEntriesBetween) {
+  // Use net::APP_CACHE to make size estimations deterministic via
+  // non-optimistic writes.
+  SetCacheType(net::APP_CACHE);
+  SetSimpleCacheMode();
+  BackendCalculateSizeOfEntriesBetween();
+}
+
 void DiskCacheBackendTest::BackendTransaction(const std::string& name,
                                               int num_entries, bool load) {
   success_ = false;
@@ -2063,7 +2123,8 @@ TEST_F(DiskCacheTest, SimpleCacheControlJoin) {
 
   // Instantiate the SimpleCacheTrial, forcing this run into the
   // ExperimentControl group.
-  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
+  base::FieldTrialList field_trial_list(
+      base::MakeUnique<base::MockEntropyProvider>());
   base::FieldTrialList::CreateFieldTrial("SimpleCacheTrial",
                                          "ExperimentControl");
   net::TestCompletionCallback cb;
@@ -2087,7 +2148,8 @@ TEST_F(DiskCacheTest, SimpleCacheControlJoin) {
 TEST_F(DiskCacheTest, SimpleCacheControlRestart) {
   // Instantiate the SimpleCacheTrial, forcing this run into the
   // ExperimentControl group.
-  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
+  base::FieldTrialList field_trial_list(
+      base::MakeUnique<base::MockEntropyProvider>());
   base::FieldTrialList::CreateFieldTrial("SimpleCacheTrial",
                                          "ExperimentControl");
 
@@ -2127,7 +2189,8 @@ TEST_F(DiskCacheTest, SimpleCacheControlLeave) {
   {
     // Instantiate the SimpleCacheTrial, forcing this run into the
     // ExperimentControl group.
-    base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
+    base::FieldTrialList field_trial_list(
+        base::MakeUnique<base::MockEntropyProvider>());
     base::FieldTrialList::CreateFieldTrial("SimpleCacheTrial",
                                            "ExperimentControl");
 
@@ -2138,7 +2201,8 @@ TEST_F(DiskCacheTest, SimpleCacheControlLeave) {
 
   // Instantiate the SimpleCacheTrial, forcing this run into the
   // ExperimentNo group.
-  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
+  base::FieldTrialList field_trial_list(
+      base::MakeUnique<base::MockEntropyProvider>());
   base::FieldTrialList::CreateFieldTrial("SimpleCacheTrial", "ExperimentNo");
   net::TestCompletionCallback cb;
 
@@ -3230,25 +3294,13 @@ TEST_F(DiskCacheTest, MultipleInstances) {
   const int kNumberOfCaches = 2;
   std::unique_ptr<disk_cache::Backend> cache[kNumberOfCaches];
 
-  int rv = disk_cache::CreateCacheBackend(net::DISK_CACHE,
-                                          net::CACHE_BACKEND_DEFAULT,
-                                          store1.path(),
-                                          0,
-                                          false,
-                                          cache_thread.task_runner(),
-                                          NULL,
-                                          &cache[0],
-                                          cb.callback());
+  int rv = disk_cache::CreateCacheBackend(
+      net::DISK_CACHE, net::CACHE_BACKEND_DEFAULT, store1.GetPath(), 0, false,
+      cache_thread.task_runner(), NULL, &cache[0], cb.callback());
   ASSERT_THAT(cb.GetResult(rv), IsOk());
-  rv = disk_cache::CreateCacheBackend(net::MEDIA_CACHE,
-                                      net::CACHE_BACKEND_DEFAULT,
-                                      store2.path(),
-                                      0,
-                                      false,
-                                      cache_thread.task_runner(),
-                                      NULL,
-                                      &cache[1],
-                                      cb.callback());
+  rv = disk_cache::CreateCacheBackend(
+      net::MEDIA_CACHE, net::CACHE_BACKEND_DEFAULT, store2.GetPath(), 0, false,
+      cache_thread.task_runner(), NULL, &cache[1], cb.callback());
   ASSERT_THAT(cb.GetResult(rv), IsOk());
 
   ASSERT_TRUE(cache[0].get() != NULL && cache[1].get() != NULL);
@@ -3753,6 +3805,8 @@ TEST_F(DiskCacheBackendTest, SimpleCacheEnumerationWhileDoomed) {
   EXPECT_TRUE(keys_to_match.empty());
 }
 
+// This test is flaky on Android Marshmallow crbug.com/638891.
+#if !defined(OS_ANDROID)
 // Tests that enumerations are not affected by corrupt files.
 TEST_F(DiskCacheBackendTest, SimpleCacheEnumerationCorruption) {
   SetSimpleCacheMode();
@@ -3790,6 +3844,7 @@ TEST_F(DiskCacheBackendTest, SimpleCacheEnumerationCorruption) {
   EXPECT_EQ(key_pool.size(), count);
   EXPECT_TRUE(keys_to_match.empty());
 }
+#endif
 
 // Tests that enumerations don't leak memory when the backend is destructed
 // mid-enumeration.

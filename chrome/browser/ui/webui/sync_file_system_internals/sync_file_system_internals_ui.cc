@@ -4,16 +4,16 @@
 
 #include "chrome/browser/ui/webui/sync_file_system_internals/sync_file_system_internals_ui.h"
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/dump_database_handler.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/extension_statuses_handler.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/file_metadata_handler.h"
 #include "chrome/browser/ui/webui/sync_file_system_internals/sync_file_system_internals_handler.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/sync_file_system_internals_resources.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "grit/sync_file_system_internals_resources.h"
-#include "ui/resources/grit/ui_resources.h"
 
 namespace {
 
@@ -36,8 +36,6 @@ content::WebUIDataSource* CreateSyncFileSystemInternalsHTMLSource() {
       "task_log.js", IDR_SYNC_FILE_SYSTEM_INTERNALS_TASK_LOG_JS);
   source->AddResourcePath(
       "dump_database.js", IDR_SYNC_FILE_SYSTEM_INTERNALS_DUMP_DATABASE_JS);
-  source->AddResourcePath("file.png", IDR_DEFAULT_FAVICON);
-  source->AddResourcePath("folder_closed.png", IDR_FOLDER_CLOSED);
   source->SetDefaultResource(IDR_SYNC_FILE_SYSTEM_INTERNALS_MAIN_HTML);
   return source;
 }
@@ -48,13 +46,14 @@ SyncFileSystemInternalsUI::SyncFileSystemInternalsUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
   web_ui->AddMessageHandler(
-      new syncfs_internals::SyncFileSystemInternalsHandler(profile));
+      base::MakeUnique<syncfs_internals::SyncFileSystemInternalsHandler>(
+          profile));
   web_ui->AddMessageHandler(
-      new syncfs_internals::ExtensionStatusesHandler(profile));
+      base::MakeUnique<syncfs_internals::ExtensionStatusesHandler>(profile));
   web_ui->AddMessageHandler(
-      new syncfs_internals::FileMetadataHandler(profile));
+      base::MakeUnique<syncfs_internals::FileMetadataHandler>(profile));
   web_ui->AddMessageHandler(
-      new syncfs_internals::DumpDatabaseHandler(profile));
+      base::MakeUnique<syncfs_internals::DumpDatabaseHandler>(profile));
   content::WebUIDataSource::Add(profile,
                                 CreateSyncFileSystemInternalsHTMLSource());
 }

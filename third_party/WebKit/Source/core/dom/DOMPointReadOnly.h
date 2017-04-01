@@ -11,27 +11,40 @@
 
 namespace blink {
 
-class CORE_EXPORT DOMPointReadOnly : public GarbageCollected<DOMPointReadOnly>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static DOMPointReadOnly* create(double x, double y, double z, double w);
+class DOMMatrixInit;
+class DOMPoint;
+class DOMPointInit;
+class ExceptionState;
+class ScriptState;
+class ScriptValue;
 
-    double x() const { return m_x; }
-    double y() const { return m_y; }
-    double z() const { return m_z; }
-    double w() const { return m_w; }
+class CORE_EXPORT DOMPointReadOnly : public GarbageCollected<DOMPointReadOnly>,
+                                     public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    DEFINE_INLINE_TRACE() { }
+ public:
+  static DOMPointReadOnly* create(double x, double y, double z, double w);
+  static DOMPointReadOnly* fromPoint(const DOMPointInit&);
 
-protected:
-    DOMPointReadOnly(double x, double y, double z, double w);
+  double x() const { return m_x; }
+  double y() const { return m_y; }
+  double z() const { return m_z; }
+  double w() const { return m_w; }
 
-    double m_x;
-    double m_y;
-    double m_z;
-    double m_w;
+  DEFINE_INLINE_TRACE() {}
+  
+  ScriptValue toJSONForBinding(ScriptState*) const;
+  DOMPoint* matrixTransform(DOMMatrixInit&, ExceptionState&);
+
+ protected:
+  DOMPointReadOnly(double x, double y, double z, double w);
+
+  double m_x;
+  double m_y;
+  double m_z;
+  double m_w;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

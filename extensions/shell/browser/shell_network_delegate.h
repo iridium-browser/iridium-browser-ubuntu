@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef EXTENSIONS_SHELL_BROWSER_SHELL_NETNETWORK_DELEGATE_H_
-#define EXTENSIONS_SHELL_BROWSER_SHELL_NETNETWORK_DELEGATE_H_
+#ifndef EXTENSIONS_SHELL_BROWSER_SHELL_NETWORK_DELEGATE_H_
+#define EXTENSIONS_SHELL_BROWSER_SHELL_NETWORK_DELEGATE_H_
 
 #include "base/macros.h"
 #include "extensions/browser/info_map.h"
@@ -38,8 +38,10 @@ class ShellNetworkDelegate : public net::NetworkDelegateImpl {
       GURL* allowed_unsafe_redirect_url) override;
   void OnBeforeRedirect(net::URLRequest* request,
                         const GURL& new_location) override;
-  void OnResponseStarted(net::URLRequest* request) override;
-  void OnCompleted(net::URLRequest* request, bool started) override;
+  void OnResponseStarted(net::URLRequest* request, int net_error) override;
+  void OnCompleted(net::URLRequest* request,
+                   bool started,
+                   int net_error) override;
   void OnURLRequestDestroyed(net::URLRequest* request) override;
   void OnPACScriptError(int line_number, const base::string16& error) override;
   net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
@@ -56,4 +58,4 @@ class ShellNetworkDelegate : public net::NetworkDelegateImpl {
 
 }  // namespace extensions
 
-#endif  // EXTENSIONS_SHELL_BROWSER_SHELL_NETNETWORK_DELEGATE_H_
+#endif  // EXTENSIONS_SHELL_BROWSER_SHELL_NETWORK_DELEGATE_H_

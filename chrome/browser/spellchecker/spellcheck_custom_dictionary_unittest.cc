@@ -24,11 +24,11 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/spellcheck/browser/spellcheck_host_metrics.h"
 #include "components/spellcheck/common/spellcheck_common.h"
-#include "components/sync/api/sync_change.h"
-#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
-#include "components/sync/api/sync_data.h"
-#include "components/sync/api/sync_error_factory.h"
-#include "components/sync/api/sync_error_factory_mock.h"
+#include "components/sync/model/sync_change.h"
+#include "components/sync/model/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/model/sync_data.h"
+#include "components/sync/model/sync_error_factory.h"
+#include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -63,8 +63,7 @@ syncer::SyncDataList GetAllSyncDataNoLimit(
 
 static std::unique_ptr<KeyedService> BuildSpellcheckService(
     content::BrowserContext* profile) {
-  return base::WrapUnique(
-      new SpellcheckService(static_cast<Profile*>(profile)));
+  return base::MakeUnique<SpellcheckService>(static_cast<Profile*>(profile));
 }
 
 class SpellcheckCustomDictionaryTest : public testing::Test {
@@ -911,7 +910,7 @@ TEST_F(SpellcheckCustomDictionaryTest, LoadDuplicatesAfterSync) {
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 
   OnLoaded(*custom_dictionary,
-           base::WrapUnique(new std::set<std::string>(change.to_add())));
+           base::MakeUnique<std::set<std::string>>(change.to_add()));
   EXPECT_EQ(0, error_counter);
   EXPECT_TRUE(custom_dictionary->IsSyncing());
 

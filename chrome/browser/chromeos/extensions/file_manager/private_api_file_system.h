@@ -21,12 +21,6 @@
 #include "extensions/browser/extension_function.h"
 #include "storage/browser/fileapi/file_system_url.h"
 
-class GURL;
-
-namespace base {
-class FilePath;
-}  // namespace base
-
 namespace storage {
 class FileSystemContext;
 class FileSystemURL;
@@ -334,6 +328,22 @@ class FileManagerPrivateInternalSetEntryTagFunction
 
   ExtensionFunction::ResponseAction Run() override;
   DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateInternalSetEntryTagFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.getDirectorySize method.
+class FileManagerPrivateInternalGetDirectorySizeFunction
+    : public LoggedAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivateInternal.getDirectorySize",
+                             FILEMANAGERPRIVATEINTERNAL_GETDIRECTORYSIZE)
+
+ protected:
+  ~FileManagerPrivateInternalGetDirectorySizeFunction() override {}
+
+  void OnDirectorySizeRetrieved(int64_t size);
+
+  // AsyncExtensionFunction overrides
+  bool RunAsync() override;
 };
 
 }  // namespace extensions

@@ -12,6 +12,7 @@
 #include "android_webview/browser/render_thread_manager.h"
 #include "android_webview/browser/test/rendering_test.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/output/compositor_frame.h"
@@ -290,10 +291,59 @@ class CompositorNoFrameTest : public RenderingTest {
 
 RENDERING_TEST_F(CompositorNoFrameTest);
 
+class ClientIsVisibleOnConstructionTest : public RenderingTest {
+  void SetUpTestHarness() override {
+    browser_view_renderer_.reset(
+        new BrowserViewRenderer(this, base::ThreadTaskRunnerHandle::Get()));
+  }
+
+  void StartTest() override {
+    EXPECT_FALSE(browser_view_renderer_->attached_to_window());
+    EXPECT_FALSE(browser_view_renderer_->window_visible_for_tests());
+    EXPECT_TRUE(browser_view_renderer_->IsClientVisible());
+    EndTest();
+  }
+};
+
+RENDERING_TEST_F(ClientIsVisibleOnConstructionTest);
+
+class ClientIsVisibleAfterAttachTest : public RenderingTest {
+  void StartTest() override {
+    EXPECT_TRUE(browser_view_renderer_->attached_to_window());
+    EXPECT_TRUE(browser_view_renderer_->window_visible_for_tests());
+
+    EXPECT_TRUE(browser_view_renderer_->IsClientVisible());
+    EndTest();
+  }
+};
+
+RENDERING_TEST_F(ClientIsVisibleAfterAttachTest);
+
+class ClientIsInvisibleAfterWindowGoneTest : public RenderingTest {
+  void StartTest() override {
+    browser_view_renderer_->SetWindowVisibility(false);
+    EXPECT_FALSE(browser_view_renderer_->IsClientVisible());
+    EndTest();
+  }
+};
+
+RENDERING_TEST_F(ClientIsInvisibleAfterWindowGoneTest);
+
+class ClientIsInvisibleAfterDetachTest : public RenderingTest {
+  void StartTest() override {
+    browser_view_renderer_->OnDetachedFromWindow();
+    EXPECT_FALSE(browser_view_renderer_->IsClientVisible());
+    EndTest();
+  }
+};
+
+RENDERING_TEST_F(ClientIsInvisibleAfterDetachTest);
+
 class ResourceRenderingTest : public RenderingTest {
  public:
   using ResourceCountMap = std::map<cc::ResourceId, int>;
-  using OutputSurfaceResourceCountMap = std::map<uint32_t, ResourceCountMap>;
+  using CompositorFrameSinkResourceCountMap =
+      std::map<uint32_t, ResourceCountMap>;
 
   virtual std::unique_ptr<content::SynchronousCompositor::Frame> GetFrame(
       int frame_number) = 0;
@@ -305,7 +355,7 @@ class ResourceRenderingTest : public RenderingTest {
 
   void WillOnDraw() override {
     if (next_frame_) {
-      compositor_->SetHardwareFrame(next_frame_->output_surface_id,
+      compositor_->SetHardwareFrame(next_frame_->compositor_frame_sink_id,
                                     std::move(next_frame_->frame));
     }
   }
@@ -319,13 +369,13 @@ class ResourceRenderingTest : public RenderingTest {
     }
   }
 
-  OutputSurfaceResourceCountMap GetReturnedResourceCounts() {
-    OutputSurfaceResourceCountMap counts;
+  CompositorFrameSinkResourceCountMap GetReturnedResourceCounts() {
+    CompositorFrameSinkResourceCountMap counts;
     content::TestSynchronousCompositor::FrameAckArray returned_resources_array;
     compositor_->SwapReturnedResources(&returned_resources_array);
     for (const auto& resources : returned_resources_array) {
       for (const auto& returned_resource : resources.resources) {
-        counts[resources.output_surface_id][returned_resource.id] +=
+        counts[resources.compositor_frame_sink_id][returned_resource.id] +=
             returned_resource.count;
       }
     }
@@ -348,9 +398,9 @@ class ResourceRenderingTest : public RenderingTest {
   int frame_number_;
 };
 
-class SwitchOutputSurfaceIdTest : public ResourceRenderingTest {
+class SwitchCompositorFrameSinkIdTest : public ResourceRenderingTest {
   struct FrameInfo {
-    uint32_t output_surface_id;
+    uint32_t compositor_frame_sink_id;
     cc::ResourceId resource_id;  // Each frame contains a single resource.
   };
 
@@ -368,19 +418,22 @@ class SwitchOutputSurfaceIdTest : public ResourceRenderingTest {
 
     std::unique_ptr<content::SynchronousCompositor::Frame> frame(
         new content::SynchronousCompositor::Frame);
-    frame->output_surface_id = infos[frame_number].output_surface_id;
+    frame->compositor_frame_sink_id =
+        infos[frame_number].compositor_frame_sink_id;
     frame->frame = ConstructFrame(infos[frame_number].resource_id);
 
-    if (last_output_surface_id_ != infos[frame_number].output_surface_id) {
+    if (last_compositor_frame_sink_id_ !=
+        infos[frame_number].compositor_frame_sink_id) {
       expected_return_count_.clear();
-      last_output_surface_id_ = infos[frame_number].output_surface_id;
+      last_compositor_frame_sink_id_ =
+          infos[frame_number].compositor_frame_sink_id;
     }
     ++expected_return_count_[infos[frame_number].resource_id];
     return frame;
   }
 
   void StartTest() override {
-    last_output_surface_id_ = -1U;
+    last_compositor_frame_sink_id_ = -1U;
     ResourceRenderingTest::StartTest();
   }
 
@@ -391,16 +444,16 @@ class SwitchOutputSurfaceIdTest : public ResourceRenderingTest {
 
     // Make sure resources for the last output surface are returned.
     EXPECT_EQ(expected_return_count_,
-              GetReturnedResourceCounts()[last_output_surface_id_]);
+              GetReturnedResourceCounts()[last_compositor_frame_sink_id_]);
     EndTest();
   }
 
  private:
-  uint32_t last_output_surface_id_;
+  uint32_t last_compositor_frame_sink_id_;
   ResourceCountMap expected_return_count_;
 };
 
-RENDERING_TEST_F(SwitchOutputSurfaceIdTest);
+RENDERING_TEST_F(SwitchCompositorFrameSinkIdTest);
 
 class RenderThreadManagerDeletionTest : public ResourceRenderingTest {
   std::unique_ptr<content::SynchronousCompositor::Frame> GetFrame(
@@ -409,20 +462,20 @@ class RenderThreadManagerDeletionTest : public ResourceRenderingTest {
       return nullptr;
     }
 
-    const uint32_t output_surface_id = 0u;
+    const uint32_t compositor_frame_sink_id = 0u;
     const cc::ResourceId resource_id =
         static_cast<cc::ResourceId>(frame_number);
 
     std::unique_ptr<content::SynchronousCompositor::Frame> frame(
         new content::SynchronousCompositor::Frame);
-    frame->output_surface_id = output_surface_id;
+    frame->compositor_frame_sink_id = compositor_frame_sink_id;
     frame->frame = ConstructFrame(resource_id);
-    ++expected_return_count_[output_surface_id][resource_id];
+    ++expected_return_count_[compositor_frame_sink_id][resource_id];
     return frame;
   }
 
   void CheckResults() override {
-    OutputSurfaceResourceCountMap resource_counts;
+    CompositorFrameSinkResourceCountMap resource_counts;
     functor_.reset();
     // Make sure resources for the last frame are returned.
     EXPECT_EQ(expected_return_count_, GetReturnedResourceCounts());
@@ -430,7 +483,7 @@ class RenderThreadManagerDeletionTest : public ResourceRenderingTest {
   }
 
  private:
-  OutputSurfaceResourceCountMap expected_return_count_;
+  CompositorFrameSinkResourceCountMap expected_return_count_;
 };
 
 RENDERING_TEST_F(RenderThreadManagerDeletionTest);
@@ -471,20 +524,20 @@ class RenderThreadManagerSwitchTest : public ResourceRenderingTest {
         return nullptr;
     }
 
-    const uint32_t output_surface_id = 0u;
+    const uint32_t compositor_frame_sink_id = 0u;
     const cc::ResourceId resource_id =
         static_cast<cc::ResourceId>(frame_number);
 
     std::unique_ptr<content::SynchronousCompositor::Frame> frame(
         new content::SynchronousCompositor::Frame);
-    frame->output_surface_id = output_surface_id;
+    frame->compositor_frame_sink_id = compositor_frame_sink_id;
     frame->frame = ConstructFrame(resource_id);
-    ++expected_return_count_[output_surface_id][resource_id];
+    ++expected_return_count_[compositor_frame_sink_id][resource_id];
     return frame;
   }
 
   void CheckResults() override {
-    OutputSurfaceResourceCountMap resource_counts;
+    CompositorFrameSinkResourceCountMap resource_counts;
     functor_.reset();
     // Make sure resources for all frames are returned.
     EXPECT_EQ(expected_return_count_, GetReturnedResourceCounts());
@@ -493,7 +546,7 @@ class RenderThreadManagerSwitchTest : public ResourceRenderingTest {
 
  private:
   std::unique_ptr<FakeFunctor> saved_functor_;
-  OutputSurfaceResourceCountMap expected_return_count_;
+  CompositorFrameSinkResourceCountMap expected_return_count_;
 };
 
 RENDERING_TEST_F(RenderThreadManagerSwitchTest);

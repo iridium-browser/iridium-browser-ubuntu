@@ -16,26 +16,6 @@
 namespace angle
 {
 
-std::string GetExecutablePath()
-{
-    std::array<char, MAX_PATH> executableFileBuf;
-    DWORD executablePathLen = GetModuleFileNameA(NULL, executableFileBuf.data(),
-                                                 static_cast<DWORD>(executableFileBuf.size()));
-    return (executablePathLen > 0 ? std::string(executableFileBuf.data()) : "");
-}
-
-std::string GetExecutableDirectory()
-{
-    std::string executablePath = GetExecutablePath();
-    size_t lastPathSepLoc = executablePath.find_last_of("\\/");
-    return (lastPathSepLoc != std::string::npos) ? executablePath.substr(0, lastPathSepLoc) : "";
-}
-
-std::string GetSharedLibraryExtension()
-{
-    return "dll";
-}
-
 void Sleep(unsigned int milliseconds)
 {
     ::Sleep(static_cast<DWORD>(milliseconds));

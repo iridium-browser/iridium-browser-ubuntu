@@ -23,7 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #ifndef LayoutMultiColumnSet_h
 #define LayoutMultiColumnSet_h
 
@@ -34,186 +33,250 @@
 
 namespace blink {
 
-// A set of columns in a multicol container. A column set is inserted as an anonymous child of the
-// actual multicol container (i.e. the layoutObject whose style computes to non-auto column-count and/or
-// column-width), next to the flow thread. There'll be one column set for each contiguous run of
-// column content. The only thing that can interrupt a contiguous run of column content is a column
-// spanner, which means that if there are no spanners, there'll only be one column set.
+// A set of columns in a multicol container. A column set is inserted as an
+// anonymous child of the actual multicol container (i.e. the layoutObject whose
+// style computes to non-auto column-count and/or column-width), next to the
+// flow thread. There'll be one column set for each contiguous run of column
+// content. The only thing that can interrupt a contiguous run of column content
+// is a column spanner, which means that if there are no spanners, there'll
+// only be one column set.
 //
-// Since a spanner interrupts an otherwise contiguous run of column content, inserting one may
-// result in the creation of additional new column sets. A placeholder for the spanning layoutObject has
-// to be placed in between the column sets that come before and after the spanner, if there's
-// actually column content both before and after the spanner.
+// Since a spanner interrupts an otherwise contiguous run of column content,
+// inserting one may result in the creation of additional new column sets. A
+// placeholder for the spanning layoutObject has to be placed in between the
+// column sets that come before and after the spanner, if there's actually
+// column content both before and after the spanner.
 //
-// A column set has no children on its own, but is merely used to slice a portion of the tall
-// "single-column" flow thread into actual columns visually, to convert from flow thread coordinates
-// to visual ones. It is in charge of both positioning columns correctly relatively to the parent
-// multicol container, and to calculate the correct translation for each column's contents, and to
-// paint any rules between them. LayoutMultiColumnSet objects are used for painting, hit testing,
-// and any other type of operation that requires mapping from flow thread coordinates to visual
-// coordinates.
+// A column set has no children on its own, but is merely used to slice a
+// portion of the tall "single-column" flow thread into actual columns visually,
+// to convert from flow thread coordinates to visual ones. It is in charge of
+// both positioning columns correctly relatively to the parent multicol
+// container, and to calculate the correct translation for each column's
+// contents, and to paint any rules between them. LayoutMultiColumnSet objects
+// are used for painting, hit testing, and any other type of operation that
+// requires mapping from flow thread coordinates to visual coordinates.
 //
-// Columns are normally laid out in the inline progression direction, but if the multicol container
-// is inside another fragmentation context (e.g. paged media, or an another multicol container), we
-// may need to group the columns, so that we get one MultiColumnFragmentainerGroup for each outer
-// fragmentainer (page / column) that the inner multicol container lives in. Each fragmentainer
-// group has its own column height, but the column height is uniform within a group.
+// Columns are normally laid out in the inline progression direction, but if the
+// multicol container is inside another fragmentation context (e.g. paged media,
+// or an another multicol container), we may need to group the columns, so
+// that we get one MultiColumnFragmentainerGroup for each outer fragmentainer
+// (page / column) that the inner multicol container lives in. Each
+// fragmentainer group has its own column height, but the column height is
+// uniform within a group.
 class CORE_EXPORT LayoutMultiColumnSet : public LayoutBlockFlow {
-public:
-    static LayoutMultiColumnSet* createAnonymous(LayoutFlowThread&, const ComputedStyle& parentStyle);
+ public:
+  static LayoutMultiColumnSet* createAnonymous(
+      LayoutFlowThread&,
+      const ComputedStyle& parentStyle);
 
-    const MultiColumnFragmentainerGroup& firstFragmentainerGroup() const { return m_fragmentainerGroups.first(); }
-    const MultiColumnFragmentainerGroup& lastFragmentainerGroup() const { return m_fragmentainerGroups.last(); }
-    MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit flowThreadOffset)
-    {
-        return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(flowThreadOffset)];
-    }
-    const MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit flowThreadOffset) const
-    {
-        return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(flowThreadOffset)];
-    }
-    const MultiColumnFragmentainerGroup& fragmentainerGroupAtVisualPoint(const LayoutPoint&) const;
-    const MultiColumnFragmentainerGroupList& fragmentainerGroups() const { return m_fragmentainerGroups; }
+  const MultiColumnFragmentainerGroup& firstFragmentainerGroup() const {
+    return m_fragmentainerGroups.first();
+  }
+  const MultiColumnFragmentainerGroup& lastFragmentainerGroup() const {
+    return m_fragmentainerGroups.last();
+  }
+  unsigned fragmentainerGroupIndexAtFlowThreadOffset(LayoutUnit,
+                                                     PageBoundaryRule) const;
+  MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(
+      LayoutUnit flowThreadOffset,
+      PageBoundaryRule rule) {
+    return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(
+        flowThreadOffset, rule)];
+  }
+  const MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(
+      LayoutUnit flowThreadOffset,
+      PageBoundaryRule rule) const {
+    return m_fragmentainerGroups[fragmentainerGroupIndexAtFlowThreadOffset(
+        flowThreadOffset, rule)];
+  }
+  const MultiColumnFragmentainerGroup& fragmentainerGroupAtVisualPoint(
+      const LayoutPoint&) const;
+  const MultiColumnFragmentainerGroupList& fragmentainerGroups() const {
+    return m_fragmentainerGroups;
+  }
 
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutMultiColumnSet || LayoutBlockFlow::isOfType(type); }
-    bool canHaveChildren() const final { return false; }
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectLayoutMultiColumnSet ||
+           LayoutBlockFlow::isOfType(type);
+  }
+  bool canHaveChildren() const final { return false; }
 
-    // Return the width and height of a single column or page in the set.
-    LayoutUnit pageLogicalWidth() const { return flowThread()->logicalWidth(); }
-    LayoutUnit pageLogicalHeightForOffset(LayoutUnit) const;
-    LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit, PageBoundaryRule) const;
-    bool isPageLogicalHeightKnown() const;
-    LayoutUnit tallestUnbreakableLogicalHeight() const { return m_tallestUnbreakableLogicalHeight; }
-    void propagateTallestUnbreakableLogicalHeight(LayoutUnit value) { m_tallestUnbreakableLogicalHeight = std::max(value, m_tallestUnbreakableLogicalHeight); }
+  // Return the width and height of a single column or page in the set.
+  LayoutUnit pageLogicalWidth() const { return flowThread()->logicalWidth(); }
+  LayoutUnit pageLogicalHeightForOffset(LayoutUnit) const;
+  LayoutUnit pageRemainingLogicalHeightForOffset(LayoutUnit,
+                                                 PageBoundaryRule) const;
+  bool isPageLogicalHeightKnown() const;
 
-    LayoutUnit nextLogicalTopForUnbreakableContent(LayoutUnit flowThreadOffset, LayoutUnit contentLogicalHeight) const;
+  // Return true if there's nothing with the current state of column balancing
+  // that prevents us from inserting additional fragmentainer groups, if needed.
+  bool newFragmentainerGroupsAllowed() const;
 
-    LayoutFlowThread* flowThread() const { return m_flowThread; }
+  LayoutUnit tallestUnbreakableLogicalHeight() const {
+    return m_tallestUnbreakableLogicalHeight;
+  }
+  void propagateTallestUnbreakableLogicalHeight(LayoutUnit value) {
+    m_tallestUnbreakableLogicalHeight =
+        std::max(value, m_tallestUnbreakableLogicalHeight);
+  }
 
-    LayoutBlockFlow* multiColumnBlockFlow() const { return toLayoutBlockFlow(parent()); }
-    LayoutMultiColumnFlowThread* multiColumnFlowThread() const { return toLayoutMultiColumnFlowThread(flowThread()); }
+  LayoutUnit nextLogicalTopForUnbreakableContent(
+      LayoutUnit flowThreadOffset,
+      LayoutUnit contentLogicalHeight) const;
 
-    LayoutMultiColumnSet* nextSiblingMultiColumnSet() const;
-    LayoutMultiColumnSet* previousSiblingMultiColumnSet() const;
+  LayoutFlowThread* flowThread() const { return m_flowThread; }
 
-    // Return true if we have a fragmentainer group that can hold a column at the specified flow thread block offset.
-    bool hasFragmentainerGroupForColumnAt(LayoutUnit bottomOffsetInFlowThread, PageBoundaryRule) const;
+  LayoutBlockFlow* multiColumnBlockFlow() const {
+    return toLayoutBlockFlow(parent());
+  }
+  LayoutMultiColumnFlowThread* multiColumnFlowThread() const {
+    return toLayoutMultiColumnFlowThread(flowThread());
+  }
 
-    MultiColumnFragmentainerGroup& appendNewFragmentainerGroup();
+  LayoutMultiColumnSet* nextSiblingMultiColumnSet() const;
+  LayoutMultiColumnSet* previousSiblingMultiColumnSet() const;
 
-    // Logical top relative to the content edge of the multicol container.
-    LayoutUnit logicalTopFromMulticolContentEdge() const;
+  // Return true if we have a fragmentainer group that can hold a column at the
+  // specified flow thread block offset.
+  bool hasFragmentainerGroupForColumnAt(LayoutUnit bottomOffsetInFlowThread,
+                                        PageBoundaryRule) const;
 
-    LayoutUnit logicalTopInFlowThread() const;
-    LayoutUnit logicalBottomInFlowThread() const;
-    LayoutUnit logicalHeightInFlowThread() const { return logicalBottomInFlowThread() - logicalTopInFlowThread(); }
+  MultiColumnFragmentainerGroup& appendNewFragmentainerGroup();
 
-    // Return the amount of flow thread contents that the specified fragmentainer group can hold
-    // without overflowing.
-    LayoutUnit fragmentainerGroupCapacity(const MultiColumnFragmentainerGroup &group) const { return group.logicalHeight() * usedColumnCount(); }
+  // Logical top relative to the content edge of the multicol container.
+  LayoutUnit logicalTopFromMulticolContentEdge() const;
 
-    LayoutRect flowThreadPortionRect() const;
-    LayoutRect flowThreadPortionOverflowRect() const;
-    LayoutRect overflowRectForFlowThreadPortion(const LayoutRect& flowThreadPortionRect, bool isFirstPortion, bool isLastPortion) const;
+  LayoutUnit logicalTopInFlowThread() const;
+  LayoutUnit logicalBottomInFlowThread() const;
+  LayoutUnit logicalHeightInFlowThread() const {
+    return logicalBottomInFlowThread() - logicalTopInFlowThread();
+  }
 
-    // The used CSS value of column-count, i.e. how many columns there are room for without overflowing.
-    unsigned usedColumnCount() const { return multiColumnFlowThread()->columnCount(); }
+  // Return the amount of flow thread contents that the specified fragmentainer
+  // group can hold without overflowing.
+  LayoutUnit fragmentainerGroupCapacity(
+      const MultiColumnFragmentainerGroup& group) const {
+    return group.logicalHeight() * usedColumnCount();
+  }
 
-    bool heightIsAuto() const;
+  LayoutRect flowThreadPortionRect() const;
+  LayoutRect flowThreadPortionOverflowRect() const;
+  LayoutRect overflowRectForFlowThreadPortion(
+      const LayoutRect& flowThreadPortionRect,
+      bool isFirstPortion,
+      bool isLastPortion) const;
 
-    // Find the column that contains the given block offset, and return the translation needed to
-    // get from flow thread coordinates to visual coordinates.
-    LayoutSize flowThreadTranslationAtOffset(LayoutUnit, CoordinateSpaceConversion) const;
+  // The used CSS value of column-count, i.e. how many columns there are room
+  // for without overflowing.
+  unsigned usedColumnCount() const {
+    return multiColumnFlowThread()->columnCount();
+  }
 
-    LayoutPoint visualPointToFlowThreadPoint(const LayoutPoint& visualPoint) const;
+  bool heightIsAuto() const;
 
-    // (Re-)calculate the column height if it's auto. This is first and foremost needed by sets that
-    // are to balance the column height, but even when it isn't to be balanced, this is necessary if
-    // the multicol container's height is constrained.
-    bool recalculateColumnHeight();
+  // Find the column that contains the given block offset, and return the
+  // translation needed to get from flow thread coordinates to visual
+  // coordinates.
+  LayoutSize flowThreadTranslationAtOffset(LayoutUnit,
+                                           PageBoundaryRule,
+                                           CoordinateSpaceConversion) const;
 
-    // Reset previously calculated column height. Will mark for layout if needed.
-    void resetColumnHeight();
+  LayoutPoint visualPointToFlowThreadPoint(
+      const LayoutPoint& visualPoint) const;
 
-    void storeOldPosition() { m_oldLogicalTop = logicalTop(); }
-    bool isInitialHeightCalculated() const { return m_initialHeightCalculated; }
+  // (Re-)calculate the column height if it's auto. This is first and foremost
+  // needed by sets that are to balance the column height, but even when it
+  // isn't to be balanced, this is necessary if the multicol container's height
+  // is constrained.
+  bool recalculateColumnHeight();
 
-    // Layout of flow thread content that's to be rendered inside this column set begins. This
-    // happens at the beginning of flow thread layout, and when advancing from a previous column set
-    // or spanner to this one.
-    void beginFlow(LayoutUnit offsetInFlowThread);
+  // Reset previously calculated column height. Will mark for layout if needed.
+  void resetColumnHeight();
 
-    // Layout of flow thread content that was to be rendered inside this column set has
-    // finished. This happens at end of flow thread layout, and when advancing to the next column
-    // set or spanner.
-    void endFlow(LayoutUnit offsetInFlowThread);
+  void storeOldPosition() { m_oldLogicalTop = logicalTop(); }
+  bool isInitialHeightCalculated() const { return m_initialHeightCalculated; }
 
-    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
-    void layout() override;
+  // Layout of flow thread content that's to be rendered inside this column set
+  // begins. This happens at the beginning of flow thread layout, and when
+  // advancing from a previous column set or spanner to this one.
+  void beginFlow(LayoutUnit offsetInFlowThread);
 
-    void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const final;
+  // Layout of flow thread content that was to be rendered inside this column
+  // set has finished. This happens at end of flow thread layout, and when
+  // advancing to the next column set or spanner.
+  void endFlow(LayoutUnit offsetInFlowThread);
 
-    void attachToFlowThread();
-    void detachFromFlowThread();
+  void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+  void layout() override;
 
-    // The top of the page nearest to the specified block offset. All in flowthread coordinates.
-    LayoutUnit pageLogicalTopForOffset(LayoutUnit offset) const;
+  void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth,
+                                     LayoutUnit& maxLogicalWidth) const final;
 
-    LayoutRect fragmentsBoundingBox(const LayoutRect& boundingBoxInFlowThread) const;
+  void attachToFlowThread();
+  void detachFromFlowThread();
 
-    void collectLayerFragments(PaintLayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect);
+  // The top of the page nearest to the specified block offset. All in
+  // flowthread coordinates.
+  LayoutUnit pageLogicalTopForOffset(LayoutUnit offset) const;
 
-    LayoutUnit columnGap() const;
+  LayoutRect fragmentsBoundingBox(
+      const LayoutRect& boundingBoxInFlowThread) const;
 
-    // The "CSS actual" value of column-count. This includes overflowing columns, if any.
-    unsigned actualColumnCount() const;
+  LayoutUnit columnGap() const;
 
-    const char* name() const override { return "LayoutMultiColumnSet"; }
+  // The "CSS actual" value of column-count. This includes overflowing columns,
+  // if any.
+  unsigned actualColumnCount() const;
 
-    // Sets |columnRuleBounds| to the bounds of each column rule rect's painted extent, adjusted by paint offset,
-    // before pixel snapping. Returns true if column rules should be painted at all.
-    bool computeColumnRuleBounds(const LayoutPoint& paintOffset, Vector<LayoutRect>& columnRuleBounds) const;
+  const char* name() const override { return "LayoutMultiColumnSet"; }
 
-    LayoutRect localOverflowRectForPaintInvalidation() const override;
+  // Sets |columnRuleBounds| to the bounds of each column rule rect's painted
+  // extent, adjusted by paint offset, before pixel snapping. Returns true if
+  // column rules should be painted at all.
+  bool computeColumnRuleBounds(const LayoutPoint& paintOffset,
+                               Vector<LayoutRect>& columnRuleBounds) const;
 
-protected:
-    LayoutMultiColumnSet(LayoutFlowThread*);
+  LayoutRect localVisualRect() const override;
 
-private:
-    unsigned fragmentainerGroupIndexAtFlowThreadOffset(LayoutUnit) const;
+ protected:
+  LayoutMultiColumnSet(LayoutFlowThread*);
 
-    void insertedIntoTree() final;
-    void willBeRemovedFromTree() final;
+ private:
+  void insertedIntoTree() final;
+  void willBeRemovedFromTree() final;
 
-    bool isSelfCollapsingBlock() const override { return false; }
+  bool isSelfCollapsingBlock() const override { return false; }
 
-    void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
-    PositionWithAffinity positionForPoint(const LayoutPoint&) override;
+  void computeLogicalHeight(LayoutUnit logicalHeight,
+                            LayoutUnit logicalTop,
+                            LogicalExtentComputedValues&) const override;
+  PositionWithAffinity positionForPoint(const LayoutPoint&) override;
 
-    void paintObject(const PaintInfo&, const LayoutPoint& paintOffset) const override;
+  void paintObject(const PaintInfo&,
+                   const LayoutPoint& paintOffset) const override;
 
-    void addOverflowFromChildren() override;
+  void addOverflowFromChildren() override;
 
-    MultiColumnFragmentainerGroupList m_fragmentainerGroups;
-    LayoutFlowThread* m_flowThread;
+  MultiColumnFragmentainerGroupList m_fragmentainerGroups;
+  LayoutFlowThread* m_flowThread;
 
-    // Height of the tallest piece of unbreakable content. This is the minimum column logical height
-    // required to avoid fragmentation where it shouldn't occur (inside unbreakable content, between
-    // orphans and widows, etc.). We only store this so that outer fragmentation contexts (if any)
-    // can query this when calculating their own minimum. Note that we don't store this value in
-    // every fragmentainer group (but rather here, in the column set), since we only need the
-    // largest one among them.
-    LayoutUnit m_tallestUnbreakableLogicalHeight;
+  // Height of the tallest piece of unbreakable content. This is the minimum
+  // column logical height required to avoid fragmentation where it shouldn't
+  // occur (inside unbreakable content, between orphans and widows, etc.).
+  // We only store this so that outer fragmentation contexts (if any) can query
+  // this when calculating their own minimum. Note that we don't store this
+  // value in every fragmentainer group (but rather here, in the column set),
+  // since we only need the largest one among them.
+  LayoutUnit m_tallestUnbreakableLogicalHeight;
 
-    // Logical top in previous layout pass.
-    LayoutUnit m_oldLogicalTop;
+  // Logical top in previous layout pass.
+  LayoutUnit m_oldLogicalTop;
 
-    bool m_initialHeightCalculated;
+  bool m_initialHeightCalculated;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutMultiColumnSet, isLayoutMultiColumnSet());
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutMultiColumnSet_h
-
+#endif  // LayoutMultiColumnSet_h

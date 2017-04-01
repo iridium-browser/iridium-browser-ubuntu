@@ -66,7 +66,7 @@ bool SearchResultActionsView::IsValidActionIndex(int action_index) const {
 void SearchResultActionsView::CreateImageButton(
     const SearchResult::Action& action) {
   views::ImageButton* button = new views::ImageButton(this);
-  button->SetBorder(views::Border::CreateEmptyBorder(0, 9, 0, 9));
+  button->SetBorder(views::CreateEmptyBorder(0, 9, 0, 9));
   button->SetAccessibleName(action.tooltip_text);
   button->SetImageAlignment(views::ImageButton::ALIGN_CENTER,
                             views::ImageButton::ALIGN_MIDDLE);
@@ -80,8 +80,8 @@ void SearchResultActionsView::CreateImageButton(
 void SearchResultActionsView::CreateBlueButton(
     const SearchResult::Action& action) {
   views::MdTextButton* button =
-      views::MdTextButton::CreateMdButton(this, action.label_text);
-  button->SetCallToAction(true);
+      views::MdTextButton::Create(this, action.label_text);
+  button->SetProminent(true);
   button->SetTooltipText(action.tooltip_text);
   button->SetFocusBehavior(FocusBehavior::NEVER);
   AddChildView(button);

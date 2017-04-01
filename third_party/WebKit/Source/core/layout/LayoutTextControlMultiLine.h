@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2008 Torch Mobile Inc. All rights reserved.
+ *               (http://www.torchmobile.com/)
  * Copyright (C) 2009 Apple Inc. All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
@@ -29,28 +30,42 @@ namespace blink {
 class HTMLTextAreaElement;
 
 class LayoutTextControlMultiLine final : public LayoutTextControl {
-public:
-    LayoutTextControlMultiLine(HTMLTextAreaElement*);
-    ~LayoutTextControlMultiLine() override;
+ public:
+  LayoutTextControlMultiLine(HTMLTextAreaElement*);
+  ~LayoutTextControlMultiLine() override;
 
-private:
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectTextArea || LayoutTextControl::isOfType(type); }
+ private:
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectTextArea || LayoutTextControl::isOfType(type);
+  }
 
-    bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
+  bool nodeAtPoint(HitTestResult&,
+                   const HitTestLocation& locationInContainer,
+                   const LayoutPoint& accumulatedOffset,
+                   HitTestAction) override;
 
-    float getAvgCharWidth(const AtomicString& family) const override;
-    LayoutUnit preferredContentLogicalWidth(float charWidth) const override;
-    LayoutUnit computeControlLogicalHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const override;
-    // We override the two baseline functions because we want our baseline to be the bottom of our margin box.
-    int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
-    int inlineBlockBaseline(LineDirectionMode) const override { return -1; }
+  float getAvgCharWidth(const AtomicString& family) const override;
+  LayoutUnit preferredContentLogicalWidth(float charWidth) const override;
+  LayoutUnit computeControlLogicalHeight(
+      LayoutUnit lineHeight,
+      LayoutUnit nonContentHeight) const override;
+  // We override the two baseline functions because we want our baseline to be
+  // the bottom of our margin box.
+  int baselinePosition(
+      FontBaseline,
+      bool firstLine,
+      LineDirectionMode,
+      LinePositionMode = PositionOnContainingLine) const override;
+  int inlineBlockBaseline(LineDirectionMode) const override { return -1; }
 
-    PassRefPtr<ComputedStyle> createInnerEditorStyle(const ComputedStyle& startStyle) const override;
-    LayoutObject* layoutSpecialExcludedChild(bool relayoutChildren, SubtreeLayoutScope&) override;
+  PassRefPtr<ComputedStyle> createInnerEditorStyle(
+      const ComputedStyle& startStyle) const override;
+  LayoutObject* layoutSpecialExcludedChild(bool relayoutChildren,
+                                           SubtreeLayoutScope&) override;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutTextControlMultiLine, isTextArea());
 
-} // namespace blink
+}  // namespace blink
 
 #endif

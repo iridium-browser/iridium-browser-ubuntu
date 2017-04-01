@@ -15,6 +15,7 @@
 #include "base/compiler_specific.h"
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -129,9 +130,10 @@ void PopulateNodeImpl(const std::vector<std::string>& description,
       // value. The folders need not have a name, but one is assigned to help
       // in debugging.
       static int next_folder_id = 1;
-      TestNode* new_node = new TestNode(base::IntToString16(next_folder_id++),
-                                        BookmarkNode::FOLDER);
-      parent->Add(new_node, parent->child_count());
+      TestNode* new_node = parent->Add(
+          base::MakeUnique<TestNode>(base::IntToString16(next_folder_id++),
+                                     BookmarkNode::FOLDER),
+          parent->child_count());
       PopulateNodeImpl(description, index, new_node);
     } else if (element == "]") {
       // End the current folder.
@@ -143,7 +145,8 @@ void PopulateNodeImpl(const std::vector<std::string>& description,
       // likely means a space was forgotten.
       DCHECK(element.find('[') == std::string::npos);
       DCHECK(element.find(']') == std::string::npos);
-      parent->Add(new TestNode(base::UTF8ToUTF16(element), BookmarkNode::URL),
+      parent->Add(base::MakeUnique<TestNode>(base::UTF8ToUTF16(element),
+                                             BookmarkNode::URL),
                   parent->child_count());
     }
   }
@@ -425,9 +428,9 @@ class BookmarkModelTest : public testing::Test,
   BookmarkPermanentNode* ReloadModelWithExtraNode() {
     model_->RemoveObserver(this);
 
-    BookmarkPermanentNode* extra_node = new BookmarkPermanentNode(100);
     BookmarkPermanentNodeList extra_nodes;
-    extra_nodes.push_back(extra_node);
+    extra_nodes.push_back(base::MakeUnique<BookmarkPermanentNode>(100));
+    BookmarkPermanentNode* extra_node = extra_nodes.back().get();
 
     std::unique_ptr<TestBookmarkClient> client(new TestBookmarkClient);
     client->SetExtraNodesToLoad(std::move(extra_nodes));
@@ -870,26 +873,43 @@ TEST_F(BookmarkModelTest, Copy) {
             actual_model_string);
 }
 
+// Tests the default node if no bookmarks have been added yet
+TEST_F(BookmarkModelTest, ParentForNewNodesWithEmptyModel) {
+#if defined(OS_ANDROID)
+  ASSERT_EQ(model_->mobile_node(), GetParentForNewNodes(model_.get()));
+#else
+  ASSERT_EQ(model_->bookmark_bar_node(), GetParentForNewNodes(model_.get()));
+#endif
+}
+
+#if defined(OS_ANDROID)
+// Tests that the bookmark_bar_node can still be returned even on Android in
+// case the last bookmark was added to it.
+TEST_F(BookmarkModelTest, ParentCanBeBookmarkBarOnAndroid) {
+  const base::string16 title(ASCIIToUTF16("foo"));
+  const GURL url("http://foo.com");
+
+  model_->AddURL(model_->bookmark_bar_node(), 0, title, url);
+  ASSERT_EQ(model_->bookmark_bar_node(), GetParentForNewNodes(model_.get()));
+}
+#endif
+
 // Tests that adding a URL to a folder updates the last modified time.
 TEST_F(BookmarkModelTest, ParentForNewNodes) {
-  ASSERT_EQ(model_->bookmark_bar_node(), model_->GetParentForNewNodes());
-
   const base::string16 title(ASCIIToUTF16("foo"));
   const GURL url("http://foo.com");
 
   model_->AddURL(model_->other_node(), 0, title, url);
-  ASSERT_EQ(model_->other_node(), model_->GetParentForNewNodes());
+  ASSERT_EQ(model_->other_node(), GetParentForNewNodes(model_.get()));
 }
 
 // Tests that adding a URL to a folder updates the last modified time.
 TEST_F(BookmarkModelTest, ParentForNewMobileNodes) {
-  ASSERT_EQ(model_->bookmark_bar_node(), model_->GetParentForNewNodes());
-
   const base::string16 title(ASCIIToUTF16("foo"));
   const GURL url("http://foo.com");
 
   model_->AddURL(model_->mobile_node(), 0, title, url);
-  ASSERT_EQ(model_->mobile_node(), model_->GetParentForNewNodes());
+  ASSERT_EQ(model_->mobile_node(), GetParentForNewNodes(model_.get()));
 }
 
 // Make sure recently modified stays in sync when adding a URL.
@@ -1017,10 +1037,10 @@ TEST_F(BookmarkModelTest, DISABLED_Sort) {
 
   BookmarkNode* child1 = AsMutable(parent->GetChild(1));
   child1->SetTitle(ASCIIToUTF16("a"));
-  delete child1->Remove(child1->GetChild(0));
+  child1->Remove(child1->GetChild(0));
   BookmarkNode* child3 = AsMutable(parent->GetChild(3));
   child3->SetTitle(ASCIIToUTF16("C"));
-  delete child3->Remove(child3->GetChild(0));
+  child3->Remove(child3->GetChild(0));
 
   ClearCounts();
 

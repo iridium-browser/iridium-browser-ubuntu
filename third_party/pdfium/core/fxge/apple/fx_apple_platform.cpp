@@ -4,24 +4,20 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fxcrt/include/fx_system.h"
-
-#if _FXM_PLATFORM_ == _FXM_PLATFORM_APPLE_
+#include "core/fxcrt/fx_system.h"
 
 #ifndef _SKIA_SUPPORT_
 #include "core/fxge/agg/fx_agg_driver.h"
 #endif
 
 #include "core/fxge/apple/apple_int.h"
-#include "core/fxge/apple/cfx_quartzdevice.h"
+#include "core/fxge/cfx_facecache.h"
+#include "core/fxge/cfx_gemodule.h"
+#include "core/fxge/cfx_renderdevice.h"
 #include "core/fxge/dib/dib_int.h"
+#include "core/fxge/fx_freetype.h"
 #include "core/fxge/ge/cfx_cliprgn.h"
 #include "core/fxge/ge/fx_text_int.h"
-#include "core/fxge/include/cfx_facecache.h"
-#include "core/fxge/include/cfx_fontcache.h"
-#include "core/fxge/include/cfx_gemodule.h"
-#include "core/fxge/include/cfx_renderdevice.h"
-#include "core/fxge/include/fx_freetype.h"
 
 #ifndef _SKIA_SUPPORT_
 
@@ -29,19 +25,18 @@ namespace {
 
 void DoNothing(void* info, const void* data, size_t size) {}
 
-FX_BOOL CGDrawGlyphRun(CGContextRef pContext,
-                       int nChars,
-                       const FXTEXT_CHARPOS* pCharPos,
-                       CFX_Font* pFont,
-                       CFX_FontCache* pCache,
-                       const CFX_Matrix* pObject2Device,
-                       FX_FLOAT font_size,
-                       uint32_t argb) {
+bool CGDrawGlyphRun(CGContextRef pContext,
+                    int nChars,
+                    const FXTEXT_CHARPOS* pCharPos,
+                    CFX_Font* pFont,
+                    const CFX_Matrix* pObject2Device,
+                    FX_FLOAT font_size,
+                    uint32_t argb) {
   if (nChars == 0)
-    return TRUE;
+    return true;
 
   CFX_Matrix new_matrix;
-  FX_BOOL bNegSize = font_size < 0;
+  bool bNegSize = font_size < 0;
   if (bNegSize)
     font_size = -font_size;
 
@@ -55,17 +50,18 @@ FX_BOOL CGDrawGlyphRun(CGContextRef pContext,
           ->m_quartz2d;
   if (!pFont->GetPlatformFont()) {
     if (pFont->GetPsName() == "DFHeiStd-W5")
-      return FALSE;
+      return false;
 
     pFont->SetPlatformFont(
         quartz2d.CreateFont(pFont->GetFontData(), pFont->GetSize()));
     if (!pFont->GetPlatformFont())
-      return FALSE;
+      return false;
   }
   CFX_FixedBufGrow<uint16_t, 32> glyph_indices(nChars);
   CFX_FixedBufGrow<CGPoint, 32> glyph_positions(nChars);
   for (int i = 0; i < nChars; i++) {
-    glyph_indices[i] = pCharPos[i].m_ExtGID;
+    glyph_indices[i] =
+        pCharPos[i].m_ExtGID ? pCharPos[i].m_ExtGID : pCharPos[i].m_GlyphIndex;
     if (bNegSize)
       glyph_positions[i].x = -pCharPos[i].m_OriginX;
     else
@@ -74,6 +70,7 @@ FX_BOOL CGDrawGlyphRun(CGContextRef pContext,
   }
   if (bNegSize) {
     new_matrix.a = -new_matrix.a;
+    new_matrix.c = -new_matrix.c;
   } else {
     new_matrix.b = -new_matrix.b;
     new_matrix.d = -new_matrix.d;
@@ -103,29 +100,28 @@ void CFX_AggDeviceDriver::DestroyPlatform() {
   }
 }
 
-FX_BOOL CFX_AggDeviceDriver::DrawDeviceText(int nChars,
-                                            const FXTEXT_CHARPOS* pCharPos,
-                                            CFX_Font* pFont,
-                                            CFX_FontCache* pCache,
-                                            const CFX_Matrix* pObject2Device,
-                                            FX_FLOAT font_size,
-                                            uint32_t argb) {
+bool CFX_AggDeviceDriver::DrawDeviceText(int nChars,
+                                         const FXTEXT_CHARPOS* pCharPos,
+                                         CFX_Font* pFont,
+                                         const CFX_Matrix* pObject2Device,
+                                         FX_FLOAT font_size,
+                                         uint32_t argb) {
   if (!pFont)
-    return FALSE;
+    return false;
 
-  FX_BOOL bBold = pFont->IsBold();
+  bool bBold = pFont->IsBold();
   if (!bBold && pFont->GetSubstFont() &&
       pFont->GetSubstFont()->m_Weight >= 500 &&
       pFont->GetSubstFont()->m_Weight <= 600) {
-    return FALSE;
+    return false;
   }
   for (int i = 0; i < nChars; i++) {
     if (pCharPos[i].m_bGlyphAdjust)
-      return FALSE;
+      return false;
   }
   CGContextRef ctx = CGContextRef(m_pPlatformGraphics);
   if (!ctx)
-    return FALSE;
+    return false;
 
   CGContextSaveGState(ctx);
   CGContextSetTextDrawingMode(ctx, kCGTextFillClip);
@@ -143,7 +139,7 @@ FX_BOOL CFX_AggDeviceDriver::DrawDeviceText(int nChars,
       CGFloat decode_f[2] = {255.f, 0.f};
       pImageCG = CGImageMaskCreate(
           pClipMask->GetWidth(), pClipMask->GetHeight(), 8, 8,
-          pClipMask->GetPitch(), pClipMaskDataProvider, decode_f, FALSE);
+          pClipMask->GetPitch(), pClipMaskDataProvider, decode_f, false);
       CGDataProviderRelease(pClipMaskDataProvider);
     }
   } else {
@@ -155,8 +151,8 @@ FX_BOOL CFX_AggDeviceDriver::DrawDeviceText(int nChars,
   else
     CGContextClipToRect(ctx, rect_cg);
 
-  FX_BOOL ret = CGDrawGlyphRun(ctx, nChars, pCharPos, pFont, pCache,
-                               pObject2Device, font_size, argb);
+  bool ret = CGDrawGlyphRun(ctx, nChars, pCharPos, pFont, pObject2Device,
+                            font_size, argb);
   if (pImageCG)
     CGImageRelease(pImageCG);
   CGContextRestoreGState(ctx);
@@ -170,7 +166,7 @@ void CFX_FaceCache::InitPlatform() {}
 void CFX_FaceCache::DestroyPlatform() {}
 
 CFX_GlyphBitmap* CFX_FaceCache::RenderGlyph_Nativetext(
-    CFX_Font* pFont,
+    const CFX_Font* pFont,
     uint32_t glyph_index,
     const CFX_Matrix* pMatrix,
     int dest_width,
@@ -187,5 +183,3 @@ void CFX_Font::ReleasePlatformResource() {
     m_pPlatformFont = nullptr;
   }
 }
-
-#endif  // _FXM_PLATFORM_  == _FXM_PLATFORM_APPLE_

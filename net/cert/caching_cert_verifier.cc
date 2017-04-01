@@ -36,7 +36,7 @@ int CachingCertVerifier::Verify(const CertVerifier::RequestParams& params,
                                 CertVerifyResult* verify_result,
                                 const CompletionCallback& callback,
                                 std::unique_ptr<Request>* out_req,
-                                const BoundNetLog& net_log) {
+                                const NetLogWithSource& net_log) {
   out_req->reset();
 
   requests_++;
@@ -198,7 +198,7 @@ void CachingCertVerifier::VisitEntries(CacheVisitor* visitor) const {
   }
 }
 
-void CachingCertVerifier::OnCACertChanged(const X509Certificate* cert) {
+void CachingCertVerifier::OnCertDBChanged(const X509Certificate* cert) {
   ClearCache();
 }
 

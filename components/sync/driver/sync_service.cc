@@ -4,10 +4,9 @@
 
 #include "components/sync/driver/sync_service.h"
 
-#include "components/sync/core/sync_manager.h"
-#include "google_apis/gaia/google_service_auth_error.h"
+#include "components/sync/engine/sync_manager.h"
 
-namespace sync_driver {
+namespace syncer {
 
 SyncSetupInProgressHandle::SyncSetupInProgressHandle(base::Closure on_destroy)
     : on_destroy_(on_destroy) {}
@@ -17,7 +16,7 @@ SyncSetupInProgressHandle::~SyncSetupInProgressHandle() {
 }
 
 SyncService::SyncTokenStatus::SyncTokenStatus()
-    : connection_status(syncer::CONNECTION_NOT_ATTEMPTED),
+    : connection_status(CONNECTION_NOT_ATTEMPTED),
       last_get_token_error(GoogleServiceAuthError::AuthErrorNone()) {}
 
-}  // namespace sync_driver
+}  // namespace syncer

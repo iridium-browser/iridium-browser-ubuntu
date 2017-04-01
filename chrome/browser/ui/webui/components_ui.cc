@@ -13,20 +13,20 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/component_updater/component_updater_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -138,7 +138,7 @@ void ComponentsDOMHandler::HandleCheckUpdate(const base::ListValue* args) {
 ///////////////////////////////////////////////////////////////////////////////
 
 ComponentsUI::ComponentsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(new ComponentsDOMHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<ComponentsDOMHandler>());
 
   // Set up the chrome://components/ source.
   Profile* profile = Profile::FromWebUI(web_ui);
@@ -159,9 +159,8 @@ ComponentsUI::~ComponentsUI() {
 void ComponentsUI::OnDemandUpdate(const std::string& component_id) {
   component_updater::ComponentUpdateService* cus =
       g_browser_process->component_updater();
-  cus->GetOnDemandUpdater().OnDemandUpdate(
-      component_id,
-      component_updater::ComponentUpdateService::CompletionCallback());
+  cus->GetOnDemandUpdater().OnDemandUpdate(component_id,
+                                           component_updater::Callback());
 }
 
 // static

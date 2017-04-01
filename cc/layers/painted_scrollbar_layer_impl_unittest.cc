@@ -8,6 +8,7 @@
 
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
+#include "cc/resources/ui_resource_bitmap.h"
 #include "cc/test/layer_test_common.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,7 +41,7 @@ TEST(PaintedScrollbarLayerImplTest, Occlusion) {
   ScrollbarOrientation orientation = VERTICAL;
 
   PaintedScrollbarLayerImpl* scrollbar_layer_impl =
-      impl.AddChildToRoot<PaintedScrollbarLayerImpl>(orientation);
+      impl.AddChildToRoot<PaintedScrollbarLayerImpl>(orientation, false, false);
   scrollbar_layer_impl->SetBounds(layer_size);
   scrollbar_layer_impl->SetContentsOpaque(true);
   scrollbar_layer_impl->set_internal_contents_scale_and_bounds(

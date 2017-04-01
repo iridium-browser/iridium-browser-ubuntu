@@ -5,7 +5,6 @@
  * found in the LICENSE file.
  */
 
-#include "SkXfermode.h"
 #include "SkXfermode_proccoeff.h"
 #include "SkColorPriv.h"
 #include "SkMathPriv.h"
@@ -949,7 +948,8 @@ template <Sk4f (blend)(const Sk4f&, const Sk4f&)> SkPM4f proc_4f(const SkPM4f& s
     assert_unit(s);
     assert_unit(d);
     SkPM4f r = as_pm4f(blend(as_4f(s), as_4f(d)));
-    assert_unit(r);
+    // Turn this assert off for now because srgb conversions may end up in rgb > a
+    // assert_unit(r);
     return r;
 }
 
@@ -1001,7 +1001,7 @@ sk_sp<GrFragmentProcessor> SkXfermode::makeFragmentProcessorForImageFilter(
     return nullptr;
 }
 
-sk_sp<GrXPFactory> SkXfermode::asXPFactory() const {
+const GrXPFactory* SkXfermode::asXPFactory() const {
     // This should never be called.
     // TODO: make pure virtual in SkXfermode once Android update lands
     SkASSERT(0);
@@ -1109,12 +1109,12 @@ sk_sp<SkFlattenable> SkProcCoeffXfermode::CreateProc(SkReadBuffer& buffer) {
 }
 
 void SkProcCoeffXfermode::flatten(SkWriteBuffer& buffer) const {
-    buffer.write32(fMode);
+    buffer.write32((int)fMode);
 }
 
 bool SkProcCoeffXfermode::asMode(Mode* mode) const {
     if (mode) {
-        *mode = fMode;
+        *mode = (Mode)fMode;
     }
     return true;
 }
@@ -1254,15 +1254,15 @@ sk_sp<GrFragmentProcessor> SkProcCoeffXfermode::makeFragmentProcessorForImageFil
     return GrXfermodeFragmentProcessor::MakeFromDstProcessor(std::move(dst), fMode);
 }
 
-sk_sp<GrXPFactory> SkProcCoeffXfermode::asXPFactory() const {
+const GrXPFactory* SkProcCoeffXfermode::asXPFactory() const {
     if (CANNOT_USE_COEFF != fSrcCoeff) {
-        sk_sp<GrXPFactory> result(GrPorterDuffXPFactory::Make(fMode));
+        const GrXPFactory* result(GrPorterDuffXPFactory::Get(fMode));
         SkASSERT(result);
         return result;
     }
 
     SkASSERT(GrCustomXfermode::IsSupportedMode(fMode));
-    return GrCustomXfermode::MakeXPFactory(fMode);
+    return GrCustomXfermode::Get(fMode);
 }
 #endif
 
@@ -1277,6 +1277,10 @@ const char* SkXfermode::ModeName(Mode mode) {
     };
     return gModeStrings[mode];
     static_assert(SK_ARRAY_COUNT(gModeStrings) == kLastMode + 1, "mode_count");
+}
+
+const char* SkBlendMode_Name(SkBlendMode mode) {
+    return SkXfermode::ModeName((SkXfermode::Mode)mode);
 }
 
 #ifndef SK_IGNORE_TO_STRING
@@ -1307,57 +1311,49 @@ void SkProcCoeffXfermode::toString(SkString* str) const {
 #endif
 
 
-sk_sp<SkXfermode> SkXfermode::Make(Mode mode) {
-    if ((unsigned)mode >= kModeCount) {
+sk_sp<SkXfermode> SkXfermode::Make(SkBlendMode mode) {
+    if ((unsigned)mode > (unsigned)SkBlendMode::kLastMode) {
         // report error
         return nullptr;
     }
 
     // Skia's "default" mode is srcover. nullptr in SkPaint is interpreted as srcover
     // so we can just return nullptr from the factory.
-    if (kSrcOver_Mode == mode) {
+    if (SkBlendMode::kSrcOver == mode) {
         return nullptr;
     }
 
-    SkASSERT(SK_ARRAY_COUNT(gProcCoeffs) == kModeCount);
+    const int COUNT_BLENDMODES = (int)SkBlendMode::kLastMode + 1;
+    SkASSERT(SK_ARRAY_COUNT(gProcCoeffs) == COUNT_BLENDMODES);
 
-    static SkOnce        once[SkXfermode::kLastMode+1];
-    static SkXfermode* cached[SkXfermode::kLastMode+1];
+    static SkOnce        once[COUNT_BLENDMODES];
+    static SkXfermode* cached[COUNT_BLENDMODES];
 
-    once[mode]([mode] {
-        ProcCoeff rec = gProcCoeffs[mode];
+    once[(int)mode]([mode] {
+        ProcCoeff rec = gProcCoeffs[(int)mode];
         if (auto xfermode = SkOpts::create_xfermode(rec, mode)) {
-            cached[mode] = xfermode;
+            cached[(int)mode] = xfermode;
         } else {
-            cached[mode] = new SkProcCoeffXfermode(rec, mode);
+            cached[(int)mode] = new SkProcCoeffXfermode(rec, mode);
         }
     });
-    return sk_ref_sp(cached[mode]);
+    return sk_ref_sp(cached[(int)mode]);
 }
 
-SkXfermodeProc SkXfermode::GetProc(Mode mode) {
+SkXfermodeProc SkXfermode::GetProc(SkBlendMode mode) {
     SkXfermodeProc  proc = nullptr;
     if ((unsigned)mode < kModeCount) {
-        proc = gProcCoeffs[mode].fProc;
+        proc = gProcCoeffs[(unsigned)mode].fProc;
     }
     return proc;
 }
 
-SkXfermodeProc4f SkXfermode::GetProc4f(Mode mode) {
+SkXfermodeProc4f SkXfermode::GetProc4f(SkBlendMode mode) {
     SkXfermodeProc4f  proc = nullptr;
     if ((unsigned)mode < kModeCount) {
-        proc = gProcCoeffs[mode].fProc4f;
+        proc = gProcCoeffs[(unsigned)mode].fProc4f;
     }
     return proc;
-}
-
-static SkPM4f missing_proc4f(const SkPM4f& src, const SkPM4f& dst) {
-    return src;
-}
-
-SkXfermodeProc4f SkXfermode::getProc4f() const {
-    Mode mode;
-    return this->asMode(&mode) ? GetProc4f(mode) : missing_proc4f;
 }
 
 bool SkXfermode::ModeAsCoeff(Mode mode, Coeff* src, Coeff* dst) {
@@ -1421,135 +1417,110 @@ bool SkXfermode::IsOpaque(const SkXfermode* xfer, SrcColorOpacity opacityType) {
     return xfer->isOpaque(opacityType);
 }
 
-bool SkXfermode::appendStages(SkRasterPipeline* pipeline) const {
-    return this->onAppendStages(pipeline);
-}
-
-bool SkXfermode::onAppendStages(SkRasterPipeline*) const {
-    return false;
-}
-
 SK_DEFINE_FLATTENABLE_REGISTRAR_GROUP_START(SkXfermode)
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkProcCoeffXfermode)
 SK_DEFINE_FLATTENABLE_REGISTRAR_GROUP_END
 
-static Sk4f inv(const Sk4f& x) { return 1.0f - x; }
+///////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Most of these modes apply the same logic kernel to each channel.
-template <Sk4f kernel(const Sk4f& s, const Sk4f& sa, const Sk4f& d, const Sk4f& da)>
-static void SK_VECTORCALL rgba(SkRasterPipeline::Stage* st, size_t x,
-                               Sk4f  r, Sk4f  g, Sk4f  b, Sk4f  a,
-                               Sk4f dr, Sk4f dg, Sk4f db, Sk4f da) {
-    r = kernel(r,a,dr,da);
-    g = kernel(g,a,dg,da);
-    b = kernel(b,a,db,da);
-    a = kernel(a,a,da,da);
-    st->next(x, r,g,b,a, dr,dg,db,da);
-}
-
-#define KERNEL(name) static Sk4f name(const Sk4f& s, const Sk4f& sa, const Sk4f& d, const Sk4f& da)
-KERNEL(clear)    { return 0.0f; }
-KERNEL(dst)      { return d; }
-KERNEL(dstover)  { return d + inv(da)*s; }
-
-KERNEL(srcin)    { return s * da; }
-KERNEL(srcout)   { return s * inv(da); }
-KERNEL(srcatop)  { return s*da + d*inv(sa); }
-KERNEL(dstin)    { return srcin  (d,da,s,sa); }
-KERNEL(dstout)   { return srcout (d,da,s,sa); }
-KERNEL(dstatop)  { return srcatop(d,da,s,sa); }
-
-KERNEL(modulate) { return s*d; }
-KERNEL(multiply) { return s*inv(da) + d*inv(sa) + s*d; }
-KERNEL(plus_)     { return s + d; }
-KERNEL(screen)   { return s + d - s*d; }
-KERNEL(xor_)     { return s*inv(da) + d*inv(sa); }
-
-// Most of the rest apply the same logic to each color channel, and srcover's logic to alpha.
-// (darken and lighten can actually go either way, but they're a little faster this way.)
-template <Sk4f kernel(const Sk4f& s, const Sk4f& sa, const Sk4f& d, const Sk4f& da)>
-static void SK_VECTORCALL rgb_srcover(SkRasterPipeline::Stage* st, size_t x,
-                                      Sk4f  r, Sk4f  g, Sk4f  b, Sk4f  a,
-                                      Sk4f dr, Sk4f dg, Sk4f db, Sk4f da) {
-    r = kernel(r,a,dr,da);
-    g = kernel(g,a,dg,da);
-    b = kernel(b,a,db,da);
-    a = a + da*inv(a);
-    st->next(x, r,g,b,a, dr,dg,db,da);
-}
-
-KERNEL(colorburn) {
-    return (d == da  ).thenElse(d + s*inv(da),
-           (s == 0.0f).thenElse(s + d*inv(sa),
-                                sa*(da - Sk4f::Min(da, (da-d)*sa/s)) + s*inv(da) + d*inv(sa)));
-}
-KERNEL(colordodge) {
-    return (d == 0.0f).thenElse(d + s*inv(da),
-           (s == sa  ).thenElse(s + d*inv(sa),
-                                sa*Sk4f::Min(da, (d*sa)/(sa - s)) + s*inv(da) + d*inv(sa)));
-}
-KERNEL(darken)     { return s + d - Sk4f::Max(s*da, d*sa); }
-KERNEL(difference) { return s + d - 2.0f*Sk4f::Min(s*da,d*sa); }
-KERNEL(exclusion)  { return s + d - 2.0f*s*d; }
-KERNEL(hardlight) {
-    return s*inv(da) + d*inv(sa)
-         + (2.0f*s <= sa).thenElse(2.0f*s*d, sa*da - 2.0f*(da-d)*(sa-s));
-}
-KERNEL(lighten) { return s + d - Sk4f::Min(s*da, d*sa); }
-KERNEL(overlay) { return hardlight(d,da,s,sa); }
-KERNEL(softlight) {
-    Sk4f m  = (da > 0.0f).thenElse(d / da, 0.0f),
-         s2 = 2.0f*s,
-         m4 = 4.0f*m;
-
-    // The logic forks three ways:
-    //    1. dark src?
-    //    2. light src, dark dst?
-    //    3. light src, light dst?
-    Sk4f darkSrc = d*(sa + (s2 - sa)*(1.0f - m)),     // Used in case 1.
-         darkDst = (m4*m4 + m4)*(m - 1.0f) + 7.0f*m,  // Used in case 2.
-         liteDst = m.rsqrt().invert() - m,            // Used in case 3.
-         liteSrc = d*sa + da*(s2 - sa) * (4.0f*d <= da).thenElse(darkDst, liteDst);  // 2 or 3?
-    return s*inv(da) + d*inv(sa) + (s2 <= sa).thenElse(darkSrc, liteSrc);  // 1 or (2 or 3)?
-}
-#undef KERNEL
-
-bool SkProcCoeffXfermode::onAppendStages(SkRasterPipeline* p) const {
-    switch (fMode) {
-        case kSrcOver_Mode: SkASSERT(false); return false;  // Well how did we get here?
-
-        case kSrc_Mode:    /*This stage is a no-op.*/ return true;
-        case kDst_Mode:     p->append(rgba<dst>);     return true;
-        case kSrcATop_Mode: p->append(rgba<srcatop>); return true;
-        case kDstATop_Mode: p->append(rgba<dstatop>); return true;
-        case kSrcIn_Mode:   p->append(rgba<srcin>);   return true;
-        case kDstIn_Mode:   p->append(rgba<dstin>);   return true;
-        case kSrcOut_Mode:  p->append(rgba<srcout>);  return true;
-        case kDstOut_Mode:  p->append(rgba<dstout>);  return true;
-        case kDstOver_Mode: p->append(rgba<dstover>); return true;
-
-        case kClear_Mode:    p->append(rgba<clear>);    return true;
-        case kModulate_Mode: p->append(rgba<modulate>); return true;
-        case kMultiply_Mode: p->append(rgba<multiply>); return true;
-        case kPlus_Mode:     p->append(rgba<plus_>);    return true;
-        case kScreen_Mode:   p->append(rgba<screen>);   return true;
-        case kXor_Mode:      p->append(rgba<xor_>);     return true;
-
-        case kColorBurn_Mode:  p->append(rgb_srcover<colorburn>);  return true;
-        case kColorDodge_Mode: p->append(rgb_srcover<colordodge>); return true;
-        case kDarken_Mode:     p->append(rgb_srcover<darken>);     return true;
-        case kDifference_Mode: p->append(rgb_srcover<difference>); return true;
-        case kExclusion_Mode:  p->append(rgb_srcover<exclusion>);  return true;
-        case kHardLight_Mode:  p->append(rgb_srcover<hardlight>);  return true;
-        case kLighten_Mode:    p->append(rgb_srcover<lighten>);    return true;
-        case kOverlay_Mode:    p->append(rgb_srcover<overlay>);    return true;
-        case kSoftLight_Mode:  p->append(rgb_srcover<softlight>);  return true;
-
-        // TODO
-        case kColor_Mode:       return false;
-        case kHue_Mode:         return false;
-        case kLuminosity_Mode:  return false;
-        case kSaturation_Mode:  return false;
+bool SkBlendMode_SupportsCoverageAsAlpha(SkBlendMode mode) {
+    switch (mode) {
+        case SkBlendMode::kDst:
+        case SkBlendMode::kSrcOver:
+        case SkBlendMode::kDstOver:
+        case SkBlendMode::kDstOut:
+        case SkBlendMode::kSrcATop:
+        case SkBlendMode::kXor:
+        case SkBlendMode::kPlus:
+            return true;
+        default:
+            break;
     }
     return false;
+}
+
+bool SkXfermode::IsOpaque(SkBlendMode mode, SrcColorOpacity opacityType) {
+    const ProcCoeff rec = gProcCoeffs[(int)mode];
+
+    switch (rec.fSC) {
+        case kDA_Coeff:
+        case kDC_Coeff:
+        case kIDA_Coeff:
+        case kIDC_Coeff:
+            return false;
+        default:
+            break;
+    }
+
+    switch (rec.fDC) {
+        case kZero_Coeff:
+            return true;
+        case kISA_Coeff:
+            return kOpaque_SrcColorOpacity == opacityType;
+        case kSA_Coeff:
+            return kTransparentBlack_SrcColorOpacity == opacityType ||
+            kTransparentAlpha_SrcColorOpacity == opacityType;
+        case kSC_Coeff:
+            return kTransparentBlack_SrcColorOpacity == opacityType;
+        default:
+            return false;
+    }
+    return false;
+}
+
+#if SK_SUPPORT_GPU
+const GrXPFactory* SkBlendMode_AsXPFactory(SkBlendMode mode) {
+    const ProcCoeff rec = gProcCoeffs[(int)mode];
+    if (CANNOT_USE_COEFF != rec.fSC) {
+        const GrXPFactory* result = GrPorterDuffXPFactory::Get(mode);
+        SkASSERT(result);
+        return result;
+    }
+
+    SkASSERT(GrCustomXfermode::IsSupportedMode(mode));
+    return GrCustomXfermode::Get(mode);
+}
+#endif
+
+bool SkBlendMode_CanOverflow(SkBlendMode mode) { return mode == SkBlendMode::kPlus; }
+
+bool SkBlendMode_AppendStages(SkBlendMode mode, SkRasterPipeline* p) {
+    auto stage = SkRasterPipeline::srcover;
+    switch (mode) {
+        case SkBlendMode::kClear:    stage = SkRasterPipeline::clear; break;
+        case SkBlendMode::kSrc:      return true;  // This stage is a no-op.
+        case SkBlendMode::kDst:      stage = SkRasterPipeline::move_dst_src; break;
+        case SkBlendMode::kSrcOver:  stage = SkRasterPipeline::srcover; break;
+        case SkBlendMode::kDstOver:  stage = SkRasterPipeline::dstover; break;
+        case SkBlendMode::kSrcIn:    stage = SkRasterPipeline::srcin; break;
+        case SkBlendMode::kDstIn:    stage = SkRasterPipeline::dstin; break;
+        case SkBlendMode::kSrcOut:   stage = SkRasterPipeline::srcout; break;
+        case SkBlendMode::kDstOut:   stage = SkRasterPipeline::dstout; break;
+        case SkBlendMode::kSrcATop:  stage = SkRasterPipeline::srcatop; break;
+        case SkBlendMode::kDstATop:  stage = SkRasterPipeline::dstatop; break;
+        case SkBlendMode::kXor:      stage = SkRasterPipeline::xor_; break;
+        case SkBlendMode::kPlus:     stage = SkRasterPipeline::plus_; break;
+        case SkBlendMode::kModulate: stage = SkRasterPipeline::modulate; break;
+
+        case SkBlendMode::kScreen:     stage = SkRasterPipeline::screen; break;
+        case SkBlendMode::kOverlay:    stage = SkRasterPipeline::overlay; break;
+        case SkBlendMode::kDarken:     stage = SkRasterPipeline::darken; break;
+        case SkBlendMode::kLighten:    stage = SkRasterPipeline::lighten; break;
+        case SkBlendMode::kColorDodge: stage = SkRasterPipeline::colordodge; break;
+        case SkBlendMode::kColorBurn:  stage = SkRasterPipeline::colorburn; break;
+        case SkBlendMode::kHardLight:  stage = SkRasterPipeline::hardlight; break;
+        case SkBlendMode::kSoftLight:  stage = SkRasterPipeline::softlight; break;
+        case SkBlendMode::kDifference: stage = SkRasterPipeline::difference; break;
+        case SkBlendMode::kExclusion:  stage = SkRasterPipeline::exclusion; break;
+        case SkBlendMode::kMultiply:   stage = SkRasterPipeline::multiply; break;
+
+        case SkBlendMode::kHue:
+        case SkBlendMode::kSaturation:
+        case SkBlendMode::kColor:
+        case SkBlendMode::kLuminosity: return false;  // TODO
+    }
+    if (p) {
+        p->append(stage);
+    }
+    return true;
 }

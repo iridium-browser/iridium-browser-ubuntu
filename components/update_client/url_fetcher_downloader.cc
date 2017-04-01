@@ -12,6 +12,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/sequenced_task_runner.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/update_client/utils.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
@@ -42,11 +43,13 @@ void UrlFetcherDownloader::DoStartDownload(const GURL& url) {
                              net::LOAD_DISABLE_CACHE);
   url_fetcher_->SetAutomaticallyRetryOn5xx(false);
   url_fetcher_->SaveResponseToTemporaryFile(task_runner());
+  data_use_measurement::DataUseUserData::AttachToFetcher(
+      url_fetcher_.get(), data_use_measurement::DataUseUserData::UPDATE_CLIENT);
 
   VLOG(1) << "Starting background download: " << url.spec();
   url_fetcher_->Start();
 
-  download_start_time_ = base::Time::Now();
+  download_start_time_ = base::TimeTicks::Now();
 
   downloaded_bytes_ = -1;
   total_bytes_ = -1;
@@ -55,7 +58,7 @@ void UrlFetcherDownloader::DoStartDownload(const GURL& url) {
 void UrlFetcherDownloader::OnURLFetchComplete(const net::URLFetcher* source) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  const base::Time download_end_time(base::Time::Now());
+  const base::TimeTicks download_end_time(base::TimeTicks::Now());
   const base::TimeDelta download_time =
       download_end_time >= download_start_time_
           ? download_end_time - download_start_time_

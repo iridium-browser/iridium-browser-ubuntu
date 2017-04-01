@@ -15,6 +15,7 @@
 #include "components/sync/syncable/entry_kernel.h"
 
 namespace syncer {
+
 class Cryptographer;
 class ReadNode;
 
@@ -262,7 +263,7 @@ class Entry {
   void* operator new(size_t size) { return (::operator new)(size); }
 
   inline explicit Entry(BaseTransaction* trans)
-      : basetrans_(trans), kernel_(NULL) {}
+      : basetrans_(trans), kernel_(nullptr) {}
 
  protected:
   BaseTransaction* const basetrans_;
@@ -270,7 +271,7 @@ class Entry {
   EntryKernel* kernel_;
 
  private:
-  friend class Directory;
+  friend class syncer::syncable::Directory;
   friend class syncer::ReadNode;
   friend std::ostream& operator<<(std::ostream& s, const Entry& e);
 

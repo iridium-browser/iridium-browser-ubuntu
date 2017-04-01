@@ -13,8 +13,10 @@
 #include "base/base_paths.h"
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "crypto/rsa_private_key.h"
@@ -61,7 +63,7 @@ LocalPolicyTestServer::LocalPolicyTestServer()
                            net::BaseTestServer::kLocalhost,
                            base::FilePath()) {
   CHECK(server_data_dir_.CreateUniqueTempDir());
-  config_file_ = server_data_dir_.path().Append(kPolicyFileName);
+  config_file_ = server_data_dir_.GetPath().Append(kPolicyFileName);
 }
 
 LocalPolicyTestServer::LocalPolicyTestServer(const base::FilePath& config_file)
@@ -95,23 +97,27 @@ bool LocalPolicyTestServer::SetSigningKeyAndSignature(
   if (!key->ExportPrivateKey(&signing_key_bits))
     return false;
 
-  policy_key_ = server_data_dir_.path().Append(kSigningKeyFileName);
+  policy_key_ = server_data_dir_.GetPath().Append(kSigningKeyFileName);
   int bytes_written = base::WriteFile(
       policy_key_, reinterpret_cast<const char*>(signing_key_bits.data()),
       signing_key_bits.size());
 
-  if (bytes_written != static_cast<int>(signing_key_bits.size()))
+  if (bytes_written != base::checked_cast<int>(signing_key_bits.size()))
     return false;
 
   // Write the signature data.
-  base::FilePath signature_file = server_data_dir_.path().Append(
-      kSigningKeySignatureFileName);
+  base::FilePath signature_file =
+      server_data_dir_.GetPath().Append(kSigningKeySignatureFileName);
   bytes_written = base::WriteFile(
       signature_file,
       signature.c_str(),
       signature.size());
 
-  return bytes_written == static_cast<int>(signature.size());
+  return bytes_written == base::checked_cast<int>(signature.size());
+}
+
+void LocalPolicyTestServer::EnableAutomaticRotationOfSigningKeys() {
+  automatic_rotation_of_signing_keys_enabled_ = true;
 }
 
 void LocalPolicyTestServer::RegisterClient(const std::string& dm_token,
@@ -131,6 +137,7 @@ void LocalPolicyTestServer::RegisterClient(const std::string& dm_token,
   types->AppendString(dm_protocol::kChromeUserPolicyType);
   types->AppendString(dm_protocol::kChromePublicAccountPolicyType);
   types->AppendString(dm_protocol::kChromeExtensionPolicyType);
+  types->AppendString(dm_protocol::kChromeSigninExtensionPolicyType);
 
   client_dict->Set(kClientStateKeyAllowedPolicyTypes, types.release());
   clients_.Set(dm_token, client_dict.release());
@@ -142,11 +149,11 @@ bool LocalPolicyTestServer::UpdatePolicy(const std::string& type,
   CHECK(server_data_dir_.IsValid());
 
   std::string selector = GetSelector(type, entity_id);
-  base::FilePath policy_file = server_data_dir_.path().AppendASCII(
+  base::FilePath policy_file = server_data_dir_.GetPath().AppendASCII(
       base::StringPrintf("policy_%s.bin", selector.c_str()));
 
   return base::WriteFile(policy_file, policy.c_str(), policy.size()) ==
-      static_cast<int>(policy.size());
+         base::checked_cast<int>(policy.size());
 }
 
 bool LocalPolicyTestServer::UpdatePolicyData(const std::string& type,
@@ -155,11 +162,11 @@ bool LocalPolicyTestServer::UpdatePolicyData(const std::string& type,
   CHECK(server_data_dir_.IsValid());
 
   std::string selector = GetSelector(type, entity_id);
-  base::FilePath data_file = server_data_dir_.path().AppendASCII(
+  base::FilePath data_file = server_data_dir_.GetPath().AppendASCII(
       base::StringPrintf("policy_%s.data", selector.c_str()));
 
   return base::WriteFile(data_file, data.c_str(), data.size()) ==
-      static_cast<int>(data.size());
+         base::checked_cast<int>(data.size());
 }
 
 GURL LocalPolicyTestServer::GetServiceURL() const {
@@ -236,16 +243,20 @@ bool LocalPolicyTestServer::GenerateAdditionalArguments(
   arguments->SetString("config-file", config_file_.AsUTF8Unsafe());
   if (!policy_key_.empty())
     arguments->SetString("policy-key", policy_key_.AsUTF8Unsafe());
+  if (automatic_rotation_of_signing_keys_enabled_) {
+    arguments->Set("rotate-policy-keys-automatically",
+                   base::Value::CreateNullValue());
+  }
   if (server_data_dir_.IsValid()) {
-    arguments->SetString("data-dir", server_data_dir_.path().AsUTF8Unsafe());
+    arguments->SetString("data-dir", server_data_dir_.GetPath().AsUTF8Unsafe());
 
     if (!clients_.empty()) {
       std::string json;
       base::JSONWriter::Write(clients_, &json);
       base::FilePath client_state_file =
-          server_data_dir_.path().Append(kClientStateFileName);
+          server_data_dir_.GetPath().Append(kClientStateFileName);
       if (base::WriteFile(client_state_file, json.c_str(), json.size()) !=
-          static_cast<int>(json.size())) {
+          base::checked_cast<int>(json.size())) {
         return false;
       }
       arguments->SetString("client-state", client_state_file.AsUTF8Unsafe());

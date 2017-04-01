@@ -4,14 +4,20 @@
 
 #include "remoting/protocol/protocol_mock_objects.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "remoting/protocol/session_plugin.h"
 #include "remoting/protocol/video_stream.h"
 
 namespace remoting {
 namespace protocol {
+
+MockAuthenticator::MockAuthenticator() {}
+
+MockAuthenticator::~MockAuthenticator() {}
 
 MockConnectionToClientEventHandler::MockConnectionToClientEventHandler() {}
 

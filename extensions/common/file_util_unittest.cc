@@ -52,7 +52,7 @@ scoped_refptr<Extension> LoadExtensionManifest(
   std::unique_ptr<base::Value> result = deserializer.Deserialize(NULL, error);
   if (!result.get())
     return NULL;
-  CHECK_EQ(base::Value::TYPE_DICTIONARY, result->GetType());
+  CHECK_EQ(base::Value::Type::DICTIONARY, result->GetType());
   return LoadExtensionManifest(*base::DictionaryValue::From(std::move(result)),
                                manifest_dir, location, extra_flags, error);
 }
@@ -68,7 +68,7 @@ TEST_F(FileUtilTest, InstallUninstallGarbageCollect) {
   // Create a source extension.
   std::string extension_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   std::string version("1.0");
-  base::FilePath src = temp.path().AppendASCII(extension_id);
+  base::FilePath src = temp.GetPath().AppendASCII(extension_id);
   ASSERT_TRUE(base::CreateDirectory(src));
 
   base::FilePath extension_content;
@@ -76,7 +76,7 @@ TEST_F(FileUtilTest, InstallUninstallGarbageCollect) {
   ASSERT_TRUE(base::PathExists(extension_content));
 
   // Create a extensions tree.
-  base::FilePath all_extensions = temp.path().AppendASCII("extensions");
+  base::FilePath all_extensions = temp.GetPath().AppendASCII("extensions");
   ASSERT_TRUE(base::CreateDirectory(all_extensions));
 
   // Install in empty directory. Should create parent directories as needed.
@@ -148,14 +148,14 @@ TEST_F(FileUtilTest, CheckIllegalFilenamesNoUnderscores) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().AppendASCII("some_dir");
+  base::FilePath src_path = temp.GetPath().AppendASCII("some_dir");
   ASSERT_TRUE(base::CreateDirectory(src_path));
 
   std::string data = "{ \"name\": { \"message\": \"foobar\" } }";
   ASSERT_TRUE(base::WriteFile(
       src_path.AppendASCII("some_file.txt"), data.c_str(), data.length()));
   std::string error;
-  EXPECT_TRUE(file_util::CheckForIllegalFilenames(temp.path(), &error));
+  EXPECT_TRUE(file_util::CheckForIllegalFilenames(temp.GetPath(), &error));
 }
 
 TEST_F(FileUtilTest, CheckIllegalFilenamesOnlyReserved) {
@@ -166,26 +166,26 @@ TEST_F(FileUtilTest, CheckIllegalFilenamesOnlyReserved) {
       extensions::kLocaleFolder, extensions::kPlatformSpecificFolder};
 
   for (size_t i = 0; i < arraysize(folders); i++) {
-    base::FilePath src_path = temp.path().Append(folders[i]);
+    base::FilePath src_path = temp.GetPath().Append(folders[i]);
     ASSERT_TRUE(base::CreateDirectory(src_path));
   }
 
   std::string error;
-  EXPECT_TRUE(file_util::CheckForIllegalFilenames(temp.path(), &error));
+  EXPECT_TRUE(file_util::CheckForIllegalFilenames(temp.GetPath(), &error));
 }
 
 TEST_F(FileUtilTest, CheckIllegalFilenamesReservedAndIllegal) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().Append(extensions::kLocaleFolder);
+  base::FilePath src_path = temp.GetPath().Append(extensions::kLocaleFolder);
   ASSERT_TRUE(base::CreateDirectory(src_path));
 
-  src_path = temp.path().AppendASCII("_some_dir");
+  src_path = temp.GetPath().AppendASCII("_some_dir");
   ASSERT_TRUE(base::CreateDirectory(src_path));
 
   std::string error;
-  EXPECT_FALSE(file_util::CheckForIllegalFilenames(temp.path(), &error));
+  EXPECT_FALSE(file_util::CheckForIllegalFilenames(temp.GetPath(), &error));
 }
 
 // These tests do not work on Windows, because it is illegal to create a
@@ -196,12 +196,12 @@ TEST_F(FileUtilTest, CheckIllegalFilenamesDirectoryWindowsReserved) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().AppendASCII("aux");
+  base::FilePath src_path = temp.GetPath().AppendASCII("aux");
   ASSERT_TRUE(base::CreateDirectory(src_path));
 
   std::string error;
   EXPECT_FALSE(
-      file_util::CheckForWindowsReservedFilenames(temp.path(), &error));
+      file_util::CheckForWindowsReservedFilenames(temp.GetPath(), &error));
 }
 
 TEST_F(FileUtilTest,
@@ -209,7 +209,7 @@ TEST_F(FileUtilTest,
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().AppendASCII("some_dir");
+  base::FilePath src_path = temp.GetPath().AppendASCII("some_dir");
   ASSERT_TRUE(base::CreateDirectory(src_path));
 
   std::string data = "{ \"name\": { \"message\": \"foobar\" } }";
@@ -218,7 +218,7 @@ TEST_F(FileUtilTest,
 
   std::string error;
   EXPECT_FALSE(
-      file_util::CheckForWindowsReservedFilenames(temp.path(), &error));
+      file_util::CheckForWindowsReservedFilenames(temp.GetPath(), &error));
 }
 #endif
 
@@ -260,7 +260,7 @@ TEST_F(FileUtilTest, ValidateThemeUTF8) {
   // "aeo" with accents. Use http://0xcc.net/jsescape/ to decode them.
   std::string non_ascii_file = "\xC3\xA0\xC3\xA8\xC3\xB2.png";
   base::FilePath non_ascii_path =
-      temp.path().Append(base::FilePath::FromUTF8Unsafe(non_ascii_file));
+      temp.GetPath().Append(base::FilePath::FromUTF8Unsafe(non_ascii_file));
   base::WriteFile(non_ascii_path, "", 0);
 
   std::string kManifest = base::StringPrintf(
@@ -270,7 +270,7 @@ TEST_F(FileUtilTest, ValidateThemeUTF8) {
       non_ascii_file.c_str());
   std::string error;
   scoped_refptr<Extension> extension = LoadExtensionManifest(
-      kManifest, temp.path(), Manifest::UNPACKED, 0, &error);
+      kManifest, temp.GetPath(), Manifest::UNPACKED, 0, &error);
   ASSERT_TRUE(extension.get()) << error;
 
   std::vector<extensions::InstallWarning> warnings;
@@ -294,8 +294,8 @@ TEST_F(FileUtilTest, BackgroundScriptsMustExist) {
 
   std::string error;
   std::vector<extensions::InstallWarning> warnings;
-  scoped_refptr<Extension> extension =
-      LoadExtensionManifest(*value, temp.path(), Manifest::UNPACKED, 0, &error);
+  scoped_refptr<Extension> extension = LoadExtensionManifest(
+      *value, temp.GetPath(), Manifest::UNPACKED, 0, &error);
   ASSERT_TRUE(extension.get()) << error;
 
   EXPECT_FALSE(
@@ -309,8 +309,8 @@ TEST_F(FileUtilTest, BackgroundScriptsMustExist) {
   scripts->Clear();
   scripts->AppendString("http://google.com/foo.js");
 
-  extension =
-      LoadExtensionManifest(*value, temp.path(), Manifest::UNPACKED, 0, &error);
+  extension = LoadExtensionManifest(*value, temp.GetPath(), Manifest::UNPACKED,
+                                    0, &error);
   ASSERT_TRUE(extension.get()) << error;
 
   warnings.clear();
@@ -347,7 +347,7 @@ TEST_F(FileUtilTest, FindPrivateKeyFiles) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath src_path = temp.path().AppendASCII("some_dir");
+  base::FilePath src_path = temp.GetPath().AppendASCII("some_dir");
   ASSERT_TRUE(base::CreateDirectory(src_path));
 
   ASSERT_TRUE(base::WriteFile(
@@ -364,7 +364,7 @@ TEST_F(FileUtilTest, FindPrivateKeyFiles) {
                               private_key,
                               arraysize(private_key) - 30));
   std::vector<base::FilePath> private_keys =
-      file_util::FindPrivateKeyFiles(temp.path());
+      file_util::FindPrivateKeyFiles(temp.GetPath());
   EXPECT_EQ(2U, private_keys.size());
   EXPECT_THAT(private_keys,
               testing::Contains(src_path.AppendASCII("a_key.pem")));
@@ -376,7 +376,7 @@ TEST_F(FileUtilTest, WarnOnPrivateKey) {
   base::ScopedTempDir temp;
   ASSERT_TRUE(temp.CreateUniqueTempDir());
 
-  base::FilePath ext_path = temp.path().AppendASCII("ext_root");
+  base::FilePath ext_path = temp.GetPath().AppendASCII("ext_root");
   ASSERT_TRUE(base::CreateDirectory(ext_path));
 
   const char manifest[] =
@@ -481,71 +481,6 @@ TEST_F(FileUtilTest, ExtensionURLToRelativeFilePath) {
     EXPECT_EQ(expected_path.value(), actual_path.value()) <<
       " For the path " << url;
   }
-}
-
-TEST_F(FileUtilTest, ExtensionResourceURLToFilePath) {
-  // Setup filesystem for testing.
-  base::FilePath root_path;
-  ASSERT_TRUE(base::CreateNewTempDirectory(
-      base::FilePath::StringType(), &root_path));
-  root_path = base::MakeAbsoluteFilePath(root_path);
-  ASSERT_FALSE(root_path.empty());
-
-  base::FilePath api_path = root_path.Append(FILE_PATH_LITERAL("apiname"));
-  ASSERT_TRUE(base::CreateDirectory(api_path));
-
-  const char data[] = "Test Data";
-  base::FilePath resource_path = api_path.Append(FILE_PATH_LITERAL("test.js"));
-  ASSERT_TRUE(base::WriteFile(resource_path, data, sizeof(data)));
-  resource_path = api_path.Append(FILE_PATH_LITERAL("escape spaces.js"));
-  ASSERT_TRUE(base::WriteFile(resource_path, data, sizeof(data)));
-  resource_path = api_path.Append(FILE_PATH_LITERAL("escape spaces.js"));
-  ASSERT_TRUE(base::WriteFile(resource_path, data, sizeof(data)));
-  resource_path = api_path.Append(FILE_PATH_LITERAL("..%2f..%2fsimple.html"));
-  ASSERT_TRUE(base::WriteFile(resource_path, data, sizeof(data)));
-
-#ifdef FILE_PATH_USES_WIN_SEPARATORS
-#define SEP "\\"
-#else
-#define SEP "/"
-#endif
-#define URL_PREFIX "chrome-extension-resource://"
-  struct TestCase {
-    const char* url;
-    const base::FilePath::CharType* expected_path;
-  } test_cases[] = {
-      {URL_PREFIX "apiname/test.js", FILE_PATH_LITERAL("test.js")},
-      {URL_PREFIX "/apiname/test.js", FILE_PATH_LITERAL("test.js")},
-      // Test % escape
-      {URL_PREFIX "apiname/%74%65st.js", FILE_PATH_LITERAL("test.js")},
-      {URL_PREFIX "apiname/escape%20spaces.js",
-       FILE_PATH_LITERAL("escape spaces.js")},
-      // Test file does not exist.
-      {URL_PREFIX "apiname/directory/to/file.js", NULL},
-      // Test apiname/../../test.js
-      {URL_PREFIX "apiname/../../test.js", FILE_PATH_LITERAL("test.js")},
-      {URL_PREFIX "apiname/..%2F../test.js", NULL},
-      {URL_PREFIX "apiname/f/../../../test.js", FILE_PATH_LITERAL("test.js")},
-      {URL_PREFIX "apiname/f%2F..%2F..%2F../test.js", NULL},
-      {URL_PREFIX "apiname/..%2f..%2fsimple.html",
-       FILE_PATH_LITERAL("..%2f..%2fsimple.html")},
-  };
-#undef SEP
-#undef URL_PREFIX
-
-  for (size_t i = 0; i < arraysize(test_cases); ++i) {
-    GURL url(test_cases[i].url);
-    base::FilePath expected_path;
-    if (test_cases[i].expected_path)
-      expected_path = root_path.Append(FILE_PATH_LITERAL("apiname")).Append(
-          test_cases[i].expected_path);
-    base::FilePath actual_path =
-        extensions::file_util::ExtensionResourceURLToFilePath(url, root_path);
-    EXPECT_EQ(expected_path.value(), actual_path.value()) <<
-      " For the path " << url;
-  }
-  // Remove temp files.
-  ASSERT_TRUE(base::DeleteFile(root_path, true));
 }
 
 }  // namespace extensions

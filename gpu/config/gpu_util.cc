@@ -17,6 +17,7 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_switches.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gpu_switching_manager.h"
 
 namespace gpu {
 
@@ -59,13 +60,6 @@ void StringToIds(const std::string& str, std::vector<uint32_t>* list) {
 }
 
 }  // namespace anonymous
-
-void MergeFeatureSets(std::set<int>* dst, const std::set<int>& src) {
-  DCHECK(dst);
-  if (src.empty())
-    return;
-  dst->insert(src.begin(), src.end());
-}
 
 void ApplyGpuDriverBugWorkarounds(const GPUInfo& gpu_info,
                                   base::CommandLine* command_line) {
@@ -143,6 +137,18 @@ void ParseSecondaryGpuDevicesFromCommandLine(
     secondary_device.device_id = device_ids[i];
     gpu_info->secondary_gpus.push_back(secondary_device);
   }
+}
+
+void InitializeDualGpusIfSupported(
+    const std::set<int>& driver_bug_workarounds) {
+  ui::GpuSwitchingManager* switching_manager =
+      ui::GpuSwitchingManager::GetInstance();
+  if (!switching_manager->SupportsDualGpus())
+    return;
+  if (driver_bug_workarounds.count(gpu::FORCE_DISCRETE_GPU) == 1)
+    ui::GpuSwitchingManager::GetInstance()->ForceUseOfDiscreteGpu();
+  else if (driver_bug_workarounds.count(gpu::FORCE_INTEGRATED_GPU) == 1)
+    ui::GpuSwitchingManager::GetInstance()->ForceUseOfIntegratedGpu();
 }
 
 }  // namespace gpu

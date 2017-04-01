@@ -4,6 +4,7 @@
 
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
+import("//components/spellcheck/spellcheck_build_features.gni")
 
 source_set("native") {
   deps = [
@@ -13,7 +14,7 @@ source_set("native") {
     "//base/third_party/dynamic_annotations:dynamic_annotations",
     "//cc:cc",
     "//components/autofill/content/browser:browser",
-    "//components/devtools_http_handler:devtools_http_handler",
+    "//components/spellcheck:build_features",
     "//components/strings",
     "//components/web_contents_delegate_android:web_contents_delegate_android",
     "//content/public/common",
@@ -41,8 +42,6 @@ source_set("native") {
     "android_webview_jni_registrar.h",
     "aw_autofill_client.cc",
     "aw_autofill_client.h",
-    "aw_browser_dependency_factory.cc",
-    "aw_browser_dependency_factory.h",
     "aw_contents.cc",
     "aw_contents.h",
     "aw_contents_background_thread_client.cc",
@@ -57,8 +56,8 @@ source_set("native") {
     "aw_contents_statics.h",
     "aw_debug.cc",
     "aw_debug.h",
-    "aw_dev_tools_server.cc",
-    "aw_dev_tools_server.h",
+    "aw_devtools_server.cc",
+    "aw_devtools_server.h",
     "aw_form_database.cc",
     "aw_form_database.h",
     "aw_gl_functor.cc",
@@ -69,10 +68,8 @@ source_set("native") {
     "aw_locale_manager_impl.h",
     "aw_media_url_interceptor.cc",
     "aw_media_url_interceptor.h",
-    "aw_message_port_service_impl.cc",
-    "aw_message_port_service_impl.h",
-    "aw_metrics_switch.cc",
-    "aw_metrics_switch.h",
+    "aw_metrics_service_client_impl.cc",
+    "aw_metrics_service_client_impl.h",
     "aw_pdf_exporter.cc",
     "aw_pdf_exporter.h",
     "aw_picture.cc",
@@ -109,14 +106,13 @@ source_set("native") {
     "permission/permission_request_handler_client.h",
     "permission/simple_permission_request.cc",
     "permission/simple_permission_request.h",
+    "popup_touch_handle_drawable.cc",
+    "popup_touch_handle_drawable.h",
     "state_serializer.cc",
     "state_serializer.h",
     "token_binding_manager_bridge.cc",
     "token_binding_manager_bridge.h",
   ]
-  if (enable_video_hole) {
-    deps += [ "//components/external_video_surface:external_video_surface" ]
-  }
 
   if (enable_spellcheck) {
     deps += [ "//components/spellcheck/browser:browser" ]
@@ -141,7 +137,6 @@ generate_jni("native_jni") {
     "../java/src/org/chromium/android_webview/AwFormDatabase.java",
     "../java/src/org/chromium/android_webview/AwGLFunctor.java",
     "../java/src/org/chromium/android_webview/AwHttpAuthHandler.java",
-    "../java/src/org/chromium/android_webview/AwMessagePortService.java",
     "../java/src/org/chromium/android_webview/AwMetricsServiceClient.java",
     "../java/src/org/chromium/android_webview/AwPdfExporter.java",
     "../java/src/org/chromium/android_webview/AwPicture.java",
@@ -153,6 +148,7 @@ generate_jni("native_jni") {
     "../java/src/org/chromium/android_webview/AwWebResourceResponse.java",
     "../java/src/org/chromium/android_webview/InputStreamUtil.java",
     "../java/src/org/chromium/android_webview/JavaBrowserViewRendererHelper.java",
+    "../java/src/org/chromium/android_webview/PopupTouchHandleDrawable.java",
     "../java/src/org/chromium/android_webview/permission/AwPermissionRequest.java",
   ]
   jni_package = "android_webview"

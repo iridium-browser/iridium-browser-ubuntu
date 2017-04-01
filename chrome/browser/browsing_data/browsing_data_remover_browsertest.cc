@@ -77,7 +77,7 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
     base::ScopedTempDir downloads_directory;
     ASSERT_TRUE(downloads_directory.CreateUniqueTempDir());
     browser()->profile()->GetPrefs()->SetFilePath(
-        prefs::kDownloadDefaultDirectory, downloads_directory.path());
+        prefs::kDownloadDefaultDirectory, downloads_directory.GetPath());
 
     // Start a download.
     content::DownloadManager* download_manager =
@@ -116,7 +116,7 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
         BrowsingDataRemoverFactory::GetForBrowserContext(browser()->profile());
     BrowsingDataRemoverCompletionObserver completion_observer(remover);
     remover->RemoveAndReply(
-        BrowsingDataRemover::Period(browsing_data::LAST_HOUR), remove_mask,
+        base::Time(), base::Time::Max(), remove_mask,
         BrowsingDataHelper::UNPROTECTED_WEB, &completion_observer);
     completion_observer.BlockUntilCompletion();
   }
@@ -128,7 +128,7 @@ class BrowsingDataRemoverBrowserTest : public InProcessBrowserTest {
         BrowsingDataRemoverFactory::GetForBrowserContext(browser()->profile());
     BrowsingDataRemoverCompletionObserver completion_observer(remover);
     remover->RemoveWithFilterAndReply(
-        BrowsingDataRemover::Period(browsing_data::LAST_HOUR), remove_mask,
+        base::Time(), base::Time::Max(), remove_mask,
         BrowsingDataHelper::UNPROTECTED_WEB, std::move(filter_builder),
         &completion_observer);
     completion_observer.BlockUntilCompletion();

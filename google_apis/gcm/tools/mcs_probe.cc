@@ -146,7 +146,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
     context_storage_.set_host_resolver(
         net::HostResolver::CreateDefaultResolver(NULL));
     context_storage_.set_transport_security_state(
-        base::WrapUnique(new net::TransportSecurityState()));
+        base::MakeUnique<net::TransportSecurityState>());
     Init();
   }
 
@@ -184,7 +184,7 @@ class MyTestCertVerifier : public net::CertVerifier {
              net::CertVerifyResult* verify_result,
              const net::CompletionCallback& callback,
              std::unique_ptr<Request>* out_req,
-             const net::BoundNetLog& net_log) override {
+             const net::NetLogWithSource& net_log) override {
     return net::OK;
   }
 };
@@ -231,6 +231,7 @@ class MCSProbe {
   void UpdateCallback(bool success);
   void ErrorCallback();
   void OnCheckInCompleted(
+      net::HttpStatusCode response_code,
       const checkin_proto::AndroidCheckinResponse& checkin_response);
   void StartMCSLogin();
 
@@ -463,8 +464,10 @@ void MCSProbe::CheckIn() {
 }
 
 void MCSProbe::OnCheckInCompleted(
+    net::HttpStatusCode response_code,
     const checkin_proto::AndroidCheckinResponse& checkin_response) {
-  bool success = checkin_response.has_android_id() &&
+  bool success = response_code == net::HTTP_OK &&
+                 checkin_response.has_android_id() &&
                  checkin_response.android_id() != 0UL &&
                  checkin_response.has_security_token() &&
                  checkin_response.security_token() != 0UL;

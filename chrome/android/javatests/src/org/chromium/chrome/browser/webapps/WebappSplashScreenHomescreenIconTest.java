@@ -7,12 +7,13 @@ package org.chromium.chrome.browser.webapps;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.metrics.WebappUma;
@@ -48,6 +49,7 @@ public class WebappSplashScreenHomescreenIconTest extends WebappActivityTestBase
 
     @SmallTest
     @Feature({"Webapps"})
+    @RetryOnFailure
     public void testUmaFallbackIcon() {
         assertEquals(1, RecordHistogram.getHistogramValueCountForTesting(
                 WebappUma.HISTOGRAM_SPLASHSCREEN_ICON_TYPE,

@@ -7,6 +7,8 @@ package org.chromium.chrome.browser.download.ui;
 import android.content.ComponentName;
 import android.support.annotation.Nullable;
 
+import org.chromium.chrome.browser.download.DownloadItem;
+import org.chromium.chrome.browser.download.DownloadManagerService;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadBridge;
 import org.chromium.chrome.browser.offlinepages.downloads.OfflinePageDownloadItem;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate;
@@ -29,11 +31,17 @@ public interface BackendProvider {
         /** See {@link DownloadManagerService#getAllDownloads}. */
         void getAllDownloads(boolean isOffTheRecord);
 
+        /** See {@link DownloadManagerService#broadcastDownloadAction}. */
+        void broadcastDownloadAction(DownloadItem downloadItem, String action);
+
         /** See {@link DownloadManagerService#checkForExternallyRemovedDownloads}. */
         void checkForExternallyRemovedDownloads(boolean isOffTheRecord);
 
         /** See {@link DownloadManagerService#removeDownload}. */
         void removeDownload(String guid, boolean isOffTheRecord);
+
+        /** See {@link DownloadManagerService#isDownloadOpenableInBrowser}. */
+        boolean isDownloadOpenableInBrowser(boolean isOffTheRecord, String mimeType);
     }
 
     /** Interacts with the Offline Pages backend. */
@@ -63,6 +71,12 @@ public interface BackendProvider {
     /** Returns the {@link OfflinePageDelegate} that works with the Offline Pages backend. */
     OfflinePageDelegate getOfflinePageBridge();
 
+    /** Returns the {@link ThumbnailProvider} that gets thumbnails for files. */
+    ThumbnailProvider getThumbnailProvider();
+
     /** Returns the {@link SelectionDelegate} that tracks selected items. */
     SelectionDelegate<DownloadHistoryItemWrapper> getSelectionDelegate();
+
+    /** Destroys the BackendProvider. */
+    void destroy();
 }

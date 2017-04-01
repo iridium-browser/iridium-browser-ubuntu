@@ -14,7 +14,7 @@
 #include "components/sessions/core/session_types.h"
 #include "components/sync_sessions/synced_session.h"
 
-namespace sync_driver {
+namespace sync_sessions {
 
 class OpenTabsUIDelegate {
  public:
@@ -34,7 +34,7 @@ class OpenTabsUIDelegate {
   // session |tag|. Caller does NOT own the SessionTab object.
   // Returns true if the foreign session and tab were found, false otherwise.
   virtual bool GetForeignTab(const std::string& tag,
-                             const SessionID::id_type tab_id,
+                             SessionID::id_type tab_id,
                              const sessions::SessionTab** tab) = 0;
 
   // Delete a foreign session and all its sync data.
@@ -64,6 +64,6 @@ class OpenTabsUIDelegate {
   virtual ~OpenTabsUIDelegate();
 };
 
-}  // namespace sync_driver
+}  // namespace sync_sessions
 
 #endif  // COMPONENTS_SYNC_SESSIONS_OPEN_TABS_UI_DELEGATE_H_

@@ -27,11 +27,10 @@ class Window;
 namespace ui {
 class MouseEvent;
 class ScopedEventDispatcher;
+class XScopedEventSelector;
 }
 
 namespace views {
-
-class Widget;
 
 // Runs a nested message loop and grabs the mouse. This is used to implement
 // dragging.
@@ -58,7 +57,7 @@ class X11WholeScreenMoveLoop : public X11MoveLoop,
   void GrabEscKey();
 
   // Creates an input-only window to be used during the drag.
-  XID CreateDragInputWindow(XDisplay* display);
+  void CreateDragInputWindow(XDisplay* display);
 
   // Dispatch mouse movement event to |delegate_| in a posted task.
   void DispatchMouseMovement();
@@ -78,6 +77,9 @@ class X11WholeScreenMoveLoop : public X11MoveLoop,
   // An invisible InputOnly window. Keyboard grab and sometimes mouse grab
   // are set on this window.
   XID grab_input_window_;
+
+  // Events selected on |grab_input_window_|.
+  std::unique_ptr<ui::XScopedEventSelector> grab_input_window_events_;
 
   // Whether the pointer was grabbed on |grab_input_window_|.
   bool grabbed_pointer_;

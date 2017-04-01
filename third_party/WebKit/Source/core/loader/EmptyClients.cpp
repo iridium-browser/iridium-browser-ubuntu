@@ -27,7 +27,9 @@
 
 #include "core/loader/EmptyClients.h"
 
+#include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/VisualViewport.h"
 #include "core/html/HTMLFormElement.h"
 #include "core/html/forms/ColorChooser.h"
 #include "core/html/forms/DateTimeChooser.h"
@@ -37,7 +39,6 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebApplicationCacheHost.h"
 #include "public/platform/WebMediaPlayer.h"
-#include "public/platform/modules/mediasession/WebMediaSession.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProvider.h"
 #include "public/platform/modules/serviceworker/WebServiceWorkerProviderClient.h"
 #include "wtf/PtrUtil.h"
@@ -45,139 +46,156 @@
 
 namespace blink {
 
-void fillWithEmptyClients(Page::PageClients& pageClients)
-{
-    DEFINE_STATIC_LOCAL(ChromeClient, dummyChromeClient, (EmptyChromeClient::create()));
-    pageClients.chromeClient = &dummyChromeClient;
+void fillWithEmptyClients(Page::PageClients& pageClients) {
+  DEFINE_STATIC_LOCAL(ChromeClient, dummyChromeClient,
+                      (EmptyChromeClient::create()));
+  pageClients.chromeClient = &dummyChromeClient;
 
-    DEFINE_STATIC_LOCAL(EmptyContextMenuClient, dummyContextMenuClient, ());
-    pageClients.contextMenuClient = &dummyContextMenuClient;
+  DEFINE_STATIC_LOCAL(EmptyContextMenuClient, dummyContextMenuClient, ());
+  pageClients.contextMenuClient = &dummyContextMenuClient;
 
-    DEFINE_STATIC_LOCAL(EmptyEditorClient, dummyEditorClient, ());
-    pageClients.editorClient = &dummyEditorClient;
+  DEFINE_STATIC_LOCAL(EmptyEditorClient, dummyEditorClient, ());
+  pageClients.editorClient = &dummyEditorClient;
 
-    DEFINE_STATIC_LOCAL(EmptySpellCheckerClient, dummySpellCheckerClient, ());
-    pageClients.spellCheckerClient = &dummySpellCheckerClient;
+  DEFINE_STATIC_LOCAL(EmptySpellCheckerClient, dummySpellCheckerClient, ());
+  pageClients.spellCheckerClient = &dummySpellCheckerClient;
 }
 
 class EmptyPopupMenu : public PopupMenu {
-public:
-    void show() override { }
-    void hide() override { }
-    void updateFromElement(UpdateReason) override { }
-    void disconnectClient() override { }
+ public:
+  void show() override {}
+  void hide() override {}
+  void updateFromElement(UpdateReason) override {}
+  void disconnectClient() override {}
 };
 
 class EmptyFrameScheduler : public WebFrameScheduler {
-public:
-    void setFrameVisible(bool) override { }
-    WebTaskRunner* loadingTaskRunner() override;
-    WebTaskRunner* timerTaskRunner() override;
-    WebTaskRunner* unthrottledTaskRunner() override;
+ public:
+  EmptyFrameScheduler() { DCHECK(isMainThread()); }
+  void setFrameVisible(bool) override {}
+  RefPtr<WebTaskRunner> loadingTaskRunner() override;
+  RefPtr<WebTaskRunner> timerTaskRunner() override;
+  RefPtr<WebTaskRunner> unthrottledTaskRunner() override;
 };
 
-WebTaskRunner* EmptyFrameScheduler::loadingTaskRunner()
-{
-    return Platform::current()->currentThread()->getWebTaskRunner();
+RefPtr<WebTaskRunner> EmptyFrameScheduler::loadingTaskRunner() {
+  return Platform::current()->mainThread()->getWebTaskRunner();
 }
 
-WebTaskRunner* EmptyFrameScheduler::timerTaskRunner()
-{
-    return Platform::current()->currentThread()->getWebTaskRunner();
+RefPtr<WebTaskRunner> EmptyFrameScheduler::timerTaskRunner() {
+  return Platform::current()->mainThread()->getWebTaskRunner();
 }
 
-WebTaskRunner* EmptyFrameScheduler::unthrottledTaskRunner()
-{
-    return Platform::current()->currentThread()->getWebTaskRunner();
+RefPtr<WebTaskRunner> EmptyFrameScheduler::unthrottledTaskRunner() {
+  return Platform::current()->mainThread()->getWebTaskRunner();
 }
 
-PopupMenu* EmptyChromeClient::openPopupMenu(LocalFrame&, HTMLSelectElement&)
-{
-    return new EmptyPopupMenu();
+PopupMenu* EmptyChromeClient::openPopupMenu(LocalFrame&, HTMLSelectElement&) {
+  return new EmptyPopupMenu();
 }
 
-ColorChooser* EmptyChromeClient::openColorChooser(LocalFrame*, ColorChooserClient*, const Color&)
-{
-    return nullptr;
+ColorChooser* EmptyChromeClient::openColorChooser(LocalFrame*,
+                                                  ColorChooserClient*,
+                                                  const Color&) {
+  return nullptr;
 }
 
-DateTimeChooser* EmptyChromeClient::openDateTimeChooser(DateTimeChooserClient*, const DateTimeChooserParameters&)
-{
-    return nullptr;
+DateTimeChooser* EmptyChromeClient::openDateTimeChooser(
+    DateTimeChooserClient*,
+    const DateTimeChooserParameters&) {
+  return nullptr;
 }
 
-void EmptyChromeClient::openTextDataListChooser(HTMLInputElement&)
-{
+void EmptyChromeClient::openTextDataListChooser(HTMLInputElement&) {}
+
+void EmptyChromeClient::openFileChooser(LocalFrame*, PassRefPtr<FileChooser>) {}
+
+void EmptyChromeClient::attachRootGraphicsLayer(GraphicsLayer* layer,
+                                                LocalFrame* localRoot) {
+  Page* page = localRoot ? localRoot->page() : nullptr;
+  if (!page)
+    return;
+  page->frameHost().visualViewport().attachToLayerTree(layer);
 }
 
-void EmptyChromeClient::openFileChooser(LocalFrame*, PassRefPtr<FileChooser>)
-{
+String EmptyChromeClient::acceptLanguages() {
+  return String();
 }
 
-String EmptyChromeClient::acceptLanguages()
-{
-    return String();
+std::unique_ptr<WebFrameScheduler> EmptyChromeClient::createFrameScheduler(
+    BlameContext*) {
+  return WTF::makeUnique<EmptyFrameScheduler>();
 }
 
-std::unique_ptr<WebFrameScheduler> EmptyChromeClient::createFrameScheduler(BlameContext*)
-{
-    return wrapUnique(new EmptyFrameScheduler());
+NavigationPolicy EmptyFrameLoaderClient::decidePolicyForNavigation(
+    const ResourceRequest&,
+    DocumentLoader*,
+    NavigationType,
+    NavigationPolicy,
+    bool,
+    bool,
+    HTMLFormElement*) {
+  return NavigationPolicyIgnore;
 }
 
-NavigationPolicy EmptyFrameLoaderClient::decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationType, NavigationPolicy, bool, bool)
-{
-    return NavigationPolicyIgnore;
+void EmptyFrameLoaderClient::dispatchWillSendSubmitEvent(HTMLFormElement*) {}
+
+void EmptyFrameLoaderClient::dispatchWillSubmitForm(HTMLFormElement*) {}
+
+DocumentLoader* EmptyFrameLoaderClient::createDocumentLoader(
+    LocalFrame* frame,
+    const ResourceRequest& request,
+    const SubstituteData& substituteData,
+    ClientRedirectPolicy clientRedirectPolicy) {
+  DCHECK(frame);
+
+  return DocumentLoader::create(frame, request, substituteData,
+                                clientRedirectPolicy);
 }
 
-void EmptyFrameLoaderClient::dispatchWillSendSubmitEvent(HTMLFormElement*)
-{
+LocalFrame* EmptyFrameLoaderClient::createFrame(const FrameLoadRequest&,
+                                                const AtomicString&,
+                                                HTMLFrameOwnerElement*) {
+  return nullptr;
 }
 
-void EmptyFrameLoaderClient::dispatchWillSubmitForm(HTMLFormElement*)
-{
+Widget* EmptyFrameLoaderClient::createPlugin(HTMLPlugInElement*,
+                                             const KURL&,
+                                             const Vector<String>&,
+                                             const Vector<String>&,
+                                             const String&,
+                                             bool,
+                                             DetachedPluginPolicy) {
+  return nullptr;
 }
 
-DocumentLoader* EmptyFrameLoaderClient::createDocumentLoader(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& substituteData)
-{
-    return DocumentLoader::create(frame, request, substituteData);
+std::unique_ptr<WebMediaPlayer> EmptyFrameLoaderClient::createWebMediaPlayer(
+    HTMLMediaElement&,
+    const WebMediaPlayerSource&,
+    WebMediaPlayerClient*) {
+  return nullptr;
 }
 
-LocalFrame* EmptyFrameLoaderClient::createFrame(const FrameLoadRequest&, const AtomicString&, HTMLFrameOwnerElement*)
-{
-    return nullptr;
+WebRemotePlaybackClient* EmptyFrameLoaderClient::createWebRemotePlaybackClient(
+    HTMLMediaElement&) {
+  return nullptr;
 }
 
-Widget* EmptyFrameLoaderClient::createPlugin(HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool, DetachedPluginPolicy)
-{
-    return nullptr;
+void EmptyTextCheckerClient::requestCheckingOfString(TextCheckingRequest*) {}
+
+void EmptyTextCheckerClient::cancelAllPendingRequests() {}
+
+std::unique_ptr<WebServiceWorkerProvider>
+EmptyFrameLoaderClient::createServiceWorkerProvider() {
+  return nullptr;
 }
 
-std::unique_ptr<WebMediaPlayer> EmptyFrameLoaderClient::createWebMediaPlayer(HTMLMediaElement&, const WebMediaPlayerSource&, WebMediaPlayerClient*)
-{
-    return nullptr;
+std::unique_ptr<WebApplicationCacheHost>
+EmptyFrameLoaderClient::createApplicationCacheHost(
+    WebApplicationCacheHostClient*) {
+  return nullptr;
 }
 
-std::unique_ptr<WebMediaSession> EmptyFrameLoaderClient::createWebMediaSession()
-{
-    return nullptr;
-}
+EmptyRemoteFrameClient::EmptyRemoteFrameClient() = default;
 
-void EmptyTextCheckerClient::requestCheckingOfString(TextCheckingRequest*)
-{
-}
-
-void EmptyTextCheckerClient::cancelAllPendingRequests()
-{
-}
-
-std::unique_ptr<WebServiceWorkerProvider> EmptyFrameLoaderClient::createServiceWorkerProvider()
-{
-    return nullptr;
-}
-
-std::unique_ptr<WebApplicationCacheHost> EmptyFrameLoaderClient::createApplicationCacheHost(WebApplicationCacheHostClient*)
-{
-    return nullptr;
-}
-
-} // namespace blink
+}  // namespace blink

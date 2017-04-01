@@ -9,6 +9,11 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -16,17 +21,25 @@
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/global_request_id.h"
 #include "content/public/browser/navigation_data.h"
 #include "content/public/browser/navigation_throttle.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/common/request_context_type.h"
+#include "third_party/WebKit/public/platform/WebMixedContentContextType.h"
 #include "url/gurl.h"
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
 namespace content {
 
+class AppCacheNavigationHandle;
+class ChromeAppCacheService;
+class NavigationUIData;
 class NavigatorDelegate;
 class ResourceRequestBodyImpl;
+class ServiceWorkerContextWrapper;
+class ServiceWorkerNavigationHandle;
 
 // This class keeps track of a single navigation. It is created upon receipt of
 // a DidStartProvisionalLoad IPC in a RenderFrameHost. The RenderFrameHost owns
@@ -71,8 +84,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       const GURL& url,
       FrameTreeNode* frame_tree_node,
       bool is_renderer_initiated,
-      bool is_synchronous,
-      bool is_srcdoc,
+      bool is_same_page,
       const base::TimeTicks& navigation_start,
       int pending_nav_entry_id,
       bool started_from_context_menu);
@@ -80,11 +92,10 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
 
   // NavigationHandle implementation:
   const GURL& GetURL() override;
+  SiteInstance* GetStartingSiteInstance() override;
   bool IsInMainFrame() override;
   bool IsParentMainFrame() override;
   bool IsRendererInitiated() override;
-  bool IsSynchronousNavigation() override;
-  bool IsSrcdoc() override;
   bool WasServerRedirect() override;
   int GetFrameTreeNodeId() override;
   int GetParentFrameTreeNodeId() override;
@@ -100,6 +111,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   bool HasCommitted() override;
   bool IsErrorPage() override;
   const net::HttpResponseHeaders* GetResponseHeaders() override;
+  net::HttpResponseInfo::ConnectionInfo GetConnectionInfo() override;
   void Resume() override;
   void CancelDeferredNavigation(
       NavigationThrottle::ThrottleCheckResult result) override;
@@ -117,14 +129,37 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       const GURL& new_referrer_url,
       bool new_is_external_protocol) override;
   NavigationThrottle::ThrottleCheckResult CallWillProcessResponseForTesting(
-      RenderFrameHost* render_frame_host) override;
+      RenderFrameHost* render_frame_host,
+      const std::string& raw_response_header) override;
+  void CallDidCommitNavigationForTesting(const GURL& url) override;
   bool WasStartedFromContextMenu() const override;
+  const GURL& GetSearchableFormURL() override;
+  const std::string& GetSearchableFormEncoding() override;
+  const GlobalRequestID& GetGlobalRequestID() override;
 
   NavigationData* GetNavigationData() override;
 
+  // The NavigatorDelegate to notify/query for various navigation events.
+  // Normally this is the WebContents, except if this NavigationHandle was
+  // created during a navigation to an interstitial page. In this case it will
+  // be the InterstitialPage itself.
+  //
+  // Note: due to the interstitial navigation case, all calls that can possibly
+  // expose the NavigationHandle to code outside of content/ MUST go though the
+  // NavigatorDelegate. In particular, the ContentBrowserClient should not be
+  // called directly form the NavigationHandle code. Thus, these calls will not
+  // expose the NavigationHandle when navigating to an InterstialPage.
   NavigatorDelegate* GetDelegate() const;
 
-  RequestContextType GetRequestContextType() const;
+  RequestContextType request_context_type() const {
+    DCHECK_GE(state_, WILL_SEND_REQUEST);
+    return request_context_type_;
+  }
+
+  blink::WebMixedContentContextType mixed_content_context_type() const {
+    DCHECK_GE(state_, WILL_SEND_REQUEST);
+    return mixed_content_context_type_;
+  }
 
   // Get the unique id from the NavigationEntry associated with this
   // NavigationHandle. Note that a synchronous, renderer-initiated navigation
@@ -165,6 +200,19 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
     return resource_request_body_;
   }
 
+  // PlzNavigate
+  void InitServiceWorkerHandle(
+      ServiceWorkerContextWrapper* service_worker_context);
+  ServiceWorkerNavigationHandle* service_worker_handle() const {
+    return service_worker_handle_.get();
+  }
+
+  // PlzNavigate
+  void InitAppCacheHandle(ChromeAppCacheService* appcache_service);
+  AppCacheNavigationHandle* appcache_handle() const {
+    return appcache_handle_.get();
+  }
+
   typedef base::Callback<void(NavigationThrottle::ThrottleCheckResult)>
       ThrottleChecksFinishedCallback;
 
@@ -179,6 +227,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       ui::PageTransition transition,
       bool is_external_protocol,
       RequestContextType request_context_type,
+      blink::WebMixedContentContextType mixed_content_context_type,
       const ThrottleChecksFinishedCallback& callback);
 
   // Called when the URLRequest will be redirected in the network stack.
@@ -191,6 +240,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
       const GURL& new_referrer_url,
       bool new_is_external_protocol,
       scoped_refptr<net::HttpResponseHeaders> response_headers,
+      net::HttpResponseInfo::ConnectionInfo connection_info,
       const ThrottleChecksFinishedCallback& callback);
 
   // Called when the URLRequest has delivered response headers and metadata.
@@ -199,10 +249,19 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // NavigationHandle will not call |callback| with a result of DEFER.
   // If the result is PROCEED, then 'ReadyToCommitNavigation' will be called
   // with |render_frame_host| and |response_headers| just before calling
-  // |callback|.
+  // |callback|. Should a transfer navigation happen, |transfer_callback| will
+  // be run on the IO thread.
+  // PlzNavigate: transfer navigations are not possible.
   void WillProcessResponse(
       RenderFrameHostImpl* render_frame_host,
       scoped_refptr<net::HttpResponseHeaders> response_headers,
+      net::HttpResponseInfo::ConnectionInfo connection_info,
+      const SSLStatus& ssl_status,
+      const GlobalRequestID& request_id,
+      bool should_replace_current_entry,
+      bool is_download,
+      bool is_stream,
+      const base::Closure& transfer_callback,
       const ThrottleChecksFinishedCallback& callback);
 
   // Returns the FrameTreeNode this navigation is happening in.
@@ -227,6 +286,20 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
     navigation_data_ = std::move(navigation_data);
   }
 
+  SSLStatus ssl_status() { return ssl_status_; }
+
+  // Called when the navigation is transferred to a different renderer.
+  void Transfer();
+
+  NavigationUIData* navigation_ui_data() const {
+    return navigation_ui_data_.get();
+  }
+
+  void set_searchable_form_url(const GURL& url) { searchable_form_url_ = url; }
+  void set_searchable_form_encoding(const std::string& encoding) {
+    searchable_form_encoding_ = encoding;
+  }
+
  private:
   friend class NavigationHandleImplTest;
 
@@ -248,8 +321,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   NavigationHandleImpl(const GURL& url,
                        FrameTreeNode* frame_tree_node,
                        bool is_renderer_initiated,
-                       bool is_synchronous,
-                       bool is_srcdoc,
+                       bool is_same_page,
                        const base::TimeTicks& navigation_start,
                        int pending_nav_entry_id,
                        bool started_from_context_menu);
@@ -257,6 +329,19 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   NavigationThrottle::ThrottleCheckResult CheckWillStartRequest();
   NavigationThrottle::ThrottleCheckResult CheckWillRedirectRequest();
   NavigationThrottle::ThrottleCheckResult CheckWillProcessResponse();
+
+  // Called when WillProcessResponse checks are done, to find the final
+  // RenderFrameHost for the navigation. Checks whether the navigation should be
+  // transferred. Returns false if the transfer attempt results in the
+  // destruction of this NavigationHandle and the navigation should no longer
+  // proceed. This can happen when the RenderFrameHostManager determines a
+  // transfer is needed, but WebContentsDelegate::ShouldTransferNavigation
+  // returns false.
+  bool MaybeTransferAndProceed();
+
+  // Helper method for MaybeTransferAndProceed. Returns false if the transfer
+  // attempt results in the destruction of this NavigationHandle.
+  bool MaybeTransferAndProceedInternal();
 
   // Helper function to run and reset the |complete_callback_|. This marks the
   // end of a round of NavigationThrottleChecks.
@@ -270,6 +355,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
 
   // See NavigationHandle for a description of those member variables.
   GURL url_;
+  scoped_refptr<SiteInstance> starting_site_instance_;
   Referrer sanitized_referrer_;
   bool has_user_gesture_;
   ui::PageTransition transition_;
@@ -277,11 +363,14 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   net::Error net_error_code_;
   RenderFrameHostImpl* render_frame_host_;
   const bool is_renderer_initiated_;
-  bool is_same_page_;
-  const bool is_synchronous_;
-  const bool is_srcdoc_;
+  const bool is_same_page_;
   bool was_redirected_;
   scoped_refptr<net::HttpResponseHeaders> response_headers_;
+  net::HttpResponseInfo::ConnectionInfo connection_info_;
+
+  // The original url of the navigation. This may differ from |url_| if the
+  // navigation encounters redirects.
+  const GURL original_url_;
 
   // The HTTP method used for the navigation.
   std::string method_;
@@ -302,7 +391,7 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   FrameTreeNode* frame_tree_node_;
 
   // A list of Throttles registered for this navigation.
-  ScopedVector<NavigationThrottle> throttles_;
+  std::vector<std::unique_ptr<NavigationThrottle>> throttles_;
 
   // The index of the next throttle to check.
   size_t next_index_;
@@ -316,14 +405,55 @@ class CONTENT_EXPORT NavigationHandleImpl : public NavigationHandle {
   // The fetch request context type.
   RequestContextType request_context_type_;
 
+  // The mixed content context type for potential mixed content checks.
+  blink::WebMixedContentContextType mixed_content_context_type_;
+
   // This callback will be run when all throttle checks have been performed.
   ThrottleChecksFinishedCallback complete_callback_;
 
-  // Embedder data tied to this navigation.
+  // PlzNavigate
+  // Manages the lifetime of a pre-created ServiceWorkerProviderHost until a
+  // corresponding ServiceWorkerNetworkProvider is created in the renderer.
+  std::unique_ptr<ServiceWorkerNavigationHandle> service_worker_handle_;
+
+  // PlzNavigate
+  // Manages the lifetime of a pre-created AppCacheHost until a browser side
+  // navigation is ready to be committed, i.e we have a renderer process ready
+  // to service the navigation request.
+  std::unique_ptr<AppCacheNavigationHandle> appcache_handle_;
+
+  // Embedder data from the IO thread tied to this navigation.
   std::unique_ptr<NavigationData> navigation_data_;
+
+  // PlzNavigate
+  // Embedder data from the UI thread tied to this navigation.
+  std::unique_ptr<NavigationUIData> navigation_ui_data_;
+
+  SSLStatus ssl_status_;
+
+  // The id of the URLRequest tied to this navigation.
+  GlobalRequestID request_id_;
+
+  // Whether the current NavigationEntry should be replaced upon commit.
+  bool should_replace_current_entry_;
+
+  // The chain of redirects.
+  std::vector<GURL> redirect_chain_;
+
+  // A callback to run on the IO thread if the navigation transfers.
+  base::Closure transfer_callback_;
+
+  // Whether the navigation ended up being a download or a stream.
+  bool is_download_;
+  bool is_stream_;
 
   // False by default unless the navigation started within a context menu.
   bool started_from_context_menu_;
+
+  GURL searchable_form_url_;
+  std::string searchable_form_encoding_;
+
+  base::WeakPtrFactory<NavigationHandleImpl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationHandleImpl);
 };

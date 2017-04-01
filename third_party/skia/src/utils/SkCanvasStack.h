@@ -11,12 +11,18 @@
 #include "SkNWayCanvas.h"
 #include "SkTArray.h"
 
+/**
+ *  Like NWayCanvas, in that it forwards all canvas methods to each sub-canvas that is "pushed".
+ *
+ *  Unlike NWayCanvas, this takes ownership of each subcanvas, and deletes them when this canvas
+ *  is deleted.
+ */
 class SkCanvasStack : public SkNWayCanvas {
 public:
     SkCanvasStack(int width, int height);
     virtual ~SkCanvasStack();
 
-    void pushCanvas(SkCanvas* canvas, const SkIPoint& origin);
+    void pushCanvas(std::unique_ptr<SkCanvas>, const SkIPoint& origin);
     void removeAll() override;
 
     /*
@@ -31,10 +37,10 @@ public:
 protected:
     void didSetMatrix(const SkMatrix&) override;
 
-    void onClipRect(const SkRect&, SkRegion::Op, ClipEdgeStyle) override;
-    void onClipRRect(const SkRRect&, SkRegion::Op, ClipEdgeStyle) override;
-    void onClipPath(const SkPath&, SkRegion::Op, ClipEdgeStyle) override;
-    void onClipRegion(const SkRegion&, SkRegion::Op) override;
+    void onClipRect(const SkRect&, SkClipOp, ClipEdgeStyle) override;
+    void onClipRRect(const SkRRect&, SkClipOp, ClipEdgeStyle) override;
+    void onClipPath(const SkPath&, SkClipOp, ClipEdgeStyle) override;
+    void onClipRegion(const SkRegion&, SkClipOp) override;
 
 private:
     void clipToZOrderedBounds();
@@ -42,6 +48,7 @@ private:
     struct CanvasData {
         SkIPoint origin;
         SkRegion requiredClip;
+        std::unique_ptr<SkCanvas> ownedCanvas;
     };
 
     SkTArray<CanvasData> fCanvasData;

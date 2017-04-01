@@ -11,6 +11,7 @@
 
 #include "base/strings/string16.h"
 #include "net/base/completion_callback.h"
+#include "net/base/net_export.h"
 #include "net/base/network_delegate.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/proxy/proxy_retry_info.h"
@@ -29,7 +30,7 @@ class HttpResponseHeaders;
 class ProxyInfo;
 class URLRequest;
 
-// WrappingNetworkDelegate takes a |network_delegate| and extends it. When
+// LayeredNetworkDelegate takes a |network_delegate| and extends it. When
 // On*() is called, the On*Internal() method of this is first called and then
 // the On*() of |network_delegate| is called. On*Internal() methods have no
 // return values, and cannot prevent calling into the nested network delegate.
@@ -59,11 +60,12 @@ class NET_EXPORT LayeredNetworkDelegate : public NetworkDelegate {
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       GURL* allowed_unsafe_redirect_url) final;
   void OnBeforeRedirect(URLRequest* request, const GURL& new_location) final;
-  void OnResponseStarted(URLRequest* request) final;
+
+  void OnResponseStarted(URLRequest* request, int net_error) final;
   void OnNetworkBytesReceived(URLRequest* request,
                               int64_t bytes_received) final;
   void OnNetworkBytesSent(URLRequest* request, int64_t bytes_sent) final;
-  void OnCompleted(URLRequest* request, bool started) final;
+  void OnCompleted(URLRequest* request, bool started, int net_error) final;
   void OnURLRequestDestroyed(URLRequest* request) final;
   void OnPACScriptError(int line_number, const base::string16& error) final;
   AuthRequiredResponse OnAuthRequired(URLRequest* request,

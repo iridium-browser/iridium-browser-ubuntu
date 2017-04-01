@@ -10,7 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/test/test_message_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "cc/output/compositor_frame.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/scheduler/delay_based_time_source.h"
 #include "cc/test/fake_output_surface_client.h"
@@ -72,6 +72,9 @@ class SoftwareBrowserCompositorOutputSurfaceTest : public testing::Test {
   void SetUp() override;
   void TearDown() override;
 
+  void UpdateVSyncParameters(base::TimeTicks timebase,
+                             base::TimeDelta interval);
+
   std::unique_ptr<content::BrowserCompositorOutputSurface> CreateSurface(
       std::unique_ptr<cc::SoftwareOutputDevice> device);
 
@@ -84,17 +87,23 @@ class SoftwareBrowserCompositorOutputSurfaceTest : public testing::Test {
   base::TestMessageLoop message_loop_;
   cc::DelayBasedBeginFrameSource begin_frame_source_;
   std::unique_ptr<ui::Compositor> compositor_;
+  int update_vsync_parameters_call_count_ = 0;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(SoftwareBrowserCompositorOutputSurfaceTest);
 };
 
 void SoftwareBrowserCompositorOutputSurfaceTest::SetUp() {
   bool enable_pixel_output = false;
-  ui::ContextFactory* context_factory =
-      ui::InitializeContextFactoryForTests(enable_pixel_output);
+  ui::ContextFactory* context_factory = nullptr;
+  ui::ContextFactoryPrivate* context_factory_private = nullptr;
 
-  compositor_.reset(
-      new ui::Compositor(context_factory, message_loop_.task_runner().get()));
+  ui::InitializeContextFactoryForTests(enable_pixel_output, &context_factory,
+                                       &context_factory_private);
+
+  compositor_.reset(new ui::Compositor(
+      context_factory_private->AllocateFrameSinkId(), context_factory,
+      context_factory_private, message_loop_.task_runner().get()));
   compositor_->SetAcceleratedWidget(gfx::kNullAcceleratedWidget);
 }
 
@@ -108,7 +117,17 @@ std::unique_ptr<content::BrowserCompositorOutputSurface>
 SoftwareBrowserCompositorOutputSurfaceTest::CreateSurface(
     std::unique_ptr<cc::SoftwareOutputDevice> device) {
   return base::MakeUnique<content::SoftwareBrowserCompositorOutputSurface>(
-      std::move(device), compositor_->vsync_manager(), &begin_frame_source_);
+      std::move(device),
+      base::Bind(
+          &SoftwareBrowserCompositorOutputSurfaceTest::UpdateVSyncParameters,
+          base::Unretained(this)),
+      base::ThreadTaskRunnerHandle::Get());
+}
+
+void SoftwareBrowserCompositorOutputSurfaceTest::UpdateVSyncParameters(
+    base::TimeTicks timebase,
+    base::TimeDelta interval) {
+  update_vsync_parameters_call_count_++;
 }
 
 TEST_F(SoftwareBrowserCompositorOutputSurfaceTest, NoVSyncProvider) {
@@ -116,11 +135,11 @@ TEST_F(SoftwareBrowserCompositorOutputSurfaceTest, NoVSyncProvider) {
   std::unique_ptr<cc::SoftwareOutputDevice> software_device(
       new cc::SoftwareOutputDevice());
   output_surface_ = CreateSurface(std::move(software_device));
-  CHECK(output_surface_->BindToClient(&output_surface_client));
+  output_surface_->BindToClient(&output_surface_client);
 
-  cc::CompositorFrame frame;
-  output_surface_->SwapBuffers(std::move(frame));
+  output_surface_->SwapBuffers(cc::OutputSurfaceFrame());
   EXPECT_EQ(NULL, output_surface_->software_device()->GetVSyncProvider());
+  EXPECT_EQ(0, update_vsync_parameters_call_count_);
 }
 
 TEST_F(SoftwareBrowserCompositorOutputSurfaceTest, VSyncProviderUpdates) {
@@ -128,13 +147,13 @@ TEST_F(SoftwareBrowserCompositorOutputSurfaceTest, VSyncProviderUpdates) {
   std::unique_ptr<cc::SoftwareOutputDevice> software_device(
       new FakeSoftwareOutputDevice());
   output_surface_ = CreateSurface(std::move(software_device));
-  CHECK(output_surface_->BindToClient(&output_surface_client));
+  output_surface_->BindToClient(&output_surface_client);
 
   FakeVSyncProvider* vsync_provider = static_cast<FakeVSyncProvider*>(
       output_surface_->software_device()->GetVSyncProvider());
   EXPECT_EQ(0, vsync_provider->call_count());
 
-  cc::CompositorFrame frame;
-  output_surface_->SwapBuffers(std::move(frame));
+  output_surface_->SwapBuffers(cc::OutputSurfaceFrame());
   EXPECT_EQ(1, vsync_provider->call_count());
+  EXPECT_EQ(1, update_vsync_parameters_call_count_);
 }

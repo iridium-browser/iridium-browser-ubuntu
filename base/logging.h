@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "base/base_export.h"
+#include "base/compiler_specific.h"
 #include "base/debug/debugger.h"
 #include "base/macros.h"
 #include "base/template_util.h"
@@ -426,9 +427,23 @@ const LogSeverity LOG_0 = LOG_ERROR;
 #define PLOG_IF(severity, condition) \
   LAZY_STREAM(PLOG_STREAM(severity), LOG_IS_ON(severity) && (condition))
 
-// The actual stream used isn't important.
-#define EAT_STREAM_PARAMETERS                                           \
-  true ? (void) 0 : ::logging::LogMessageVoidify() & LOG_STREAM(FATAL)
+BASE_EXPORT extern std::ostream* g_swallow_stream;
+
+// Note that g_swallow_stream is used instead of an arbitrary LOG() stream to
+// avoid the creation of an object with a non-trivial destructor (LogMessage).
+// On MSVC x86 (checked on 2015 Update 3), this causes a few additional
+// pointless instructions to be emitted even at full optimization level, even
+// though the : arm of the ternary operator is clearly never executed. Using a
+// simpler object to be &'d with Voidify() avoids these extra instructions.
+// Using a simpler POD object with a templated operator<< also works to avoid
+// these instructions. However, this causes warnings on statically defined
+// implementations of operator<<(std::ostream, ...) in some .cc files, because
+// they become defined-but-unreferenced functions. A reinterpret_cast of 0 to an
+// ostream* also is not suitable, because some compilers warn of undefined
+// behavior.
+#define EAT_STREAM_PARAMETERS \
+  true ? (void)0              \
+       : ::logging::LogMessageVoidify() & (*::logging::g_swallow_stream)
 
 // Captures the result of a CHECK_EQ (for example) and facilitates testing as a
 // boolean.
@@ -445,6 +460,13 @@ class CheckOpResult {
   std::string* message_;
 };
 
+// Crashes in the fastest, simplest possible way with no attempt at logging.
+#if defined(COMPILER_GCC) || defined(__clang__)
+#define IMMEDIATE_CRASH() __builtin_trap()
+#else
+#define IMMEDIATE_CRASH() ((void)(*(volatile char*)0 = 0))
+#endif
+
 // CHECK dies with a fatal error if condition is not true.  It is *not*
 // controlled by NDEBUG, so the check will be executed regardless of
 // compilation mode.
@@ -454,20 +476,14 @@ class CheckOpResult {
 
 #if defined(OFFICIAL_BUILD) && defined(NDEBUG)
 
-// Make all CHECK functions discard their log strings to reduce code
-// bloat, and improve performance, for official release builds.
-
-#if defined(COMPILER_GCC) || __clang__
-#define LOGGING_CRASH() __builtin_trap()
-#else
-#define LOGGING_CRASH() ((void)(*(volatile char*)0 = 0))
-#endif
-
+// Make all CHECK functions discard their log strings to reduce code bloat, and
+// improve performance, for official release builds.
+//
 // This is not calling BreakDebugger since this is called frequently, and
 // calling an out-of-line function instead of a noreturn inline macro prevents
 // compiler optimizations.
-#define CHECK(condition)                                                \
-  !(condition) ? LOGGING_CRASH() : EAT_STREAM_PARAMETERS
+#define CHECK(condition) \
+  UNLIKELY(!(condition)) ? IMMEDIATE_CRASH() : EAT_STREAM_PARAMETERS
 
 #define PCHECK(condition) CHECK(condition)
 
@@ -527,10 +543,24 @@ class CheckOpResult {
 // it uses the definition for operator<<, with a few special cases below.
 template <typename T>
 inline typename std::enable_if<
-    base::internal::SupportsOstreamOperator<const T&>::value,
+    base::internal::SupportsOstreamOperator<const T&>::value &&
+        !std::is_function<typename std::remove_pointer<T>::type>::value,
     void>::type
 MakeCheckOpValueString(std::ostream* os, const T& v) {
   (*os) << v;
+}
+
+// Provide an overload for functions and function pointers. Function pointers
+// don't implicitly convert to void* but do implicitly convert to bool, so
+// without this function pointers are always printed as 1 or 0. (MSVC isn't
+// standards-conforming here and converts function pointers to regular
+// pointers, so this is a no-op for MSVC.)
+template <typename T>
+inline typename std::enable_if<
+    std::is_function<typename std::remove_pointer<T>::type>::value,
+    void>::type
+MakeCheckOpValueString(std::ostream* os, const T& v) {
+  (*os) << reinterpret_cast<const void*>(v);
 }
 
 // We need overloads for enums that don't support operator<<.
@@ -589,11 +619,11 @@ std::string* MakeCheckOpString<std::string, std::string>(
   inline std::string* Check##name##Impl(const t1& v1, const t2& v2, \
                                         const char* names) { \
     if (v1 op v2) return NULL; \
-    else return MakeCheckOpString(v1, v2, names); \
+    else return ::logging::MakeCheckOpString(v1, v2, names);    \
   } \
   inline std::string* Check##name##Impl(int v1, int v2, const char* names) { \
     if (v1 op v2) return NULL; \
-    else return MakeCheckOpString(v1, v2, names); \
+    else return ::logging::MakeCheckOpString(v1, v2, names);    \
   }
 DEFINE_CHECK_OP_IMPL(EQ, ==)
 DEFINE_CHECK_OP_IMPL(NE, !=)
@@ -731,7 +761,7 @@ const LogSeverity LOG_DCHECK = LOG_INFO;
 // defined.
 //
 // You may append to the error message like so:
-//   DCHECK_NE(1, 2) << ": The world must be ending!";
+//   DCHECK_NE(1, 2) << "The world must be ending!";
 //
 // We are very careful to ensure that each argument is evaluated exactly
 // once, and that anything which is legal to pass as a function argument is

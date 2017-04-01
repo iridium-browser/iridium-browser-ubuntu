@@ -11,14 +11,18 @@
 #include "webrtc/modules/rtp_rtcp/source/rtp_format_h264.h"
 
 #include <string.h>
+#include <memory>
+#include <utility>
 #include <vector>
 
 #include "webrtc/base/checks.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/modules/include/module_common_types.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
+#include "webrtc/modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "webrtc/common_video/h264/sps_vui_rewriter.h"
 #include "webrtc/common_video/h264/h264_common.h"
+#include "webrtc/common_video/h264/pps_parser.h"
 #include "webrtc/common_video/h264/sps_parser.h"
 #include "webrtc/system_wrappers/include/metrics.h"
 
@@ -74,9 +78,14 @@ bool ParseStapAStartOffsets(const uint8_t* nalu_ptr,
 
 }  // namespace
 
-RtpPacketizerH264::RtpPacketizerH264(FrameType frame_type,
-                                     size_t max_payload_len)
-    : max_payload_len_(max_payload_len) {}
+RtpPacketizerH264::RtpPacketizerH264(size_t max_payload_len,
+                                     H264PacketizationMode packetization_mode)
+    : max_payload_len_(max_payload_len),
+      packetization_mode_(packetization_mode) {
+  // Guard against uninitialized memory in packetization_mode.
+  RTC_CHECK(packetization_mode == H264PacketizationMode::NonInterleaved ||
+            packetization_mode == H264PacketizationMode::SingleNalUnit);
+}
 
 RtpPacketizerH264::~RtpPacketizerH264() {
 }
@@ -113,10 +122,6 @@ void RtpPacketizerH264::SetPayloadData(
       // RtpDepacketizerH264::ParseSingleNalu (receive side, in orderer to
       // protect us from unknown or legacy send clients).
 
-      // Create temporary RBSP decoded buffer of the payload (exlcuding the
-      // leading nalu type header byte (the SpsParser uses only the payload).
-      std::unique_ptr<rtc::Buffer> rbsp_buffer = H264::ParseRbsp(
-          buffer + H264::kNaluTypeSize, length - H264::kNaluTypeSize);
       rtc::Optional<SpsParser::SpsState> sps;
 
       std::unique_ptr<rtc::Buffer> output_buffer(new rtc::Buffer());
@@ -124,7 +129,8 @@ void RtpPacketizerH264::SetPayloadData(
       // can append modified payload on top of that.
       output_buffer->AppendData(buffer[0]);
       SpsVuiRewriter::ParseResult result = SpsVuiRewriter::ParseAndRewriteSps(
-          rbsp_buffer->data(), rbsp_buffer->size(), &sps, output_buffer.get());
+          buffer + H264::kNaluTypeSize, length - H264::kNaluTypeSize, &sps,
+          output_buffer.get());
 
       switch (result) {
         case SpsVuiRewriter::ParseResult::kVuiRewritten:
@@ -162,11 +168,19 @@ void RtpPacketizerH264::SetPayloadData(
 
 void RtpPacketizerH264::GeneratePackets() {
   for (size_t i = 0; i < input_fragments_.size();) {
-    if (input_fragments_[i].length > max_payload_len_) {
-      PacketizeFuA(i);
-      ++i;
-    } else {
-      i = PacketizeStapA(i);
+    switch (packetization_mode_) {
+      case H264PacketizationMode::SingleNalUnit:
+        PacketizeSingleNalu(i);
+        ++i;
+        break;
+      case H264PacketizationMode::NonInterleaved:
+        if (input_fragments_[i].length > max_payload_len_) {
+          PacketizeFuA(i);
+          ++i;
+        } else {
+          i = PacketizeStapA(i);
+        }
+        break;
     }
   }
 }
@@ -194,7 +208,7 @@ void RtpPacketizerH264::PacketizeFuA(size_t fragment_index) {
     offset += packet_length;
     fragment_length -= packet_length;
   }
-  RTC_CHECK_EQ(0u, fragment_length);
+  RTC_CHECK_EQ(0, fragment_length);
 }
 
 size_t RtpPacketizerH264::PacketizeStapA(size_t fragment_index) {
@@ -205,7 +219,7 @@ size_t RtpPacketizerH264::PacketizeStapA(size_t fragment_index) {
   const Fragment* fragment = &input_fragments_[fragment_index];
   RTC_CHECK_GE(payload_size_left, fragment->length);
   while (payload_size_left >= fragment->length + fragment_headers_length) {
-    RTC_CHECK_GT(fragment->length, 0u);
+    RTC_CHECK_GT(fragment->length, 0);
     packets_.push(PacketUnit(*fragment, aggregated_fragments == 0, false, true,
                              fragment->buffer[0]));
     payload_size_left -= fragment->length;
@@ -229,54 +243,64 @@ size_t RtpPacketizerH264::PacketizeStapA(size_t fragment_index) {
   return fragment_index;
 }
 
-bool RtpPacketizerH264::NextPacket(uint8_t* buffer,
-                                   size_t* bytes_to_send,
+void RtpPacketizerH264::PacketizeSingleNalu(size_t fragment_index) {
+  // Add a single NALU to the queue, no aggregation.
+  size_t payload_size_left = max_payload_len_;
+  const Fragment* fragment = &input_fragments_[fragment_index];
+  RTC_CHECK_GE(payload_size_left, fragment->length)
+      << "Payload size left " << payload_size_left << ", fragment length "
+      << fragment->length << ", packetization mode " << packetization_mode_;
+  RTC_CHECK_GT(fragment->length, 0u);
+  packets_.push(PacketUnit(*fragment, true /* first */, true /* last */,
+                           false /* aggregated */, fragment->buffer[0]));
+}
+
+bool RtpPacketizerH264::NextPacket(RtpPacketToSend* rtp_packet,
                                    bool* last_packet) {
-  *bytes_to_send = 0;
+  RTC_DCHECK(rtp_packet);
+  RTC_DCHECK(last_packet);
   if (packets_.empty()) {
-    *bytes_to_send = 0;
     *last_packet = true;
     return false;
   }
 
   PacketUnit packet = packets_.front();
-
   if (packet.first_fragment && packet.last_fragment) {
     // Single NAL unit packet.
-    *bytes_to_send = packet.source_fragment.length;
-    memcpy(buffer, packet.source_fragment.buffer, *bytes_to_send);
+    size_t bytes_to_send = packet.source_fragment.length;
+    uint8_t* buffer = rtp_packet->AllocatePayload(bytes_to_send);
+    memcpy(buffer, packet.source_fragment.buffer, bytes_to_send);
     packets_.pop();
     input_fragments_.pop_front();
-    RTC_CHECK_LE(*bytes_to_send, max_payload_len_);
   } else if (packet.aggregated) {
-    NextAggregatePacket(buffer, bytes_to_send);
-    RTC_CHECK_LE(*bytes_to_send, max_payload_len_);
+    RTC_CHECK_EQ(H264PacketizationMode::NonInterleaved, packetization_mode_);
+    NextAggregatePacket(rtp_packet);
   } else {
-    NextFragmentPacket(buffer, bytes_to_send);
-    RTC_CHECK_LE(*bytes_to_send, max_payload_len_);
+    RTC_CHECK_EQ(H264PacketizationMode::NonInterleaved, packetization_mode_);
+    NextFragmentPacket(rtp_packet);
   }
+  RTC_DCHECK_LE(rtp_packet->payload_size(), max_payload_len_);
   *last_packet = packets_.empty();
+  rtp_packet->SetMarker(*last_packet);
   return true;
 }
 
-void RtpPacketizerH264::NextAggregatePacket(uint8_t* buffer,
-                                            size_t* bytes_to_send) {
+void RtpPacketizerH264::NextAggregatePacket(RtpPacketToSend* rtp_packet) {
+  uint8_t* buffer = rtp_packet->AllocatePayload(max_payload_len_);
+  RTC_DCHECK(buffer);
   PacketUnit* packet = &packets_.front();
   RTC_CHECK(packet->first_fragment);
   // STAP-A NALU header.
   buffer[0] = (packet->header & (kFBit | kNriMask)) | H264::NaluType::kStapA;
-  int index = kNalHeaderSize;
-  *bytes_to_send += kNalHeaderSize;
+  size_t index = kNalHeaderSize;
   while (packet->aggregated) {
     const Fragment& fragment = packet->source_fragment;
     // Add NAL unit length field.
     ByteWriter<uint16_t>::WriteBigEndian(&buffer[index], fragment.length);
     index += kLengthFieldSize;
-    *bytes_to_send += kLengthFieldSize;
     // Add NAL unit.
     memcpy(&buffer[index], fragment.buffer, fragment.length);
     index += fragment.length;
-    *bytes_to_send += fragment.length;
     packets_.pop();
     input_fragments_.pop_front();
     if (packet->last_fragment)
@@ -284,10 +308,10 @@ void RtpPacketizerH264::NextAggregatePacket(uint8_t* buffer,
     packet = &packets_.front();
   }
   RTC_CHECK(packet->last_fragment);
+  rtp_packet->SetPayloadSize(index);
 }
 
-void RtpPacketizerH264::NextFragmentPacket(uint8_t* buffer,
-                                           size_t* bytes_to_send) {
+void RtpPacketizerH264::NextFragmentPacket(RtpPacketToSend* rtp_packet) {
   PacketUnit* packet = &packets_.front();
   // NAL unit fragmented over multiple packets (FU-A).
   // We do not send original NALU header, so it will be replaced by the
@@ -301,11 +325,11 @@ void RtpPacketizerH264::NextFragmentPacket(uint8_t* buffer,
   fu_header |= (packet->last_fragment ? kEBit : 0);
   uint8_t type = packet->header & kTypeMask;
   fu_header |= type;
+  const Fragment& fragment = packet->source_fragment;
+  uint8_t* buffer =
+      rtp_packet->AllocatePayload(kFuAHeaderSize + fragment.length);
   buffer[0] = fu_indicator;
   buffer[1] = fu_header;
-
-  const Fragment& fragment = packet->source_fragment;
-  *bytes_to_send = fragment.length + kFuAHeaderSize;
   memcpy(buffer + kFuAHeaderSize, fragment.buffer, fragment.length);
   if (packet->last_fragment)
     input_fragments_.pop_front();
@@ -342,6 +366,7 @@ bool RtpDepacketizerH264::Parse(ParsedPayload* parsed_payload,
   modified_buffer_.reset();
 
   uint8_t nal_type = payload_data[0] & kTypeMask;
+  parsed_payload->type.Video.codecHeader.H264.nalus_length = 0;
   if (nal_type == H264::NaluType::kFuA) {
     // Fragmented NAL units (FU-A).
     if (!ParseFuaNalu(parsed_payload, payload_data))
@@ -368,7 +393,7 @@ bool RtpDepacketizerH264::ProcessStapAOrSingleNalu(
   parsed_payload->type.Video.width = 0;
   parsed_payload->type.Video.height = 0;
   parsed_payload->type.Video.codec = kRtpVideoH264;
-  parsed_payload->type.Video.isFirstPacket = true;
+  parsed_payload->type.Video.is_first_packet_in_frame = true;
   RTPVideoHeaderH264* h264_header =
       &parsed_payload->type.Video.codecHeader.H264;
 
@@ -408,81 +433,138 @@ bool RtpDepacketizerH264::ProcessStapAOrSingleNalu(
       return false;
     }
 
-    nal_type = payload_data[start_offset] & kTypeMask;
+    NaluInfo nalu;
+    nalu.type = payload_data[start_offset] & kTypeMask;
+    nalu.offset = start_offset;
+    nalu.size = end_offset - start_offset;
+    nalu.sps_id = -1;
+    nalu.pps_id = -1;
     start_offset += H264::kNaluTypeSize;
 
-    if (nal_type == H264::NaluType::kSps) {
-      // Check if VUI is present in SPS and if it needs to be modified to avoid
-      // excessive decoder latency.
+    switch (nalu.type) {
+      case H264::NaluType::kSps: {
+        // Check if VUI is present in SPS and if it needs to be modified to
+        // avoid
+        // excessive decoder latency.
 
-      // Copy any previous data first (likely just the first header).
-      std::unique_ptr<rtc::Buffer> output_buffer(new rtc::Buffer());
-      if (start_offset)
-        output_buffer->AppendData(payload_data, start_offset);
+        // Copy any previous data first (likely just the first header).
+        std::unique_ptr<rtc::Buffer> output_buffer(new rtc::Buffer());
+        if (start_offset)
+          output_buffer->AppendData(payload_data, start_offset);
 
-      // RBSP decode of payload data.
-      std::unique_ptr<rtc::Buffer> rbsp_buffer = H264::ParseRbsp(
-          &payload_data[start_offset], end_offset - start_offset);
-      rtc::Optional<SpsParser::SpsState> sps;
+        rtc::Optional<SpsParser::SpsState> sps;
 
-      SpsVuiRewriter::ParseResult result = SpsVuiRewriter::ParseAndRewriteSps(
-          rbsp_buffer->data(), rbsp_buffer->size(), &sps, output_buffer.get());
-      switch (result) {
-        case SpsVuiRewriter::ParseResult::kVuiRewritten:
-          if (modified_buffer_) {
-            LOG(LS_WARNING) << "More than one H264 SPS NAL units needing "
-                               "rewriting found within a single STAP-A packet. "
-                               "Keeping the first and rewriting the last.";
-          }
+        SpsVuiRewriter::ParseResult result = SpsVuiRewriter::ParseAndRewriteSps(
+            &payload_data[start_offset], end_offset - start_offset, &sps,
+            output_buffer.get());
+        switch (result) {
+          case SpsVuiRewriter::ParseResult::kVuiRewritten:
+            if (modified_buffer_) {
+              LOG(LS_WARNING)
+                  << "More than one H264 SPS NAL units needing "
+                     "rewriting found within a single STAP-A packet. "
+                     "Keeping the first and rewriting the last.";
+            }
 
-          // Rewrite length field to new SPS size.
-          if (h264_header->packetization_type == kH264StapA) {
-            size_t length_field_offset =
-                start_offset - (H264::kNaluTypeSize + kLengthFieldSize);
-            // Stap-A Length includes payload data and type header.
-            size_t rewritten_size =
-                output_buffer->size() - start_offset + H264::kNaluTypeSize;
-            ByteWriter<uint16_t>::WriteBigEndian(
-                &(*output_buffer)[length_field_offset], rewritten_size);
-          }
+            // Rewrite length field to new SPS size.
+            if (h264_header->packetization_type == kH264StapA) {
+              size_t length_field_offset =
+                  start_offset - (H264::kNaluTypeSize + kLengthFieldSize);
+              // Stap-A Length includes payload data and type header.
+              size_t rewritten_size =
+                  output_buffer->size() - start_offset + H264::kNaluTypeSize;
+              ByteWriter<uint16_t>::WriteBigEndian(
+                  &(*output_buffer)[length_field_offset], rewritten_size);
+            }
 
-          // Append rest of packet.
-          output_buffer->AppendData(&payload_data[end_offset],
-                                    nalu_length + kNalHeaderSize - end_offset);
+            // Append rest of packet.
+            output_buffer->AppendData(
+                &payload_data[end_offset],
+                nalu_length + kNalHeaderSize - end_offset);
 
-          modified_buffer_ = std::move(output_buffer);
-          length_ = modified_buffer_->size();
+            modified_buffer_ = std::move(output_buffer);
+            length_ = modified_buffer_->size();
 
-          RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
-                                    SpsValidEvent::kReceivedSpsRewritten,
-                                    SpsValidEvent::kSpsRewrittenMax);
-          break;
-        case SpsVuiRewriter::ParseResult::kPocOk:
-          RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
-                                    SpsValidEvent::kReceivedSpsPocOk,
-                                    SpsValidEvent::kSpsRewrittenMax);
-          break;
-        case SpsVuiRewriter::ParseResult::kVuiOk:
-          RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
-                                    SpsValidEvent::kReceivedSpsVuiOk,
-                                    SpsValidEvent::kSpsRewrittenMax);
-          break;
-        case SpsVuiRewriter::ParseResult::kFailure:
-          RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
-                                    SpsValidEvent::kReceivedSpsParseFailure,
-                                    SpsValidEvent::kSpsRewrittenMax);
-          break;
+            RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
+                                      SpsValidEvent::kReceivedSpsRewritten,
+                                      SpsValidEvent::kSpsRewrittenMax);
+            break;
+          case SpsVuiRewriter::ParseResult::kPocOk:
+            RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
+                                      SpsValidEvent::kReceivedSpsPocOk,
+                                      SpsValidEvent::kSpsRewrittenMax);
+            break;
+          case SpsVuiRewriter::ParseResult::kVuiOk:
+            RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
+                                      SpsValidEvent::kReceivedSpsVuiOk,
+                                      SpsValidEvent::kSpsRewrittenMax);
+            break;
+          case SpsVuiRewriter::ParseResult::kFailure:
+            RTC_HISTOGRAM_ENUMERATION(kSpsValidHistogramName,
+                                      SpsValidEvent::kReceivedSpsParseFailure,
+                                      SpsValidEvent::kSpsRewrittenMax);
+            break;
+        }
+
+        if (sps) {
+          parsed_payload->type.Video.width = sps->width;
+          parsed_payload->type.Video.height = sps->height;
+          nalu.sps_id = sps->id;
+        } else {
+          LOG(LS_WARNING) << "Failed to parse SPS id from SPS slice.";
+        }
+        parsed_payload->frame_type = kVideoFrameKey;
+        break;
       }
-
-      if (sps) {
-        parsed_payload->type.Video.width = sps->width;
-        parsed_payload->type.Video.height = sps->height;
+      case H264::NaluType::kPps: {
+        uint32_t pps_id;
+        uint32_t sps_id;
+        if (PpsParser::ParsePpsIds(&payload_data[start_offset],
+                                    end_offset - start_offset, &pps_id,
+                                    &sps_id)) {
+          nalu.pps_id = pps_id;
+          nalu.sps_id = sps_id;
+        } else {
+          LOG(LS_WARNING)
+              << "Failed to parse PPS id and SPS id from PPS slice.";
+        }
+        break;
       }
-      parsed_payload->frame_type = kVideoFrameKey;
-    } else if (nal_type == H264::NaluType::kPps ||
-               nal_type == H264::NaluType::kSei ||
-               nal_type == H264::NaluType::kIdr) {
-      parsed_payload->frame_type = kVideoFrameKey;
+      case H264::NaluType::kIdr:
+        parsed_payload->frame_type = kVideoFrameKey;
+        FALLTHROUGH();
+      case H264::NaluType::kSlice: {
+        rtc::Optional<uint32_t> pps_id = PpsParser::ParsePpsIdFromSlice(
+            &payload_data[start_offset], end_offset - start_offset);
+        if (pps_id) {
+          nalu.pps_id = *pps_id;
+        } else {
+          LOG(LS_WARNING) << "Failed to parse PPS id from slice of type: "
+                          << static_cast<int>(nalu.type);
+        }
+        break;
+      }
+      // Slices below don't contain SPS or PPS ids.
+      case H264::NaluType::kAud:
+      case H264::NaluType::kEndOfSequence:
+      case H264::NaluType::kEndOfStream:
+      case H264::NaluType::kFiller:
+        break;
+      case H264::NaluType::kSei:
+        parsed_payload->frame_type = kVideoFrameKey;
+        break;
+      case H264::NaluType::kStapA:
+      case H264::NaluType::kFuA:
+        LOG(LS_WARNING) << "Unexpected STAP-A or FU-A received.";
+        return false;
+    }
+    RTPVideoHeaderH264* h264 = &parsed_payload->type.Video.codecHeader.H264;
+    if (h264->nalus_length == kMaxNalusPerPacket) {
+      LOG(LS_WARNING)
+          << "Received packet containing more than " << kMaxNalusPerPacket
+          << " NAL units. Will not keep track sps and pps ids for all of them.";
+    } else {
+      h264->nalus[h264->nalus_length++] = nalu;
     }
   }
 
@@ -499,10 +581,22 @@ bool RtpDepacketizerH264::ParseFuaNalu(
   uint8_t fnri = payload_data[0] & (kFBit | kNriMask);
   uint8_t original_nal_type = payload_data[1] & kTypeMask;
   bool first_fragment = (payload_data[1] & kSBit) > 0;
-
+  NaluInfo nalu;
+  nalu.type = original_nal_type;
+  nalu.sps_id = -1;
+  nalu.pps_id = -1;
   if (first_fragment) {
     offset_ = 0;
     length_ -= kNalHeaderSize;
+    rtc::Optional<uint32_t> pps_id = PpsParser::ParsePpsIdFromSlice(
+        payload_data + 2 * kNalHeaderSize, length_ - kNalHeaderSize);
+    if (pps_id) {
+      nalu.pps_id = *pps_id;
+    } else {
+      LOG(LS_WARNING) << "Failed to parse PPS from first fragment of FU-A NAL "
+                         "unit with original type: "
+                      << static_cast<int>(nalu.type);
+    }
     uint8_t original_nal_header = fnri | original_nal_type;
     modified_buffer_.reset(new rtc::Buffer());
     modified_buffer_->AppendData(payload_data + kNalHeaderSize, length_);
@@ -520,11 +614,14 @@ bool RtpDepacketizerH264::ParseFuaNalu(
   parsed_payload->type.Video.width = 0;
   parsed_payload->type.Video.height = 0;
   parsed_payload->type.Video.codec = kRtpVideoH264;
-  parsed_payload->type.Video.isFirstPacket = first_fragment;
-  RTPVideoHeaderH264* h264_header =
-      &parsed_payload->type.Video.codecHeader.H264;
-  h264_header->packetization_type = kH264FuA;
-  h264_header->nalu_type = original_nal_type;
+  parsed_payload->type.Video.is_first_packet_in_frame = first_fragment;
+  RTPVideoHeaderH264* h264 = &parsed_payload->type.Video.codecHeader.H264;
+  h264->packetization_type = kH264FuA;
+  h264->nalu_type = original_nal_type;
+  if (first_fragment) {
+    h264->nalus[h264->nalus_length] = nalu;
+    h264->nalus_length = 1;
+  }
   return true;
 }
 

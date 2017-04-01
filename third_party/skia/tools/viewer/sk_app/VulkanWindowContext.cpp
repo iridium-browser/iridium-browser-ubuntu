@@ -8,10 +8,12 @@
 
 #include "GrContext.h"
 #include "GrRenderTarget.h"
+#include "SkAutoMalloc.h"
 #include "SkSurface.h"
 #include "VulkanWindowContext.h"
 
 #include "vk/GrVkInterface.h"
+#include "vk/GrVkMemory.h"
 #include "vk/GrVkUtil.h"
 #include "vk/GrVkTypes.h"
 
@@ -169,7 +171,7 @@ bool VulkanWindowContext::createSwapchain(int width, int height,
     // Pick our surface format. For now, just make sure it matches our sRGB request:
     VkFormat surfaceFormat = VK_FORMAT_UNDEFINED;
     VkColorSpaceKHR colorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
-    auto srgbColorSpace = SkColorSpace::NewNamed(SkColorSpace::kSRGB_Named);
+    auto srgbColorSpace = SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
     bool wantSRGB = srgbColorSpace == params.fColorSpace;
     for (uint32_t i = 0; i < surfaceFormatCount; ++i) {
         GrPixelConfig config;
@@ -219,7 +221,7 @@ bool VulkanWindowContext::createSwapchain(int width, int height,
         swapchainCreateInfo.pQueueFamilyIndices = nullptr;
     }
 
-    swapchainCreateInfo.preTransform = caps.currentTransform;;
+    swapchainCreateInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     swapchainCreateInfo.compositeAlpha = composite_alpha;
     swapchainCreateInfo.presentMode = mode;
     swapchainCreateInfo.clipped = true;
@@ -261,8 +263,8 @@ void VulkanWindowContext::createBuffers(VkFormat format) {
         GrBackendRenderTargetDesc desc;
         GrVkImageInfo info;
         info.fImage = fImages[i];
-        info.fAlloc = { VK_NULL_HANDLE, 0, 0 };
-        info.fImageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        info.fAlloc = { VK_NULL_HANDLE, 0, 0, 0 };
+        info.fImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         info.fImageTiling = VK_IMAGE_TILING_OPTIMAL;
         info.fFormat = format;
         info.fLevelCount = 1;
@@ -309,7 +311,7 @@ void VulkanWindowContext::createBuffers(VkFormat format) {
     fenceInfo.pNext = nullptr;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    // we create one additional backbuffer structure here, because we want to 
+    // we create one additional backbuffer structure here, because we want to
     // give the command buffers they contain a chance to finish before we cycle back
     fBackbuffers = new BackbufferInfo[fImageCount + 1];
     for (uint32_t i = 0; i < fImageCount + 1; ++i) {
@@ -416,7 +418,6 @@ VulkanWindowContext::BackbufferInfo* VulkanWindowContext::getAvailableBackbuffer
     }
 
     BackbufferInfo* backbuffer = fBackbuffers + fCurrentBackbufferIndex;
-
     GR_VK_CALL_ERRCHECK(fBackendContext->fInterface,
                         WaitForFences(fBackendContext->fDevice, 2, backbuffer->fUsageFences,
                                       true, UINT64_MAX));
@@ -443,9 +444,12 @@ sk_sp<SkSurface> VulkanWindowContext::getBackbufferSurface() {
     }
     if (VK_ERROR_OUT_OF_DATE_KHR == res) {
         // tear swapchain down and try again
-        if (!this->createSwapchain(0, 0, fDisplayParams)) {
+        if (!this->createSwapchain(-1, -1, fDisplayParams)) {
             return nullptr;
         }
+        backbuffer = this->getAvailableBackbuffer();
+        GR_VK_CALL_ERRCHECK(fBackendContext->fInterface,
+                            ResetFences(fBackendContext->fDevice, 2, backbuffer->fUsageFences));
 
         // acquire the image
         res = fAcquireNextImageKHR(fBackendContext->fDevice, fSwapchain, UINT64_MAX,
@@ -459,6 +463,7 @@ sk_sp<SkSurface> VulkanWindowContext::getBackbufferSurface() {
 
     // set up layout transfer from initial to color attachment
     VkImageLayout layout = fImageLayouts[backbuffer->fImageIndex];
+    SkASSERT(VK_IMAGE_LAYOUT_UNDEFINED == layout || VK_IMAGE_LAYOUT_PRESENT_SRC_KHR == layout);
     VkPipelineStageFlags srcStageMask = (VK_IMAGE_LAYOUT_UNDEFINED == layout) ?
                                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT :
                                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -514,17 +519,29 @@ sk_sp<SkSurface> VulkanWindowContext::getBackbufferSurface() {
                         QueueSubmit(fBackendContext->fQueue, 1, &submitInfo,
                                     backbuffer->fUsageFences[0]));
 
-    return sk_ref_sp(fSurfaces[backbuffer->fImageIndex].get());
+    GrVkImageInfo* imageInfo;
+    SkSurface* surface = fSurfaces[backbuffer->fImageIndex].get();
+    surface->getRenderTargetHandle((GrBackendObject*)&imageInfo,
+                                   SkSurface::kFlushRead_BackendHandleAccess);
+    imageInfo->updateImageLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    return sk_ref_sp(surface);
 }
 
 void VulkanWindowContext::swapBuffers() {
 
     BackbufferInfo* backbuffer = fBackbuffers + fCurrentBackbufferIndex;
+    GrVkImageInfo* imageInfo;
+    SkSurface* surface = fSurfaces[backbuffer->fImageIndex].get();
+    surface->getRenderTargetHandle((GrBackendObject*)&imageInfo,
+                                   SkSurface::kFlushRead_BackendHandleAccess);
+    // Check to make sure we never change the actually wrapped image
+    SkASSERT(imageInfo->fImage == fImages[backbuffer->fImageIndex]);
 
-    VkImageLayout layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    VkPipelineStageFlags srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkImageLayout layout = imageInfo->fImageLayout;
+    VkPipelineStageFlags srcStageMask = GrVkMemory::LayoutToPipelineStageFlags(layout);
     VkPipelineStageFlags dstStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    VkAccessFlags srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    VkAccessFlags srcAccessMask = GrVkMemory::LayoutToSrcAccessMask(layout);
     VkAccessFlags dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
     VkImageMemoryBarrier imageMemoryBarrier = {

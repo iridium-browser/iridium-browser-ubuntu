@@ -22,7 +22,6 @@
 #include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/windows_version.h"
@@ -108,23 +107,23 @@ bool IsUpdatePendingRestart() {
 }
 
 bool SwapNewChromeExeIfPresent() {
-  base::FilePath new_chrome_exe;
-  if (!GetNewerChromeFile(&new_chrome_exe))
-    return false;
-  if (!base::PathExists(new_chrome_exe))
+  if (!IsUpdatePendingRestart())
     return false;
   base::FilePath cur_chrome_exe;
   if (!PathService::Get(base::FILE_EXE, &cur_chrome_exe))
     return false;
 
-  // Open up the registry key containing current version and rename information.
-  bool user_install = InstallUtil::IsPerUserInstall(cur_chrome_exe);
-  HKEY reg_root = user_install ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
-  BrowserDistribution *dist = BrowserDistribution::GetDistribution();
+  // If this is a system-level install, ask Google Update to launch an elevated
+  // process to rename Chrome executables.
+  if (!InstallUtil::IsPerUserInstall(cur_chrome_exe))
+    return InvokeGoogleUpdateForRename();
+
+  // If this is a user-level install, directly launch a process to rename Chrome
+  // executables. Obtain the command to launch the process from the registry.
   base::win::RegKey key;
-  if (key.Open(reg_root, dist->GetVersionKey().c_str(),
-               KEY_QUERY_VALUE) == ERROR_SUCCESS) {
-    // First try to rename exe by launching rename command ourselves.
+  if (key.Open(HKEY_CURRENT_USER,
+               BrowserDistribution::GetDistribution()->GetVersionKey().c_str(),
+               KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS) {
     std::wstring rename_cmd;
     if (key.ReadValue(google_update::kRegRenameCmdField,
                       &rename_cmd) == ERROR_SUCCESS) {
@@ -141,8 +140,7 @@ bool SwapNewChromeExeIfPresent() {
     }
   }
 
-  // Rename didn't work so try to rename by calling Google Update
-  return InvokeGoogleUpdateForRename();
+  return false;
 }
 
 bool IsRunningOldChrome() {

@@ -33,19 +33,19 @@ const base::FilePath::CharType cookie_filename[] = FILE_PATH_LITERAL("Cookies");
 class SQLitePersistentCookieStorePerfTest : public testing::Test {
  public:
   SQLitePersistentCookieStorePerfTest()
-      : pool_owner_(new base::SequencedWorkerPoolOwner(1, "Background Pool")),
+      : pool_owner_(new base::SequencedWorkerPoolOwner(2, "SetupPool")),
         loaded_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                       base::WaitableEvent::InitialState::NOT_SIGNALED),
         key_loaded_event_(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                           base::WaitableEvent::InitialState::NOT_SIGNALED) {}
 
-  void OnLoaded(const std::vector<CanonicalCookie*>& cookies) {
-    cookies_ = cookies;
+  void OnLoaded(std::vector<std::unique_ptr<CanonicalCookie>> cookies) {
+    cookies_.swap(cookies);
     loaded_event_.Signal();
   }
 
-  void OnKeyLoaded(const std::vector<CanonicalCookie*>& cookies) {
-    cookies_ = cookies;
+  void OnKeyLoaded(std::vector<std::unique_ptr<CanonicalCookie>> cookies) {
+    cookies_.swap(cookies);
     key_loaded_event_.Signal();
   }
 
@@ -68,7 +68,7 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     store_ = new SQLitePersistentCookieStore(
-        temp_dir_.path().Append(cookie_filename), client_task_runner(),
+        temp_dir_.GetPath().Append(cookie_filename), client_task_runner(),
         background_task_runner(), false, NULL);
     std::vector<CanonicalCookie*> cookies;
     Load();
@@ -93,10 +93,10 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
     // Shut down the pool, causing deferred (no-op) commits to be discarded.
     pool_owner_->pool()->Shutdown();
     // ~SequencedWorkerPoolOwner blocks on pool shutdown.
-    pool_owner_.reset(new base::SequencedWorkerPoolOwner(1, "pool"));
+    pool_owner_.reset(new base::SequencedWorkerPoolOwner(2, "TestPool"));
 
     store_ = new SQLitePersistentCookieStore(
-        temp_dir_.path().Append(cookie_filename), client_task_runner(),
+        temp_dir_.GetPath().Append(cookie_filename), client_task_runner(),
         background_task_runner(), false, NULL);
   }
 
@@ -109,12 +109,12 @@ class SQLitePersistentCookieStorePerfTest : public testing::Test {
   std::unique_ptr<base::SequencedWorkerPoolOwner> pool_owner_;
   base::WaitableEvent loaded_event_;
   base::WaitableEvent key_loaded_event_;
-  std::vector<CanonicalCookie*> cookies_;
+  std::vector<std::unique_ptr<CanonicalCookie>> cookies_;
   base::ScopedTempDir temp_dir_;
   scoped_refptr<SQLitePersistentCookieStore> store_;
 };
 
-// Test the performance of priority load of cookies for a specfic domain key
+// Test the performance of priority load of cookies for a specific domain key
 TEST_F(SQLitePersistentCookieStorePerfTest, TestLoadForKeyPerformance) {
   for (int domain_num = 0; domain_num < 3; ++domain_num) {
     std::string domain_name(base::StringPrintf("domain_%d.com", domain_num));

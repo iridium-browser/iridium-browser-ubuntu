@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <deque>
+#include <list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "components/precache/core/fetcher_pool.h"
+#include "components/precache/core/proto/precache.pb.h"
 #include "components/precache/core/proto/quota.pb.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -40,23 +42,39 @@ class PrecacheUnfinishedWork;
 
 // Visible for testing.
 extern const int kNoTracking;
+extern const int kMaxParallelFetches;
 
-// Contains the information about manifest for a host.
+// Information about the manifest for a host.
 struct ManifestHostInfo {
   ManifestHostInfo(int64_t manifest_id,
                    const std::string& hostname,
+                   int64_t visits,
                    const std::string& used_url_hash,
-                   const std::string& unused_url_hash);
+                   const std::string& downloaded_url_hash);
+  ~ManifestHostInfo();
   ManifestHostInfo(ManifestHostInfo&&);
   ManifestHostInfo& operator=(ManifestHostInfo&&);
-
-  ~ManifestHostInfo();
+  // Copy constructor and assignment operator are implicitly deleted.
 
   int64_t manifest_id;
   std::string hostname;
   GURL manifest_url;
+  int64_t visits;
   std::string used_url_hash;
-  std::string unused_url_hash;
+  std::string downloaded_url_hash;
+};
+
+// Information about a resource to be downloaded.
+struct ResourceInfo {
+  ResourceInfo(const GURL& url, const std::string& referrer, double weight);
+  ~ResourceInfo();
+  ResourceInfo(ResourceInfo&&);
+  ResourceInfo& operator=(ResourceInfo&&);
+  // Copy constructor and assignment operator are implicitly deleted.
+
+  GURL url;              // The resource being requested.
+  std::string referrer;  // The host of the manifest requesting this resource.
+  double weight;         // Estimate of the expected utility of this resource.
 };
 
 // Public interface to code that fetches resources that the user is likely to
@@ -110,7 +128,6 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
     // were fetched or not. If the PrecacheFetcher is destroyed before OnDone is
     // called, then precaching will be canceled and OnDone will not be called.
     virtual void OnDone() = 0;
-
   };
 
   // Visible for testing.
@@ -152,6 +169,8 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
 
  private:
   friend class PrecacheFetcherTest;
+  FRIEND_TEST_ALL_PREFIXES(PrecacheFetcherTest,
+                           GloballyRankResourcesAfterPauseResume);
   FRIEND_TEST_ALL_PREFIXES(PrecacheFetcherTest, FetcherPoolMaxLimitReached);
   FRIEND_TEST_ALL_PREFIXES(PrecacheFetcherTest,
                            CancelPrecachingAfterAllManifestFetch);
@@ -168,7 +187,7 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
   // the |resource_urls_to_fetch_| list, reducing the memory usage.
   void StartNextFetch();
 
-  void StartNextManifestFetch();
+  void StartNextManifestFetches();
   void StartNextResourceFetch();
 
   // Called when the precache configuration settings have been fetched.
@@ -183,7 +202,13 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
   // Called when a precache manifest has been fetched. Builds the list of
   // resource URLs to fetch according to the URLs in the manifest. If the fetch
   // of a manifest fails, then it skips to the next manifest.
-  void OnManifestFetchComplete(const Fetcher& source);
+  void OnManifestFetchComplete(int64_t host_visits, const Fetcher& source);
+
+  // Moves the pending resource URLs into the to-be-fetched queue, and sorts and
+  // truncates if specified by the PrecacheConfigurationSettings. Called by
+  // OnManifestFetchComplete after the last manifest is fetched, so that
+  // StartNextFetch will begin fetching resource URLs.
+  void QueueResourcesForFetch();
 
   // Called when a resource has been fetched.
   void OnResourceFetchComplete(const Fetcher& source);
@@ -215,8 +240,23 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
   // Non-owning pointer. Should not be NULL.
   PrecacheDelegate* precache_delegate_;
 
+  // Top hosts for which manifests still need to be fetched (i.e. no Fetcher has
+  // been created yet).
   std::deque<ManifestHostInfo> top_hosts_to_fetch_;
-  std::deque<std::pair<GURL, std::string>> resources_to_fetch_;
+
+  // Top hosts for which manifests are currently being fetched.
+  std::list<ManifestHostInfo> top_hosts_fetching_;
+
+  // Resources to be fetched, in desired fetch order. Populated only after
+  // manifest fetching is complete.
+  std::deque<ResourceInfo> resources_to_fetch_;
+
+  // Resources currently being fetched, in the order requested.
+  std::list<ResourceInfo> resources_fetching_;
+
+  // Resources to be fetched, not yet ranked. Valid until manifest fetching is
+  // done, after which resources are sorted and places in resources_to_fetch_.
+  std::deque<ResourceInfo> resources_to_rank_;
 
   FetcherPool<Fetcher> pool_;
 
@@ -230,6 +270,12 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
 
   DISALLOW_COPY_AND_ASSIGN(PrecacheFetcher);
 };
+
+// Visible for testing.
+double ResourceWeight(
+    PrecacheConfigurationSettings::ResourceWeightFunction function,
+    double resource_weight_ratio,
+    int64_t host_visits);
 
 // Class that fetches a URL, and runs the specified callback when the fetch is
 // complete. This class exists so that a different method can be run in
@@ -253,14 +299,25 @@ class PrecacheFetcher : public base::SupportsWeakPtr<PrecacheFetcher> {
 // network_url_fetcher() will return nullptr.
 class PrecacheFetcher::Fetcher : public net::URLFetcherDelegate {
  public:
-  // Construct a new Fetcher. This will create and start a new URLFetcher for
-  // the specified URL using the specified request context.
+  // Construct a new Fetcher. This will create and start a new URLFetcher
+  // immediately. Parameters:
+  //   request_context: The request context to pass to the URLFetcher.
+  //   url: The URL to fetch.
+  //   referrer: The hostname of the manifest requesting this resource. Empty
+  //       for config fetches.
+  //   callback: Called when the fetch is finished or cancelled.
+  //   is_resource_request: If true, the URL may be refreshed using
+  //       LOAD_VALIDATE_CACHE.
+  //   max_bytes: The number of bytes to download before cancelling.
+  //   revalidation_only: If true, the URL is fetched only if it has an existing
+  //       cache entry with conditional headers.
   Fetcher(net::URLRequestContextGetter* request_context,
           const GURL& url,
           const std::string& referrer,
           const base::Callback<void(const Fetcher&)>& callback,
           bool is_resource_request,
-          size_t max_bytes);
+          size_t max_bytes,
+          bool revalidation_only);
   ~Fetcher() override;
   void OnURLFetchDownloadProgress(const net::URLFetcher* source,
                                   int64_t current,
@@ -283,12 +340,14 @@ class PrecacheFetcher::Fetcher : public net::URLFetcherDelegate {
   void LoadFromCache();
   void LoadFromNetwork();
 
+  // The arguments to this Fetcher's constructor.
   net::URLRequestContextGetter* const request_context_;
   const GURL url_;
   const std::string referrer_;
   const base::Callback<void(const Fetcher&)> callback_;
   const bool is_resource_request_;
   const size_t max_bytes_;
+  const bool revalidation_only_;
 
   FetchStage fetch_stage_;
   // The cache_url_fetcher_ is kept alive until Fetcher destruction for testing.

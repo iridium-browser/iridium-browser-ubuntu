@@ -8,19 +8,15 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "chrome/grit/generated_resources.h"
 #include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/api_permission_set.h"
 #include "extensions/common/permissions/media_galleries_permission.h"
 #include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/permissions/settings_override_permission.h"
-#include "extensions/strings/grit/extensions_strings.h"
 
 namespace extensions {
 
 namespace {
-
-const char kWindowsPermission[] = "windows";
 
 template <typename T>
 APIPermission* CreateAPIPermission(const APIPermissionInfo* permission) {
@@ -33,7 +29,7 @@ std::vector<std::unique_ptr<APIPermissionInfo>>
 ChromeAPIPermissions::GetAllPermissions() const {
   // WARNING: If you are modifying a permission message in this list, be sure to
   // add the corresponding permission message rule to
-  // ChromePermissionMessageProvider::GetCoalescedPermissionMessages as well.
+  // ChromePermissionMessageProvider::GetPermissionMessages as well.
   APIPermissionInfo::InitInfo permissions_to_register[] = {
       // Register permissions for all extension types.
       {APIPermission::kBackground, "background"},
@@ -140,8 +136,6 @@ ChromeAPIPermissions::GetAllPermissions() const {
       {APIPermission::kMediaPlayerPrivate, "mediaPlayerPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kMediaRouterPrivate, "mediaRouterPrivate",
-       APIPermissionInfo::kFlagCannotBeOptional},
-      {APIPermission::kMetricsPrivate, "metricsPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kMusicManagerPrivate, "musicManagerPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
@@ -264,14 +258,6 @@ ChromeAPIPermissions::GetAllPermissions() const {
     permissions.push_back(
         base::WrapUnique(new APIPermissionInfo(permissions_to_register[i])));
   return permissions;
-}
-
-std::vector<PermissionsProvider::AliasInfo>
-ChromeAPIPermissions::GetAllAliases() const {
-  // Register aliases.
-  std::vector<PermissionsProvider::AliasInfo> aliases;
-  aliases.push_back(PermissionsProvider::AliasInfo("tabs", kWindowsPermission));
-  return aliases;
 }
 
 }  // namespace extensions

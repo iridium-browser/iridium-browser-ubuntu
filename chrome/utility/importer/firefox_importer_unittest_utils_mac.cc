@@ -17,15 +17,16 @@
 #include "base/process/launch.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/multiprocess_test.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/common/importer/firefox_importer_utils.h"
+#include "content/public/common/content_descriptors.h"
 #include "content/public/common/mojo_channel_switches.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_descriptors.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_message.h"
-#include "ipc/ipc_multiprocess_test.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
@@ -55,8 +56,9 @@ base::Process LaunchNSSDecrypterChildProcess(
   options.environ["DYLD_FALLBACK_LIBRARY_PATH"] = nss_path.value();
 
   base::FileHandleMappingVector fds_to_map;
-  fds_to_map.push_back(std::pair<int,int>(mojo_handle.get().handle,
-      kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
+  fds_to_map.push_back(std::pair<int, int>(
+      mojo_handle.get().handle,
+      kMojoIPCChannel + base::GlobalDescriptors::kBaseDescriptor));
 
   options.fds_to_remap = &fds_to_map;
   return base::LaunchProcess(cl.argv(), options);
@@ -179,48 +181,25 @@ FFUnitTestDecryptorProxy::~FFUnitTestDecryptorProxy() {
   }
 }
 
-// A message_loop task that quits the message loop when invoked, setting cancel
-// causes the task to do nothing when invoked.
-class CancellableQuitMsgLoop : public base::RefCounted<CancellableQuitMsgLoop> {
- public:
-  CancellableQuitMsgLoop() : cancelled_(false) {}
-  void QuitNow() {
-    if (!cancelled_)
-      base::MessageLoop::current()->QuitWhenIdle();
-  }
-  bool cancelled_;
-
- private:
-  friend class base::RefCounted<CancellableQuitMsgLoop>;
-  ~CancellableQuitMsgLoop() {}
-};
-
 // Spin until either a client response arrives or a timeout occurs.
-bool FFUnitTestDecryptorProxy::WaitForClientResponse() {
+void FFUnitTestDecryptorProxy::WaitForClientResponse() {
   // What we're trying to do here is to wait for an RPC message to go over the
   // wire and the client to reply.  If the client does not reply by a given
   // timeout we kill the message loop.
-  // The way we do this is to post a CancellableQuitMsgLoop for 3 seconds in
-  // the future and cancel it if an RPC message comes back earlier.
   // This relies on the IPC listener class to quit the message loop itself when
   // a message comes in.
-  scoped_refptr<CancellableQuitMsgLoop> quit_task(
-      new CancellableQuitMsgLoop());
+  base::RunLoop run_loop;
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&CancellableQuitMsgLoop::QuitNow, quit_task.get()),
+      FROM_HERE, run_loop.QuitWhenIdleClosure(),
       TestTimeouts::action_max_timeout());
-
-  message_loop_->Run();
-  bool ret = !quit_task->cancelled_;
-  quit_task->cancelled_ = false;
-  return ret;
+  run_loop.Run();
 }
 
 bool FFUnitTestDecryptorProxy::DecryptorInit(const base::FilePath& dll_path,
                                              const base::FilePath& db_path) {
   channel_->Send(new Msg_Decryptor_Init(dll_path, db_path));
-  bool ok = WaitForClientResponse();
-  if (ok && listener_->got_result) {
+  WaitForClientResponse();
+  if (listener_->got_result) {
     listener_->got_result = false;
     return listener_->result_bool;
   }
@@ -229,8 +208,8 @@ bool FFUnitTestDecryptorProxy::DecryptorInit(const base::FilePath& dll_path,
 
 base::string16 FFUnitTestDecryptorProxy::Decrypt(const std::string& crypt) {
   channel_->Send(new Msg_Decrypt(crypt));
-  bool ok = WaitForClientResponse();
-  if (ok && listener_->got_result) {
+  WaitForClientResponse();
+  if (listener_->got_result) {
     listener_->got_result = false;
     return listener_->result_string;
   }
@@ -240,8 +219,8 @@ base::string16 FFUnitTestDecryptorProxy::Decrypt(const std::string& crypt) {
 std::vector<autofill::PasswordForm> FFUnitTestDecryptorProxy::ParseSignons(
     const base::FilePath& signons_path) {
   channel_->Send(new Msg_ParseSignons(signons_path));
-  bool ok = WaitForClientResponse();
-  if (ok && listener_->got_result) {
+  WaitForClientResponse();
+  if (listener_->got_result) {
     listener_->got_result = false;
     return listener_->result_vector;
   }
@@ -301,13 +280,13 @@ class FFDecryptorClientChannelListener : public IPC::Listener {
 };
 
 // Entry function in child process.
-MULTIPROCESS_IPC_TEST_MAIN(NSSDecrypterChildProcess) {
+MULTIPROCESS_TEST_MAIN(NSSDecrypterChildProcess) {
   base::MessageLoopForIO main_message_loop;
   FFDecryptorClientChannelListener listener;
 
   mojo::edk::SetParentPipeHandle(
       mojo::edk::ScopedPlatformHandle(mojo::edk::PlatformHandle(
-          base::GlobalDescriptors::GetInstance()->Get(kPrimaryIPCChannel))));
+          kMojoIPCChannel + base::GlobalDescriptors::kBaseDescriptor)));
   mojo::ScopedMessagePipeHandle mojo_handle =
       mojo::edk::CreateChildMessagePipe(
           base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(

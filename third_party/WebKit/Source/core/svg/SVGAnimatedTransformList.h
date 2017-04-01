@@ -37,25 +37,36 @@
 
 namespace blink {
 
-// SVG Spec: http://www.w3.org/TR/SVG11/coords.html#InterfaceSVGAnimatedTransformList
-class SVGAnimatedTransformList final : public SVGAnimatedProperty<SVGTransformList>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static SVGAnimatedTransformList* create(SVGElement* contextElement, const QualifiedName& attributeName, SVGTransformList* initialValue)
-    {
-        return new SVGAnimatedTransformList(contextElement, attributeName, initialValue);
-    }
+// SVG Spec:
+// http://www.w3.org/TR/SVG11/coords.html#InterfaceSVGAnimatedTransformList
+class SVGAnimatedTransformList final
+    : public SVGAnimatedProperty<SVGTransformList>,
+      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS()
-    {
-        visitor->traceWrappers(contextElement());
-    }
+ public:
+  static SVGAnimatedTransformList* create(
+      SVGElement* contextElement,
+      const QualifiedName& attributeName,
+      CSSPropertyID cssPropertyId = CSSPropertyInvalid) {
+    return new SVGAnimatedTransformList(contextElement, attributeName,
+                                        cssPropertyId);
+  }
 
-protected:
-    SVGAnimatedTransformList(SVGElement* contextElement, const QualifiedName& attributeName, SVGTransformList* initialValue)
-        : SVGAnimatedProperty<SVGTransformList>(contextElement, attributeName, initialValue) { }
+  DEFINE_INLINE_VIRTUAL_TRACE_WRAPPERS() {
+    visitor->traceWrappers(contextElement());
+  }
+
+ protected:
+  SVGAnimatedTransformList(SVGElement* contextElement,
+                           const QualifiedName& attributeName,
+                           CSSPropertyID cssPropertyId)
+      : SVGAnimatedProperty<SVGTransformList>(contextElement,
+                                              attributeName,
+                                              SVGTransformList::create(),
+                                              cssPropertyId) {}
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

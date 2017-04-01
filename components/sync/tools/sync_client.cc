@@ -30,20 +30,20 @@
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "components/sync/base/cancelation_signal.h"
 #include "components/sync/base/fake_encryptor.h"
+#include "components/sync/base/invalidation_helper.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/unrecoverable_error_handler.h"
 #include "components/sync/base/weak_handle.h"
-#include "components/sync/core/base_node.h"
-#include "components/sync/core/http_bridge.h"
-#include "components/sync/core/http_post_provider_factory.h"
-#include "components/sync/core/internal_components_factory_impl.h"
-#include "components/sync/core/read_node.h"
-#include "components/sync/core/sync_manager.h"
-#include "components/sync/core/sync_manager_factory.h"
-#include "components/sync/driver/invalidation_helper.h"
+#include "components/sync/engine/engine_components_factory_impl.h"
+#include "components/sync/engine/net/http_bridge.h"
+#include "components/sync/engine/net/http_post_provider_factory.h"
 #include "components/sync/engine/passive_model_worker.h"
+#include "components/sync/engine/sync_manager.h"
+#include "components/sync/engine/sync_manager_factory.h"
 #include "components/sync/js/js_event_details.h"
 #include "components/sync/js/js_event_handler.h"
+#include "components/sync/syncable/base_node.h"
+#include "components/sync/syncable/read_node.h"
 #include "components/sync/tools/null_invalidation_state_tracker.h"
 #include "jingle/notifier/base/notification_method.h"
 #include "jingle/notifier/base/notifier_options.h"
@@ -79,7 +79,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
  public:
   MyTestURLRequestContext() : TestURLRequestContext(true) {
     context_storage_.set_host_resolver(
-        net::HostResolver::CreateDefaultResolver(NULL));
+        net::HostResolver::CreateDefaultResolver(nullptr));
     context_storage_.set_transport_security_state(
         base::MakeUnique<net::TransportSecurityState>());
     Init();
@@ -98,7 +98,7 @@ class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
     // Construct |context_| lazily so it gets constructed on the right
     // thread (the IO thread).
     if (!context_)
-      context_.reset(new MyTestURLRequestContext());
+      context_ = base::MakeUnique<MyTestURLRequestContext>();
     return context_.get();
   }
 
@@ -190,9 +190,9 @@ class LoggingJsEventHandler
   }
 };
 
-class InvalidationAdapter : public syncer::InvalidationInterface {
+class InvalidationAdapter : public InvalidationInterface {
  public:
-  explicit InvalidationAdapter(const syncer::Invalidation& invalidation)
+  explicit InvalidationAdapter(const Invalidation& invalidation)
       : invalidation_(invalidation) {}
   ~InvalidationAdapter() override {}
 
@@ -211,7 +211,7 @@ class InvalidationAdapter : public syncer::InvalidationInterface {
   void Drop() override { invalidation_.Drop(); }
 
  private:
-  syncer::Invalidation invalidation_;
+  Invalidation invalidation_;
 };
 
 class InvalidatorShim : public InvalidationHandler {
@@ -225,20 +225,20 @@ class InvalidatorShim : public InvalidationHandler {
 
   void OnIncomingInvalidation(
       const ObjectIdInvalidationMap& invalidation_map) override {
-    syncer::ObjectIdSet ids = invalidation_map.GetObjectIds();
-    for (syncer::ObjectIdSet::const_iterator ids_it = ids.begin();
-         ids_it != ids.end(); ++ids_it) {
-      syncer::ModelType type;
+    ObjectIdSet ids = invalidation_map.GetObjectIds();
+    for (ObjectIdSet::const_iterator ids_it = ids.begin(); ids_it != ids.end();
+         ++ids_it) {
+      ModelType type;
       if (!NotificationTypeToRealModelType(ids_it->name(), &type)) {
         DLOG(WARNING) << "Notification has invalid id: "
-                      << syncer::ObjectIdToString(*ids_it);
+                      << ObjectIdToString(*ids_it);
       } else {
-        syncer::SingleObjectInvalidationSet invalidation_set =
+        SingleObjectInvalidationSet invalidation_set =
             invalidation_map.ForObject(*ids_it);
-        for (syncer::SingleObjectInvalidationSet::const_iterator inv_it =
+        for (SingleObjectInvalidationSet::const_iterator inv_it =
                  invalidation_set.begin();
              inv_it != invalidation_set.end(); ++inv_it) {
-          std::unique_ptr<syncer::InvalidationInterface> inv_adapter(
+          std::unique_ptr<InvalidationInterface> inv_adapter(
               new InvalidationAdapter(*inv_it));
           sync_manager_->OnIncomingInvalidation(type, std::move(inv_adapter));
         }
@@ -317,7 +317,7 @@ int SyncClientMain(int argc, char* argv[]) {
         "Usage: %s --%s=foo@bar.com --%s=token\n"
         "[--%s=host:port] [--%s] [--%s]\n"
         "Run chrome and set a breakpoint on\n"
-        "syncer::SyncManagerImpl::UpdateCredentials() "
+        "SyncManagerImpl::UpdateCredentials() "
         "after logging into\n"
         "sync to get the token to pass into this utility.\n",
         argv[0], kEmailSwitch, kTokenSwitch, kXmppHostPortSwitch,
@@ -334,9 +334,8 @@ int SyncClientMain(int argc, char* argv[]) {
       new MyTestURLRequestContextGetter(io_thread.task_runner());
   const notifier::NotifierOptions& notifier_options =
       ParseNotifierOptions(command_line, context_getter);
-  syncer::NetworkChannelCreator network_channel_creator =
-      syncer::NonBlockingInvalidator::MakePushClientChannelCreator(
-          notifier_options);
+  NetworkChannelCreator network_channel_creator =
+      NonBlockingInvalidator::MakePushClientChannelCreator(notifier_options);
   const char kClientInfo[] = "standalone_sync_client";
   std::string invalidator_id = base::RandBytesAsString(8);
   NullInvalidationStateTracker null_invalidation_state_tracker;
@@ -384,7 +383,7 @@ int SyncClientMain(int argc, char* argv[]) {
     routing_info[it.Get()] = GROUP_PASSIVE;
   }
   scoped_refptr<PassiveModelWorker> passive_model_safe_worker =
-      new PassiveModelWorker(nullptr);
+      new PassiveModelWorker();
   std::vector<scoped_refptr<ModelSafeWorker>> workers;
   workers.push_back(passive_model_safe_worker);
 
@@ -393,8 +392,8 @@ int SyncClientMain(int argc, char* argv[]) {
   std::unique_ptr<SyncManager> sync_manager =
       sync_manager_factory.CreateSyncManager("sync_client manager");
   LoggingJsEventHandler js_event_handler;
-  // Used only by InitialProcessMetadata(), so it's okay to leave this as NULL.
-  const scoped_refptr<base::TaskRunner> blocking_task_runner = NULL;
+  // Used only by InitialProcessMetadata(), so it's okay to leave this as null.
+  const scoped_refptr<base::TaskRunner> blocking_task_runner = nullptr;
   const char kUserAgent[] = "sync_client";
   // TODO(akalin): Replace this with just the context getter once
   // HttpPostProviderFactory is removed.
@@ -403,20 +402,19 @@ int SyncClientMain(int argc, char* argv[]) {
       context_getter.get(), base::Bind(&StubNetworkTimeUpdateCallback),
       &factory_cancelation_signal));
   post_factory->Init(kUserAgent, BindToTrackerCallback());
-  // Used only when committing bookmarks, so it's okay to leave this
-  // as NULL.
-  ExtensionsActivity* extensions_activity = NULL;
+  // Used only when committing bookmarks, so it's okay to leave this as null.
+  ExtensionsActivity* extensions_activity = nullptr;
   LoggingChangeDelegate change_delegate;
   const char kRestoredKeyForBootstrapping[] = "";
   const char kRestoredKeystoreKeyForBootstrapping[] = "";
   NullEncryptor null_encryptor;
-  InternalComponentsFactoryImpl::Switches factory_switches = {
-      InternalComponentsFactory::ENCRYPTION_KEYSTORE,
-      InternalComponentsFactory::BACKOFF_NORMAL};
+  EngineComponentsFactoryImpl::Switches factory_switches = {
+      EngineComponentsFactory::ENCRYPTION_KEYSTORE,
+      EngineComponentsFactory::BACKOFF_NORMAL};
   CancelationSignal scm_cancelation_signal;
 
   SyncManager::InitArgs args;
-  args.database_location = database_dir.path();
+  args.database_location = database_dir.GetPath();
   args.event_handler = WeakHandle<JsEventHandler>(js_event_handler.AsWeakPtr());
   args.service_url = GURL(kSyncServiceURL);
   args.post_factory = std::move(post_factory);
@@ -428,8 +426,8 @@ int SyncClientMain(int argc, char* argv[]) {
   args.restored_key_for_bootstrapping = kRestoredKeyForBootstrapping;
   args.restored_keystore_key_for_bootstrapping =
       kRestoredKeystoreKeyForBootstrapping;
-  args.internal_components_factory.reset(
-      new InternalComponentsFactoryImpl(factory_switches));
+  args.engine_components_factory =
+      base::MakeUnique<EngineComponentsFactoryImpl>(factory_switches);
   args.encryptor = &null_encryptor;
   args.unrecoverable_error_handler = WeakHandle<UnrecoverableErrorHandler>();
   args.report_unrecoverable_error_function =

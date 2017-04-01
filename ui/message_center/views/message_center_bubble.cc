@@ -60,12 +60,10 @@ void ContentsView::ChildPreferredSizeChanged(View* child) {
 // MessageCenterBubble /////////////////////////////////////////////////////////
 
 MessageCenterBubble::MessageCenterBubble(MessageCenter* message_center,
-                                         MessageCenterTray* tray,
-                                         bool first_item_has_no_margin)
+                                         MessageCenterTray* tray)
     : MessageBubbleBase(message_center, tray),
       message_center_view_(NULL),
-      initially_settings_visible_(false),
-      first_item_has_no_margin_(first_item_has_no_margin) {}
+      initially_settings_visible_(false) {}
 
 MessageCenterBubble::~MessageCenterBubble() {
   // Removs this from the widget observers just in case. MessageCenterBubble
@@ -89,7 +87,6 @@ views::TrayBubbleView::InitParams MessageCenterBubble::GetInitParams(
   init_params.max_width += kMarginBetweenItems * 2;
   init_params.max_height = max_height();
   init_params.can_activate = true;
-  init_params.first_item_has_no_margin = first_item_has_no_margin_;
   return init_params;
 }
 
@@ -98,24 +95,13 @@ void MessageCenterBubble::InitializeContents(
   set_bubble_view(new_bubble_view);
   bubble_view()->GetWidget()->AddObserver(this);
   message_center_view_ = new MessageCenterView(
-      message_center(), tray(), max_height(), initially_settings_visible_,
-      false); /* MessageCenterBubble should be used only on ChromeOS.
-                 Message center is never shown top down in ChromeOS. */
+      message_center(), tray(), max_height(), initially_settings_visible_);
   bubble_view()->AddChildView(new ContentsView(this, message_center_view_));
   // Resize the content of the bubble view to the given bubble size. This is
   // necessary in case of the bubble border forcing a bigger size then the
   // |new_bubble_view| actually wants. See crbug.com/169390.
   bubble_view()->Layout();
   UpdateBubbleView();
-  views::FocusManager* focus_manager = bubble_view()->GetFocusManager();
-  // new_bubble_view should be a top level view and have a focus manager.
-  DCHECK(focus_manager);
-  views::View* next_focusable_view = focus_manager
-      ->GetNextFocusableView(nullptr, nullptr, false, false);
-  // The bubble may not have any focusable view (eg. on lock screen). In such
-  // case, |next_focusable_view| is null.
-  if (next_focusable_view)
-    next_focusable_view->RequestFocus();
 }
 
 void MessageCenterBubble::OnBubbleViewDestroyed() {

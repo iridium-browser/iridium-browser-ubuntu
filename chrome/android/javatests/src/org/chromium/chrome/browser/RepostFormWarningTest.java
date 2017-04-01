@@ -4,13 +4,13 @@
 
 package org.chromium.chrome.browser;
 
-import android.os.Environment;
+import android.support.test.filters.MediumTest;
+import android.support.test.filters.SmallTest;
 import android.support.v7.app.AlertDialog;
-import android.test.suitebuilder.annotation.MediumTest;
-import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.content.browser.test.util.Criteria;
@@ -25,6 +25,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * Integration tests verifying that form resubmission dialogs are correctly displayed and handled.
  */
+@RetryOnFailure
 public class RepostFormWarningTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     // Active tab.
     private Tab mTab;
@@ -48,8 +49,7 @@ public class RepostFormWarningTest extends ChromeActivityTestCaseBase<ChromeActi
 
         mTab = getActivity().getActivityTab();
         mCallbackHelper = new TestCallbackHelperContainer(mTab.getContentViewCore());
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 
     @Override
@@ -154,7 +154,7 @@ public class RepostFormWarningTest extends ChromeActivityTestCaseBase<ChromeActi
                 });
     }
 
-    private AlertDialog waitForRepostFormWarningDialog() throws InterruptedException {
+    private AlertDialog waitForRepostFormWarningDialog() {
         CriteriaHelper.pollUiThread(
                 new Criteria("Form resubmission warning not shown") {
                     @Override

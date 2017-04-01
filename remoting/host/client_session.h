@@ -18,6 +18,7 @@
 #include "base/timer/timer.h"
 #include "remoting/host/client_session_control.h"
 #include "remoting/host/client_session_details.h"
+#include "remoting/host/desktop_environment_options.h"
 #include "remoting/host/host_extension_session_manager.h"
 #include "remoting/host/remote_input_filter.h"
 #include "remoting/protocol/clipboard_echo_filter.h"
@@ -33,13 +34,9 @@
 #include "remoting/protocol/video_stream.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
-
 namespace remoting {
 
-class AudioPump;
+class AudioStream;
 class DesktopEnvironment;
 class DesktopEnvironmentFactory;
 class InputInjector;
@@ -93,9 +90,9 @@ class ClientSession : public base::NonThreadSafe,
   // |event_handler| and |desktop_environment_factory| must outlive |this|.
   // All |HostExtension|s in |extensions| must outlive |this|.
   ClientSession(EventHandler* event_handler,
-                scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner,
                 std::unique_ptr<protocol::ConnectionToClient> connection,
                 DesktopEnvironmentFactory* desktop_environment_factory,
+                const DesktopEnvironmentOptions& desktop_environment_options,
                 const base::TimeDelta& max_duration,
                 scoped_refptr<protocol::PairingRegistry> pairing_registry,
                 const std::vector<HostExtension*>& extensions);
@@ -115,19 +112,12 @@ class ClientSession : public base::NonThreadSafe,
   void DeliverClientMessage(const protocol::ExtensionMessage& message) override;
 
   // protocol::ConnectionToClient::EventHandler interface.
-  void OnConnectionAuthenticating(
-      protocol::ConnectionToClient* connection) override;
-  void OnConnectionAuthenticated(
-      protocol::ConnectionToClient* connection) override;
-  void CreateVideoStreams(protocol::ConnectionToClient* connection) override;
-  void OnConnectionChannelsConnected(
-      protocol::ConnectionToClient* connection) override;
-  void OnConnectionClosed(protocol::ConnectionToClient* connection,
-                          protocol::ErrorCode error) override;
-  void OnInputEventReceived(protocol::ConnectionToClient* connection,
-                            int64_t timestamp) override;
-  void OnRouteChange(protocol::ConnectionToClient* connection,
-                     const std::string& channel_name,
+  void OnConnectionAuthenticating() override;
+  void OnConnectionAuthenticated() override;
+  void CreateMediaStreams() override;
+  void OnConnectionChannelsConnected() override;
+  void OnConnectionClosed(protocol::ErrorCode error) override;
+  void OnRouteChange(const std::string& channel_name,
                      const protocol::TransportRoute& route) override;
 
   // ClientSessionControl interface.
@@ -148,6 +138,10 @@ class ClientSession : public base::NonThreadSafe,
     return client_capabilities_.get();
   }
 
+  void SetEventTimestampsSourceForTests(
+      scoped_refptr<protocol::InputEventTimestampsSource>
+          event_timestamp_source);
+
  private:
   // Creates a proxy for sending clipboard events to the client.
   std::unique_ptr<protocol::ClipboardStub> CreateClipboardProxy();
@@ -156,9 +150,6 @@ class ClientSession : public base::NonThreadSafe,
   void OnVideoSizeChanged(protocol::VideoStream* stream,
                           const webrtc::DesktopSize& size,
                           const webrtc::DesktopVector& dpi) override;
-  void OnVideoFrameSent(protocol::VideoStream* stream,
-                        uint32_t frame_id,
-                        int64_t input_event_timestamp) override;
 
   EventHandler* event_handler_;
 
@@ -169,6 +160,9 @@ class ClientSession : public base::NonThreadSafe,
 
   // Used to create a DesktopEnvironment instance for this session.
   DesktopEnvironmentFactory* desktop_environment_factory_;
+
+  // The DesktopEnvironmentOptions used to initialize DesktopEnvironment.
+  DesktopEnvironmentOptions desktop_environment_options_;
 
   // The DesktopEnvironment instance for this session.
   std::unique_ptr<DesktopEnvironment> desktop_environment_;
@@ -207,11 +201,9 @@ class ClientSession : public base::NonThreadSafe,
   // is reached.
   base::OneShotTimer max_duration_timer_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
-
   // Objects responsible for sending video, audio and mouse shape.
-  std::unique_ptr<AudioPump> audio_pump_;
   std::unique_ptr<protocol::VideoStream> video_stream_;
+  std::unique_ptr<protocol::AudioStream> audio_stream_;
   std::unique_ptr<MouseShapePump> mouse_shape_pump_;
 
   // The set of all capabilities supported by the client.
@@ -249,6 +241,9 @@ class ClientSession : public base::NonThreadSafe,
   // VideoLayout is sent only after the control channel is connected. Until
   // then it's stored in |pending_video_layout_message_|.
   std::unique_ptr<protocol::VideoLayout> pending_video_layout_message_;
+
+  scoped_refptr<protocol::InputEventTimestampsSource>
+      event_timestamp_source_for_tests_;
 
   // Used to disable callbacks to |this| once DisconnectSession() has been
   // called.

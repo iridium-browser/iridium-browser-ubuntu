@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_HTTP_HTTP_LOG_UTIL_
-#define NET_HTTP_HTTP_LOG_UTIL_
+#ifndef NET_HTTP_HTTP_LOG_UTIL_H_
+#define NET_HTTP_HTTP_LOG_UTIL_H_
 
 #include <string>
 
 #include "base/strings/string_piece.h"
 #include "net/base/net_export.h"
-#include "net/log/net_log.h"
 #include "net/spdy/spdy_header_block.h"
 
 namespace base {
@@ -17,6 +16,8 @@ class ListValue;
 }  // namespace base
 
 namespace net {
+
+class NetLogCaptureMode;
 
 // Given an HTTP header |header| with value |value|, returns the elided version
 // of the header value at |log_level|.
@@ -38,4 +39,4 @@ std::unique_ptr<base::ListValue> ElideSpdyHeaderBlockForNetLog(
 
 }  // namespace net
 
-#endif  // NET_HTTP_HTTP_LOG_UTIL_
+#endif  // NET_HTTP_HTTP_LOG_UTIL_H_

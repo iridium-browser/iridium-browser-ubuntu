@@ -10,7 +10,6 @@
 
 class Browser;
 class SigninViewControllerDelegate;
-class Profile;
 
 namespace signin_metrics {
 enum class AccessPoint;
@@ -34,6 +33,7 @@ class SigninViewController {
                        Browser* browser,
                        signin_metrics::AccessPoint access_point);
   void ShowModalSyncConfirmationDialog(Browser* browser);
+  void ShowModalSigninErrorDialog(Browser* browser);
 
   // Closes the tab-modal signin flow previously shown using this
   // SigninViewController, if one exists. Does nothing otherwise.

@@ -4,14 +4,12 @@
 
 package org.chromium.net.impl;
 
-import android.content.Context;
-import android.os.Build;
 import android.os.ConditionVariable;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
-import android.util.Log;
 
+import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
@@ -19,11 +17,12 @@ import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeClassQualifiedName;
 import org.chromium.base.annotations.UsedByReflection;
 import org.chromium.net.BidirectionalStream;
-import org.chromium.net.CronetEngine;
 import org.chromium.net.EffectiveConnectionType;
+import org.chromium.net.ExperimentalBidirectionalStream;
 import org.chromium.net.NetworkQualityRttListener;
 import org.chromium.net.NetworkQualityThroughputListener;
 import org.chromium.net.RequestFinishedInfo;
+import org.chromium.net.RttThroughputValues;
 import org.chromium.net.UrlRequest;
 import org.chromium.net.urlconnection.CronetHttpURLConnection;
 import org.chromium.net.urlconnection.CronetURLStreamHandlerFactory;
@@ -34,6 +33,7 @@ import java.net.URLConnection;
 import java.net.URLStreamHandlerFactory;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -48,11 +48,11 @@ import javax.annotation.concurrent.GuardedBy;
 @JNINamespace("cronet")
 @UsedByReflection("CronetEngine.java")
 @VisibleForTesting
-public class CronetUrlRequestContext extends CronetEngine {
+public class CronetUrlRequestContext extends CronetEngineBase {
     private static final int LOG_NONE = 3; // LOG(FATAL), no VLOG.
     private static final int LOG_DEBUG = -1; // LOG(FATAL...INFO), VLOG(1)
     private static final int LOG_VERBOSE = -2; // LOG(FATAL...INFO), VLOG(2)
-    static final String LOG_TAG = "ChromiumNetwork";
+    static final String LOG_TAG = CronetUrlRequestContext.class.getSimpleName();
 
     /**
      * Synchronize access to mUrlRequestContextAdapter and shutdown routine.
@@ -61,7 +61,15 @@ public class CronetUrlRequestContext extends CronetEngine {
     private final ConditionVariable mInitCompleted = new ConditionVariable(false);
     private final AtomicInteger mActiveRequestCount = new AtomicInteger(0);
 
+    @GuardedBy("mLock")
     private long mUrlRequestContextAdapter = 0;
+    /**
+     * This field is accessed without synchronization, but only for the purposes of reference
+     * equality comparison with other threads. If such a comparison is performed on the network
+     * thread, then there is a happens-before edge between the write of this field and the
+     * subsequent read; if it's performed on another thread, then observing a value of null won't
+     * change the result of the comparison.
+     */
     private Thread mNetworkThread;
 
     private boolean mNetworkQualityEstimatorEnabled;
@@ -74,7 +82,8 @@ public class CronetUrlRequestContext extends CronetEngine {
 
     /**
      * Locks operations on the list of RequestFinishedInfo.Listeners, because operations can happen
-     * on any thread.
+     * on any thread. This should be used for fine-grained locking only. In particular, don't call
+     * any UrlRequest methods that acquire mUrlRequestAdapterLock while holding this lock.
      */
     private final Object mFinishedListenerLock = new Object();
 
@@ -83,20 +92,45 @@ public class CronetUrlRequestContext extends CronetEngine {
      * estimator.
      */
     @GuardedBy("mNetworkQualityLock")
-    private int mEffectiveConnectionType =
-            EffectiveConnectionType.EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+    private int mEffectiveConnectionType = EffectiveConnectionType.TYPE_UNKNOWN;
+
+    /**
+     * Current estimate of the HTTP RTT (in milliseconds) computed by the
+     * network quality estimator.
+     */
+    @GuardedBy("mNetworkQualityLock")
+    private int mHttpRttMs = RttThroughputValues.INVALID_RTT_THROUGHPUT;
+
+    /**
+     * Current estimate of the transport RTT (in milliseconds) computed by the
+     * network quality estimator.
+     */
+    @GuardedBy("mNetworkQualityLock")
+    private int mTransportRttMs = RttThroughputValues.INVALID_RTT_THROUGHPUT;
+
+    /**
+     * Current estimate of the downstream throughput (in kilobits per second)
+     * computed by the network quality estimator.
+     */
+    @GuardedBy("mNetworkQualityLock")
+    private int mDownstreamThroughputKbps = RttThroughputValues.INVALID_RTT_THROUGHPUT;
 
     @GuardedBy("mNetworkQualityLock")
-    private final ObserverList<NetworkQualityRttListener> mRttListenerList =
-            new ObserverList<NetworkQualityRttListener>();
+    private final ObserverList<VersionSafeCallbacks.NetworkQualityRttListenerWrapper>
+            mRttListenerList =
+                    new ObserverList<VersionSafeCallbacks.NetworkQualityRttListenerWrapper>();
 
     @GuardedBy("mNetworkQualityLock")
-    private final ObserverList<NetworkQualityThroughputListener> mThroughputListenerList =
-            new ObserverList<NetworkQualityThroughputListener>();
+    private final ObserverList<VersionSafeCallbacks.NetworkQualityThroughputListenerWrapper>
+            mThroughputListenerList =
+                    new ObserverList<VersionSafeCallbacks
+                                             .NetworkQualityThroughputListenerWrapper>();
 
     @GuardedBy("mFinishedListenerLock")
-    private final List<RequestFinishedInfo.Listener> mFinishedListenerList =
-            new ArrayList<RequestFinishedInfo.Listener>();
+    private final Map<RequestFinishedInfo.Listener,
+            VersionSafeCallbacks.RequestFinishedInfoListener> mFinishedListenerMap =
+            new HashMap<RequestFinishedInfo.Listener,
+                    VersionSafeCallbacks.RequestFinishedInfoListener>();
 
     /**
      * Synchronize access to mCertVerifierData.
@@ -122,12 +156,12 @@ public class CronetUrlRequestContext extends CronetEngine {
     private boolean mNetLogToDisk;
 
     @UsedByReflection("CronetEngine.java")
-    public CronetUrlRequestContext(final CronetEngine.Builder builder) {
+    public CronetUrlRequestContext(final CronetEngineBuilderImpl builder) {
         CronetLibraryLoader.ensureInitialized(builder.getContext(), builder);
         nativeSetMinLogLevel(getLoggingLevel());
         synchronized (mLock) {
-            mUrlRequestContextAdapter = nativeCreateRequestContextAdapter(
-                    createNativeUrlRequestContextConfig(builder.getContext(), builder));
+            mUrlRequestContextAdapter =
+                    nativeCreateRequestContextAdapter(createNativeUrlRequestContextConfig(builder));
             if (mUrlRequestContextAdapter == 0) {
                 throw new NullPointerException("Context Adapter creation failed.");
             }
@@ -156,23 +190,22 @@ public class CronetUrlRequestContext extends CronetEngine {
     }
 
     @VisibleForTesting
-    public static long createNativeUrlRequestContextConfig(
-            final Context context, CronetEngine.Builder builder) {
+    public static long createNativeUrlRequestContextConfig(CronetEngineBuilderImpl builder) {
         final long urlRequestContextConfig = nativeCreateRequestContextConfig(
                 builder.getUserAgent(), builder.storagePath(), builder.quicEnabled(),
-                builder.getDefaultQuicUserAgentId(context), builder.http2Enabled(),
-                builder.sdchEnabled(), builder.dataReductionProxyKey(),
-                builder.dataReductionProxyPrimaryProxy(), builder.dataReductionProxyFallbackProxy(),
+                builder.getDefaultQuicUserAgentId(), builder.http2Enabled(), builder.sdchEnabled(),
+                builder.dataReductionProxyKey(), builder.dataReductionProxyPrimaryProxy(),
+                builder.dataReductionProxyFallbackProxy(),
                 builder.dataReductionProxySecureProxyCheckUrl(), builder.cacheDisabled(),
                 builder.httpCacheMode(), builder.httpCacheMaxSize(), builder.experimentalOptions(),
                 builder.mockCertVerifier(), builder.networkQualityEstimatorEnabled(),
                 builder.publicKeyPinningBypassForLocalTrustAnchorsEnabled(),
                 builder.certVerifierData());
-        for (Builder.QuicHint quicHint : builder.quicHints()) {
+        for (CronetEngineBuilderImpl.QuicHint quicHint : builder.quicHints()) {
             nativeAddQuicHint(urlRequestContextConfig, quicHint.mHost, quicHint.mPort,
                     quicHint.mAlternatePort);
         }
-        for (Builder.Pkp pkp : builder.publicKeyPins()) {
+        for (CronetEngineBuilderImpl.Pkp pkp : builder.publicKeyPins()) {
             nativeAddPkp(urlRequestContextConfig, pkp.mHost, pkp.mHashes, pkp.mIncludeSubdomains,
                     pkp.mExpirationDate.getTime());
         }
@@ -180,41 +213,38 @@ public class CronetUrlRequestContext extends CronetEngine {
     }
 
     @Override
-    public UrlRequest createRequest(String url, UrlRequest.Callback callback, Executor executor,
+    public ExperimentalBidirectionalStream.Builder newBidirectionalStreamBuilder(
+            String url, BidirectionalStream.Callback callback, Executor executor) {
+        return new BidirectionalStreamBuilderImpl(url, callback, executor, this);
+    }
+
+    @Override
+    public UrlRequestBase createRequest(String url, UrlRequest.Callback callback, Executor executor,
             int priority, Collection<Object> requestAnnotations, boolean disableCache,
-            boolean disableConnectionMigration) {
+            boolean disableConnectionMigration, boolean allowDirectExecutor) {
         synchronized (mLock) {
             checkHaveAdapter();
-            boolean metricsCollectionEnabled = false;
-            synchronized (mFinishedListenerLock) {
-                metricsCollectionEnabled = !mFinishedListenerList.isEmpty();
-            }
             return new CronetUrlRequest(this, url, priority, callback, executor, requestAnnotations,
-                    metricsCollectionEnabled, disableCache, disableConnectionMigration);
+                    disableCache, disableConnectionMigration, allowDirectExecutor);
         }
     }
 
     @Override
-    public BidirectionalStream createBidirectionalStream(String url,
+    protected ExperimentalBidirectionalStream createBidirectionalStream(String url,
             BidirectionalStream.Callback callback, Executor executor, String httpMethod,
-            List<Map.Entry<String, String>> requestHeaders,
-            @BidirectionalStream.Builder.StreamPriority int priority,
-            boolean delayRequestHeadersUntilFirstFlush) {
+            List<Map.Entry<String, String>> requestHeaders, @StreamPriority int priority,
+            boolean delayRequestHeadersUntilFirstFlush, Collection<Object> requestAnnotations) {
         synchronized (mLock) {
             checkHaveAdapter();
             return new CronetBidirectionalStream(this, url, priority, callback, executor,
-                    httpMethod, requestHeaders, delayRequestHeadersUntilFirstFlush);
+                    httpMethod, requestHeaders, delayRequestHeadersUntilFirstFlush,
+                    requestAnnotations);
         }
-    }
-
-    @Override
-    public boolean isEnabled() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH;
     }
 
     @Override
     public String getVersionString() {
-        return "Cronet/" + ImplVersion.getVersion();
+        return "Cronet/" + ImplVersion.getCronetVersionWithLastChange();
     }
 
     @Override
@@ -251,7 +281,9 @@ public class CronetUrlRequestContext extends CronetEngine {
     public void startNetLogToFile(String fileName, boolean logAll) {
         synchronized (mLock) {
             checkHaveAdapter();
-            nativeStartNetLogToFile(mUrlRequestContextAdapter, fileName, logAll);
+            if (!nativeStartNetLogToFile(mUrlRequestContextAdapter, fileName, logAll)) {
+                throw new RuntimeException("Unable to start NetLog");
+            }
             mIsLogging = true;
         }
     }
@@ -320,22 +352,57 @@ public class CronetUrlRequestContext extends CronetEngine {
             throw new IllegalStateException("Network quality estimator must be enabled");
         }
         synchronized (mNetworkQualityLock) {
-            checkHaveAdapter();
-            return mEffectiveConnectionType;
+            return convertConnectionTypeToApiValue(mEffectiveConnectionType);
+        }
+    }
+
+    @Override
+    public int getHttpRttMs() {
+        if (!mNetworkQualityEstimatorEnabled) {
+            throw new IllegalStateException("Network quality estimator must be enabled");
+        }
+        synchronized (mNetworkQualityLock) {
+            return mHttpRttMs != RttThroughputValues.INVALID_RTT_THROUGHPUT
+                    ? mHttpRttMs
+                    : CONNECTION_METRIC_UNKNOWN;
+        }
+    }
+
+    @Override
+    public int getTransportRttMs() {
+        if (!mNetworkQualityEstimatorEnabled) {
+            throw new IllegalStateException("Network quality estimator must be enabled");
+        }
+        synchronized (mNetworkQualityLock) {
+            return mTransportRttMs != RttThroughputValues.INVALID_RTT_THROUGHPUT
+                    ? mTransportRttMs
+                    : CONNECTION_METRIC_UNKNOWN;
+        }
+    }
+
+    @Override
+    public int getDownstreamThroughputKbps() {
+        if (!mNetworkQualityEstimatorEnabled) {
+            throw new IllegalStateException("Network quality estimator must be enabled");
+        }
+        synchronized (mNetworkQualityLock) {
+            return mDownstreamThroughputKbps != RttThroughputValues.INVALID_RTT_THROUGHPUT
+                    ? mDownstreamThroughputKbps
+                    : CONNECTION_METRIC_UNKNOWN;
         }
     }
 
     @VisibleForTesting
     @Override
-    public void configureNetworkQualityEstimatorForTesting(
-            boolean useLocalHostRequests, boolean useSmallerResponses) {
+    public void configureNetworkQualityEstimatorForTesting(boolean useLocalHostRequests,
+            boolean useSmallerResponses, boolean disableOfflineCheck) {
         if (!mNetworkQualityEstimatorEnabled) {
             throw new IllegalStateException("Network quality estimator must be enabled");
         }
         synchronized (mLock) {
             checkHaveAdapter();
-            nativeConfigureNetworkQualityEstimatorForTesting(
-                    mUrlRequestContextAdapter, useLocalHostRequests, useSmallerResponses);
+            nativeConfigureNetworkQualityEstimatorForTesting(mUrlRequestContextAdapter,
+                    useLocalHostRequests, useSmallerResponses, disableOfflineCheck);
         }
     }
 
@@ -351,7 +418,8 @@ public class CronetUrlRequestContext extends CronetEngine {
                     nativeProvideRTTObservations(mUrlRequestContextAdapter, true);
                 }
             }
-            mRttListenerList.addObserver(listener);
+            mRttListenerList.addObserver(
+                    new VersionSafeCallbacks.NetworkQualityRttListenerWrapper(listener));
         }
     }
 
@@ -361,11 +429,13 @@ public class CronetUrlRequestContext extends CronetEngine {
             throw new IllegalStateException("Network quality estimator must be enabled");
         }
         synchronized (mNetworkQualityLock) {
-            mRttListenerList.removeObserver(listener);
-            if (mRttListenerList.isEmpty()) {
-                synchronized (mLock) {
-                    checkHaveAdapter();
-                    nativeProvideRTTObservations(mUrlRequestContextAdapter, false);
+            if (mRttListenerList.removeObserver(
+                        new VersionSafeCallbacks.NetworkQualityRttListenerWrapper(listener))) {
+                if (mRttListenerList.isEmpty()) {
+                    synchronized (mLock) {
+                        checkHaveAdapter();
+                        nativeProvideRTTObservations(mUrlRequestContextAdapter, false);
+                    }
                 }
             }
         }
@@ -383,7 +453,8 @@ public class CronetUrlRequestContext extends CronetEngine {
                     nativeProvideThroughputObservations(mUrlRequestContextAdapter, true);
                 }
             }
-            mThroughputListenerList.addObserver(listener);
+            mThroughputListenerList.addObserver(
+                    new VersionSafeCallbacks.NetworkQualityThroughputListenerWrapper(listener));
         }
     }
 
@@ -393,11 +464,14 @@ public class CronetUrlRequestContext extends CronetEngine {
             throw new IllegalStateException("Network quality estimator must be enabled");
         }
         synchronized (mNetworkQualityLock) {
-            mThroughputListenerList.removeObserver(listener);
-            if (mThroughputListenerList.isEmpty()) {
-                synchronized (mLock) {
-                    checkHaveAdapter();
-                    nativeProvideThroughputObservations(mUrlRequestContextAdapter, false);
+            if (mThroughputListenerList.removeObserver(
+                        new VersionSafeCallbacks.NetworkQualityThroughputListenerWrapper(
+                                listener))) {
+                if (mThroughputListenerList.isEmpty()) {
+                    synchronized (mLock) {
+                        checkHaveAdapter();
+                        nativeProvideThroughputObservations(mUrlRequestContextAdapter, false);
+                    }
                 }
             }
         }
@@ -406,14 +480,21 @@ public class CronetUrlRequestContext extends CronetEngine {
     @Override
     public void addRequestFinishedListener(RequestFinishedInfo.Listener listener) {
         synchronized (mFinishedListenerLock) {
-            mFinishedListenerList.add(listener);
+            mFinishedListenerMap.put(
+                    listener, new VersionSafeCallbacks.RequestFinishedInfoListener(listener));
         }
     }
 
     @Override
     public void removeRequestFinishedListener(RequestFinishedInfo.Listener listener) {
         synchronized (mFinishedListenerLock) {
-            mFinishedListenerList.remove(listener);
+            mFinishedListenerMap.remove(listener);
+        }
+    }
+
+    boolean hasRequestFinishedListener() {
+        synchronized (mFinishedListenerLock) {
+            return !mFinishedListenerMap.isEmpty();
         }
     }
 
@@ -463,12 +544,14 @@ public class CronetUrlRequestContext extends CronetEngine {
         }
     }
 
+    @GuardedBy("mLock")
     private void checkHaveAdapter() throws IllegalStateException {
         if (!haveRequestContextAdapter()) {
             throw new IllegalStateException("Engine is shut down.");
         }
     }
 
+    @GuardedBy("mLock")
     private boolean haveRequestContextAdapter() {
         return mUrlRequestContextAdapter != 0;
     }
@@ -489,13 +572,32 @@ public class CronetUrlRequestContext extends CronetEngine {
         return loggingLevel;
     }
 
+    private static int convertConnectionTypeToApiValue(
+            @EffectiveConnectionType.EffectiveConnectionTypeEnum int type) {
+        switch (type) {
+            case EffectiveConnectionType.TYPE_OFFLINE:
+                return EFFECTIVE_CONNECTION_TYPE_OFFLINE;
+            case EffectiveConnectionType.TYPE_SLOW_2G:
+                return EFFECTIVE_CONNECTION_TYPE_SLOW_2G;
+            case EffectiveConnectionType.TYPE_2G:
+                return EFFECTIVE_CONNECTION_TYPE_2G;
+            case EffectiveConnectionType.TYPE_3G:
+                return EFFECTIVE_CONNECTION_TYPE_3G;
+            case EffectiveConnectionType.TYPE_4G:
+                return EFFECTIVE_CONNECTION_TYPE_4G;
+            case EffectiveConnectionType.TYPE_UNKNOWN:
+                return EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+            default:
+                throw new RuntimeException(
+                        "Internal Error: Illegal EffectiveConnectionType value " + type);
+        }
+    }
+
     @SuppressWarnings("unused")
     @CalledByNative
     private void initNetworkThread() {
-        synchronized (mLock) {
-            mNetworkThread = Thread.currentThread();
-            mInitCompleted.open();
-        }
+        mNetworkThread = Thread.currentThread();
+        mInitCompleted.open();
         Thread.currentThread().setName("ChromiumNet");
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
     }
@@ -512,9 +614,21 @@ public class CronetUrlRequestContext extends CronetEngine {
 
     @SuppressWarnings("unused")
     @CalledByNative
+    private void onRTTOrThroughputEstimatesComputed(
+            final int httpRttMs, final int transportRttMs, final int downstreamThroughputKbps) {
+        synchronized (mNetworkQualityLock) {
+            mHttpRttMs = httpRttMs;
+            mTransportRttMs = transportRttMs;
+            mDownstreamThroughputKbps = downstreamThroughputKbps;
+        }
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
     private void onRttObservation(final int rttMs, final long whenMs, final int source) {
         synchronized (mNetworkQualityLock) {
-            for (final NetworkQualityRttListener listener : mRttListenerList) {
+            for (final VersionSafeCallbacks.NetworkQualityRttListenerWrapper listener :
+                    mRttListenerList) {
                 Runnable task = new Runnable() {
                     @Override
                     public void run() {
@@ -531,7 +645,8 @@ public class CronetUrlRequestContext extends CronetEngine {
     private void onThroughputObservation(
             final int throughputKbps, final long whenMs, final int source) {
         synchronized (mNetworkQualityLock) {
-            for (final NetworkQualityThroughputListener listener : mThroughputListenerList) {
+            for (final VersionSafeCallbacks.NetworkQualityThroughputListenerWrapper listener :
+                    mThroughputListenerList) {
                 Runnable task = new Runnable() {
                     @Override
                     public void run() {
@@ -550,13 +665,13 @@ public class CronetUrlRequestContext extends CronetEngine {
         mWaitGetCertVerifierDataComplete.open();
     }
 
-    void reportFinished(final CronetUrlRequest request) {
-        final RequestFinishedInfo requestInfo = request.getRequestFinishedInfo();
-        ArrayList<RequestFinishedInfo.Listener> currentListeners;
+    void reportFinished(final RequestFinishedInfo requestInfo) {
+        ArrayList<VersionSafeCallbacks.RequestFinishedInfoListener> currentListeners;
         synchronized (mFinishedListenerLock) {
-            currentListeners = new ArrayList<RequestFinishedInfo.Listener>(mFinishedListenerList);
+            currentListeners = new ArrayList<VersionSafeCallbacks.RequestFinishedInfoListener>(
+                    mFinishedListenerMap.values());
         }
-        for (final RequestFinishedInfo.Listener listener : currentListeners) {
+        for (final VersionSafeCallbacks.RequestFinishedInfoListener listener : currentListeners) {
             Runnable task = new Runnable() {
                 @Override
                 public void run() {
@@ -602,7 +717,7 @@ public class CronetUrlRequestContext extends CronetEngine {
     private native void nativeDestroy(long nativePtr);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
-    private native void nativeStartNetLogToFile(long nativePtr, String fileName, boolean logAll);
+    private native boolean nativeStartNetLogToFile(long nativePtr, String fileName, boolean logAll);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeStartNetLogToDisk(
@@ -618,12 +733,16 @@ public class CronetUrlRequestContext extends CronetEngine {
     private native void nativeInitRequestContextOnMainThread(long nativePtr);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
-    private native void nativeConfigureNetworkQualityEstimatorForTesting(
-            long nativePtr, boolean useLocalHostRequests, boolean useSmallerResponses);
+    private native void nativeConfigureNetworkQualityEstimatorForTesting(long nativePtr,
+            boolean useLocalHostRequests, boolean useSmallerResponses, boolean disableOfflineCheck);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeProvideRTTObservations(long nativePtr, boolean should);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeProvideThroughputObservations(long nativePtr, boolean should);
+
+    public boolean isNetworkThread(Thread thread) {
+        return thread == mNetworkThread;
+    }
 }

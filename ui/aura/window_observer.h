@@ -70,6 +70,12 @@ class AURA_EXPORT WindowObserver {
   // value supplied to SetVisible(). If |visible| is true, window->IsVisible()
   // may still return false. See description in Window::IsVisible() for details.
   virtual void OnWindowVisibilityChanging(Window* window, bool visible) {}
+
+  // When the visibility of a Window changes OnWindowVisibilityChanged() is
+  // called for all observers attached to descendants of the Window as well
+  // as all observers attached to ancestors of the Window. The Window supplied
+  // to OnWindowVisibilityChanged() is the Window that Show()/Hide() was called
+  // on.
   virtual void OnWindowVisibilityChanged(Window* window, bool visible) {}
 
   // Invoked when SetBounds() is invoked on |window|. |old_bounds| and
@@ -119,6 +125,10 @@ class AURA_EXPORT WindowObserver {
 
   // Called when the window title has changed.
   virtual void OnWindowTitleChanged(Window* window) {}
+
+  // Called when the app embedded in |window| disconnects (is no longer
+  // embedded).
+  virtual void OnEmbeddedAppDisconnected(Window* window);
 
  protected:
   virtual ~WindowObserver();

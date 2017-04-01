@@ -13,13 +13,13 @@ from google.appengine.api import users
 from google.appengine.ext import ndb
 
 from dashboard import auto_bisect
-from dashboard import issue_tracker_service
 from dashboard import oauth2_decorator
-from dashboard import request_handler
-from dashboard import utils
+from dashboard.common import request_handler
+from dashboard.common import utils
 from dashboard.models import alert
 from dashboard.models import bug_data
 from dashboard.models import bug_label_patterns
+from dashboard.services import issue_tracker_service
 
 # A list of bug labels to suggest for all performance regression bugs.
 _DEFAULT_LABELS = [
@@ -97,7 +97,8 @@ class FileBugHandler(request_handler.RequestHandler):
         'description': description,
         'labels': labels,
         'components': components,
-        'owner': users.get_current_user(),
+        'owner': '',
+        'cc': users.get_current_user(),
     })
 
   def _CreateBug(self, summary, description, labels, components, urlsafe_keys):
@@ -128,11 +129,14 @@ class FileBugHandler(request_handler.RequestHandler):
       })
       return
 
+    cc = self.request.get('cc')
+
     http = oauth2_decorator.DECORATOR.http()
-    service = issue_tracker_service.IssueTrackerService(http=http)
+    service = issue_tracker_service.IssueTrackerService(http)
 
     bug_id = service.NewBug(
-        summary, description, labels=labels, components=components, owner=owner)
+        summary, description, labels=labels, components=components, owner=owner,
+        cc=cc)
     if not bug_id:
       self.RenderHtml('bug_result.html', {'error': 'Error creating bug!'})
       return
@@ -147,11 +151,22 @@ class FileBugHandler(request_handler.RequestHandler):
 
     template_params = {'bug_id': bug_id}
     if all(k.kind() == 'Anomaly' for k in alert_keys):
+      logging.info('Kicking bisect for bug ' + str(bug_id))
       bisect_result = auto_bisect.StartNewBisectForBug(bug_id)
       if 'error' in bisect_result:
+        logging.info('Failed to kick bisect for ' + str(bug_id))
         template_params['bisect_error'] = bisect_result['error']
       else:
+        logging.info('Successfully kicked bisect for ' + str(bug_id))
         template_params.update(bisect_result)
+    else:
+      kinds = set()
+      for k in alert_keys:
+        kinds.add(k.kind())
+      logging.info(
+          'Didn\'t kick bisect for bug id %s because alerts had kinds %s',
+          bug_id, list(kinds))
+
     self.RenderHtml('bug_result.html', template_params)
 
 
@@ -211,11 +226,23 @@ def _FetchLabelsAndComponents(alert_keys):
 
 
 def _MilestoneLabel(alerts):
-  """Returns a milestone label string, or None."""
+  """Returns a milestone label string, or None.
+
+  Because revision numbers for other repos may not be easily reconcilable with
+  Chromium milestones, do not label them (see
+  https://github.com/catapult-project/catapult/issues/2906).
+  """
   revisions = [a.start_revision for a in alerts if hasattr(a, 'start_revision')]
   if not revisions:
     return None
   start_revision = min(revisions)
+
+  for a in alerts:
+    if a.start_revision == start_revision:
+      master = utils.TestPath(a.GetTestMetadataKey()).split('/')[0]
+      if master != 'ChromiumPerf' and master != 'ChromiumPerfFyi':
+        return None
+      break
   try:
     milestone = _GetMilestoneForRevision(start_revision)
   except KeyError:

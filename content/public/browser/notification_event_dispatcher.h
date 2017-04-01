@@ -5,7 +5,6 @@
 #ifndef CONTENT_PUBLIC_BROWSER_NOTIFICATION_EVENT_DISPATCHER_H_
 #define CONTENT_PUBLIC_BROWSER_NOTIFICATION_EVENT_DISPATCHER_H_
 
-#include <stdint.h>
 #include <string>
 
 #include "base/callback_forward.h"
@@ -14,10 +13,13 @@
 
 class GURL;
 
+namespace base {
+class NullableString16;
+}
+
 namespace content {
 
 class BrowserContext;
-struct PlatformNotificationData;
 
 // This is the dispatcher to be used for firing events related to persistent
 // notifications on a Service Worker. This class is a singleton, the instance of
@@ -31,23 +33,24 @@ class CONTENT_EXPORT NotificationEventDispatcher {
       base::Callback<void(PersistentNotificationStatus)>;
 
   // Dispatches the "notificationclick" event on the Service Worker associated
-  // with |persistent_notification_id| belonging to |origin|. The |callback|
-  // will be invoked when it's known whether the event successfully executed.
+  // with |notification_id| belonging to |origin|. The |callback| will be
+  // invoked when it's known whether the event successfully executed.
   virtual void DispatchNotificationClickEvent(
       BrowserContext* browser_context,
-      int64_t persistent_notification_id,
+      const std::string& notification_id,
       const GURL& origin,
       int action_index,
+      const base::NullableString16& reply,
       const NotificationDispatchCompleteCallback&
           dispatch_complete_callback) = 0;
 
   // Dispatches the "notificationclose" event on the Service Worker associated
-  // with |persistent_notification_id| belonging to |origin|. The
+  // with |notification_id| belonging to |origin|. The
   // |dispatch_complete_callback| will be invoked when it's known whether the
   // event successfully executed.
   virtual void DispatchNotificationCloseEvent(
       BrowserContext* browser_context,
-      int64_t persistent_notification_id,
+      const std::string& notification_id,
       const GURL& origin,
       bool by_user,
       const NotificationDispatchCompleteCallback&

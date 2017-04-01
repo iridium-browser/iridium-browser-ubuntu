@@ -26,9 +26,10 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.blink_public.web.WebInputEventModifier;
 import org.chromium.blink_public.web.WebInputEventType;
+import org.chromium.blink_public.web.WebTextInputMode;
 import org.chromium.content.browser.RenderCoordinates;
+import org.chromium.content.browser.picker.InputDialogContainer;
 import org.chromium.ui.base.ime.TextInputType;
-import org.chromium.ui.picker.InputDialogContainer;
 
 /**
  * Adapts and plumbs android IME service onto the chrome text input API.
@@ -105,6 +106,7 @@ public class ImeAdapter {
 
     private int mTextInputType = TextInputType.NONE;
     private int mTextInputFlags;
+    private int mTextInputMode = WebTextInputMode.kDefault;
 
     // Keep the current configuration to detect the change when onConfigurationChanged() is called.
     private Configuration mCurrentConfig;
@@ -156,21 +158,9 @@ public class ImeAdapter {
         }
     }
 
-    private boolean isImeThreadEnabled() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        return nativeIsImeThreadEnabled(mNativeImeAdapterAndroid);
-    }
-
     private void createInputConnectionFactory() {
         if (mInputConnectionFactory != null) return;
-        if (isImeThreadEnabled()) {
-            Log.i(TAG, "ImeThread is enabled.");
-            mInputConnectionFactory =
-                    new ThreadedInputConnectionFactory(mInputMethodManagerWrapper);
-        } else {
-            Log.i(TAG, "ImeThread is not enabled.");
-            mInputConnectionFactory = new ReplicaInputConnection.Factory();
-        }
+        mInputConnectionFactory = new ThreadedInputConnectionFactory(mInputMethodManagerWrapper);
     }
 
     /**
@@ -189,9 +179,9 @@ public class ImeAdapter {
             return null;
         }
         if (mInputConnectionFactory == null) return null;
-        setInputConnection(mInputConnectionFactory.initializeAndGet(
-                mViewEmbedder.getAttachedView(), this, mTextInputType, mTextInputFlags,
-                mLastSelectionStart, mLastSelectionEnd, outAttrs));
+        setInputConnection(mInputConnectionFactory.initializeAndGet(mViewEmbedder.getAttachedView(),
+                this, mTextInputType, mTextInputFlags, mTextInputMode, mLastSelectionStart,
+                mLastSelectionEnd, outAttrs));
         if (DEBUG_LOGS) Log.w(TAG, "onCreateInputConnection: " + mInputConnection);
 
         if (mCursorAnchorInfoController != null) {
@@ -268,20 +258,29 @@ public class ImeAdapter {
      * Shows or hides the keyboard based on passed parameters.
      * @param textInputType Text input type for the currently focused field in renderer.
      * @param textInputFlags Text input flags.
+     * @param textInputMode Text input mode.
      * @param showIfNeeded Whether the keyboard should be shown if it is currently hidden.
      */
-    public void updateKeyboardVisibility(int textInputType,
-            int textInputFlags, boolean showIfNeeded) {
+    public void updateKeyboardVisibility(
+            int textInputType, int textInputFlags, int textInputMode, boolean showIfNeeded) {
         if (DEBUG_LOGS) {
             Log.w(TAG, "updateKeyboardVisibility: type [%d->%d], flags [%d], show [%b], ",
                     mTextInputType, textInputType, textInputFlags, showIfNeeded);
         }
+        boolean needsRestart = false;
         mTextInputFlags = textInputFlags;
+        if (mTextInputMode != textInputMode) {
+            mTextInputMode = textInputMode;
+            needsRestart = true;
+        }
+
         if (mTextInputType != textInputType) {
             mTextInputType = textInputType;
             // No need to restart if we are going to hide anyways.
-            if (textInputType != TextInputType.NONE) restartInput();
+            if (textInputType != TextInputType.NONE) needsRestart = true;
         }
+
+        if (needsRestart) restartInput();
 
         // There is no API for us to get notified of user's dismissal of keyboard.
         // Therefore, we should try to show keyboard even when text input type hasn't changed.
@@ -305,11 +304,10 @@ public class ImeAdapter {
      *                         composition.
      * @param compositionEnd The character offset of the composition end, or -1 if there is no
      *                       selection.
-     * @param isNonImeChange True when the update was caused by non-IME (e.g. Javascript).
-     * @param inBatchEditMode True when in batch edit mode.
+     * @param replyToRequest True when the update was requested by IME.
      */
     public void updateState(String text, int selectionStart, int selectionEnd, int compositionStart,
-            int compositionEnd, boolean isNonImeChange, boolean inBatchEditMode) {
+            int compositionEnd, boolean replyToRequest) {
         if (mCursorAnchorInfoController != null && (!TextUtils.equals(mLastText, text)
                 || mLastSelectionStart != selectionStart || mLastSelectionEnd != selectionEnd
                 || mLastCompositionStart != compositionStart
@@ -326,7 +324,7 @@ public class ImeAdapter {
         boolean singleLine = mTextInputType != TextInputType.TEXT_AREA
                 && mTextInputType != TextInputType.CONTENT_EDITABLE;
         mInputConnection.updateStateOnUiThread(text, selectionStart, selectionEnd, compositionStart,
-                compositionEnd, singleLine, isNonImeChange, inBatchEditMode);
+                compositionEnd, singleLine, replyToRequest);
     }
 
     /**
@@ -347,6 +345,7 @@ public class ImeAdapter {
         if (nativeImeAdapter != 0) {
             createInputConnectionFactory();
         }
+        resetAndHideKeyboard();
     }
 
     /**
@@ -375,7 +374,14 @@ public class ImeAdapter {
         }
         // Detach input connection by returning null from onCreateInputConnection().
         if (mTextInputType == TextInputType.NONE && mInputConnection != null) {
-            restartInput();
+            ChromiumBaseInputConnection inputConnection = mInputConnection;
+            restartInput();  // resets mInputConnection
+            // crbug.com/666982: Restart input may not happen if view is detached from window, but
+            // we need to unblock in any case. We want to call this after restartInput() to
+            // ensure that there is no additional IME operation in the queue, except for
+            // moveCursorToSelectionEnd(), which block the IME thread unnecessarily and need
+            // refactoring anyways. (crbug.com/662908)
+            inputConnection.unblockOnUiThread();
         }
     }
 
@@ -427,6 +433,7 @@ public class ImeAdapter {
      * Call this when view is detached from window
      */
     public void onViewDetachedFromWindow() {
+        resetAndHideKeyboard();
         if (mInputConnectionFactory != null) {
             mInputConnectionFactory.onViewDetachedFromWindow();
         }
@@ -438,7 +445,6 @@ public class ImeAdapter {
      */
     public void onViewFocusChanged(boolean gainFocus) {
         if (DEBUG_LOGS) Log.w(TAG, "onViewFocusChanged: gainFocus [%b]", gainFocus);
-        if (!gainFocus) resetAndHideKeyboard();
         if (mInputConnectionFactory != null) {
             mInputConnectionFactory.onViewFocusChanged(gainFocus);
         }
@@ -484,6 +490,7 @@ public class ImeAdapter {
         if (DEBUG_LOGS) Log.w(TAG, "resetAndHideKeyboard");
         mTextInputType = TextInputType.NONE;
         mTextInputFlags = 0;
+        mTextInputMode = WebTextInputMode.kDefault;
         // This will trigger unblocking if necessary.
         hideKeyboard();
     }
@@ -567,7 +574,7 @@ public class ImeAdapter {
                 timestampMs, COMPOSITION_KEY_CODE, 0, false, unicodeFromKeyEvent);
 
         if (isCommit) {
-            nativeCommitText(mNativeImeAdapterAndroid, text.toString());
+            nativeCommitText(mNativeImeAdapterAndroid, text, text.toString(), newCursorPosition);
         } else {
             nativeSetComposingText(
                     mNativeImeAdapterAndroid, text, text.toString(), newCursorPosition);
@@ -680,25 +687,6 @@ public class ImeAdapter {
     }
 
     /**
-     * Send a request to the native counterpart to begin batch edit.
-     */
-    boolean beginBatchEdit() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        if (mInputConnection == null) return false;
-        return nativeBeginBatchEdit(mNativeImeAdapterAndroid);
-    }
-
-    /**
-     * Send a request to the native counterpart to end batch edit.
-     */
-    boolean endBatchEdit() {
-        if (mNativeImeAdapterAndroid == 0) return false;
-        // You won't get state update anyways.
-        if (mInputConnection == null) return false;
-        return nativeEndBatchEdit(mNativeImeAdapterAndroid);
-    }
-
-    /**
      * Notified when IME requested Chrome to change the cursor update mode.
      */
     public boolean onRequestCursorUpdates(int cursorUpdateMode) {
@@ -788,7 +776,8 @@ public class ImeAdapter {
             int end, int backgroundColor);
     private native void nativeSetComposingText(long nativeImeAdapterAndroid, CharSequence text,
             String textStr, int newCursorPosition);
-    private native void nativeCommitText(long nativeImeAdapterAndroid, String textStr);
+    private native void nativeCommitText(
+            long nativeImeAdapterAndroid, CharSequence text, String textStr, int newCursorPosition);
     private native void nativeFinishComposingText(long nativeImeAdapterAndroid);
     private native void nativeAttachImeAdapter(long nativeImeAdapterAndroid);
     private native void nativeSetEditableSelectionOffsets(long nativeImeAdapterAndroid,
@@ -797,11 +786,7 @@ public class ImeAdapter {
     private native void nativeDeleteSurroundingText(long nativeImeAdapterAndroid,
             int before, int after);
     private native void nativeResetImeAdapter(long nativeImeAdapterAndroid);
-    private native boolean nativeRequestTextInputStateUpdate(
-            long nativeImeAdapterAndroid);
-    private native boolean nativeBeginBatchEdit(long nativeImeAdapterAndroid);
-    private native boolean nativeEndBatchEdit(long nativeImeAdapterAndroid);
+    private native boolean nativeRequestTextInputStateUpdate(long nativeImeAdapterAndroid);
     private native void nativeRequestCursorUpdate(long nativeImeAdapterAndroid,
             boolean immediateRequest, boolean monitorRequest);
-    private native boolean nativeIsImeThreadEnabled(long nativeImeAdapterAndroid);
 }

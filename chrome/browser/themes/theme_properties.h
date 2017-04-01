@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
+#include "chrome/common/features.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/color_utils.h"
 
@@ -128,7 +129,7 @@ class ThemeProperties {
     COLOR_NTP_SECTION_HEADER_RULE,
     COLOR_NTP_SECTION_HEADER_RULE_LIGHT,
     COLOR_NTP_TEXT_LIGHT,
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
     COLOR_SUPERVISED_USER_LABEL,
     COLOR_SUPERVISED_USER_LABEL_BACKGROUND,
     COLOR_SUPERVISED_USER_LABEL_BORDER,
@@ -146,8 +147,6 @@ class ThemeProperties {
     // The color of a toolbar button's border.
     COLOR_TOOLBAR_BUTTON_STROKE,
     COLOR_TOOLBAR_BUTTON_STROKE_INACTIVE,
-    GRADIENT_FRAME_INCOGNITO,
-    GRADIENT_FRAME_INCOGNITO_INACTIVE,
     GRADIENT_TOOLBAR,
     GRADIENT_TOOLBAR_INACTIVE,
     GRADIENT_TOOLBAR_BUTTON,
@@ -155,6 +154,11 @@ class ThemeProperties {
     GRADIENT_TOOLBAR_BUTTON_PRESSED,
     GRADIENT_TOOLBAR_BUTTON_PRESSED_INACTIVE,
 #endif  // OS_MACOSX
+
+#if defined(OS_WIN)
+    // The color of the 1px border around the window on Windows 10.
+    COLOR_ACCENT_BORDER,
+#endif  // OS_WIN
   };
 
   // Used by the browser theme pack to parse alignments from something like
@@ -172,10 +176,6 @@ class ThemeProperties {
   // Converts a Tiling into a string like "no-repeat". The result is used to
   // generate a CSS value.
   static std::string TilingToString(int tiling);
-
-  // Returns the set of IDR_* resources that should be tinted.
-  // This method is not thread safe.
-  static const std::set<int>& GetTintableToolbarButtons();
 
   // Returns the default tint for the given tint |id| TINT_* enum value.
   // Returns an HSL value of {-1, -1, -1} if |id| is invalid.

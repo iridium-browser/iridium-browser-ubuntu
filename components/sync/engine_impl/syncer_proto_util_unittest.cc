@@ -4,11 +4,8 @@
 
 #include "components/sync/engine_impl/syncer_proto_util.h"
 
-#include <string>
-
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_loop.h"
-#include "base/time/time.h"
 #include "components/sync/base/cancelation_signal.h"
 #include "components/sync/base/model_type_test_util.h"
 #include "components/sync/engine_impl/cycle/sync_cycle_context.h"
@@ -251,11 +248,11 @@ TEST_F(SyncerProtoUtilTest, PostAndProcessHeaders) {
 
   dcm.set_send_error(true);
   EXPECT_FALSE(
-      SyncerProtoUtil::PostAndProcessHeaders(&dcm, NULL, msg, &response));
+      SyncerProtoUtil::PostAndProcessHeaders(&dcm, nullptr, msg, &response));
 
   dcm.set_send_error(false);
   EXPECT_TRUE(
-      SyncerProtoUtil::PostAndProcessHeaders(&dcm, NULL, msg, &response));
+      SyncerProtoUtil::PostAndProcessHeaders(&dcm, nullptr, msg, &response));
 }
 
 }  // namespace syncer

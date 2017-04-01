@@ -7,19 +7,18 @@
 
 #include <map>
 #include <memory>
+#include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/common/shelf/shelf_types.h"
 #include "ash/common/shell_observer.h"
+#include "ash/common/wm/workspace/workspace_types.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "base/macros.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
-#include "ui/base/ui_base_types.h"
-
-class SkBitmap;
+#include "ui/views/widget/widget.h"
 
 namespace aura {
-class EventFilter;
 class Window;
 }
 
@@ -34,47 +33,46 @@ class KeyboardController;
 namespace ui {
 class EventHandler;
 class MenuModel;
+class WindowTreeHost;
 }
 
 namespace views {
 class MenuModelAdapter;
 class MenuRunner;
-class Widget;
 }
 
 namespace wm {
-class InputMethodEventFilter;
-class RootWindowEventFilter;
 class ScopedCaptureClient;
 }
 
 namespace ash {
-class AshWindowTreeHost;
 class AlwaysOnTopController;
-class AnimatingDesktopController;
-class DesktopBackgroundWidgetController;
+class AnimatingWallpaperWidgetController;
+class AshTouchExplorationManager;
+class AshWindowTreeHost;
+class BootSplashScreen;
 class DockedWindowLayoutManager;
 enum class LoginStatus;
 class PanelLayoutManager;
-class RootWindowControllerCommon;
-class Shelf;
 class ShelfLayoutManager;
-class ShelfWidget;
 class StackingController;
 class StatusAreaWidget;
-class SystemBackgroundController;
 class SystemModalContainerLayoutManager;
 class SystemTray;
+class SystemWallpaperController;
 class TouchHudDebug;
 class TouchHudProjection;
-class WmShelfAura;
-class WmWindow;
+class WallpaperWidgetController;
+class WmShelf;
 class WorkspaceController;
 
-#if defined(OS_CHROMEOS)
-class BootSplashScreen;
-class AshTouchExplorationManager;
-#endif
+namespace mus {
+class WindowManager;
+}
+
+namespace wm {
+class RootWindowLayoutManager;
+}
 
 // This class maintains the per root window state for ash. This class
 // owns the root window and other dependent objects that should be
@@ -83,12 +81,15 @@ class AshTouchExplorationManager;
 // The RootWindowController for particular root window is stored in
 // its property (RootWindowSettings) and can be obtained using
 // |GetRootWindowController(aura::WindowEventDispatcher*)| function.
-//
-// NOTE: In classic ash there is one RootWindow per display, so every RootWindow
-// has a RootWindowController. In mus/mash there is one RootWindow per top-level
-// Widget, so not all RootWindows have a RootWindowController.
 class ASH_EXPORT RootWindowController : public ShellObserver {
  public:
+  // Enumerates the type of display. If there is only a single display then
+  // it is primary. In a multi-display environment one monitor is deemed the
+  // PRIMARY and all others SECONDARY.
+  enum class RootWindowType { PRIMARY, SECONDARY };
+
+  ~RootWindowController() override;
+
   // Creates and Initialize the RootWindowController for primary display.
   static void CreateForPrimaryDisplay(AshWindowTreeHost* host);
 
@@ -101,8 +102,21 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // Returns the RootWindowController of the target root window.
   static RootWindowController* ForTargetRootWindow();
 
-  ~RootWindowController() override;
+  static std::vector<RootWindowController*> root_window_controllers() {
+    return root_window_controllers_ ? *root_window_controllers_
+                                    : std::vector<RootWindowController*>();
+  }
 
+  // Configures |init_params| prior to initializing |widget|.
+  // |shell_container_id| is the id of the container to parent |widget| to.
+  // TODO(sky): remove this, http://crbug.com/671246.
+  void ConfigureWidgetInitParamsForContainer(
+      views::Widget* widget,
+      int shell_container_id,
+      views::Widget::InitParams* init_params);
+
+  // TODO(sky): move these to a separate class or use AshWindowTreeHost in
+  // mash. http://crbug.com/671246.
   AshWindowTreeHost* ash_host() { return ash_host_.get(); }
   const AshWindowTreeHost* ash_host() const { return ash_host_.get(); }
 
@@ -111,20 +125,27 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   aura::Window* GetRootWindow();
   const aura::Window* GetRootWindow() const;
 
+  // TODO(sky): remove these. http://crbug.com/671246.
+  WmWindow* GetWindow() {
+    return const_cast<WmWindow*>(
+        const_cast<const RootWindowController*>(this)->GetWindow());
+  }
+  const WmWindow* GetWindow() const;
+
   WorkspaceController* workspace_controller() {
     return workspace_controller_.get();
   }
 
-  AlwaysOnTopController* always_on_top_controller() {
-    return always_on_top_controller_.get();
-  }
+  wm::WorkspaceWindowState GetWorkspaceWindowState();
 
-  WmShelfAura* wm_shelf_aura() const { return wm_shelf_aura_.get(); }
+  WmShelf* wm_shelf() const { return wm_shelf_.get(); }
 
-  // Access the shelf widget associated with this root window controller,
-  // NULL if no such shelf exists.
-  // DEPRECATED: Prefer GetShelf()->shelf_widget().
-  ShelfWidget* shelf_widget() { return shelf_widget_.get(); }
+  bool HasShelf();
+
+  WmShelf* GetShelf();
+
+  // Creates the shelf view for this root window and notifies observers.
+  void CreateShelfView();
 
   // Get touch HUDs associated with this root window controller.
   TouchHudDebug* touch_hud_debug() const { return touch_hud_debug_; }
@@ -141,69 +162,87 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
     touch_hud_projection_ = hud;
   }
 
-  DesktopBackgroundWidgetController* wallpaper_controller() {
-    return wallpaper_controller_.get();
+  DockedWindowLayoutManager* docked_window_layout_manager() {
+    return docked_window_layout_manager_;
   }
-  void SetWallpaperController(DesktopBackgroundWidgetController* controller);
-  AnimatingDesktopController* animating_wallpaper_controller() {
-    return animating_wallpaper_controller_.get();
+
+  PanelLayoutManager* panel_layout_manager() { return panel_layout_manager_; }
+
+  wm::RootWindowLayoutManager* root_window_layout_manager() {
+    return root_window_layout_manager_;
   }
-  void SetAnimatingWallpaperController(AnimatingDesktopController* controller);
 
   // Access the shelf layout manager associated with this root
   // window controller, NULL if no such shelf exists.
   ShelfLayoutManager* GetShelfLayoutManager();
+
+  // Returns the layout manager for the appropriate modal-container. If the
+  // window is inside the lockscreen modal container, then the layout manager
+  // for that is returned. Otherwise the layout manager for the default modal
+  // container is returned.
+  // If no window is specified (i.e. |window| is null), then the lockscreen
+  // modal container is used if the screen is currently locked. Otherwise, the
+  // default modal container is used.
+  SystemModalContainerLayoutManager* GetSystemModalLayoutManager(
+      WmWindow* window);
+
+  AlwaysOnTopController* always_on_top_controller() {
+    return always_on_top_controller_.get();
+  }
+
+  // May return null, for example for a secondary monitor at the login screen.
+  StatusAreaWidget* GetStatusAreaWidget();
 
   // Returns the system tray on this root window. Note that
   // calling this on the root window that doesn't have a shelf will
   // lead to a crash.
   SystemTray* GetSystemTray();
 
-  // Shows context menu at the |location_in_screen|. This uses
-  // |ShellDelegate::CreateContextMenu| to define the content of the menu.
-  void ShowContextMenu(const gfx::Point& location_in_screen,
-                       ui::MenuSourceType source_type);
-
   // True if the window can receive events on this root window.
   bool CanWindowReceiveEvents(aura::Window* window);
 
-  // Returns the layout-manager for the appropriate modal-container. If the
-  // window is inside the lockscreen modal container, then the layout manager
-  // for that is returned. Otherwise the layout manager for the default modal
-  // container is returned.
-  // If no window is specified (i.e. |window| is NULL), then the lockscreen
-  // modal container is used if the screen is currently locked. Otherwise, the
-  // default modal container is used.
-  SystemModalContainerLayoutManager* GetSystemModalLayoutManager(
-      aura::Window* window);
+  // Returns the window events will be targeted at for the specified location
+  // (in screen coordinates).
+  //
+  // NOTE: the returned window may not contain the location as resize handles
+  // may extend outside the bounds of the window.
+  WmWindow* FindEventTarget(const gfx::Point& location_in_screen);
+
+  // Gets the last location seen in a mouse event in this root window's
+  // coordinates. This may return a point outside the root window's bounds.
+  gfx::Point GetLastMouseLocationInRoot();
 
   aura::Window* GetContainer(int container_id);
   const aura::Window* GetContainer(int container_id) const;
 
-  // Show shelf view if it was created hidden (before session has started).
-  // TODO(jamescook): Eliminate this and handle show via Shelf.
-  void ShowShelf();
+  // TODO(sky): remove these. http://crbug.com/671246.
+  WmWindow* GetWmContainer(int container_id) {
+    return const_cast<WmWindow*>(
+        const_cast<const RootWindowController*>(this)->GetWmContainer(
+            container_id));
+  }
+  const WmWindow* GetWmContainer(int container_id) const;
 
-  // Creates the shelf for this root window and notifies observers.
-  void CreateShelf();
+  WallpaperWidgetController* wallpaper_widget_controller() {
+    return wallpaper_widget_controller_.get();
+  }
+  void SetWallpaperWidgetController(WallpaperWidgetController* controller);
 
-  // Returns the shelf controller for this root window.
-  // TODO(jamescook): Remove this and use WmRootWindowController::GetShelf().
-  Shelf* GetShelf() const;
-
-  // Called when the login status changes after login (such as lock/unlock).
-  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
-  void UpdateAfterLoginStatusChange(LoginStatus status);
+  AnimatingWallpaperWidgetController* animating_wallpaper_widget_controller() {
+    return animating_wallpaper_widget_controller_.get();
+  }
+  void SetAnimatingWallpaperWidgetController(
+      AnimatingWallpaperWidgetController* controller);
 
   // Called when the brightness/grayscale animation from white to the login
-  // desktop background image has started.  Starts |boot_splash_screen_|'s
-  // hiding animation (if the screen is non-NULL).
-  void HandleInitialDesktopBackgroundAnimationStarted();
+  // wallpaper image has started.  Starts |boot_splash_screen_|'s hiding
+  // animation (if the screen is non-NULL).
+  void OnInitialWallpaperAnimationStarted();
 
-  // Called when the wallpaper ainmation is finished. Updates |background_|
-  // to be black and drops |boot_splash_screen_| and moves the wallpaper
-  // controller into the root window controller. |widget| holds the wallpaper
-  // image, or NULL if the background is a solid color.
+  // Called when the wallpaper animation is finished. Updates
+  // |system_wallpaper_| to be black and drops |boot_splash_screen_| and moves
+  // the wallpaper controller into the root window controller. |widget| holds
+  // the wallpaper image, or NULL if the wallpaper is a solid color.
   void OnWallpaperAnimationFinished(views::Widget* widget);
 
   // Deletes associated objects and clears the state, but doesn't delete
@@ -241,26 +280,49 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   // controller so that synthesized touch events are anchored at this point.
   void SetTouchAccessibilityAnchorPoint(const gfx::Point& anchor_point);
 
- private:
-  explicit RootWindowController(AshWindowTreeHost* host);
-  enum RootWindowType { PRIMARY, SECONDARY };
+  // Shows a context menu at the |location_in_screen|.
+  void ShowContextMenu(const gfx::Point& location_in_screen,
+                       ui::MenuSourceType source_type);
 
-  // Initializes the RootWindowController.  |is_primary| is true if
-  // the controller is for primary display.  |first_run_after_boot| is
-  // set to true only for primary root window after boot.
-  void Init(RootWindowType root_window_type, bool first_run_after_boot);
+  // Called when the login status changes after login (such as lock/unlock).
+  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
+  void UpdateAfterLoginStatusChange(LoginStatus status);
+
+ private:
+  // TODO(sky): remove this. Temporary during ash-mus unification.
+  // http://crbug.com/671246.
+  friend class mus::WindowManager;
+
+  // Creates a new RootWindowController with the specified host. Only one of
+  // |ash_host| or |window_tree_host| should be specified. This takes ownership
+  // of the supplied arguments.
+  // TODO(sky): mash should create AshWindowTreeHost, http://crbug.com/671246.
+  RootWindowController(AshWindowTreeHost* ash_host,
+                       aura::WindowTreeHost* window_tree_host);
+
+  // Initializes the RootWindowController based on |root_window_type|.
+  void Init(RootWindowType root_window_type);
 
   void InitLayoutManagers();
 
-  // Initializes |system_background_| and possibly also |boot_splash_screen_|.
-  // |is_first_run_after_boot| determines the background's initial color.
-  void CreateSystemBackground(bool is_first_run_after_boot);
+  // Creates the containers (WmWindows) used by the shell.
+  void CreateContainers();
+
+  // Initializes |system_wallpaper_| and possibly also |boot_splash_screen_|.
+  // The initial color is determined by the |root_window_type| and whether or
+  // not this is the first boot.
+  void CreateSystemWallpaper(RootWindowType root_window_type);
 
   // Enables projection touch HUD.
   void EnableTouchHudProjection();
 
   // Disables projection touch HUD.
   void DisableTouchHudProjection();
+
+  // Resets WmShell::GetRootWindowForNewWindows() if appropriate. This is called
+  // during shutdown to make sure GetRootWindowForNewWindows() isn't referencing
+  // this.
+  void ResetRootForNewWindowsIfNecessary();
 
   // Callback for MenuModelAdapter.
   void OnMenuClosed();
@@ -270,63 +332,52 @@ class ASH_EXPORT RootWindowController : public ShellObserver {
   void OnTouchHudProjectionToggled(bool enabled) override;
 
   std::unique_ptr<AshWindowTreeHost> ash_host_;
+  std::unique_ptr<aura::WindowTreeHost> mus_window_tree_host_;
+  // This comes from |ash_host_| or |mus_window_tree_host_|.
+  aura::WindowTreeHost* window_tree_host_;
 
-  std::unique_ptr<RootWindowControllerCommon> root_window_controller_common_;
+  // LayoutManagers are owned by the window they are installed on.
+  DockedWindowLayoutManager* docked_window_layout_manager_ = nullptr;
+  PanelLayoutManager* panel_layout_manager_ = nullptr;
+  wm::RootWindowLayoutManager* root_window_layout_manager_ = nullptr;
+
+  std::unique_ptr<WallpaperWidgetController> wallpaper_widget_controller_;
+  std::unique_ptr<AnimatingWallpaperWidgetController>
+      animating_wallpaper_widget_controller_;
+  std::unique_ptr<WorkspaceController> workspace_controller_;
+
+  std::unique_ptr<AlwaysOnTopController> always_on_top_controller_;
+
+  // Manages the context menu.
+  std::unique_ptr<ui::MenuModel> menu_model_;
+  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
+  std::unique_ptr<views::MenuRunner> menu_runner_;
 
   std::unique_ptr<StackingController> stacking_controller_;
 
   // The shelf controller for this root window. Exists for the entire lifetime
   // of the RootWindowController so that it is safe for observers to be added
   // to it during construction of the shelf widget and status tray.
-  std::unique_ptr<WmShelfAura> wm_shelf_aura_;
+  std::unique_ptr<WmShelf> wm_shelf_;
 
-  // Legacy shelf controller. Only present after shelf is created (post-login).
-  std::unique_ptr<Shelf> shelf_;
+  std::unique_ptr<SystemWallpaperController> system_wallpaper_;
 
-  // The shelf widget for this root window.
-  std::unique_ptr<ShelfWidget> shelf_widget_;
-
-  // An invisible/empty window used as a event target for
-  // |MouseCursorEventFilter| before a user logs in.
-  // (crbug.com/266987)
-  // Its container is |LockScreenBackgroundContainer| and
-  // this must be deleted before the container is deleted.
-  std::unique_ptr<aura::Window> mouse_event_target_;
-
-  // Manages layout of docked windows. Owned by DockedContainer.
-  DockedWindowLayoutManager* docked_layout_manager_;
-
-  // Manages layout of panels. Owned by PanelContainer.
-  PanelLayoutManager* panel_layout_manager_;
-
-  std::unique_ptr<SystemBackgroundController> system_background_;
-
-#if defined(OS_CHROMEOS)
   std::unique_ptr<BootSplashScreen> boot_splash_screen_;
   // Responsible for initializing TouchExplorationController when spoken
   // feedback is on.
   std::unique_ptr<AshTouchExplorationManager> touch_exploration_manager_;
-#endif
-
-  std::unique_ptr<WorkspaceController> workspace_controller_;
-  std::unique_ptr<AlwaysOnTopController> always_on_top_controller_;
 
   // Heads-up displays for touch events. These HUDs are not owned by the root
   // window controller and manage their own lifetimes.
-  TouchHudDebug* touch_hud_debug_;
-  TouchHudProjection* touch_hud_projection_;
+  TouchHudDebug* touch_hud_debug_ = nullptr;
+  TouchHudProjection* touch_hud_projection_ = nullptr;
 
   // Handles double clicks on the panel window header.
   std::unique_ptr<ui::EventHandler> panel_container_handler_;
 
-  std::unique_ptr<DesktopBackgroundWidgetController> wallpaper_controller_;
-  std::unique_ptr<AnimatingDesktopController> animating_wallpaper_controller_;
   std::unique_ptr<::wm::ScopedCaptureClient> capture_client_;
 
-  // Manages the context menu.
-  std::unique_ptr<ui::MenuModel> menu_model_;
-  std::unique_ptr<views::MenuModelAdapter> menu_model_adapter_;
-  std::unique_ptr<views::MenuRunner> menu_runner_;
+  static std::vector<RootWindowController*>* root_window_controllers_;
 
   DISALLOW_COPY_AND_ASSIGN(RootWindowController);
 };

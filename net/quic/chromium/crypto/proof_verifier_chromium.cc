@@ -10,8 +10,8 @@
 #include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "crypto/signature_verifier.h"
 #include "net/base/host_port_pair.h"
@@ -30,7 +30,6 @@
 using base::StringPiece;
 using base::StringPrintf;
 using std::string;
-using std::vector;
 
 namespace net {
 
@@ -60,7 +59,7 @@ class ProofVerifierChromium::Job {
       TransportSecurityState* transport_security_state,
       CTVerifier* cert_transparency_verifier,
       int cert_verify_flags,
-      const BoundNetLog& net_log);
+      const NetLogWithSource& net_log);
   ~Job();
 
   // Starts the proof verification.  If |QUIC_PENDING| is returned, then
@@ -96,7 +95,7 @@ class ProofVerifierChromium::Job {
   };
 
   // Convert |certs| to |cert_|(X509Certificate). Returns true if successful.
-  bool GetX509Certificate(const vector<string>& certs,
+  bool GetX509Certificate(const std::vector<string>& certs,
                           std::string* error_details,
                           std::unique_ptr<ProofVerifyDetails>* verify_details);
 
@@ -155,7 +154,7 @@ class ProofVerifierChromium::Job {
 
   base::TimeTicks start_time_;
 
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
 
   DISALLOW_COPY_AND_ASSIGN(Job);
 };
@@ -167,7 +166,7 @@ ProofVerifierChromium::Job::Job(
     TransportSecurityState* transport_security_state,
     CTVerifier* cert_transparency_verifier,
     int cert_verify_flags,
-    const BoundNetLog& net_log)
+    const NetLogWithSource& net_log)
     : proof_verifier_(proof_verifier),
       verifier_(cert_verifier),
       policy_enforcer_(ct_policy_enforcer),
@@ -202,7 +201,7 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyProof(
     const string& server_config,
     QuicVersion quic_version,
     StringPiece chlo_hash,
-    const vector<string>& certs,
+    const std::vector<string>& certs,
     const std::string& cert_sct,
     const string& signature,
     std::string* error_details,
@@ -231,7 +230,7 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyProof(
     // gets all the data it needs for SCT verification and does not do any
     // external communication.
     cert_transparency_verifier_->Verify(cert_.get(), std::string(), cert_sct,
-                                        &verify_details_->ct_verify_result,
+                                        &verify_details_->ct_verify_result.scts,
                                         net_log_);
   }
 
@@ -254,7 +253,7 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyProof(
 
 QuicAsyncStatus ProofVerifierChromium::Job::VerifyCertChain(
     const string& hostname,
-    const vector<string>& certs,
+    const std::vector<string>& certs,
     std::string* error_details,
     std::unique_ptr<ProofVerifyDetails>* verify_details,
     std::unique_ptr<ProofVerifierCallback> callback) {
@@ -283,7 +282,7 @@ QuicAsyncStatus ProofVerifierChromium::Job::VerifyCertChain(
 }
 
 bool ProofVerifierChromium::Job::GetX509Certificate(
-    const vector<string>& certs,
+    const std::vector<string>& certs,
     std::string* error_details,
     std::unique_ptr<ProofVerifyDetails>* verify_details) {
   if (certs.empty()) {
@@ -295,7 +294,7 @@ bool ProofVerifierChromium::Job::GetX509Certificate(
   }
 
   // Convert certs to X509Certificate.
-  vector<StringPiece> cert_pieces(certs.size());
+  std::vector<StringPiece> cert_pieces(certs.size());
   for (unsigned i = 0; i < certs.size(); i++) {
     cert_pieces[i] = base::StringPiece(certs[i]);
   }
@@ -426,6 +425,8 @@ int ProofVerifierChromium::Job::DoVerifyCertComplete(int result) {
     int ct_result = OK;
     if (verify_details_->ct_verify_result.cert_policy_compliance !=
             ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS &&
+        verify_details_->ct_verify_result.cert_policy_compliance !=
+            ct::CertPolicyCompliance::CERT_POLICY_BUILD_NOT_TIMELY &&
         transport_security_state_->ShouldRequireCT(
             hostname_, cert_verify_result.verified_cert.get(),
             cert_verify_result.public_key_hashes)) {
@@ -515,19 +516,12 @@ bool ProofVerifierChromium::Job::VerifySignature(const string& signed_data,
     return false;
   }
 
-  if (quic_version <= QUIC_VERSION_30) {
-    verifier.VerifyUpdate(
-        reinterpret_cast<const uint8_t*>(kProofSignatureLabelOld),
-        sizeof(kProofSignatureLabelOld));
-  } else {
-    verifier.VerifyUpdate(
-        reinterpret_cast<const uint8_t*>(kProofSignatureLabel),
-        sizeof(kProofSignatureLabel));
-    uint32_t len = chlo_hash.length();
-    verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(&len), sizeof(len));
-    verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(chlo_hash.data()),
-                          len);
-  }
+  verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(kProofSignatureLabel),
+                        sizeof(kProofSignatureLabel));
+  uint32_t len = chlo_hash.length();
+  verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(&len), sizeof(len));
+  verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(chlo_hash.data()),
+                        len);
 
   verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(signed_data.data()),
                         signed_data.size());
@@ -557,7 +551,6 @@ ProofVerifierChromium::ProofVerifierChromium(
 }
 
 ProofVerifierChromium::~ProofVerifierChromium() {
-  base::STLDeleteElements(&active_jobs_);
 }
 
 QuicAsyncStatus ProofVerifierChromium::VerifyProof(
@@ -579,15 +572,17 @@ QuicAsyncStatus ProofVerifierChromium::VerifyProof(
   }
   const ProofVerifyContextChromium* chromium_context =
       reinterpret_cast<const ProofVerifyContextChromium*>(verify_context);
-  std::unique_ptr<Job> job(
-      new Job(this, cert_verifier_, ct_policy_enforcer_,
-              transport_security_state_, cert_transparency_verifier_,
-              chromium_context->cert_verify_flags, chromium_context->net_log));
+  std::unique_ptr<Job> job = base::MakeUnique<Job>(
+      this, cert_verifier_, ct_policy_enforcer_, transport_security_state_,
+      cert_transparency_verifier_, chromium_context->cert_verify_flags,
+      chromium_context->net_log);
   QuicAsyncStatus status = job->VerifyProof(
       hostname, port, server_config, quic_version, chlo_hash, certs, cert_sct,
       signature, error_details, verify_details, std::move(callback));
-  if (status == QUIC_PENDING)
-    active_jobs_.insert(job.release());
+  if (status == QUIC_PENDING) {
+    Job* job_ptr = job.get();
+    active_jobs_[job_ptr] = std::move(job);
+  }
   return status;
 }
 
@@ -604,20 +599,21 @@ QuicAsyncStatus ProofVerifierChromium::VerifyCertChain(
   }
   const ProofVerifyContextChromium* chromium_context =
       reinterpret_cast<const ProofVerifyContextChromium*>(verify_context);
-  std::unique_ptr<Job> job(
-      new Job(this, cert_verifier_, ct_policy_enforcer_,
-              transport_security_state_, cert_transparency_verifier_,
-              chromium_context->cert_verify_flags, chromium_context->net_log));
+  std::unique_ptr<Job> job = base::MakeUnique<Job>(
+      this, cert_verifier_, ct_policy_enforcer_, transport_security_state_,
+      cert_transparency_verifier_, chromium_context->cert_verify_flags,
+      chromium_context->net_log);
   QuicAsyncStatus status = job->VerifyCertChain(
       hostname, certs, error_details, verify_details, std::move(callback));
-  if (status == QUIC_PENDING)
-    active_jobs_.insert(job.release());
+  if (status == QUIC_PENDING) {
+    Job* job_ptr = job.get();
+    active_jobs_[job_ptr] = std::move(job);
+  }
   return status;
 }
 
 void ProofVerifierChromium::OnJobComplete(Job* job) {
   active_jobs_.erase(job);
-  delete job;
 }
 
 }  // namespace net

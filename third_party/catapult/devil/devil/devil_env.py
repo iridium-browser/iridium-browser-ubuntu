@@ -4,6 +4,7 @@
 
 import contextlib
 import json
+import logging
 import os
 import platform
 import sys
@@ -85,13 +86,15 @@ class _Environment(object):
   def __init__(self):
     self._dm_init_lock = threading.Lock()
     self._dm = None
+    self._logging_init_lock = threading.Lock()
+    self._logging_initialized = False
 
   def Initialize(self, configs=None, config_files=None):
     """Initialize devil's environment from configuration files.
 
     This uses all configurations provided via |configs| and |config_files|
     to determine the locations of devil's dependencies. Configurations should
-    all take the form described by catapult_base.dependency_manager.BaseConfig.
+    all take the form described by py_utils.dependency_manager.BaseConfig.
     If no configurations are provided, a default one will be used if available.
 
     Args:
@@ -138,6 +141,32 @@ class _Environment(object):
       self._dm = dependency_manager.DependencyManager(
           [dependency_manager.BaseConfig(c) for c in config_files])
 
+  def InitializeLogging(self, log_level, formatter=None, handler=None):
+    if self._logging_initialized:
+      return
+
+    with self._logging_init_lock:
+      if self._logging_initialized:
+        return
+
+      formatter = formatter or logging.Formatter(
+          '%(threadName)-4s  %(message)s')
+      handler = handler or logging.StreamHandler(sys.stdout)
+      handler.setFormatter(formatter)
+
+      devil_logger = logging.getLogger('devil')
+      devil_logger.setLevel(log_level)
+      devil_logger.propagate = False
+      devil_logger.addHandler(handler)
+
+      import py_utils.cloud_storage
+      lock_logger = py_utils.cloud_storage.logger
+      lock_logger.setLevel(log_level)
+      lock_logger.propagate = False
+      lock_logger.addHandler(handler)
+
+      self._logging_initialized = True
+
   def FetchPath(self, dependency, arch=None, device=None):
     if self._dm is None:
       self.Initialize()
@@ -150,9 +179,13 @@ class _Environment(object):
       self.Initialize()
     return self._dm.LocalPath(dependency, GetPlatform(arch, device))
 
+  def PrefetchPaths(self, dependencies=None, arch=None, device=None):
+    return self._dm.PrefetchPaths(
+        GetPlatform(arch, device), dependencies=dependencies)
+
 
 def GetPlatform(arch=None, device=None):
-  if device:
+  if arch or device:
     return 'android_%s' % (arch or device.product_cpu_abi)
   return '%s_%s' % (sys.platform, platform.machine())
 

@@ -54,6 +54,12 @@ var GetAnchorOffset = requireNative('automationInternal').GetAnchorOffset;
 
 /**
  * @param {number} axTreeID The id of the accessibility tree.
+ * @return {?string} The selection anchor affinity.
+ */
+var GetAnchorAffinity = requireNative('automationInternal').GetAnchorAffinity;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
  * @return {?number} The ID of the selection focus object.
  */
 var GetFocusObjectID = requireNative('automationInternal').GetFocusObjectID;
@@ -63,6 +69,12 @@ var GetFocusObjectID = requireNative('automationInternal').GetFocusObjectID;
  * @return {?number} The selection focus offset.
  */
 var GetFocusOffset = requireNative('automationInternal').GetFocusOffset;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @return {?string} The selection focus affinity.
+ */
+var GetFocusAffinity = requireNative('automationInternal').GetFocusAffinity;
 
 /**
  * @param {number} axTreeID The id of the accessibility tree.
@@ -146,6 +158,16 @@ var GetLocation = requireNative('automationInternal').GetLocation;
  *     the tree or node wasn't found.
  */
 var GetBoundsForRange = requireNative('automationInternal').GetBoundsForRange;
+
+/**
+ * @param {number} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {!Array.<number>} The text offset where each line starts, or an empty
+ *     array if this node has no text content, or undefined if the tree or node
+ *     was not found.
+ */
+var GetLineStartOffsets = requireNative(
+    'automationInternal').GetLineStartOffsets;
 
 /**
  * @param {number} axTreeID The id of the accessibility tree.
@@ -267,6 +289,10 @@ AutomationNodeImpl.prototype = {
     return GetIndexInParent(this.treeID, this.id);
   },
 
+  get lineStartOffsets() {
+    return GetLineStartOffsets(this.treeID, this.id);
+  },
+
   get childTree() {
     var childTreeID = GetIntAttribute(this.treeID, this.id, 'childTreeId');
     if (childTreeID)
@@ -341,8 +367,18 @@ AutomationNodeImpl.prototype = {
     this.performAction_('focus');
   },
 
+  getImageData: function(maxWidth, maxHeight) {
+    this.performAction_('getImageData',
+                        { maxWidth: maxWidth,
+                          maxHeight: maxHeight });
+  },
+
   makeVisible: function() {
     this.performAction_('makeVisible');
+  },
+
+    resumeMedia: function() {
+    this.performAction_('resumeMedia');
   },
 
   setSelection: function(startIndex, endIndex) {
@@ -354,8 +390,24 @@ AutomationNodeImpl.prototype = {
     }
   },
 
+  setSequentialFocusNavigationStartingPoint: function() {
+    this.performAction_('setSequentialFocusNavigationStartingPoint');
+  },
+
   showContextMenu: function() {
     this.performAction_('showContextMenu');
+  },
+
+  startDuckingMedia: function() {
+    this.performAction_('startDuckingMedia');
+  },
+
+  stopDuckingMedia: function() {
+    this.performAction_('stopDuckingMedia');
+  },
+
+  suspendMedia: function() {
+    this.performAction_('suspendMedia');
   },
 
   domQuerySelector: function(selector, callback) {
@@ -409,14 +461,16 @@ AutomationNodeImpl.prototype = {
              attributes: this.attributes };
   },
 
-  dispatchEvent: function(eventType) {
+  dispatchEvent: function(eventType, eventFrom, mouseX, mouseY) {
     var path = [];
     var parent = this.parent;
     while (parent) {
       $Array.push(path, parent);
       parent = parent.parent;
     }
-    var event = new AutomationEvent(eventType, this.wrapper);
+    var event = new AutomationEvent(eventType, this.wrapper, eventFrom);
+    event.mouseX = mouseX;
+    event.mouseY = mouseY;
 
     // Dispatch the event through the propagation path in three phases:
     // - capturing: starting from the root and going down to the target's parent
@@ -625,6 +679,7 @@ var stringAttributes = [
     'dropeffect',
     'help',
     'htmlTag',
+    'imageDataUrl',
     'language',
     'liveRelevant',
     'liveStatus',
@@ -680,6 +735,8 @@ var intAttributes = [
 
 var nodeRefAttributes = [
     ['activedescendantId', 'activeDescendant'],
+    ['nextOnLineId', 'nextOnLine'],
+    ['previousOnLineId', 'previousOnLine'],
     ['tableColumnHeaderId', 'tableColumnHeader'],
     ['tableHeaderId', 'tableHeader'],
     ['tableRowHeaderId', 'tableRowHeader'],
@@ -893,6 +950,10 @@ AutomationRootNodeImpl.prototype = {
     return result;
   },
 
+  get chromeChannel() {
+    return GetStringAttribute(this.treeID, this.id, 'chromeChannel');
+  },
+
   get docUrl() {
     return GetDocURL(this.treeID);
   },
@@ -923,6 +984,12 @@ AutomationRootNodeImpl.prototype = {
       return GetAnchorOffset(this.treeID);
   },
 
+  get anchorAffinity() {
+    var id = GetAnchorObjectID(this.treeID);
+    if (id && id != -1)
+      return GetAnchorAffinity(this.treeID);
+  },
+
   get focusObject() {
     var id = GetFocusObjectID(this.treeID);
     if (id && id != -1)
@@ -935,6 +1002,12 @@ AutomationRootNodeImpl.prototype = {
     var id = GetFocusObjectID(this.treeID);
     if (id && id != -1)
       return GetFocusOffset(this.treeID);
+  },
+
+  get focusAffinity() {
+    var id = GetFocusObjectID(this.treeID);
+    if (id && id != -1)
+      return GetFocusAffinity(this.treeID);
   },
 
   get: function(id) {
@@ -963,7 +1036,7 @@ AutomationRootNodeImpl.prototype = {
   },
 
   destroy: function() {
-    this.dispatchEvent(schema.EventType.destroyed);
+    this.dispatchEvent(schema.EventType.destroyed, 'none');
     for (var id in this.axNodeDataCache_)
       this.remove(id);
     this.detach();
@@ -977,7 +1050,9 @@ AutomationRootNodeImpl.prototype = {
     var targetNode = this.get(eventParams.targetID);
     if (targetNode) {
       var targetNodeImpl = privates(targetNode).impl;
-      targetNodeImpl.dispatchEvent(eventParams.eventType);
+      targetNodeImpl.dispatchEvent(
+          eventParams.eventType, eventParams.eventFrom,
+          eventParams.mouseX, eventParams.mouseY);
     } else {
       logging.WARNING('Got ' + eventParams.eventType +
                       ' event on unknown node: ' + eventParams.targetID +
@@ -1014,10 +1089,16 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
     'find',
     'findAll',
     'focus',
+    'getImageData',
     'makeVisible',
     'matches',
+    'resumeMedia',
     'setSelection',
+    'setSequentialFocusNavigationStartingPoint',
     'showContextMenu',
+    'startDuckingMedia',
+    'stopDuckingMedia',
+    'suspendMedia',
     'addEventListener',
     'removeEventListener',
     'domQuerySelector',
@@ -1036,6 +1117,7 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
       'state',
       'location',
       'indexInParent',
+      'lineStartOffsets',
       'root',
       'htmlAttributes',
   ]),
@@ -1047,14 +1129,17 @@ function AutomationRootNode() {
 utils.expose(AutomationRootNode, AutomationRootNodeImpl, {
   superclass: AutomationNode,
   readonly: [
+    'chromeChannel',
     'docTitle',
     'docUrl',
     'docLoaded',
     'docLoadingProgress',
     'anchorObject',
     'anchorOffset',
+    'anchorAffinity',
     'focusObject',
     'focusOffset',
+    'focusAffinity',
   ],
 });
 

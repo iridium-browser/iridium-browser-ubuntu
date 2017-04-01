@@ -16,7 +16,9 @@
 #include "net/base/completion_callback.h"
 #include "net/base/ip_address.h"
 #include "net/base/net_errors.h"
+#include "net/log/net_log_source.h"
 #include "net/socket/tcp_client_socket.h"
+#include "third_party/WebKit/public/public_features.h"
 
 namespace {
 
@@ -308,20 +310,20 @@ void AdbClientSocket::AdbQuery(int port,
   new AdbQuerySocket(port, query, callback);
 }
 
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
 static void UseTransportQueryForDesktop(const SocketCallback& callback,
                                         net::StreamSocket* socket,
                                         int result) {
   callback.Run(result, socket);
 }
-#endif  // defined(DEBUG_DEVTOOLS)
+#endif  // BUILDFLAG(DEBUG_DEVTOOLS)
 
 // static
 void AdbClientSocket::TransportQuery(int port,
                                      const std::string& serial,
                                      const std::string& socket_name,
                                      const SocketCallback& callback) {
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
   if (serial.empty()) {
     // Use plain socket for remote debugging on Desktop (debugging purposes).
     int tcp_port = 0;
@@ -331,11 +333,11 @@ void AdbClientSocket::TransportQuery(int port,
     net::AddressList address_list = net::AddressList::CreateFromIPAddress(
         net::IPAddress::IPv4Localhost(), tcp_port);
     net::TCPClientSocket* socket = new net::TCPClientSocket(
-        address_list, NULL, net::NetLog::Source());
+        address_list, nullptr, nullptr, net::NetLogSource());
     socket->Connect(base::Bind(&UseTransportQueryForDesktop, callback, socket));
     return;
   }
-#endif  // defined(DEBUG_DEVTOOLS)
+#endif  // BUILDFLAG(DEBUG_DEVTOOLS)
   new AdbTransportSocket(port, serial, socket_name, callback);
 }
 
@@ -365,10 +367,18 @@ AdbClientSocket::~AdbClientSocket() {
 }
 
 void AdbClientSocket::Connect(const net::CompletionCallback& callback) {
-  net::AddressList address_list = net::AddressList::CreateFromIPAddress(
-      net::IPAddress::IPv4Localhost(), port_);
+  // In a IPv4/IPv6 dual stack environment, getaddrinfo for localhost could
+  // only return IPv6 address while current adb (1.0.36) will always listen
+  // on IPv4. So just try IPv4 first, then fall back to IPv6.
+  net::IPAddressList list = {net::IPAddress::IPv4Localhost(),
+                             net::IPAddress::IPv6Localhost()};
+  net::AddressList ip_list = net::AddressList::CreateFromIPAddressList(
+      list, "localhost");
+  net::AddressList address_list = net::AddressList::CopyWithPort(
+      ip_list, port_);
+
   socket_.reset(new net::TCPClientSocket(address_list, NULL, NULL,
-                                         net::NetLog::Source()));
+                                         net::NetLogSource()));
   int result = socket_->Connect(callback);
   if (result != net::ERR_IO_PENDING)
     callback.Run(result);

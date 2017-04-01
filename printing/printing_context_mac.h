@@ -32,14 +32,13 @@ class PRINTING_EXPORT PrintingContextMac : public PrintingContext {
   Result UpdatePrinterSettings(bool external_preview,
                                bool show_system_dialog,
                                int page_count) override;
-  Result InitWithSettings(const PrintSettings& settings) override;
   Result NewDocument(const base::string16& document_name) override;
   Result NewPage() override;
   Result PageDone() override;
   Result DocumentDone() override;
   void Cancel() override;
   void ReleaseContext() override;
-  gfx::NativeDrawingContext context() const override;
+  skia::NativeDrawingContext context() const override;
 
  private:
   // Initializes PrintSettings from |print_info_|. This must be called

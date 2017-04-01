@@ -32,6 +32,7 @@
 
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
+#include "core/dom/TaskRunnerHelper.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseContext.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -45,36 +46,42 @@ namespace blink {
 
 namespace {
 
-void databaseModified(const WebSecurityOrigin& origin, const String& databaseName)
-{
-    if (Platform::current()->databaseObserver())
-        Platform::current()->databaseObserver()->databaseModified(origin, databaseName);
+void databaseModified(const WebSecurityOrigin& origin,
+                      const String& databaseName) {
+  if (Platform::current()->databaseObserver())
+    Platform::current()->databaseObserver()->databaseModified(origin,
+                                                              databaseName);
 }
 
-void databaseModifiedCrossThread(const String& originString, const String& databaseName)
-{
-    databaseModified(WebSecurityOrigin::createFromString(originString), databaseName);
+void databaseModifiedCrossThread(const String& originString,
+                                 const String& databaseName) {
+  databaseModified(WebSecurityOrigin::createFromString(originString),
+                   databaseName);
 }
 
-} // namespace
+}  // namespace
 
-void SQLTransactionClient::didCommitWriteTransaction(Database* database)
-{
-    String databaseName = database->stringIdentifier();
-    ExecutionContext* executionContext = database->getDatabaseContext()->getExecutionContext();
-    if (!executionContext->isContextThread()) {
-        executionContext->postTask(BLINK_FROM_HERE, createCrossThreadTask(&databaseModifiedCrossThread, executionContext->getSecurityOrigin()->toRawString(), databaseName));
-    } else {
-        databaseModified(WebSecurityOrigin(executionContext->getSecurityOrigin()), databaseName);
-    }
+void SQLTransactionClient::didCommitWriteTransaction(Database* database) {
+  String databaseName = database->stringIdentifier();
+  ExecutionContext* executionContext =
+      database->getDatabaseContext()->getExecutionContext();
+  SecurityOrigin* origin = database->getSecurityOrigin();
+  if (!executionContext->isContextThread()) {
+    executionContext->postTask(
+        TaskType::DatabaseAccess, BLINK_FROM_HERE,
+        createCrossThreadTask(&databaseModifiedCrossThread,
+                              origin->toRawString(), databaseName));
+  } else {
+    databaseModified(WebSecurityOrigin(origin), databaseName);
+  }
 }
 
-bool SQLTransactionClient::didExceedQuota(Database* database)
-{
-    // Chromium does not allow users to manually change the quota for an origin (for now, at least).
-    // Don't do anything.
-    ASSERT(database->getDatabaseContext()->getExecutionContext()->isContextThread());
-    return false;
+bool SQLTransactionClient::didExceedQuota(Database* database) {
+  // Chromium does not allow users to manually change the quota for an origin
+  // (for now, at least).  Don't do anything.
+  ASSERT(
+      database->getDatabaseContext()->getExecutionContext()->isContextThread());
+  return false;
 }
 
-} // namespace blink
+}  // namespace blink

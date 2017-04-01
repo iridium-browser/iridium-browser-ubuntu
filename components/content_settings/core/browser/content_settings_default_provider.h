@@ -81,7 +81,7 @@ class DefaultProvider : public ObservableProvider {
   PrefService* prefs_;
 
   // Whether this settings map is for an Incognito session.
-  bool is_incognito_;
+  const bool is_incognito_;
 
   // Used around accesses to the |default_settings_| object to guarantee
   // thread safety.

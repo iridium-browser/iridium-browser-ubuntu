@@ -211,11 +211,19 @@ class ChannelPosix : public Channel,
     DCHECK(!read_watcher_);
     DCHECK(!write_watcher_);
     read_watcher_.reset(new base::MessageLoopForIO::FileDescriptorWatcher);
-    write_watcher_.reset(new base::MessageLoopForIO::FileDescriptorWatcher);
-    base::MessageLoopForIO::current()->WatchFileDescriptor(
-        handle_.get().handle, true /* persistent */,
-        base::MessageLoopForIO::WATCH_READ, read_watcher_.get(), this);
     base::MessageLoop::current()->AddDestructionObserver(this);
+    if (handle_.get().needs_connection) {
+      base::MessageLoopForIO::current()->WatchFileDescriptor(
+          handle_.get().handle, false /* persistent */,
+          base::MessageLoopForIO::WATCH_READ, read_watcher_.get(), this);
+    } else {
+      write_watcher_.reset(new base::MessageLoopForIO::FileDescriptorWatcher);
+      base::MessageLoopForIO::current()->WatchFileDescriptor(
+          handle_.get().handle, true /* persistent */,
+          base::MessageLoopForIO::WATCH_READ, read_watcher_.get(), this);
+      base::AutoLock lock(write_lock_);
+      FlushOutgoingMessagesNoLock();
+    }
   }
 
   void WaitForWriteOnIOThread() {
@@ -265,6 +273,24 @@ class ChannelPosix : public Channel,
   // base::MessageLoopForIO::Watcher:
   void OnFileCanReadWithoutBlocking(int fd) override {
     CHECK_EQ(fd, handle_.get().handle);
+    if (handle_.get().needs_connection) {
+#if !defined(OS_NACL)
+      read_watcher_.reset();
+      base::MessageLoop::current()->RemoveDestructionObserver(this);
+
+      ScopedPlatformHandle accept_fd;
+      ServerAcceptConnection(handle_.get(), &accept_fd);
+      if (!accept_fd.is_valid()) {
+        OnError();
+        return;
+      }
+      handle_ = std::move(accept_fd);
+      StartOnIOThread();
+#else
+      NOTREACHED();
+#endif
+      return;
+    }
 
     bool read_error = false;
     size_t next_read_size = 0;
@@ -321,6 +347,10 @@ class ChannelPosix : public Channel,
   // cannot be written, it's queued and a wait is initiated to write the message
   // ASAP on the I/O thread.
   bool WriteNoLock(MessageView message_view) {
+    if (handle_.get().needs_connection) {
+      outgoing_messages_.emplace_front(std::move(message_view));
+      return true;
+    }
     size_t bytes_written = 0;
     do {
       message_view.advance_data_offset(bytes_written);
@@ -370,8 +400,26 @@ class ChannelPosix : public Channel,
       }
 
       if (result < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK)
+        if (errno != EAGAIN && errno != EWOULDBLOCK
+#if defined(OS_MACOSX)
+            // On OS X if sendmsg() is trying to send fds between processes and
+            // there isn't enough room in the output buffer to send the fd
+            // structure over atomically then EMSGSIZE is returned.
+            //
+            // EMSGSIZE presents a problem since the system APIs can only call
+            // us when there's room in the socket buffer and not when there is
+            // "enough" room.
+            //
+            // The current behavior is to return to the event loop when EMSGSIZE
+            // is received and hopefull service another FD.  This is however
+            // still technically a busy wait since the event loop will call us
+            // right back until the receiver has read enough data to allow
+            // passing the FD over atomically.
+            && errno != EMSGSIZE
+#endif
+            ) {
           return false;
+        }
         message_view.SetHandles(std::move(handles));
         outgoing_messages_.emplace_front(std::move(message_view));
         WaitForWriteOnIOThreadNoLock();

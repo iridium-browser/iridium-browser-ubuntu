@@ -15,8 +15,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/grit/theme_resources.h"
 #include "content/public/test/test_browser_thread.h"
-#include "grit/theme_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/image/image.h"
@@ -99,7 +99,7 @@ class BrowserThemePackTest : public ::testing::Test {
 
   void LoadColorJSON(const std::string& json) {
     std::unique_ptr<base::Value> value = base::JSONReader::Read(json);
-    ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
+    ASSERT_TRUE(value->IsType(base::Value::Type::DICTIONARY));
     LoadColorDictionary(static_cast<base::DictionaryValue*>(value.get()));
   }
 
@@ -109,7 +109,7 @@ class BrowserThemePackTest : public ::testing::Test {
 
   void LoadTintJSON(const std::string& json) {
     std::unique_ptr<base::Value> value = base::JSONReader::Read(json);
-    ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
+    ASSERT_TRUE(value->IsType(base::Value::Type::DICTIONARY));
     LoadTintDictionary(static_cast<base::DictionaryValue*>(value.get()));
   }
 
@@ -119,7 +119,7 @@ class BrowserThemePackTest : public ::testing::Test {
 
   void LoadDisplayPropertiesJSON(const std::string& json) {
     std::unique_ptr<base::Value> value = base::JSONReader::Read(json);
-    ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
+    ASSERT_TRUE(value->IsType(base::Value::Type::DICTIONARY));
     LoadDisplayPropertiesDictionary(
         static_cast<base::DictionaryValue*>(value.get()));
   }
@@ -131,7 +131,7 @@ class BrowserThemePackTest : public ::testing::Test {
   void ParseImageNamesJSON(const std::string& json,
                            TestFilePathMap* out_file_paths) {
     std::unique_ptr<base::Value> value = base::JSONReader::Read(json);
-    ASSERT_TRUE(value->IsType(base::Value::TYPE_DICTIONARY));
+    ASSERT_TRUE(value->IsType(base::Value::Type::DICTIONARY));
     ParseImageNamesDictionary(static_cast<base::DictionaryValue*>(value.get()),
                               out_file_paths);
   }
@@ -616,7 +616,7 @@ TEST_F(BrowserThemePackTest, TestNonExistantImages) {
 TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  base::FilePath file = dir.path().AppendASCII("data.pak");
+  base::FilePath file = dir.GetPath().AppendASCII("data.pak");
 
   // Part 1: Build the pack from an extension.
   {
@@ -640,7 +640,7 @@ TEST_F(BrowserThemePackTest, CanBuildAndReadPack) {
 TEST_F(BrowserThemePackTest, HiDpiThemeTest) {
   base::ScopedTempDir dir;
   ASSERT_TRUE(dir.CreateUniqueTempDir());
-  base::FilePath file = dir.path().AppendASCII("theme_data.pak");
+  base::FilePath file = dir.GetPath().AppendASCII("theme_data.pak");
 
   // Part 1: Build the pack from an extension.
   {

@@ -25,6 +25,24 @@ import urllib2
 # on the fly :(.
 os.environ.pop('http_proxy', None)
 
+from chromite.lib import constants
+
+# The isolateserver includes a bunch of third_party python packages that clash
+# with chromite's bundled third_party python packages (like oauth2client).
+# Since upload_symbols is not imported in to other parts of chromite, and there
+# are no deps in third_party we care about, purge the chromite copy.  This way
+# we can use isolateserver for deduping.
+# TODO: If we ever sort out third_party/ handling and make it per-script opt-in,
+# we can purge this logic.
+third_party = os.path.join(constants.CHROMITE_DIR, 'third_party')
+while True:
+  try:
+    sys.path.remove(third_party)
+  except ValueError:
+    break
+sys.path.insert(0, os.path.join(third_party, 'swarming.client'))
+del third_party
+
 from chromite.lib import cros_logging as logging
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
@@ -33,7 +51,9 @@ from chromite.lib import remote_access
 from chromite.scripts import cros_generate_breakpad_symbols
 from chromite.scripts import upload_symbols
 
-import isolateserver
+# And our sys.path muckery confuses pylint.
+import isolateserver  # pylint: disable=import-error
+
 
 class SymbolsTestBase(cros_test_lib.MockTempDirTestCase):
   """Base class for most symbols tests."""
@@ -506,7 +526,7 @@ class PerformSymbolFilesUploadTest(SymbolsTestBase):
 
     # Timeout for 300M file.
     large = self.createSymbolFile('large.sym', size=(300 * 1024 * 1024))
-    self.assertEqual(upload_symbols.GetUploadTimeout(large), 1542)
+    self.assertEqual(upload_symbols.GetUploadTimeout(large), 1080)
 
   def testUploadSymbolFile(self):
     upload_symbols.UploadSymbolFile('fake_url', self.sym_initial, 'product')
@@ -595,7 +615,9 @@ class PerformSymbolFilesUploadTest(SymbolsTestBase):
       if symbol.file_name == fail_file:
         raise urllib2.URLError('network failure')
 
-    self.PatchObject(upload_symbols, 'UploadSymbolFile', side_effect=failSome)
+    upload_mock = self.PatchObject(upload_symbols, 'UploadSymbolFile',
+                                   side_effect=failSome)
+    upload_mock.__name__ = 'UploadSymbolFileMock2'
 
     result = upload_symbols.PerformSymbolsFileUpload(
         symbols, 'fake_url', product_name='product')
@@ -672,6 +694,8 @@ class UploadSymbolsTest(SymbolsTestBase):
     # Mock out UploadSymbolFile so it's easy to see which file to fail for.
     upload_mock = self.PatchObject(upload_symbols, 'UploadSymbolFile',
                                    side_effect=failSome)
+    # Mock __name__ for logging.
+    upload_mock.__name__ = 'UploadSymbolFileMock'
 
     result = upload_symbols.UploadSymbols(
         [self.data], 'fake_url', 'product',

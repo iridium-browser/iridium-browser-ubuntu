@@ -41,22 +41,40 @@ MediaRouterAction::MediaRouterAction(Browser* browser,
       media_router::MediaRoutesObserver(GetMediaRouter(browser)),
       current_icon_(gfx::VectorIconId::MEDIA_ROUTER_IDLE),
       has_local_display_route_(false),
+      has_dialog_(false),
       delegate_(nullptr),
       browser_(browser),
       toolbar_actions_bar_(toolbar_actions_bar),
       platform_delegate_(MediaRouterActionPlatformDelegate::Create(browser)),
       contextual_menu_(browser),
       tab_strip_model_observer_(this),
+      toolbar_actions_bar_observer_(this),
       weak_ptr_factory_(this) {
   DCHECK(browser_);
   DCHECK(toolbar_actions_bar_);
   tab_strip_model_observer_.Add(browser_->tab_strip_model());
-
-  RegisterObserver();
+  toolbar_actions_bar_observer_.Add(toolbar_actions_bar_);
+  IssuesObserver::Init();
 }
 
 MediaRouterAction::~MediaRouterAction() {
-  UnregisterObserver();
+}
+
+// static
+SkColor MediaRouterAction::GetIconColor(gfx::VectorIconId icon_id) {
+  switch (icon_id) {
+    case gfx::VectorIconId::MEDIA_ROUTER_IDLE:
+      return gfx::kChromeIconGrey;
+    case gfx::VectorIconId::MEDIA_ROUTER_ACTIVE:
+      return gfx::kGoogleBlue500;
+    case gfx::VectorIconId::MEDIA_ROUTER_WARNING:
+      return gfx::kGoogleYellow700;
+    case gfx::VectorIconId::MEDIA_ROUTER_ERROR:
+      return gfx::kGoogleRed700;
+    default:
+      NOTREACHED();
+      return gfx::kPlaceholderColor;
+  }
 }
 
 std::string MediaRouterAction::GetId() const {
@@ -66,20 +84,17 @@ std::string MediaRouterAction::GetId() const {
 void MediaRouterAction::SetDelegate(ToolbarActionViewDelegate* delegate) {
   delegate_ = delegate;
 
-  // Updates the current popup state if |delegate_| is non-null and has
-  // WebContents ready.
   // In cases such as opening a new browser window, SetDelegate() will be
-  // called before the WebContents is set. In those cases, we update the popup
-  // state when ActiveTabChanged() is called.
+  // called before the WebContents is set. In those cases, we register with the
+  // dialog controller when ActiveTabChanged() is called.
   if (delegate_ && delegate_->GetCurrentWebContents())
-    UpdatePopupState();
+    RegisterWithDialogController();
 }
 
 gfx::Image MediaRouterAction::GetIcon(content::WebContents* web_contents,
                                       const gfx::Size& size) {
-  // Color is defined in the icon.
   return gfx::Image(
-      gfx::CreateVectorIcon(current_icon_, gfx::kPlaceholderColor));
+      gfx::CreateVectorIcon(current_icon_, GetIconColor(current_icon_)));
 }
 
 base::string16 MediaRouterAction::GetActionName() const {
@@ -113,7 +128,6 @@ bool MediaRouterAction::HasPopup(
 
 void MediaRouterAction::HidePopup() {
   GetMediaRouterDialogController()->HideMediaRouterDialog();
-  OnPopupHidden();
 }
 
 gfx::NativeView MediaRouterAction::GetPopupNativeView() {
@@ -122,6 +136,13 @@ gfx::NativeView MediaRouterAction::GetPopupNativeView() {
 
 ui::MenuModel* MediaRouterAction::GetContextMenu() {
   return contextual_menu_.menu_model();
+}
+
+void MediaRouterAction::OnContextMenuClosed() {
+  if (toolbar_actions_bar_->popped_out_action() == this &&
+      !GetMediaRouterDialogController()->IsShowingMediaRouterDialog()) {
+    toolbar_actions_bar_->UndoPopOut();
+  }
 }
 
 bool MediaRouterAction::ExecuteAction(bool by_user) {
@@ -143,17 +164,20 @@ bool MediaRouterAction::ExecuteAction(bool by_user) {
 }
 
 void MediaRouterAction::UpdateState() {
-  if (delegate_)
-    delegate_->UpdateState();
+  delegate_->UpdateState();
 }
 
 bool MediaRouterAction::DisabledClickOpensMenu() const {
   return false;
 }
 
-void MediaRouterAction::OnIssueUpdated(const media_router::Issue* issue) {
-  issue_.reset(issue ? new media_router::Issue(*issue) : nullptr);
+void MediaRouterAction::OnIssue(const media_router::Issue& issue) {
+  current_issue_.reset(new media_router::IssueInfo(issue.info()));
+  MaybeUpdateIcon();
+}
 
+void MediaRouterAction::OnIssuesCleared() {
+  current_issue_.reset();
   MaybeUpdateIcon();
 }
 
@@ -172,42 +196,55 @@ void MediaRouterAction::ActiveTabChanged(content::WebContents* old_contents,
                                          content::WebContents* new_contents,
                                          int index,
                                          int reason) {
-  UpdatePopupState();
+  RegisterWithDialogController();
+  UpdateDialogState();
 }
 
-void MediaRouterAction::OnPopupHidden() {
-  if (delegate_)
+void MediaRouterAction::OnToolbarActionsBarAnimationEnded() {
+  UpdateDialogState();
+}
+
+void MediaRouterAction::OnDialogHidden() {
+  if (has_dialog_) {
+    has_dialog_ = false;
     delegate_->OnPopupClosed();
+  }
 }
 
-void MediaRouterAction::OnPopupShown() {
-  // We depress the action regardless of whether ExecuteAction() was user
-  // initiated.
-  if (delegate_)
+void MediaRouterAction::OnDialogShown() {
+  if (!has_dialog_) {
+    has_dialog_ = true;
+    // We depress the action regardless of whether ExecuteAction() was user
+    // initiated.
     delegate_->OnPopupShown(true);
+  }
 }
 
-void MediaRouterAction::UpdatePopupState() {
+void MediaRouterAction::RegisterWithDialogController() {
   MediaRouterDialogControllerImpl* controller =
       GetMediaRouterDialogController();
 
   if (!controller)
     return;
 
-  // When each browser window is created, its toolbar creates a
-  // MediaRouterAction that is only destroyed when the browser window is torn
-  // down. |controller| will keep track of that instance. If |this| was created
-  // in overflow mode, it will be destroyed when the overflow menu is closed.
-  // If SetMediaRouterAction() was previously called, this is a no-op.
+  // |controller| keeps track of |this| if |this| was created with the browser
+  // window or ephemerally by activating the Cast functionality. If |this| was
+  // created in overflow mode, it will be destroyed when the overflow menu is
+  // closed.
   if (!toolbar_actions_bar_->in_overflow_mode())
     controller->SetMediaRouterAction(weak_ptr_factory_.GetWeakPtr());
+}
 
-  // Update the button in case the pressed state is out of sync with dialog
-  // visibility.
-  if (controller->IsShowingMediaRouterDialog())
-    OnPopupShown();
+void MediaRouterAction::UpdateDialogState() {
+  // The WebContents may be null during browser test shutdown, in which case we
+  // cannot call GetMediaRouterDialogController().
+  if (!delegate_->GetCurrentWebContents())
+    return;
+
+  if (GetMediaRouterDialogController()->IsShowingMediaRouterDialog())
+    OnDialogShown();
   else
-    OnPopupHidden();
+    OnDialogHidden();
 }
 
 MediaRouterDialogControllerImpl*
@@ -231,19 +268,22 @@ void MediaRouterAction::MaybeUpdateIcon() {
     current_icon_ = new_icon;
 
     // Tell the associated view to update its icon to reflect the change made
-    // above.
+    // above. If MaybeUpdateIcon() was called as a result of instantiating
+    // |this|, then |delegate_| may not be set yet.
     if (delegate_)
-      delegate_->UpdateState();
+      UpdateState();
   }
 }
 
 gfx::VectorIconId MediaRouterAction::GetCurrentIcon() const {
   // Highest priority is to indicate whether there's an issue.
-  if (issue_) {
-    if (issue_->severity() == media_router::Issue::FATAL)
+  if (current_issue_) {
+    media_router::IssueInfo::Severity severity = current_issue_->severity;
+    if (severity == media_router::IssueInfo::Severity::FATAL)
       return gfx::VectorIconId::MEDIA_ROUTER_ERROR;
-    if (issue_->severity() == media_router::Issue::WARNING)
+    if (severity == media_router::IssueInfo::Severity::WARNING)
       return gfx::VectorIconId::MEDIA_ROUTER_WARNING;
+    // Fall through for Severity::NOTIFICATION.
   }
 
   return has_local_display_route_ ? gfx::VectorIconId::MEDIA_ROUTER_ACTIVE

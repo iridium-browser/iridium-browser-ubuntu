@@ -6,31 +6,31 @@
 #define CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_DATA_TYPE_CONTROLLER_H_
 
 #include "base/macros.h"
+#include "components/sync/driver/async_directory_type_controller.h"
 #include "components/sync/driver/data_type_controller.h"
-#include "components/sync/driver/ui_data_type_controller.h"
-
-namespace sync_driver {
-class SyncClient;
-}
 
 class Profile;
 
-// A UIDataTypeController for supervised user sync datatypes, which enables or
+namespace syncer {
+class SyncClient;
+}
+
+// A DataTypeController for supervised user sync datatypes, which enables or
 // disables these types based on the profile's IsSupervised state.
 class SupervisedUserSyncDataTypeController
-    : public sync_driver::UIDataTypeController {
+    : public syncer::AsyncDirectoryTypeController {
  public:
+  // |dump_stack| is called when an unrecoverable error occurs.
   SupervisedUserSyncDataTypeController(syncer::ModelType type,
-                                       const base::Closure& error_callback,
-                                       sync_driver::SyncClient* sync_client,
+                                       const base::Closure& dump_stack,
+                                       syncer::SyncClient* sync_client,
                                        Profile* profile);
+  ~SupervisedUserSyncDataTypeController() override;
 
+  // AsyncDirectoryTypeController implementation.
   bool ReadyForStart() const override;
 
  private:
-  // DataTypeController is RefCounted.
-  ~SupervisedUserSyncDataTypeController() override;
-
   Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(SupervisedUserSyncDataTypeController);

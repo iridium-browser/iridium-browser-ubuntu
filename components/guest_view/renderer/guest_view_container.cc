@@ -5,12 +5,14 @@
 #include "components/guest_view/renderer/guest_view_container.h"
 
 #include "base/macros.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "components/guest_view/common/guest_view_constants.h"
 #include "components/guest_view/common/guest_view_messages.h"
 #include "components/guest_view/renderer/guest_view_request.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -53,6 +55,7 @@ GuestViewContainer::GuestViewContainer(content::RenderFrame* render_frame)
       render_frame_(render_frame),
       in_destruction_(false),
       destruction_isolate_(nullptr),
+      element_resize_isolate_(nullptr),
       weak_ptr_factory_(this) {
   render_frame_lifetime_observer_.reset(
       new RenderFrameLifetimeObserver(this, render_frame_));
@@ -103,7 +106,8 @@ void GuestViewContainer::Destroy(bool embedder_frame_destroyed) {
       pending_response_->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
 
     while (pending_requests_.size() > 0) {
-      linked_ptr<GuestViewRequest> pending_request = pending_requests_.front();
+      std::unique_ptr<GuestViewRequest> pending_request =
+          std::move(pending_requests_.front());
       pending_requests_.pop_front();
       // Call the JavaScript callbacks with no arguments which implies an error.
       pending_request->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
@@ -126,29 +130,33 @@ void GuestViewContainer::RenderFrameDestroyed() {
   Destroy(true /* embedder_frame_destroyed */);
 }
 
-void GuestViewContainer::IssueRequest(linked_ptr<GuestViewRequest> request) {
-  EnqueueRequest(request);
+void GuestViewContainer::IssueRequest(
+    std::unique_ptr<GuestViewRequest> request) {
+  EnqueueRequest(std::move(request));
   PerformPendingRequest();
 }
 
-void GuestViewContainer::EnqueueRequest(linked_ptr<GuestViewRequest> request) {
-  pending_requests_.push_back(request);
+void GuestViewContainer::EnqueueRequest(
+    std::unique_ptr<GuestViewRequest> request) {
+  pending_requests_.push_back(std::move(request));
 }
 
 void GuestViewContainer::PerformPendingRequest() {
   if (!ready_ || pending_requests_.empty() || pending_response_.get())
     return;
 
-  linked_ptr<GuestViewRequest> pending_request = pending_requests_.front();
+  std::unique_ptr<GuestViewRequest> pending_request =
+      std::move(pending_requests_.front());
   pending_requests_.pop_front();
   pending_request->PerformRequest();
-  pending_response_ = pending_request;
+  pending_response_ = std::move(pending_request);
 }
 
 void GuestViewContainer::HandlePendingResponseCallback(
     const IPC::Message& message) {
   CHECK(pending_response_.get());
-  linked_ptr<GuestViewRequest> pending_response(pending_response_.release());
+  std::unique_ptr<GuestViewRequest> pending_response =
+      std::move(pending_response_);
   pending_response->HandleResponse(message);
 }
 
@@ -216,6 +224,45 @@ void GuestViewContainer::SetElementInstanceID(int element_instance_id) {
 
 void GuestViewContainer::DidDestroyElement() {
   Destroy(false);
+}
+
+void GuestViewContainer::RegisterElementResizeCallback(
+    v8::Local<v8::Function> callback,
+    v8::Isolate* isolate) {
+  element_resize_callback_.Reset(isolate, callback);
+  element_resize_isolate_ = isolate;
+}
+
+void GuestViewContainer::DidResizeElement(const gfx::Size& new_size) {
+  // Call the element resize callback, if one is registered.
+  if (element_resize_callback_.IsEmpty())
+    return;
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&GuestViewContainer::CallElementResizeCallback,
+                 weak_ptr_factory_.GetWeakPtr(), new_size));
+}
+
+void GuestViewContainer::CallElementResizeCallback(
+    const gfx::Size& new_size) {
+  v8::HandleScope handle_scope(element_resize_isolate_);
+  v8::Local<v8::Function> callback = v8::Local<v8::Function>::New(
+      element_resize_isolate_, element_resize_callback_);
+  v8::Local<v8::Context> context = callback->CreationContext();
+  if (context.IsEmpty())
+    return;
+
+  const int argc = 2;
+  v8::Local<v8::Value> argv[argc] = {
+      v8::Integer::New(element_resize_isolate_, new_size.width()),
+      v8::Integer::New(element_resize_isolate_, new_size.height())};
+
+  v8::Context::Scope context_scope(context);
+  v8::MicrotasksScope microtasks(
+      element_resize_isolate_, v8::MicrotasksScope::kDoNotRunMicrotasks);
+
+  callback->Call(context->Global(), argc, argv);
 }
 
 base::WeakPtr<content::BrowserPluginDelegate> GuestViewContainer::GetWeakPtr() {

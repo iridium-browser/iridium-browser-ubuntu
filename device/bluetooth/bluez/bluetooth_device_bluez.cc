@@ -11,7 +11,8 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/metrics/histogram.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "dbus/bus.h"
@@ -180,7 +181,7 @@ BluetoothDeviceBlueZ::~BluetoothDeviceBlueZ() {
   for (const auto& iter : gatt_services_swapped) {
     DCHECK(adapter());
     adapter()->NotifyGattServiceRemoved(
-        static_cast<BluetoothRemoteGattServiceBlueZ*>(iter.second));
+        static_cast<BluetoothRemoteGattServiceBlueZ*>(iter.second.get()));
   }
 }
 
@@ -236,6 +237,28 @@ bool BluetoothDeviceBlueZ::IsGattServicesDiscoveryComplete() const {
 }
 
 void BluetoothDeviceBlueZ::DisconnectGatt() {
+  // There isn't currently a good way to manage the ownership of a connection
+  // between Chrome and bluetoothd plugins/profiles. Until a proper reference
+  // count is kept in bluetoothd, we might unwittingly kill a connection to a
+  // device the user is still interested in, e.g. a mouse. A device's paired
+  // status is usually a good indication that the device is being used by other
+  // parts of the system and therefore we leak these connections.
+  // TODO(crbug.com/630586): Call disconnect for all devices.
+
+  // IsPaired() returns true if we've connected to the device before. So we
+  // check the dbus property directly.
+  // TODO(crbug.com/649651): Use IsPaired once it returns true only for paired
+  // devices.
+  bluez::BluetoothDeviceClient::Properties* properties =
+      bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient()->GetProperties(
+          object_path_);
+  DCHECK(properties);
+
+  if (properties->paired.value()) {
+    LOG(WARNING) << "Leaking connection to paired device.";
+    return;
+  }
+
   Disconnect(base::Bind(&base::DoNothing), base::Bind(&base::DoNothing));
 }
 
@@ -291,7 +314,10 @@ base::Optional<std::string> BluetoothDeviceBlueZ::GetName() const {
           object_path_);
   DCHECK(properties);
 
-  return properties->alias.value();
+  if (properties->name.is_valid())
+    return properties->name.value();
+  else
+    return base::nullopt;
 }
 
 bool BluetoothDeviceBlueZ::IsPaired() const {
@@ -557,8 +583,8 @@ void BluetoothDeviceBlueZ::CreateGattConnection(
     return;
   }
 
-  // TODO(armansito): Until there is a way to create a reference counted GATT
-  // connection in bluetoothd, simply do a regular connect.
+  // TODO(crbug.com/630586): Until there is a way to create a reference counted
+  // GATT connection in bluetoothd, simply do a regular connect.
   Connect(NULL, base::Bind(&BluetoothDeviceBlueZ::OnCreateGattConnection,
                            weak_ptr_factory_.GetWeakPtr(), callback),
           error_callback);
@@ -571,6 +597,46 @@ void BluetoothDeviceBlueZ::GetServiceRecords(
       object_path_, callback,
       base::Bind(&BluetoothDeviceBlueZ::OnGetServiceRecordsError,
                  weak_ptr_factory_.GetWeakPtr(), error_callback));
+}
+
+void BluetoothDeviceBlueZ::UpdateServiceData() {
+  bluez::BluetoothDeviceClient::Properties* properties =
+      bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient()->GetProperties(
+          object_path_);
+  DCHECK(properties);
+  DCHECK(properties->service_data.is_valid());
+
+  service_data_.clear();
+  for (const auto& pair : properties->service_data.value())
+    service_data_[BluetoothUUID(pair.first)] = pair.second;
+}
+
+void BluetoothDeviceBlueZ::UpdateManufacturerData() {
+  bluez::BluetoothDeviceClient::Properties* properties =
+      bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient()->GetProperties(
+          object_path_);
+  DCHECK(properties);
+  manufacturer_data_.clear();
+
+  if (properties->manufacturer_data.is_valid()) {
+    for (const auto& pair : properties->manufacturer_data.value())
+      manufacturer_data_[pair.first] = pair.second;
+  }
+}
+
+void BluetoothDeviceBlueZ::UpdateAdvertisingDataFlags() {
+  bluez::BluetoothDeviceClient::Properties* properties =
+      bluez::BluezDBusManager::Get()->GetBluetoothDeviceClient()->GetProperties(
+          object_path_);
+  DCHECK(properties);
+  advertising_data_flags_ = base::nullopt;
+
+  // The advertising data flags property is a vector<uint8> because the
+  // Supplement to Bluetooth Core Specification Version 6 page 13 said that
+  // "The Flags field may be zero or more octets long." However, only the first
+  // byte of that is needed because there is only 5 bits of data defined there.
+  if (properties->advertising_data_flags.is_valid())
+    advertising_data_flags_ = properties->advertising_data_flags.value()[0];
 }
 
 BluetoothPairingBlueZ* BluetoothDeviceBlueZ::BeginPairing(
@@ -613,8 +679,7 @@ void BluetoothDeviceBlueZ::GattServiceAdded(
   BluetoothRemoteGattServiceBlueZ* service =
       new BluetoothRemoteGattServiceBlueZ(adapter(), this, object_path);
 
-  gatt_services_.set(service->GetIdentifier(),
-                     std::unique_ptr<BluetoothRemoteGattService>(service));
+  gatt_services_[service->GetIdentifier()] = base::WrapUnique(service);
   DCHECK(service->object_path() == object_path);
   DCHECK(service->GetUUID().IsValid());
 
@@ -624,15 +689,14 @@ void BluetoothDeviceBlueZ::GattServiceAdded(
 
 void BluetoothDeviceBlueZ::GattServiceRemoved(
     const dbus::ObjectPath& object_path) {
-  GattServiceMap::const_iterator iter =
-      gatt_services_.find(object_path.value());
+  auto iter = gatt_services_.find(object_path.value());
   if (iter == gatt_services_.end()) {
     VLOG(3) << "Unknown GATT service removed: " << object_path.value();
     return;
   }
 
   BluetoothRemoteGattServiceBlueZ* service =
-      static_cast<BluetoothRemoteGattServiceBlueZ*>(iter->second);
+      static_cast<BluetoothRemoteGattServiceBlueZ*>(iter->second.get());
 
   VLOG(1) << "Removing remote GATT service with UUID: '"
           << service->GetUUID().canonical_value()
@@ -640,7 +704,8 @@ void BluetoothDeviceBlueZ::GattServiceRemoved(
 
   DCHECK(service->object_path() == object_path);
   std::unique_ptr<BluetoothRemoteGattService> scoped_service =
-      gatt_services_.take_and_erase(iter->first);
+      std::move(gatt_services_[object_path.value()]);
+  gatt_services_.erase(iter);
 
   DCHECK(adapter());
   discovery_complete_notified_.erase(service);
@@ -863,6 +928,9 @@ void BluetoothDeviceBlueZ::OnSetTrusted(bool success) {
 
 void BluetoothDeviceBlueZ::OnDisconnect(const base::Closure& callback) {
   VLOG(1) << object_path_.value() << ": Disconnected";
+  // Do not notify about changed device since this is already done by
+  // the dbus::PropertySet and the property change callback for BlueZ.
+  DidDisconnectGatt(false /* notifyDeviceChanged */);
   callback.Run();
 }
 

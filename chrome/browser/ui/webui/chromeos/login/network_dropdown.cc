@@ -4,9 +4,14 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/network_dropdown.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 
+#include "ash/common/system/chromeos/network/network_icon.h"
+#include "ash/common/system/chromeos/network/network_icon_animation.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -16,8 +21,6 @@
 #include "content/public/browser/web_ui.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/webui/web_ui_util.h"
-#include "ui/chromeos/network/network_icon.h"
-#include "ui/chromeos/network/network_icon_animation.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -87,7 +90,7 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
       id = -2;
     else
       id = model->GetCommandIdAt(i);
-    base::DictionaryValue* item = new base::DictionaryValue();
+    auto item = base::MakeUnique<base::DictionaryValue>();
     item->SetInteger("id", id);
     base::string16 label = model->GetLabelAt(i);
     base::ReplaceSubstringsAfterOffset(&label, 0, base::ASCIIToUTF16("&&"),
@@ -108,7 +111,7 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
     }
     if (type == ui::MenuModel::TYPE_SUBMENU)
       item->Set("sub", ConvertMenuModel(model->GetSubmenuModelAt(i)));
-    list->Append(item);
+    list->Append(std::move(item));
   }
   return list;
 }
@@ -135,7 +138,7 @@ NetworkDropdown::NetworkDropdown(Actor* actor,
 }
 
 NetworkDropdown::~NetworkDropdown() {
-  ui::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
+  ash::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
   if (NetworkHandler::IsInitialized()) {
     NetworkHandler::Get()->network_state_handler()->RemoveObserver(
         this, FROM_HERE);
@@ -188,12 +191,13 @@ void NetworkDropdown::SetNetworkIconAndText() {
   base::string16 text;
   gfx::ImageSkia icon_image;
   bool animating = false;
-  ui::network_icon::GetDefaultNetworkImageAndLabel(
-      ui::network_icon::ICON_TYPE_LIST, &icon_image, &text, &animating);
+  ash::network_icon::GetDefaultNetworkImageAndLabel(
+      ash::network_icon::ICON_TYPE_LIST, &icon_image, &text, &animating);
   if (animating) {
-    ui::network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
+    ash::network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
   } else {
-    ui::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
+    ash::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(
+        this);
   }
   SkBitmap icon_bitmap = icon_image.GetRepresentation(
       web_ui_->GetDeviceScaleFactor()).sk_bitmap();

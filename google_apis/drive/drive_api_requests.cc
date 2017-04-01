@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/sequenced_task_runner.h"
@@ -92,7 +93,8 @@ void AttachProperties(const Properties& properties,
 
   base::ListValue* const properties_value = new base::ListValue;
   for (const auto& property : properties) {
-    base::DictionaryValue* const property_value = new base::DictionaryValue;
+    std::unique_ptr<base::DictionaryValue> property_value(
+        new base::DictionaryValue);
     std::string visibility_as_string;
     switch (property.visibility()) {
       case Property::VISIBILITY_PRIVATE:
@@ -105,7 +107,7 @@ void AttachProperties(const Properties& properties,
     property_value->SetString("visibility", visibility_as_string);
     property_value->SetString("key", property.key());
     property_value->SetString("value", property.value());
-    properties_value->Append(property_value);
+    properties_value->Append(std::move(property_value));
   }
   request_body->Set("properties", properties_value);
 }
@@ -1140,11 +1142,10 @@ bool PermissionsInsertRequest::GetContentData(std::string* upload_content_type,
 
 SingleBatchableDelegateRequest::SingleBatchableDelegateRequest(
     RequestSender* sender,
-    BatchableDelegate* delegate)
+    std::unique_ptr<BatchableDelegate> delegate)
     : UrlFetchRequestBase(sender),
-      delegate_(delegate),
-      weak_ptr_factory_(this) {
-}
+      delegate_(std::move(delegate)),
+      weak_ptr_factory_(this) {}
 
 SingleBatchableDelegateRequest::~SingleBatchableDelegateRequest() {
 }
@@ -1226,7 +1227,7 @@ void BatchUploadRequest::AddRequest(BatchableDelegate* request) {
   DCHECK(request);
   DCHECK(GetChildEntry(request) == child_requests_.end());
   DCHECK(!committed_);
-  child_requests_.push_back(new BatchUploadChildEntry(request));
+  child_requests_.push_back(base::MakeUnique<BatchUploadChildEntry>(request));
   request->Prepare(base::Bind(&BatchUploadRequest::OnChildRequestPrepared,
                               weak_ptr_factory_.GetWeakPtr(), request));
 }
@@ -1270,8 +1271,8 @@ void BatchUploadRequest::Cancel() {
 
 // Obtains corresponding child entry of |request_id|. Returns NULL if the
 // entry is not found.
-ScopedVector<BatchUploadChildEntry>::iterator BatchUploadRequest::GetChildEntry(
-    RequestID request_id) {
+std::vector<std::unique_ptr<BatchUploadChildEntry>>::iterator
+BatchUploadRequest::GetChildEntry(RequestID request_id) {
   for (auto it = child_requests_.begin(); it != child_requests_.end(); ++it) {
     if ((*it)->request.get() == request_id)
       return it;
@@ -1282,7 +1283,7 @@ ScopedVector<BatchUploadChildEntry>::iterator BatchUploadRequest::GetChildEntry(
 void BatchUploadRequest::MayCompletePrepare() {
   if (!committed_ || prepare_callback_.is_null())
     return;
-  for (auto* child : child_requests_) {
+  for (const auto& child : child_requests_) {
     if (!child->prepared)
       return;
   }
@@ -1290,7 +1291,7 @@ void BatchUploadRequest::MayCompletePrepare() {
   // Build multipart body here.
   int64_t total_size = 0;
   std::vector<ContentTypeAndData> parts;
-  for (auto* child : child_requests_) {
+  for (const auto& child : child_requests_) {
     std::string type;
     std::string data;
     const bool result = child->request->GetContentData(&type, &data);
@@ -1409,7 +1410,7 @@ void BatchUploadRequest::ProcessURLFetchResults(const net::URLFetcher* source) {
 }
 
 void BatchUploadRequest::RunCallbackOnPrematureFailure(DriveApiErrorCode code) {
-  for (auto* child : child_requests_)
+  for (const auto& child : child_requests_)
     child->request->NotifyError(code);
   child_requests_.clear();
 }
@@ -1417,7 +1418,7 @@ void BatchUploadRequest::RunCallbackOnPrematureFailure(DriveApiErrorCode code) {
 void BatchUploadRequest::OnURLFetchUploadProgress(const net::URLFetcher* source,
                                                   int64_t current,
                                                   int64_t total) {
-  for (auto* child : child_requests_) {
+  for (const auto& child : child_requests_) {
     if (child->data_offset <= current &&
         current <= child->data_offset + child->data_size) {
       child->request->NotifyUploadProgress(source, current - child->data_offset,

@@ -30,6 +30,7 @@
 
 #include "modules/filesystem/HTMLInputElementFileSystem.h"
 
+#include "bindings/core/v8/ScriptState.h"
 #include "core/fileapi/FileList.h"
 #include "core/html/HTMLInputElement.h"
 #include "modules/filesystem/DOMFilePath.h"
@@ -43,36 +44,39 @@
 namespace blink {
 
 // static
-EntryHeapVector HTMLInputElementFileSystem::webkitEntries(ExecutionContext* executionContext, HTMLInputElement& input)
-{
-    EntryHeapVector entries;
-    FileList* files = input.files();
+EntryHeapVector HTMLInputElementFileSystem::webkitEntries(
+    ScriptState* scriptState,
+    HTMLInputElement& input) {
+  EntryHeapVector entries;
+  FileList* files = input.files();
 
-    if (!files)
-        return entries;
-
-    DOMFileSystem* filesystem = DOMFileSystem::createIsolatedFileSystem(executionContext, input.droppedFileSystemId());
-    if (!filesystem) {
-        // Drag-drop isolated filesystem is not available.
-        return entries;
-    }
-
-    for (unsigned i = 0; i < files->length(); ++i) {
-        File* file = files->item(i);
-
-        // FIXME: This involves synchronous file operation.
-        FileMetadata metadata;
-        if (!getFileMetadata(file->path(), metadata))
-            continue;
-
-        // The dropped entries are mapped as top-level entries in the isolated filesystem.
-        String virtualPath = DOMFilePath::append("/", file->name());
-        if (metadata.type == FileMetadata::TypeDirectory)
-            entries.append(DirectoryEntry::create(filesystem, virtualPath));
-        else
-            entries.append(FileEntry::create(filesystem, virtualPath));
-    }
+  if (!files)
     return entries;
+
+  DOMFileSystem* filesystem = DOMFileSystem::createIsolatedFileSystem(
+      scriptState->getExecutionContext(), input.droppedFileSystemId());
+  if (!filesystem) {
+    // Drag-drop isolated filesystem is not available.
+    return entries;
+  }
+
+  for (unsigned i = 0; i < files->length(); ++i) {
+    File* file = files->item(i);
+
+    // FIXME: This involves synchronous file operation.
+    FileMetadata metadata;
+    if (!getFileMetadata(file->path(), metadata))
+      continue;
+
+    // The dropped entries are mapped as top-level entries in the isolated
+    // filesystem.
+    String virtualPath = DOMFilePath::append("/", file->name());
+    if (metadata.type == FileMetadata::TypeDirectory)
+      entries.push_back(DirectoryEntry::create(filesystem, virtualPath));
+    else
+      entries.push_back(FileEntry::create(filesystem, virtualPath));
+  }
+  return entries;
 }
 
-} // namespace blink
+}  // namespace blink

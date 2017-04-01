@@ -41,6 +41,7 @@ class LayoutTestPushMessagingService : public PushMessagingService {
   void GetEncryptionInfo(
       const GURL& origin,
       int64_t service_worker_registration_id,
+      const std::string& sender_id,
       const PushMessagingService::EncryptionInfoCallback& callback) override;
   blink::WebPushPermissionStatus GetPermissionStatus(const GURL& origin,
                                                      bool user_visible)
@@ -50,8 +51,13 @@ class LayoutTestPushMessagingService : public PushMessagingService {
                    int64_t service_worker_registration_id,
                    const std::string& sender_id,
                    const UnregisterCallback& callback) override;
+  void DidDeleteServiceWorkerRegistration(
+      const GURL& origin,
+      int64_t service_worker_registration_id) override;
 
  private:
+  int64_t subscribed_service_worker_registration_;
+
   DISALLOW_COPY_AND_ASSIGN(LayoutTestPushMessagingService);
 };
 

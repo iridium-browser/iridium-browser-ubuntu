@@ -4,17 +4,17 @@
 
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 
+#include <stdint.h>
 #include <memory>
 #include <string>
-#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_test_helper.h"
+#include "chrome/browser/chromeos/settings/install_attributes.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/cryptohome/cryptohome_util.h"
@@ -24,6 +24,7 @@
 #include "components/policy/policy_constants.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "content/public/test/test_utils.h"
+#include "crypto/rsa_private_key.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace em = enterprise_management;
@@ -33,8 +34,8 @@ namespace policy {
 namespace {
 
 void CopyLockResult(base::RunLoop* loop,
-                    EnterpriseInstallAttributes::LockResult* out,
-                    EnterpriseInstallAttributes::LockResult result) {
+                    chromeos::InstallAttributes::LockResult* out,
+                    chromeos::InstallAttributes::LockResult result) {
   *out = result;
   loop->Quit();
 }
@@ -48,7 +49,7 @@ class DeviceCloudPolicyStoreChromeOSTest
       : local_state_(TestingBrowserProcess::GetGlobal()),
         fake_cryptohome_client_(new chromeos::FakeCryptohomeClient()),
         install_attributes_(
-            new EnterpriseInstallAttributes(fake_cryptohome_client_)),
+            new chromeos::InstallAttributes(fake_cryptohome_client_)),
         store_(new DeviceCloudPolicyStoreChromeOS(
             &device_settings_service_,
             install_attributes_.get(),
@@ -61,14 +62,15 @@ class DeviceCloudPolicyStoreChromeOSTest
         std::unique_ptr<chromeos::CryptohomeClient>(fake_cryptohome_client_));
 
     base::RunLoop loop;
-    EnterpriseInstallAttributes::LockResult result;
+    chromeos::InstallAttributes::LockResult result;
     install_attributes_->LockDevice(
-        PolicyBuilder::kFakeUsername,
         DEVICE_MODE_ENTERPRISE,
+        PolicyBuilder::kFakeDomain,
+        std::string(),  // realm
         PolicyBuilder::kFakeDeviceId,
         base::Bind(&CopyLockResult, &loop, &result));
     loop.Run();
-    ASSERT_EQ(EnterpriseInstallAttributes::LOCK_SUCCESS, result);
+    ASSERT_EQ(chromeos::InstallAttributes::LOCK_SUCCESS, result);
   }
 
   void ExpectFailure(CloudPolicyStore::Status expected_status) {
@@ -76,6 +78,7 @@ class DeviceCloudPolicyStoreChromeOSTest
     EXPECT_TRUE(store_->is_initialized());
     EXPECT_FALSE(store_->has_policy());
     EXPECT_FALSE(store_->is_managed());
+    EXPECT_EQ(std::string(), store_->policy_signature_public_key());
   }
 
   void ExpectSuccess() {
@@ -89,6 +92,7 @@ class DeviceCloudPolicyStoreChromeOSTest
         base::Value::Equals(&expected,
                             store_->policy_map().GetValue(
                                 key::kDeviceMetricsReportingEnabled)));
+    EXPECT_FALSE(store_->policy_signature_public_key().empty());
   }
 
   void PrepareExistingPolicy() {
@@ -112,7 +116,7 @@ class DeviceCloudPolicyStoreChromeOSTest
     chromeos::cryptohome_util::InstallAttributesSet("enterprise.owned",
                                                     std::string());
     install_attributes_.reset(
-        new EnterpriseInstallAttributes(fake_cryptohome_client_));
+        new chromeos::InstallAttributes(fake_cryptohome_client_));
     store_.reset(new DeviceCloudPolicyStoreChromeOS(
         &device_settings_service_, install_attributes_.get(),
         base::ThreadTaskRunnerHandle::Get()));
@@ -120,7 +124,7 @@ class DeviceCloudPolicyStoreChromeOSTest
 
   ScopedTestingLocalState local_state_;
   chromeos::FakeCryptohomeClient* fake_cryptohome_client_;
-  std::unique_ptr<EnterpriseInstallAttributes> install_attributes_;
+  std::unique_ptr<chromeos::InstallAttributes> install_attributes_;
 
   std::unique_ptr<DeviceCloudPolicyStoreChromeOS> store_;
 
@@ -153,6 +157,8 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, LoadSuccess) {
   store_->Load();
   FlushDeviceSettings();
   ExpectSuccess();
+  EXPECT_EQ(device_policy_.GetPublicSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreSuccess) {
@@ -160,6 +166,8 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreSuccess) {
   store_->Store(device_policy_.policy());
   FlushDeviceSettings();
   ExpectSuccess();
+  EXPECT_EQ(device_policy_.GetPublicSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreNoSignature) {
@@ -170,6 +178,8 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreNoSignature) {
   EXPECT_EQ(CloudPolicyStore::STATUS_VALIDATION_ERROR, store_->status());
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(device_policy_.GetPublicSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreBadSignature) {
@@ -180,6 +190,8 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreBadSignature) {
   EXPECT_EQ(CloudPolicyStore::STATUS_VALIDATION_ERROR, store_->status());
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(device_policy_.GetPublicSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreKeyRotation) {
@@ -193,6 +205,8 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, StoreKeyRotation) {
       *device_policy_.GetNewSigningKey());
   ReloadDeviceSettings();
   ExpectSuccess();
+  EXPECT_EQ(device_policy_.GetPublicNewSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest,
@@ -200,13 +214,15 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest,
   PrepareExistingPolicy();
   device_policy_.SetDefaultNewSigningKey();
   device_policy_.Build();
-  *device_policy_.policy().mutable_new_public_key_verification_signature() =
-      "garbage";
+  *device_policy_.policy()
+       .mutable_new_public_key_verification_signature_deprecated() = "garbage";
   store_->Store(device_policy_.policy());
   FlushDeviceSettings();
   EXPECT_EQ(CloudPolicyStore::STATUS_VALIDATION_ERROR, store_->status());
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_KEY_VERIFICATION_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(device_policy_.GetPublicSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest,
@@ -214,12 +230,15 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest,
   PrepareExistingPolicy();
   device_policy_.SetDefaultNewSigningKey();
   device_policy_.Build();
-  device_policy_.policy().clear_new_public_key_verification_signature();
+  device_policy_.policy()
+      .clear_new_public_key_verification_signature_deprecated();
   store_->Store(device_policy_.policy());
   FlushDeviceSettings();
   EXPECT_EQ(CloudPolicyStore::STATUS_VALIDATION_ERROR, store_->status());
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_KEY_VERIFICATION_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(device_policy_.GetPublicSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicySuccess) {
@@ -227,6 +246,8 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicySuccess) {
   store_->InstallInitialPolicy(device_policy_.policy());
   FlushDeviceSettings();
   ExpectSuccess();
+  EXPECT_EQ(device_policy_.GetPublicNewSigningKeyAsString(),
+            store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicyNoSignature) {
@@ -237,29 +258,33 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicyNoSignature) {
   ExpectFailure(CloudPolicyStore::STATUS_VALIDATION_ERROR);
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_INITIAL_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(std::string(), store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest,
        InstallInitialPolicyVerificationFailure) {
   PrepareNewSigningKey();
-  *device_policy_.policy().mutable_new_public_key_verification_signature() =
-      "garbage";
+  *device_policy_.policy()
+       .mutable_new_public_key_verification_signature_deprecated() = "garbage";
   store_->InstallInitialPolicy(device_policy_.policy());
   FlushDeviceSettings();
   ExpectFailure(CloudPolicyStore::STATUS_VALIDATION_ERROR);
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_KEY_VERIFICATION_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(std::string(), store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest,
        InstallInitialPolicyMissingSignatureFailure) {
   PrepareNewSigningKey();
-  device_policy_.policy().clear_new_public_key_verification_signature();
+  device_policy_.policy()
+      .clear_new_public_key_verification_signature_deprecated();
   store_->InstallInitialPolicy(device_policy_.policy());
   FlushDeviceSettings();
   ExpectFailure(CloudPolicyStore::STATUS_VALIDATION_ERROR);
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_KEY_VERIFICATION_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(std::string(), store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicyNoKey) {
@@ -270,6 +295,7 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicyNoKey) {
   ExpectFailure(CloudPolicyStore::STATUS_VALIDATION_ERROR);
   EXPECT_EQ(CloudPolicyValidatorBase::VALIDATION_BAD_INITIAL_SIGNATURE,
             store_->validation_status());
+  EXPECT_EQ(std::string(), store_->policy_signature_public_key());
 }
 
 TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicyNotEnterprise) {
@@ -278,6 +304,7 @@ TEST_F(DeviceCloudPolicyStoreChromeOSTest, InstallInitialPolicyNotEnterprise) {
   store_->InstallInitialPolicy(device_policy_.policy());
   FlushDeviceSettings();
   ExpectFailure(CloudPolicyStore::STATUS_BAD_STATE);
+  EXPECT_EQ(std::string(), store_->policy_signature_public_key());
 }
 
 }  // namespace policy

@@ -43,7 +43,7 @@ MockBluetoothDevice::MockBluetoothDevice(MockBluetoothAdapter* adapter,
       .WillByDefault(testing::Return(
           base::UTF8ToUTF16(name_ ? name_.value() : "Unnamed Device")));
   ON_CALL(*this, GetDeviceType())
-      .WillByDefault(testing::Return(DEVICE_UNKNOWN));
+      .WillByDefault(testing::Return(BluetoothDeviceType::UNKNOWN));
   ON_CALL(*this, IsPaired())
       .WillByDefault(testing::Return(paired));
   ON_CALL(*this, IsConnected())
@@ -73,19 +73,30 @@ void MockBluetoothDevice::AddMockService(
 std::vector<BluetoothRemoteGattService*> MockBluetoothDevice::GetMockServices()
     const {
   std::vector<BluetoothRemoteGattService*> services;
-  for (BluetoothRemoteGattService* service : mock_services_) {
-    services.push_back(service);
+  for (const auto& service : mock_services_) {
+    services.push_back(service.get());
   }
   return services;
 }
 
 BluetoothRemoteGattService* MockBluetoothDevice::GetMockService(
     const std::string& identifier) const {
-  for (BluetoothRemoteGattService* service : mock_services_) {
+  for (const auto& service : mock_services_) {
     if (service->GetIdentifier() == identifier)
-      return service;
+      return service.get();
   }
   return nullptr;
+}
+
+void MockBluetoothDevice::PushPendingCallback(const base::Closure& callback) {
+  pending_callbacks_.push(callback);
+}
+
+void MockBluetoothDevice::RunPendingCallbacks() {
+  while (!pending_callbacks_.empty()) {
+    pending_callbacks_.front().Run();
+    pending_callbacks_.pop();
+  }
 }
 
 }  // namespace device

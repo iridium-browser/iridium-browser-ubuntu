@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_EXTENSION_FUNCTION_H_
 
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "extensions/browser/extension_function.h"
 
 class Browser;
@@ -53,12 +54,35 @@ class ChromeUIThreadExtensionFunction : public UIThreadExtensionFunction {
   // Same as above but uses WindowControllerList instead of BrowserList.
   extensions::WindowController* GetExtensionWindowController();
 
-  // Gets the "current" web contents if any. If there is no associated web
-  // contents then defaults to the foremost one.
+  void SetError(const std::string& error);
+
+  // ExtensionFunction:
   content::WebContents* GetAssociatedWebContents() override;
+  const std::string& GetError() const override;
 
  protected:
   ~ChromeUIThreadExtensionFunction() override;
+
+  // Responds with success/failure. |results_| or |error_| should be set
+  // accordingly.
+  void SendResponse(bool success);
+
+  // Sets a single Value as the results of the function.
+  void SetResult(std::unique_ptr<base::Value> result);
+
+  // Sets multiple Values as the results of the function.
+  void SetResultList(std::unique_ptr<base::ListValue> results);
+
+  // Exposed versions of ExtensionFunction::results_ and
+  // ExtensionFunction::error_ that are curried into the response.
+  // These need to keep the same name to avoid breaking existing
+  // implementations, but this should be temporary with crbug.com/648275
+  // and crbug.com/634140.
+  std::unique_ptr<base::ListValue> results_;
+  std::string error_;
+
+ private:
+  ChromeExtensionFunctionDetails chrome_details_;
 };
 
 // A chrome specific analog to AsyncExtensionFunction. This has access to a
@@ -85,33 +109,6 @@ class ChromeAsyncExtensionFunction : public ChromeUIThreadExtensionFunction {
   // If you're hitting a compile error here due to "final" - great! You're doing
   // the right thing, you just need to extend ChromeUIThreadExtensionFunction
   // instead of ChromeAsyncExtensionFunction.
-  ResponseAction Run() final;
-};
-
-// A chrome specific analog to SyncExtensionFunction. This has access to a
-// chrome Profile.
-//
-// DEPRECATED: Please consider inherting UIThreadExtensionFunction or
-// SyncExtensionFunction directly. Then if you need access to Chrome details,
-// you can construct a ChromeExtensionFunctionDetails object within your
-// function implementation.
-class ChromeSyncExtensionFunction : public ChromeUIThreadExtensionFunction {
- public:
-  ChromeSyncExtensionFunction();
-
- protected:
-  ~ChromeSyncExtensionFunction() override;
-
-  // Deprecated, see SyncExtensionFunction::RunSync.
-  virtual bool RunSync() = 0;
-
-  // ValidationFailure override to match RunSync().
-  static bool ValidationFailure(ChromeSyncExtensionFunction* function);
-
- private:
-  // If you're hitting a compile error here due to "final" - great! You're doing
-  // the right thing, you just need to extend ChromeUIThreadExtensionFunction
-  // instead of ChromeSyncExtensionFunction.
   ResponseAction Run() final;
 };
 

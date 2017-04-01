@@ -35,23 +35,39 @@
 
 namespace blink {
 
-class CharacterIteratorTest : public EditingTestBase {
-};
+class CharacterIteratorTest : public EditingTestBase {};
 
-TEST_F(CharacterIteratorTest, SubrangeWithReplacedElements)
-{
-    static const char* bodyContent =
-        "<div id='div' contenteditable='true'>1<img src='foo.png'>345</div>";
-    setBodyContent(bodyContent);
-    document().view()->updateAllLifecyclePhases();
+TEST_F(CharacterIteratorTest, SubrangeWithReplacedElements) {
+  static const char* bodyContent =
+      "<div id='div' contenteditable='true'>1<img src='foo.png'>345</div>";
+  setBodyContent(bodyContent);
+  document().view()->updateAllLifecyclePhases();
 
-    Node* divNode = document().getElementById("div");
-    Range* entireRange = Range::create(document(), divNode, 0, divNode, 3);
+  Node* divNode = document().getElementById("div");
+  Range* entireRange = Range::create(document(), divNode, 0, divNode, 3);
 
-    EphemeralRange result = calculateCharacterSubrange(EphemeralRange(entireRange), 2, 3);
-    Node* textNode = divNode->lastChild();
-    EXPECT_EQ(Position(textNode, 0), result.startPosition());
-    EXPECT_EQ(Position(textNode, 3), result.endPosition());
+  EphemeralRange result =
+      calculateCharacterSubrange(EphemeralRange(entireRange), 2, 3);
+  Node* textNode = divNode->lastChild();
+  EXPECT_EQ(Position(textNode, 0), result.startPosition());
+  EXPECT_EQ(Position(textNode, 3), result.endPosition());
 }
 
-} // namespace blink
+TEST_F(CharacterIteratorTest, CollapsedSubrange) {
+  static const char* bodyContent =
+      "<div id='div' contenteditable='true'>hello</div>";
+  setBodyContent(bodyContent);
+  document().view()->updateAllLifecyclePhases();
+
+  Node* textNode = document().getElementById("div")->lastChild();
+  Range* entireRange = Range::create(document(), textNode, 1, textNode, 4);
+  EXPECT_EQ(1, entireRange->startOffset());
+  EXPECT_EQ(4, entireRange->endOffset());
+
+  const EphemeralRange& result =
+      calculateCharacterSubrange(EphemeralRange(entireRange), 2, 0);
+  EXPECT_EQ(Position(textNode, 3), result.startPosition());
+  EXPECT_EQ(Position(textNode, 3), result.endPosition());
+}
+
+}  // namespace blink

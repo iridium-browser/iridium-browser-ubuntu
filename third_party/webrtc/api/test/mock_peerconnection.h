@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "webrtc/api/peerconnection.h"
-#include "testing/gmock/include/gmock/gmock.h"
+#include "webrtc/test/gmock.h"
 
 namespace webrtc {
 
@@ -28,7 +28,15 @@ class MockPeerConnection
   MockPeerConnection()
       : rtc::RefCountedObject<webrtc::PeerConnection>(
             new FakePeerConnectionFactory()) {}
+  MOCK_METHOD0(local_streams,
+               rtc::scoped_refptr<StreamCollectionInterface>());
+  MOCK_METHOD0(remote_streams,
+               rtc::scoped_refptr<StreamCollectionInterface>());
   MOCK_METHOD0(session, WebRtcSession*());
+  MOCK_CONST_METHOD0(GetSenders,
+                     std::vector<rtc::scoped_refptr<RtpSenderInterface>>());
+  MOCK_CONST_METHOD0(GetReceivers,
+                     std::vector<rtc::scoped_refptr<RtpReceiverInterface>>());
   MOCK_CONST_METHOD0(sctp_data_channels,
                      const std::vector<rtc::scoped_refptr<DataChannel>>&());
 };

@@ -298,7 +298,7 @@ void ClipboardMac::ReadRTF(ClipboardType type, std::string* result) const {
   return ReadData(GetRtfFormatType(), result);
 }
 
-SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
+SkBitmap ClipboardMac::ReadImage(ClipboardType type, NSPasteboard* pb) const {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(type, CLIPBOARD_TYPE_COPY_PASTE);
 
@@ -306,7 +306,6 @@ SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
   // may throw, and that exception will leak. Prevent a crash in that case;
   // a blank image is better.
   base::scoped_nsobject<NSImage> image;
-  NSPasteboard* pb = GetPasteboard();
   @try {
     if ([[pb types] containsObject:NSFilenamesPboardType]) {
       // -[NSImage initWithPasteboard:] gets confused with copies of a single
@@ -325,12 +324,31 @@ SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
   } @catch (id exception) {
   }
 
-  SkBitmap bitmap;
-  if (image.get()) {
-    bitmap = skia::NSImageToSkBitmapWithColorSpace(
-        image.get(), /*is_opaque=*/ false, base::mac::GetSystemColorSpace());
+  if (!image)
+    return SkBitmap();
+  if ([[image representations] count] == 0u)
+    return SkBitmap();
+
+  // This logic prevents loss of pixels from retina images, where size != pixel
+  // size. In an ideal world, the concept of "retina-ness" would be plumbed all
+  // the way through to the web, but the clipboard API doesn't support the
+  // additional metainformation.
+  if ([[image representations] count] == 1u) {
+    NSImageRep* rep = [[image representations] objectAtIndex:0];
+    NSInteger width = [rep pixelsWide];
+    NSInteger height = [rep pixelsHigh];
+    if (width != 0 && height != 0) {
+      return skia::NSImageRepToSkBitmapWithColorSpace(
+          rep, NSMakeSize(width, height), /*is_opaque=*/false,
+          base::mac::GetSystemColorSpace());
+    }
   }
-  return bitmap;
+  return skia::NSImageToSkBitmapWithColorSpace(
+      image.get(), /*is_opaque=*/false, base::mac::GetSystemColorSpace());
+}
+
+SkBitmap ClipboardMac::ReadImage(ClipboardType type) const {
+  return ReadImage(type, GetPasteboard());
 }
 
 void ClipboardMac::ReadCustomData(ClipboardType clipboard_type,

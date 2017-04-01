@@ -13,19 +13,11 @@ namespace aura {
 class Window;
 }
 
-namespace gfx {
-class Point;
-class Rect;
-class Size;
-}
-
 namespace ui {
 class Event;
 }
 
 namespace ash {
-
-class WmWindow;
 
 namespace wm {
 
@@ -47,7 +39,7 @@ ASH_EXPORT aura::Window* GetActivatableWindow(aura::Window* window);
 ASH_EXPORT bool IsWindowUserPositionable(aura::Window* window);
 
 // Pins the window on top of other windows.
-ASH_EXPORT void PinWindow(aura::Window* window);
+ASH_EXPORT void PinWindow(aura::Window* window, bool trusted);
 
 // Moves |window| to the root window where the |event| occured if it is not
 // already in the same root window. Returns true if |window| was moved.
@@ -55,15 +47,12 @@ ASH_EXPORT bool MoveWindowToEventRoot(aura::Window* window,
                                       const ui::Event& event);
 
 // Snap the window's layer to physical pixel boundary.
-void SnapWindowToPixelBoundary(aura::Window* window);
+ASH_EXPORT void SnapWindowToPixelBoundary(aura::Window* window);
 
 // Mark the container window so that InstallSnapLayoutManagerToContainers
 // installs the SnapToPixelLayoutManager.
 ASH_EXPORT void SetSnapsChildrenToPhysicalPixelBoundary(
     aura::Window* container);
-
-// Traverse the |container| tree and installs SnapToPixelLayoutManager.
-void InstallSnapLayoutManagerToContainers(aura::Window* container);
 
 }  // namespace wm
 }  // namespace ash

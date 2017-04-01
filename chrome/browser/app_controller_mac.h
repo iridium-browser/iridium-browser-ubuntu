@@ -61,7 +61,8 @@ class WorkAreaWatcherObserver;
   // a weak pointer that is updated to match the corresponding cache entry
   // during a profile switch.
   BookmarkMenuBridge* bookmarkMenuBridge_;
-  std::map<base::FilePath, BookmarkMenuBridge*> profileBookmarkMenuBridgeMap_;
+  std::map<base::FilePath, std::unique_ptr<BookmarkMenuBridge>>
+      profileBookmarkMenuBridgeMap_;
 
   std::unique_ptr<HistoryMenuBridge> historyMenuBridge_;
 
@@ -117,12 +118,6 @@ class WorkAreaWatcherObserver;
 
 @property(readonly, nonatomic) BOOL startupComplete;
 @property(readonly, nonatomic) Profile* lastProfile;
-
-// Helper method used to update the "Signin" menu item in the main menu and the
-// wrench menu to reflect the current signed in state.
-+ (void)updateSigninItem:(id)signinItem
-              shouldShow:(BOOL)showSigninMenuItem
-          currentProfile:(Profile*)profile;
 
 - (void)didEndMainMessageLoop;
 
@@ -198,4 +193,4 @@ bool IsOpeningNewWindow();
 
 }  // namespace app_controller_mac
 
-#endif
+#endif  // CHROME_BROWSER_APP_CONTROLLER_MAC_H_

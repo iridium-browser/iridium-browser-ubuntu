@@ -6,22 +6,26 @@
 
 #import <Foundation/Foundation.h>
 
-#include "base/ios/block_types.h"
+#import "base/ios/block_types.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/mac/bind_objc_block.h"
+#import "base/mac/bind_objc_block.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #import "ios/web/public/web_state/js/crw_js_injection_evaluator.h"
 #include "ios/web/public/web_thread.h"
 #include "mojo/public/cpp/system/core.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 
 namespace {
 
-// Wraps an integer into |base::Value| as |TYPE_INTEGER|.
+// Wraps an integer into |base::Value| as |Type::INTEGER|.
 template <typename IntegerT>
 std::unique_ptr<base::Value> ValueFromInteger(IntegerT handle) {
   return std::unique_ptr<base::Value>(
@@ -30,8 +34,9 @@ std::unique_ptr<base::Value> ValueFromInteger(IntegerT handle) {
 
 }  // namespace
 
-MojoFacade::MojoFacade(shell::mojom::InterfaceProvider* interface_provider,
-                       id<CRWJSInjectionEvaluator> script_evaluator)
+MojoFacade::MojoFacade(
+    service_manager::mojom::InterfaceProvider* interface_provider,
+    id<CRWJSInjectionEvaluator> script_evaluator)
     : interface_provider_(interface_provider),
       script_evaluator_(script_evaluator) {
   DCHECK_CURRENTLY_ON(WebThread::UI);
@@ -110,8 +115,8 @@ std::unique_ptr<base::Value> MojoFacade::HandleInterfaceProviderGetInterface(
   interface_name_as_value->GetAsString(&interface_name_as_string);
 
   mojo::MessagePipe pipe;
-  interface_provider_->GetInterface(
-      mojo::String::From(interface_name_as_string), std::move(pipe.handle0));
+  interface_provider_->GetInterface(interface_name_as_string,
+                                    std::move(pipe.handle0));
 
   return ValueFromInteger(pipe.handle1.release().value());
 }
@@ -131,14 +136,14 @@ std::unique_ptr<base::Value> MojoFacade::HandleCoreCreateMessagePipe(
   const base::Value* options_as_value = nullptr;
   CHECK(args->Get("optionsDict", &options_as_value));
 
-  if (options_as_value->IsType(base::Value::TYPE_DICTIONARY)) {
+  if (options_as_value->IsType(base::Value::Type::DICTIONARY)) {
     // There are no options defined for CreateMessagePipe yet.
     const base::DictionaryValue* options_as_dict;
     options_as_value->GetAsDictionary(&options_as_dict);
     CHECK(options_as_dict->empty());
   }
 
-  CHECK(options_as_value->IsType(base::Value::TYPE_NULL));
+  CHECK(options_as_value->IsType(base::Value::Type::NONE));
 
   mojo::MessagePipe message_pipe;
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue);
@@ -244,7 +249,8 @@ std::unique_ptr<base::Value> MojoFacade::HandleSupportWatch(
   int callback_id;
   CHECK(args->GetInteger("callbackId", &callback_id));
 
-  mojo::Watcher::ReadyCallback callback = base::BindBlock(^(MojoResult result) {
+  mojo::Watcher::ReadyCallback callback = base::BindBlockArc(^(
+      MojoResult result) {
     NSString* script =
         [NSString stringWithFormat:@"__crWeb.mojo.signalWatch(%d, %d)",
                                    callback_id, result];

@@ -9,16 +9,11 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/values.h"
-#include "components/sync/api/sync_change.h"
+#include "components/sync/model/sync_change.h"
 
 namespace syncer {
 class SyncData;
-}
-
-namespace sync_pb {
-class ExtensionSettingSpecifics;
 }
 
 namespace extensions {
@@ -68,7 +63,7 @@ class SettingSyncData {
   DISALLOW_COPY_AND_ASSIGN(SettingSyncData);
 };
 
-typedef ScopedVector<SettingSyncData> SettingSyncDataList;
+using SettingSyncDataList = std::vector<std::unique_ptr<SettingSyncData>>;
 
 }  // namespace extensions
 

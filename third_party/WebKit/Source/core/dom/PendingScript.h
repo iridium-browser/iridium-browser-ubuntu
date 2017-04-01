@@ -29,7 +29,7 @@
 #include "bindings/core/v8/ScriptStreamer.h"
 #include "core/CoreExport.h"
 #include "core/fetch/ResourceOwner.h"
-#include "core/fetch/ScriptResource.h"
+#include "core/loader/resource/ScriptResource.h"
 #include "platform/MemoryCoordinator.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Noncopyable.h"
@@ -38,71 +38,96 @@
 namespace blink {
 
 class Element;
+class PendingScript;
 class ScriptSourceCode;
+
+class CORE_EXPORT PendingScriptClient : public GarbageCollectedMixin {
+ public:
+  virtual ~PendingScriptClient() {}
+
+  // Invoked when the pending script has finished loading. This could be during
+  // |watchForLoad| (if the pending script was already ready), or when the
+  // resource loads (if script streaming is not occurring), or when script
+  // streaming finishes.
+  virtual void pendingScriptFinished(PendingScript*) = 0;
+
+  DEFINE_INLINE_VIRTUAL_TRACE() {}
+};
 
 // A container for an external script which may be loaded and executed.
 //
-// TODO(kochi): The comment below is from pre-oilpan age and may not be correct now.
-// A RefPtr alone does not prevent the underlying Resource
-// from purging its data buffer. This class holds a dummy client open for its
-// lifetime in order to guarantee that the data buffer will not be purged.
-class CORE_EXPORT PendingScript final : public GarbageCollectedFinalized<PendingScript>, public ResourceOwner<ScriptResource>, public MemoryCoordinatorClient {
-    USING_GARBAGE_COLLECTED_MIXIN(PendingScript);
-    USING_PRE_FINALIZER(PendingScript, dispose);
-    WTF_MAKE_NONCOPYABLE(PendingScript);
-public:
-    static PendingScript* create(Element*, ScriptResource*);
-    ~PendingScript() override;
+// TODO(kochi): The comment below is from pre-oilpan age and may not be correct
+// now.
+// A RefPtr alone does not prevent the underlying Resource from purging its data
+// buffer. This class holds a dummy client open for its lifetime in order to
+// guarantee that the data buffer will not be purged.
+class CORE_EXPORT PendingScript final
+    : public GarbageCollectedFinalized<PendingScript>,
+      public ResourceOwner<ScriptResource>,
+      public MemoryCoordinatorClient {
+  USING_GARBAGE_COLLECTED_MIXIN(PendingScript);
+  USING_PRE_FINALIZER(PendingScript, dispose);
+  WTF_MAKE_NONCOPYABLE(PendingScript);
 
-    TextPosition startingPosition() const { return m_startingPosition; }
-    void setStartingPosition(const TextPosition& position) { m_startingPosition = position; }
-    void markParserBlockingLoadStartTime();
-    // Returns the time the load of this script started blocking the parser, or
-    // zero if this script hasn't yet blocked the parser, in
-    // monotonicallyIncreasingTime.
-    double parserBlockingLoadStartTime() const { return m_parserBlockingLoadStartTime; }
+ public:
+  static PendingScript* create(Element*, ScriptResource*);
+  ~PendingScript() override;
 
-    void watchForLoad(ScriptResourceClient*);
-    void stopWatchingForLoad();
+  TextPosition startingPosition() const { return m_startingPosition; }
+  void setStartingPosition(const TextPosition& position) {
+    m_startingPosition = position;
+  }
+  void markParserBlockingLoadStartTime();
+  // Returns the time the load of this script started blocking the parser, or
+  // zero if this script hasn't yet blocked the parser, in
+  // monotonicallyIncreasingTime.
+  double parserBlockingLoadStartTime() const {
+    return m_parserBlockingLoadStartTime;
+  }
 
-    Element* element() const { return m_element.get(); }
-    void setElement(Element*);
-    Element* releaseElementAndClear();
+  void watchForLoad(PendingScriptClient*);
+  void stopWatchingForLoad();
 
-    void setScriptResource(ScriptResource*);
+  Element* element() const { return m_element.get(); }
+  void setElement(Element*);
 
-    void notifyFinished(Resource*) override;
-    String debugName() const override { return "PendingScript"; }
-    void notifyAppendData(ScriptResource*) override;
+  void setScriptResource(ScriptResource*);
 
-    DECLARE_TRACE();
+  DECLARE_TRACE();
 
-    ScriptSourceCode getSource(const KURL& documentURL, bool& errorOccurred) const;
+  ScriptSourceCode getSource(const KURL& documentURL,
+                             bool& errorOccurred) const;
 
-    void setStreamer(ScriptStreamer*);
-    void streamingFinished();
+  void setStreamer(ScriptStreamer*);
+  void streamingFinished();
 
-    bool isReady() const;
-    bool errorOccurred() const;
+  bool isReady() const;
+  bool errorOccurred() const;
 
-    void dispose();
+  void dispose();
 
-private:
-    PendingScript(Element*, ScriptResource*);
-    PendingScript() = delete;
+ private:
+  PendingScript(Element*, ScriptResource*);
+  PendingScript() = delete;
 
-    void prepareToSuspend() override;
+  // ScriptResourceClient
+  void notifyFinished(Resource*) override;
+  String debugName() const override { return "PendingScript"; }
+  void notifyAppendData(ScriptResource*) override;
 
-    bool m_watchingForLoad;
-    Member<Element> m_element;
-    TextPosition m_startingPosition; // Only used for inline script tags.
-    bool m_integrityFailure;
-    double m_parserBlockingLoadStartTime;
+  // MemoryCoordinatorClient
+  void onMemoryStateChange(MemoryState) override;
 
-    Member<ScriptStreamer> m_streamer;
-    Member<ScriptResourceClient> m_client;
+  bool m_watchingForLoad;
+  Member<Element> m_element;
+  TextPosition m_startingPosition;  // Only used for inline script tags.
+  bool m_integrityFailure;
+  double m_parserBlockingLoadStartTime;
+
+  Member<ScriptStreamer> m_streamer;
+  Member<PendingScriptClient> m_client;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PendingScript_h
+#endif  // PendingScript_h

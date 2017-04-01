@@ -9,6 +9,7 @@
 
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/filter_operations.h"
 #include "cc/quads/debug_border_draw_quad.h"
@@ -325,6 +326,8 @@ void ParamTraits<cc::RenderPass>::Write(base::Pickle* m, const param_type& p) {
   WriteParam(m, p.output_rect);
   WriteParam(m, p.damage_rect);
   WriteParam(m, p.transform_to_root_target);
+  WriteParam(m, p.filters);
+  WriteParam(m, p.background_filters);
   WriteParam(m, p.has_transparent_background);
   WriteParam(m, base::checked_cast<uint32_t>(p.quad_list.size()));
 
@@ -406,6 +409,12 @@ static size_t ReserveSizeForRenderPassWrite(const cc::RenderPass& p) {
 
   // The largest quad type, verified by a unit test.
   to_reserve += p.quad_list.size() * cc::LargestDrawQuadSize();
+
+  base::PickleSizer sizer;
+  GetParamSize(&sizer, p.filters);
+  GetParamSize(&sizer, p.background_filters);
+  to_reserve += sizer.payload_size();
+
   return to_reserve;
 }
 
@@ -422,22 +431,26 @@ static cc::DrawQuad* ReadDrawQuad(const base::Pickle* m,
 bool ParamTraits<cc::RenderPass>::Read(const base::Pickle* m,
                                        base::PickleIterator* iter,
                                        param_type* p) {
-  cc::RenderPassId id;
+  int id;
   gfx::Rect output_rect;
   gfx::Rect damage_rect;
   gfx::Transform transform_to_root_target;
+  cc::FilterOperations filters;
+  cc::FilterOperations background_filters;
   bool has_transparent_background;
   uint32_t quad_list_size;
 
   if (!ReadParam(m, iter, &id) || !ReadParam(m, iter, &output_rect) ||
       !ReadParam(m, iter, &damage_rect) ||
       !ReadParam(m, iter, &transform_to_root_target) ||
+      !ReadParam(m, iter, &filters) ||
+      !ReadParam(m, iter, &background_filters) ||
       !ReadParam(m, iter, &has_transparent_background) ||
       !ReadParam(m, iter, &quad_list_size))
     return false;
 
-  p->SetAll(id, output_rect, damage_rect, transform_to_root_target,
-            has_transparent_background);
+  p->SetAll(id, output_rect, damage_rect, transform_to_root_target, filters,
+            background_filters, has_transparent_background);
 
   for (uint32_t i = 0; i < quad_list_size; ++i) {
     cc::DrawQuad::Material material;
@@ -520,6 +533,10 @@ void ParamTraits<cc::RenderPass>::Log(const param_type& p, std::string* l) {
   l->append(", ");
   LogParam(p.transform_to_root_target, l);
   l->append(", ");
+  LogParam(p.filters, l);
+  l->append(", ");
+  LogParam(p.background_filters, l);
+  l->append(", ");
   LogParam(p.has_transparent_background, l);
   l->append(", ");
 
@@ -568,116 +585,112 @@ void ParamTraits<cc::RenderPass>::Log(const param_type& p, std::string* l) {
   l->append("])");
 }
 
-void ParamTraits<cc::SurfaceId>::GetSize(base::PickleSizer* s,
-                                         const param_type& p) {
+void ParamTraits<cc::FrameSinkId>::GetSize(base::PickleSizer* s,
+                                           const param_type& p) {
   GetParamSize(s, p.client_id());
-  GetParamSize(s, p.local_id());
-  GetParamSize(s, p.nonce());
+  GetParamSize(s, p.sink_id());
 }
 
-void ParamTraits<cc::SurfaceId>::Write(base::Pickle* m, const param_type& p) {
+void ParamTraits<cc::FrameSinkId>::Write(base::Pickle* m, const param_type& p) {
   WriteParam(m, p.client_id());
-  WriteParam(m, p.local_id());
-  WriteParam(m, p.nonce());
+  WriteParam(m, p.sink_id());
 }
 
-bool ParamTraits<cc::SurfaceId>::Read(const base::Pickle* m,
-                                      base::PickleIterator* iter,
-                                      param_type* p) {
+bool ParamTraits<cc::FrameSinkId>::Read(const base::Pickle* m,
+                                        base::PickleIterator* iter,
+                                        param_type* p) {
   uint32_t client_id;
   if (!ReadParam(m, iter, &client_id))
     return false;
 
+  uint32_t sink_id;
+  if (!ReadParam(m, iter, &sink_id))
+    return false;
+
+  *p = cc::FrameSinkId(client_id, sink_id);
+  return true;
+}
+
+void ParamTraits<cc::FrameSinkId>::Log(const param_type& p, std::string* l) {
+  l->append("FrameSinkId(");
+  LogParam(p.client_id(), l);
+  l->append(", ");
+  LogParam(p.sink_id(), l);
+  l->append(")");
+}
+
+void ParamTraits<cc::LocalFrameId>::GetSize(base::PickleSizer* s,
+                                            const param_type& p) {
+  GetParamSize(s, p.local_id());
+  GetParamSize(s, p.nonce());
+}
+
+void ParamTraits<cc::LocalFrameId>::Write(base::Pickle* m,
+                                          const param_type& p) {
+  WriteParam(m, p.local_id());
+  WriteParam(m, p.nonce());
+}
+
+bool ParamTraits<cc::LocalFrameId>::Read(const base::Pickle* m,
+                                         base::PickleIterator* iter,
+                                         param_type* p) {
   uint32_t local_id;
   if (!ReadParam(m, iter, &local_id))
     return false;
 
-  uint64_t nonce;
+  base::UnguessableToken nonce;
   if (!ReadParam(m, iter, &nonce))
     return false;
 
-  *p = cc::SurfaceId(client_id, local_id, nonce);
+  *p = cc::LocalFrameId(local_id, nonce);
   return true;
 }
 
-void ParamTraits<cc::SurfaceId>::Log(const param_type& p, std::string* l) {
-  l->append("SurfaceId(");
-  LogParam(p.client_id(), l);
-  l->append(", ");
+void ParamTraits<cc::LocalFrameId>::Log(const param_type& p, std::string* l) {
+  l->append("LocalFrameId(");
   LogParam(p.local_id(), l);
   l->append(", ");
   LogParam(p.nonce(), l);
   l->append(")");
 }
 
-namespace {
-enum CompositorFrameType {
-  NO_FRAME,
-  DELEGATED_FRAME,
-  GL_FRAME,
-};
+void ParamTraits<cc::SurfaceId>::GetSize(base::PickleSizer* s,
+                                         const param_type& p) {
+  GetParamSize(s, p.frame_sink_id());
+  GetParamSize(s, p.local_frame_id());
+}
+
+void ParamTraits<cc::SurfaceId>::Write(base::Pickle* m, const param_type& p) {
+  WriteParam(m, p.frame_sink_id());
+  WriteParam(m, p.local_frame_id());
+}
+
+bool ParamTraits<cc::SurfaceId>::Read(const base::Pickle* m,
+                                      base::PickleIterator* iter,
+                                      param_type* p) {
+  cc::FrameSinkId frame_sink_id;
+  if (!ReadParam(m, iter, &frame_sink_id))
+    return false;
+
+  cc::LocalFrameId local_frame_id;
+  if (!ReadParam(m, iter, &local_frame_id))
+    return false;
+
+  *p = cc::SurfaceId(frame_sink_id, local_frame_id);
+  return true;
+}
+
+void ParamTraits<cc::SurfaceId>::Log(const param_type& p, std::string* l) {
+  l->append("SurfaceId(");
+  LogParam(p.frame_sink_id(), l);
+  l->append(", ");
+  LogParam(p.local_frame_id(), l);
+  l->append(")");
 }
 
 void ParamTraits<cc::CompositorFrame>::Write(base::Pickle* m,
                                              const param_type& p) {
   WriteParam(m, p.metadata);
-  if (p.delegated_frame_data) {
-    DCHECK(!p.gl_frame_data);
-    WriteParam(m, static_cast<int>(DELEGATED_FRAME));
-    WriteParam(m, *p.delegated_frame_data);
-  } else if (p.gl_frame_data) {
-    WriteParam(m, static_cast<int>(GL_FRAME));
-    WriteParam(m, *p.gl_frame_data);
-  } else {
-    WriteParam(m, static_cast<int>(NO_FRAME));
-  }
-}
-
-bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
-                                            base::PickleIterator* iter,
-                                            param_type* p) {
-  if (!ReadParam(m, iter, &p->metadata))
-    return false;
-
-  int compositor_frame_type;
-  if (!ReadParam(m, iter, &compositor_frame_type))
-    return false;
-
-  switch (compositor_frame_type) {
-    case DELEGATED_FRAME:
-      p->delegated_frame_data.reset(new cc::DelegatedFrameData());
-      if (!ReadParam(m, iter, p->delegated_frame_data.get()))
-        return false;
-      break;
-    case GL_FRAME:
-      p->gl_frame_data.reset(new cc::GLFrameData());
-      if (!ReadParam(m, iter, p->gl_frame_data.get()))
-        return false;
-      break;
-    case NO_FRAME:
-      break;
-    default:
-      return false;
-  }
-  return true;
-}
-
-void ParamTraits<cc::CompositorFrame>::Log(const param_type& p,
-                                           std::string* l) {
-  l->append("CompositorFrame(");
-  LogParam(p.metadata, l);
-  l->append(", ");
-  if (p.delegated_frame_data)
-    LogParam(*p.delegated_frame_data, l);
-  else if (p.gl_frame_data)
-    LogParam(*p.gl_frame_data, l);
-  l->append(")");
-}
-
-void ParamTraits<cc::DelegatedFrameData>::Write(base::Pickle* m,
-                                                const param_type& p) {
-  DCHECK_NE(0u, p.render_pass_list.size());
-
   size_t to_reserve = 0u;
   to_reserve += p.resource_list.size() * sizeof(cc::TransferableResource);
   for (const auto& pass : p.render_pass_list) {
@@ -696,19 +709,22 @@ void ParamTraits<cc::DelegatedFrameData>::Write(base::Pickle* m,
   }
 }
 
-bool ParamTraits<cc::DelegatedFrameData>::Read(const base::Pickle* m,
-                                               base::PickleIterator* iter,
-                                               param_type* p) {
+bool ParamTraits<cc::CompositorFrame>::Read(const base::Pickle* m,
+                                            base::PickleIterator* iter,
+                                            param_type* p) {
+  if (!ReadParam(m, iter, &p->metadata))
+    return false;
+
   const size_t kMaxRenderPasses = 10000;
   const size_t kMaxSharedQuadStateListSize = 100000;
   const size_t kMaxQuadListSize = 1000000;
 
-  std::set<cc::RenderPassId> pass_set;
+  std::set<int> pass_id_set;
 
   uint32_t num_render_passes;
   if (!ReadParam(m, iter, &p->resource_list) ||
       !ReadParam(m, iter, &num_render_passes) ||
-      num_render_passes > kMaxRenderPasses || num_render_passes == 0)
+      num_render_passes > kMaxRenderPasses)
     return false;
   for (uint32_t i = 0; i < num_render_passes; ++i) {
     uint32_t quad_list_size;
@@ -730,18 +746,21 @@ bool ParamTraits<cc::DelegatedFrameData>::Read(const base::Pickle* m,
         continue;
       const cc::RenderPassDrawQuad* rpdq =
           cc::RenderPassDrawQuad::MaterialCast(quad);
-      if (!pass_set.count(rpdq->render_pass_id))
+      if (!pass_id_set.count(rpdq->render_pass_id))
         return false;
     }
-    pass_set.insert(render_pass->id);
+    pass_id_set.insert(render_pass->id);
     p->render_pass_list.push_back(std::move(render_pass));
   }
+
   return true;
 }
 
-void ParamTraits<cc::DelegatedFrameData>::Log(const param_type& p,
-                                              std::string* l) {
-  l->append("DelegatedFrameData(");
+void ParamTraits<cc::CompositorFrame>::Log(const param_type& p,
+                                           std::string* l) {
+  l->append("CompositorFrame(");
+  LogParam(p.metadata, l);
+  l->append(", ");
   LogParam(p.resource_list, l);
   l->append(", [");
   for (size_t i = 0; i < p.render_pass_list.size(); ++i) {

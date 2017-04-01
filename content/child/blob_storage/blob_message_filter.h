@@ -29,7 +29,6 @@ class Message;
 
 namespace storage {
 struct BlobItemBytesRequest;
-struct BlobItemBytesResponse;
 }
 
 namespace content {
@@ -42,7 +41,7 @@ class BlobMessageFilter : public IPC::MessageFilter {
   BlobMessageFilter(scoped_refptr<base::TaskRunner> file_runner);
 
   void OnChannelClosing() override;
-  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterAdded(IPC::Channel* channel) override;
   bool OnMessageReceived(const IPC::Message& message) override;
   bool GetSupportedMessageClasses(
       std::vector<uint32_t>* supported_message_classes) const override;
@@ -57,10 +56,7 @@ class BlobMessageFilter : public IPC::MessageFilter {
       std::vector<base::SharedMemoryHandle> memory_handles,
       const std::vector<IPC::PlatformFileForTransit>& file_handles);
 
-  void OnCancelBuildingBlob(const std::string& uuid,
-                            storage::IPCBlobCreationCancelCode code);
-
-  void OnDoneBuildingBlob(const std::string& uuid);
+  void OnBlobFinalStatus(const std::string& uuid, storage::BlobStatus code);
 
   IPC::Sender* sender_;
   scoped_refptr<base::TaskRunner> file_runner_;

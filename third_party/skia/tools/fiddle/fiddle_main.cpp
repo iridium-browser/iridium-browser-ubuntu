@@ -7,9 +7,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "SkForceLinking.h"
-
-__SK_FORCE_IMAGE_DECODER_LINKING;
 
 #include "fiddle_main.h"
 
@@ -64,7 +61,7 @@ static SkData* encode_snapshot(const sk_sp<SkSurface>& surface) {
     return img ? img->encode() : nullptr;
 }
 
-#if defined(__linux)
+#if defined(__linux) && !defined(__ANDROID__)
     #include <GL/osmesa.h>
     static sk_sp<GrContext> create_grcontext() {
         // We just leak the OSMesaContext... the process will die soon anyway.
@@ -108,9 +105,19 @@ int main() {
         }
     }
     sk_sp<SkData> rasterData, gpuData, pdfData, skpData;
+    SkColorType colorType = kN32_SkColorType;
+    sk_sp<SkColorSpace> colorSpace = nullptr;
+    if (options.f16) {
+        SkASSERT(options.srgb);
+        colorType = kRGBA_F16_SkColorType;
+        colorSpace = SkColorSpace::MakeNamed(SkColorSpace::kSRGBLinear_Named);
+    } else if (options.srgb) {
+        colorSpace = SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
+    }
+    SkImageInfo info = SkImageInfo::Make(options.size.width(), options.size.height(), colorType,
+                                         kPremul_SkAlphaType, colorSpace);
     if (options.raster) {
-        auto rasterSurface =
-                SkSurface::MakeRaster(SkImageInfo::MakeN32Premul(options.size));
+        auto rasterSurface = SkSurface::MakeRaster(info);
         srand(0);
         draw(rasterSurface->getCanvas());
         rasterData.reset(encode_snapshot(rasterSurface));
@@ -120,10 +127,7 @@ int main() {
         if (!grContext) {
             fputs("Unable to get GrContext.\n", stderr);
         } else {
-            auto surface = SkSurface::MakeRenderTarget(
-                    grContext.get(),
-                    SkBudgeted::kNo,
-                    SkImageInfo::MakeN32Premul(options.size));
+            auto surface = SkSurface::MakeRenderTarget(grContext.get(), SkBudgeted::kNo, info);
             if (!surface) {
                 fputs("Unable to get render surface.\n", stderr);
                 exit(1);
@@ -136,10 +140,12 @@ int main() {
     if (options.pdf) {
         SkDynamicMemoryWStream pdfStream;
         sk_sp<SkDocument> document(SkDocument::MakePDF(&pdfStream));
-        srand(0);
-        draw(document->beginPage(options.size.width(), options.size.height()));
-        document->close();
-        pdfData.reset(pdfStream.copyToData());
+        if (document) {
+            srand(0);
+            draw(document->beginPage(options.size.width(), options.size.height()));
+            document->close();
+            pdfData = pdfStream.detachAsData();
+        }
     }
     if (options.skp) {
         SkSize size;
@@ -150,7 +156,7 @@ int main() {
         auto picture = recorder.finishRecordingAsPicture();
         SkDynamicMemoryWStream skpStream;
         picture->serialize(&skpStream);
-        skpData.reset(skpStream.copyToData());
+        skpData = skpStream.detachAsData();
     }
 
     printf("{\n");

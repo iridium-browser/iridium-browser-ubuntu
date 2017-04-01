@@ -47,6 +47,7 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/net_internals_resources.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
@@ -64,7 +65,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/net_internals_resources.h"
+#include "extensions/features/features.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
@@ -75,6 +76,9 @@
 #include "net/http/http_server_properties.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_capture_mode.h"
+#include "net/log/net_log_entry.h"
 #include "net/log/net_log_util.h"
 #include "net/log/write_to_file_net_log_observer.h"
 #include "net/proxy/proxy_service.h"
@@ -83,7 +87,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/file_manager/filesystem_api_util.h"
-#include "chrome/browser/chromeos/net/onc_utils.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/system_logs/debug_log_writer.h"
 #include "chrome/browser/net/nss_context.h"
@@ -98,7 +101,7 @@
 #include "chrome/browser/net/service_providers_win.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "extensions/browser/extension_registry.h"
@@ -175,7 +178,7 @@ content::WebUIDataSource* CreateNetInternalsHTMLSource() {
   source->SetDefaultResource(IDR_NET_INTERNALS_INDEX_HTML);
   source->AddResourcePath("index.js", IDR_NET_INTERNALS_INDEX_JS);
   source->SetJsonPath("strings.js");
-  source->DisableI18nAndUseGzipForAllPaths();
+  source->UseGzip(std::unordered_set<std::string>());
   return source;
 }
 
@@ -208,6 +211,7 @@ class NetInternalsMessageHandler
   void OnClearBrowserCache(const base::ListValue* list);
   void OnGetPrerenderInfo(const base::ListValue* list);
   void OnGetHistoricNetworkStats(const base::ListValue* list);
+  void OnGetSessionNetworkStats(const base::ListValue* list);
   void OnGetExtensionInfo(const base::ListValue* list);
   void OnGetDataReductionProxyInfo(const base::ListValue* list);
 #if defined(OS_CHROMEOS)
@@ -239,8 +243,6 @@ class NetInternalsMessageHandler
 
   // This is the "real" message handler, which lives on the IO thread.
   scoped_refptr<IOThreadImpl> proxy_;
-
-  base::WeakPtr<prerender::PrerenderManager> prerender_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(NetInternalsMessageHandler);
 };
@@ -299,7 +301,6 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnHSTSQuery(const base::ListValue* list);
   void OnHSTSAdd(const base::ListValue* list);
   void OnHSTSDelete(const base::ListValue* list);
-  void OnGetSessionNetworkStats(const base::ListValue* list);
   void OnCloseIdleSockets(const base::ListValue* list);
   void OnFlushSocketPools(const base::ListValue* list);
 #if defined(OS_WIN)
@@ -308,7 +309,7 @@ class NetInternalsMessageHandler::IOThreadImpl
   void OnSetCaptureMode(const base::ListValue* list);
 
   // NetLog::ThreadSafeObserver implementation:
-  void OnAddEntry(const net::NetLog::Entry& entry) override;
+  void OnAddEntry(const net::NetLogEntry& entry) override;
 
   // Helper that calls g_browser.receive in the renderer, passing in |command|
   // and |arg|.  If the renderer is displaying a log file, the message will be
@@ -392,7 +393,7 @@ NetInternalsMessageHandler::~NetInternalsMessageHandler() {
     proxy_->OnWebUIDeleted();
     // Notify the handler on the IO thread that the renderer is gone.
     BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::Bind(&IOThreadImpl::Detach, proxy_.get()));
+                            base::Bind(&IOThreadImpl::Detach, proxy_));
   }
 }
 
@@ -406,17 +407,9 @@ void NetInternalsMessageHandler::RegisterMessages() {
   proxy_->AddRequestContextGetter(
       content::BrowserContext::GetDefaultStoragePartition(profile)->
           GetMediaURLRequestContext());
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   proxy_->AddRequestContextGetter(profile->GetRequestContextForExtensions());
 #endif
-
-  prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile);
-  if (prerender_manager) {
-    prerender_manager_ = prerender_manager->AsWeakPtr();
-  } else {
-    prerender_manager_ = base::WeakPtr<prerender::PrerenderManager>();
-  }
 
   web_ui()->RegisterMessageCallback(
       "notifyReady",
@@ -451,10 +444,6 @@ void NetInternalsMessageHandler::RegisterMessages() {
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnHSTSDelete, proxy_));
   web_ui()->RegisterMessageCallback(
-      "getSessionNetworkStats",
-      base::Bind(&IOThreadImpl::CallbackHelper,
-                 &IOThreadImpl::OnGetSessionNetworkStats, proxy_));
-  web_ui()->RegisterMessageCallback(
       "closeIdleSockets",
       base::Bind(&IOThreadImpl::CallbackHelper,
                  &IOThreadImpl::OnCloseIdleSockets, proxy_));
@@ -483,6 +472,10 @@ void NetInternalsMessageHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(
       "getHistoricNetworkStats",
       base::Bind(&NetInternalsMessageHandler::OnGetHistoricNetworkStats,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      "getSessionNetworkStats",
+      base::Bind(&NetInternalsMessageHandler::OnGetSessionNetworkStats,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       "getExtensionInfo",
@@ -531,7 +524,7 @@ void NetInternalsMessageHandler::OnClearBrowserCache(
   BrowsingDataRemover* remover =
       BrowsingDataRemoverFactory::GetForBrowserContext(
           Profile::FromWebUI(web_ui()));
-  remover->Remove(BrowsingDataRemover::Unbounded(),
+  remover->Remove(base::Time(), base::Time::Max(),
                   BrowsingDataRemover::REMOVE_CACHE,
                   BrowsingDataHelper::UNPROTECTED_WEB);
   // BrowsingDataRemover deletes itself.
@@ -542,8 +535,12 @@ void NetInternalsMessageHandler::OnGetPrerenderInfo(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::unique_ptr<base::DictionaryValue> value;
-  if (prerender_manager_) {
-    value = prerender_manager_->GetAsValue();
+
+  prerender::PrerenderManager* prerender_manager =
+      prerender::PrerenderManagerFactory::GetForBrowserContext(
+          Profile::FromWebUI(web_ui()));
+  if (prerender_manager) {
+    value = prerender_manager->GetAsValue();
   } else {
     value.reset(new base::DictionaryValue());
     value->SetBoolean("enabled", false);
@@ -571,11 +568,29 @@ void NetInternalsMessageHandler::OnGetHistoricNetworkStats(
                         std::move(historic_network_info));
 }
 
+void NetInternalsMessageHandler::OnGetSessionNetworkStats(
+    const base::ListValue* list) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  std::unique_ptr<base::Value> session_network_info;
+  Profile* profile = Profile::FromWebUI(web_ui());
+  DataReductionProxyChromeSettings* data_reduction_proxy_settings =
+      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(profile);
+  if (data_reduction_proxy_settings) {
+    data_reduction_proxy::DataReductionProxyCompressionStats*
+        compression_stats =
+            data_reduction_proxy_settings->data_reduction_proxy_service()
+                ->compression_stats();
+    session_network_info = compression_stats->SessionNetworkStatsInfoToValue();
+  }
+  SendJavascriptCommand("receivedSessionNetworkStats",
+                        std::move(session_network_info));
+}
+
 void NetInternalsMessageHandler::OnGetExtensionInfo(
     const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auto extension_list = base::MakeUnique<base::ListValue>();
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   Profile* profile = Profile::FromWebUI(web_ui());
   extensions::ExtensionSystem* extension_system =
       extensions::ExtensionSystem::Get(profile);
@@ -869,27 +884,6 @@ void NetInternalsMessageHandler::IOThreadImpl::OnHSTSDelete(
   transport_security_state->DeleteDynamicDataForHost(domain);
 }
 
-void NetInternalsMessageHandler::IOThreadImpl::OnGetSessionNetworkStats(
-    const base::ListValue* list) {
-  DCHECK(!list);
-  net::URLRequestContext* context =
-      main_context_getter_->GetURLRequestContext();
-  net::HttpNetworkSession* http_network_session =
-      GetHttpNetworkSession(context);
-
-  std::unique_ptr<base::Value> network_info;
-  if (http_network_session) {
-    // TODO(mmenke):  This cast is ugly.  Can we get rid of it, or, better,
-    // remove DRP data from net-internals entirely?
-    data_reduction_proxy::DataReductionProxyNetworkDelegate* net_delegate =
-        static_cast<data_reduction_proxy::DataReductionProxyNetworkDelegate*>(
-            context->network_delegate());
-    if (net_delegate)
-      network_info = net_delegate->SessionNetworkStatsInfoToValue();
-  }
-  SendJavascriptCommand("receivedSessionNetworkStats", std::move(network_info));
-}
-
 void NetInternalsMessageHandler::IOThreadImpl::OnFlushSocketPools(
     const base::ListValue* list) {
   DCHECK(!list);
@@ -1104,7 +1098,7 @@ void NetInternalsMessageHandler::IOThreadImpl::OnSetCaptureMode(
 // Note that unlike other methods of IOThreadImpl, this function
 // can be called from ANY THREAD.
 void NetInternalsMessageHandler::IOThreadImpl::OnAddEntry(
-    const net::NetLog::Entry& entry) {
+    const net::NetLogEntry& entry) {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&IOThreadImpl::AddEntryToQueue, this,
                                      base::Passed(entry.ToValue())));
@@ -1176,7 +1170,7 @@ void NetInternalsMessageHandler::IOThreadImpl::SendNetInfo(int info_sources) {
 
 NetInternalsUI::NetInternalsUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(new NetInternalsMessageHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<NetInternalsMessageHandler>());
 
   // Set up the chrome://net-internals/ source.
   Profile* profile = Profile::FromWebUI(web_ui);

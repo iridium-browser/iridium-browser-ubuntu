@@ -10,15 +10,14 @@
 #include <utility>
 #include <vector>
 
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_piece.h"
 #include "base/supports_user_data.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/common/resource_messages.h"
-#include "content/public/browser/resource_controller.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/resource_throttle.h"
 #include "net/base/host_port_pair.h"
@@ -33,14 +32,17 @@ namespace content {
 
 namespace {
 
+// When kPrioritySupportedRequestsDelayable is enabled, requests for
+// H2/QUIC/SPDY resources can be delayed by the ResourceScheduler just as
+// HTTP/1.1 resources are. Disabling this appears to have negative performance
+// impact, see https://crbug.com/655585.
+const base::Feature kPrioritySupportedRequestsDelayable{
+    "PrioritySupportedRequestsDelayable", base::FEATURE_DISABLED_BY_DEFAULT};
+
 enum StartMode {
   START_SYNC,
   START_ASYNC
 };
-
-// Field trial constants
-const char kRequestLimitFieldTrial[] = "OutstandingRequestLimiting";
-const char kRequestLimitFieldTrialGroupPrefix[] = "Limit";
 
 // Flags identifying various attributes of the request that are used
 // when making scheduling decisions.
@@ -49,6 +51,38 @@ const RequestAttributes kAttributeNone = 0x00;
 const RequestAttributes kAttributeInFlight = 0x01;
 const RequestAttributes kAttributeDelayable = 0x02;
 const RequestAttributes kAttributeLayoutBlocking = 0x04;
+
+// Reasons why pending requests may be started.  For logging only.
+enum class RequestStartTrigger {
+  NONE,
+  COMPLETION_PRE_BODY,
+  COMPLETION_POST_BODY,
+  BODY_REACHED,
+  CLIENT_KILL,
+  SPDY_PROXY_DETECTED,
+  REQUEST_REPRIORITIZED,
+};
+
+const char* RequestStartTriggerString(RequestStartTrigger trigger) {
+  switch (trigger) {
+    case RequestStartTrigger::NONE:
+      return "NONE";
+    case RequestStartTrigger::COMPLETION_PRE_BODY:
+      return "COMPLETION_PRE_BODY";
+    case RequestStartTrigger::COMPLETION_POST_BODY:
+      return "COMPLETION_POST_BODY";
+    case RequestStartTrigger::BODY_REACHED:
+      return "BODY_REACHED";
+    case RequestStartTrigger::CLIENT_KILL:
+      return "CLIENT_KILL";
+    case RequestStartTrigger::SPDY_PROXY_DETECTED:
+      return "SPDY_PROXY_DETECTED";
+    case RequestStartTrigger::REQUEST_REPRIORITIZED:
+      return "REQUEST_REPRIORITIZED";
+  }
+  NOTREACHED();
+  return "Unknown";
+}
 
 }  // namespace
 
@@ -176,6 +210,7 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
         scheduler_(scheduler),
         priority_(priority),
         fifo_ordering_(0),
+        host_port_pair_(net::HostPortPair::FromURL(request->url())),
         weak_ptr_factory_(this) {
     DCHECK(!request_->GetUserData(kUserDataKey));
     request_->SetUserData(kUserDataKey, new UnownedPointer(this));
@@ -215,7 +250,7 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
         return;
       }
       deferred_ = false;
-      controller()->Resume();
+      Resume();
     }
 
     ready_ = true;
@@ -241,6 +276,7 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
   void set_attributes(RequestAttributes attributes) {
     attributes_ = attributes;
   }
+  const net::HostPortPair& host_port_pair() const { return host_port_pair_; }
 
  private:
   class UnownedPointer : public base::SupportsUserData::Data {
@@ -274,6 +310,8 @@ class ResourceScheduler::ScheduledResourceRequest : public ResourceThrottle {
   ResourceScheduler* scheduler_;
   RequestPriorityParams priority_;
   uint32_t fifo_ordering_;
+  // Cached to excessive recomputation in ShouldKeepSearching.
+  const net::HostPortPair host_port_pair_;
 
   base::WeakPtrFactory<ResourceScheduler::ScheduledResourceRequest>
       weak_ptr_factory_;
@@ -310,13 +348,13 @@ void ResourceScheduler::RequestQueue::Insert(
 // Each client represents a tab.
 class ResourceScheduler::Client {
  public:
-  explicit Client(ResourceScheduler* scheduler)
+  explicit Client(bool priority_requests_delayable)
       : is_loaded_(false),
         has_html_body_(false),
         using_spdy_proxy_(false),
-        scheduler_(scheduler),
         in_flight_delayable_count_(0),
-        total_layout_blocking_count_(0) {}
+        total_layout_blocking_count_(0),
+        priority_requests_delayable_(priority_requests_delayable) {}
 
   ~Client() {}
 
@@ -325,7 +363,7 @@ class ResourceScheduler::Client {
     SetRequestAttributes(request, DetermineRequestAttributes(request));
     if (ShouldStartRequest(request) == START_REQUEST) {
       // New requests can be started synchronously without issue.
-      StartRequest(request, START_SYNC);
+      StartRequest(request, START_SYNC, RequestStartTrigger::NONE);
     } else {
       pending_requests_.Insert(request);
     }
@@ -339,7 +377,10 @@ class ResourceScheduler::Client {
       EraseInFlightRequest(request);
 
       // Removing this request may have freed up another to load.
-      LoadAnyStartablePendingRequests();
+      LoadAnyStartablePendingRequests(
+          has_html_body_
+          ? RequestStartTrigger::COMPLETION_POST_BODY
+          : RequestStartTrigger::COMPLETION_PRE_BODY);
     }
   }
 
@@ -356,7 +397,7 @@ class ResourceScheduler::Client {
       pending_requests_.Erase(request);
       // Starting requests asynchronously ensures no side effects, and avoids
       // starting a bunch of requests that may be about to be deleted.
-      StartRequest(request, START_ASYNC);
+      StartRequest(request, START_ASYNC, RequestStartTrigger::CLIENT_KILL);
     }
     RequestSet unowned_requests;
     for (RequestSet::iterator it = in_flight_requests_.begin();
@@ -381,13 +422,13 @@ class ResourceScheduler::Client {
 
   void OnWillInsertBody() {
     has_html_body_ = true;
-    LoadAnyStartablePendingRequests();
+    LoadAnyStartablePendingRequests(RequestStartTrigger::BODY_REACHED);
   }
 
   void OnReceivedSpdyProxiedHttpResponse() {
     if (!using_spdy_proxy_) {
       using_spdy_proxy_ = true;
-      LoadAnyStartablePendingRequests();
+      LoadAnyStartablePendingRequests(RequestStartTrigger::SPDY_PROXY_DETECTED);
     }
   }
 
@@ -408,7 +449,8 @@ class ResourceScheduler::Client {
 
     if (new_priority_params.priority > old_priority_params.priority) {
       // Check if this request is now able to load at its new priority.
-      LoadAnyStartablePendingRequests();
+      LoadAnyStartablePendingRequests(
+          RequestStartTrigger::REQUEST_REPRIORITIZED);
     }
   }
 
@@ -520,14 +562,20 @@ class ResourceScheduler::Client {
       attributes |= kAttributeLayoutBlocking;
     } else if (request->url_request()->priority() <
                kDelayablePriorityThreshold) {
-      // Resources below the delayable priority threshold that are being
-      // requested from a server that does not support native prioritization are
-      // considered delayable.
-      url::SchemeHostPort scheme_host_port(request->url_request()->url());
-      net::HttpServerProperties& http_server_properties =
-          *request->url_request()->context()->http_server_properties();
-      if (!http_server_properties.SupportsRequestPriority(scheme_host_port))
+      if (priority_requests_delayable_) {
+        // Resources below the delayable priority threshold that are considered
+        // delayable.
         attributes |= kAttributeDelayable;
+      } else {
+        // Resources below the delayable priority threshold that are being
+        // requested from a server that does not support native prioritization
+        // are considered delayable.
+        url::SchemeHostPort scheme_host_port(request->url_request()->url());
+        net::HttpServerProperties& http_server_properties =
+            *request->url_request()->context()->http_server_properties();
+        if (!http_server_properties.SupportsRequestPriority(scheme_host_port))
+          attributes |= kAttributeDelayable;
+      }
     }
 
     return attributes;
@@ -538,9 +586,7 @@ class ResourceScheduler::Client {
     size_t same_host_count = 0;
     for (RequestSet::const_iterator it = in_flight_requests_.begin();
          it != in_flight_requests_.end(); ++it) {
-      net::HostPortPair host_port_pair =
-          net::HostPortPair::FromURL((*it)->url_request()->url());
-      if (active_request_host.Equals(host_port_pair)) {
+      if (active_request_host.Equals((*it)->host_port_pair())) {
         same_host_count++;
         if (same_host_count >= kMaxNumDelayableRequestsPerHostPerClient)
           return true;
@@ -550,7 +596,16 @@ class ResourceScheduler::Client {
   }
 
   void StartRequest(ScheduledResourceRequest* request,
-                    StartMode start_mode) {
+                    StartMode start_mode,
+                    RequestStartTrigger trigger) {
+    // Only log on requests that were blocked by the ResourceScheduler.
+    if (start_mode == START_ASYNC) {
+      DCHECK_NE(RequestStartTrigger::NONE, trigger);
+      request->url_request()->net_log().AddEvent(
+          net::NetLogEventType::RESOURCE_SCHEDULER_REQUEST_STARTED,
+          net::NetLog::StringCallback(
+              "trigger", RequestStartTriggerString(trigger)));
+    }
     InsertInFlightRequest(request);
     request->Start(start_mode);
   }
@@ -577,16 +632,13 @@ class ResourceScheduler::Client {
   //  The following rules are followed:
   //
   //  All types of requests:
-  //   * If an outstanding request limit is in place, only that number
-  //     of requests may be in flight for a single client at the same time.
   //   * Non-delayable, High-priority and request-priority capable requests are
   //     issued immediately.
   //   * Low priority requests are delayable.
   //   * While kInFlightNonDelayableRequestCountPerClientThreshold
   //     layout-blocking requests are loading or the body tag has not yet been
   //     parsed, limit the number of delayable requests that may be in flight
-  //     (to kMaxNumDelayableWhileLayoutBlockingPerClient by default, or to zero
-  //     if there's an outstanding request limit in place).
+  //     to kMaxNumDelayableWhileLayoutBlockingPerClient.
   //   * If no high priority or layout-blocking requests are in flight, start
   //     loading delayable requests.
   //   * Never exceed 10 delayable requests in flight per client.
@@ -605,26 +657,23 @@ class ResourceScheduler::Client {
     if (!url_request.url().SchemeIsHTTPOrHTTPS())
       return START_REQUEST;
 
-    if (using_spdy_proxy_ && url_request.url().SchemeIs(url::kHttpScheme))
-      return START_REQUEST;
+    const net::HostPortPair& host_port_pair = request->host_port_pair();
 
-    // Implementation of the kRequestLimitFieldTrial.
-    if (scheduler_->limit_outstanding_requests() &&
-        in_flight_requests_.size() >= scheduler_->outstanding_request_limit()) {
-      return DO_NOT_START_REQUEST_AND_STOP_SEARCHING;
+    if (!priority_requests_delayable_) {
+      if (using_spdy_proxy_ && url_request.url().SchemeIs(url::kHttpScheme))
+        return START_REQUEST;
+
+      url::SchemeHostPort scheme_host_port(url_request.url());
+
+      net::HttpServerProperties& http_server_properties =
+          *url_request.context()->http_server_properties();
+
+      // TODO(willchan): We should really improve this algorithm as described in
+      // crbug.com/164101. Also, theoretically we should not count a
+      // request-priority capable request against the delayable requests limit.
+      if (http_server_properties.SupportsRequestPriority(scheme_host_port))
+        return START_REQUEST;
     }
-
-    net::HostPortPair host_port_pair =
-        net::HostPortPair::FromURL(url_request.url());
-    url::SchemeHostPort scheme_host_port(url_request.url());
-    net::HttpServerProperties& http_server_properties =
-        *url_request.context()->http_server_properties();
-
-    // TODO(willchan): We should really improve this algorithm as described in
-    // crbug.com/164101. Also, theoretically we should not count a
-    // request-priority capable request against the delayable requests limit.
-    if (http_server_properties.SupportsRequestPriority(scheme_host_port))
-      return START_REQUEST;
 
     // Non-delayable requests.
     if (!RequestAttributesAreSet(request->attributes(), kAttributeDelayable))
@@ -654,8 +703,7 @@ class ResourceScheduler::Client {
         return DO_NOT_START_REQUEST_AND_STOP_SEARCHING;
       }
       if (in_flight_requests_.size() > 0 &&
-          (scheduler_->limit_outstanding_requests() ||
-           in_flight_delayable_count_ >=
+          (in_flight_delayable_count_ >=
            kMaxNumDelayableWhileLayoutBlockingPerClient)) {
         // Block the request if at least one request is in flight and the
         // number of in-flight delayable requests has hit the configured
@@ -667,7 +715,7 @@ class ResourceScheduler::Client {
     return START_REQUEST;
   }
 
-  void LoadAnyStartablePendingRequests() {
+  void LoadAnyStartablePendingRequests(RequestStartTrigger trigger) {
     // We iterate through all the pending requests, starting with the highest
     // priority one. For each entry, one of three things can happen:
     // 1) We start the request, remove it from the list, and keep checking.
@@ -685,7 +733,7 @@ class ResourceScheduler::Client {
 
       if (query_result == START_REQUEST) {
         pending_requests_.Erase(request);
-        StartRequest(request, START_ASYNC);
+        StartRequest(request, START_ASYNC, trigger);
 
         // StartRequest can modify the pending list, so we (re)start evaluation
         // from the currently highest priority request. Avoid copying a singular
@@ -711,30 +759,19 @@ class ResourceScheduler::Client {
   bool using_spdy_proxy_;
   RequestQueue pending_requests_;
   RequestSet in_flight_requests_;
-  ResourceScheduler* scheduler_;
   // The number of delayable in-flight requests.
   size_t in_flight_delayable_count_;
   // The number of layout-blocking in-flight requests.
   size_t total_layout_blocking_count_;
+
+  // True if requests to servers that support priorities (e.g., H2/QUIC) can
+  // be delayed.
+  bool priority_requests_delayable_;
 };
 
 ResourceScheduler::ResourceScheduler()
-    : limit_outstanding_requests_(false),
-      outstanding_request_limit_(0) {
-  std::string outstanding_limit_trial_group =
-      base::FieldTrialList::FindFullName(kRequestLimitFieldTrial);
-  std::vector<std::string> split_group(
-      base::SplitString(outstanding_limit_trial_group, "=",
-                        base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL));
-  int outstanding_limit = 0;
-  if (split_group.size() == 2 &&
-      split_group[0] == kRequestLimitFieldTrialGroupPrefix &&
-      base::StringToInt(split_group[1], &outstanding_limit) &&
-      outstanding_limit > 0) {
-    limit_outstanding_requests_ = true;
-    outstanding_request_limit_ = outstanding_limit;
-  }
-}
+    : priority_requests_delayable_(
+          base::FeatureList::IsEnabled(kPrioritySupportedRequestsDelayable)) {}
 
 ResourceScheduler::~ResourceScheduler() {
   DCHECK(unowned_requests_.empty());
@@ -791,7 +828,7 @@ void ResourceScheduler::OnClientCreated(int child_id,
   ClientId client_id = MakeClientId(child_id, route_id);
   DCHECK(!base::ContainsKey(client_map_, client_id));
 
-  Client* client = new Client(this);
+  Client* client = new Client(priority_requests_delayable_);
   client_map_[client_id] = client;
 }
 

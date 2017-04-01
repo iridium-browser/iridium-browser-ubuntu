@@ -16,12 +16,15 @@
 #include "base/strings/string_split.h"
 #include "net/base/host_port_pair.h"
 #include "net/cert/ct_policy_enforcer.h"
+#include "net/cert/ct_policy_status.h"
+#include "net/cert/do_nothing_ct_verifier.h"
 #include "net/cert/mock_cert_verifier.h"
-#include "net/cert/multi_log_ct_verifier.h"
+#include "net/cert/signed_certificate_timestamp_and_status.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/log/net_log_with_source.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/ssl_client_socket.h"
@@ -47,7 +50,7 @@ namespace {
 // SPDY request.
 void ParseUrl(base::StringPiece url, std::string* scheme, std::string* host,
               std::string* path) {
-  GURL gurl(url.as_string());
+  GURL gurl(url);
   path->assign(gurl.PathForRequest());
   scheme->assign(gurl.scheme());
   host->assign(gurl.host());
@@ -207,8 +210,8 @@ class PriorityGetter : public BufferedSpdyFramerVisitorInterface {
                          size_t len) override {}
   void OnStreamEnd(SpdyStreamId stream_id) override {}
   void OnStreamPadding(SpdyStreamId stream_id, size_t len) override {}
-  void OnSettings(bool clear_persisted) override {}
-  void OnSetting(SpdySettingsIds id, uint8_t flags, uint32_t value) override {}
+  void OnSettings() override {}
+  void OnSetting(SpdySettingsIds id, uint32_t value) override {}
   void OnPing(SpdyPingId unique_id, bool is_ack) override {}
   void OnRstStream(SpdyStreamId stream_id,
                    SpdyRstStreamStatus status) override {}
@@ -250,7 +253,7 @@ base::WeakPtr<SpdyStream> CreateStreamSynchronously(
     const base::WeakPtr<SpdySession>& session,
     const GURL& url,
     RequestPriority priority,
-    const BoundNetLog& net_log) {
+    const NetLogWithSource& net_log) {
   SpdyStreamRequest stream_request;
   int rv = stream_request.StartRequest(type, session, url, priority, net_log,
                                        CompletionCallback());
@@ -327,7 +330,7 @@ SpdySessionDependencies::SpdySessionDependencies(
       cert_verifier(new MockCertVerifier),
       channel_id_service(nullptr),
       transport_security_state(new TransportSecurityState),
-      cert_transparency_verifier(new MultiLogCTVerifier),
+      cert_transparency_verifier(new DoNothingCTVerifier),
       ct_policy_enforcer(new CTPolicyEnforcer),
       proxy_service(std::move(proxy_service)),
       ssl_config_service(new SSLConfigServiceDefaults),
@@ -340,10 +343,10 @@ SpdySessionDependencies::SpdySessionDependencies(
       enable_user_alternate_protocol_ports(false),
       enable_quic(false),
       session_max_recv_window_size(kDefaultInitialWindowSize),
-      stream_max_recv_window_size(kDefaultInitialWindowSize),
       time_func(&base::TimeTicks::Now),
       enable_http2_alternative_service_with_different_host(false),
-      net_log(NULL) {
+      net_log(nullptr),
+      http_09_on_non_default_ports_enabled(false) {
   // Note: The CancelledTransaction test does cleanup by running all
   // tasks in the message loop (RunAllPending).  Unfortunately, that
   // doesn't clean up tasks on the host resolver thread; and
@@ -351,6 +354,7 @@ SpdySessionDependencies::SpdySessionDependencies(
   // lookups allows the test to shutdown cleanly.  Until we have
   // cancellable TCPConnectJobs, use synchronous lookups.
   host_resolver->set_synchronous_mode(true);
+  http2_settings[SETTINGS_INITIAL_WINDOW_SIZE] = kDefaultInitialWindowSize;
 }
 
 SpdySessionDependencies::~SpdySessionDependencies() {}
@@ -390,15 +394,38 @@ HttpNetworkSession::Params SpdySessionDependencies::CreateSessionParams(
   params.enable_quic = session_deps->enable_quic;
   params.spdy_session_max_recv_window_size =
       session_deps->session_max_recv_window_size;
-  params.spdy_stream_max_recv_window_size =
-      session_deps->stream_max_recv_window_size;
+  params.http2_settings = session_deps->http2_settings;
   params.time_func = session_deps->time_func;
   params.proxy_delegate = session_deps->proxy_delegate.get();
   params.enable_http2_alternative_service_with_different_host =
       session_deps->enable_http2_alternative_service_with_different_host;
   params.net_log = session_deps->net_log;
+  params.http_09_on_non_default_ports_enabled =
+      session_deps->http_09_on_non_default_ports_enabled;
+  params.restrict_to_one_preconnect_for_proxies = true;
   return params;
 }
+
+class AllowAnyCertCTPolicyEnforcer : public CTPolicyEnforcer {
+ public:
+  AllowAnyCertCTPolicyEnforcer() {}
+  ~AllowAnyCertCTPolicyEnforcer() override = default;
+
+  ct::CertPolicyCompliance DoesConformToCertPolicy(
+      X509Certificate* cert,
+      const SCTList& verified_scts,
+      const NetLogWithSource& net_log) override {
+    return ct::CertPolicyCompliance::CERT_POLICY_COMPLIES_VIA_SCTS;
+  }
+
+  ct::EVPolicyCompliance DoesConformToCTEVPolicy(
+      X509Certificate* cert,
+      const ct::EVCertsWhitelist* ev_whitelist,
+      const SCTList& verified_scts,
+      const NetLogWithSource& net_log) override {
+    return ct::EVPolicyCompliance::EV_POLICY_COMPLIES_VIA_SCTS;
+  }
+};
 
 SpdyURLRequestContext::SpdyURLRequestContext() : storage_(this) {
   storage_.set_host_resolver(
@@ -407,30 +434,36 @@ SpdyURLRequestContext::SpdyURLRequestContext() : storage_(this) {
   storage_.set_transport_security_state(
       base::WrapUnique(new TransportSecurityState));
   storage_.set_proxy_service(ProxyService::CreateDirect());
+  storage_.set_ct_policy_enforcer(
+      base::WrapUnique(new AllowAnyCertCTPolicyEnforcer()));
+  storage_.set_cert_transparency_verifier(
+      base::WrapUnique(new DoNothingCTVerifier()));
   storage_.set_ssl_config_service(new SSLConfigServiceDefaults);
   storage_.set_http_auth_handler_factory(
       HttpAuthHandlerFactory::CreateDefault(host_resolver()));
   storage_.set_http_server_properties(
       std::unique_ptr<HttpServerProperties>(new HttpServerPropertiesImpl()));
-  storage_.set_job_factory(base::WrapUnique(new URLRequestJobFactoryImpl()));
+  storage_.set_job_factory(base::MakeUnique<URLRequestJobFactoryImpl>());
   HttpNetworkSession::Params params;
   params.client_socket_factory = &socket_factory_;
   params.host_resolver = host_resolver();
   params.cert_verifier = cert_verifier();
   params.transport_security_state = transport_security_state();
   params.proxy_service = proxy_service();
+  params.ct_policy_enforcer = ct_policy_enforcer();
+  params.cert_transparency_verifier = cert_transparency_verifier();
   params.ssl_config_service = ssl_config_service();
   params.http_auth_handler_factory = http_auth_handler_factory();
   params.enable_spdy_ping_based_connection_checking = false;
   params.http_server_properties = http_server_properties();
   storage_.set_http_network_session(
-      base::WrapUnique(new HttpNetworkSession(params)));
+      base::MakeUnique<HttpNetworkSession>(params));
   SpdySessionPoolPeer pool_peer(
       storage_.http_network_session()->spdy_session_pool());
   pool_peer.SetEnableSendingInitialData(false);
-  storage_.set_http_transaction_factory(base::WrapUnique(
-      new HttpCache(storage_.http_network_session(),
-                    HttpCache::DefaultBackend::InMemory(0), false)));
+  storage_.set_http_transaction_factory(base::MakeUnique<HttpCache>(
+      storage_.http_network_session(), HttpCache::DefaultBackend::InMemory(0),
+      false));
 }
 
 SpdyURLRequestContext::~SpdyURLRequestContext() {
@@ -439,7 +472,7 @@ SpdyURLRequestContext::~SpdyURLRequestContext() {
 
 bool HasSpdySession(SpdySessionPool* pool, const SpdySessionKey& key) {
   return static_cast<bool>(
-      pool->FindAvailableSession(key, GURL(), BoundNetLog()));
+      pool->FindAvailableSession(key, GURL(), NetLogWithSource()));
 }
 
 namespace {
@@ -447,7 +480,7 @@ namespace {
 base::WeakPtr<SpdySession> CreateSpdySessionHelper(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     Error expected_status,
     bool is_secure) {
   EXPECT_FALSE(HasSpdySession(http_session->spdy_session_pool(), key));
@@ -493,7 +526,7 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
 
   base::WeakPtr<SpdySession> spdy_session =
       http_session->spdy_session_pool()->CreateAvailableSessionFromSocket(
-          key, std::move(connection), net_log, OK, is_secure);
+          key, std::move(connection), net_log, is_secure);
   // Failure is reported asynchronously.
   EXPECT_TRUE(spdy_session);
   EXPECT_TRUE(HasSpdySession(http_session->spdy_session_pool(), key));
@@ -505,25 +538,25 @@ base::WeakPtr<SpdySession> CreateSpdySessionHelper(
 base::WeakPtr<SpdySession> CreateInsecureSpdySession(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
-    const BoundNetLog& net_log) {
+    const NetLogWithSource& net_log) {
   return CreateSpdySessionHelper(http_session, key, net_log,
                                  OK, false /* is_secure */);
 }
 
-base::WeakPtr<SpdySession> TryCreateInsecureSpdySessionExpectingFailure(
+base::WeakPtr<SpdySession> TryCreateSpdySessionExpectingFailure(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
     Error expected_error,
-    const BoundNetLog& net_log) {
+    const NetLogWithSource& net_log) {
   DCHECK_LT(expected_error, ERR_IO_PENDING);
-  return CreateSpdySessionHelper(http_session, key, net_log,
-                                 expected_error, false /* is_secure */);
+  return CreateSpdySessionHelper(http_session, key, net_log, expected_error,
+                                 true /* is_secure */);
 }
 
 base::WeakPtr<SpdySession> CreateSecureSpdySession(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
-    const BoundNetLog& net_log) {
+    const NetLogWithSource& net_log) {
   return CreateSpdySessionHelper(http_session, key, net_log,
                                  OK, true /* is_secure */);
 }
@@ -534,7 +567,7 @@ namespace {
 class FakeSpdySessionClientSocket : public MockClientSocket {
  public:
   explicit FakeSpdySessionClientSocket(int read_result)
-      : MockClientSocket(BoundNetLog()), read_result_(read_result) {}
+      : MockClientSocket(NetLogWithSource()), read_result_(read_result) {}
 
   ~FakeSpdySessionClientSocket() override {}
 
@@ -565,7 +598,7 @@ class FakeSpdySessionClientSocket : public MockClientSocket {
     return false;
   }
 
-  bool WasNpnNegotiated() const override {
+  bool WasAlpnNegotiated() const override {
     ADD_FAILURE();
     return false;
   }
@@ -596,7 +629,7 @@ base::WeakPtr<SpdySession> CreateFakeSpdySessionHelper(
           expected_status == OK ? ERR_IO_PENDING : expected_status)));
   base::WeakPtr<SpdySession> spdy_session =
       pool->CreateAvailableSessionFromSocket(
-          key, std::move(handle), BoundNetLog(), OK, true /* is_secure */);
+          key, std::move(handle), NetLogWithSource(), true /* is_secure */);
   // Failure is reported asynchronously.
   EXPECT_TRUE(spdy_session);
   EXPECT_TRUE(HasSpdySession(pool, key));
@@ -625,26 +658,14 @@ void SpdySessionPoolPeer::RemoveAliases(const SpdySessionKey& key) {
   pool_->RemoveAliases(key);
 }
 
-void SpdySessionPoolPeer::DisableDomainAuthenticationVerification() {
-  pool_->verify_domain_authentication_ = false;
-}
-
 void SpdySessionPoolPeer::SetEnableSendingInitialData(bool enabled) {
   pool_->enable_sending_initial_data_ = enabled;
 }
 
-void SpdySessionPoolPeer::SetSessionMaxRecvWindowSize(size_t window) {
-  pool_->session_max_recv_window_size_ = window;
-}
-
-void SpdySessionPoolPeer::SetStreamInitialRecvWindowSize(size_t window) {
-  pool_->stream_max_recv_window_size_ = window;
-}
-
 SpdyTestUtil::SpdyTestUtil()
-    : headerless_spdy_framer_(HTTP2),
-      request_spdy_framer_(HTTP2),
-      response_spdy_framer_(HTTP2),
+    : headerless_spdy_framer_(SpdyFramer::ENABLE_COMPRESSION),
+      request_spdy_framer_(SpdyFramer::ENABLE_COMPRESSION),
+      response_spdy_framer_(SpdyFramer::ENABLE_COMPRESSION),
       default_url_(GURL(kDefaultUrl)) {}
 
 SpdyTestUtil::~SpdyTestUtil() {}
@@ -709,14 +730,9 @@ std::string SpdyTestUtil::ConstructSpdyReplyString(
 SpdySerializedFrame SpdyTestUtil::ConstructSpdySettings(
     const SettingsMap& settings) {
   SpdySettingsIR settings_ir;
-  for (SettingsMap::const_iterator it = settings.begin();
-       it != settings.end();
+  for (SettingsMap::const_iterator it = settings.begin(); it != settings.end();
        ++it) {
-    settings_ir.AddSetting(
-        it->first,
-        (it->second.first & SETTINGS_FLAG_PLEASE_PERSIST) != 0,
-        (it->second.first & SETTINGS_FLAG_PERSISTED) != 0,
-        it->second.second);
+    settings_ir.AddSetting(it->first, it->second);
   }
   return SpdySerializedFrame(
       headerless_spdy_framer_.SerializeFrame(settings_ir));
@@ -742,7 +758,7 @@ SpdySerializedFrame SpdyTestUtil::ConstructSpdyGoAway() {
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyGoAway(
     SpdyStreamId last_good_stream_id) {
-  SpdyGoAwayIR go_ir(last_good_stream_id, GOAWAY_OK, "go away");
+  SpdyGoAwayIR go_ir(last_good_stream_id, GOAWAY_NO_ERROR, "go away");
   return SpdySerializedFrame(headerless_spdy_framer_.SerializeFrame(go_ir));
 }
 
@@ -769,6 +785,19 @@ SpdySerializedFrame SpdyTestUtil::ConstructSpdyRstStream(
   SpdyRstStreamIR rst_ir(stream_id, status);
   return SpdySerializedFrame(
       headerless_spdy_framer_.SerializeRstStream(rst_ir));
+}
+
+// TODO(jgraettinger): Eliminate uses of this method in tests (prefer
+// SpdyPriorityIR).
+SpdySerializedFrame SpdyTestUtil::ConstructSpdyPriority(
+    SpdyStreamId stream_id,
+    SpdyStreamId parent_stream_id,
+    RequestPriority request_priority,
+    bool exclusive) {
+  int weight = Spdy3PriorityToHttp2Weight(
+      ConvertRequestPriorityToSpdyPriority(request_priority));
+  SpdyPriorityIR ir(stream_id, parent_stream_id, weight, exclusive);
+  return SpdySerializedFrame(headerless_spdy_framer_.SerializePriority(ir));
 }
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyGet(
@@ -960,12 +989,12 @@ SpdySerializedFrame SpdyTestUtil::ConstructSpdyGetReplyRedirect(int stream_id) {
   static const char* const kExtraHeaders[] = {
     "location", "http://www.foo.com/index.php",
   };
-  return ConstructSpdyReplyError("301 Moved Permanently", kExtraHeaders,
+  return ConstructSpdyReplyError("301", kExtraHeaders,
                                  arraysize(kExtraHeaders) / 2, stream_id);
 }
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyReplyError(int stream_id) {
-  return ConstructSpdyReplyError("500 Internal Server Error", NULL, 0, 1);
+  return ConstructSpdyReplyError("500", NULL, 0, 1);
 }
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyGetReply(
@@ -1011,21 +1040,19 @@ SpdySerializedFrame SpdyTestUtil::ConstructSpdyPostReply(
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyDataFrame(int stream_id,
                                                          bool fin) {
-  SpdyFramer framer(HTTP2);
   SpdyDataIR data_ir(stream_id,
                      base::StringPiece(kUploadData, kUploadDataSize));
   data_ir.set_fin(fin);
-  return SpdySerializedFrame(framer.SerializeData(data_ir));
+  return SpdySerializedFrame(headerless_spdy_framer_.SerializeData(data_ir));
 }
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyDataFrame(int stream_id,
                                                          const char* data,
                                                          uint32_t len,
                                                          bool fin) {
-  SpdyFramer framer(HTTP2);
   SpdyDataIR data_ir(stream_id, base::StringPiece(data, len));
   data_ir.set_fin(fin);
-  return SpdySerializedFrame(framer.SerializeData(data_ir));
+  return SpdySerializedFrame(headerless_spdy_framer_.SerializeData(data_ir));
 }
 
 SpdySerializedFrame SpdyTestUtil::ConstructSpdyDataFrame(int stream_id,
@@ -1033,11 +1060,10 @@ SpdySerializedFrame SpdyTestUtil::ConstructSpdyDataFrame(int stream_id,
                                                          uint32_t len,
                                                          bool fin,
                                                          int padding_length) {
-  SpdyFramer framer(HTTP2);
   SpdyDataIR data_ir(stream_id, base::StringPiece(data, len));
   data_ir.set_fin(fin);
   data_ir.set_padding_len(padding_length);
-  return SpdySerializedFrame(framer.SerializeData(data_ir));
+  return SpdySerializedFrame(headerless_spdy_framer_.SerializeData(data_ir));
 }
 
 SpdySerializedFrame SpdyTestUtil::ConstructWrappedSpdyFrame(
@@ -1089,7 +1115,7 @@ SpdyHeaderBlock SpdyTestUtil::ConstructHeaderBlock(
     base::StringPiece url,
     int64_t* content_length) const {
   std::string scheme, host, path;
-  ParseUrl(url.data(), &scheme, &host, &path);
+  ParseUrl(url, &scheme, &host, &path);
   SpdyHeaderBlock headers;
   headers[GetMethodKey()] = method.as_string();
   headers[GetHostKey()] = host.c_str();

@@ -20,9 +20,9 @@ var CreateProfileOverlay = options.CreateProfileOverlay;
 var EditDictionaryOverlay = cr.IsMac ? null : options.EditDictionaryOverlay;
 var EasyUnlockTurnOffOverlay = options.EasyUnlockTurnOffOverlay;
 var FactoryResetOverlay = options.FactoryResetOverlay;
-<if expr="enable_google_now">
+// <if expr="enable_google_now">
 var GeolocationOptions = options.GeolocationOptions;
-</if>
+// </if>
 var FontSettings = options.FontSettings;
 var HandlerOptions = options.HandlerOptions;
 var HomePageOverlay = options.HomePageOverlay;
@@ -47,8 +47,6 @@ var SupervisedUserImportOverlay = options.SupervisedUserImportOverlay;
 var SupervisedUserLearnMoreOverlay = options.SupervisedUserLearnMoreOverlay;
 var SyncSetupOverlay = options.SyncSetupOverlay;
 var ThirdPartyImeConfirmOverlay = options.ThirdPartyImeConfirmOverlay;
-var TriggeredResetProfileSettingsOverlay =
-    options.TriggeredResetProfileSettingsOverlay;
 
 /**
  * DOMContentLoaded handler, sets up the page.
@@ -165,9 +163,10 @@ function load() {
   PageManager.registerOverlay(PasswordManager.getInstance(),
                               BrowserOptions.getInstance(),
                               [$('manage-passwords')]);
-  PageManager.registerOverlay(ResetProfileSettingsOverlay.getInstance(),
-                              BrowserOptions.getInstance(),
-                              [$('reset-profile-settings')]);
+  PageManager.registerOverlay(
+      new ResetProfileSettingsOverlay(false /* isTriggered */),
+      BrowserOptions.getInstance(),
+      [$('reset-profile-settings')]);
   PageManager.registerOverlay(SearchEngineManager.getInstance(),
                               BrowserOptions.getInstance(),
                               [$('manage-default-search-engines')]);
@@ -177,11 +176,11 @@ function load() {
                               BrowserOptions.getInstance(),
                               [$('customize-sync')]);
 
-<if expr="is_win">
+// <if expr="is_win">
   PageManager.registerOverlay(
-      TriggeredResetProfileSettingsOverlay.getInstance(),
+      new ResetProfileSettingsOverlay(true /* isTriggered */),
       BrowserOptions.getInstance());
-</if>
+// </if>
 
   if (loadTimeData.getBoolean('showAbout')) {
     PageManager.registerOverlay(help.HelpPage.getInstance(),

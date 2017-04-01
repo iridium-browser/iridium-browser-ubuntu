@@ -4,11 +4,11 @@
 
 package org.chromium.chrome.browser.video;
 
-import android.os.Environment;
-import android.test.suitebuilder.annotation.LargeTest;
+import android.support.test.filters.LargeTest;
 
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -30,9 +30,10 @@ public class VideoTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     @DisableIf.Build(sdk_is_less_than = 19, message = "crbug.com/582067")
     @Feature({"Media", "Media-Video", "Main"})
     @LargeTest
+    @RetryOnFailure
     public void testLoadMediaUrl() throws InterruptedException, TimeoutException {
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
+                getInstrumentation().getContext());
         try {
             Tab tab = getActivity().getActivityTab();
             TabTitleObserver titleObserver = new TabTitleObserver(tab, "ready_to_play");

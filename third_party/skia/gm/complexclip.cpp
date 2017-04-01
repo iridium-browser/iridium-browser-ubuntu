@@ -4,17 +4,16 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #include "gm.h"
 #include "SkCanvas.h"
-//#include "SkParsePath.h"
 #include "SkPath.h"
-//#include "SkRandom.h"
 
 namespace skiagm {
 
-static const SkColor gPathColor = SK_ColorBLACK;
-static const SkColor gClipAColor = SK_ColorBLUE;
-static const SkColor gClipBColor = SK_ColorRED;
+constexpr SkColor gPathColor = SK_ColorBLACK;
+constexpr SkColor gClipAColor = SK_ColorBLUE;
+constexpr SkColor gClipBColor = SK_ColorRED;
 
 class ComplexClipGM : public GM {
 public:
@@ -85,15 +84,15 @@ protected:
         sk_tool_utils::set_portable_typeface(&paint);
         paint.setTextSize(SkIntToScalar(20));
 
-        static const struct {
-            SkRegion::Op fOp;
-            const char*  fName;
+        constexpr struct {
+            SkClipOp fOp;
+            const char*      fName;
         } gOps[] = { //extra spaces in names for measureText
-            {SkRegion::kIntersect_Op,         "Isect "},
-            {SkRegion::kDifference_Op,        "Diff " },
-            {SkRegion::kUnion_Op,             "Union "},
-            {SkRegion::kXOR_Op,               "Xor "  },
-            {SkRegion::kReverseDifference_Op, "RDiff "}
+            {kIntersect_SkClipOp,         "Isect "},
+            {kDifference_SkClipOp,        "Diff " },
+            {kUnion_SkClipOp,             "Union "},
+            {kXOR_SkClipOp,               "Xor "  },
+            {kReverseDifference_SkClipOp, "RDiff "}
         };
 
         canvas->translate(SkIntToScalar(20), SkIntToScalar(20));
@@ -130,7 +129,7 @@ protected:
                                       SkPath::kEvenOdd_FillType);
                     clipB.setFillType(doInvB ? SkPath::kInverseEvenOdd_FillType :
                                       SkPath::kEvenOdd_FillType);
-                    canvas->clipPath(clipA, SkRegion::kIntersect_Op, fDoAAClip);
+                    canvas->clipPath(clipA, fDoAAClip);
                     canvas->clipPath(clipB, gOps[op].fOp, fDoAAClip);
 
                     // In the inverse case we need to prevent the draw from covering the whole

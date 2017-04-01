@@ -26,10 +26,10 @@
 namespace net {
 
 class AddressList;
-class BoundNetLog;
 class DnsClient;
 class IPAddress;
 class NetLog;
+class NetLogWithSource;
 
 // For each hostname that is requested, HostResolver creates a
 // HostResolverImpl::Job. When this job gets dispatched it creates a ProcTask
@@ -138,10 +138,10 @@ class NET_EXPORT HostResolverImpl
               AddressList* addresses,
               const CompletionCallback& callback,
               std::unique_ptr<Request>* out_req,
-              const BoundNetLog& source_net_log) override;
+              const NetLogWithSource& source_net_log) override;
   int ResolveFromCache(const RequestInfo& info,
                        AddressList* addresses,
-                       const BoundNetLog& source_net_log) override;
+                       const NetLogWithSource& source_net_log) override;
   void SetDnsClientEnabled(bool enabled) override;
   HostCache* GetHostCache() override;
   std::unique_ptr<base::Value> GetDnsConfigAsValue() const override;
@@ -152,7 +152,7 @@ class NET_EXPORT HostResolverImpl
   int ResolveStaleFromCache(const RequestInfo& info,
                             AddressList* addresses,
                             HostCache::EntryStaleness* stale_info,
-                            const BoundNetLog& source_net_log);
+                            const NetLogWithSource& source_net_log);
 
   void InitializePersistence(
       const PersistCallback& persist_callback,
@@ -179,8 +179,8 @@ class NET_EXPORT HostResolverImpl
   class LoopbackProbeJob;
   class DnsTask;
   class RequestImpl;
-  typedef HostCache::Key Key;
-  typedef std::map<Key, Job*> JobMap;
+  using Key = HostCache::Key;
+  using JobMap = std::map<Key, std::unique_ptr<Job>>;
 
   // Number of consecutive failures of DnsTask (with successful fallback to
   // ProcTask) before the DnsClient is disabled until the next DNS change.
@@ -204,7 +204,7 @@ class NET_EXPORT HostResolverImpl
                     AddressList* addresses,
                     bool allow_stale,
                     HostCache::EntryStaleness* stale_info,
-                    const BoundNetLog& request_net_log);
+                    const NetLogWithSource& request_net_log);
 
   // Tries to resolve |key| as an IP, returns true and sets |net_error| if
   // succeeds, returns false otherwise.
@@ -248,12 +248,12 @@ class NET_EXPORT HostResolverImpl
   // family when the request leaves it unspecified.
   Key GetEffectiveKeyForRequest(const RequestInfo& info,
                                 const IPAddress* ip_address,
-                                const BoundNetLog& net_log);
+                                const NetLogWithSource& net_log);
 
   // Probes IPv6 support and returns true if IPv6 support is enabled.
   // Results are cached, i.e. when called repeatedly this method returns result
   // from the first probe for some time before probing again.
-  virtual bool IsIPv6Reachable(const BoundNetLog& net_log);
+  virtual bool IsIPv6Reachable(const NetLogWithSource& net_log);
 
   // Asynchronously checks if only loopback IPs are available.
   virtual void RunLoopbackProbeJob();
@@ -263,7 +263,7 @@ class NET_EXPORT HostResolverImpl
                    const HostCache::Entry& entry,
                    base::TimeDelta ttl);
 
-  // Removes |job| from |jobs_|, only if it exists.
+  // Removes |job| from |jobs_|, only if it exists, but does not delete it.
   void RemoveJob(Job* job);
 
   // Aborts all in progress jobs with ERR_NETWORK_CHANGED and notifies their

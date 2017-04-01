@@ -18,7 +18,6 @@ import android.view.animation.DecelerateInterpolator;
 import android.view.animation.Interpolator;
 import android.widget.FrameLayout;
 
-import org.chromium.chrome.browser.tab.TabContentViewParent;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.GestureStateListener;
 
@@ -137,9 +136,10 @@ public abstract class SwipableOverlayView extends FrameLayout {
         return mContentViewCore;
     }
 
-    protected void addToParentView(TabContentViewParent parentView) {
+    protected void addToParentView(ViewGroup parentView) {
+        if (parentView == null) return;
         if (getParent() == null) {
-            parentView.addInfobarView(this, createLayoutParams());
+            parentView.addView(this, createLayoutParams());
 
             // Listen for the layout to know when to animate the View coming onto the screen.
             addOnLayoutChangeListener(mLayoutChangeListener);
@@ -208,7 +208,7 @@ public abstract class SwipableOverlayView extends FrameLayout {
     private GestureStateListener createGestureStateListener() {
         return new GestureStateListener() {
             @Override
-            public void onFlingStartGesture(int vx, int vy, int scrollOffsetY, int scrollExtentY) {
+            public void onFlingStartGesture(int scrollOffsetY, int scrollExtentY) {
                 if (!isAllowedToAutoHide() || !cancelCurrentAnimation()) return;
                 beginGesture(scrollOffsetY, scrollExtentY);
                 mGestureState = GESTURE_FLINGING;

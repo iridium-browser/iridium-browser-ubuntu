@@ -24,6 +24,7 @@
 #include "ios/chrome/browser/autofill/personal_data_manager_factory.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/infobars/infobar_utils.h"
+#include "ios/chrome/browser/ui/autofill/card_unmask_prompt_view_bridge.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 
@@ -56,9 +57,8 @@ PrefService* AutofillClientIOS::GetPrefs() {
   return browser_state_->GetPrefs();
 }
 
-// TODO(jdonnelly): Implement this when adding credit card upload.
-sync_driver::SyncService* AutofillClientIOS::GetSyncService() {
-  NOTIMPLEMENTED();
+// TODO(crbug.com/535784): Implement this when adding credit card upload.
+syncer::SyncService* AutofillClientIOS::GetSyncService() {
   return nullptr;
 }
 
@@ -66,8 +66,8 @@ IdentityProvider* AutofillClientIOS::GetIdentityProvider() {
   return identity_provider_.get();
 }
 
-rappor::RapporService* AutofillClientIOS::GetRapporService() {
-  return GetApplicationContext()->GetRapporService();
+rappor::RapporServiceImpl* AutofillClientIOS::GetRapporServiceImpl() {
+  return GetApplicationContext()->GetRapporServiceImpl();
 }
 
 void AutofillClientIOS::ShowAutofillSettings() {
@@ -78,10 +78,11 @@ void AutofillClientIOS::ShowUnmaskPrompt(
     const CreditCard& card,
     UnmaskCardReason reason,
     base::WeakPtr<CardUnmaskDelegate> delegate) {
-  ios::ChromeBrowserProvider* provider = ios::GetChromeBrowserProvider();
   unmask_controller_.ShowPrompt(
-      provider->CreateCardUnmaskPromptView(&unmask_controller_), card, reason,
-      delegate);
+      // autofill::CardUnmaskPromptViewBridge manages its own lifetime, so
+      // do not use std::unique_ptr<> here.
+      new autofill::CardUnmaskPromptViewBridge(&unmask_controller_), card,
+      reason, delegate);
 }
 
 void AutofillClientIOS::OnUnmaskVerificationResult(PaymentsRpcResult result) {
@@ -195,6 +196,10 @@ bool AutofillClientIOS::ShouldShowSigninPromo() {
 }
 
 void AutofillClientIOS::StartSigninFlow() {
+  NOTIMPLEMENTED();
+}
+
+void AutofillClientIOS::ShowHttpNotSecureExplanation() {
   NOTIMPLEMENTED();
 }
 

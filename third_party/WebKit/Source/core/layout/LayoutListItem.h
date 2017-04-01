@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2009 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2009 Apple Inc.
+ *               All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -31,74 +32,75 @@ class HTMLOListElement;
 class LayoutListMarker;
 
 class LayoutListItem final : public LayoutBlockFlow {
-public:
-    explicit LayoutListItem(Element*);
+ public:
+  explicit LayoutListItem(Element*);
 
-    int value() const
-    {
-        if (!m_isValueUpToDate)
-            updateValueNow();
-        return m_value;
-    }
-    void updateValue();
+  int value() const {
+    if (!m_isValueUpToDate)
+      updateValueNow();
+    return m_value;
+  }
+  void updateValue();
 
-    bool hasExplicitValue() const { return m_hasExplicitValue; }
-    int explicitValue() const { return m_explicitValue; }
-    void setExplicitValue(int);
-    void clearExplicitValue();
+  bool hasExplicitValue() const { return m_hasExplicitValue; }
+  int explicitValue() const { return m_explicitValue; }
+  void setExplicitValue(int);
+  void clearExplicitValue();
 
-    void setNotInList(bool);
-    bool notInList() const { return m_notInList; }
+  void setNotInList(bool);
+  bool notInList() const { return m_notInList; }
 
-    const String& markerText() const;
+  const String& markerText() const;
 
-    void updateListMarkerNumbers();
+  void updateListMarkerNumbers();
 
-    static void updateItemValuesForOrderedList(const HTMLOListElement*);
-    static unsigned itemCountForOrderedList(const HTMLOListElement*);
+  static void updateItemValuesForOrderedList(const HTMLOListElement*);
+  static unsigned itemCountForOrderedList(const HTMLOListElement*);
 
-    bool isEmpty() const;
+  bool isEmpty() const;
 
-    LayoutListMarker* marker() const { return m_marker; }
+  LayoutListMarker* marker() const { return m_marker; }
 
-    const char* name() const override { return "LayoutListItem"; }
+  const char* name() const override { return "LayoutListItem"; }
 
-private:
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectListItem || LayoutBlockFlow::isOfType(type); }
+ private:
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectListItem || LayoutBlockFlow::isOfType(type);
+  }
 
-    void willBeDestroyed() override;
+  void willBeDestroyed() override;
 
-    void insertedIntoTree() override;
-    void willBeRemovedFromTree() override;
+  void insertedIntoTree() override;
+  void willBeRemovedFromTree() override;
 
-    void paint(const PaintInfo&, const LayoutPoint&) const override;
+  void paint(const PaintInfo&, const LayoutPoint&) const override;
 
-    void subtreeDidChange() final;
+  void subtreeDidChange() final;
 
-    // Returns true if we re-attached and updated the location of the marker.
-    bool updateMarkerLocation();
+  // Returns true if we re-attached and updated the location of the marker.
+  bool updateMarkerLocation();
 
-    void positionListMarker();
+  void positionListMarker();
 
-    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+  void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
-    void addOverflowFromChildren() override;
+  void addOverflowFromChildren() override;
 
-    inline int calcValue() const;
-    void updateValueNow() const;
-    void explicitValueChanged();
+  inline int calcValue() const;
+  void updateValueNow() const;
+  void explicitValueChanged();
 
-    int m_explicitValue;
-    LayoutListMarker* m_marker;
-    mutable int m_value;
+  int m_explicitValue;
+  LayoutListMarker* m_marker;
+  mutable int m_value;
 
-    bool m_hasExplicitValue : 1;
-    mutable bool m_isValueUpToDate : 1;
-    bool m_notInList : 1;
+  bool m_hasExplicitValue : 1;
+  mutable bool m_isValueUpToDate : 1;
+  bool m_notInList : 1;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutListItem, isListItem());
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutListItem_h
+#endif  // LayoutListItem_h

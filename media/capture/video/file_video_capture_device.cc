@@ -13,8 +13,9 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "media/base/video_capture_types.h"
+#include "media/capture/video_capture_types.h"
 #include "media/filters/jpeg_parser.h"
 
 namespace media {
@@ -90,7 +91,8 @@ void ParseY4MTags(const std::string& file_header,
         // Pixel aspect ratio ignored.
         break;
       case 'C':
-        CHECK(token == "420" || token == "420jpeg" || token == "420paldv")
+        CHECK(token == "420" || token == "420jpeg" || token == "420mpeg2" ||
+              token == "420paldv")
             << token;  // Only I420 is supported, and we fudge the variants.
         break;
       default:

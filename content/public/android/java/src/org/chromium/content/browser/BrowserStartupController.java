@@ -61,7 +61,7 @@ public class BrowserStartupController {
 
     private static BrowserStartupController sInstance;
 
-    private static boolean sBrowserMayStartAsynchronously = false;
+    private static boolean sBrowserMayStartAsynchronously;
     private static boolean sShouldStartGpuProcessOnBrowserStartup = true;
 
     private static void setAsynchronousStartup(boolean enable) {
@@ -118,7 +118,7 @@ public class BrowserStartupController {
 
     BrowserStartupController(Context context, int libraryProcessType) {
         mContext = context.getApplicationContext();
-        mAsyncStartupCallbacks = new ArrayList<StartupCallback>();
+        mAsyncStartupCallbacks = new ArrayList<>();
         mLibraryProcessType = libraryProcessType;
     }
 
@@ -233,6 +233,14 @@ public class BrowserStartupController {
         return ContentMain.start();
     }
 
+    /**
+     * @return Whether the browser process completed successfully.
+     */
+    public boolean isStartupSuccessfullyCompleted() {
+        ThreadUtils.assertOnUiThread();
+        return mStartupDone && mStartupSuccess;
+    }
+
     public void addStartupCompletedObserver(StartupCallback callback) {
         ThreadUtils.assertOnUiThread();
         if (mStartupDone) {
@@ -290,7 +298,7 @@ public class BrowserStartupController {
         // Normally Main.java will have kicked this off asynchronously for Chrome. But other
         // ContentView apps like tests also need them so we make sure we've extracted resources
         // here. We can still make it a little async (wait until the library is loaded).
-        ResourceExtractor resourceExtractor = ResourceExtractor.get(mContext);
+        ResourceExtractor resourceExtractor = ResourceExtractor.get();
         resourceExtractor.startExtractingResources();
 
         // This strictmode exception is to cover the case where the browser process is being started
@@ -302,7 +310,7 @@ public class BrowserStartupController {
         try {
             // Normally Main.java will have already loaded the library asynchronously, we only need
             // to load it here if we arrived via another flow, e.g. bookmark access & sync setup.
-            LibraryLoader.get(mLibraryProcessType).ensureInitialized(mContext);
+            LibraryLoader.get(mLibraryProcessType).ensureInitialized();
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
@@ -336,7 +344,7 @@ public class BrowserStartupController {
      * Initialization needed for tests. Mainly used by content browsertests.
      */
     public void initChromiumBrowserProcessForTests() {
-        ResourceExtractor resourceExtractor = ResourceExtractor.get(mContext);
+        ResourceExtractor resourceExtractor = ResourceExtractor.get();
         resourceExtractor.startExtractingResources();
         resourceExtractor.waitForCompletion();
         nativeSetCommandLineFlags(false, null);

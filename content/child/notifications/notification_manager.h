@@ -8,9 +8,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <map>
 #include <memory>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include "base/id_map.h"
@@ -20,11 +20,10 @@
 #include "content/common/platform_notification_messages.h"
 #include "content/public/child/worker_thread.h"
 #include "third_party/WebKit/public/platform/modules/notifications/WebNotificationManager.h"
+#include "url/gurl.h"
 
 namespace content {
 
-struct NotificationResources;
-struct PlatformNotificationData;
 class ThreadSafeSender;
 
 class NotificationManager : public blink::WebNotificationManager,
@@ -51,14 +50,15 @@ class NotificationManager : public blink::WebNotificationManager,
       const blink::WebNotificationData& notification_data,
       std::unique_ptr<blink::WebNotificationResources> notification_resources,
       blink::WebServiceWorkerRegistration* service_worker_registration,
-      blink::WebNotificationShowCallbacks* callbacks) override;
+      std::unique_ptr<blink::WebNotificationShowCallbacks> callbacks) override;
   void getNotifications(
       const blink::WebString& filter_tag,
       blink::WebServiceWorkerRegistration* service_worker_registration,
-      blink::WebNotificationGetCallbacks* callbacks) override;
+      std::unique_ptr<blink::WebNotificationGetCallbacks> callbacks) override;
   void close(blink::WebNotificationDelegate* delegate) override;
   void closePersistent(const blink::WebSecurityOrigin& origin,
-                       int64_t persistent_notification_id) override;
+                       const blink::WebString& tag,
+                       const blink::WebString& notification_id) override;
   void notifyDelegateDestroyed(
       blink::WebNotificationDelegate* delegate) override;
 
@@ -82,15 +82,28 @@ class NotificationManager : public blink::WebNotificationManager,
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
 
   // Tracks pending requests for getting a list of notifications.
-  IDMap<blink::WebNotificationGetCallbacks, IDMapOwnPointer>
+  IDMap<std::unique_ptr<blink::WebNotificationGetCallbacks>>
       pending_get_notification_requests_;
 
   // Tracks pending requests for displaying persistent notifications.
-  IDMap<blink::WebNotificationShowCallbacks, IDMapOwnPointer>
+  IDMap<std::unique_ptr<blink::WebNotificationShowCallbacks>>
       pending_show_notification_requests_;
 
+  // Structure holding the information for active non-persistent notifications.
+  struct ActiveNotificationData {
+    ActiveNotificationData() = default;
+    ActiveNotificationData(blink::WebNotificationDelegate* delegate,
+                           const GURL& origin,
+                           const std::string& tag);
+    ~ActiveNotificationData();
+
+    blink::WebNotificationDelegate* delegate = nullptr;
+    GURL origin;
+    std::string tag;
+  };
+
   // Map to store the delegate associated with a notification request Id.
-  std::map<int, blink::WebNotificationDelegate*> active_page_notifications_;
+  std::unordered_map<int, ActiveNotificationData> active_page_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationManager);
 };

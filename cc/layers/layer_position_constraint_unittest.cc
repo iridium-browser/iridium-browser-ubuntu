@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "cc/animation/animation_host.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/proto/layer_position_constraint.pb.h"
@@ -61,8 +62,10 @@ void ExecuteCalculateDrawProperties(LayerImpl* root_layer) {
 class LayerPositionConstraintTest : public testing::Test {
  public:
   LayerPositionConstraintTest()
-      : layer_tree_host_(
-            FakeLayerTreeHost::Create(&fake_client_, &task_graph_runner_)),
+      : animation_host_(AnimationHost::CreateForTesting(ThreadInstance::MAIN)),
+        layer_tree_host_(FakeLayerTreeHost::Create(&fake_client_,
+                                                   &task_graph_runner_,
+                                                   animation_host_.get())),
         root_impl_(nullptr),
         inner_viewport_container_layer_impl_(nullptr),
         scroll_layer_impl_(nullptr),
@@ -73,7 +76,7 @@ class LayerPositionConstraintTest : public testing::Test {
         great_grand_child_impl_(nullptr) {
     layer_tree_host_->InitializeForTesting(
         TaskRunnerProvider::Create(nullptr, nullptr),
-        std::unique_ptr<Proxy>(new FakeProxy), nullptr);
+        std::unique_ptr<Proxy>(new FakeProxy));
     CreateTreeForTest();
     fixed_to_top_left_.set_is_fixed_position(true);
     fixed_to_bottom_right_.set_is_fixed_position(true);
@@ -170,6 +173,7 @@ class LayerPositionConstraintTest : public testing::Test {
  protected:
   FakeLayerTreeHostClient fake_client_;
   TestTaskGraphRunner task_graph_runner_;
+  std::unique_ptr<AnimationHost> animation_host_;
   std::unique_ptr<FakeLayerTreeHost> layer_tree_host_;
   scoped_refptr<Layer> root_;
   scoped_refptr<Layer> inner_viewport_container_layer_;
@@ -200,8 +204,7 @@ class LayerPositionConstraintTest : public testing::Test {
             ->property_trees()
             ->scroll_tree.SetScrollOffsetDeltaForTesting(layer_impl->id(),
                                                          delta))
-      layer_impl->layer_tree_impl()->DidUpdateScrollOffset(
-          layer_impl->id(), layer_impl->transform_tree_index());
+      layer_impl->layer_tree_impl()->DidUpdateScrollOffset(layer_impl->id());
   }
 };
 

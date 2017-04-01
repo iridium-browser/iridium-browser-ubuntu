@@ -13,6 +13,28 @@
 
 namespace {
 
+void ExpectParsedUrlsEqual(const GURL& a, const GURL& b) {
+  EXPECT_EQ(a, b);
+  const url::Parsed& a_parsed = a.parsed_for_possibly_invalid_spec();
+  const url::Parsed& b_parsed = b.parsed_for_possibly_invalid_spec();
+  EXPECT_EQ(a_parsed.scheme.begin, b_parsed.scheme.begin);
+  EXPECT_EQ(a_parsed.scheme.len, b_parsed.scheme.len);
+  EXPECT_EQ(a_parsed.username.begin, b_parsed.username.begin);
+  EXPECT_EQ(a_parsed.username.len, b_parsed.username.len);
+  EXPECT_EQ(a_parsed.password.begin, b_parsed.password.begin);
+  EXPECT_EQ(a_parsed.password.len, b_parsed.password.len);
+  EXPECT_EQ(a_parsed.host.begin, b_parsed.host.begin);
+  EXPECT_EQ(a_parsed.host.len, b_parsed.host.len);
+  EXPECT_EQ(a_parsed.port.begin, b_parsed.port.begin);
+  EXPECT_EQ(a_parsed.port.len, b_parsed.port.len);
+  EXPECT_EQ(a_parsed.path.begin, b_parsed.path.begin);
+  EXPECT_EQ(a_parsed.path.len, b_parsed.path.len);
+  EXPECT_EQ(a_parsed.query.begin, b_parsed.query.begin);
+  EXPECT_EQ(a_parsed.query.len, b_parsed.query.len);
+  EXPECT_EQ(a_parsed.ref.begin, b_parsed.ref.begin);
+  EXPECT_EQ(a_parsed.ref.len, b_parsed.ref.len);
+}
+
 TEST(OriginTest, UniqueOriginComparison) {
   url::Origin unique_origin;
   EXPECT_EQ("", unique_origin.scheme());
@@ -38,6 +60,45 @@ TEST(OriginTest, UniqueOriginComparison) {
     EXPECT_FALSE(origin.IsSameOriginWith(origin));
     EXPECT_FALSE(unique_origin.IsSameOriginWith(origin));
     EXPECT_FALSE(origin.IsSameOriginWith(unique_origin));
+
+    ExpectParsedUrlsEqual(GURL(origin.Serialize()), origin.GetURL());
+  }
+}
+
+TEST(OriginTest, ConstructFromTuple) {
+  struct TestCases {
+    const char* const scheme;
+    const char* const host;
+    const uint16_t port;
+    const char* const suborigin;
+  } cases[] = {
+      {"http", "example.com", 80, ""},
+      {"http", "example.com", 123, ""},
+      {"https", "example.com", 443, ""},
+      {"http-so", "foobar.example.com", 80, "foobar"},
+      {"http-so", "foobar.example.com", 123, "foobar"},
+      {"https-so", "foobar.example.com", 443, "foobar"},
+  };
+
+  for (const auto& test_case : cases) {
+    testing::Message scope_message;
+    if (test_case.suborigin != std::string()) {
+      scope_message << test_case.scheme << "-so://" << test_case.suborigin
+                    << "." << test_case.host << ":" << test_case.port;
+    } else {
+      scope_message << test_case.scheme << "://" << test_case.host << ":"
+                    << test_case.port;
+    }
+    SCOPED_TRACE(scope_message);
+    url::Origin origin_with_suborigin =
+        url::Origin::CreateFromNormalizedTupleWithSuborigin(
+            test_case.scheme, test_case.host, test_case.port,
+            test_case.suborigin);
+
+    EXPECT_EQ(test_case.scheme, origin_with_suborigin.scheme());
+    EXPECT_EQ(test_case.host, origin_with_suborigin.host());
+    EXPECT_EQ(test_case.port, origin_with_suborigin.port());
+    EXPECT_EQ(test_case.suborigin, origin_with_suborigin.suborigin());
   }
 }
 
@@ -103,6 +164,8 @@ TEST(OriginTest, ConstructFromGURL) {
     EXPECT_TRUE(origin.IsSameOriginWith(origin));
     EXPECT_FALSE(different_origin.IsSameOriginWith(origin));
     EXPECT_FALSE(origin.IsSameOriginWith(different_origin));
+
+    ExpectParsedUrlsEqual(GURL(origin.Serialize()), origin.GetURL());
   }
 }
 
@@ -127,12 +190,132 @@ TEST(OriginTest, Serialization) {
     GURL url(test_case.url);
     EXPECT_TRUE(url.is_valid());
     url::Origin origin(url);
-    EXPECT_EQ(test_case.expected, origin.Serialize());
+    EXPECT_TRUE(origin.suborigin().empty());
+    std::string serialized = origin.Serialize();
+    std::string serialized_physical_origin =
+        origin.GetPhysicalOrigin().Serialize();
+    ExpectParsedUrlsEqual(GURL(serialized), origin.GetURL());
+
+    EXPECT_EQ(test_case.expected, serialized);
+    EXPECT_EQ(test_case.expected, serialized_physical_origin);
 
     // The '<<' operator should produce the same serialization as Serialize().
     std::stringstream out;
     out << origin;
     EXPECT_EQ(test_case.expected, out.str());
+  }
+}
+
+TEST(OriginTest, SuboriginSerialization) {
+  struct TestCases {
+    const char* const url;
+    const char* const expected;
+    const char* const expected_physical_origin;
+    const char* const expected_suborigin;
+  } cases[] = {
+      {"http-so://foobar.example.com/", "http-so://foobar.example.com",
+       "http://example.com", "foobar"},
+      {"http-so://foobar.example.com:123/", "http-so://foobar.example.com:123",
+       "http://example.com:123", "foobar"},
+      {"https-so://foobar.example.com/", "https-so://foobar.example.com",
+       "https://example.com", "foobar"},
+      {"https-so://foobar.example.com:123/",
+       "https-so://foobar.example.com:123", "https://example.com:123",
+       "foobar"},
+      {"http://example.com/", "http://example.com", "http://example.com", ""},
+      {"http-so://foobar.example.com/some/path", "http-so://foobar.example.com",
+       "http://example.com", "foobar"},
+      {"http-so://foobar.example.com/some/path?query",
+       "http-so://foobar.example.com", "http://example.com", "foobar"},
+      {"http-so://foobar.example.com/some/path#fragment",
+       "http-so://foobar.example.com", "http://example.com", "foobar"},
+      {"http-so://foobar.example.com/some/path?query#fragment",
+       "http-so://foobar.example.com", "http://example.com", "foobar"},
+      {"http-so://foobar.example.com:1234/some/path?query#fragment",
+       "http-so://foobar.example.com:1234", "http://example.com:1234",
+       "foobar"},
+  };
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.url);
+    GURL url(test_case.url);
+    EXPECT_TRUE(url.is_valid());
+    url::Origin origin(url);
+    std::string serialized = origin.Serialize();
+    std::string serialized_physical_origin =
+        origin.GetPhysicalOrigin().Serialize();
+    EXPECT_FALSE(origin.unique());
+    EXPECT_EQ(test_case.expected_suborigin, origin.suborigin());
+    ExpectParsedUrlsEqual(GURL(serialized), origin.GetURL());
+
+    EXPECT_EQ(test_case.expected, serialized);
+    EXPECT_EQ(test_case.expected_physical_origin, serialized_physical_origin);
+
+    // The '<<' operator should produce the same serialization as Serialize().
+    std::stringstream out;
+    out << origin;
+    EXPECT_EQ(test_case.expected, out.str());
+  }
+
+  const char* const failure_cases[] = {
+      "http-so://.",  "http-so://foo",  "http-so://.foo",  "http-so://foo.",
+      "https-so://.", "https-so://foo", "https-so://.foo", "https-so://foo.",
+  };
+
+  for (const auto& test_case : failure_cases) {
+    SCOPED_TRACE(test_case);
+    GURL url(test_case);
+    EXPECT_TRUE(url.is_valid());
+    url::Origin origin(url);
+    std::string serialized = origin.Serialize();
+    std::string serialized_physical_origin =
+        origin.GetPhysicalOrigin().Serialize();
+    EXPECT_TRUE(origin.unique());
+    EXPECT_EQ("", origin.suborigin());
+    ExpectParsedUrlsEqual(GURL(serialized), origin.GetURL());
+
+    EXPECT_EQ("null", serialized);
+    EXPECT_EQ("null", serialized_physical_origin);
+  }
+}
+
+TEST(OriginTest, SuboriginIsSameOriginWith) {
+  struct TestCases {
+    const char* const url1;
+    const char* const url2;
+    bool is_same_origin;
+    bool is_same_physical_origin;
+  } cases[]{
+      {"http-so://foobar1.example.com/", "http-so://foobar1.example.com", true,
+       true},
+      {"http-so://foobar2.example.com/", "https-so://foobar2.example.com",
+       false, false},
+      {"http-so://foobar3.example.com/", "http://example.com", false, true},
+      {"https-so://foobar4.example.com/", "https-so://foobar4.example.com",
+       true, true},
+      {"https-so://foobar5.example.com/", "https://example.com", false, true},
+      {"http-so://foobar6.example.com/", "http-so://bazbar.example.com", false,
+       true},
+      {"http-so://foobar7.example.com/", "http-so://foobar7.google.com", false,
+       false},
+  };
+
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.url1);
+    url::Origin origin1(GURL(test_case.url1));
+    url::Origin origin2(GURL(test_case.url2));
+
+    EXPECT_TRUE(origin1.IsSameOriginWith(origin1));
+    EXPECT_TRUE(origin2.IsSameOriginWith(origin2));
+    EXPECT_EQ(test_case.is_same_origin, origin1.IsSameOriginWith(origin2));
+    EXPECT_EQ(test_case.is_same_origin, origin2.IsSameOriginWith(origin1));
+
+    EXPECT_TRUE(origin1.IsSamePhysicalOriginWith(origin1));
+    EXPECT_TRUE(origin2.IsSamePhysicalOriginWith(origin2));
+    EXPECT_EQ(test_case.is_same_physical_origin,
+              origin1.IsSamePhysicalOriginWith(origin2));
+    EXPECT_EQ(test_case.is_same_physical_origin,
+              origin2.IsSamePhysicalOriginWith(origin1));
   }
 }
 
@@ -186,6 +369,8 @@ TEST(OriginTest, UnsafelyCreate) {
     EXPECT_EQ(test.port, origin.port());
     EXPECT_FALSE(origin.unique());
     EXPECT_TRUE(origin.IsSameOriginWith(origin));
+
+    ExpectParsedUrlsEqual(GURL(origin.Serialize()), origin.GetURL());
   }
 }
 
@@ -221,6 +406,8 @@ TEST(OriginTest, UnsafelyCreateUniqueOnInvalidInput) {
     EXPECT_EQ(0, origin.port());
     EXPECT_TRUE(origin.unique());
     EXPECT_FALSE(origin.IsSameOriginWith(origin));
+
+    ExpectParsedUrlsEqual(GURL(origin.Serialize()), origin.GetURL());
   }
 }
 
@@ -249,7 +436,66 @@ TEST(OriginTest, UnsafelyCreateUniqueViaEmbeddedNulls) {
     EXPECT_EQ(0, origin.port());
     EXPECT_TRUE(origin.unique());
     EXPECT_FALSE(origin.IsSameOriginWith(origin));
+
+    ExpectParsedUrlsEqual(GURL(origin.Serialize()), origin.GetURL());
   }
+}
+
+TEST(OriginTest, DomainIs) {
+  const struct {
+    const char* url;
+    const char* lower_ascii_domain;
+    bool expected_domain_is;
+  } kTestCases[] = {
+      {"http://google.com/foo", "google.com", true},
+      {"http://www.google.com:99/foo", "google.com", true},
+      {"http://www.google.com.cn/foo", "google.com", false},
+      {"http://www.google.comm", "google.com", false},
+      {"http://www.iamnotgoogle.com/foo", "google.com", false},
+      {"http://www.google.com/foo", "Google.com", false},
+
+      // If the host ends with a dot, it matches domains with or without a dot.
+      {"http://www.google.com./foo", "google.com", true},
+      {"http://www.google.com./foo", "google.com.", true},
+      {"http://www.google.com./foo", ".com", true},
+      {"http://www.google.com./foo", ".com.", true},
+
+      // But, if the host doesn't end with a dot and the input domain does, then
+      // it's considered to not match.
+      {"http://google.com/foo", "google.com.", false},
+
+      // If the host ends with two dots, it doesn't match.
+      {"http://www.google.com../foo", "google.com", false},
+
+      // Filesystem scheme.
+      {"filesystem:http://www.google.com:99/foo/", "google.com", true},
+      {"filesystem:http://www.iamnotgoogle.com/foo/", "google.com", false},
+
+      // File scheme.
+      {"file:///home/user/text.txt", "", false},
+      {"file:///home/user/text.txt", "txt", false},
+  };
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(testing::Message() << "(url, domain): (" << test_case.url
+                                    << ", " << test_case.lower_ascii_domain
+                                    << ")");
+    GURL url(test_case.url);
+    ASSERT_TRUE(url.is_valid());
+    url::Origin origin(url);
+
+    EXPECT_EQ(test_case.expected_domain_is,
+              origin.DomainIs(test_case.lower_ascii_domain));
+  }
+
+  // If the URL is invalid, DomainIs returns false.
+  GURL invalid_url("google.com");
+  ASSERT_FALSE(invalid_url.is_valid());
+  EXPECT_FALSE(url::Origin(invalid_url).DomainIs("google.com"));
+
+  // Unique origins.
+  EXPECT_FALSE(url::Origin().DomainIs(""));
+  EXPECT_FALSE(url::Origin().DomainIs("com"));
 }
 
 }  // namespace url

@@ -22,9 +22,12 @@ class Value;
 class ListValue;
 }
 
+namespace content {
+class DevToolsAgentHost;
+}
+
 class Browser;
 class DevToolsTargetsUIHandler;
-class DevToolsTargetImpl;
 class PortForwardingStatusSerializer;
 
 class InspectUI : public content::WebUIController,
@@ -62,6 +65,8 @@ class InspectUI : public content::WebUIController,
   void UpdateDiscoverUsbDevicesEnabled();
   void UpdatePortForwardingEnabled();
   void UpdatePortForwardingConfig();
+  void UpdateTCPDiscoveryEnabled();
+  void UpdateTCPDiscoveryConfig();
 
   void SetPortForwardingDefaults();
 
@@ -71,11 +76,14 @@ class InspectUI : public content::WebUIController,
 
   DevToolsTargetsUIHandler* FindTargetHandler(
       const std::string& source_id);
-  DevToolsTargetImpl* FindTarget(const std::string& source_id,
-                                 const std::string& target_id);
+  scoped_refptr<content::DevToolsAgentHost> FindTarget(
+      const std::string& source_id,
+      const std::string& target_id);
 
   void PopulateTargets(const std::string& source_id,
                        const base::ListValue& targets);
+
+  void PopulateAdditionalTargets(const base::ListValue& targets);
 
   void ForceUpdateIfNeeded(const std::string& source_id,
                            const std::string& target_type);
@@ -90,8 +98,8 @@ class InspectUI : public content::WebUIController,
   // A scoped container for preference change registries.
   PrefChangeRegistrar pref_change_registrar_;
 
-  typedef std::map<std::string, DevToolsTargetsUIHandler*> TargetHandlerMap;
-  TargetHandlerMap target_handlers_;
+  std::map<std::string, std::unique_ptr<DevToolsTargetsUIHandler>>
+      target_handlers_;
 
   std::unique_ptr<PortForwardingStatusSerializer> port_status_serializer_;
 

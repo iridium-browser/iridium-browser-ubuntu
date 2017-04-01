@@ -6,23 +6,13 @@
 
 namespace blink {
 
-AppliedTextDecoration::AppliedTextDecoration(TextDecoration line, TextDecorationStyle style, StyleColor color)
-    : m_line(line)
-    , m_style(style)
-    , m_color(color)
-{
+AppliedTextDecoration::AppliedTextDecoration(TextDecoration line,
+                                             TextDecorationStyle style,
+                                             Color color)
+    : m_lines(line), m_style(style), m_color(color) {}
+
+bool AppliedTextDecoration::operator==(const AppliedTextDecoration& o) const {
+  return m_color == o.m_color && m_lines == o.m_lines && m_style == o.m_style;
 }
 
-AppliedTextDecoration::AppliedTextDecoration(TextDecoration line)
-    : m_line(line)
-    , m_style(TextDecorationStyleSolid)
-    , m_color(StyleColor::currentColor())
-{
-}
-
-bool AppliedTextDecoration::operator==(const AppliedTextDecoration& o) const
-{
-    return m_color == o.m_color && m_line == o.m_line && m_style == o.m_style;
-}
-
-} // namespace blink
+}  // namespace blink

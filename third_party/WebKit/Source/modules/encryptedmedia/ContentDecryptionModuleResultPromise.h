@@ -11,53 +11,68 @@
 
 namespace blink {
 
-ExceptionCode WebCdmExceptionToExceptionCode(WebContentDecryptionModuleException);
+ExceptionCode WebCdmExceptionToExceptionCode(
+    WebContentDecryptionModuleException);
 
 // This class wraps the promise resolver to simplify creation of
 // ContentDecryptionModuleResult objects. The default implementations of the
 // complete(), completeWithSession(), etc. methods will reject the promise
 // with an error. It needs to be subclassed and the appropriate complete()
 // method overridden to resolve the promise as needed.
-class ContentDecryptionModuleResultPromise : public ContentDecryptionModuleResult {
-public:
-    ~ContentDecryptionModuleResultPromise() override;
+//
+// Subclasses need to keep a Member<> to the object that created them so
+// that the creator remains around as long as this promise is pending. This
+// promise is not referenced by the object that created it (e.g MediaKeys,
+// MediaKeySession, Navigator.requestMediaKeySystemAccess), so this promise
+// may be cleaned up before or after it's creator once both become unreachable.
+// If it is after, the destruction of the creator may trigger this promise,
+// so use isValidToFulfillPromise() to verify that it is safe to fulfill
+// the promise.
+class ContentDecryptionModuleResultPromise
+    : public ContentDecryptionModuleResult {
+ public:
+  ~ContentDecryptionModuleResultPromise() override;
 
-    // ContentDecryptionModuleResult implementation.
-    void complete() override;
-    void completeWithContentDecryptionModule(WebContentDecryptionModule*) override;
-    void completeWithSession(WebContentDecryptionModuleResult::SessionStatus) override;
-    void completeWithError(WebContentDecryptionModuleException, unsigned long systemCode, const WebString&) override;
+  // ContentDecryptionModuleResult implementation.
+  void complete() override;
+  void completeWithContentDecryptionModule(
+      WebContentDecryptionModule*) override;
+  void completeWithSession(
+      WebContentDecryptionModuleResult::SessionStatus) override;
+  void completeWithError(WebContentDecryptionModuleException,
+                         unsigned long systemCode,
+                         const WebString&) override;
 
-    // It is only valid to call this before completion.
-    ScriptPromise promise();
+  // It is only valid to call this before completion.
+  ScriptPromise promise();
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-protected:
-    explicit ContentDecryptionModuleResultPromise(ScriptState*);
+ protected:
+  explicit ContentDecryptionModuleResultPromise(ScriptState*);
 
-    // Resolves the promise with |value|. Used by subclasses to resolve the
-    // promise.
-    template <typename... T>
-    void resolve(T... value)
-    {
-        m_resolver->resolve(value...);
-        m_resolver.clear();
-    }
+  // Resolves the promise with |value|. Used by subclasses to resolve the
+  // promise.
+  template <typename... T>
+  void resolve(T... value) {
+    DCHECK(isValidToFulfillPromise());
 
-    // Rejects the promise with a DOMException. This will post a task to
-    // actually reject the promise later on.
-    void reject(ExceptionCode, const String& errorMessage);
+    m_resolver->resolve(value...);
+    m_resolver.clear();
+  }
 
-    ExecutionContext* getExecutionContext() const;
+  // Rejects the promise with a DOMException.
+  void reject(ExceptionCode, const String& errorMessage);
 
-private:
-    // Rejects the promise with a DOMException.
-    void rejectInternal(ExceptionCode, const String& errorMessage);
+  ExecutionContext* getExecutionContext() const;
 
-    Member<ScriptPromiseResolver> m_resolver;
+  // Determine if it's OK to resolve/reject this promise.
+  bool isValidToFulfillPromise();
+
+ private:
+  Member<ScriptPromiseResolver> m_resolver;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ContentDecryptionModuleResultPromise_h
+#endif  // ContentDecryptionModuleResultPromise_h

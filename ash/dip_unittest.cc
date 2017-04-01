@@ -5,11 +5,9 @@
 #include <algorithm>
 #include <vector>
 
-#include "ash/common/ash_switches.h"
 #include "ash/common/material_design/material_design_controller.h"
-#include "ash/common/shelf/shelf.h"
 #include "ash/common/shelf/shelf_widget.h"
-#include "ash/display/display_manager.h"
+#include "ash/common/shelf/wm_shelf.h"
 #include "ash/shell.h"
 #include "ash/test/ash_md_test_base.h"
 #include "ash/wm/window_properties.h"
@@ -19,6 +17,7 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/layer.h"
 #include "ui/display/display.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/widget/widget.h"
@@ -39,8 +38,6 @@ INSTANTIATE_TEST_CASE_P(
                     MaterialDesignController::MATERIAL_EXPERIMENTAL));
 
 // Test if the WM sets correct work area under different density.
-// TODO(msw): Broken on Windows. http://crbug.com/584038
-#if defined(OS_CHROMEOS)
 TEST_P(DIPTest, WorkArea) {
   const int height_offset = GetMdMaximizedWindowHeightOffset();
   UpdateDisplay("1000x900*1.0f");
@@ -60,7 +57,7 @@ TEST_P(DIPTest, WorkArea) {
   display::Screen* screen = display::Screen::GetScreen();
 
   const display::Display display_2x = screen->GetDisplayNearestWindow(root);
-  const DisplayInfo display_info_2x =
+  const display::ManagedDisplayInfo display_info_2x =
       Shell::GetInstance()->display_manager()->GetDisplayInfo(display_2x.id());
 
   // The |bounds_in_pixel()| should report bounds in pixel coordinate.
@@ -76,10 +73,9 @@ TEST_P(DIPTest, WorkArea) {
 
   // Sanity check if the workarea's inset hight is same as
   // the shelf's height.
-  Shelf* shelf = Shelf::ForPrimaryDisplay();
+  WmShelf* shelf = GetPrimaryShelf();
   EXPECT_EQ(display_2x.bounds().InsetsFrom(work_area).height(),
             shelf->shelf_widget()->GetNativeView()->layer()->bounds().height());
 }
-#endif  // defined(OS_CHROMEOS)
 
 }  // namespace ash

@@ -4,24 +4,27 @@
 
 #include "ash/common/system/chromeos/network/tray_vpn.h"
 
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/session/session_state_delegate.h"
+#include "ash/common/system/chromeos/network/network_icon.h"
+#include "ash/common/system/chromeos/network/network_icon_animation.h"
+#include "ash/common/system/chromeos/network/network_icon_animation_observer.h"
 #include "ash/common/system/chromeos/network/network_state_list_detailed_view.h"
-#include "ash/common/system/chromeos/network/vpn_delegate.h"
+#include "ash/common/system/chromeos/network/vpn_list.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_item_more.h"
+#include "ash/common/system/tray/tray_popup_item_style.h"
 #include "ash/common/system/tray/tray_popup_label_button.h"
 #include "ash/common/wm_shell.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "grit/ash_strings.h"
-#include "grit/ui_chromeos_strings.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/chromeos/network/network_icon.h"
-#include "ui/chromeos/network/network_icon_animation.h"
-#include "ui/chromeos/network/network_icon_animation_observer.h"
+#include "ui/gfx/paint_vector_icon.h"
 
 using chromeos::NetworkHandler;
 using chromeos::NetworkState;
@@ -32,26 +35,20 @@ namespace ash {
 namespace tray {
 
 class VpnDefaultView : public TrayItemMore,
-                       public ui::network_icon::AnimationObserver {
+                       public network_icon::AnimationObserver {
  public:
   VpnDefaultView(SystemTrayItem* owner, bool show_more)
-      : TrayItemMore(owner, show_more) {
-    Update();
-  }
+      : TrayItemMore(owner, show_more) {}
 
   ~VpnDefaultView() override {
-    ui::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
+    network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
   }
 
   static bool ShouldShow() {
     // Show the VPN entry in the ash tray bubble if at least one third-party VPN
     // provider is installed.
-    if (WmShell::Get()
-            ->system_tray_delegate()
-            ->GetVPNDelegate()
-            ->HaveThirdPartyVPNProviders()) {
+    if (WmShell::Get()->vpn_list()->HaveThirdPartyVPNProviders())
       return true;
-    }
 
     // Also show the VPN entry if at least one VPN network is configured.
     NetworkStateHandler* const handler =
@@ -67,19 +64,50 @@ class VpnDefaultView : public TrayItemMore,
     bool animating = false;
     GetNetworkStateHandlerImageAndLabel(&image, &label, &animating);
     if (animating)
-      ui::network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
+      network_icon::NetworkIconAnimation::GetInstance()->AddObserver(this);
     else
-      ui::network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(
-          this);
+      network_icon::NetworkIconAnimation::GetInstance()->RemoveObserver(this);
     SetImage(image);
     SetLabel(label);
     SetAccessibleName(label);
   }
 
-  // ui::network_icon::AnimationObserver
+  // network_icon::AnimationObserver
   void NetworkIconChanged() override { Update(); }
 
+ protected:
+  // TrayItemMore:
+  std::unique_ptr<TrayPopupItemStyle> CreateStyle() const override {
+    std::unique_ptr<TrayPopupItemStyle> style = TrayItemMore::CreateStyle();
+    style->set_color_style(
+        !IsVpnEnabled()
+            ? TrayPopupItemStyle::ColorStyle::DISABLED
+            : IsVpnConnected() ? TrayPopupItemStyle::ColorStyle::ACTIVE
+                               : TrayPopupItemStyle::ColorStyle::INACTIVE);
+    return style;
+  }
+
+  void UpdateStyle() override {
+    TrayItemMore::UpdateStyle();
+    Update();
+  }
+
  private:
+  bool IsVpnEnabled() const {
+    NetworkStateHandler* handler =
+        NetworkHandler::Get()->network_state_handler();
+    return handler->FirstNetworkByType(NetworkTypePattern::VPN());
+  }
+
+  bool IsVpnConnected() const {
+    NetworkStateHandler* handler =
+        NetworkHandler::Get()->network_state_handler();
+    const NetworkState* vpn =
+        handler->FirstNetworkByType(NetworkTypePattern::VPN());
+    return IsVpnEnabled() &&
+           (vpn->IsConnectedState() || vpn->IsConnectingState());
+  }
+
   void GetNetworkStateHandlerImageAndLabel(gfx::ImageSkia* image,
                                            base::string16* label,
                                            bool* animating) {
@@ -87,9 +115,17 @@ class VpnDefaultView : public TrayItemMore,
         NetworkHandler::Get()->network_state_handler();
     const NetworkState* vpn =
         handler->FirstNetworkByType(NetworkTypePattern::VPN());
-    if (!vpn || (!vpn->IsConnectedState() && !vpn->IsConnectingState())) {
-      *image = ui::network_icon::GetImageForDisconnectedNetwork(
-          ui::network_icon::ICON_TYPE_DEFAULT_VIEW, shill::kTypeVPN);
+    if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      *image = gfx::CreateVectorIcon(
+          kNetworkVpnIcon, TrayPopupItemStyle::GetIconColor(
+                               GetNativeTheme(),
+                               vpn && vpn->IsConnectedState()
+                                   ? TrayPopupItemStyle::ColorStyle::ACTIVE
+                                   : TrayPopupItemStyle::ColorStyle::INACTIVE));
+    } else {
+      *image = network_icon::GetVpnImage();
+    }
+    if (!IsVpnConnected()) {
       if (label) {
         *label =
             l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_VPN_DISCONNECTED);
@@ -98,11 +134,9 @@ class VpnDefaultView : public TrayItemMore,
       return;
     }
     *animating = vpn->IsConnectingState();
-    *image = ui::network_icon::GetImageForNetwork(
-        vpn, ui::network_icon::ICON_TYPE_DEFAULT_VIEW);
     if (label) {
-      *label = ui::network_icon::GetLabelForNetwork(
-          vpn, ui::network_icon::ICON_TYPE_DEFAULT_VIEW);
+      *label = network_icon::GetLabelForNetwork(
+          vpn, network_icon::ICON_TYPE_DEFAULT_VIEW);
     }
   }
 

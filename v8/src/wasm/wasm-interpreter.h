@@ -6,7 +6,7 @@
 #define V8_WASM_INTERPRETER_H_
 
 #include "src/wasm/wasm-opcodes.h"
-#include "src/zone-containers.h"
+#include "src/zone/zone-containers.h"
 
 namespace v8 {
 namespace base {
@@ -17,8 +17,8 @@ namespace internal {
 namespace wasm {
 
 // forward declarations.
+struct ModuleBytesEnv;
 struct WasmFunction;
-struct WasmModuleInstance;
 class WasmInterpreterInternals;
 
 typedef size_t pc_t;
@@ -28,35 +28,27 @@ typedef uint32_t spdiff_t;
 
 const pc_t kInvalidPc = 0x80000000;
 
-// Visible for testing. A {ControlTransfer} helps the interpreter figure out
-// the target program counter and stack manipulations for a branch.
-struct ControlTransfer {
-  enum StackAction { kNoAction, kPopAndRepush, kPushVoid };
-  pcdiff_t pcdiff;  // adjustment to the program counter (positive or negative).
-  spdiff_t spdiff;  // number of elements to pop off the stack.
-  StackAction action;  // action to perform on the stack.
-};
-typedef ZoneMap<pc_t, ControlTransfer> ControlTransferMap;
+typedef ZoneMap<pc_t, pcdiff_t> ControlTransferMap;
 
 // Macro for defining union members.
 #define FOREACH_UNION_MEMBER(V) \
-  V(i32, kAstI32, int32_t)      \
-  V(u32, kAstI32, uint32_t)     \
-  V(i64, kAstI64, int64_t)      \
-  V(u64, kAstI64, uint64_t)     \
-  V(f32, kAstF32, float)        \
-  V(f64, kAstF64, double)
+  V(i32, kWasmI32, int32_t)     \
+  V(u32, kWasmI32, uint32_t)    \
+  V(i64, kWasmI64, int64_t)     \
+  V(u64, kWasmI64, uint64_t)    \
+  V(f32, kWasmF32, float)       \
+  V(f64, kWasmF64, double)
 
 // Representation of values within the interpreter.
 struct WasmVal {
-  LocalType type;
+  ValueType type;
   union {
 #define DECLARE_FIELD(field, localtype, ctype) ctype field;
     FOREACH_UNION_MEMBER(DECLARE_FIELD)
 #undef DECLARE_FIELD
   } val;
 
-  WasmVal() : type(kAstStmt) {}
+  WasmVal() : type(kWasmStmt) {}
 
 #define DECLARE_CONSTRUCTOR(field, localtype, ctype) \
   explicit WasmVal(ctype v) : type(localtype) { val.field = v; }
@@ -64,12 +56,21 @@ struct WasmVal {
 #undef DECLARE_CONSTRUCTOR
 
   template <typename T>
-  T to() {
+  inline T to() {
+    UNREACHABLE();
+  }
+
+  template <typename T>
+  inline T to_unchecked() {
     UNREACHABLE();
   }
 };
 
 #define DECLARE_CAST(field, localtype, ctype) \
+  template <>                                 \
+  inline ctype WasmVal::to_unchecked() {      \
+    return val.field;                         \
+  }                                           \
   template <>                                 \
   inline ctype WasmVal::to() {                \
     CHECK_EQ(localtype, type);                \
@@ -77,11 +78,6 @@ struct WasmVal {
   }
 FOREACH_UNION_MEMBER(DECLARE_CAST)
 #undef DECLARE_CAST
-
-template <>
-inline void WasmVal::to() {
-  CHECK_EQ(kAstStmt, type);
-}
 
 // Representation of frames within the interpreter.
 class WasmFrame {
@@ -102,7 +98,7 @@ class WasmFrame {
 };
 
 // An interpreter capable of executing WASM.
-class WasmInterpreter {
+class V8_EXPORT_PRIVATE WasmInterpreter {
  public:
   // State machine for a Thread:
   //                       +---------------Run()-----------+
@@ -132,15 +128,18 @@ class WasmInterpreter {
     virtual int GetFrameCount() = 0;
     virtual const WasmFrame* GetFrame(int index) = 0;
     virtual WasmFrame* GetMutableFrame(int index) = 0;
-    virtual WasmVal GetReturnValue() = 0;
+    virtual WasmVal GetReturnValue(int index = 0) = 0;
+    // Returns true if the thread executed an instruction which may produce
+    // nondeterministic results, e.g. float div, float sqrt, and float mul,
+    // where the sign bit of a NaN is nondeterministic.
+    virtual bool PossibleNondeterminism() = 0;
 
     // Thread-specific breakpoints.
     bool SetBreakpoint(const WasmFunction* function, int pc, bool enabled);
     bool GetBreakpoint(const WasmFunction* function, int pc);
   };
 
-  WasmInterpreter(WasmModuleInstance* instance,
-                  base::AccountingAllocator* allocator);
+  WasmInterpreter(const ModuleBytesEnv& env, AccountingAllocator* allocator);
   ~WasmInterpreter();
 
   //==========================================================================
@@ -190,9 +189,8 @@ class WasmInterpreter {
   bool SetFunctionCodeForTesting(const WasmFunction* function,
                                  const byte* start, const byte* end);
 
-  // Computes the control targets for the given bytecode as {pc offset, sp
-  // offset}
-  // pairs. Used internally in the interpreter, but exposed for testing.
+  // Computes the control transfers for the given bytecode. Used internally in
+  // the interpreter, but exposed for testing.
   static ControlTransferMap ComputeControlTransfersForTesting(Zone* zone,
                                                               const byte* start,
                                                               const byte* end);

@@ -46,9 +46,8 @@ class VP9EncoderImpl : public VP9Encoder {
 
   int SetChannelParameters(uint32_t packet_loss, int64_t rtt) override;
 
-  int SetRates(uint32_t new_bitrate_kbit, uint32_t frame_rate) override;
-
-  void OnDroppedFrame() override {}
+  int SetRateAllocation(const BitrateAllocation& bitrate_allocation,
+                        uint32_t frame_rate) override;
 
   const char* ImplementationName() const override;
 
@@ -153,7 +152,9 @@ class VP9DecoderImpl : public VP9Decoder {
   const char* ImplementationName() const override;
 
  private:
-  int ReturnFrame(const vpx_image_t* img, uint32_t timeStamp);
+  int ReturnFrame(const vpx_image_t* img,
+                  uint32_t timestamp,
+                  int64_t ntp_time_ms);
 
   // Memory pool used to share buffers between libvpx and webrtc.
   Vp9FrameBufferPool frame_buffer_pool_;

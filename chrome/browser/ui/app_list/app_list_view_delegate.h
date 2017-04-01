@@ -9,13 +9,12 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
-#include "base/observer_list.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/search/hotword_client.h"
@@ -31,11 +30,8 @@
 class AppListControllerDelegate;
 class Profile;
 
-namespace apps {
-class CustomLauncherPageContents;
-}
-
 namespace app_list {
+class CustomLauncherPageContents;
 class LauncherPageEventDispatcher;
 class SearchController;
 class SearchResourceManager;
@@ -48,10 +44,6 @@ class FilePath;
 
 namespace content {
 struct SpeechRecognitionSessionPreamble;
-}
-
-namespace gfx {
-class ImageSkia;
 }
 
 #if defined(USE_ASH)
@@ -112,18 +104,6 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
 #endif
   bool IsSpeechRecognitionEnabled() override;
   const Users& GetUsers() const override;
-  bool ShouldCenterWindow() const override;
-  void AddObserver(app_list::AppListViewDelegateObserver* observer) override;
-  void RemoveObserver(app_list::AppListViewDelegateObserver* observer) override;
-#if !defined(OS_CHROMEOS)
-  base::string16 GetMessageTitle() const override;
-  base::string16 GetMessageText(size_t* message_break) const override;
-  base::string16 GetAppsShortcutName() const override;
-  base::string16 GetLearnMoreText() const override;
-  base::string16 GetLearnMoreLink() const override;
-  gfx::ImageSkia* GetAppsIcon() const override;
-  void OpenLearnMoreLink() override;
-#endif
 
   // Overridden from TemplateURLServiceObserver:
   void OnTemplateURLServiceChanged() override;
@@ -202,8 +182,6 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
   std::unique_ptr<AppSyncUIStateWatcher> app_sync_ui_state_watcher_;
 #endif
 
-  base::ObserverList<app_list::AppListViewDelegateObserver> observers_;
-
   ScopedObserver<TemplateURLService, AppListViewDelegate>
       template_url_service_observer_;
 
@@ -212,7 +190,8 @@ class AppListViewDelegate : public app_list::AppListViewDelegate,
   ScopedObserver<SigninManagerBase, AppListViewDelegate> scoped_observer_;
 
   // Window contents of additional custom launcher pages.
-  ScopedVector<apps::CustomLauncherPageContents> custom_page_contents_;
+  std::vector<std::unique_ptr<app_list::CustomLauncherPageContents>>
+      custom_page_contents_;
 
   // Registers for NOTIFICATION_APP_TERMINATING to unload custom launcher pages.
   content::NotificationRegistrar registrar_;

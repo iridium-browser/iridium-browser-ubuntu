@@ -25,9 +25,6 @@ class URLRequest;
 
 namespace content {
 class ByteStreamReader;
-class ByteStreamWriter;
-class DownloadRequestHandle;
-class PowerSaveBlocker;
 struct DownloadCreateInfo;
 
 // Forwards data to the download thread.
@@ -41,6 +38,16 @@ class CONTENT_EXPORT DownloadResourceHandler
   // started_cb will be called exactly once on the UI thread.
   // |id| should be invalid if the id should be automatically assigned.
   DownloadResourceHandler(net::URLRequest* request);
+
+  // static
+  // This function is passed into ResourceDispatcherHostImpl during its
+  // creation and is used to create instances of DownloadResourceHandler as
+  // needed.
+  // TODO(ananta)
+  // Find a better way to achieve this. Ideally we want to move the logic of
+  // creating DownloadResourceHandler instances out of
+  // ResourceDispatcherHostImpl.
+  static std::unique_ptr<ResourceHandler> Create(net::URLRequest* request);
 
   bool OnRequestRedirected(const net::RedirectInfo& redirect_info,
                            ResourceResponse* response,
@@ -61,7 +68,6 @@ class CONTENT_EXPORT DownloadResourceHandler
   bool OnReadCompleted(int bytes_read, bool* defer) override;
 
   void OnResponseCompleted(const net::URLRequestStatus& status,
-                           const std::string& security_info,
                            bool* defer) override;
 
   // N/A to this flavor of DownloadHandler.

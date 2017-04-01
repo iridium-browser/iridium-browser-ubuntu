@@ -2,13 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/aura/wm_window_aura.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/wm/root_window_finder.h"
-#include "ash/display/display_manager.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_properties.h"
@@ -23,7 +21,8 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/display/display.h"
-#include "ui/display/manager/display_layout.h"
+#include "ui/display/display_layout.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/test/event_generator.h"
@@ -49,7 +48,6 @@ class ModalWidgetDelegate : public views::WidgetDelegateView {
   ~ModalWidgetDelegate() override {}
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   ui::ModalType GetModalType() const override { return ui::MODAL_TYPE_SYSTEM; }
 
  private:
@@ -311,24 +309,24 @@ TEST_F(ExtendedDesktopTest, GetRootWindowAt) {
   SetSecondaryDisplayLayout(display::DisplayPlacement::LEFT);
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
-  EXPECT_EQ(root_windows[1], WmWindowAura::GetAuraWindow(
+  EXPECT_EQ(root_windows[1], WmWindow::GetAuraWindow(
                                  wm::GetRootWindowAt(gfx::Point(-400, 100))));
-  EXPECT_EQ(root_windows[1], WmWindowAura::GetAuraWindow(
-                                 wm::GetRootWindowAt(gfx::Point(-1, 100))));
-  EXPECT_EQ(root_windows[0], WmWindowAura::GetAuraWindow(
-                                 wm::GetRootWindowAt(gfx::Point(0, 300))));
-  EXPECT_EQ(root_windows[0], WmWindowAura::GetAuraWindow(
-                                 wm::GetRootWindowAt(gfx::Point(700, 300))));
+  EXPECT_EQ(root_windows[1],
+            WmWindow::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(-1, 100))));
+  EXPECT_EQ(root_windows[0],
+            WmWindow::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(0, 300))));
+  EXPECT_EQ(root_windows[0],
+            WmWindow::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(700, 300))));
 
   // Zero origin.
   EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(0, 0))));
+            WmWindow::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(0, 0))));
 
   // Out of range point should return the nearest root window
-  EXPECT_EQ(root_windows[1], WmWindowAura::GetAuraWindow(
-                                 wm::GetRootWindowAt(gfx::Point(-600, 0))));
-  EXPECT_EQ(root_windows[0], WmWindowAura::GetAuraWindow(
-                                 wm::GetRootWindowAt(gfx::Point(701, 100))));
+  EXPECT_EQ(root_windows[1],
+            WmWindow::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(-600, 0))));
+  EXPECT_EQ(root_windows[0],
+            WmWindow::GetAuraWindow(wm::GetRootWindowAt(gfx::Point(701, 100))));
 }
 
 TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
@@ -341,44 +339,34 @@ TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
 
   // Containing rect.
-  EXPECT_EQ(root_windows[1],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(-300, 10, 50, 50))));
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(100, 10, 50, 50))));
+  EXPECT_EQ(root_windows[1], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(-300, 10, 50, 50))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(100, 10, 50, 50))));
 
   // Intersecting rect.
-  EXPECT_EQ(root_windows[1],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(-200, 0, 300, 300))));
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(-100, 0, 300, 300))));
+  EXPECT_EQ(root_windows[1], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(-200, 0, 300, 300))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(-100, 0, 300, 300))));
 
   // Zero origin.
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(0, 0, 0, 0))));
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(0, 0, 1, 1))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(0, 0, 0, 0))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(0, 0, 1, 1))));
 
   // Empty rect.
-  EXPECT_EQ(root_windows[1],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(-400, 100, 0, 0))));
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(100, 100, 0, 0))));
+  EXPECT_EQ(root_windows[1], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(-400, 100, 0, 0))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(100, 100, 0, 0))));
 
   // Out of range rect should return the primary root window.
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(-600, -300, 50, 50))));
-  EXPECT_EQ(root_windows[0],
-            WmWindowAura::GetAuraWindow(
-                wm::GetRootWindowMatching(gfx::Rect(0, 1000, 50, 50))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(-600, -300, 50, 50))));
+  EXPECT_EQ(root_windows[0], WmWindow::GetAuraWindow(wm::GetRootWindowMatching(
+                                 gfx::Rect(0, 1000, 50, 50))));
 }
 
 TEST_F(ExtendedDesktopTest, Capture) {
@@ -800,14 +788,13 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
   w1->SetBounds(gfx::Rect(150, 10, 50, 50));
   EXPECT_EQ(root_windows[1], w1->GetNativeView()->GetRootWindow());
 
-  // The widget stays in the same root if kStayInSameRootWindowKey is set to
-  // true.
-  w1->GetNativeView()->SetProperty(kStayInSameRootWindowKey, true);
+  // The widget stays in the same root if kLockedToRootKey is set to true.
+  w1->GetNativeView()->SetProperty(kLockedToRootKey, true);
   w1->SetBounds(gfx::Rect(10, 10, 50, 50));
   EXPECT_EQ(root_windows[1], w1->GetNativeView()->GetRootWindow());
 
   // The widget should now move to the 1st root window without the property.
-  w1->GetNativeView()->ClearProperty(kStayInSameRootWindowKey);
+  w1->GetNativeView()->ClearProperty(kLockedToRootKey);
   w1->SetBounds(gfx::Rect(10, 10, 50, 50));
   EXPECT_EQ(root_windows[0], w1->GetNativeView()->GetRootWindow());
 
@@ -819,7 +806,7 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
   aura::Window* window =
       aura::test::CreateTestWindowWithId(100, settings_bubble_container);
   window->SetBoundsInScreen(gfx::Rect(150, 10, 50, 50),
-                            ScreenUtil::GetSecondaryDisplay());
+                            display_manager()->GetSecondaryDisplay());
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 
   aura::Window* status_container =
@@ -827,7 +814,7 @@ TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
           kShellWindowId_StatusContainer);
   window = aura::test::CreateTestWindowWithId(100, status_container);
   window->SetBoundsInScreen(gfx::Rect(150, 10, 50, 50),
-                            ScreenUtil::GetSecondaryDisplay());
+                            display_manager()->GetSecondaryDisplay());
   EXPECT_EQ(root_windows[0], window->GetRootWindow());
 }
 
@@ -844,7 +831,7 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   widget1->Show();
   EXPECT_EQ(root_windows[0], widget1->GetNativeView()->GetRootWindow());
   views::Widget* widget2 =
-      CreateTestWidget(ScreenUtil::GetSecondaryDisplay().bounds());
+      CreateTestWidget(display_manager()->GetSecondaryDisplay().bounds());
   widget2->Show();
   EXPECT_EQ(root_windows[1], widget2->GetNativeView()->GetRootWindow());
 

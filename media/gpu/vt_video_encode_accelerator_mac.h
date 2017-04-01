@@ -5,10 +5,15 @@
 #ifndef MEDIA_GPU_VT_VIDEO_ENCODE_ACCELERATOR_MAC_H_
 #define MEDIA_GPU_VT_VIDEO_ENCODE_ACCELERATOR_MAC_H_
 
+#include <deque>
 #include <memory>
 
+#include "base/bind.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "media/base/mac/videotoolbox_glue.h"
+#include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
+#include "base/threading/thread.h"
+#include "base/threading/thread_checker.h"
 #include "media/base/mac/videotoolbox_helpers.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/video/video_encode_accelerator.h"
@@ -40,10 +45,6 @@ class MEDIA_GPU_EXPORT VTVideoEncodeAccelerator
   void Destroy() override;
 
  private:
-  using CMSampleBufferRef = CoreMediaGlue::CMSampleBufferRef;
-  using VTCompressionSessionRef = VideoToolboxGlue::VTCompressionSessionRef;
-  using VTEncodeInfoFlags = VideoToolboxGlue::VTEncodeInfoFlags;
-
   // Holds the associated data of a video frame being processed.
   struct InProgressFrameEncode;
 
@@ -101,8 +102,6 @@ class MEDIA_GPU_EXPORT VTVideoEncodeAccelerator
   // encoding work).
   void DestroyCompressionSession();
 
-  // VideoToolboxGlue provides access to VideoToolbox at runtime.
-  const VideoToolboxGlue* videotoolbox_glue_;
   base::ScopedCFTypeRef<VTCompressionSessionRef> compression_session_;
 
   gfx::Size input_visible_size_;

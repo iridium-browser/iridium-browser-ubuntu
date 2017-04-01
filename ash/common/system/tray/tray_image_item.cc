@@ -10,11 +10,11 @@
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_item_view.h"
 #include "ash/common/system/tray/tray_utils.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "grit/ash_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/layout/box_layout.h"
 
@@ -22,34 +22,29 @@ namespace ash {
 
 namespace {
 
-// Maps a non-MD PNG resource id to its corresponding MD vector icon id.
+// Maps a non-MD PNG resource id to its corresponding MD vector icon.
 // TODO(tdanderson): Remove this once material design is enabled by
 // default. See crbug.com/614453.
-gfx::VectorIconId ResourceIdToVectorIconId(int resource_id) {
-  gfx::VectorIconId vector_id = gfx::VectorIconId::VECTOR_ICON_NONE;
+const gfx::VectorIcon& ResourceIdToVectorIcon(int resource_id) {
   switch (resource_id) {
     case IDR_AURA_UBER_TRAY_ACCESSIBILITY:
-      return gfx::VectorIconId::SYSTEM_TRAY_ACCESSIBILITY;
-    case IDR_AURA_UBER_TRAY_UPDATE:
-      return gfx::VectorIconId::SYSTEM_TRAY_UPDATE;
-    case IDR_AURA_UBER_TRAY_VOLUME_MUTE:
-      return gfx::VectorIconId::SYSTEM_TRAY_VOLUME_MUTE;
-#if defined(OS_CHROMEOS)
+      return kSystemTrayAccessibilityIcon;
     case IDR_AURA_UBER_TRAY_AUTO_ROTATION_LOCKED:
-      return gfx::VectorIconId::SYSTEM_TRAY_ROTATION_LOCK_LOCKED;
+      return kSystemTrayRotationLockLockedIcon;
     case IDR_AURA_UBER_TRAY_CAPS_LOCK:
-      return gfx::VectorIconId::SYSTEM_TRAY_CAPS_LOCK;
+      return kSystemTrayCapsLockIcon;
     case IDR_AURA_UBER_TRAY_TRACING:
-      // TODO(tdanderson): Update the icon used for tracing or remove it from
-      // the system tray. See crbug.com/625691.
-      return gfx::VectorIconId::CODE;
-#endif
+      return kSystemTrayTracingIcon;
+    case IDR_AURA_UBER_TRAY_UPDATE:
+      return kSystemTrayUpdateIcon;
+    case IDR_AURA_UBER_TRAY_VOLUME_MUTE:
+      return kSystemTrayVolumeMuteIcon;
     default:
       NOTREACHED();
       break;
   }
 
-  return vector_id;
+  return gfx::kNoneIcon;
 }
 
 }  // namespace
@@ -74,7 +69,6 @@ views::View* TrayImageItem::CreateTrayView(LoginStatus status) {
   tray_view_->CreateImageView();
   UpdateImageOnImageView();
   tray_view_->SetVisible(GetInitialVisibility());
-  SetItemAlignment(system_tray()->shelf_alignment());
   return tray_view_;
 }
 
@@ -90,7 +84,6 @@ void TrayImageItem::UpdateAfterLoginStatusChange(LoginStatus status) {}
 
 void TrayImageItem::UpdateAfterShelfAlignmentChange(ShelfAlignment alignment) {
   SetTrayImageItemBorder(tray_view_, alignment);
-  SetItemAlignment(alignment);
 }
 
 void TrayImageItem::DestroyTrayView() {
@@ -111,22 +104,13 @@ void TrayImageItem::SetImageFromResourceId(int resource_id) {
   UpdateImageOnImageView();
 }
 
-void TrayImageItem::SetItemAlignment(ShelfAlignment alignment) {
-  // Center the item dependent on the orientation of the shelf.
-  views::BoxLayout::Orientation layout = IsHorizontalAlignment(alignment)
-                                             ? views::BoxLayout::kHorizontal
-                                             : views::BoxLayout::kVertical;
-  tray_view_->SetLayoutManager(new views::BoxLayout(layout, 0, 0, 0));
-  tray_view_->Layout();
-}
-
 void TrayImageItem::UpdateImageOnImageView() {
   if (!tray_view_)
     return;
 
   if (MaterialDesignController::UseMaterialDesignSystemIcons()) {
     tray_view_->image_view()->SetImage(gfx::CreateVectorIcon(
-        ResourceIdToVectorIconId(resource_id_), kTrayIconSize, icon_color_));
+        ResourceIdToVectorIcon(resource_id_), kTrayIconSize, icon_color_));
   } else {
     tray_view_->image_view()->SetImage(ui::ResourceBundle::GetSharedInstance()
                                            .GetImageNamed(resource_id_)

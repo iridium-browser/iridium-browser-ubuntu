@@ -17,6 +17,8 @@ InterstitialPageNavigatorImpl::InterstitialPageNavigatorImpl(
     : interstitial_(interstitial),
       controller_(navigation_controller) {}
 
+InterstitialPageNavigatorImpl::~InterstitialPageNavigatorImpl() {}
+
 NavigatorDelegate* InterstitialPageNavigatorImpl::GetDelegate() {
   return interstitial_;
 }
@@ -25,13 +27,34 @@ NavigationController* InterstitialPageNavigatorImpl::GetController() {
   return controller_;
 }
 
+void InterstitialPageNavigatorImpl::DidStartProvisionalLoad(
+    RenderFrameHostImpl* render_frame_host,
+    const GURL& url,
+    const base::TimeTicks& navigation_start) {
+  // The interstitial page should only navigate once.
+  DCHECK(!render_frame_host->navigation_handle());
+  render_frame_host->SetNavigationHandle(
+      NavigationHandleImpl::Create(url, render_frame_host->frame_tree_node(),
+                                   false,  // is_renderer_initiated
+                                   false,  // is_synchronous
+                                   navigation_start,
+                                   0,      // pending_nav_entry_id
+                                   false)  // started_in_context_menu
+      );
+}
+
 void InterstitialPageNavigatorImpl::DidNavigate(
     RenderFrameHostImpl* render_frame_host,
-    const FrameHostMsg_DidCommitProvisionalLoad_Params& input_params) {
+    const FrameHostMsg_DidCommitProvisionalLoad_Params& input_params,
+    std::unique_ptr<NavigationHandleImpl> navigation_handle) {
+  navigation_handle->DidCommitNavigation(input_params, false,
+                                         render_frame_host);
+  navigation_handle.reset();
+
   // TODO(nasko): Move implementation here, but for the time being call out
   // to the interstitial page code.
-  interstitial_->DidNavigate(
-      render_frame_host->render_view_host(), input_params);
+  interstitial_->DidNavigate(render_frame_host->render_view_host(),
+                             input_params);
 }
 
 }  // namespace content

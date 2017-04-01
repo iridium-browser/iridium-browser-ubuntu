@@ -35,10 +35,8 @@ bool MatchIsFromDefaultSearchProvider(const AutocompleteMatch& match,
 }  // namespace
 
 InstantSearchPrerenderer::InstantSearchPrerenderer(Profile* profile,
-                                                   const GURL& url)
-    : profile_(profile),
-      prerender_url_(url) {
-}
+                                                   const GURL& prerender_url)
+    : profile_(profile), prerender_url_(prerender_url) {}
 
 InstantSearchPrerenderer::~InstantSearchPrerenderer() {
   if (prerender_handle_)
@@ -51,7 +49,8 @@ InstantSearchPrerenderer* InstantSearchPrerenderer::GetForProfile(
   DCHECK(profile);
   InstantService* instant_service =
       InstantServiceFactory::GetForProfile(profile);
-  return instant_service ? instant_service->instant_search_prerenderer() : NULL;
+  return instant_service ? instant_service->GetInstantSearchPrerenderer()
+                         : nullptr;
 }
 
 void InstantSearchPrerenderer::Init(
@@ -66,7 +65,7 @@ void InstantSearchPrerenderer::Init(
   std::unique_ptr<prerender::PrerenderHandle> old_prerender_handle =
       std::move(prerender_handle_);
   prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile_);
+      prerender::PrerenderManagerFactory::GetForBrowserContext(profile_);
   if (prerender_manager) {
     prerender_handle_ = prerender_manager->AddPrerenderForInstant(
         prerender_url_, session_storage_namespace, size);
@@ -129,11 +128,11 @@ bool InstantSearchPrerenderer::UsePrerenderedPage(
   base::string16 search_terms =
       search::ExtractSearchTermsFromURL(profile_, url);
   prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile_);
+      prerender::PrerenderManagerFactory::GetForBrowserContext(profile_);
   if (search_terms.empty() || !params->target_contents ||
       !prerender_contents() || !prerender_manager ||
       !QueryMatchesPrefetch(search_terms) ||
-      params->disposition != CURRENT_TAB) {
+      params->disposition != WindowOpenDisposition::CURRENT_TAB) {
     Cancel();
     return false;
   }

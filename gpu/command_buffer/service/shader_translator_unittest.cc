@@ -24,7 +24,7 @@ class ShaderTranslatorTest : public testing::Test {
  protected:
   void SetUp() override {
     ShBuiltInResources resources;
-    ShInitBuiltInResources(&resources);
+    sh::InitBuiltInResources(&resources);
     resources.MaxExpressionComplexity = 32;
     resources.MaxCallStackDepth = 32;
 
@@ -33,7 +33,7 @@ class ShaderTranslatorTest : public testing::Test {
 
     ASSERT_TRUE(vertex_translator_->Init(GL_VERTEX_SHADER, SH_GLES2_SPEC,
                                          &resources, shader_output_language_,
-                                         SH_EMULATE_BUILT_IN_FUNCTIONS,
+                                         static_cast<ShCompileOptions>(0),
                                          false));
     ASSERT_TRUE(fragment_translator_->Init(GL_FRAGMENT_SHADER, SH_GLES2_SPEC,
                                            &resources, shader_output_language_,
@@ -63,7 +63,7 @@ class ES3ShaderTranslatorTest : public testing::Test {
  protected:
   void SetUp() override {
     ShBuiltInResources resources;
-    ShInitBuiltInResources(&resources);
+    sh::InitBuiltInResources(&resources);
     resources.MaxExpressionComplexity = 32;
     resources.MaxCallStackDepth = 32;
 
@@ -72,7 +72,8 @@ class ES3ShaderTranslatorTest : public testing::Test {
 
     ASSERT_TRUE(vertex_translator_->Init(GL_VERTEX_SHADER, SH_GLES3_SPEC,
                                          &resources, shader_output_language_,
-                                         SH_EMULATE_BUILT_IN_FUNCTIONS, false));
+                                         static_cast<ShCompileOptions>(0),
+                                         false));
     ASSERT_TRUE(fragment_translator_->Init(GL_FRAGMENT_SHADER, SH_GLES3_SPEC,
                                            &resources, shader_output_language_,
                                            static_cast<ShCompileOptions>(0),
@@ -423,20 +424,20 @@ TEST_F(ShaderTranslatorTest, OptionsString) {
   scoped_refptr<ShaderTranslator> translator_3 = new ShaderTranslator();
 
   ShBuiltInResources resources;
-  ShInitBuiltInResources(&resources);
+  sh::InitBuiltInResources(&resources);
 
   ASSERT_TRUE(translator_1->Init(GL_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
                                  SH_GLSL_150_CORE_OUTPUT,
-                                 SH_EMULATE_BUILT_IN_FUNCTIONS,
+                                 static_cast<ShCompileOptions>(0),
                                  false));
   ASSERT_TRUE(translator_2->Init(GL_FRAGMENT_SHADER, SH_GLES2_SPEC, &resources,
                                  SH_GLSL_150_CORE_OUTPUT,
-                                 static_cast<ShCompileOptions>(0),
+                                 SH_INIT_OUTPUT_VARIABLES,
                                  false));
   resources.EXT_draw_buffers = 1;
   ASSERT_TRUE(translator_3->Init(GL_VERTEX_SHADER, SH_GLES2_SPEC, &resources,
                                  SH_GLSL_150_CORE_OUTPUT,
-                                 SH_EMULATE_BUILT_IN_FUNCTIONS,
+                                 static_cast<ShCompileOptions>(0),
                                  false));
 
   std::string options_1(
@@ -463,7 +464,7 @@ class ShaderTranslatorOutputVersionTest
 // https://bugs.chromium.org/p/angleproject/issues/detail?id=1277
 TEST_F(ShaderTranslatorOutputVersionTest, DISABLED_CompatibilityOutput) {
   ShBuiltInResources resources;
-  ShInitBuiltInResources(&resources);
+  sh::InitBuiltInResources(&resources);
   ShCompileOptions compile_options = SH_OBJECT_CODE;
   ShShaderOutput shader_output_language = SH_GLSL_COMPATIBILITY_OUTPUT;
   scoped_refptr<ShaderTranslator> vertex_translator = new ShaderTranslator();
@@ -531,7 +532,7 @@ TEST_P(ShaderTranslatorOutputVersionTest, HasCorrectOutputGLSLVersion) {
 
   scoped_refptr<ShaderTranslator> translator = new ShaderTranslator();
   ShBuiltInResources resources;
-  ShInitBuiltInResources(&resources);
+  sh::InitBuiltInResources(&resources);
   ShCompileOptions compile_options = SH_OBJECT_CODE;
   ShShaderOutput shader_output_language =
       ShaderTranslator::GetShaderOutputLanguageForContext(
@@ -619,4 +620,3 @@ INSTANTIATE_TEST_CASE_P(OpenGLESContexts,
 
 }  // namespace gles2
 }  // namespace gpu
-

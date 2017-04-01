@@ -8,12 +8,14 @@
 #include <set>
 #include <utility>
 
+#include "base/base_paths.h"
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
+#include "base/path_service.h"
 #include "base/process/kill.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
@@ -22,6 +24,8 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "mojo/edk/embedder/embedder.h"
+#include "mojo/edk/embedder/named_platform_handle.h"
+#include "mojo/edk/embedder/named_platform_handle_utils.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -38,6 +42,7 @@ namespace test {
 namespace {
 
 const char kMojoPrimordialPipeToken[] = "mojo-primordial-pipe-token";
+const char kMojoNamedPipeName[] = "mojo-named-pipe-name";
 
 template <typename Func>
 int RunClientFunction(Func handler) {
@@ -91,12 +96,27 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
   }
 
   PlatformChannelPair channel;
+  NamedPlatformHandle named_pipe;
   HandlePassingInformation handle_passing_info;
-  channel.PrepareToPassClientHandleToChildProcess(&command_line,
-                                                  &handle_passing_info);
+  if (launch_type == LaunchType::CHILD || launch_type == LaunchType::PEER) {
+    channel.PrepareToPassClientHandleToChildProcess(&command_line,
+                                                    &handle_passing_info);
+  } else if (launch_type == LaunchType::NAMED_CHILD ||
+             launch_type == LaunchType::NAMED_PEER) {
+#if defined(OS_POSIX)
+    base::FilePath temp_dir;
+    CHECK(base::PathService::Get(base::DIR_TEMP, &temp_dir));
+    named_pipe = NamedPlatformHandle(
+        temp_dir.AppendASCII(GenerateRandomToken()).value());
+#else
+    named_pipe = NamedPlatformHandle(GenerateRandomToken());
+#endif
+    command_line.AppendSwitchNative(kMojoNamedPipeName, named_pipe.name);
+  }
 
   std::string pipe_token = mojo::edk::GenerateRandomToken();
-  if (launch_type == LaunchType::CHILD)
+  if (launch_type == LaunchType::CHILD ||
+      launch_type == LaunchType::NAMED_CHILD)
     command_line.AppendSwitchASCII(kMojoPrimordialPipeToken, pipe_token);
 
   if (!switch_string.empty()) {
@@ -120,19 +140,37 @@ ScopedMessagePipeHandle MultiprocessTestHelper::StartChildWithExtraSwitch(
 #error "Not supported yet."
 #endif
 
+  // NOTE: In the case of named pipes, it's important that the server handle be
+  // created before the child process is launched; otherwise the server binding
+  // the pipe path can race with child's connection to the pipe.
+  ScopedPlatformHandle server_handle;
+  if (launch_type == LaunchType::CHILD || launch_type == LaunchType::PEER) {
+    server_handle = channel.PassServerHandle();
+  } else if (launch_type == LaunchType::NAMED_CHILD ||
+             launch_type == LaunchType::NAMED_PEER) {
+    server_handle = CreateServerHandle(named_pipe);
+  }
+
   ScopedMessagePipeHandle pipe;
   std::string child_token = mojo::edk::GenerateRandomToken();
-  if (launch_type == LaunchType::CHILD)
+  if (launch_type == LaunchType::CHILD ||
+      launch_type == LaunchType::NAMED_CHILD) {
     pipe = CreateParentMessagePipe(pipe_token, child_token);
-  else if (launch_type == LaunchType::PEER)
-    pipe = ConnectToPeerProcess(channel.PassServerHandle());
+  } else if (launch_type == LaunchType::PEER ||
+             launch_type == LaunchType::NAMED_PEER) {
+    peer_token_ = mojo::edk::GenerateRandomToken();
+    pipe = ConnectToPeerProcess(std::move(server_handle), peer_token_);
+  }
 
   test_child_ =
       base::SpawnMultiProcessTestChild(test_child_main, command_line, options);
-  channel.ChildProcessLaunched();
+  if (launch_type == LaunchType::CHILD || launch_type == LaunchType::PEER)
+    channel.ChildProcessLaunched();
 
-  if (launch_type == LaunchType::CHILD) {
-    ChildProcessLaunched(test_child_.Handle(), channel.PassServerHandle(),
+  if (launch_type == LaunchType::CHILD ||
+      launch_type == LaunchType::NAMED_CHILD) {
+    DCHECK(server_handle.is_valid());
+    ChildProcessLaunched(test_child_.Handle(), std::move(server_handle),
                          child_token, process_error_callback_);
   }
 
@@ -144,16 +182,16 @@ int MultiprocessTestHelper::WaitForChildShutdown() {
   CHECK(test_child_.IsValid());
 
   int rv = -1;
-#if defined(OS_ANDROID)
-  // On Android, we need to use a special function to wait for the child.
-  CHECK(AndroidWaitForChildExitWithTimeout(
-      test_child_, TestTimeouts::action_timeout(), &rv));
-#else
-  CHECK(
-      test_child_.WaitForExitWithTimeout(TestTimeouts::action_timeout(), &rv));
-#endif
+  WaitForMultiprocessTestChildExit(test_child_, TestTimeouts::action_timeout(),
+                                   &rv);
   test_child_.Close();
   return rv;
+}
+
+void MultiprocessTestHelper::ClosePeerConnection() {
+  DCHECK(!peer_token_.empty());
+  ::mojo::edk::ClosePeerConnection(peer_token_);
+  peer_token_.clear();
 }
 
 bool MultiprocessTestHelper::WaitForChildTestShutdown() {
@@ -167,17 +205,29 @@ void MultiprocessTestHelper::ChildSetup() {
   std::string primordial_pipe_token =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           kMojoPrimordialPipeToken);
+  NamedPlatformHandle named_pipe(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueNative(
+          kMojoNamedPipeName));
   if (!primordial_pipe_token.empty()) {
     primordial_pipe = CreateChildMessagePipe(primordial_pipe_token);
 #if defined(OS_MACOSX) && !defined(OS_IOS)
     CHECK(base::MachPortBroker::ChildSendTaskPortToParent("mojo_test"));
 #endif
-    SetParentPipeHandle(PlatformChannelPair::PassClientHandleFromParentProcess(
-        *base::CommandLine::ForCurrentProcess()));
+    if (named_pipe.is_valid()) {
+      SetParentPipeHandle(CreateClientHandle(named_pipe));
+    } else {
+      SetParentPipeHandle(
+          PlatformChannelPair::PassClientHandleFromParentProcess(
+              *base::CommandLine::ForCurrentProcess()));
+    }
   } else {
-    primordial_pipe = ConnectToPeerProcess(
-        PlatformChannelPair::PassClientHandleFromParentProcess(
-            *base::CommandLine::ForCurrentProcess()));
+    if (named_pipe.is_valid()) {
+      primordial_pipe = ConnectToPeerProcess(CreateClientHandle(named_pipe));
+    } else {
+      primordial_pipe = ConnectToPeerProcess(
+          PlatformChannelPair::PassClientHandleFromParentProcess(
+              *base::CommandLine::ForCurrentProcess()));
+    }
   }
 }
 

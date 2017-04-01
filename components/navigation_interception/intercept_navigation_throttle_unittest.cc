@@ -37,7 +37,7 @@ const char kTestUrl[] = "http://www.test.com/";
 // that results in very ugly syntax, which is why these custom matchers are
 // used instead.
 MATCHER(NavigationParamsUrlIsTest, "") {
-  return arg.url() == GURL(kTestUrl);
+  return arg.url() == kTestUrl;
 }
 
 }  // namespace
@@ -65,11 +65,11 @@ class InterceptNavigationThrottleTest
         content::NavigationHandle::CreateNavigationHandleForTesting(url,
                                                                     main_rfh());
     test_handle->RegisterThrottleForTesting(
-        base::WrapUnique(new InterceptNavigationThrottle(
+        base::MakeUnique<InterceptNavigationThrottle>(
             test_handle.get(),
             base::Bind(&MockInterceptCallbackReceiver::ShouldIgnoreNavigation,
                        base::Unretained(mock_callback_receiver_.get())),
-            true)));
+            true));
     return test_handle->CallWillStartRequestForTesting(
         is_post, content::Referrer(), false, ui::PAGE_TRANSITION_LINK, false);
   }
@@ -79,11 +79,11 @@ class InterceptNavigationThrottleTest
         content::NavigationHandle::CreateNavigationHandleForTesting(
             GURL(kTestUrl), main_rfh());
     test_handle->RegisterThrottleForTesting(
-        base::WrapUnique(new InterceptNavigationThrottle(
+        base::MakeUnique<InterceptNavigationThrottle>(
             test_handle.get(),
             base::Bind(&MockInterceptCallbackReceiver::ShouldIgnoreNavigation,
                        base::Unretained(mock_callback_receiver_.get())),
-            true)));
+            true));
     test_handle->CallWillStartRequestForTesting(
         true, content::Referrer(), false, ui::PAGE_TRANSITION_LINK, false);
     return test_handle->CallWillRedirectRequestForTesting(GURL(kTestUrl), false,

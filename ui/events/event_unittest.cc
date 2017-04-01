@@ -738,17 +738,17 @@ TEST(EventTest, PointerEventCanConvertFrom) {
 
   // Common mouse events can be converted.
   const EventType mouse_allowed[] = {
-      ET_MOUSE_PRESSED,
-      ET_MOUSE_DRAGGED,
-      ET_MOUSE_MOVED,
-      ET_MOUSE_ENTERED,
-      ET_MOUSE_EXITED,
-      ET_MOUSE_RELEASED
+      ET_MOUSE_PRESSED,         ET_MOUSE_DRAGGED, ET_MOUSE_MOVED,
+      ET_MOUSE_ENTERED,         ET_MOUSE_EXITED,  ET_MOUSE_RELEASED,
+      ET_MOUSE_CAPTURE_CHANGED,
   };
   for (size_t i = 0; i < arraysize(mouse_allowed); i++) {
     MouseEvent event(mouse_allowed[i], point, point, time, 0, 0);
     EXPECT_TRUE(PointerEvent::CanConvertFrom(event));
   }
+  // Mouse wheel events can be converted.
+  MouseWheelEvent event(gfx::Vector2d(), point, point, time, 0, 0);
+  EXPECT_TRUE(PointerEvent::CanConvertFrom(event));
 
   // Common touch events can be converted.
   const EventType touch_allowed[] = {
@@ -761,16 +761,6 @@ TEST(EventTest, PointerEventCanConvertFrom) {
     TouchEvent event(touch_allowed[i], point, 0, time);
     EXPECT_TRUE(PointerEvent::CanConvertFrom(event));
   }
-
-  // Capture changes cannot be converted.
-  EXPECT_FALSE(
-      PointerEvent::CanConvertFrom(
-          MouseEvent(ET_MOUSE_CAPTURE_CHANGED, point, point, time, 0, 0)));
-
-  // Wheel events cannot be converted.
-  EXPECT_FALSE(
-      PointerEvent::CanConvertFrom(
-          MouseWheelEvent(gfx::Vector2d(), point, point, time, 0, 0)));
 
   // Non-mouse non-touch events cannot be converted.
   EXPECT_FALSE(
@@ -975,6 +965,22 @@ TEST(EventTest, PointerEventToTouchEventDetails) {
   EXPECT_EQ(pointer_event.pointer_id(), touch_event.touch_id());
   EXPECT_EQ(pointer_event.pointer_details(), touch_event.pointer_details());
   EXPECT_EQ(pointer_event.time_stamp(), touch_event.time_stamp());
+}
+
+TEST(EventTest, PointerEventSourceEventTypeExistsInLatencyInfo) {
+  ui::PointerEvent wheel_poniter_event(
+      ui::ET_POINTER_WHEEL_CHANGED, gfx::Point(), gfx::Point(), 0, 0, 0,
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_MOUSE),
+      ui::EventTimeForNow());
+  EXPECT_EQ(wheel_poniter_event.latency()->source_event_type(),
+            ui::SourceEventType::WHEEL);
+
+  ui::PointerEvent touch_poniter_event(
+      ui::ET_TOUCH_PRESSED, gfx::Point(), gfx::Point(), 0, 0, 0,
+      ui::PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH),
+      ui::EventTimeForNow());
+  EXPECT_EQ(touch_poniter_event.latency()->source_event_type(),
+            ui::SourceEventType::TOUCH);
 }
 
 // Checks that Event.Latency.OS.TOUCH_PRESSED, TOUCH_MOVED,

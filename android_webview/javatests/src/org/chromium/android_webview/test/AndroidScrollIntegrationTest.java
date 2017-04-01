@@ -4,8 +4,9 @@
 
 package org.chromium.android_webview.test;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.view.View;
 
 import org.chromium.android_webview.AwContents;
@@ -15,12 +16,13 @@ import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JavascriptEventObserver;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.parameter.ParameterizedTest;
-import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.net.test.util.TestWebServer;
-import org.chromium.ui.gfx.DeviceDisplayInfo;
+import org.chromium.ui.display.DisplayAndroid;
 
 import java.util.Locale;
 import java.util.concurrent.Callable;
@@ -320,7 +322,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         enableJavaScriptOnUiThread(testContainerView.getAwContents());
 
         final double deviceDIPScale =
-                DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+                DisplayAndroid.getNonMultiDisplay(testContainerView.getContext()).getDipScale();
         final int targetScrollXCss = 233;
         final int targetScrollYCss = 322;
         final int targetScrollXPix = (int) Math.ceil(targetScrollXCss * deviceDIPScale);
@@ -346,6 +348,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @SuppressLint("DefaultLocale")
     public void testJsScrollReflectedInUi() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final ScrollTestContainerView testContainerView =
@@ -353,7 +356,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         enableJavaScriptOnUiThread(testContainerView.getAwContents());
 
         final double deviceDIPScale =
-                DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+                DisplayAndroid.getNonMultiDisplay(testContainerView.getContext()).getDipScale();
         final int targetScrollXCss = 132;
         final int targetScrollYCss = 243;
         final int targetScrollXPix = (int) Math.floor(targetScrollXCss * deviceDIPScale);
@@ -381,7 +384,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         enableJavaScriptOnUiThread(testContainerView.getAwContents());
 
         final double deviceDIPScale =
-                DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+                DisplayAndroid.getNonMultiDisplay(testContainerView.getContext()).getDipScale();
         final int targetScrollXCss = 132;
         final int targetScrollYCss = 243;
         final int targetScrollXPix = (int) Math.floor(targetScrollXCss * deviceDIPScale);
@@ -411,7 +414,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         enableJavaScriptOnUiThread(testContainerView.getAwContents());
 
         final double deviceDIPScale =
-                DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+                DisplayAndroid.getNonMultiDisplay(testContainerView.getContext()).getDipScale();
         final int targetScrollXCss = 132;
         final int targetScrollYCss = 243;
         final int targetScrollXPix = (int) Math.floor(targetScrollXCss * deviceDIPScale);
@@ -440,6 +443,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
     @SmallTest
     @Feature({"AndroidWebView"})
     @ParameterizedTest.Set  // crbug.com/616505
+    @RetryOnFailure
     public void testTouchScrollCanBeAlteredByUi() throws Throwable {
         final TestAwContentsClient contentsClient = new TestAwContentsClient();
         final ScrollTestContainerView testContainerView =
@@ -454,7 +458,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         final int targetScrollYPix = dragStepSize * dragSteps;
 
         final double deviceDIPScale =
-                DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+                DisplayAndroid.getNonMultiDisplay(testContainerView.getContext()).getDipScale();
         final int maxScrollXPix = 101;
         final int maxScrollYPix = 211;
         // Make sure we can't hit these values simply as a result of scrolling.
@@ -679,7 +683,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         enableJavaScriptOnUiThread(testContainerView.getAwContents());
 
         final double deviceDIPScale =
-                DeviceDisplayInfo.create(testContainerView.getContext()).getDIPScale();
+                DisplayAndroid.getNonMultiDisplay(testContainerView.getContext()).getDipScale();
         final int targetScrollYCss = 243;
         final int targetScrollYPix = (int) Math.ceil(targetScrollYCss * deviceDIPScale);
 
@@ -723,9 +727,7 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
         }
 
         @Override
-        public void onFlingStartGesture(
-                int velocityX, int velocityY, int scrollOffsetY, int scrollExtentY) {
-        }
+        public void onFlingStartGesture(int scrollOffsetY, int scrollExtentY) {}
 
         @Override
         public void onScrollUpdateGestureConsumed() {
@@ -787,8 +789,8 @@ public class AndroidScrollIntegrationTest extends AwTestBase {
 
         // Containers to execute asserts on the test thread
         final AtomicBoolean canZoomIn = new AtomicBoolean(false);
-        final AtomicReference<Float> atomicOldScale = new AtomicReference<Float>();
-        final AtomicReference<Float> atomicNewScale = new AtomicReference<Float>();
+        final AtomicReference<Float> atomicOldScale = new AtomicReference<>();
+        final AtomicReference<Float> atomicNewScale = new AtomicReference<>();
         final AtomicInteger atomicOldScrollRange = new AtomicInteger();
         final AtomicInteger atomicNewScrollRange = new AtomicInteger();
         final AtomicInteger atomicContentHeight = new AtomicInteger();

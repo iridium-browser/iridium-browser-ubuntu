@@ -9,8 +9,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "components/sync/driver/async_directory_type_controller.h"
 #include "components/sync/driver/generic_change_processor.h"
-#include "components/sync/driver/ui_data_type_controller.h"
 
 class Profile;
 
@@ -18,18 +18,19 @@ namespace browser_sync {
 
 // TODO(zea): Rename this and ExtensionSettingsDTC to ExtensionOrApp*, since
 // both actually handle the APP datatypes as well.
-class ExtensionDataTypeController : public sync_driver::UIDataTypeController {
+class ExtensionDataTypeController
+    : public syncer::AsyncDirectoryTypeController {
  public:
+  // |dump_stack| is called when an unrecoverable error occurs.
   ExtensionDataTypeController(
       syncer::ModelType type,  // Either EXTENSIONS or APPS.
-      const base::Closure& error_callback,
-      sync_driver::SyncClient* sync_client,
+      const base::Closure& dump_stack,
+      syncer::SyncClient* sync_client,
       Profile* profile);
-
- private:
   ~ExtensionDataTypeController() override;
 
-  // DataTypeController implementations.
+ private:
+  // AsyncDirectoryTypeController implementation.
   bool StartModels() override;
 
   Profile* const profile_;

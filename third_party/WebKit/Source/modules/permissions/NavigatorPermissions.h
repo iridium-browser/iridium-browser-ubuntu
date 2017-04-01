@@ -5,6 +5,7 @@
 #ifndef NavigatorPermissions_h
 #define NavigatorPermissions_h
 
+#include "core/frame/Navigator.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
@@ -13,22 +14,25 @@ namespace blink {
 class Navigator;
 class Permissions;
 
-class NavigatorPermissions final : public GarbageCollected<NavigatorPermissions>, public Supplement<Navigator> {
-    USING_GARBAGE_COLLECTED_MIXIN(NavigatorPermissions);
-public:
-    static NavigatorPermissions& from(Navigator&);
-    static Permissions* permissions(Navigator&);
+class NavigatorPermissions final
+    : public GarbageCollected<NavigatorPermissions>,
+      public Supplement<Navigator> {
+  USING_GARBAGE_COLLECTED_MIXIN(NavigatorPermissions);
 
-    DECLARE_VIRTUAL_TRACE();
+ public:
+  static NavigatorPermissions& from(Navigator&);
+  static Permissions* permissions(Navigator&);
 
-private:
-    NavigatorPermissions();
+  DECLARE_VIRTUAL_TRACE();
 
-    static const char* supplementName();
+ private:
+  NavigatorPermissions();
 
-    Member<Permissions> m_permissions;
+  static const char* supplementName();
+
+  Member<Permissions> m_permissions;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // NavigatorPermissions_h
+#endif  // NavigatorPermissions_h

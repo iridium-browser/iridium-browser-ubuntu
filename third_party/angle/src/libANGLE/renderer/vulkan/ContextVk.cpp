@@ -42,8 +42,7 @@ ContextVk::~ContextVk()
 
 gl::Error ContextVk::initialize()
 {
-    UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::NoError();
 }
 
 gl::Error ContextVk::flush()
@@ -102,31 +101,43 @@ gl::Error ContextVk::drawRangeElements(GLenum mode,
                                        const GLvoid *indices,
                                        const gl::IndexRange &indexRange)
 {
-    UNIMPLEMENTED();
-    return gl::Error(GL_INVALID_OPERATION);
+    return gl::NoError();
 }
 
-void ContextVk::notifyDeviceLost()
+VkDevice ContextVk::getDevice() const
 {
-    UNIMPLEMENTED();
+    return mRenderer->getDevice();
 }
 
-bool ContextVk::isDeviceLost() const
+vk::CommandBuffer *ContextVk::getCommandBuffer()
 {
-    UNIMPLEMENTED();
-    return bool();
+    return mRenderer->getCommandBuffer();
 }
 
-bool ContextVk::testDeviceLost()
+vk::Error ContextVk::submitCommands(const vk::CommandBuffer &commandBuffer)
 {
-    UNIMPLEMENTED();
-    return bool();
+    // TODO(jmadill): Command queuing.
+    ANGLE_TRY(mRenderer->submitAndFinishCommandBuffer(commandBuffer));
+    return vk::NoError();
 }
 
-bool ContextVk::testDeviceResettable()
+gl::Error ContextVk::drawArraysIndirect(GLenum mode, const GLvoid *indirect)
 {
     UNIMPLEMENTED();
-    return bool();
+    return gl::InternalError() << "DrawArraysIndirect hasn't been implemented for vulkan backend.";
+}
+
+gl::Error ContextVk::drawElementsIndirect(GLenum mode, GLenum type, const GLvoid *indirect)
+{
+    UNIMPLEMENTED();
+    return gl::InternalError()
+           << "DrawElementsIndirect hasn't been implemented for vulkan backend.";
+}
+
+GLenum ContextVk::getResetStatus()
+{
+    UNIMPLEMENTED();
+    return GL_NO_ERROR;
 }
 
 std::string ContextVk::getVendorString() const
@@ -137,8 +148,7 @@ std::string ContextVk::getVendorString() const
 
 std::string ContextVk::getRendererDescription() const
 {
-    UNIMPLEMENTED();
-    return std::string();
+    return mRenderer->getRendererDescription();
 }
 
 void ContextVk::insertEventMarker(GLsizei length, const char *marker)
@@ -156,9 +166,9 @@ void ContextVk::popGroupMarker()
     UNIMPLEMENTED();
 }
 
-void ContextVk::syncState(const gl::State &state, const gl::State::DirtyBits &dirtyBits)
+void ContextVk::syncState(const gl::State & /*state*/, const gl::State::DirtyBits & /*dirtyBits*/)
 {
-    UNIMPLEMENTED();
+    // TODO(jmadill): Vulkan dirty bits.
 }
 
 GLint ContextVk::getGPUDisjoint()
@@ -173,9 +183,8 @@ GLint64 ContextVk::getTimestamp()
     return GLint64();
 }
 
-void ContextVk::onMakeCurrent(const gl::ContextState &data)
+void ContextVk::onMakeCurrent(const gl::ContextState & /*data*/)
 {
-    UNIMPLEMENTED();
 }
 
 const gl::Caps &ContextVk::getNativeCaps() const
@@ -215,7 +224,7 @@ ProgramImpl *ContextVk::createProgram(const gl::ProgramState &state)
 
 FramebufferImpl *ContextVk::createFramebuffer(const gl::FramebufferState &state)
 {
-    return new FramebufferVk(state);
+    return FramebufferVk::CreateUserFBO(state);
 }
 
 TextureImpl *ContextVk::createTexture(const gl::TextureState &state)
@@ -228,9 +237,9 @@ RenderbufferImpl *ContextVk::createRenderbuffer()
     return new RenderbufferVk();
 }
 
-BufferImpl *ContextVk::createBuffer()
+BufferImpl *ContextVk::createBuffer(const gl::BufferState &state)
 {
-    return new BufferVk();
+    return new BufferVk(state);
 }
 
 VertexArrayImpl *ContextVk::createVertexArray(const gl::VertexArrayState &state)

@@ -25,9 +25,9 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
   NSEventType type = [native_event type];
   switch (type) {
     case NSKeyDown:
-      return ET_KEY_PRESSED;
     case NSKeyUp:
-      return ET_KEY_RELEASED;
+    case NSFlagsChanged:
+      return IsKeyUpEvent(native_event) ? ET_KEY_RELEASED : ET_KEY_PRESSED;
     case NSLeftMouseDown:
     case NSRightMouseDown:
     case NSOtherMouseDown:
@@ -43,7 +43,7 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
     case NSMouseMoved:
       return ET_MOUSE_MOVED;
     case NSScrollWheel:
-      return ET_MOUSEWHEEL;
+      return ET_SCROLL;
     case NSMouseEntered:
       return ET_MOUSE_ENTERED;
     case NSMouseExited:
@@ -53,7 +53,6 @@ EventType EventTypeFromNative(const base::NativeEvent& native_event) {
     case NSAppKitDefined:
     case NSSystemDefined:
       return ET_UNKNOWN;
-    case NSFlagsChanged:
     case NSApplicationDefined:
     case NSPeriodic:
     case NSCursorUpdate:
@@ -91,14 +90,18 @@ base::TimeTicks EventTimeFromNative(const base::NativeEvent& native_event) {
 }
 
 gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
+  return gfx::ToFlooredPoint(EventLocationFromNativeF(native_event));
+}
+
+gfx::PointF EventLocationFromNativeF(const base::NativeEvent& native_event) {
   NSWindow* window = [native_event window];
   if (!window) {
     NOTIMPLEMENTED();  // Point will be in screen coordinates.
-    return gfx::Point();
+    return gfx::PointF();
   }
   NSPoint location = [native_event locationInWindow];
   NSRect content_rect = [window contentRectForFrameRect:[window frame]];
-  return gfx::Point(location.x, NSHeight(content_rect) - location.y);
+  return gfx::PointF(location.x, NSHeight(content_rect) - location.y);
 }
 
 gfx::Point EventSystemLocationFromNative(
@@ -198,9 +201,48 @@ bool GetScrollOffsets(const base::NativeEvent& native_event,
                       float* y_offset,
                       float* x_offset_ordinal,
                       float* y_offset_ordinal,
-                      int* finger_count) {
-  NOTIMPLEMENTED();
-  return false;
+                      int* finger_count,
+                      EventMomentumPhase* momentum_phase) {
+  gfx::Vector2d offset = GetMouseWheelOffset(native_event);
+  *x_offset = *x_offset_ordinal = offset.x();
+  *y_offset = *y_offset_ordinal = offset.y();
+
+  // For non-scrolling events, the finger count can be determined with
+  // [[native_event touchesMatchingPhase:NSTouchPhaseTouching inView:nil] count]
+  // but it's illegal to ask that of scroll events, so say two fingers.
+  *finger_count = 2;
+
+  // If a user just rests two fingers on the touchpad without moving, AppKit
+  // uses NSEventPhaseMayBegin. Treat this the same as NSEventPhaseBegan.
+  const NSUInteger kBeginPhaseMask = NSEventPhaseBegan | NSEventPhaseMayBegin;
+  const NSUInteger kEndPhaseMask = NSEventPhaseCancelled | NSEventPhaseEnded;
+
+  // Note: although the NSEventPhase constants are bit flags, the logic here
+  // assumes AppKit will not combine them, so momentum phase should only be set
+  // once. If one of these DCHECKs fails it could mean some new hardware that
+  // needs tests in events_mac_unittest.mm.
+  DCHECK_EQ(EventMomentumPhase::NONE, *momentum_phase);
+
+  if ([native_event phase] & kBeginPhaseMask)
+    *momentum_phase = EventMomentumPhase::MAY_BEGIN;
+
+  if (([native_event phase] | [native_event momentumPhase]) & kEndPhaseMask) {
+    DCHECK_EQ(EventMomentumPhase::NONE, *momentum_phase);
+    *momentum_phase = EventMomentumPhase::END;
+  } else if ([native_event momentumPhase] != NSEventPhaseNone) {
+    DCHECK_EQ(EventMomentumPhase::NONE, *momentum_phase);
+    *momentum_phase = EventMomentumPhase::INERTIAL_UPDATE;
+  }
+
+  // If the event completely lacks phase information, there won't be further
+  // updates, so they must be treated as an end.
+  if (([native_event phase] | [native_event momentumPhase]) ==
+      NSEventPhaseNone) {
+    DCHECK_EQ(EventMomentumPhase::NONE, *momentum_phase);
+    *momentum_phase = EventMomentumPhase::END;
+  }
+
+  return true;
 }
 
 bool GetFlingData(const base::NativeEvent& native_event,

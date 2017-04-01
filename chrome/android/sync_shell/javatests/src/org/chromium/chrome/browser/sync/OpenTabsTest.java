@@ -4,12 +4,17 @@
 
 package org.chromium.chrome.browser.sync;
 
-import android.test.suitebuilder.annotation.LargeTest;
+import android.support.test.filters.LargeTest;
 import android.util.Pair;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
@@ -21,9 +26,6 @@ import org.chromium.components.sync.protocol.SessionWindow;
 import org.chromium.components.sync.protocol.SyncEnums;
 import org.chromium.components.sync.protocol.TabNavigation;
 import org.chromium.content.browser.test.util.Criteria;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,6 +37,7 @@ import java.util.concurrent.Callable;
 /**
  * Test suite for the open tabs (sessions) sync data type.
  */
+@RetryOnFailure  // crbug.com/637448
 public class OpenTabsTest extends SyncTestBase {
     private static final String TAG = "OpenTabsTest";
 

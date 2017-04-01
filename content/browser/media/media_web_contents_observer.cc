@@ -34,9 +34,6 @@ MediaWebContentsObserver::~MediaWebContentsObserver() {}
 
 void MediaWebContentsObserver::WebContentsDestroyed() {
   g_audible_metrics.Get().UpdateAudibleWebContentsState(web_contents(), false);
-#if defined(OS_ANDROID)
-  view_weak_factory_.reset();
-#endif
 }
 
 void MediaWebContentsObserver::RenderFrameDeleted(
@@ -46,9 +43,6 @@ void MediaWebContentsObserver::RenderFrameDeleted(
 }
 
 void MediaWebContentsObserver::MaybeUpdateAudibleState() {
-  if (!AudioStreamMonitor::monitoring_available())
-    return;
-
   AudioStreamMonitor* audio_stream_monitor =
       static_cast<WebContentsImpl*>(web_contents())->audio_stream_monitor();
 
@@ -112,7 +106,8 @@ void MediaWebContentsObserver::OnMediaPaused(RenderFrameHost* render_frame_host,
   if (removed_audio || removed_video) {
     // Notify observers the player has been "paused".
     static_cast<WebContentsImpl*>(web_contents())
-        ->MediaStoppedPlaying(player_id);
+        ->MediaStoppedPlaying(
+            WebContentsObserver::MediaPlayerInfo(removed_video), player_id);
   }
 
   if (reached_end_of_stream)
@@ -127,7 +122,7 @@ void MediaWebContentsObserver::OnMediaPlaying(
     bool has_video,
     bool has_audio,
     bool is_remote,
-    base::TimeDelta duration) {
+    media::MediaContentType media_content_type) {
   // Ignore the videos playing remotely and don't hold the wake lock for the
   // screen. TODO(dalecurtis): Is this correct? It means observers will not
   // receive play and pause messages.
@@ -135,16 +130,8 @@ void MediaWebContentsObserver::OnMediaPlaying(
     return;
 
   const MediaPlayerId id(render_frame_host, delegate_id);
-  if (has_audio) {
+  if (has_audio)
     AddMediaPlayerEntry(id, &active_audio_players_);
-
-    // If we don't have audio stream monitoring, allocate the audio power save
-    // blocker here instead of during NotifyNavigationStateChanged().
-    if (!audio_power_save_blocker_ &&
-        !AudioStreamMonitor::monitoring_available()) {
-      CreateAudioPowerSaveBlocker();
-    }
-  }
 
   if (has_video) {
     AddMediaPlayerEntry(id, &active_video_players_);
@@ -157,28 +144,35 @@ void MediaWebContentsObserver::OnMediaPlaying(
   }
 
   if (!session_controllers_manager_.RequestPlay(
-      id, has_audio, is_remote, duration)) {
+          id, has_audio, is_remote, media_content_type)) {
     return;
   }
 
   // Notify observers of the new player.
   DCHECK(has_audio || has_video);
-  static_cast<WebContentsImpl*>(web_contents())->MediaStartedPlaying(id);
+  static_cast<WebContentsImpl*>(web_contents())
+      ->MediaStartedPlaying(WebContentsObserver::MediaPlayerInfo(has_video),
+                            id);
 }
 
 void MediaWebContentsObserver::ClearPowerSaveBlockers(
     RenderFrameHost* render_frame_host) {
   std::set<MediaPlayerId> removed_players;
-  RemoveAllMediaPlayerEntries(render_frame_host, &active_audio_players_,
-                              &removed_players);
   RemoveAllMediaPlayerEntries(render_frame_host, &active_video_players_,
+                              &removed_players);
+  std::set<MediaPlayerId> video_players(removed_players);
+  RemoveAllMediaPlayerEntries(render_frame_host, &active_audio_players_,
                               &removed_players);
   MaybeReleasePowerSaveBlockers();
 
   // Notify all observers the player has been "paused".
   WebContentsImpl* wci = static_cast<WebContentsImpl*>(web_contents());
-  for (const auto& id : removed_players)
-    wci->MediaStoppedPlaying(id);
+  for (const auto& id : removed_players) {
+    auto it = video_players.find(id);
+    bool was_video = (it != video_players.end());
+    wci->MediaStoppedPlaying(WebContentsObserver::MediaPlayerInfo(was_video),
+                             id);
+  }
 }
 
 void MediaWebContentsObserver::CreateAudioPowerSaveBlocker() {
@@ -200,23 +194,13 @@ void MediaWebContentsObserver::CreateVideoPowerSaveBlocker() {
       BrowserThread::GetTaskRunnerForThread(BrowserThread::FILE)));
 #if defined(OS_ANDROID)
   if (web_contents()->GetNativeView()) {
-    view_weak_factory_.reset(new base::WeakPtrFactory<ui::ViewAndroid>(
-        web_contents()->GetNativeView()));
     video_power_save_blocker_.get()->InitDisplaySleepBlocker(
-        view_weak_factory_->GetWeakPtr());
+        web_contents()->GetNativeView());
   }
 #endif
 }
 
 void MediaWebContentsObserver::MaybeReleasePowerSaveBlockers() {
-  // If there are no more audio players and we don't have audio stream
-  // monitoring, release the audio power save blocker here instead of during
-  // NotifyNavigationStateChanged().
-  if (active_audio_players_.empty() &&
-      !AudioStreamMonitor::monitoring_available()) {
-    audio_power_save_blocker_.reset();
-  }
-
   // If there are no more video players, clear the video power save blocker.
   if (active_video_players_.empty())
     video_power_save_blocker_.reset();

@@ -39,18 +39,17 @@ class TracingControllerAgent(tracing_agents.TracingAgent):
     self._log_path = None
 
   @py_utils.Timeout(tracing_agents.START_STOP_TIMEOUT)
-  def StartAgentTracing(self, options, categories, timeout=None):
+  def StartAgentTracing(self, config, timeout=None):
     """Start tracing for the controller tracing agent.
 
     Start tracing for the controller tracing agent. Note that
     the tracing controller records the "controller side"
     of the clock sync records, and nothing else.
     """
-    del options
-    del categories
+    del config
     if not trace_event.trace_can_enable():
       raise RuntimeError, ('Cannot enable trace_event;'
-                           ' ensure catapult_base is in PYTHONPATH')
+                           ' ensure py_utils is in PYTHONPATH')
 
     controller_log_file = tempfile.NamedTemporaryFile(delete=False)
     self._log_path = controller_log_file.name
@@ -94,23 +93,27 @@ class TracingControllerAgent(tracing_agents.TracingAgent):
     raise NotImplementedError
 
 class TracingController(object):
-  def __init__(self, options, categories, agents):
+  def __init__(self, agents_with_config, controller_config):
     """Create tracing controller.
 
     Create a tracing controller object. Note that the tracing
     controller is also a tracing agent.
 
     Args:
-       options: Tracing options.
-       categories: Categories of trace events to record.
-       agents: List of tracing agents for this controller.
+       agents_with_config: List of tracing agents for this controller with the
+                           corresponding tracing configuration objects.
+       controller_config:  Configuration options for the tracing controller.
     """
-    self._child_agents = agents
+    self._child_agents = None
+    self._child_agents_with_config = agents_with_config
     self._controller_agent = TracingControllerAgent()
-    self._options = options
-    self._categories = categories
+    self._controller_config = controller_config
     self._trace_in_progress = False
     self.all_results = None
+
+  @property
+  def get_child_agents(self):
+    return self._child_agents
 
   def StartTracing(self):
     """Start tracing for all tracing agents.
@@ -129,28 +132,28 @@ class TracingController(object):
     # Start the controller tracing agents. Controller tracing agent
     # must be started successfully to proceed.
     if not self._controller_agent.StartAgentTracing(
-        self._options,
-        self._categories,
-        timeout=self._options.timeout):
+        self._controller_config,
+        timeout=self._controller_config.timeout):
       print 'Unable to start controller tracing agent.'
       return False
 
     # Start the child tracing agents.
     succ_agents = []
-    for agent in self._child_agents:
-      if agent.StartAgentTracing(self._options,
-                                 self._categories,
-                                 timeout=self._options.timeout):
+    for agent_and_config in self._child_agents_with_config:
+      agent = agent_and_config.agent
+      config = agent_and_config.config
+      if agent.StartAgentTracing(config,
+                                 timeout=self._controller_config.timeout):
         succ_agents.append(agent)
       else:
         print 'Agent %s not started.' % str(agent)
 
     # Print warning if all agents not started.
-    na = len(self._child_agents)
+    na = len(self._child_agents_with_config)
     ns = len(succ_agents)
     if ns < na:
       print 'Warning: Only %d of %d tracing agents started.' % (ns, na)
-      self._child_agents = succ_agents
+    self._child_agents = succ_agents
     return True
 
   def StopTracing(self):
@@ -171,7 +174,7 @@ class TracingController(object):
     self._IssueClockSyncMarker()
     succ_agents = []
     for agent in self._child_agents:
-      if agent.StopAgentTracing(timeout=self._options.timeout):
+      if agent.StopAgentTracing(timeout=self._controller_config.timeout):
         succ_agents.append(agent)
       else:
         print 'Agent %s not stopped.' % str(agent)
@@ -179,7 +182,7 @@ class TracingController(object):
     # Stop the controller tracing agent. Controller tracing agent
     # must be stopped successfully to proceed.
     if not self._controller_agent.StopAgentTracing(
-        timeout=self._options.timeout):
+        timeout=self._controller_config.timeout):
       print 'Unable to stop controller tracing agent.'
       return False
 
@@ -194,7 +197,8 @@ class TracingController(object):
     all_results = []
     for agent in self._child_agents + [self._controller_agent]:
       try:
-        result = agent.GetResults(timeout=self._options.collection_timeout)
+        result = agent.GetResults(
+            timeout=self._controller_config.collection_timeout)
         if not result:
           print 'Warning: Timeout when getting results from %s.' % str(agent)
           continue
@@ -213,6 +217,10 @@ class TracingController(object):
     self.all_results = all_results
     return all_results
 
+  def GetTraceType(self):
+    """Return a string representing the child agents that are being traced."""
+    sorted_agents = sorted(map(str, self._child_agents))
+    return ' + '.join(sorted_agents)
 
   def _IssueClockSyncMarker(self):
     """Issue clock sync markers to all the child tracing agents."""
@@ -228,3 +236,62 @@ def GetUniqueSyncID():
   (since UUIDs are not JSON serializable)
   """
   return str(uuid.uuid4())
+
+
+class AgentWithConfig(object):
+  def __init__(self, agent, config):
+    self.agent = agent
+    self.config = config
+
+
+def CreateAgentsWithConfig(options, modules):
+  """Create tracing agents.
+
+  This function will determine which tracing agents are valid given the
+  options and create those agents along with their corresponding configuration
+  object.
+  Args:
+    options: The command-line options.
+    modules: The modules for either Systrace or profile_chrome.
+             TODO(washingtonp): After all profile_chrome agents are in
+             Systrace, this parameter will no longer be valid.
+  Returns:
+    A list of AgentWithConfig options containing agents and their corresponding
+    configuration object.
+  """
+  result = []
+  for module in modules:
+    config = module.get_config(options)
+    agent = module.try_create_agent(config)
+    if agent and config:
+      result.append(AgentWithConfig(agent, config))
+  return [x for x in result if x and x.agent]
+
+
+class TracingControllerConfig(tracing_agents.TracingConfig):
+  def __init__(self, output_file, trace_time, write_json,
+               link_assets, asset_dir, timeout, collection_timeout,
+               device_serial_number, target):
+    tracing_agents.TracingConfig.__init__(self)
+    self.output_file = output_file
+    self.trace_time = trace_time
+    self.write_json = write_json
+    self.link_assets = link_assets
+    self.asset_dir = asset_dir
+    self.timeout = timeout
+    self.collection_timeout = collection_timeout
+    self.device_serial_number = device_serial_number
+    self.target = target
+
+
+def GetControllerConfig(options):
+  return TracingControllerConfig(options.output_file, options.trace_time,
+                                 options.write_json,
+                                 options.link_assets, options.asset_dir,
+                                 options.timeout, options.collection_timeout,
+                                 options.device_serial_number, options.target)
+
+def GetChromeStartupControllerConfig(options):
+  return TracingControllerConfig(None, options.trace_time,
+                                 options.write_json, None, None, None, None,
+                                 None, None)

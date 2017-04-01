@@ -4,12 +4,14 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fpdfdoc/include/cpdf_filespec.h"
+#include "core/fpdfdoc/cpdf_filespec.h"
 
-#include "core/fpdfapi/fpdf_parser/include/cpdf_dictionary.h"
-#include "core/fpdfapi/fpdf_parser/include/cpdf_object.h"
-#include "core/fpdfapi/fpdf_parser/include/fpdf_parser_decode.h"
-#include "core/fxcrt/include/fx_system.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
+#include "core/fpdfapi/parser/cpdf_name.h"
+#include "core/fpdfapi/parser/cpdf_object.h"
+#include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fpdfapi/parser/fpdf_parser_decode.h"
+#include "core/fxcrt/fx_system.h"
 
 namespace {
 
@@ -80,23 +82,23 @@ CFX_WideString CPDF_FileSpec::DecodeFileName(const CFX_WideStringC& filepath) {
 
 bool CPDF_FileSpec::GetFileName(CFX_WideString* csFileName) const {
   if (CPDF_Dictionary* pDict = m_pObj->AsDictionary()) {
-    *csFileName = pDict->GetUnicodeTextBy("UF");
+    *csFileName = pDict->GetUnicodeTextFor("UF");
     if (csFileName->IsEmpty()) {
       *csFileName =
-          CFX_WideString::FromLocal(pDict->GetStringBy("F").AsStringC());
+          CFX_WideString::FromLocal(pDict->GetStringFor("F").AsStringC());
     }
-    if (pDict->GetStringBy("FS") == "URL")
+    if (pDict->GetStringFor("FS") == "URL")
       return true;
     if (csFileName->IsEmpty()) {
       if (pDict->KeyExist("DOS")) {
         *csFileName =
-            CFX_WideString::FromLocal(pDict->GetStringBy("DOS").AsStringC());
+            CFX_WideString::FromLocal(pDict->GetStringFor("DOS").AsStringC());
       } else if (pDict->KeyExist("Mac")) {
         *csFileName =
-            CFX_WideString::FromLocal(pDict->GetStringBy("Mac").AsStringC());
+            CFX_WideString::FromLocal(pDict->GetStringFor("Mac").AsStringC());
       } else if (pDict->KeyExist("Unix")) {
         *csFileName =
-            CFX_WideString::FromLocal(pDict->GetStringBy("Unix").AsStringC());
+            CFX_WideString::FromLocal(pDict->GetStringFor("Unix").AsStringC());
       } else {
         return false;
       }
@@ -110,9 +112,9 @@ bool CPDF_FileSpec::GetFileName(CFX_WideString* csFileName) const {
   return true;
 }
 
-CPDF_FileSpec::CPDF_FileSpec() {
-  m_pObj = new CPDF_Dictionary;
-  m_pObj->AsDictionary()->SetAtName("Type", "Filespec");
+CPDF_FileSpec::CPDF_FileSpec(const CFX_WeakPtr<CFX_ByteStringPool>& pPool) {
+  m_pObj = new CPDF_Dictionary(pPool);
+  m_pObj->AsDictionary()->SetNewFor<CPDF_Name>("Type", "Filespec");
 }
 
 CFX_WideString CPDF_FileSpec::EncodeFileName(const CFX_WideStringC& filepath) {
@@ -161,7 +163,8 @@ void CPDF_FileSpec::SetFileName(const CFX_WideStringC& wsFileName) {
   if (m_pObj->IsString()) {
     m_pObj->SetString(CFX_ByteString::FromUnicode(wsStr));
   } else if (CPDF_Dictionary* pDict = m_pObj->AsDictionary()) {
-    pDict->SetAtString("F", CFX_ByteString::FromUnicode(wsStr));
-    pDict->SetAtString("UF", PDF_EncodeText(wsStr));
+    pDict->SetNewFor<CPDF_String>("F", CFX_ByteString::FromUnicode(wsStr),
+                                  false);
+    pDict->SetNewFor<CPDF_String>("UF", PDF_EncodeText(wsStr), false);
   }
 }

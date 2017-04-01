@@ -15,6 +15,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/devtools/device/android_device_manager.h"
+#include "chrome/browser/devtools/device/devtools_device_discovery.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -23,18 +24,12 @@
 
 namespace base {
 template<typename T> struct DefaultSingletonTraits;
-
-class MessageLoop;
-class DictionaryValue;
-class ListValue;
-class Thread;
 }  // namespace base
 
 namespace content {
 class BrowserContext;
 }
 
-class DevToolsTargetImpl;
 class PortForwardingController;
 class Profile;
 class TCPDeviceProvider;
@@ -61,95 +56,17 @@ class DevToolsAndroidBridge : public KeyedService {
     DISALLOW_COPY_AND_ASSIGN(Factory);
   };
 
-  using BrowserId = std::pair<std::string, std::string>;
+  using RemotePage = DevToolsDeviceDiscovery::RemotePage;
+  using RemotePages = DevToolsDeviceDiscovery::RemotePages;
+  using RemoteBrowser = DevToolsDeviceDiscovery::RemoteBrowser;
+  using RemoteBrowsers = DevToolsDeviceDiscovery::RemoteBrowsers;
+  using RemoteDevice = DevToolsDeviceDiscovery::RemoteDevice;
+  using RemoteDevices = DevToolsDeviceDiscovery::RemoteDevices;
+  using CompleteDevice = DevToolsDeviceDiscovery::CompleteDevice;
+  using CompleteDevices = DevToolsDeviceDiscovery::CompleteDevices;
+  using DeviceListCallback = DevToolsDeviceDiscovery::DeviceListCallback;
 
-  class RemotePage : public base::RefCounted<RemotePage> {
-   public:
-    const std::string& serial() { return browser_id_.first; }
-    const std::string& socket() { return browser_id_.second; }
-    const std::string& frontend_url() { return frontend_url_; }
-
-   private:
-    friend class base::RefCounted<RemotePage>;
-    friend class DevToolsAndroidBridge;
-
-    RemotePage(const BrowserId& browser_id, const base::DictionaryValue& dict);
-
-    virtual ~RemotePage();
-
-    BrowserId browser_id_;
-    std::string frontend_url_;
-    std::unique_ptr<base::DictionaryValue> dict_;
-
-    DISALLOW_COPY_AND_ASSIGN(RemotePage);
-  };
-
-  using RemotePages = std::vector<scoped_refptr<RemotePage> >;
   using JsonRequestCallback = base::Callback<void(int, const std::string&)>;
-
-  class RemoteBrowser : public base::RefCounted<RemoteBrowser> {
-   public:
-    const std::string& serial() { return browser_id_.first; }
-    const std::string& socket() { return browser_id_.second; }
-    const std::string& display_name() { return display_name_; }
-    const std::string& user() { return user_; }
-    const std::string& version() { return version_; }
-    const RemotePages& pages() { return pages_; }
-
-    bool IsChrome();
-    std::string GetId();
-
-    using ParsedVersion = std::vector<int>;
-    ParsedVersion GetParsedVersion();
-
-   private:
-    friend class base::RefCounted<RemoteBrowser>;
-    friend class DevToolsAndroidBridge;
-
-    RemoteBrowser(const std::string& serial,
-                  const AndroidDeviceManager::BrowserInfo& browser_info);
-
-    virtual ~RemoteBrowser();
-
-    BrowserId browser_id_;
-    std::string display_name_;
-    std::string user_;
-    AndroidDeviceManager::BrowserInfo::Type type_;
-    std::string version_;
-    RemotePages pages_;
-
-    DISALLOW_COPY_AND_ASSIGN(RemoteBrowser);
-  };
-
-  using RemoteBrowsers = std::vector<scoped_refptr<RemoteBrowser> >;
-
-  class RemoteDevice : public base::RefCounted<RemoteDevice> {
-   public:
-    std::string serial() { return serial_; }
-    std::string model() { return model_; }
-    bool is_connected() { return connected_; }
-    RemoteBrowsers& browsers() { return browsers_; }
-    gfx::Size screen_size() { return screen_size_; }
-
-   private:
-    friend class base::RefCounted<RemoteDevice>;
-    friend class DevToolsAndroidBridge;
-
-    RemoteDevice(const std::string& serial,
-                 const AndroidDeviceManager::DeviceInfo& device_info);
-
-    virtual ~RemoteDevice();
-
-    std::string serial_;
-    std::string model_;
-    bool connected_;
-    RemoteBrowsers browsers_;
-    gfx::Size screen_size_;
-
-    DISALLOW_COPY_AND_ASSIGN(RemoteDevice);
-  };
-
-  using RemoteDevices = std::vector<scoped_refptr<RemoteDevice> >;
 
   class DeviceListListener {
    public:
@@ -201,11 +118,6 @@ class DevToolsAndroidBridge : public KeyedService {
     task_scheduler_ = scheduler;
   }
 
-  bool HasDevToolsWindow(const std::string& agent_id);
-
-  // Creates new target instance owned by caller.
-  DevToolsTargetImpl* CreatePageTarget(scoped_refptr<RemotePage> browser);
-
   using RemotePageCallback = base::Callback<void(scoped_refptr<RemotePage>)>;
   void OpenRemotePage(scoped_refptr<RemoteBrowser> browser,
                       const std::string& url);
@@ -220,27 +132,17 @@ class DevToolsAndroidBridge : public KeyedService {
   using TCPProviderCallback =
       base::Callback<void(scoped_refptr<TCPDeviceProvider>)>;
   void set_tcp_provider_callback_for_test(TCPProviderCallback callback);
+
  private:
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
   friend class base::DeleteHelper<DevToolsAndroidBridge>;
-
-  friend class PortForwardingController;
-
-  class AgentHostDelegate;
-  class DiscoveryRequest;
-  class RemotePageTarget;
 
   ~DevToolsAndroidBridge() override;
 
   void StartDeviceListPolling();
   void StopDeviceListPolling();
   bool NeedsDeviceListPolling();
-
-  using CompleteDevice = std::pair<scoped_refptr<AndroidDeviceManager::Device>,
-                    scoped_refptr<RemoteDevice>>;
-  using CompleteDevices = std::vector<CompleteDevice>;
-  using DeviceListCallback = base::Callback<void(const CompleteDevices&)>;
 
   void RequestDeviceList(const DeviceListCallback& callback);
   void ReceivedDeviceList(const CompleteDevices& complete_devices);
@@ -254,19 +156,6 @@ class DevToolsAndroidBridge : public KeyedService {
 
   void CreateDeviceProviders();
 
-  void SendJsonRequest(const BrowserId& browser_id,
-                       const std::string& url,
-                       const JsonRequestCallback& callback);
-
-  void SendProtocolCommand(const BrowserId& browser_id,
-                           const std::string& target_path,
-                           const std::string& method,
-                           std::unique_ptr<base::DictionaryValue> params,
-                           const base::Closure callback);
-
-  scoped_refptr<AndroidDeviceManager::Device> FindDevice(
-      const std::string& serial);
-
   base::WeakPtr<DevToolsAndroidBridge> AsWeakPtr() {
       return weak_factory_.GetWeakPtr();
   }
@@ -278,12 +167,8 @@ class DevToolsAndroidBridge : public KeyedService {
       std::map<std::string, scoped_refptr<AndroidDeviceManager::Device> >;
   DeviceMap device_map_;
 
-  using AgentHostDelegates = std::map<std::string, AgentHostDelegate*>;
-  AgentHostDelegates host_delegates_;
-
   using DeviceListListeners = std::vector<DeviceListListener*>;
   DeviceListListeners device_list_listeners_;
-  base::CancelableCallback<void(const CompleteDevices&)> device_list_callback_;
 
   using DeviceCountListeners = std::vector<DeviceCountListener*>;
   DeviceCountListeners device_count_listeners_;
@@ -297,6 +182,8 @@ class DevToolsAndroidBridge : public KeyedService {
   PrefChangeRegistrar pref_change_registrar_;
 
   TCPProviderCallback tcp_provider_callback_;
+
+  std::unique_ptr<DevToolsDeviceDiscovery> device_discovery_;
 
   base::WeakPtrFactory<DevToolsAndroidBridge> weak_factory_;
 

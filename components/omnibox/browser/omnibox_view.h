@@ -28,7 +28,6 @@ class GURL;
 class OmniboxClient;
 class OmniboxEditController;
 class OmniboxViewMacTest;
-class ToolbarModel;
 class OmniboxEditModel;
 
 namespace gfx {
@@ -90,9 +89,6 @@ class OmniboxView {
   // the field is empty.
   bool IsEditingOrEmpty() const;
 
-  // Returns the resource ID of the icon to show for the current text.
-  int GetIcon() const;
-
   // Like GetIcon(), but returns a vector icon identifier.
   gfx::VectorIconId GetVectorIcon() const;
 
@@ -130,20 +126,9 @@ class OmniboxView {
   // avoid selecting the "phantom newline" at the end of the edit.
   virtual void SelectAll(bool reversed) = 0;
 
-  // Sets focus, disables search term replacement, reverts the omnibox, and
-  // selects all.
-  void ShowURL();
-
-  // Enables search term replacement and reverts the omnibox.
-  void HideURL();
-
-  // Re-enables search term replacement on the ToolbarModel, and reverts the
-  // edit and popup back to their unedited state (permanent text showing, popup
-  // closed, no user input in progress).
+  // Reverts the edit and popup back to their unedited state (permanent text
+  // showing, popup closed, no user input in progress).
   virtual void RevertAll();
-
-  // Like RevertAll(), but does not touch the search term replacement state.
-  void RevertWithoutResettingSearchTermReplacement();
 
   // Updates the autocomplete popup and other state after the text has been
   // changed by the user.
@@ -202,12 +187,6 @@ class OmniboxView {
   // to the rich edit control, the IME window is the relative window. Otherwise,
   // the top-most window is the relative window.
   virtual gfx::NativeView GetRelativeWindowForPopup() const = 0;
-
-  // Shows |input| as gray suggested text after what the user has typed.
-  virtual void SetGrayTextAutocompletion(const base::string16& input) = 0;
-
-  // Returns the current gray suggested text.
-  virtual base::string16 GetGrayTextAutocompletion() const = 0;
 
   // Returns the width in pixels needed to display the current text. The
   // returned value includes margins.
@@ -285,7 +264,6 @@ class OmniboxView {
 
  private:
   friend class OmniboxViewMacTest;
-  FRIEND_TEST_ALL_PREFIXES(InstantExtendedTest, ShowURL);
 
   // |model_| can be NULL in tests.
   std::unique_ptr<OmniboxEditModel> model_;

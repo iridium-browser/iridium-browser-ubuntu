@@ -18,7 +18,25 @@ namespace scheduler {
 
 class SchedulerHelper;
 
-// Common scheduler functionality for Idle tasks.
+// The job of the IdleHelper is to run idle tasks when the system is otherwise
+// idle. Idle tasks should be optional work, with no guarantee they will be run
+// at all. Idle tasks are subject to three levels of throttling:
+//
+//   1. Both idle queues are run a BEST_EFFORT priority (i.e. only selected if
+//      there is nothing else to do.
+//   2. The idle queues are only enabled during an idle period.
+//   3. Idle tasks posted from within an idle task run in the next idle period.
+//      This is achieved by inserting a fence into the queue.
+//
+// There are two types of idle periods:
+//   1. Short idle period - typically less than 10ms run after begin main frame
+//      has finished, with the idle period ending at the compositor provided
+//      deadline.
+//   2. Long idle periods - typically up to 50ms when no frames are being
+//      produced.
+//
+// Idle tasks are supplied a deadline, and should endeavor to finished before it
+// ends to avoid jank.
 class BLINK_PLATFORM_EXPORT IdleHelper
     : public base::MessageLoop::TaskObserver,
       public SingleThreadIdleTaskRunner::Delegate {
@@ -76,6 +94,9 @@ class BLINK_PLATFORM_EXPORT IdleHelper
       base::TimeDelta required_quiescence_duration_before_long_idle_period);
   ~IdleHelper() override;
 
+  // Prevents any further idle tasks from running.
+  void Shutdown();
+
   // Returns the idle task runner. Tasks posted to this runner may be reordered
   // relative to other task types and may be starved for an arbitrarily long
   // time if no idle time is available.
@@ -117,6 +138,7 @@ class BLINK_PLATFORM_EXPORT IdleHelper
   void OnIdleTaskPosted() override;
   base::TimeTicks WillProcessIdleTask() override;
   void DidProcessIdleTask() override;
+  base::TimeTicks NowTicks() override;
 
   // base::MessageLoop::TaskObserver implementation:
   void WillProcessTask(const base::PendingTask& pending_task) override;
@@ -128,6 +150,8 @@ class BLINK_PLATFORM_EXPORT IdleHelper
  private:
   friend class BaseIdleHelperTest;
   friend class IdleHelperTest;
+
+  const scoped_refptr<TaskQueue>& idle_queue() const { return idle_queue_; }
 
   class State {
    public:
@@ -210,6 +234,8 @@ class BLINK_PLATFORM_EXPORT IdleHelper
   base::TimeDelta required_quiescence_duration_before_long_idle_period_;
 
   const char* disabled_by_default_tracing_category_;
+
+  bool is_shutdown_;
 
   base::WeakPtr<IdleHelper> weak_idle_helper_ptr_;
   base::WeakPtrFactory<IdleHelper> weak_factory_;

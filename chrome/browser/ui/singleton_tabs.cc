@@ -50,11 +50,10 @@ void ShowSingletonTabOverwritingNTP(Browser* browser,
       browser->tab_strip_model()->GetActiveWebContents();
   if (contents) {
     const GURL& contents_url = contents->GetURL();
-    if ((contents_url == GURL(kChromeUINewTabURL) ||
-         search::IsInstantNTP(contents) ||
-         contents_url == GURL(url::kAboutBlankURL)) &&
+    if ((contents_url == kChromeUINewTabURL || search::IsInstantNTP(contents) ||
+         contents_url == url::kAboutBlankURL) &&
         GetIndexOfSingletonTab(&local_params) < 0) {
-      local_params.disposition = CURRENT_TAB;
+      local_params.disposition = WindowOpenDisposition::CURRENT_TAB;
     }
   }
 
@@ -64,7 +63,7 @@ void ShowSingletonTabOverwritingNTP(Browser* browser,
 NavigateParams GetSingletonTabNavigateParams(Browser* browser,
                                              const GURL& url) {
   NavigateParams params(browser, url, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
-  params.disposition = SINGLETON_TAB;
+  params.disposition = WindowOpenDisposition::SINGLETON_TAB;
   params.window_action = NavigateParams::SHOW_WINDOW;
   params.user_gesture = true;
   params.tabstrip_add_types |= TabStripModel::ADD_INHERIT_OPENER;
@@ -74,7 +73,7 @@ NavigateParams GetSingletonTabNavigateParams(Browser* browser,
 // Returns the index of an existing singleton tab in |params->browser| matching
 // the URL specified in |params|.
 int GetIndexOfSingletonTab(NavigateParams* params) {
-  if (params->disposition != SINGLETON_TAB)
+  if (params->disposition != WindowOpenDisposition::SINGLETON_TAB)
     return -1;
 
   // In case the URL was rewritten by the BrowserURLHandler we need to ensure

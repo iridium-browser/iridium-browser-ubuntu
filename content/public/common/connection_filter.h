@@ -7,7 +7,7 @@
 
 #include "content/common/content_export.h"
 
-namespace shell {
+namespace service_manager {
 class Connector;
 class Identity;
 class InterfaceRegistry;
@@ -16,9 +16,9 @@ class InterfaceRegistry;
 namespace content {
 
 // A ConnectionFilter may be used to conditionally expose interfaces on inbound
-// connections accepted by MojoShellConnection. ConnectionFilters are used
-// exclusively on the IO thread. See MojoShellConnection::AddConnectionFilter
-// for details.
+// connections accepted by ServiceManagerConnection. ConnectionFilters are used
+// exclusively on the IO thread. See
+// ServiceManagerConnection::AddConnectionFilter for details.
 class CONTENT_EXPORT ConnectionFilter {
  public:
   virtual ~ConnectionFilter() {}
@@ -35,9 +35,9 @@ class CONTENT_EXPORT ConnectionFilter {
   //
   // NOTE: This ConnectionFilter is NOT guaranteed to outlive |registry|, so you
   // must not attach unsafe references to |this|, e.g., via AddInterface().
-  virtual bool OnConnect(const shell::Identity& remote_identity,
-                         shell::InterfaceRegistry* registry,
-                         shell::Connector* connector) = 0;
+  virtual bool OnConnect(const service_manager::Identity& remote_identity,
+                         service_manager::InterfaceRegistry* registry,
+                         service_manager::Connector* connector) = 0;
 };
 
 }  // namespace content

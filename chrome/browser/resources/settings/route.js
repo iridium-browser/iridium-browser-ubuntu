@@ -91,11 +91,20 @@ cr.define('settings', function() {
   r.ADVANCED = new Route('/advanced');
   r.ABOUT = new Route('/help');
 
-<if expr="chromeos">
+  // Navigable dialogs. These are the only non-section children of root pages.
+  // These are disfavored. If we add anymore, we should add explicit support.
+  r.IMPORT_DATA = r.BASIC.createChild('/importData');
+  r.SIGN_OUT = r.BASIC.createChild('/signOut');
+  r.CLEAR_BROWSER_DATA = r.ADVANCED.createChild('/clearBrowserData');
+  r.RESET_DIALOG = r.ADVANCED.createChild('/resetProfileSettings');
+  r.TRIGGERED_RESET_DIALOG =
+      r.ADVANCED.createChild('/triggeredResetProfileSettings');
+
+// <if expr="chromeos">
   r.INTERNET = r.BASIC.createSection('/internet', 'internet');
   r.NETWORK_DETAIL = r.INTERNET.createChild('/networkDetail');
   r.KNOWN_NETWORKS = r.INTERNET.createChild('/knownNetworks');
-</if>
+// </if>
 
   r.APPEARANCE = r.BASIC.createSection('/appearance', 'appearance');
   r.FONTS = r.APPEARANCE.createChild('/fonts');
@@ -106,14 +115,18 @@ cr.define('settings', function() {
   r.SEARCH = r.BASIC.createSection('/search', 'search');
   r.SEARCH_ENGINES = r.SEARCH.createChild('/searchEngines');
 
+// <if expr="chromeos">
+  r.ANDROID_APPS = r.BASIC.createSection('/androidApps', 'androidApps');
+// </if>
+
   r.ON_STARTUP = r.BASIC.createSection('/onStartup', 'onStartup');
 
   r.PEOPLE = r.BASIC.createSection('/people', 'people');
   r.SYNC = r.PEOPLE.createChild('/syncSetup');
-<if expr="not chromeos">
+// <if expr="not chromeos">
   r.MANAGE_PROFILE = r.PEOPLE.createChild('/manageProfile');
-</if>
-<if expr="chromeos">
+// </if>
+// <if expr="chromeos">
   r.CHANGE_PICTURE = r.PEOPLE.createChild('/changePicture');
   r.ACCOUNTS = r.PEOPLE.createChild('/accounts');
   r.LOCK_SCREEN = r.PEOPLE.createChild('/lockScreen');
@@ -123,22 +136,18 @@ cr.define('settings', function() {
   r.KEYBOARD = r.DEVICE.createChild('/keyboard-overlay');
   r.DISPLAY = r.DEVICE.createChild('/display');
   r.STYLUS = r.DEVICE.createChild('/stylus');
-</if>
+  r.STORAGE = r.DEVICE.createChild('/storage');
+// </if>
 
   r.PRIVACY = r.ADVANCED.createSection('/privacy', 'privacy');
   r.CERTIFICATES = r.PRIVACY.createChild('/certificates');
 
-  // CLEAR_BROWSER_DATA is the only navigable dialog route. It's the only child
-  // of a root page that's not a section. Don't add any more routes like these.
-  // If more navigable dialogs are needed, add explicit support in Route.
-  r.CLEAR_BROWSER_DATA = r.ADVANCED.createChild('/clearBrowserData');
-
-  r.SITE_SETTINGS = r.PRIVACY.createChild('/siteSettings');
+  r.SITE_SETTINGS = r.PRIVACY.createChild('/content');
   r.SITE_SETTINGS_ALL = r.SITE_SETTINGS.createChild('all');
   r.SITE_SETTINGS_SITE_DETAILS =
-      r.SITE_SETTINGS_ALL.createChild('/siteSettings/siteDetails');
+      r.SITE_SETTINGS_ALL.createChild('/content/siteDetails');
 
-  r.SITE_SETTINGS_HANDLERS = r.SITE_SETTINGS.createChild('handlers');
+  r.SITE_SETTINGS_HANDLERS = r.SITE_SETTINGS.createChild('/handlers');
 
   // TODO(tommycli): Find a way to refactor these repetitive category routes.
   r.SITE_SETTINGS_AUTOMATIC_DOWNLOADS =
@@ -147,48 +156,47 @@ cr.define('settings', function() {
       r.SITE_SETTINGS.createChild('backgroundSync');
   r.SITE_SETTINGS_CAMERA = r.SITE_SETTINGS.createChild('camera');
   r.SITE_SETTINGS_COOKIES = r.SITE_SETTINGS.createChild('cookies');
+  r.SITE_SETTINGS_DATA_DETAILS =
+      r.SITE_SETTINGS_COOKIES.createChild('/cookies/detail');
   r.SITE_SETTINGS_IMAGES = r.SITE_SETTINGS.createChild('images');
   r.SITE_SETTINGS_JAVASCRIPT = r.SITE_SETTINGS.createChild('javascript');
-  r.SITE_SETTINGS_KEYGEN = r.SITE_SETTINGS.createChild('keygen');
   r.SITE_SETTINGS_LOCATION = r.SITE_SETTINGS.createChild('location');
   r.SITE_SETTINGS_MICROPHONE = r.SITE_SETTINGS.createChild('microphone');
   r.SITE_SETTINGS_NOTIFICATIONS = r.SITE_SETTINGS.createChild('notifications');
-  r.SITE_SETTINGS_PLUGINS = r.SITE_SETTINGS.createChild('plugins');
+  r.SITE_SETTINGS_FLASH = r.SITE_SETTINGS.createChild('flash');
   r.SITE_SETTINGS_POPUPS = r.SITE_SETTINGS.createChild('popups');
   r.SITE_SETTINGS_UNSANDBOXED_PLUGINS =
       r.SITE_SETTINGS.createChild('unsandboxedPlugins');
   r.SITE_SETTINGS_USB_DEVICES = r.SITE_SETTINGS.createChild('usbDevices');
+  r.SITE_SETTINGS_ZOOM_LEVELS = r.SITE_SETTINGS.createChild('zoomLevels');
+  r.SITE_SETTINGS_PDF_DOCUMENTS = r.SITE_SETTINGS.createChild('pdfDocuments');
 
-<if expr="chromeos">
+// <if expr="chromeos">
   r.DATETIME = r.ADVANCED.createSection('/dateTime', 'dateTime');
-
   r.BLUETOOTH = r.ADVANCED.createSection('/bluetooth', 'bluetooth');
-  r.BLUETOOTH_ADD_DEVICE = r.BLUETOOTH.createChild('/bluetoothAddDevice');
-  r.BLUETOOTH_PAIR_DEVICE =
-      r.BLUETOOTH_ADD_DEVICE.createChild('bluetoothPairDevice');
-</if>
+// </if>
 
-  r.PASSWORDS = r.ADVANCED.createSection('/passwords', 'passwordsAndForms');
+  r.PASSWORDS =
+      r.ADVANCED.createSection('/passwordsAndForms', 'passwordsAndForms');
   r.AUTOFILL = r.PASSWORDS.createChild('/autofill');
-  r.MANAGE_PASSWORDS = r.PASSWORDS.createChild('/managePasswords');
+  r.MANAGE_PASSWORDS = r.PASSWORDS.createChild('/passwords');
 
   r.LANGUAGES = r.ADVANCED.createSection('/languages', 'languages');
-  r.LANGUAGES_DETAIL = r.LANGUAGES.createChild('edit');
-<if expr="chromeos">
+// <if expr="chromeos">
   r.INPUT_METHODS = r.LANGUAGES.createChild('/inputMethods');
-</if>
-<if expr="not is_macosx">
+// </if>
+// <if expr="not is_macosx">
   r.EDIT_DICTIONARY = r.LANGUAGES.createChild('/editDictionary');
-</if>
+// </if>
 
-  r.DOWNLOADS = r.ADVANCED.createSection('/downloadsDirectory', 'downloads');
+  r.DOWNLOADS = r.ADVANCED.createSection('/downloads', 'downloads');
 
   r.PRINTING = r.ADVANCED.createSection('/printing', 'printing');
   r.CLOUD_PRINTERS = r.PRINTING.createChild('/cloudPrinters');
-<if expr="chromeos">
+// <if expr="chromeos">
   r.CUPS_PRINTERS = r.PRINTING.createChild('/cupsPrinters');
   r.CUPS_PRINTER_DETAIL = r.CUPS_PRINTERS.createChild('/cupsPrinterDetails');
-</if>
+// </if>
 
   r.ACCESSIBILITY = r.ADVANCED.createSection('/accessibility', 'a11y');
   r.MANAGE_ACCESSIBILITY = r.ACCESSIBILITY.createChild('/manageAccessibility');
@@ -196,11 +204,12 @@ cr.define('settings', function() {
   r.SYSTEM = r.ADVANCED.createSection('/system', 'system');
   r.RESET = r.ADVANCED.createSection('/reset', 'reset');
 
-<if expr="chromeos">
-  r.INPUT_METHODS = r.LANGUAGES.createChild('/inputMethods');
-  r.DETAILED_BUILD_INFO = r.ABOUT.createChild('/help/details');
-  r.DETAILED_BUILD_INFO.section = 'about';
-</if>
+// <if expr="chromeos">
+  // "About" is the only section in About, but we still need to create the route
+  // in order to show the subpage on Chrome OS.
+  r.ABOUT_ABOUT = r.ABOUT.createSection('/help/about', 'about');
+  r.DETAILED_BUILD_INFO = r.ABOUT_ABOUT.createChild('/help/details');
+// </if>
 
   var routeObservers_ = new Set();
 
@@ -221,22 +230,38 @@ cr.define('settings', function() {
       assert(routeObservers_.delete(this));
     },
 
-    /** @abstract */
-    currentRouteChanged: assertNotReached,
+    /**
+     * @param {!settings.Route|undefined} opt_newRoute
+     * @param {!settings.Route|undefined} opt_oldRoute
+     * @abstract
+     */
+    currentRouteChanged: function(opt_newRoute, opt_oldRoute) {
+      assertNotReached();
+    },
   };
 
   /**
-   * Returns the matching canonical route, or null if none matches.
+   * Regular expression that captures the leading slash, the content and the
+   * trailing slash in three different groups.
+   * @const {!RegExp}
+   */
+  var CANONICAL_PATH_REGEX = /(^\/)([\/-\w]+)(\/$)/;
+
+  /**
    * @param {string} path
-   * @return {?settings.Route}
+   * @return {?settings.Route} The matching canonical route, or null if none
+   *     matches.
    */
   var getRouteForPath = function(path) {
+    // Allow trailing slash in paths.
+    var canonicalPath = path.replace(CANONICAL_PATH_REGEX, '$1$2');
+
     // TODO(tommycli): Use Object.values once Closure compilation supports it.
     var matchingKey = Object.keys(Route).find(function(key) {
-      return Route[key].path == path;
+      return Route[key].path == canonicalPath;
     });
 
-    return Route[matchingKey] || null;
+    return !!matchingKey ? Route[matchingKey] : null;
   };
 
   /**
@@ -252,6 +277,9 @@ cr.define('settings', function() {
    * @private {!URLSearchParams}
    */
   var currentQueryParameters_ = new URLSearchParams();
+
+  /** @private {boolean} */
+  var lastRouteChangeWasPopstate_ = false;
 
   /** @private */
   var initializeRouteFromUrlCalled_ = false;
@@ -277,11 +305,13 @@ cr.define('settings', function() {
    * Helper function to set the current route and notify all observers.
    * @param {!settings.Route} route
    * @param {!URLSearchParams} queryParameters
+   * @param {boolean} isPopstate
    */
-  var setCurrentRoute = function(route, queryParameters) {
+  var setCurrentRoute = function(route, queryParameters, isPopstate) {
     var oldRoute = currentRoute_;
     currentRoute_ = route;
     currentQueryParameters_ = queryParameters;
+    lastRouteChangeWasPopstate_ = isPopstate;
     for (var observer of routeObservers_)
       observer.currentRouteChanged(currentRoute_, oldRoute);
   };
@@ -294,25 +324,37 @@ cr.define('settings', function() {
     return new URLSearchParams(currentQueryParameters_);  // Defensive copy.
   };
 
+  /** @return {boolean} */
+  var lastRouteChangeWasPopstate = function() {
+    return lastRouteChangeWasPopstate_;
+  };
+
   /**
    * Navigates to a canonical route and pushes a new history entry.
    * @param {!settings.Route} route
    * @param {URLSearchParams=} opt_dynamicParameters Navigations to the same
-   *     search parameters in a different order will still push to history.
+   *     URL parameters in a different order will still push to history.
+   * @param {boolean=} opt_removeSearch Whether to strip the 'search' URL
+   *     parameter during navigation. Defaults to false.
    */
-  var navigateTo = function(route, opt_dynamicParameters) {
+  var navigateTo = function(route, opt_dynamicParameters, opt_removeSearch) {
     var params = opt_dynamicParameters || new URLSearchParams();
+    var removeSearch = !!opt_removeSearch;
+
+    var oldSearchParam = getQueryParameters().get('search') || '';
+    var newSearchParam = params.get('search') || '';
+
+    if (!removeSearch && oldSearchParam && !newSearchParam)
+      params.append('search', oldSearchParam);
 
     var url = route.path;
-    if (opt_dynamicParameters) {
-      var queryString = opt_dynamicParameters.toString();
-      if (queryString)
-        url += '?' + queryString;
-    }
+    var queryString = params.toString();
+    if (queryString)
+      url += '?' + queryString;
 
     // History serializes the state, so we don't push the actual route object.
     window.history.pushState(currentRoute_.path, '', url);
-    setCurrentRoute(route, params);
+    setCurrentRoute(route, params, false);
   };
 
   /**
@@ -334,7 +376,7 @@ cr.define('settings', function() {
   window.addEventListener('popstate', function(event) {
     // On pop state, do not push the state onto the window.history again.
     setCurrentRoute(getRouteForPath(window.location.pathname) || Route.BASIC,
-                    new URLSearchParams(window.location.search));
+                    new URLSearchParams(window.location.search), true);
   });
 
   return {
@@ -344,6 +386,7 @@ cr.define('settings', function() {
     initializeRouteFromUrl: initializeRouteFromUrl,
     getCurrentRoute: getCurrentRoute,
     getQueryParameters: getQueryParameters,
+    lastRouteChangeWasPopstate: lastRouteChangeWasPopstate,
     navigateTo: navigateTo,
     navigateToPreviousRoute: navigateToPreviousRoute,
   };

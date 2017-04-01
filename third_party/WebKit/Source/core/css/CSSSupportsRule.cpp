@@ -34,27 +34,20 @@
 
 namespace blink {
 
-CSSSupportsRule::CSSSupportsRule(StyleRuleSupports* supportsRule, CSSStyleSheet* parent)
-    : CSSGroupingRule(supportsRule, parent)
-{
+CSSSupportsRule::CSSSupportsRule(StyleRuleSupports* supportsRule,
+                                 CSSStyleSheet* parent)
+    : CSSConditionRule(supportsRule, parent) {}
+
+String CSSSupportsRule::cssText() const {
+  StringBuilder result;
+
+  result.append("@supports ");
+  result.append(conditionText());
+  result.append(" {\n");
+  appendCSSTextForItems(result);
+  result.append('}');
+
+  return result.toString();
 }
 
-String CSSSupportsRule::cssText() const
-{
-    StringBuilder result;
-
-    result.append("@supports ");
-    result.append(conditionText());
-    result.append(" {\n");
-    appendCSSTextForItems(result);
-    result.append('}');
-
-    return result.toString();
-}
-
-String CSSSupportsRule::conditionText() const
-{
-    return toStyleRuleSupports(m_groupRule.get())->conditionText();
-}
-
-} // namespace blink
+}  // namespace blink

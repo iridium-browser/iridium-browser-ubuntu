@@ -217,7 +217,7 @@ net::URLRequestJob* TestDownloadRequestHandler::PartialResponseJob::Factory(
     net::URLRequest* request,
     net::NetworkDelegate* delegate,
     base::WeakPtr<Interceptor> interceptor) {
-  return new PartialResponseJob(base::WrapUnique(new Parameters(parameters)),
+  return new PartialResponseJob(base::MakeUnique<Parameters>(parameters),
                                 interceptor, request, delegate);
 }
 
@@ -327,7 +327,9 @@ void TestDownloadRequestHandler::PartialResponseJob::ReportCompletedRequest() {
     completed_request->request_headers = request()->extra_request_headers();
     completed_request->referrer = request()->referrer();
     completed_request->referrer_policy = request()->referrer_policy();
-    completed_request->initiator = request()->initiator();
+    completed_request->initiator = request()->initiator().has_value()
+                                       ? request()->initiator().value()
+                                       : url::Origin();
     completed_request->first_party_for_cookies =
         request()->first_party_for_cookies();
     completed_request->first_party_url_policy =

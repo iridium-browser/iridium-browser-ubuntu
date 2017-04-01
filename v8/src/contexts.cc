@@ -57,15 +57,17 @@ bool ScriptContextTable::Lookup(Handle<ScriptContextTable> table,
 
 
 bool Context::is_declaration_context() {
-  if (IsFunctionContext() || IsNativeContext() || IsScriptContext()) {
+  if (IsFunctionContext() || IsNativeContext() || IsScriptContext() ||
+      IsModuleContext()) {
     return true;
   }
+  if (IsEvalContext()) return closure()->shared()->language_mode() == STRICT;
   if (!IsBlockContext()) return false;
   Object* ext = extension();
   // If we have the special extension, we immediately know it must be a
   // declaration scope. That's just a small performance shortcut.
-  return ext->IsSloppyBlockWithEvalContextExtension()
-      || ScopeInfo::cast(ext)->is_declaration_scope();
+  return ext->IsContextExtension() ||
+         ScopeInfo::cast(ext)->is_declaration_scope();
 }
 
 
@@ -73,7 +75,6 @@ Context* Context::declaration_context() {
   Context* current = this;
   while (!current->is_declaration_context()) {
     current = current->previous();
-    DCHECK(current->closure() == closure());
   }
   return current;
 }
@@ -81,7 +82,8 @@ Context* Context::declaration_context() {
 Context* Context::closure_context() {
   Context* current = this;
   while (!current->IsFunctionContext() && !current->IsScriptContext() &&
-         !current->IsNativeContext()) {
+         !current->IsModuleContext() && !current->IsNativeContext() &&
+         !current->IsEvalContext()) {
     current = current->previous();
     DCHECK(current->closure() == closure());
   }
@@ -89,40 +91,52 @@ Context* Context::closure_context() {
 }
 
 JSObject* Context::extension_object() {
-  DCHECK(IsNativeContext() || IsFunctionContext() || IsBlockContext());
+  DCHECK(IsNativeContext() || IsFunctionContext() || IsBlockContext() ||
+         IsEvalContext());
   HeapObject* object = extension();
   if (object->IsTheHole(GetIsolate())) return nullptr;
   if (IsBlockContext()) {
-    if (!object->IsSloppyBlockWithEvalContextExtension()) return nullptr;
-    object = SloppyBlockWithEvalContextExtension::cast(object)->extension();
+    if (!object->IsContextExtension()) return nullptr;
+    object = JSObject::cast(ContextExtension::cast(object)->extension());
   }
   DCHECK(object->IsJSContextExtensionObject() ||
          (IsNativeContext() && object->IsJSGlobalObject()));
   return JSObject::cast(object);
 }
 
-
 JSReceiver* Context::extension_receiver() {
-  DCHECK(IsNativeContext() || IsWithContext() ||
+  DCHECK(IsNativeContext() || IsWithContext() || IsEvalContext() ||
          IsFunctionContext() || IsBlockContext());
-  return IsWithContext() ? JSReceiver::cast(extension()) : extension_object();
+  return IsWithContext() ? JSReceiver::cast(
+                               ContextExtension::cast(extension())->extension())
+                         : extension_object();
 }
 
-
 ScopeInfo* Context::scope_info() {
-  DCHECK(IsModuleContext() || IsScriptContext() || IsBlockContext());
+  DCHECK(!IsNativeContext());
+  if (IsFunctionContext() || IsModuleContext() || IsEvalContext()) {
+    return closure()->shared()->scope_info();
+  }
   HeapObject* object = extension();
-  if (object->IsSloppyBlockWithEvalContextExtension()) {
-    DCHECK(IsBlockContext());
-    object = SloppyBlockWithEvalContextExtension::cast(object)->scope_info();
+  if (object->IsContextExtension()) {
+    DCHECK(IsBlockContext() || IsCatchContext() || IsWithContext() ||
+           IsDebugEvaluateContext());
+    object = ContextExtension::cast(object)->scope_info();
   }
   return ScopeInfo::cast(object);
 }
 
+Module* Context::module() {
+  Context* current = this;
+  while (!current->IsModuleContext()) {
+    current = current->previous();
+  }
+  return Module::cast(current->extension());
+}
 
 String* Context::catch_name() {
   DCHECK(IsCatchContext());
-  return String::cast(extension());
+  return String::cast(ContextExtension::cast(extension())->extension());
 }
 
 
@@ -178,13 +192,14 @@ static Maybe<bool> UnscopableLookup(LookupIterator* it) {
 
 static PropertyAttributes GetAttributesForMode(VariableMode mode) {
   DCHECK(IsDeclaredVariableMode(mode));
-  return IsImmutableVariableMode(mode) ? READ_ONLY : NONE;
+  return mode == CONST ? READ_ONLY : NONE;
 }
 
 Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
                                int* index, PropertyAttributes* attributes,
                                InitializationFlag* init_flag,
                                VariableMode* variable_mode) {
+  DCHECK(!IsModuleContext());
   Isolate* isolate = GetIsolate();
   Handle<Context> context(this, isolate);
 
@@ -210,6 +225,8 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
     }
 
     // 1. Check global objects, subjects of with, and extension objects.
+    DCHECK_IMPLIES(context->IsEvalContext(),
+                   context->extension()->IsTheHole(isolate));
     if ((context->IsNativeContext() ||
          (context->IsWithContext() && ((flags & SKIP_WITH_CONTEXT) == 0)) ||
          context->IsFunctionContext() || context->IsBlockContext()) &&
@@ -248,8 +265,14 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
           object->IsJSContextExtensionObject()) {
         maybe = JSReceiver::GetOwnPropertyAttributes(object, name);
       } else if (context->IsWithContext()) {
-        // A with context will never bind "this".
-        if (name->Equals(*isolate->factory()->this_string())) {
+        // A with context will never bind "this", but debug-eval may look into
+        // a with context when resolving "this". Other synthetic variables such
+        // as new.target may be resolved as DYNAMIC_LOCAL due to bug v8:5405 ,
+        // skipping them here serves as a workaround until a more thorough
+        // fix can be applied.
+        // TODO(v8:5405): Replace this check with a DCHECK when resolution of
+        // of synthetic variables does not go through this code path.
+        if (ScopeInfo::VariableIsSynthetic(*name)) {
           maybe = Just(ABSENT);
         } else {
           LookupIterator it(object, name, object);
@@ -282,12 +305,10 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
 
     // 2. Check the context proper if it has slots.
     if (context->IsFunctionContext() || context->IsBlockContext() ||
-        context->IsScriptContext()) {
+        context->IsScriptContext() || context->IsEvalContext()) {
       // Use serialized scope information of functions and blocks to search
       // for the context index.
-      Handle<ScopeInfo> scope_info(context->IsFunctionContext()
-          ? context->closure()->shared()->scope_info()
-          : context->scope_info());
+      Handle<ScopeInfo> scope_info(context->scope_info());
       VariableMode mode;
       InitializationFlag flag;
       MaybeAssignedFlag maybe_assigned_flag;
@@ -307,10 +328,11 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
       }
 
       // Check the slot corresponding to the intermediate context holding
-      // only the function name variable.
-      if (follow_context_chain && context->IsFunctionContext()) {
-        VariableMode mode;
-        int function_index = scope_info->FunctionContextSlotIndex(*name, &mode);
+      // only the function name variable. It's conceptually (and spec-wise)
+      // in an outer scope of the function's declaration scope.
+      if (follow_context_chain && (flags & STOP_AT_DECLARATION_SCOPE) == 0 &&
+          context->IsFunctionContext()) {
+        int function_index = scope_info->FunctionContextSlotIndex(*name);
         if (function_index >= 0) {
           if (FLAG_trace_contexts) {
             PrintF("=> found intermediate function in context slot %d\n",
@@ -318,9 +340,8 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
           }
           *index = function_index;
           *attributes = READ_ONLY;
-          DCHECK(mode == CONST_LEGACY || mode == CONST);
           *init_flag = kCreatedInitialized;
-          *variable_mode = mode;
+          *variable_mode = CONST;
           return context;
         }
       }
@@ -339,18 +360,21 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
       }
     } else if (context->IsDebugEvaluateContext()) {
       // Check materialized locals.
-      Object* obj = context->get(EXTENSION_INDEX);
-      if (obj->IsJSReceiver()) {
-        Handle<JSReceiver> extension(JSReceiver::cast(obj));
-        LookupIterator it(extension, name, extension);
-        Maybe<bool> found = JSReceiver::HasProperty(&it);
-        if (found.FromMaybe(false)) {
-          *attributes = NONE;
-          return extension;
+      Object* ext = context->get(EXTENSION_INDEX);
+      if (ext->IsContextExtension()) {
+        Object* obj = ContextExtension::cast(ext)->extension();
+        if (obj->IsJSReceiver()) {
+          Handle<JSReceiver> extension(JSReceiver::cast(obj));
+          LookupIterator it(extension, name, extension);
+          Maybe<bool> found = JSReceiver::HasProperty(&it);
+          if (found.FromMaybe(false)) {
+            *attributes = NONE;
+            return extension;
+          }
         }
       }
       // Check the original context, but do not follow its context chain.
-      obj = context->get(WRAPPED_CONTEXT_INDEX);
+      Object* obj = context->get(WRAPPED_CONTEXT_INDEX);
       if (obj->IsContext()) {
         Handle<Object> result =
             Context::cast(obj)->Lookup(name, DONT_FOLLOW_CHAINS, index,
@@ -386,25 +410,182 @@ Handle<Object> Context::Lookup(Handle<String> name, ContextLookupFlags flags,
   return Handle<Object>::null();
 }
 
+static const int kSharedOffset = 0;
+static const int kCachedCodeOffset = 1;
+static const int kLiteralsOffset = 2;
+static const int kOsrAstIdOffset = 3;
+static const int kEntryLength = 4;
+static const int kInitialLength = kEntryLength;
 
-void Context::InitializeGlobalSlots() {
-  DCHECK(IsScriptContext());
+int Context::SearchOptimizedCodeMapEntry(SharedFunctionInfo* shared,
+                                         BailoutId osr_ast_id) {
   DisallowHeapAllocation no_gc;
+  DCHECK(this->IsNativeContext());
+  if (!OptimizedCodeMapIsCleared()) {
+    FixedArray* optimized_code_map = this->osr_code_table();
+    int length = optimized_code_map->length();
+    Smi* osr_ast_id_smi = Smi::FromInt(osr_ast_id.ToInt());
+    for (int i = 0; i < length; i += kEntryLength) {
+      if (WeakCell::cast(optimized_code_map->get(i + kSharedOffset))->value() ==
+              shared &&
+          optimized_code_map->get(i + kOsrAstIdOffset) == osr_ast_id_smi) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
 
-  ScopeInfo* scope_info = this->scope_info();
+void Context::SearchOptimizedCodeMap(SharedFunctionInfo* shared,
+                                     BailoutId osr_ast_id, Code** pcode,
+                                     LiteralsArray** pliterals) {
+  DCHECK(this->IsNativeContext());
+  int entry = SearchOptimizedCodeMapEntry(shared, osr_ast_id);
+  if (entry != -1) {
+    FixedArray* code_map = osr_code_table();
+    DCHECK_LE(entry + kEntryLength, code_map->length());
+    WeakCell* cell = WeakCell::cast(code_map->get(entry + kCachedCodeOffset));
+    WeakCell* literals_cell =
+        WeakCell::cast(code_map->get(entry + kLiteralsOffset));
 
-  int context_globals = scope_info->ContextGlobalCount();
-  if (context_globals > 0) {
-    PropertyCell* empty_cell = GetHeap()->empty_property_cell();
+    *pcode = cell->cleared() ? nullptr : Code::cast(cell->value());
+    *pliterals = literals_cell->cleared()
+                     ? nullptr
+                     : LiteralsArray::cast(literals_cell->value());
+  } else {
+    *pcode = nullptr;
+    *pliterals = nullptr;
+  }
+}
 
-    int context_locals = scope_info->ContextLocalCount();
-    int index = Context::MIN_CONTEXT_SLOTS + context_locals;
-    for (int i = 0; i < context_globals; i++) {
-      set(index++, empty_cell);
+void Context::AddToOptimizedCodeMap(Handle<Context> native_context,
+                                    Handle<SharedFunctionInfo> shared,
+                                    Handle<Code> code,
+                                    Handle<LiteralsArray> literals,
+                                    BailoutId osr_ast_id) {
+  DCHECK(native_context->IsNativeContext());
+  Isolate* isolate = native_context->GetIsolate();
+  if (isolate->serializer_enabled()) return;
+
+  STATIC_ASSERT(kEntryLength == 4);
+  Handle<FixedArray> new_code_map;
+  int entry;
+
+  if (native_context->OptimizedCodeMapIsCleared()) {
+    new_code_map = isolate->factory()->NewFixedArray(kInitialLength, TENURED);
+    entry = 0;
+  } else {
+    Handle<FixedArray> old_code_map(native_context->osr_code_table(), isolate);
+    entry = native_context->SearchOptimizedCodeMapEntry(*shared, osr_ast_id);
+    if (entry >= 0) {
+      // Just set the code and literals of the entry.
+      Handle<WeakCell> code_cell = isolate->factory()->NewWeakCell(code);
+      old_code_map->set(entry + kCachedCodeOffset, *code_cell);
+      Handle<WeakCell> literals_cell =
+          isolate->factory()->NewWeakCell(literals);
+      old_code_map->set(entry + kLiteralsOffset, *literals_cell);
+      return;
+    }
+
+    // Can we reuse an entry?
+    DCHECK(entry < 0);
+    int length = old_code_map->length();
+    for (int i = 0; i < length; i += kEntryLength) {
+      if (WeakCell::cast(old_code_map->get(i + kSharedOffset))->cleared()) {
+        new_code_map = old_code_map;
+        entry = i;
+        break;
+      }
+    }
+
+    if (entry < 0) {
+      // Copy old optimized code map and append one new entry.
+      new_code_map = isolate->factory()->CopyFixedArrayAndGrow(
+          old_code_map, kEntryLength, TENURED);
+      entry = old_code_map->length();
+    }
+  }
+
+  Handle<WeakCell> code_cell = isolate->factory()->NewWeakCell(code);
+  Handle<WeakCell> literals_cell = isolate->factory()->NewWeakCell(literals);
+  Handle<WeakCell> shared_cell = isolate->factory()->NewWeakCell(shared);
+
+  new_code_map->set(entry + kSharedOffset, *shared_cell);
+  new_code_map->set(entry + kCachedCodeOffset, *code_cell);
+  new_code_map->set(entry + kLiteralsOffset, *literals_cell);
+  new_code_map->set(entry + kOsrAstIdOffset, Smi::FromInt(osr_ast_id.ToInt()));
+
+#ifdef DEBUG
+  for (int i = 0; i < new_code_map->length(); i += kEntryLength) {
+    WeakCell* cell = WeakCell::cast(new_code_map->get(i + kSharedOffset));
+    DCHECK(cell->cleared() || cell->value()->IsSharedFunctionInfo());
+    cell = WeakCell::cast(new_code_map->get(i + kCachedCodeOffset));
+    DCHECK(cell->cleared() ||
+           (cell->value()->IsCode() &&
+            Code::cast(cell->value())->kind() == Code::OPTIMIZED_FUNCTION));
+    cell = WeakCell::cast(new_code_map->get(i + kLiteralsOffset));
+    DCHECK(cell->cleared() || cell->value()->IsFixedArray());
+    DCHECK(new_code_map->get(i + kOsrAstIdOffset)->IsSmi());
+  }
+#endif
+
+  FixedArray* old_code_map = native_context->osr_code_table();
+  if (old_code_map != *new_code_map) {
+    native_context->set_osr_code_table(*new_code_map);
+  }
+}
+
+void Context::EvictFromOptimizedCodeMap(Code* optimized_code,
+                                        const char* reason) {
+  DCHECK(IsNativeContext());
+  DisallowHeapAllocation no_gc;
+  if (OptimizedCodeMapIsCleared()) return;
+
+  Heap* heap = GetHeap();
+  FixedArray* code_map = osr_code_table();
+  int dst = 0;
+  int length = code_map->length();
+  for (int src = 0; src < length; src += kEntryLength) {
+    if (WeakCell::cast(code_map->get(src + kCachedCodeOffset))->value() ==
+        optimized_code) {
+      BailoutId osr(Smi::cast(code_map->get(src + kOsrAstIdOffset))->value());
+      if (FLAG_trace_opt) {
+        PrintF(
+            "[evicting entry from native context optimizing code map (%s) for ",
+            reason);
+        ShortPrint();
+        DCHECK(!osr.IsNone());
+        PrintF(" (osr ast id %d)]\n", osr.ToInt());
+      }
+      // Evict the src entry by not copying it to the dst entry.
+      continue;
+    }
+    // Keep the src entry by copying it to the dst entry.
+    if (dst != src) {
+      code_map->set(dst + kSharedOffset, code_map->get(src + kSharedOffset));
+      code_map->set(dst + kCachedCodeOffset,
+                    code_map->get(src + kCachedCodeOffset));
+      code_map->set(dst + kLiteralsOffset,
+                    code_map->get(src + kLiteralsOffset));
+      code_map->set(dst + kOsrAstIdOffset,
+                    code_map->get(src + kOsrAstIdOffset));
+    }
+    dst += kEntryLength;
+  }
+  if (dst != length) {
+    // Always trim even when array is cleared because of heap verifier.
+    heap->RightTrimFixedArray(code_map, length - dst);
+    if (code_map->length() == 0) {
+      ClearOptimizedCodeMap();
     }
   }
 }
 
+void Context::ClearOptimizedCodeMap() {
+  DCHECK(IsNativeContext());
+  FixedArray* empty_fixed_array = GetHeap()->empty_fixed_array();
+  set_osr_code_table(empty_fixed_array);
+}
 
 void Context::AddOptimizedFunction(JSFunction* function) {
   DCHECK(IsNativeContext());
@@ -544,6 +725,17 @@ int Context::IntrinsicIndexForName(Handle<String> string) {
 
 #undef COMPARE_NAME
 
+#define COMPARE_NAME(index, type, name) \
+  if (strncmp(string, #name, length) == 0) return index;
+
+int Context::IntrinsicIndexForName(const unsigned char* unsigned_string,
+                                   int length) {
+  const char* string = reinterpret_cast<const char*>(unsigned_string);
+  NATIVE_CONTEXT_INTRINSIC_FUNCTIONS(COMPARE_NAME);
+  return kNotFound;
+}
+
+#undef COMPARE_NAME
 
 #ifdef DEBUG
 
@@ -568,6 +760,10 @@ bool Context::IsBootstrappingOrValidParentContext(
 
 #endif
 
+void Context::ResetErrorsThrown() {
+  DCHECK(IsNativeContext());
+  set_errors_thrown(Smi::FromInt(0));
+}
 
 void Context::IncrementErrorsThrown() {
   DCHECK(IsNativeContext());

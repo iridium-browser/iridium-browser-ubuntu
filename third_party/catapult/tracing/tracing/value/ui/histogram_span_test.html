@@ -5,63 +5,87 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+<link rel="import" href="/tracing/base/unit.html">
 <link rel="import" href="/tracing/value/diagnostics/diagnostic_map.html">
 <link rel="import" href="/tracing/value/diagnostics/generic.html">
 <link rel="import" href="/tracing/value/histogram.html">
 <link rel="import" href="/tracing/value/ui/histogram_span.html">
-<link rel="import" href="/tracing/value/unit.html">
 
 <script>
 'use strict';
 
 tr.b.unittest.testSuite(function() {
-  var DURATION_NUMERIC_BUILDER = tr.v.NumericBuilder.createLinear(
-      tr.v.Unit.byName.timeDurationInMs, tr.b.Range.fromExplicitRange(0, 1000),
-      10);
-
   test('basic', function() {
-    var h = DURATION_NUMERIC_BUILDER.build();
-    h.add(-1, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('a')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(0, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('c')}));
-    h.add(500, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('c')}));
-    h.add(999, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('d')}));
-    h.add(1000, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('d')}));
+    var h = new tr.v.Histogram('', tr.b.Unit.byName.unitlessNumber);
+    h.addSample(-1, {foo: new tr.v.d.Generic('a')});
+    h.addSample(0, {foo: new tr.v.d.Generic('b')});
+    h.addSample(0, {foo: new tr.v.d.Generic('b')});
+    h.addSample(0, {foo: new tr.v.d.Generic('b')});
+    h.addSample(0, {foo: new tr.v.d.Generic('b')});
+    h.addSample(0, {foo: new tr.v.d.Generic('b')});
+    h.addSample(0, {foo: new tr.v.d.Generic('b')});
+    h.addSample(0, {foo: new tr.v.d.Generic('c')});
+    h.addSample(500, {foo: new tr.v.d.Generic('c')});
+    h.addSample(999, {foo: new tr.v.d.Generic('d')});
+    h.addSample(1000, {foo: new tr.v.d.Generic('d')});
 
     var span = document.createElement('tr-v-ui-histogram-span');
-    span.histogram = h;
     this.addHTMLOutput(span);
+    span.histogram = h;
   });
 
   test('undefined', function() {
     var span = document.createElement('tr-v-ui-histogram-span');
-    span.histogram = undefined;
     this.addHTMLOutput(span);
+    span.histogram = undefined;
   });
 
   test('emptyHistogram', function() {
-    var h = DURATION_NUMERIC_BUILDER.build();
+    var h = new tr.v.Histogram('', tr.b.Unit.byName.unitlessNumber);
 
     var span = document.createElement('tr-v-ui-histogram-span');
-    span.histogram = h;
     this.addHTMLOutput(span);
+    span.histogram = h;
+  });
+
+  test('singleSample', function() {
+    var h = new tr.v.Histogram('', tr.b.Unit.byName.unitlessNumber);
+    h.addSample(100, {
+      sample_diagnostic_0: new tr.v.d.Generic('foo'),
+      sample_diagnostic_1: new tr.v.d.Generic('bar'),
+    });
+    h.diagnostics.set('histogram diagnostic 0', new tr.v.d.Generic('baz'));
+    h.diagnostics.set('histogram diagnostic 1', new tr.v.d.Generic('qux'));
+
+    var span = document.createElement('tr-v-ui-histogram-span');
+    this.addHTMLOutput(span);
+    span.histogram = h;
   });
 
   test('nans', function() {
-    var h = DURATION_NUMERIC_BUILDER.build();
-    h.add(undefined, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('b')}));
-    h.add(NaN, new tr.v.d.DiagnosticMap({foo: new tr.v.d.Generic('c')}));
+    var h = new tr.v.Histogram('', tr.b.Unit.byName.unitlessNumber);
+    h.addSample(undefined, {foo: new tr.v.d.Generic('b')});
+    h.addSample(NaN, {foo: new tr.v.d.Generic('c')});
     h.customizeSummaryOptions({nans: true});
 
     var span = document.createElement('tr-v-ui-histogram-span');
-    span.histogram = h;
     this.addHTMLOutput(span);
+    span.histogram = h;
   });
 
+  test('singleBin', function() {
+    var h = new tr.v.Histogram('', tr.b.Unit.byName.unitlessNumber,
+        tr.v.HistogramBinBoundaries.SINGULAR);
+    h.addSample(0);
+    h.addSample(25);
+    h.addSample(100);
+    h.addSample(100);
+    h.addSample(25);
+    h.addSample(50);
+    h.addSample(75);
+    var span = document.createElement('tr-v-ui-histogram-span');
+    this.addHTMLOutput(span);
+    span.histogram = h;
+  });
 });
 </script>

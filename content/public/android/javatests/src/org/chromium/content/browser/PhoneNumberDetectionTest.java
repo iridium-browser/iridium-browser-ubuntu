@@ -4,16 +4,19 @@
 
 package org.chromium.content.browser;
 
-import android.test.suitebuilder.annotation.LargeTest;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.LargeTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content.common.ContentSwitches;
 
 /**
  * Test suite for phone number detection.
  */
+@CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
 public class PhoneNumberDetectionTest extends ContentDetectionTestBase {
 
     private static final String TELEPHONE_INTENT_PREFIX = "tel:";
@@ -27,6 +30,7 @@ public class PhoneNumberDetectionTest extends ContentDetectionTestBase {
     @LargeTest
     @Feature({"ContentDetection", "TabContents"})
     @CommandLineFlags.Add(ContentSwitches.NETWORK_COUNTRY_ISO + "=US")
+    @RetryOnFailure
     public void testInternationalNumberIntents() throws Throwable {
         startActivityWithTestUrl(
                 "content/test/data/android/content_detection/phone_international.html");
@@ -166,6 +170,7 @@ public class PhoneNumberDetectionTest extends ContentDetectionTestBase {
 
     @MediumTest
     @Feature({"ContentDetection", "TabContents"})
+    @DisabledTest(message = "crbug.com/673279")
     @CommandLineFlags.Add(ContentSwitches.NETWORK_COUNTRY_ISO + "=GB")
     public void testLocalUKNumbers() throws Throwable {
         startActivityWithTestUrl(
@@ -191,6 +196,7 @@ public class PhoneNumberDetectionTest extends ContentDetectionTestBase {
     @MediumTest
     @Feature({"ContentDetection", "TabContents"})
     @CommandLineFlags.Add(ContentSwitches.NETWORK_COUNTRY_ISO + "=FR")
+    @RetryOnFailure
     public void testLocalFRNumbers() throws Throwable {
         startActivityWithTestUrl(
                 "content/test/data/android/content_detection/phone_local.html");

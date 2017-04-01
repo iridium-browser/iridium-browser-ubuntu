@@ -19,7 +19,6 @@
 #include "base/memory/weak_ptr.h"
 #include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "device/bluetooth/bluetooth_export.h"
@@ -34,9 +33,11 @@
 
 namespace base {
 class SequencedTaskRunner;
+class TimeDelta;
 }  // namespace base
 
 namespace device {
+class BluetoothDevice;
 class BluetoothSocketThread;
 class BluetoothTestBlueZ;
 }  // namespace device
@@ -45,6 +46,7 @@ namespace bluez {
 
 class BluetoothBlueZTest;
 class BluetoothAdapterProfileBlueZ;
+class BluetoothAdvertisementBlueZ;
 class BluetoothDeviceBlueZ;
 class BluetoothLocalGattCharacteristicBlueZ;
 class BluetoothLocalGattServiceBlueZ;
@@ -105,6 +107,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ
                        const ErrorCallback& error_callback) override;
   uint32_t GetDiscoverableTimeout() const;
   bool IsDiscovering() const override;
+  std::unordered_map<device::BluetoothDevice*, device::BluetoothDevice::UUIDSet>
+  RetrieveGattConnectedDevicesWithDiscoveryFilter(
+      const device::BluetoothDiscoveryFilter& discovery_filter) override;
   void CreateRfcommService(
       const device::BluetoothUUID& uuid,
       const ServiceOptions& options,
@@ -115,15 +120,17 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ
       const ServiceOptions& options,
       const CreateServiceCallback& callback,
       const CreateServiceErrorCallback& error_callback) override;
-  void RegisterAudioSink(
-      const device::BluetoothAudioSink::Options& options,
-      const device::BluetoothAdapter::AcquiredCallback& callback,
-      const device::BluetoothAudioSink::ErrorCallback& error_callback) override;
 
   void RegisterAdvertisement(
       std::unique_ptr<device::BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) override;
+      const AdvertisementErrorCallback& error_callback) override;
+
+  void SetAdvertisingInterval(
+      const base::TimeDelta& min,
+      const base::TimeDelta& max,
+      const base::Closure& callback,
+      const AdvertisementErrorCallback& error_callback) override;
 
   device::BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
@@ -289,13 +296,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ
   void OnRequestDefaultAgent();
   void OnRequestDefaultAgentError(const std::string& error_name,
                                   const std::string& error_message);
-
-  // Called by BluetoothAudioSinkBlueZ on completion of registering an audio
-  // sink.
-  void OnRegisterAudioSink(
-      const device::BluetoothAdapter::AcquiredCallback& callback,
-      const device::BluetoothAudioSink::ErrorCallback& error_callback,
-      scoped_refptr<device::BluetoothAudioSink> audio_sink);
 
   // Internal method to obtain a BluetoothPairingBlueZ object for the device
   // with path |object_path|. Returns the existing pairing object if the device
@@ -491,6 +491,14 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterBlueZ
   // that are registered with this adapter.
   std::unique_ptr<BluetoothGattApplicationServiceProvider>
       gatt_application_provider_;
+
+  // List of advertisements registered with this adapter. This list is used
+  // to ensure we unregister any advertisements that were registered with
+  // this adapter on adapter shutdown. This is a sub-optimal solution since
+  // we'll keep a list of all advertisements ever created by this adapter (the
+  // unregistered ones will just be inactive). This will be fixed with
+  // crbug.com/687396.
+  std::vector<scoped_refptr<BluetoothAdvertisementBlueZ>> advertisements_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

@@ -33,7 +33,8 @@
 #define Performance_h
 
 #include "core/CoreExport.h"
-#include "core/frame/DOMWindowProperty.h"
+#include "core/dom/ContextLifecycleObserver.h"
+#include "core/frame/PerformanceMonitor.h"
 #include "core/timing/MemoryInfo.h"
 #include "core/timing/PerformanceBase.h"
 #include "core/timing/PerformanceNavigation.h"
@@ -41,31 +42,55 @@
 
 namespace blink {
 
-class CORE_EXPORT Performance final : public PerformanceBase, public DOMWindowProperty {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(Performance);
-public:
-    static Performance* create(LocalFrame* frame)
-    {
-        return new Performance(frame);
-    }
-    ~Performance() override;
+class ScriptState;
+class ScriptValue;
 
-    ExecutionContext* getExecutionContext() const override;
+class CORE_EXPORT Performance final : public PerformanceBase,
+                                      public ContextLifecycleObserver,
+                                      public PerformanceMonitor::Client {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(Performance);
+  friend class PerformanceTest;
 
-    MemoryInfo* memory();
-    PerformanceNavigation* navigation() const;
-    PerformanceTiming* timing() const override;
+ public:
+  static Performance* create(LocalFrame* frame) {
+    return new Performance(frame);
+  }
+  ~Performance() override;
 
-    DECLARE_VIRTUAL_TRACE();
+  ExecutionContext* getExecutionContext() const override;
 
-private:
-    explicit Performance(LocalFrame*);
+  MemoryInfo* memory();
+  PerformanceNavigation* navigation() const;
+  PerformanceTiming* timing() const override;
 
-    mutable Member<PerformanceNavigation> m_navigation;
-    mutable Member<PerformanceTiming> m_timing;
+  void updateLongTaskInstrumentation() override;
+
+  ScriptValue toJSONForBinding(ScriptState*) const;
+
+  DECLARE_VIRTUAL_TRACE();
+
+ private:
+  explicit Performance(LocalFrame*);
+
+  // ContextLifecycleObserver overrides.
+  void contextDestroyed(ExecutionContext*) override;
+
+  static std::pair<String, DOMWindow*> sanitizedAttribution(
+      ExecutionContext*,
+      bool hasMultipleContexts,
+      Frame* observerFrame);
+
+  // PerformanceMonitor::Client implementation.
+  void reportLongTask(double startTime,
+                      double endTime,
+                      ExecutionContext* taskContext,
+                      bool hasMultipleContexts) override;
+
+  mutable Member<PerformanceNavigation> m_navigation;
+  mutable Member<PerformanceTiming> m_timing;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // Performance_h
+#endif  // Performance_h

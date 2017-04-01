@@ -5,44 +5,81 @@
 #ifndef MediaSession_h
 #define MediaSession_h
 
-#include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "modules/ModulesExport.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/modules/mediasession/WebMediaSession.h"
+#include "public/platform/modules/mediasession/media_session.mojom-blink.h"
+#include "wtf/text/WTFString.h"
 #include <memory>
 
 namespace blink {
 
+class ExecutionContext;
 class MediaMetadata;
-class ScriptState;
+class MediaSessionActionHandler;
 
 class MODULES_EXPORT MediaSession final
-    : public GarbageCollectedFinalized<MediaSession>
-    , public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static MediaSession* create(ExecutionContext*, ExceptionState&);
+    : public GarbageCollectedFinalized<MediaSession>,
+      public ContextClient,
+      public ScriptWrappable,
+      blink::mojom::blink::MediaSessionClient {
+  USING_GARBAGE_COLLECTED_MIXIN(MediaSession);
+  DEFINE_WRAPPERTYPEINFO();
+  USING_PRE_FINALIZER(MediaSession, dispose);
 
-    WebMediaSession* getWebMediaSession() { return m_webMediaSession.get(); }
+ public:
+  static MediaSession* create(ExecutionContext*);
 
-    ScriptPromise activate(ScriptState*);
-    ScriptPromise deactivate(ScriptState*);
+  void dispose();
 
-    void setMetadata(MediaMetadata*);
-    MediaMetadata* metadata() const;
+  void setPlaybackState(const String&);
+  String playbackState();
 
-    DECLARE_VIRTUAL_TRACE();
+  void setMetadata(MediaMetadata*);
+  MediaMetadata* metadata() const;
 
-private:
-    friend class MediaSessionTest;
+  void setActionHandler(const String& action, MediaSessionActionHandler*);
 
-    explicit MediaSession(std::unique_ptr<WebMediaSession>);
+  // Called by the MediaMetadata owned by |this| when it has updates. Also used
+  // internally when a new MediaMetadata object is set.
+  void onMetadataChanged();
 
-    std::unique_ptr<WebMediaSession> m_webMediaSession;
-    Member<MediaMetadata> m_metadata;
+  DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
+
+ private:
+  friend class V8MediaSession;
+  friend class MediaSessionTest;
+
+  enum class ActionChangeType {
+    ActionEnabled,
+    ActionDisabled,
+  };
+
+  explicit MediaSession(ExecutionContext*);
+
+  void notifyActionChange(const String& action, ActionChangeType);
+
+  // blink::mojom::blink::MediaSessionClient implementation.
+  void DidReceiveAction(blink::mojom::blink::MediaSessionAction) override;
+
+  void setV8ReferencesForHandlers(v8::Isolate*,
+                                  const v8::Persistent<v8::Object>& wrapper);
+
+  // Returns null when the ExecutionContext is not document.
+  mojom::blink::MediaSessionService* getService();
+
+  mojom::blink::MediaSessionPlaybackState m_playbackState;
+  Member<MediaMetadata> m_metadata;
+  HeapHashMap<String, TraceWrapperMember<MediaSessionActionHandler>>
+      m_actionHandlers;
+  mojom::blink::MediaSessionServicePtr m_service;
+  mojo::Binding<blink::mojom::blink::MediaSessionClient> m_clientBinding;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MediaSession_h
+#endif  // MediaSession_h

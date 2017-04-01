@@ -16,6 +16,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
@@ -42,7 +43,7 @@
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/signin/get_auth_frame.h"
+#include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -387,6 +388,19 @@ class SamlTest : public OobeBaseTest {
     ASSERT_TRUE(content::ExecuteScript(GetLoginUI()->GetWebContents(), js));
   }
 
+  void SetManualPasswords(const std::string& password,
+                          const std::string& confirm_password) {
+    std::string js =
+        "$('saml-confirm-password').$.passwordInput.value='$Password';"
+        "$('saml-confirm-password').$$('#confirmPasswordInput').value="
+        "    '$ConfirmPassword';"
+        "$('saml-confirm-password').$.inputForm.submit();";
+    base::ReplaceSubstringsAfterOffset(&js, 0, "$Password", password);
+    base::ReplaceSubstringsAfterOffset(&js, 0, "$ConfirmPassword",
+                                       confirm_password);
+    ASSERT_TRUE(content::ExecuteScript(GetLoginUI()->GetWebContents(), js));
+  }
+
   std::string WaitForAndGetFatalErrorMessage() {
     OobeScreenWaiter(OobeScreen::SCREEN_FATAL_ERROR).Wait();
     std::string message_element = "$('fatal-error-card')";
@@ -460,7 +474,14 @@ IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_SamlUI) {
 }
 
 // Tests the sign-in flow when the credentials passing API is used.
-IN_PROC_BROWSER_TEST_F(SamlTest, CredentialPassingAPI) {
+//
+// Flaky. See http://crbug.com/659992
+#if defined(OS_LINUX)
+#define MAYBE_CredentialPassingAPI DISABLED_CredentialPassingAPI
+#else
+#define MAYBE_CredentialPassingAPI CredentialPassingAPI
+#endif
+IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_CredentialPassingAPI) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_api_login.html");
   fake_saml_idp()->SetLoginAuthHTMLTemplate("saml_api_login_auth.html");
   StartSamlAndWaitForIdpPageLoad(kFirstSAMLUserEmail);
@@ -560,10 +581,12 @@ IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedMultiple) {
 
   // Lands on confirm password screen.
   OobeScreenWaiter(OobeScreen::SCREEN_CONFIRM_PASSWORD).Wait();
+  JsExpect("!$('saml-confirm-password').manualInput");
 
   // Entering an unknown password should go back to the confirm password screen.
   SendConfirmPassword("wrong_password");
   OobeScreenWaiter(OobeScreen::SCREEN_CONFIRM_PASSWORD).Wait();
+  JsExpect("!$('saml-confirm-password').manualInput");
 
   // Either scraped password should be able to sign-in.
   content::WindowedNotificationObserver session_start_waiter(
@@ -582,8 +605,21 @@ IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedNone) {
   SetSignFormField("Email", "fake_user");
   ExecuteJsInSigninFrame("document.getElementById('Submit').click();");
 
-  EXPECT_EQ(l10n_util::GetStringUTF8(IDS_LOGIN_FATAL_ERROR_NO_PASSWORD),
-            WaitForAndGetFatalErrorMessage());
+  // Lands on confirm password screen with manual input state.
+  OobeScreenWaiter(OobeScreen::SCREEN_CONFIRM_PASSWORD).Wait();
+  JsExpect("$('saml-confirm-password').manualInput");
+  // Entering passwords that don't match will make us land again in the same
+  // page.
+  SetManualPasswords("Test1", "Test2");
+  OobeScreenWaiter(OobeScreen::SCREEN_CONFIRM_PASSWORD).Wait();
+  JsExpect("$('saml-confirm-password').manualInput");
+
+  // Two matching passwords should let the user to sign in.
+  content::WindowedNotificationObserver session_start_waiter(
+      chrome::NOTIFICATION_SESSION_STARTED,
+      content::NotificationService::AllSources());
+  SetManualPasswords("Test1", "Test1");
+  session_start_waiter.Wait();
 }
 
 // Types |bob@example.com| into the GAIA login form but then authenticates as
@@ -609,7 +645,7 @@ IN_PROC_BROWSER_TEST_F(SamlTest, UseAutenticatedUserEmailAddress) {
   const user_manager::User* user =
       user_manager::UserManager::Get()->GetActiveUser();
   ASSERT_TRUE(user);
-  EXPECT_EQ(kFirstSAMLUserEmail, user->email());
+  EXPECT_EQ(kFirstSAMLUserEmail, user->GetAccountId().GetUserEmail());
 }
 
 // Verifies that if the authenticated user's e-mail address cannot be retrieved,
@@ -642,12 +678,14 @@ IN_PROC_BROWSER_TEST_F(SamlTest, PasswordConfirmFlow) {
 
   // Lands on confirm password screen with no error message.
   OobeScreenWaiter(OobeScreen::SCREEN_CONFIRM_PASSWORD).Wait();
+  JsExpect("!$('saml-confirm-password').manualInput");
   JsExpect("!$('saml-confirm-password').$.passwordInput.isInvalid");
 
   // Enter an unknown password for the first time should go back to confirm
   // password screen with error message.
   SendConfirmPassword("wrong_password");
   OobeScreenWaiter(OobeScreen::SCREEN_CONFIRM_PASSWORD).Wait();
+  JsExpect("!$('saml-confirm-password').manualInput");
   JsExpect("$('saml-confirm-password').$.passwordInput.isInvalid");
 
   // Enter an unknown password 2nd time should go back fatal error message.
@@ -780,7 +818,7 @@ SAMLEnrollmentTest::~SAMLEnrollmentTest() {
 void SAMLEnrollmentTest::SetUp() {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   const base::FilePath policy_file =
-      temp_dir_.path().AppendASCII("policy.json");
+      temp_dir_.GetPath().AppendASCII("policy.json");
   ASSERT_EQ(static_cast<int>(strlen(kPolicy)),
             base::WriteFile(policy_file, kPolicy, strlen(kPolicy)));
 
@@ -793,7 +831,6 @@ void SAMLEnrollmentTest::SetUp() {
 void SAMLEnrollmentTest::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
                                   test_server_->GetServiceURL().spec());
-  command_line->AppendSwitch(policy::switches::kDisablePolicyKeyVerification);
 
   SamlTest::SetUpCommandLine(command_line);
 }

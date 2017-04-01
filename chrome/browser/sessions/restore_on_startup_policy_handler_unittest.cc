@@ -21,7 +21,7 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -60,7 +60,7 @@ TEST_F(RestoreOnStartupPolicyHandlerTest, CheckPolicySettings_FailsTypeCheck) {
   EXPECT_EQ(
       l10n_util::GetStringFUTF16(IDS_POLICY_TYPE_ERROR,
                                  base::ASCIIToUTF16(base::Value::GetTypeName(
-                                     base::Value::TYPE_INTEGER))),
+                                     base::Value::Type::INTEGER))),
       errors().begin()->second);
 }
 

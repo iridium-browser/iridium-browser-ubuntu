@@ -11,7 +11,7 @@ Polymer({
     count: {
       type: Number,
       value: 0,
-      observer: 'changeToolbarView_'
+      observer: 'changeToolbarView_',
     },
 
     // True if 1 or more history items are selected. When this value changes
@@ -19,13 +19,14 @@ Polymer({
     itemsSelected_: {
       type: Boolean,
       value: false,
-      reflectToAttribute: true
+      reflectToAttribute: true,
     },
 
     // The most recent term entered in the search field. Updated incrementally
     // as the user types.
     searchTerm: {
       type: String,
+      observer: 'searchTermChanged_',
       notify: true,
     },
 
@@ -33,12 +34,11 @@ Polymer({
     // toolbar.
     spinnerActive: {
       type: Boolean,
-      value: false
+      value: false,
     },
 
     hasDrawer: {
       type: Boolean,
-      observer: 'hasDrawerChanged_',
       reflectToAttribute: true,
     },
 
@@ -51,16 +51,40 @@ Polymer({
     // The period to search over. Matches BrowsingHistoryHandler::Range.
     groupedRange: {
       type: Number,
-      value: 0,
       reflectToAttribute: true,
-      notify: true
+      notify: true,
     },
+
+    groupedOffset: {
+      type: Number,
+      notify: true,
+    },
+
+    querying: Boolean,
+
+    hasMoreResults: Boolean,
 
     // The start time of the query range.
     queryStartTime: String,
 
     // The end time of the query range.
     queryEndTime: String,
+
+    // Whether to show the menu promo (a tooltip that points at the menu button
+    // in narrow mode).
+    showMenuPromo: Boolean,
+
+    showSyncNotice: Boolean,
+  },
+
+  /** @return {CrToolbarSearchFieldElement} */
+  get searchField() {
+    return /** @type {CrToolbarElement} */ (this.$['main-toolbar'])
+        .getSearchField();
+  },
+
+  showSearchField: function() {
+    this.searchField.showAndFocus();
   },
 
   /**
@@ -75,17 +99,13 @@ Polymer({
   /**
    * When changing the search term externally, update the search field to
    * reflect the new search term.
-   * @param {string} search
+   * @private
    */
-  setSearchTerm: function(search) {
-    if (this.searchTerm == search)
-      return;
-
-    this.searchTerm = search;
-    var searchField = /** @type {!CrToolbarElement} */(this.$['main-toolbar'])
-                          .getSearchField();
-    searchField.showAndFocus();
-    searchField.setValue(search);
+  searchTermChanged_: function() {
+    if (this.searchField.getValue() != this.searchTerm) {
+      this.searchField.showAndFocus();
+      this.searchField.setValue(this.searchTerm);
+    }
   },
 
   /**
@@ -96,22 +116,24 @@ Polymer({
     this.searchTerm = /** @type {string} */ (event.detail);
   },
 
+  /** @private */
+  onInfoButtonTap_: function() {
+    var dropdown = this.$.syncNotice.get();
+    dropdown.positionTarget = this.$$('#info-button-icon');
+    // It is possible for this listener to trigger while the dialog is
+    // closing. Ensure the dialog is fully closed before reopening it.
+    if (dropdown.style.display == 'none')
+      dropdown.open();
+  },
+
+  /** @private */
   onClearSelectionTap_: function() {
     this.fire('unselect-all');
   },
 
+  /** @private */
   onDeleteTap_: function() {
     this.fire('delete-selected');
-  },
-
-  get searchBar() {
-    return this.$['main-toolbar'].getSearchField();
-  },
-
-  showSearchField: function() {
-    /** @type {!CrToolbarElement} */(this.$['main-toolbar'])
-        .getSearchField()
-        .showAndFocus();
   },
 
   /**
@@ -122,18 +144,41 @@ Polymer({
     return loadTimeData.getBoolean('allowDeletingHistory');
   },
 
+  /** @private */
   numberOfItemsSelected_: function(count) {
     return count > 0 ? loadTimeData.getStringF('itemsSelected', count) : '';
   },
 
+  /** @private */
   getHistoryInterval_: function(queryStartTime, queryEndTime) {
     // TODO(calamity): Fix the format of these dates.
     return loadTimeData.getStringF(
-      'historyInterval', queryStartTime, queryEndTime);
+        'historyInterval', queryStartTime, queryEndTime);
   },
 
   /** @private */
-  hasDrawerChanged_: function() {
-    this.updateStyles();
+  onTodayTap_: function() {
+    if (!this.querying)
+      this.groupedOffset = 0;
+  },
+
+  /** @private */
+  onPrevTap_: function() {
+    if (!this.querying)
+      this.groupedOffset = this.groupedOffset + 1;
+  },
+
+  /** @private */
+  onNextTap_: function() {
+    if (!this.querying)
+      this.groupedOffset = this.groupedOffset - 1;
+  },
+
+  /**
+   * @private
+   * @return {boolean}
+   */
+  isToday_: function() {
+    return this.groupedOffset == 0;
   },
 });

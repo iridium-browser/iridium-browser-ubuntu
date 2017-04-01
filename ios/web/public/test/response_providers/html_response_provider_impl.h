@@ -9,8 +9,8 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "ios/web/public/test/response_providers/data_response_provider.h"
-#include "ios/web/public/test/response_providers/response_provider.h"
+#import "ios/web/public/test/response_providers/data_response_provider.h"
+#import "ios/web/public/test/response_providers/response_provider.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "url/gurl.h"
@@ -39,6 +39,11 @@ class HtmlResponseProviderImpl {
   // response to a URL based on the mapping present in |responses|.
   explicit HtmlResponseProviderImpl(
       const std::map<GURL, std::string>& responses);
+  // Constructs an HtmlResponseProvider that generates a simple string response
+  // to a URL with set cookie in the headers based on the mapping present in
+  // |responses|.
+  explicit HtmlResponseProviderImpl(
+      const std::map<GURL, std::pair<std::string, std::string>>& responses);
   // Constructs an HtmlResponseProviderImpl that generates a response to a URL
   // based on the mapping present in |responses|.
   explicit HtmlResponseProviderImpl(const std::map<GURL, Response>& responses);

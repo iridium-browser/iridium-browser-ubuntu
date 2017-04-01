@@ -6,35 +6,44 @@
 #define DEVICE_GENERIC_SENSOR_SENSOR_PROVIDER_IMPL_H_
 
 #include "base/macros.h"
+#include "device/generic_sensor/generic_sensor_export.h"
 #include "device/generic_sensor/public/interfaces/sensor_provider.mojom.h"
-#include "device/generic_sensor/sensor_export.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace device {
 
 class PlatformSensorProvider;
+class PlatformSensor;
 
 // Implementation of SensorProvider mojo interface.
 // Uses PlatformSensorProvider singleton to create platform specific instances
 // of PlatformSensor which are used by SensorImpl.
-class SensorProviderImpl final : public mojom::SensorProvider {
+class DEVICE_GENERIC_SENSOR_EXPORT SensorProviderImpl final
+    : public mojom::SensorProvider {
  public:
-  DEVICE_SENSOR_EXPORT static void Create(
-      mojo::InterfaceRequest<mojom::SensorProvider> request);
+  static void Create(
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+      mojom::SensorProviderRequest request);
 
   ~SensorProviderImpl() override;
 
  private:
-  SensorProviderImpl(mojo::InterfaceRequest<mojom::SensorProvider> request,
-                     PlatformSensorProvider* provider);
+  explicit SensorProviderImpl(PlatformSensorProvider* provider);
 
   // SensorProvider implementation.
   void GetSensor(mojom::SensorType type,
                  mojom::SensorRequest sensor_request,
                  const GetSensorCallback& callback) override;
 
-  mojo::StrongBinding<mojom::SensorProvider> binding_;
+  // Helper callback method to return created sensors.
+  void SensorCreated(mojom::SensorType type,
+                     mojo::ScopedSharedBufferHandle cloned_handle,
+                     mojom::SensorRequest sensor_request,
+                     const GetSensorCallback& callback,
+                     scoped_refptr<PlatformSensor> sensor);
+
   PlatformSensorProvider* provider_;
+  base::WeakPtrFactory<SensorProviderImpl> weak_ptr_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(SensorProviderImpl);
 };
 

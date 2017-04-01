@@ -13,6 +13,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_window.h"
+#include "chrome/common/features.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -23,7 +24,7 @@ class DictionaryValue;
 class ListValue;
 }
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 class SupervisedUserRegistrationUtility;
 #endif
 
@@ -44,7 +45,7 @@ class SigninCreateProfileHandler : public content::WebUIMessageHandler,
                            ReturnSignedInProfiles);
   FRIEND_TEST_ALL_PREFIXES(SigninCreateProfileHandlerTest,
                            CreateProfile);
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   FRIEND_TEST_ALL_PREFIXES(SigninCreateProfileHandlerTest,
                            CreateSupervisedUser);
   FRIEND_TEST_ALL_PREFIXES(SigninCreateProfileHandlerTest,
@@ -57,6 +58,8 @@ class SigninCreateProfileHandler : public content::WebUIMessageHandler,
                            CustodianHasAuthError);
   FRIEND_TEST_ALL_PREFIXES(SigninCreateProfileHandlerTest,
                            NotAllowedToCreateSupervisedUser);
+  FRIEND_TEST_ALL_PREFIXES(SigninCreateProfileHandlerTest,
+                           CreateProfileWithForceSignin);
 #endif
 
   // WebUIMessageHandler implementation.
@@ -81,7 +84,7 @@ class SigninCreateProfileHandler : public content::WebUIMessageHandler,
   // It is used to map the type of the profile creation operation to the
   // correct UMA metric name.
   enum ProfileCreationOperationType {
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
     SUPERVISED_PROFILE_CREATION,
     SUPERVISED_PROFILE_IMPORT,
 #endif
@@ -140,6 +143,9 @@ class SigninCreateProfileHandler : public content::WebUIMessageHandler,
   virtual void OpenNewWindowForProfile(Profile* profile,
                                        Profile::CreateStatus status);
 
+  // Opens a new signin dialog for |profile|.
+  virtual void OpenSigninDialogForProfile(Profile* profile);
+
   // This callback is run after a new browser (but not the window) has been
   // created for the new profile.
   void OnBrowserReadyCallback(Profile* profile, Profile::CreateStatus status);
@@ -173,7 +179,7 @@ class SigninCreateProfileHandler : public content::WebUIMessageHandler,
                                const std::string& supervised_user_id,
                                Profile* custodian_profile);
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   base::string16 GetProfileCreateErrorMessageRemote() const;
   base::string16 GetProfileCreateErrorMessageSignin() const;
 

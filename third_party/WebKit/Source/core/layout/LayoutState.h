@@ -59,68 +59,64 @@ class LayoutView;
 // See e.g LayoutBox::offsetFromLogicalTopOfFirstPage on how to use LayoutState
 // for computations.
 class LayoutState {
-    // LayoutState is always allocated on the stack.
-    // The reason is that it is scoped to layout, thus we can avoid expensive
-    // mallocs.
-    DISALLOW_NEW();
-    WTF_MAKE_NONCOPYABLE(LayoutState);
-public:
-    // Constructor for root LayoutState created by LayoutView
-    LayoutState(LayoutUnit pageLogicalHeight, bool pageLogicalHeightChanged, LayoutView&);
-    // Constructor for sub-tree layout and orthogonal writing-mode roots
-    explicit LayoutState(LayoutObject& root);
+  // LayoutState is always allocated on the stack.
+  // The reason is that it is scoped to layout, thus we can avoid expensive
+  // mallocs.
+  DISALLOW_NEW();
+  WTF_MAKE_NONCOPYABLE(LayoutState);
 
-    LayoutState(LayoutBox&, const LayoutSize& offset, LayoutUnit pageLogicalHeight = LayoutUnit(), bool pageHeightLogicalChanged = false, bool containingBlockLogicalWidthChanged = false);
+ public:
+  // Constructor for root LayoutState created by LayoutView
+  explicit LayoutState(LayoutView&);
+  // Constructor for sub-tree layout and orthogonal writing-mode roots
+  explicit LayoutState(LayoutObject& root);
 
-    ~LayoutState();
+  LayoutState(LayoutBox&,
+              bool containingBlockLogicalWidthChanged = false);
 
-    bool isPaginated() const { return m_isPaginated; }
+  ~LayoutState();
 
-    // The page logical offset is the object's offset from the top of the page in the page progression
-    // direction (so an x-offset in vertical text and a y-offset for horizontal text).
-    LayoutUnit pageLogicalOffset(const LayoutBox&, const LayoutUnit& childLogicalOffset) const;
+  bool isPaginated() const { return m_isPaginated; }
 
-    LayoutUnit heightOffsetForTableHeaders() const { return m_heightOffsetForTableHeaders; };
-    void setHeightOffsetForTableHeaders(LayoutUnit offset) { m_heightOffsetForTableHeaders = offset; };
+  // The page logical offset is the object's offset from the top of the page in
+  // the page progression direction (so an x-offset in vertical text and a
+  // y-offset for horizontal text).
+  LayoutUnit pageLogicalOffset(const LayoutBox&,
+                               const LayoutUnit& childLogicalOffset) const;
 
-    const LayoutSize& layoutOffset() const { return m_layoutOffset; }
-    const LayoutSize& pageOffset() const { return m_pageOffset; }
-    LayoutUnit pageLogicalHeight() const { return m_pageLogicalHeight; }
-    bool pageLogicalHeightChanged() const { return m_pageLogicalHeightChanged; }
-    bool containingBlockLogicalWidthChanged() const { return m_containingBlockLogicalWidthChanged; }
+  const LayoutSize& paginationOffset() const { return m_paginationOffset; }
+  bool containingBlockLogicalWidthChanged() const {
+    return m_containingBlockLogicalWidthChanged;
+  }
 
-    LayoutState* next() const { return m_next; }
+  bool paginationStateChanged() const { return m_paginationStateChanged; }
+  void setPaginationStateChanged() { m_paginationStateChanged = true; }
 
-    LayoutFlowThread* flowThread() const { return m_flowThread; }
+  LayoutState* next() const { return m_next; }
 
-    LayoutObject& layoutObject() const { return m_layoutObject; }
+  LayoutFlowThread* flowThread() const { return m_flowThread; }
 
-private:
-    // Do not add anything apart from bitfields until after m_flowThread. See https://bugs.webkit.org/show_bug.cgi?id=100173
-    bool m_isPaginated : 1;
-    // If our page height has changed, this will force all blocks to relayout.
-    bool m_pageLogicalHeightChanged : 1;
-    bool m_containingBlockLogicalWidthChanged : 1;
+  LayoutObject& layoutObject() const { return m_layoutObject; }
 
-    LayoutFlowThread* m_flowThread;
+ private:
+  // Do not add anything apart from bitfields until after m_flowThread. See
+  // https://bugs.webkit.org/show_bug.cgi?id=100173
+  bool m_isPaginated : 1;
 
-    LayoutState* m_next;
+  bool m_containingBlockLogicalWidthChanged : 1;
+  bool m_paginationStateChanged : 1;
 
-    // x/y offset from container. Does not include relative positioning or scroll offsets.
-    LayoutSize m_layoutOffset;
+  LayoutFlowThread* m_flowThread;
 
-    // The current page height for the pagination model that encloses us.
-    LayoutUnit m_pageLogicalHeight;
+  LayoutState* m_next;
 
-    // The height we need to make available for repeating table headers in paginated layout.
-    LayoutUnit m_heightOffsetForTableHeaders;
+  // x/y offset from the logical top / start of the first page. Does not include
+  // relative positioning or scroll offsets.
+  LayoutSize m_paginationOffset;
 
-    // The offset of the start of the first page in the nearest enclosing pagination model.
-    LayoutSize m_pageOffset;
-
-    LayoutObject& m_layoutObject;
+  LayoutObject& m_layoutObject;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutState_h
+#endif  // LayoutState_h

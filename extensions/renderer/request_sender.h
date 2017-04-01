@@ -9,7 +9,6 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "v8/include/v8.h"
 
 struct ExtensionHostMsg_Request_Params;
@@ -46,20 +45,6 @@ class RequestSender {
                                     bool success,
                                     const base::ListValue& response,
                                     const std::string& error) = 0;
-  };
-
-  // Helper class to (re)set the |source_tab_id_| below.
-  class ScopedTabID {
-   public:
-    ScopedTabID(RequestSender* request_sender, int tab_id);
-    ~ScopedTabID();
-
-   private:
-    RequestSender* const request_sender_;
-    const int tab_id_;
-    const int previous_tab_id_;
-
-    DISALLOW_COPY_AND_ASSIGN(ScopedTabID);
   };
 
   RequestSender();
@@ -101,14 +86,13 @@ class RequestSender {
 
  private:
   friend class ScopedTabID;
-  typedef std::map<int, linked_ptr<PendingRequest> > PendingRequestMap;
+  using PendingRequestMap = std::map<int, std::unique_ptr<PendingRequest>>;
 
-  void InsertRequest(int request_id, PendingRequest* pending_request);
-  linked_ptr<PendingRequest> RemoveRequest(int request_id);
+  void InsertRequest(int request_id,
+                     std::unique_ptr<PendingRequest> pending_request);
+  std::unique_ptr<PendingRequest> RemoveRequest(int request_id);
 
   PendingRequestMap pending_requests_;
-
-  int source_tab_id_;  // Id of the tab sending the request, or -1 if no tab.
 
   DISALLOW_COPY_AND_ASSIGN(RequestSender);
 };

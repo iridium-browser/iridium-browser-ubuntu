@@ -511,41 +511,13 @@ below:
           tree item
         </message>
       </if>
-      <message name="IDS_AX_BUTTON_ACTION_VERB" desc="Verb stating the action that will occur when a button is pressed, as used by accessibility.">
-        press
-      </message>
-      <message name="IDS_AX_RADIO_BUTTON_ACTION_VERB" desc="Verb stating the action that will occur when a radio button is clicked, as used by accessibility.">
-        select
-      </message>
-      <message name="IDS_AX_TEXT_FIELD_ACTION_VERB" desc="Verb stating the action that will occur when a text field is selected, as used by accessibility.">
-        activate
-      </message>
-      <message name="IDS_AX_CHECKED_CHECK_BOX_ACTION_VERB" desc="Verb stating the action that will occur when a checked checkbox is clicked, as used by accessibility.">
-        uncheck
-      </message>
-      <message name="IDS_AX_UNCHECKED_CHECK_BOX_ACTION_VERB" desc="Verb stating the action that will occur when an unchecked checkbox is clicked, as used by accessibility.">
-        check
-      </message>
-      <message name="IDS_AX_LINK_ACTION_VERB" desc="Verb stating the action that will occur when a link is clicked, as used by accessibility.">
-        jump
-      </message>
-      <message name="IDS_AX_POP_UP_BUTTON_ACTION_VERB" desc="Verb stating the action that will occur when a pop-up button is clicked, as used by accessibility.">
-        open
-      </message>
-      <message name="IDS_AX_DEFAULT_ACTION_VERB" desc="Verb stating the action that will occur when clicking on a generic clickable object, when we don't know what that action is, as used by accessibility.">
-        click
-      </message>
-
+      
       <message name="IDS_AX_AM_PM_FIELD_TEXT" desc="Accessible description of the AM/PM field in a date/time control">
         AM/PM
       </message>
 
       <message name="IDS_AX_DAY_OF_MONTH_FIELD_TEXT" desc="Accessible description of the day of month field in a date/time control">
         Day
-      </message>
-
-      <message name="IDS_AX_DATE_TIME_FIELD_EMPTY_VALUE_TEXT" desc="Accessible description of empty value of field in a date/time control">
-        blank
       </message>
 
       <message name="IDS_AX_HOUR_FIELD_TEXT" desc="Accessible description of the hour field in a date/time control">
@@ -624,6 +596,14 @@ below:
         control remote playback
       </message>
 
+      <message name="IDS_AX_MEDIA_DOWNLOAD_BUTTON" desc="Media controls download button.">
+        download media
+      </message>
+
+      <message name="IDS_AX_MEDIA_OVERFLOW_BUTTON" desc="Media controls overflow button.">
+        show more media controls
+      </message>
+
       <message name="IDS_AX_MEDIA_AUDIO_ELEMENT_HELP" desc="Accessible help of audio controls">
         audio
       </message>
@@ -696,6 +676,10 @@ below:
         control remote playback
       </message>
 
+      <message name="IDS_AX_MEDIA_OVERFLOW_BUTTON_HELP" desc="accessibility help description for overflow button.">
+        more options
+      </message>
+
       <message name="IDS_AX_MILLISECOND_FIELD_TEXT" desc="Accessible description of the millisecond field in a date/time control">
         Milliseconds
       </message>
@@ -718,13 +702,6 @@ below:
 
       <message name="IDS_AX_YEAR_FIELD_TEXT" desc="Accessible description of the year field in a date/time control">
         Year
-      </message>
-
-      <message name="IDS_KEYGEN_HIGH_GRADE_KEY" desc="High-grade cryptographic key size menu item">
-        2048 (High Grade)
-      </message>
-      <message name="IDS_KEYGEN_MED_GRADE_KEY" desc="Medium-grade cryptographic key size menu item">
-        1024 (Medium Grade)
       </message>
 
       <message name="IDS_FORM_INPUT_WEEK_TEMPLATE" desc="A specfic week (1-53) in a specific year shown in a form control">
@@ -856,8 +833,38 @@ below:
         Please lengthen this text to <ph name="MIN_CHARACTERS">$2<ex>101</ex></ph> characters or more (you are currently using <ph name="CURRENT_LENGTH">$1<ex>100</ex></ph> characters).
       </message>
 
-      <message name="IDS_MEDIA_TRACKS_NO_LABEL" desc="Menu item label for a text track that has no name specified">
-        Unknown
+      <message name="IDS_MEDIA_OVERFLOW_MENU_CLOSED_CAPTIONS" desc="Media controls overflow menu item label for a closed captions button. The text for this overflow menu should be short.">
+        Captions
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_CAST" desc="Media controls overflow menu item label for a cast button.">
+        Cast
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_ENTER_FULLSCREEN" desc="Media controls overflow menu item label for a button to enter fullscreen.">
+        Fullscreen
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_EXIT_FULLSCREEN" desc="Media controls overflow menu item label for a button to exit fullscreen.">
+        Exit fullscreen
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_STOP_CAST" desc="Media controls overflow menu item label for a button to stop casting.">
+        Stop casting
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_MUTE" desc="Media controls overflow menu item label for a mute button.">
+        Mute
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_UNMUTE" desc="Media controls overflow menu item label for an unmute button.">
+        Unmute
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_PLAY" desc="Media controls overflow menu item label for a play button.">
+        Play
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_PAUSE" desc="Media controls overflow menu item label for a pause button.">
+        Pause
+      </message>
+      <message name="IDS_MEDIA_OVERFLOW_MENU_DOWNLOAD" desc="Media controls overflow menu item label for a download button.">
+       Download
+      </message>
+      <message name="IDS_MEDIA_TRACKS_NO_LABEL" desc="Menu item label for a text track that has no name specified. The number represents the track number in the list of tracks.">
+        Track <ph name="NUMBER">$1<ex>1</ex></ph>
       </message>
 
       <message name="IDS_MEDIA_TRACKS_OFF" desc="Menu item label for a text track that represents disabling closed captions">

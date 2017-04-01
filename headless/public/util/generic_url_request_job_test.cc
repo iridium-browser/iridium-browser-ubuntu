@@ -53,10 +53,12 @@ class MockFetcher : public URLFetcher {
   ~MockFetcher() override {}
 
   void StartFetch(const GURL& url,
+                  const std::string& method,
                   const net::HttpRequestHeaders& request_headers,
                   ResultListener* result_listener) override {
     // Record the request.
     fetch_request_->SetString("url", url.spec());
+    fetch_request_->SetString("method", method);
     std::unique_ptr<base::DictionaryValue> headers(new base::DictionaryValue);
     for (net::HttpRequestHeaders::Iterator it(request_headers); it.GetNext();) {
       headers->SetString(it.name(), it.value());
@@ -84,6 +86,7 @@ class MockFetcher : public URLFetcher {
       response_headers->AddHeader(
           base::StringPrintf("%s: %s", it.key().c_str(), value.c_str()));
     }
+
     result_listener->OnFetchComplete(
         GURL(final_url), http_response_code, std::move(response_headers),
         response_data_.c_str(), response_data_.size());
@@ -146,7 +149,7 @@ class GenericURLRequestJobTest : public testing::Test {
     std::unique_ptr<net::URLRequest> request(url_request_context_.CreateRequest(
         url, net::DEFAULT_PRIORITY, &request_delegate_));
     request->Start();
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     return request;
   }
 
@@ -179,10 +182,11 @@ TEST_F(GenericURLRequestJobTest, BasicRequestParams) {
   request->SetExtraRequestHeaderByName("User-Agent", "TestBrowser", true);
   request->SetExtraRequestHeaderByName("Accept", "text/plain", true);
   request->Start();
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 
   std::string expected_request_json =
       "{\"url\": \"https://example.com/\","
+      " \"method\": \"GET\","
       " \"headers\": {"
       "   \"Accept\": \"text/plain\","
       "   \"Cookie\": \"\","
@@ -237,6 +241,10 @@ TEST_F(GenericURLRequestJobTest, BasicRequestContents) {
   EXPECT_TRUE(request->Read(buffer.get(), kBufferSize, &bytes_read));
   EXPECT_EQ(5, bytes_read);
   EXPECT_EQ("Reply", std::string(buffer->data(), 5));
+
+  net::LoadTimingInfo load_timing_info;
+  request->GetLoadTimingInfo(&load_timing_info);
+  EXPECT_FALSE(load_timing_info.receive_headers_end.is_null());
 }
 
 TEST_F(GenericURLRequestJobTest, ReadInParts) {
@@ -334,6 +342,7 @@ TEST_F(GenericURLRequestJobTest, RequestWithCookies) {
 
   std::string expected_request_json =
       "{\"url\": \"https://example.com/\","
+      " \"method\": \"GET\","
       " \"headers\": {"
       "   \"Cookie\": \"basic_cookie=1; secure_cookie=2; http_only_cookie=3\","
       "   \"Referer\": \"\""

@@ -27,6 +27,7 @@
 #include "content/browser/indexed_db/mock_indexed_db_callbacks.h"
 #include "content/browser/indexed_db/mock_indexed_db_database_callbacks.h"
 #include "content/browser/indexed_db/mock_indexed_db_factory.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
@@ -37,38 +38,39 @@ const int kFakeChildProcessId = 0;
 
 namespace content {
 
-TEST(IndexedDBDatabaseTest, BackingStoreRetention) {
+class IndexedDBDatabaseTest : public ::testing::Test {
+ private:
+  TestBrowserThreadBundle thread_bundle_;
+};
+
+TEST_F(IndexedDBDatabaseTest, BackingStoreRetention) {
   scoped_refptr<IndexedDBFakeBackingStore> backing_store =
       new IndexedDBFakeBackingStore();
   EXPECT_TRUE(backing_store->HasOneRef());
 
   scoped_refptr<MockIndexedDBFactory> factory = new MockIndexedDBFactory();
+  scoped_refptr<IndexedDBDatabase> db;
   leveldb::Status s;
-  scoped_refptr<IndexedDBDatabase> db =
-      IndexedDBDatabase::Create(ASCIIToUTF16("db"),
-                                backing_store.get(),
-                                factory.get(),
-                                IndexedDBDatabase::Identifier(),
-                                &s);
+  std::tie(db, s) =
+      IndexedDBDatabase::Create(ASCIIToUTF16("db"), backing_store.get(),
+                                factory.get(), IndexedDBDatabase::Identifier());
   ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
   db = NULL;
   EXPECT_TRUE(backing_store->HasOneRef());  // local
 }
 
-TEST(IndexedDBDatabaseTest, ConnectionLifecycle) {
+TEST_F(IndexedDBDatabaseTest, ConnectionLifecycle) {
   scoped_refptr<IndexedDBFakeBackingStore> backing_store =
       new IndexedDBFakeBackingStore();
   EXPECT_TRUE(backing_store->HasOneRef());  // local
 
   scoped_refptr<MockIndexedDBFactory> factory = new MockIndexedDBFactory();
+  scoped_refptr<IndexedDBDatabase> db;
   leveldb::Status s;
-  scoped_refptr<IndexedDBDatabase> db =
-      IndexedDBDatabase::Create(ASCIIToUTF16("db"),
-                                backing_store.get(),
-                                factory.get(),
-                                IndexedDBDatabase::Identifier(),
-                                &s);
+  std::tie(db, s) =
+      IndexedDBDatabase::Create(ASCIIToUTF16("db"), backing_store.get(),
+                                factory.get(), IndexedDBDatabase::Identifier());
   ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
@@ -110,19 +112,17 @@ TEST(IndexedDBDatabaseTest, ConnectionLifecycle) {
   db = NULL;
 }
 
-TEST(IndexedDBDatabaseTest, ForcedClose) {
+TEST_F(IndexedDBDatabaseTest, ForcedClose) {
   scoped_refptr<IndexedDBFakeBackingStore> backing_store =
       new IndexedDBFakeBackingStore();
   EXPECT_TRUE(backing_store->HasOneRef());
 
   scoped_refptr<MockIndexedDBFactory> factory = new MockIndexedDBFactory();
+  scoped_refptr<IndexedDBDatabase> database;
   leveldb::Status s;
-  scoped_refptr<IndexedDBDatabase> database =
-      IndexedDBDatabase::Create(ASCIIToUTF16("db"),
-                                backing_store.get(),
-                                factory.get(),
-                                IndexedDBDatabase::Identifier(),
-                                &s);
+  std::tie(database, s) =
+      IndexedDBDatabase::Create(ASCIIToUTF16("db"), backing_store.get(),
+                                factory.get(), IndexedDBDatabase::Identifier());
   ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
@@ -150,41 +150,41 @@ TEST(IndexedDBDatabaseTest, ForcedClose) {
   EXPECT_TRUE(callbacks->abort_called());
 }
 
-class MockDeleteCallbacks : public IndexedDBCallbacks {
+class MockCallbacks : public IndexedDBCallbacks {
  public:
-  MockDeleteCallbacks()
-      : IndexedDBCallbacks(NULL, 0, 0),
-        blocked_called_(false),
-        success_called_(false) {}
+  MockCallbacks() : IndexedDBCallbacks(nullptr, url::Origin(), nullptr) {}
 
   void OnBlocked(int64_t existing_version) override { blocked_called_ = true; }
   void OnSuccess(int64_t result) override { success_called_ = true; }
+  void OnError(const IndexedDBDatabaseError& error) override {
+    error_called_ = true;
+  }
 
   bool blocked_called() const { return blocked_called_; }
   bool success_called() const { return success_called_; }
+  bool error_called() const { return error_called_; }
 
  private:
-  ~MockDeleteCallbacks() override {}
+  ~MockCallbacks() override {}
 
-  bool blocked_called_;
-  bool success_called_;
+  bool blocked_called_ = false;
+  bool success_called_ = false;
+  bool error_called_ = false;
 
-  DISALLOW_COPY_AND_ASSIGN(MockDeleteCallbacks);
+  DISALLOW_COPY_AND_ASSIGN(MockCallbacks);
 };
 
-TEST(IndexedDBDatabaseTest, PendingDelete) {
+TEST_F(IndexedDBDatabaseTest, PendingDelete) {
   scoped_refptr<IndexedDBFakeBackingStore> backing_store =
       new IndexedDBFakeBackingStore();
   EXPECT_TRUE(backing_store->HasOneRef());  // local
 
   scoped_refptr<MockIndexedDBFactory> factory = new MockIndexedDBFactory();
+  scoped_refptr<IndexedDBDatabase> db;
   leveldb::Status s;
-  scoped_refptr<IndexedDBDatabase> db =
-      IndexedDBDatabase::Create(ASCIIToUTF16("db"),
-                                backing_store.get(),
-                                factory.get(),
-                                IndexedDBDatabase::Identifier(),
-                                &s);
+  std::tie(db, s) =
+      IndexedDBDatabase::Create(ASCIIToUTF16("db"), backing_store.get(),
+                                factory.get(), IndexedDBDatabase::Identifier());
   ASSERT_TRUE(s.ok());
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
@@ -203,7 +203,7 @@ TEST(IndexedDBDatabaseTest, PendingDelete) {
   EXPECT_EQ(db->PendingOpenDeleteCount(), 0UL);
   EXPECT_FALSE(backing_store->HasOneRef());  // local and db
 
-  scoped_refptr<MockDeleteCallbacks> request2(new MockDeleteCallbacks());
+  scoped_refptr<MockCallbacks> request2(new MockCallbacks());
   db->DeleteDatabase(request2);
   EXPECT_EQ(db->ConnectionCount(), 1UL);
   EXPECT_EQ(db->ActiveOpenDeleteCount(), 1UL);
@@ -228,7 +228,8 @@ TEST(IndexedDBDatabaseTest, PendingDelete) {
   EXPECT_TRUE(request2->success_called());
 }
 
-void DummyOperation(IndexedDBTransaction* transaction) {
+leveldb::Status DummyOperation(IndexedDBTransaction* transaction) {
+  return leveldb::Status::OK();
 }
 
 class IndexedDBDatabaseOperationTest : public testing::Test {
@@ -240,11 +241,9 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
   void SetUp() override {
     backing_store_ = new IndexedDBFakeBackingStore();
     leveldb::Status s;
-    db_ = IndexedDBDatabase::Create(ASCIIToUTF16("db"),
-                                    backing_store_.get(),
-                                    factory_.get(),
-                                    IndexedDBDatabase::Identifier(),
-                                    &s);
+    std::tie(db_, s) = IndexedDBDatabase::Create(
+        ASCIIToUTF16("db"), backing_store_.get(), factory_.get(),
+        IndexedDBDatabase::Identifier());
     ASSERT_TRUE(s.ok());
 
     request_ = new MockIndexedDBCallbacks();
@@ -257,13 +256,13 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
     db_->OpenConnection(std::move(connection));
     EXPECT_EQ(IndexedDBDatabaseMetadata::NO_VERSION, db_->metadata().version);
 
-    connection_ = base::MakeUnique<IndexedDBConnection>(db_, callbacks_);
-    transaction_ = IndexedDBClassFactory::Get()->CreateIndexedDBTransaction(
-        transaction_id, connection_->GetWeakPtr(),
-        std::set<int64_t>() /*scope*/,
+    connection_ = base::MakeUnique<IndexedDBConnection>(kFakeChildProcessId,
+                                                        db_, callbacks_);
+    transaction_ = connection_->CreateTransaction(
+        transaction_id, std::set<int64_t>() /*scope*/,
         blink::WebIDBTransactionModeVersionChange,
         new IndexedDBFakeBackingStore::FakeTransaction(commit_success_));
-    db_->TransactionCreated(transaction_.get());
+    db_->TransactionCreated(transaction_);
 
     // Add a dummy task which takes the place of the VersionChangeOperation
     // which kicks off the upgrade. This ensures that the transaction has
@@ -273,18 +272,21 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
 
   void RunPostedTasks() { base::RunLoop().RunUntilIdle(); }
 
+private:
+  // Needs to outlive |db_|.
+  content::TestBrowserThreadBundle thread_bundle_;
+
  protected:
   scoped_refptr<IndexedDBFakeBackingStore> backing_store_;
   scoped_refptr<IndexedDBDatabase> db_;
   scoped_refptr<MockIndexedDBCallbacks> request_;
   scoped_refptr<MockIndexedDBDatabaseCallbacks> callbacks_;
-  scoped_refptr<IndexedDBTransaction> transaction_;
+  IndexedDBTransaction* transaction_;
   std::unique_ptr<IndexedDBConnection> connection_;
 
   leveldb::Status commit_success_;
 
  private:
-  base::MessageLoop message_loop_;
   scoped_refptr<MockIndexedDBFactory> factory_;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBDatabaseOperationTest);
@@ -293,11 +295,8 @@ class IndexedDBDatabaseOperationTest : public testing::Test {
 TEST_F(IndexedDBDatabaseOperationTest, CreateObjectStore) {
   EXPECT_EQ(0ULL, db_->metadata().object_stores.size());
   const int64_t store_id = 1001;
-  db_->CreateObjectStore(transaction_->id(),
-                         store_id,
-                         ASCIIToUTF16("store"),
-                         IndexedDBKeyPath(),
-                         false /*auto_increment*/);
+  db_->CreateObjectStore(transaction_, store_id, ASCIIToUTF16("store"),
+                         IndexedDBKeyPath(), false /*auto_increment*/);
   EXPECT_EQ(1ULL, db_->metadata().object_stores.size());
   RunPostedTasks();
   transaction_->Commit();
@@ -307,20 +306,12 @@ TEST_F(IndexedDBDatabaseOperationTest, CreateObjectStore) {
 TEST_F(IndexedDBDatabaseOperationTest, CreateIndex) {
   EXPECT_EQ(0ULL, db_->metadata().object_stores.size());
   const int64_t store_id = 1001;
-  db_->CreateObjectStore(transaction_->id(),
-                         store_id,
-                         ASCIIToUTF16("store"),
-                         IndexedDBKeyPath(),
-                         false /*auto_increment*/);
+  db_->CreateObjectStore(transaction_, store_id, ASCIIToUTF16("store"),
+                         IndexedDBKeyPath(), false /*auto_increment*/);
   EXPECT_EQ(1ULL, db_->metadata().object_stores.size());
   const int64_t index_id = 2002;
-  db_->CreateIndex(transaction_->id(),
-                   store_id,
-                   index_id,
-                   ASCIIToUTF16("index"),
-                   IndexedDBKeyPath(),
-                   false /*unique*/,
-                   false /*multi_entry*/);
+  db_->CreateIndex(transaction_, store_id, index_id, ASCIIToUTF16("index"),
+                   IndexedDBKeyPath(), false /*unique*/, false /*multi_entry*/);
   EXPECT_EQ(
       1ULL,
       db_->metadata().object_stores.find(store_id)->second.indexes.size());
@@ -346,11 +337,8 @@ class IndexedDBDatabaseOperationAbortTest
 TEST_F(IndexedDBDatabaseOperationAbortTest, CreateObjectStore) {
   EXPECT_EQ(0ULL, db_->metadata().object_stores.size());
   const int64_t store_id = 1001;
-  db_->CreateObjectStore(transaction_->id(),
-                         store_id,
-                         ASCIIToUTF16("store"),
-                         IndexedDBKeyPath(),
-                         false /*auto_increment*/);
+  db_->CreateObjectStore(transaction_, store_id, ASCIIToUTF16("store"),
+                         IndexedDBKeyPath(), false /*auto_increment*/);
   EXPECT_EQ(1ULL, db_->metadata().object_stores.size());
   RunPostedTasks();
   transaction_->Commit();
@@ -360,20 +348,12 @@ TEST_F(IndexedDBDatabaseOperationAbortTest, CreateObjectStore) {
 TEST_F(IndexedDBDatabaseOperationAbortTest, CreateIndex) {
   EXPECT_EQ(0ULL, db_->metadata().object_stores.size());
   const int64_t store_id = 1001;
-  db_->CreateObjectStore(transaction_->id(),
-                         store_id,
-                         ASCIIToUTF16("store"),
-                         IndexedDBKeyPath(),
-                         false /*auto_increment*/);
+  db_->CreateObjectStore(transaction_, store_id, ASCIIToUTF16("store"),
+                         IndexedDBKeyPath(), false /*auto_increment*/);
   EXPECT_EQ(1ULL, db_->metadata().object_stores.size());
   const int64_t index_id = 2002;
-  db_->CreateIndex(transaction_->id(),
-                   store_id,
-                   index_id,
-                   ASCIIToUTF16("index"),
-                   IndexedDBKeyPath(),
-                   false /*unique*/,
-                   false /*multi_entry*/);
+  db_->CreateIndex(transaction_, store_id, index_id, ASCIIToUTF16("index"),
+                   IndexedDBKeyPath(), false /*unique*/, false /*multi_entry*/);
   EXPECT_EQ(
       1ULL,
       db_->metadata().object_stores.find(store_id)->second.indexes.size());
@@ -387,11 +367,8 @@ TEST_F(IndexedDBDatabaseOperationTest, CreatePutDelete) {
   const int64_t store_id = 1001;
 
   // Creation is synchronous.
-  db_->CreateObjectStore(transaction_->id(),
-                         store_id,
-                         ASCIIToUTF16("store"),
-                         IndexedDBKeyPath(),
-                         false /*auto_increment*/);
+  db_->CreateObjectStore(transaction_, store_id, ASCIIToUTF16("store"),
+                         IndexedDBKeyPath(), false /*auto_increment*/);
   EXPECT_EQ(1ULL, db_->metadata().object_stores.size());
 
 
@@ -399,15 +376,14 @@ TEST_F(IndexedDBDatabaseOperationTest, CreatePutDelete) {
   IndexedDBValue value("value1", std::vector<IndexedDBBlobInfo>());
   std::vector<std::unique_ptr<storage::BlobDataHandle>> handles;
   std::unique_ptr<IndexedDBKey> key(base::MakeUnique<IndexedDBKey>("key"));
-  std::vector<IndexedDBDatabase::IndexKeys> index_keys;
+  std::vector<IndexedDBIndexKeys> index_keys;
   scoped_refptr<MockIndexedDBCallbacks> request(
       new MockIndexedDBCallbacks(false));
-  db_->Put(transaction_->id(), store_id, &value, &handles, std::move(key),
+  db_->Put(transaction_, store_id, &value, &handles, std::move(key),
            blink::WebIDBPutModeAddOnly, request, index_keys);
 
   // Deletion is asynchronous.
-  db_->DeleteObjectStore(transaction_->id(),
-                         store_id);
+  db_->DeleteObjectStore(transaction_, store_id);
   EXPECT_EQ(1ULL, db_->metadata().object_stores.size());
 
   // This will execute the Put then Delete.

@@ -39,18 +39,16 @@ void InFlightBoundsChange::Revert() {
   WindowPrivate(window()).LocalSetBounds(window()->bounds(), revert_bounds_);
 }
 
-// InFlightMoveLoopChange -----------------------------------------------------
+// InFlightDragChange -----------------------------------------------------
 
-InFlightMoveLoopChange::InFlightMoveLoopChange(Window* window)
-    : InFlightChange(window, ChangeType::MOVE_LOOP) {}
-
-void InFlightMoveLoopChange::SetRevertValueFrom(const InFlightChange& change) {}
-
-void InFlightMoveLoopChange::Revert() {
-  // Reverting bounds happens in the window server in the error case; it cannot
-  // happen in the client because this could conflict with a
-  // InFlightBoundsChange.
+InFlightDragChange::InFlightDragChange(Window* window, ChangeType type)
+    : InFlightChange(window, type) {
+  DCHECK(type == ChangeType::MOVE_LOOP || type == ChangeType::DRAG_LOOP);
 }
+
+void InFlightDragChange::SetRevertValueFrom(const InFlightChange& change) {}
+
+void InFlightDragChange::Revert() {}
 
 // CrashInFlightChange --------------------------------------------------------
 
@@ -140,10 +138,10 @@ void InFlightFocusChange::Revert() {
 InFlightPropertyChange::InFlightPropertyChange(
     Window* window,
     const std::string& property_name,
-    const mojo::Array<uint8_t>& revert_value)
+    const base::Optional<std::vector<uint8_t>>& revert_value)
     : InFlightChange(window, ChangeType::PROPERTY),
       property_name_(property_name),
-      revert_value_(revert_value.Clone()) {}
+      revert_value_(revert_value) {}
 
 InFlightPropertyChange::~InFlightPropertyChange() {}
 
@@ -154,12 +152,12 @@ bool InFlightPropertyChange::Matches(const InFlightChange& change) const {
 
 void InFlightPropertyChange::SetRevertValueFrom(const InFlightChange& change) {
   revert_value_ =
-      static_cast<const InFlightPropertyChange&>(change).revert_value_.Clone();
+      static_cast<const InFlightPropertyChange&>(change).revert_value_;
 }
 
 void InFlightPropertyChange::Revert() {
-  WindowPrivate(window())
-      .LocalSetSharedProperty(property_name_, std::move(revert_value_));
+  WindowPrivate(window()).LocalSetSharedProperty(
+      property_name_, revert_value_ ? &revert_value_.value() : nullptr);
 }
 
 // InFlightPredefinedCursorChange ---------------------------------------------

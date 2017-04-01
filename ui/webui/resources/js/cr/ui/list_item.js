@@ -11,6 +11,13 @@ cr.define('cr.ui', function() {
    */
   var ListItem = cr.ui.define('li');
 
+  /**
+   * The next id suffix to use when giving each item an unique id.
+   * @type {number}
+   * @private
+   */
+  ListItem.nextUniqueIdSuffix_ = 0;
+
   ListItem.prototype = {
     __proto__: HTMLLIElement.prototype,
 
@@ -36,23 +43,24 @@ cr.define('cr.ui', function() {
      */
     decorate: function() {
       this.setAttribute('role', 'listitem');
+      if (!this.id)
+        this.id = 'listitem-' + ListItem.nextUniqueIdSuffix_++;
     },
 
     /**
      * Called when the selection state of this element changes.
      */
-    selectionChanged: function() {
-    },
+    selectionChanged: function() {},
   };
 
   /**
    * Whether the item is selected. Setting this does not update the underlying
    * selection model. This is only used for display purpose.
    */
-  cr.defineProperty(ListItem, 'selected', cr.PropertyKind.BOOL_ATTR,
-                    function() {
-                      this.selectionChanged();
-                    });
+  cr.defineProperty(
+      ListItem, 'selected', cr.PropertyKind.BOOL_ATTR, function() {
+        this.selectionChanged();
+      });
 
   /**
    * Whether the item is the lead in a selection. Setting this does not update
@@ -66,7 +74,5 @@ cr.define('cr.ui', function() {
    */
   cr.defineProperty(ListItem, 'listIndex');
 
-  return {
-    ListItem: ListItem
-  };
+  return {ListItem: ListItem};
 });

@@ -28,7 +28,7 @@ class Point;
 
 namespace ash {
 namespace test {
-class DisplayManagerTestApi;
+class AshTestBase;
 }
 class SharedDisplayEdgeIndicator;
 
@@ -43,7 +43,7 @@ class ASH_EXPORT ExtendedMouseWarpController : public MouseWarpController {
   void SetEnabled(bool enable) override;
 
  private:
-  friend class test::DisplayManagerTestApi;
+  friend class test::AshTestBase;
   friend class ExtendedMouseWarpControllerTest;
   FRIEND_TEST_ALL_PREFIXES(ExtendedMouseWarpControllerTest,
                            IndicatorBoundsTestThreeDisplays);

@@ -28,114 +28,160 @@
 namespace blink {
 
 class SVGElement;
+enum class SVGTransformChange;
 
 class CORE_EXPORT LayoutSVGRoot final : public LayoutReplaced {
-public:
-    explicit LayoutSVGRoot(SVGElement*);
-    ~LayoutSVGRoot() override;
+ public:
+  explicit LayoutSVGRoot(SVGElement*);
+  ~LayoutSVGRoot() override;
 
-    bool isEmbeddedThroughSVGImage() const;
-    bool isEmbeddedThroughFrameContainingSVGDocument() const;
+  bool isEmbeddedThroughSVGImage() const;
+  bool isEmbeddedThroughFrameContainingSVGDocument() const;
 
-    void computeIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
+  void computeIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
 
-    // If you have a LayoutSVGRoot, use firstChild or lastChild instead.
-    void slowFirstChild() const = delete;
-    void slowLastChild() const = delete;
+  // If you have a LayoutSVGRoot, use firstChild or lastChild instead.
+  void slowFirstChild() const = delete;
+  void slowLastChild() const = delete;
 
-    LayoutObject* firstChild() const { ASSERT(children() == virtualChildren()); return children()->firstChild(); }
-    LayoutObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
+  LayoutObject* firstChild() const {
+    ASSERT(children() == virtualChildren());
+    return children()->firstChild();
+  }
+  LayoutObject* lastChild() const {
+    ASSERT(children() == virtualChildren());
+    return children()->lastChild();
+  }
 
-    bool isLayoutSizeChanged() const { return m_isLayoutSizeChanged; }
-    bool didScreenScaleFactorChange() const { return m_didScreenScaleFactorChange; }
-    void setNeedsBoundariesUpdate() override { m_needsBoundariesOrTransformUpdate = true; }
-    void setNeedsTransformUpdate() override { m_needsBoundariesOrTransformUpdate = true; }
+  bool isLayoutSizeChanged() const { return m_isLayoutSizeChanged; }
+  bool didScreenScaleFactorChange() const {
+    return m_didScreenScaleFactorChange;
+  }
+  void setNeedsBoundariesUpdate() override {
+    m_needsBoundariesOrTransformUpdate = true;
+  }
+  void setNeedsTransformUpdate() override {
+    m_needsBoundariesOrTransformUpdate = true;
+  }
 
-    IntSize containerSize() const { return m_containerSize; }
-    void setContainerSize(const IntSize& containerSize)
-    {
-        // SVGImage::draw() does a view layout prior to painting,
-        // and we need that layout to know of the new size otherwise
-        // the layout may be incorrectly using the old size.
-        if (m_containerSize != containerSize)
-            setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::SizeChanged);
-        m_containerSize = containerSize;
+  IntSize containerSize() const { return m_containerSize; }
+  void setContainerSize(const IntSize& containerSize) {
+    // SVGImage::draw() does a view layout prior to painting,
+    // and we need that layout to know of the new size otherwise
+    // the layout may be incorrectly using the old size.
+    if (m_containerSize != containerSize) {
+      setNeedsLayoutAndFullPaintInvalidation(
+          LayoutInvalidationReason::SizeChanged);
     }
+    m_containerSize = containerSize;
+  }
 
-    // localToBorderBoxTransform maps local SVG viewport coordinates to local CSS box coordinates.
-    const AffineTransform& localToBorderBoxTransform() const { return m_localToBorderBoxTransform; }
-    bool shouldApplyViewportClip() const;
+  // localToBorderBoxTransform maps local SVG viewport coordinates to local CSS
+  // box coordinates.
+  const AffineTransform& localToBorderBoxTransform() const {
+    return m_localToBorderBoxTransform;
+  }
 
-    LayoutRect visualOverflowRect() const override;
+  bool shouldApplyViewportClip() const;
+  bool shouldClipOverflow() const override {
+    return LayoutBox::shouldClipOverflow() || shouldApplyViewportClip();
+  }
 
-    bool hasNonIsolatedBlendingDescendants() const final;
+  LayoutRect visualOverflowRect() const override;
+  LayoutRect overflowClipRect(
+      const LayoutPoint& location,
+      OverlayScrollbarClipBehavior = IgnoreOverlayScrollbarSize) const override;
 
-    const char* name() const override { return "LayoutSVGRoot"; }
+  bool hasNonIsolatedBlendingDescendants() const final;
 
-private:
-    const LayoutObjectChildList* children() const { return &m_children; }
-    LayoutObjectChildList* children() { return &m_children; }
+  const char* name() const override { return "LayoutSVGRoot"; }
 
-    LayoutObjectChildList* virtualChildren() override { return children(); }
-    const LayoutObjectChildList* virtualChildren() const override { return children(); }
+ private:
+  const LayoutObjectChildList* children() const { return &m_children; }
+  LayoutObjectChildList* children() { return &m_children; }
 
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectSVG || type == LayoutObjectSVGRoot || LayoutReplaced::isOfType(type); }
+  LayoutObjectChildList* virtualChildren() override { return children(); }
+  const LayoutObjectChildList* virtualChildren() const override {
+    return children();
+  }
 
-    LayoutUnit computeReplacedLogicalWidth(ShouldComputePreferred  = ComputeActual) const override;
-    LayoutUnit computeReplacedLogicalHeight(LayoutUnit estimatedUsedWidth = LayoutUnit()) const override;
-    void layout() override;
-    void paintReplaced(const PaintInfo&, const LayoutPoint&) const override;
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectSVG || type == LayoutObjectSVGRoot ||
+           LayoutReplaced::isOfType(type);
+  }
 
-    void willBeDestroyed() override;
-    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
-    bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
-    void addChild(LayoutObject* child, LayoutObject* beforeChild = nullptr) override;
-    void removeChild(LayoutObject*) override;
+  LayoutUnit computeReplacedLogicalWidth(
+      ShouldComputePreferred = ComputeActual) const override;
+  LayoutUnit computeReplacedLogicalHeight(
+      LayoutUnit estimatedUsedWidth = LayoutUnit()) const override;
+  void layout() override;
+  void paintReplaced(const PaintInfo&, const LayoutPoint&) const override;
 
-    void insertedIntoTree() override;
-    void willBeRemovedFromTree() override;
+  void willBeDestroyed() override;
+  void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+  bool isChildAllowed(LayoutObject*, const ComputedStyle&) const override;
+  void addChild(LayoutObject* child,
+                LayoutObject* beforeChild = nullptr) override;
+  void removeChild(LayoutObject*) override;
 
-    const AffineTransform& localToSVGParentTransform() const override;
+  void insertedIntoTree() override;
+  void willBeRemovedFromTree() override;
 
-    FloatRect objectBoundingBox() const override { return m_objectBoundingBox; }
-    FloatRect strokeBoundingBox() const override { return m_strokeBoundingBox; }
-    FloatRect paintInvalidationRectInLocalSVGCoordinates() const override { return m_paintInvalidationBoundingBox; }
+  AffineTransform localToSVGParentTransform() const override;
 
-    bool nodeAtPoint(HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override;
+  FloatRect objectBoundingBox() const override { return m_objectBoundingBox; }
+  FloatRect strokeBoundingBox() const override { return m_strokeBoundingBox; }
+  FloatRect visualRectInLocalSVGCoordinates() const override {
+    return m_visualRectInLocalSVGCoordinates;
+  }
 
-    LayoutRect localOverflowRectForPaintInvalidation() const override;
+  bool nodeAtPoint(HitTestResult&,
+                   const HitTestLocation& locationInContainer,
+                   const LayoutPoint& accumulatedOffset,
+                   HitTestAction) override;
 
-    void mapLocalToAncestor(const LayoutBoxModelObject* ancestor, TransformState&, MapCoordinatesFlags = ApplyContainerFlip) const override;
-    const LayoutObject* pushMappingToContainer(const LayoutBoxModelObject* ancestorToStopAt, LayoutGeometryMap&) const override;
+  LayoutRect localVisualRect() const override;
 
-    bool canBeSelectionLeaf() const override { return false; }
-    bool canHaveChildren() const override { return true; }
+  bool paintedOutputOfObjectHasNoEffectRegardlessOfSize() const final {
+    // The rule is the same as LayoutBox's instead of LayoutReplaced's.
+    return LayoutBox::paintedOutputOfObjectHasNoEffectRegardlessOfSize();
+  }
 
-    void descendantIsolationRequirementsChanged(DescendantIsolationState) final;
+  void mapLocalToAncestor(
+      const LayoutBoxModelObject* ancestor,
+      TransformState&,
+      MapCoordinatesFlags = ApplyContainerFlip) const override;
+  const LayoutObject* pushMappingToContainer(
+      const LayoutBoxModelObject* ancestorToStopAt,
+      LayoutGeometryMap&) const override;
 
-    void updateCachedBoundaries();
-    void buildLocalToBorderBoxTransform();
+  bool canBeSelectionLeaf() const override { return false; }
+  bool canHaveChildren() const override { return true; }
 
-    PositionWithAffinity positionForPoint(const LayoutPoint&) final;
+  void descendantIsolationRequirementsChanged(DescendantIsolationState) final;
 
-    LayoutObjectChildList m_children;
-    IntSize m_containerSize;
-    FloatRect m_objectBoundingBox;
-    bool m_objectBoundingBoxValid;
-    FloatRect m_strokeBoundingBox;
-    FloatRect m_paintInvalidationBoundingBox;
-    mutable AffineTransform m_localToParentTransform;
-    AffineTransform m_localToBorderBoxTransform;
-    bool m_isLayoutSizeChanged : 1;
-    bool m_didScreenScaleFactorChange : 1;
-    bool m_needsBoundariesOrTransformUpdate : 1;
-    bool m_hasBoxDecorationBackground : 1;
-    mutable bool m_hasNonIsolatedBlendingDescendants : 1;
-    mutable bool m_hasNonIsolatedBlendingDescendantsDirty : 1;
+  void updateCachedBoundaries();
+  SVGTransformChange buildLocalToBorderBoxTransform();
+
+  PositionWithAffinity positionForPoint(const LayoutPoint&) final;
+
+  LayoutObjectChildList m_children;
+  IntSize m_containerSize;
+  FloatRect m_objectBoundingBox;
+  bool m_objectBoundingBoxValid;
+  FloatRect m_strokeBoundingBox;
+  FloatRect m_visualRectInLocalSVGCoordinates;
+  AffineTransform m_localToBorderBoxTransform;
+  bool m_isLayoutSizeChanged : 1;
+  bool m_didScreenScaleFactorChange : 1;
+  bool m_needsBoundariesOrTransformUpdate : 1;
+  bool m_hasBoxDecorationBackground : 1;
+  mutable bool m_hasNonIsolatedBlendingDescendants : 1;
+  mutable bool m_hasNonIsolatedBlendingDescendantsDirty : 1;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGRoot, isSVGRoot());
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutSVGRoot_h
+#endif  // LayoutSVGRoot_h

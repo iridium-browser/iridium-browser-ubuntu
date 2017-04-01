@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/window_state.h"
-#include "ash/display/display_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_state_aura.h"
 #include "base/command_line.h"
+#include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
@@ -130,9 +131,6 @@ TEST_F(LockLayoutManagerTest, NorwmalWindowBoundsArePreserved) {
 }
 
 TEST_F(LockLayoutManagerTest, MaximizedFullscreenWindowBoundsAreEqualToScreen) {
-  if (!SupportsHostWindowResize())
-    return;
-
   gfx::Rect screen_bounds =
       display::Screen::GetScreen()->GetPrimaryDisplay().bounds();
 
@@ -183,9 +181,6 @@ TEST_F(LockLayoutManagerTest, MaximizedFullscreenWindowBoundsAreEqualToScreen) {
 }
 
 TEST_F(LockLayoutManagerTest, KeyboardBounds) {
-  if (!SupportsHostWindowResize())
-    return;
-
   display::Display primary_display =
       display::Screen::GetScreen()->GetPrimaryDisplay();
   gfx::Rect screen_bounds = primary_display.bounds();
@@ -218,17 +213,15 @@ TEST_F(LockLayoutManagerTest, KeyboardBounds) {
       keyboard::KEYBOARD_OVERSCROLL_OVERRIDE_DISABLED);
   ShowKeyboard(true);
   ShowKeyboard(false);
-  ash::DisplayManager* display_manager =
-      Shell::GetInstance()->display_manager();
-  display_manager->SetDisplayRotation(primary_display.id(),
-                                      display::Display::ROTATE_90,
-                                      display::Display::ROTATION_SOURCE_ACTIVE);
+  display_manager()->SetDisplayRotation(
+      primary_display.id(), display::Display::ROTATE_90,
+      display::Display::ROTATION_SOURCE_ACTIVE);
   primary_display = display::Screen::GetScreen()->GetPrimaryDisplay();
   screen_bounds = primary_display.bounds();
   EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
-  display_manager->SetDisplayRotation(primary_display.id(),
-                                      display::Display::ROTATE_0,
-                                      display::Display::ROTATION_SOURCE_ACTIVE);
+  display_manager()->SetDisplayRotation(
+      primary_display.id(), display::Display::ROTATE_0,
+      display::Display::ROTATION_SOURCE_ACTIVE);
 
   // When virtual keyboard overscroll is disabled keyboard bounds do
   // affect window bounds.
@@ -264,7 +257,8 @@ TEST_F(LockLayoutManagerTest, MultipleMonitors) {
   widget_params.show_state = ui::SHOW_STATE_FULLSCREEN;
   std::unique_ptr<aura::Window> window(
       CreateTestLoginWindow(widget_params, false /* use_delegate */));
-  window->SetProperty(aura::client::kCanMaximizeKey, true);
+  window->SetProperty(aura::client::kResizeBehaviorKey,
+                      ui::mojom::kResizeBehaviorCanMaximize);
 
   EXPECT_EQ(screen_bounds.ToString(), window->GetBoundsInScreen().ToString());
 

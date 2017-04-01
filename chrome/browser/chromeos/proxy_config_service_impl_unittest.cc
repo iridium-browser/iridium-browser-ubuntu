@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#include "chromeos/network/proxy/proxy_config_service_impl.h"
 
 #include <stddef.h>
 
+#include <utility>
 #include <vector>
 
 #include "base/format_macros.h"
@@ -13,12 +14,10 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/chromeos/net/proxy_config_handler.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
-#include "chrome/browser/chromeos/ui_proxy_config.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
@@ -27,14 +26,21 @@
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_utils.h"
-#include "components/pref_registry/testing_pref_service_syncable.h"
+#include "chromeos/network/proxy/proxy_config_handler.h"
+#include "chromeos/network/proxy/ui_proxy_config.h"
+#include "components/onc/onc_pref_names.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_browser_thread.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_common_unittest.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+
+// TODO(stevenjb): Refactor and move this to src/chromeos/network/proxy or
+// rename. This is really more of an integration test than a unit test at this
+// point and currently relies on some chrome specific components.
 
 using content::BrowserThread;
 
@@ -239,14 +245,15 @@ class ProxyConfigServiceImplTest : public testing::Test {
     NetworkHandler::Initialize();
 
     PrefProxyConfigTrackerImpl::RegisterPrefs(pref_service_.registry());
-    chromeos::proxy_config::RegisterPrefs(pref_service_.registry());
+    ::onc::RegisterPrefs(pref_service_.registry());
     PrefProxyConfigTrackerImpl::RegisterProfilePrefs(profile_prefs_.registry());
-    chromeos::proxy_config::RegisterProfilePrefs(profile_prefs_.registry());
+    ::onc::RegisterProfilePrefs(profile_prefs_.registry());
   }
 
   void SetUpProxyConfigService(PrefService* profile_prefs) {
-    config_service_impl_.reset(
-        new ProxyConfigServiceImpl(profile_prefs, &pref_service_));
+    config_service_impl_.reset(new ProxyConfigServiceImpl(
+        profile_prefs, &pref_service_,
+        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)));
     proxy_config_service_ =
         config_service_impl_->CreateTrackingProxyConfigService(
             std::unique_ptr<net::ProxyConfigService>());
@@ -254,7 +261,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
     // CreateTrackingProxyConfigService triggers update of initial prefs proxy
     // config by tracker to chrome proxy config service, so flush all pending
     // tasks so that tests start fresh.
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetUpPrivateWiFi() {
@@ -264,7 +271,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
         DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
 
     // Process any pending notifications before clearing services.
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     service_test->ClearServices();
 
     // Sends a notification about the added profile.
@@ -277,7 +284,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
                              true /* visible */);
     profile_test->AddService(kUserProfilePath, "/service/stub_wifi2");
 
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetUpSharedEthernet() {
@@ -287,7 +294,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
         DBusThreadManager::Get()->GetShillServiceClient()->GetTestInterface();
 
     // Process any pending notifications before clearing services.
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     service_test->ClearServices();
 
     // Sends a notification about the added profile.
@@ -299,12 +306,12 @@ class ProxyConfigServiceImplTest : public testing::Test {
     profile_test->AddService(NetworkProfileHandler::GetSharedProfilePath(),
                              "/service/ethernet");
 
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void TearDown() override {
     config_service_impl_->DetachFromPrefService();
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     config_service_impl_.reset();
     proxy_config_service_.reset();
     NetworkHandler::Shutdown();
@@ -355,7 +362,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
     // Let message loop process all messages. This will run
     // ChromeProxyConfigService::UpdateProxyConfig, which is posted on IO from
     // PrefProxyConfigTrackerImpl::OnProxyConfigChanged.
-    loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     net::ProxyConfigService::ConfigAvailability availability =
         proxy_config_service_->GetLatestProxyConfig(config);
 
@@ -366,7 +373,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
   std::unique_ptr<net::ProxyConfigService> proxy_config_service_;
   std::unique_ptr<ProxyConfigServiceImpl> config_service_impl_;
   TestingPrefServiceSimple pref_service_;
-  user_prefs::TestingPrefServiceSyncable profile_prefs_;
+  sync_preferences::TestingPrefServiceSyncable profile_prefs_;
 
  private:
   ScopedTestDeviceSettingsService test_device_settings_service_;
@@ -512,11 +519,11 @@ TEST_F(ProxyConfigServiceImplTest, SharedEthernetAndUserPolicy) {
       chromeos::onc::ReadDictionaryFromJson(kEthernetPolicy));
 
   std::unique_ptr<base::ListValue> network_configs(new base::ListValue);
-  network_configs->Append(ethernet_policy.release());
+  network_configs->Append(std::move(ethernet_policy));
 
-  profile_prefs_.SetUserPref(prefs::kUseSharedProxies,
+  profile_prefs_.SetUserPref(::proxy_config::prefs::kUseSharedProxies,
                              new base::FundamentalValue(false));
-  profile_prefs_.SetManagedPref(prefs::kOpenNetworkConfiguration,
+  profile_prefs_.SetManagedPref(::onc::prefs::kOpenNetworkConfiguration,
                                 network_configs.release());
 
   net::ProxyConfig actual_config;

@@ -19,7 +19,7 @@
 #include "libGLESv2.hpp"
 #include "Framebuffer.h"
 #include "libEGL/main.h"
-#include "libEGL/Surface.h"
+#include "libEGL/EGLSurface.h"
 #include "Common/Thread.hpp"
 #include "Common/SharedLibrary.hpp"
 #include "common/debug.h"
@@ -1324,6 +1324,11 @@ GL_APICALL void GL_APIENTRY glEGLImageTargetRenderbufferStorageOES(GLenum target
 GL_APICALL void GL_APIENTRY glDrawBuffersEXT(GLsizei n, const GLenum *bufs)
 {
 	return es2::DrawBuffersEXT(n, bufs);
+}
+
+void GL_APIENTRY Register(const char *licenseKey)
+{
+	// Nothing to do, SwiftShader is open-source
 }
 }
 

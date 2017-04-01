@@ -6,8 +6,10 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace chromeos {
 namespace attestation {
@@ -21,17 +23,14 @@ void PlatformVerificationImpl::Create(
   DVLOG(2) << __FUNCTION__;
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(render_frame_host);
-
-  // The created object is strongly bound to (and owned by) the pipe.
-  new PlatformVerificationImpl(render_frame_host, std::move(request));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<PlatformVerificationImpl>(render_frame_host),
+      std::move(request));
 }
 
 PlatformVerificationImpl::PlatformVerificationImpl(
-    content::RenderFrameHost* render_frame_host,
-    mojo::InterfaceRequest<PlatformVerification> request)
-    : binding_(this, std::move(request)),
-      render_frame_host_(render_frame_host),
-      weak_factory_(this) {
+    content::RenderFrameHost* render_frame_host)
+    : render_frame_host_(render_frame_host), weak_factory_(this) {
   DCHECK(render_frame_host);
 }
 
@@ -39,8 +38,8 @@ PlatformVerificationImpl::~PlatformVerificationImpl() {
 }
 
 void PlatformVerificationImpl::ChallengePlatform(
-    const mojo::String& service_id,
-    const mojo::String& challenge,
+    const std::string& service_id,
+    const std::string& challenge,
     const ChallengePlatformCallback& callback) {
   DVLOG(2) << __FUNCTION__;
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);

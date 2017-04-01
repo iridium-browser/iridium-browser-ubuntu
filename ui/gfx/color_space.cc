@@ -8,15 +8,41 @@
 
 #include "base/lazy_instance.h"
 #include "base/synchronization/lock.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "ui/gfx/icc_profile.h"
 
 namespace gfx {
 
-ColorSpace::ColorSpace()
-    : primaries_(PrimaryID::UNSPECIFIED),
-      transfer_(TransferID::UNSPECIFIED),
-      matrix_(MatrixID::UNSPECIFIED),
-      range_(RangeID::LIMITED) {}
+ColorSpace::PrimaryID ColorSpace::PrimaryIDFromInt(int primary_id) {
+  if (primary_id < 0 || primary_id > static_cast<int>(PrimaryID::LAST))
+    return PrimaryID::UNKNOWN;
+  if (primary_id > static_cast<int>(PrimaryID::LAST_STANDARD_VALUE) &&
+      primary_id < 1000)
+    return PrimaryID::UNKNOWN;
+  return static_cast<PrimaryID>(primary_id);
+}
+
+ColorSpace::TransferID ColorSpace::TransferIDFromInt(int transfer_id) {
+  if (transfer_id < 0 || transfer_id > static_cast<int>(TransferID::LAST))
+    return TransferID::UNKNOWN;
+  if (transfer_id > static_cast<int>(TransferID::LAST_STANDARD_VALUE) &&
+      transfer_id < 1000)
+    return TransferID::UNKNOWN;
+  return static_cast<TransferID>(transfer_id);
+}
+
+ColorSpace::MatrixID ColorSpace::MatrixIDFromInt(int matrix_id) {
+  if (matrix_id < 0 || matrix_id > static_cast<int>(MatrixID::LAST))
+    return MatrixID::UNKNOWN;
+  if (matrix_id > static_cast<int>(MatrixID::LAST_STANDARD_VALUE) &&
+      matrix_id < 1000)
+    return MatrixID::UNKNOWN;
+  return static_cast<MatrixID>(matrix_id);
+}
+
+ColorSpace::ColorSpace() {
+  memset(custom_primary_matrix_, 0, sizeof(custom_primary_matrix_));
+}
 
 ColorSpace::ColorSpace(PrimaryID primaries,
                        TransferID transfer,
@@ -26,12 +52,43 @@ ColorSpace::ColorSpace(PrimaryID primaries,
       transfer_(transfer),
       matrix_(matrix),
       range_(range) {
+  memset(custom_primary_matrix_, 0, sizeof(custom_primary_matrix_));
   // TODO: Set profile_id_
 }
 
+ColorSpace::ColorSpace(int primaries, int transfer, int matrix, RangeID range)
+    : primaries_(PrimaryIDFromInt(primaries)),
+      transfer_(TransferIDFromInt(transfer)),
+      matrix_(MatrixIDFromInt(matrix)),
+      range_(range) {
+  memset(custom_primary_matrix_, 0, sizeof(custom_primary_matrix_));
+  // TODO: Set profile_id_
+}
+
+ColorSpace::ColorSpace(const ColorSpace& other)
+    : primaries_(other.primaries_),
+      transfer_(other.transfer_),
+      matrix_(other.matrix_),
+      range_(other.range_),
+      icc_profile_id_(other.icc_profile_id_),
+      sk_color_space_(other.sk_color_space_) {
+  memcpy(custom_primary_matrix_, other.custom_primary_matrix_,
+         sizeof(custom_primary_matrix_));
+}
+
+ColorSpace::~ColorSpace() = default;
+
 // static
 ColorSpace ColorSpace::CreateSRGB() {
-  return ColorSpace(PrimaryID::BT709, TransferID::IEC61966_2_1, MatrixID::RGB,
+  ColorSpace result(PrimaryID::BT709, TransferID::IEC61966_2_1, MatrixID::RGB,
+                    RangeID::FULL);
+  result.sk_color_space_ = SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
+  return result;
+}
+
+// static
+ColorSpace ColorSpace::CreateSCRGBLinear() {
+  return ColorSpace(PrimaryID::BT709, TransferID::LINEAR, MatrixID::RGB,
                     RangeID::FULL);
 }
 
@@ -60,8 +117,19 @@ ColorSpace ColorSpace::CreateREC709() {
 }
 
 bool ColorSpace::operator==(const ColorSpace& other) const {
-  return primaries_ == other.primaries_ && transfer_ == other.transfer_ &&
-         matrix_ == other.matrix_ && range_ == other.range_;
+  if (primaries_ != other.primaries_ || transfer_ != other.transfer_ ||
+      matrix_ != other.matrix_ || range_ != other.range_)
+    return false;
+  if (primaries_ == PrimaryID::CUSTOM &&
+      memcmp(custom_primary_matrix_, other.custom_primary_matrix_,
+             sizeof(custom_primary_matrix_)))
+    return false;
+  return true;
+}
+
+bool ColorSpace::IsHDR() const {
+  return transfer_ == TransferID::SMPTEST2084 ||
+         transfer_ == TransferID::ARIB_STD_B67;
 }
 
 bool ColorSpace::operator!=(const ColorSpace& other) const {
@@ -84,12 +152,32 @@ bool ColorSpace::operator<(const ColorSpace& other) const {
   if (range_ < other.range_)
     return true;
   if (range_ > other.range_)
-    return true;
-
-  // TODO(hubbe): For "CUSTOM" primaries or tranfer functions, compare their
-  // coefficients here
-
+    return false;
+  if (primaries_ == PrimaryID::CUSTOM) {
+    int primary_result =
+        memcmp(custom_primary_matrix_, other.custom_primary_matrix_,
+               sizeof(custom_primary_matrix_));
+    if (primary_result < 0)
+      return true;
+    if (primary_result > 0)
+      return false;
+  }
   return false;
+}
+
+ColorSpace ColorSpace::FromSkColorSpace(
+    const sk_sp<SkColorSpace>& sk_color_space) {
+  if (!sk_color_space)
+    return gfx::ColorSpace();
+  if (SkColorSpace::Equals(
+          sk_color_space.get(),
+          SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named).get()))
+    return gfx::ColorSpace::CreateSRGB();
+
+  // TODO(crbug.com/634102): Add conversion to gfx::ColorSpace for
+  // non-ICC-profile based color spaces.
+  ICCProfile icc_profile = ICCProfile::FromSkColorSpace(sk_color_space);
+  return icc_profile.GetColorSpace();
 }
 
 }  // namespace gfx

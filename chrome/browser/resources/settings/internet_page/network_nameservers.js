@@ -19,9 +19,7 @@ Polymer({
       observer: 'networkPropertiesChanged_',
     },
 
-    /**
-     * Whether or not the nameservers can be edited.
-     */
+    /** Whether or not the nameservers can be edited. */
     editable: {
       type: Boolean,
       value: false,
@@ -29,9 +27,9 @@ Polymer({
 
     /**
      * Array of nameserver addresses stored as strings.
-     * @type {!Array<string>}
+     * @private {!Array<string>}
      */
-    nameservers: {
+    nameservers_: {
       type: Array,
       value: function() {
         return [];
@@ -40,14 +38,16 @@ Polymer({
 
     /**
      * The selected nameserver type.
+     * @private
      */
-    nameserversType: {
+    nameserversType_: {
       type: String,
       value: 'automatic',
     },
 
     /**
      * Array of nameserver types.
+     * @private
      */
     nameserverTypeNames_: {
       type: Array,
@@ -67,7 +67,7 @@ Polymer({
 
   /**
    * Saved nameservers when switching to 'automatic'.
-   * @type {!Array<string>}
+   * @private {!Array<string>}
    */
   savedNameservers_: [],
 
@@ -108,32 +108,35 @@ Polymer({
    * @private
    */
   setNameservers_: function(nameserversType, nameservers) {
-    this.nameserversType = nameserversType;
     if (nameserversType == 'custom') {
       // Add empty entries for unset custom nameservers.
       for (let i = nameservers.length; i < this.MAX_NAMESERVERS; ++i)
         nameservers[i] = '';
     }
-    this.nameservers = nameservers;
+    this.nameservers_ = nameservers;
+    // Set nameserversType_ after dom-repeat has been stamped.
+    this.async(function() {
+      this.nameserversType_ = nameserversType;
+    }.bind(this));
   },
 
   /**
-   * @param {string} nameserversType The nameservers type.
-   * @return {string} The description for |nameserversType|.
+   * @param {string} type The nameservers type.
+   * @return {string} The description for |type|.
    * @private
    */
-  nameserverTypeDesc_: function(nameserversType) {
+  nameserverTypeDesc_: function(type) {
     // TODO(stevenjb): Translate.
-    if (nameserversType == 'custom')
+    if (type == 'custom')
       return 'Custom name servers';
-    if (nameserversType == 'google')
+    if (type == 'google')
       return 'Google name servers';
     return 'Automatic name servers';
   },
 
   /**
-   * @param {boolean} editable The editable state.
-   * @param {string} nameserversType The nameservers type.
+   * @param {boolean} editable
+   * @param {string} nameserversType
    * @return {boolean} True if the nameservers are editable.
    * @private
    */
@@ -144,14 +147,15 @@ Polymer({
   /**
    * Event triggered when the selected type changes. Updates nameservers and
    * sends the change value if necessary.
-   * @param {!{detail: !{selected: string}}} e
+   * @param {!Event} event
    * @private
    */
-  onTypeChange_: function(e) {
-    if (this.nameserversType == 'custom')
-      this.savedNameservers_ = this.nameservers;
-    var type = e.detail.selected;
-    this.nameserversType = type;
+  onTypeChange_: function(event) {
+    if (this.nameserversType_ == 'custom')
+      this.savedNameservers_ = this.nameservers_;
+    let target = /** @type {!HTMLSelectElement} */ (event.target);
+    let type = target.value;
+    this.nameserversType_ = type;
     if (type == 'custom') {
       // Restore the saved nameservers.
       this.setNameservers_(type, this.savedNameservers_);
@@ -167,7 +171,7 @@ Polymer({
    * @private
    */
   onValueChange_: function() {
-    if (this.nameserversType != 'custom') {
+    if (this.nameserversType_ != 'custom') {
       // If a user inputs Google nameservers in the custom nameservers fields,
       // |nameserversType| will change to 'google' so don't send the values.
       return;
@@ -180,7 +184,7 @@ Polymer({
    * @private
    */
   sendNameServers_: function() {
-    var type = this.nameserversType;
+    var type = this.nameserversType_;
 
     if (type == 'custom') {
       let nameservers = [];

@@ -9,15 +9,12 @@
 #include "base/memory/weak_ptr.h"
 #include "third_party/WebKit/public/web/WebWidgetClient.h"
 
-namespace blink {
-class WebWidget;
-}  // namespace blink
-
 namespace test_runner {
 
 class TestRunner;
+class TestRunnerForSpecificView;
 class WebTestDelegate;
-class WebViewTestProxyBase;
+class WebWidgetTestProxyBase;
 
 // WebWidgetTestClient implements WebWidgetClient interface, providing behavior
 // expected by tests.  WebWidgetTestClient ends up used by WebViewTestProxy
@@ -28,12 +25,11 @@ class WebWidgetTestClient : public blink::WebWidgetClient {
  public:
   // Caller has to ensure that all arguments (i.e. |test_runner| and |delegate|)
   // live longer than |this|.
-  WebWidgetTestClient(TestRunner* test_runner,
-                      WebViewTestProxyBase* web_view_test_proxy_base);
+  WebWidgetTestClient(WebWidgetTestProxyBase* web_widget_test_proxy_base);
 
   virtual ~WebWidgetTestClient();
 
-  // WebWidgetClient overrides needed by WebViewTestProxy.
+  // WebWidgetClient overrides needed by WebWidgetTestProxy.
   blink::WebScreenInfo screenInfo() override;
   void scheduleAnimation() override;
   bool requestPointerLock() override;
@@ -41,14 +37,21 @@ class WebWidgetTestClient : public blink::WebWidgetClient {
   bool isPointerLocked() override;
   void setToolTipText(const blink::WebString& text,
                       blink::WebTextDirection direction) override;
-  void resetInputMethod() override;
+  void startDragging(blink::WebReferrerPolicy policy,
+                     const blink::WebDragData& data,
+                     blink::WebDragOperationsMask mask,
+                     const blink::WebImage& image,
+                     const blink::WebPoint& point) override;
 
  private:
   void AnimateNow();
 
-  // Borrowed pointers to other parts of Layout Tests state.
-  TestRunner* test_runner_;
-  WebViewTestProxyBase* web_view_test_proxy_base_;
+  WebTestDelegate* delegate();
+  TestRunnerForSpecificView* view_test_runner();
+  TestRunner* test_runner();
+
+  // Borrowed pointer to WebWidgetTestProxyBase.
+  WebWidgetTestProxyBase* web_widget_test_proxy_base_;
 
   bool animation_scheduled_;
 

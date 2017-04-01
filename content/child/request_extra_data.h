@@ -16,8 +16,11 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
 #include "ui/base/page_transition_types.h"
+#include "url/origin.h"
 
 namespace content {
+
+struct ResourceRequest;
 
 // Can be used by callers to store extra data on every ResourceRequest
 // which will be incorporated into the ResourceHostMsg_RequestResource message
@@ -42,8 +45,8 @@ class CONTENT_EXPORT RequestExtraData
   void set_is_main_frame(bool is_main_frame) {
     is_main_frame_ = is_main_frame;
   }
-  GURL frame_origin() const { return frame_origin_; }
-  void set_frame_origin(const GURL& frame_origin) {
+  url::Origin frame_origin() const { return frame_origin_; }
+  void set_frame_origin(const url::Origin& frame_origin) {
     frame_origin_ = frame_origin;
   }
   bool parent_is_main_frame() const { return parent_is_main_frame_; }
@@ -133,11 +136,35 @@ class CONTENT_EXPORT RequestExtraData
     initiated_in_secure_context_ = secure;
   }
 
+  // The request is a prefetch and should use LOAD_PREFETCH network flags.
+  bool is_prefetch() const { return is_prefetch_; }
+  void set_is_prefetch(bool prefetch) { is_prefetch_ = prefetch; }
+
+  // The request is downloaded to the network cache, but not rendered or
+  // executed. The renderer will see this as an aborted request.
+  bool download_to_network_cache_only() const {
+    return download_to_network_cache_only_;
+  }
+  void set_download_to_network_cache_only(bool download_to_cache) {
+    download_to_network_cache_only_ = download_to_cache;
+  }
+
+  // Copy of the settings value determining if mixed plugin content should be
+  // blocked.
+  bool block_mixed_plugin_content() const {
+    return block_mixed_plugin_content_;
+  }
+  void set_block_mixed_plugin_content(bool block_mixed_plugin_content) {
+    block_mixed_plugin_content_ = block_mixed_plugin_content;
+  }
+
+  void CopyToResourceRequest(ResourceRequest* request) const;
+
  private:
   blink::WebPageVisibilityState visibility_state_;
   int render_frame_id_;
   bool is_main_frame_;
-  GURL frame_origin_;
+  url::Origin frame_origin_;
   bool parent_is_main_frame_;
   int parent_render_frame_id_;
   bool allow_download_;
@@ -151,6 +178,9 @@ class CONTENT_EXPORT RequestExtraData
   blink::WebString requested_with_;
   std::unique_ptr<StreamOverrideParameters> stream_override_;
   bool initiated_in_secure_context_;
+  bool is_prefetch_;
+  bool download_to_network_cache_only_;
+  bool block_mixed_plugin_content_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestExtraData);
 };

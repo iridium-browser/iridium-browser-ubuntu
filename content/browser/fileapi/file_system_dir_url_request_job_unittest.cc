@@ -11,7 +11,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/format_macros.h"
 #include "base/location.h"
-#include "base/memory/scoped_vector.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -133,8 +133,8 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     special_storage_policy_ = new MockSpecialStoragePolicy;
-    file_system_context_ = CreateFileSystemContextForTesting(
-        NULL, temp_dir_.path());
+    file_system_context_ =
+        CreateFileSystemContextForTesting(NULL, temp_dir_.GetPath());
 
     file_system_context_->OpenFileSystem(
         GURL("http://remote/"),
@@ -152,18 +152,19 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
   }
 
   void SetUpAutoMountContext(base::FilePath* mnt_point) {
-    *mnt_point = temp_dir_.path().AppendASCII("auto_mount_dir");
+    *mnt_point = temp_dir_.GetPath().AppendASCII("auto_mount_dir");
     ASSERT_TRUE(base::CreateDirectory(*mnt_point));
 
-    ScopedVector<storage::FileSystemBackend> additional_providers;
-    additional_providers.push_back(new TestFileSystemBackend(
+    std::vector<std::unique_ptr<storage::FileSystemBackend>>
+        additional_providers;
+    additional_providers.push_back(base::MakeUnique<TestFileSystemBackend>(
         base::ThreadTaskRunnerHandle::Get().get(), *mnt_point));
 
     std::vector<storage::URLRequestAutoMountHandler> handlers;
     handlers.push_back(base::Bind(&TestAutoMountForURLRequest));
 
     file_system_context_ = CreateFileSystemContextWithAutoMountersForTesting(
-        NULL, std::move(additional_providers), handlers, temp_dir_.path());
+        NULL, std::move(additional_providers), handlers, temp_dir_.GetPath());
   }
 
   void OnOpenFileSystem(const GURL& root_url,
@@ -347,22 +348,19 @@ TEST_F(FileSystemDirURLRequestJobTest, InvalidURL) {
   TestRequest(GURL("filesystem:/foo/bar/baz"));
   ASSERT_FALSE(request_->is_pending());
   EXPECT_TRUE(delegate_->request_failed());
-  ASSERT_FALSE(request_->status().is_success());
-  EXPECT_EQ(net::ERR_INVALID_URL, request_->status().error());
+  EXPECT_EQ(net::ERR_INVALID_URL, delegate_->request_status());
 }
 
 TEST_F(FileSystemDirURLRequestJobTest, NoSuchRoot) {
   TestRequest(GURL("filesystem:http://remote/persistent/somedir/"));
   ASSERT_FALSE(request_->is_pending());
-  ASSERT_FALSE(request_->status().is_success());
-  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request_->status().error());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, delegate_->request_status());
 }
 
 TEST_F(FileSystemDirURLRequestJobTest, NoSuchDirectory) {
   TestRequest(CreateFileSystemURL("somedir/"));
   ASSERT_FALSE(request_->is_pending());
-  ASSERT_FALSE(request_->status().is_success());
-  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request_->status().error());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, delegate_->request_status());
 }
 
 TEST_F(FileSystemDirURLRequestJobTest, Cancel) {
@@ -379,12 +377,11 @@ TEST_F(FileSystemDirURLRequestJobTest, Incognito) {
   CreateDirectory("foo");
 
   scoped_refptr<FileSystemContext> file_system_context =
-      CreateIncognitoFileSystemContextForTesting(NULL, temp_dir_.path());
+      CreateIncognitoFileSystemContextForTesting(NULL, temp_dir_.GetPath());
 
   TestRequestWithContext(CreateFileSystemURL("/"),
                          file_system_context.get());
   ASSERT_FALSE(request_->is_pending());
-  ASSERT_TRUE(request_->status().is_success());
 
   std::istringstream in(delegate_->data_received());
   std::string line;
@@ -394,8 +391,7 @@ TEST_F(FileSystemDirURLRequestJobTest, Incognito) {
   TestRequestWithContext(CreateFileSystemURL("foo"),
                          file_system_context.get());
   ASSERT_FALSE(request_->is_pending());
-  ASSERT_FALSE(request_->status().is_success());
-  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request_->status().error());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, delegate_->request_status());
 }
 
 TEST_F(FileSystemDirURLRequestJobTest, AutoMountDirectoryListing) {
@@ -438,8 +434,7 @@ TEST_F(FileSystemDirURLRequestJobTest, AutoMountInvalidRoot) {
   TestRequest(GURL("filesystem:http://automount/external/invalid"));
 
   ASSERT_FALSE(request_->is_pending());
-  ASSERT_FALSE(request_->status().is_success());
-  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request_->status().error());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, delegate_->request_status());
 
   ASSERT_FALSE(
       storage::ExternalMountPoints::GetSystemInstance()->RevokeFileSystem(
@@ -452,8 +447,7 @@ TEST_F(FileSystemDirURLRequestJobTest, AutoMountNoHandler) {
   TestRequest(GURL("filesystem:http://noauto/external/mnt_name"));
 
   ASSERT_FALSE(request_->is_pending());
-  ASSERT_FALSE(request_->status().is_success());
-  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request_->status().error());
+  EXPECT_EQ(net::ERR_FILE_NOT_FOUND, delegate_->request_status());
 
   ASSERT_FALSE(
       storage::ExternalMountPoints::GetSystemInstance()->RevokeFileSystem(

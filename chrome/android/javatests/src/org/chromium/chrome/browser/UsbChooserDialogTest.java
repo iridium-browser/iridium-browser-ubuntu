@@ -5,12 +5,13 @@
 package org.chromium.chrome.browser;
 
 import android.app.Dialog;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.LargeTest;
 import android.view.View;
 import android.widget.Button;
 import android.widget.ListView;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
@@ -24,6 +25,7 @@ import java.util.concurrent.Callable;
 /**
  * Tests for the UsbChooserDialog class.
  */
+@RetryOnFailure
 public class UsbChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     /**
      * Works like the UsbChooserDialog class, but records calls to native methods instead of
@@ -82,7 +84,7 @@ public class UsbChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActiv
     }
 
     private static void selectItem(final UsbChooserDialogWithFakeNatives chooserDialog,
-            int position) throws InterruptedException {
+            int position) {
         final Dialog dialog = chooserDialog.mItemChooserDialog.getDialogForTesting();
         final ListView items = (ListView) dialog.findViewById(R.id.items);
         final Button button = (Button) dialog.findViewById(R.id.positive);
@@ -125,8 +127,8 @@ public class UsbChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActiv
                 "</?link2>", "").replaceAll("</?link>", "");
     }
 
-    @SmallTest
-    public void testCancel() throws InterruptedException {
+    @LargeTest
+    public void testCancel() {
         Dialog dialog = mChooserDialog.mItemChooserDialog.getDialogForTesting();
         assertTrue(dialog.isShowing());
 
@@ -147,7 +149,7 @@ public class UsbChooserDialogTest extends ChromeActivityTestCaseBase<ChromeActiv
         });
     }
 
-    @SmallTest
+    @LargeTest
     public void testSelectItem() throws InterruptedException {
         Dialog dialog = mChooserDialog.mItemChooserDialog.getDialogForTesting();
 

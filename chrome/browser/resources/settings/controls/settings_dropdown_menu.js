@@ -30,16 +30,13 @@ Polymer({
   is: 'settings-dropdown-menu',
 
   properties: {
-    /** A text label for the drop-down menu. */
-    label: String,
-
     /**
      * List of options for the drop-down menu.
-     * @type {!DropdownMenuOptionList}
+     * @type {?DropdownMenuOptionList}
      */
     menuOptions: {
       type: Array,
-      value: function() { return []; },
+      value: null,
     },
 
     /** Whether the dropdown menu should be disabled. */
@@ -50,27 +47,13 @@ Polymer({
     },
 
     /**
-     * Either loading text or the label for the drop-down menu.
-     * @private
-     */
-    menuLabel_: {
-      type: String,
-      value: function() { return loadTimeData.getString('loading'); },
-    },
-
-    /**
-     * The current selected value, as a string.
-     * @private
-     */
-    selected_: String,
-
-    /**
-     * The value of the 'custom' item.
+     * The value of the "custom" item.
      * @private
      */
     notFoundValue_: {
       type: String,
       value: 'SETTINGS_DROPDOWN_NOT_FOUND_ITEM',
+      readOnly: true,
     },
   },
 
@@ -79,38 +62,21 @@ Polymer({
   ],
 
   observers: [
-    'checkSetup_(menuOptions)',
-    'updateSelected_(pref.value)',
+    'updateSelected_(menuOptions, pref.value)',
   ],
-
-  ready: function() {
-    this.checkSetup_(this.menuOptions);
-  },
-
-  /**
-   * Check to see if we have all the pieces needed to enable the control.
-   * @param {DropdownMenuOptionList} menuOptions
-   * @private
-   */
-  checkSetup_: function(menuOptions) {
-    if (!this.menuOptions.length)
-      return;
-
-    this.menuLabel_ = this.label;
-    this.updateSelected_();
-  },
 
   /**
    * Pass the selection change to the pref value.
    * @private
    */
-  onSelect_: function() {
-    if (!this.pref || this.selected_ == undefined ||
-        this.selected_ == this.notFoundValue_) {
+  onChange_: function() {
+    var selected = this.$.dropdownMenu.value;
+
+    if (selected == this.notFoundValue_)
       return;
-    }
+
     var prefValue = Settings.PrefUtil.stringToPrefValue(
-        this.selected_, this.pref);
+        selected, assert(this.pref));
     if (prefValue !== undefined)
       this.set('pref.value', prefValue);
   },
@@ -120,25 +86,38 @@ Polymer({
    * @private
    */
   updateSelected_: function() {
-    if (!this.pref || !this.menuOptions.length)
+    if (this.menuOptions === null || !this.menuOptions.length)
       return;
+
     var prefValue = this.pref.value;
     var option = this.menuOptions.find(function(menuItem) {
       return menuItem.value == prefValue;
     });
-    if (option == undefined)
-      this.selected_ = this.notFoundValue_;
-    else
-      this.selected_ = Settings.PrefUtil.prefToString(this.pref);
+
+    // Wait for the dom-repeat to populate the <select> before setting
+    // <select>#value so the correct option gets selected.
+    this.async(function() {
+      this.$.dropdownMenu.value = option == undefined ?
+          this.notFoundValue_ :
+          Settings.PrefUtil.prefToString(assert(this.pref));
+    }.bind(this));
   },
 
   /**
-   * @param {string} selected
+   * @param {?DropdownMenuOptionList} menuOptions
+   * @param {string} prefValue
    * @return {boolean}
    * @private
    */
-  isSelectedNotFound_: function(selected) {
-    return this.menuOptions.length > 0 && selected == this.notFoundValue_;
+  showNotFoundValue_: function(menuOptions, prefValue) {
+    // Don't show "Custom" before the options load.
+    if (!menuOptions || !menuOptions.length)
+      return false;
+
+    var option = menuOptions.find(function(menuItem) {
+      return menuItem.value == prefValue;
+    });
+    return !option;
   },
 
   /**
@@ -146,6 +125,7 @@ Polymer({
    * @private
    */
   shouldDisableMenu_: function() {
-    return this.disabled || !this.menuOptions.length;
+    return this.disabled || this.menuOptions === null ||
+        this.menuOptions.length == 0;
   },
 });

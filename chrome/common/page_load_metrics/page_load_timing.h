@@ -11,6 +11,26 @@
 
 namespace page_load_metrics {
 
+struct StyleSheetTiming {
+  StyleSheetTiming();
+  StyleSheetTiming(const StyleSheetTiming& other);
+  ~StyleSheetTiming();
+
+  bool operator==(const StyleSheetTiming& other) const;
+  bool operator!=(const StyleSheetTiming& other) const {
+    return !(*this == other);
+  }
+
+  bool IsEmpty() const;
+
+  // Total time spent parsing author style sheets, before the first contentful
+  // paint.
+  base::Optional<base::TimeDelta> author_style_sheet_parse_duration_before_fcp;
+
+  // Time spent in Document::updateStyle before FCP.
+  base::Optional<base::TimeDelta> update_style_duration_before_fcp;
+};
+
 // PageLoadTiming contains timing metrics associated with a page load. Many of
 // the metrics here are based on the Navigation Timing spec:
 // http://www.w3.org/TR/navigation-timing/.
@@ -27,10 +47,13 @@ struct PageLoadTiming {
 
   bool IsEmpty() const;
 
-  // Time that the navigation for the associated page was initiated.
+  // Time that the navigation for the associated page was initiated. Note that
+  // this field is only used for internal tracking purposes and should not be
+  // used by PageLoadMetricsObservers. This field will likely be removed in the
+  // future.
   base::Time navigation_start;
 
-  // All TimeDeltas are relative to navigation_start
+  // TimeDeltas relative to navigation_start:
 
   // Time that the first byte of the response is received.
   base::Optional<base::TimeDelta> response_start;
@@ -55,6 +78,9 @@ struct PageLoadTiming {
   // (Experimental) Time when the page's primary content is painted.
   base::Optional<base::TimeDelta> first_meaningful_paint;
 
+
+  // TimeDeltas below represent durations of time during the page load:
+
   // Time that the document's parser started and stopped parsing main resource
   // content.
   base::Optional<base::TimeDelta> parse_start;
@@ -76,6 +102,23 @@ struct PageLoadTiming {
   // for details.
   base::Optional<base::TimeDelta>
       parse_blocked_on_script_load_from_document_write_duration;
+
+  // Sum of times when the parser is executing a script.  This duration takes
+  // place between parser_start and parser_stop, and thus must be less than or
+  // equal to parser_stop - parser_start. Note that this value may be updated
+  // multiple times during the period between parse_start and parse_stop.
+  base::Optional<base::TimeDelta> parse_blocked_on_script_execution_duration;
+
+  // Sum of times when the parser is executing a script that was inserted from
+  // document.write. This duration must be less than or equal to
+  // parse_blocked_on_script_load_duration. Note that this value may be updated
+  // multiple times during the period between parse_start and parse_stop. Note
+  // that some uncommon cases where scripts are loaded via document.write are
+  // not currently covered by this field. See crbug/600711 for details.
+  base::Optional<base::TimeDelta>
+      parse_blocked_on_script_execution_from_document_write_duration;
+
+  StyleSheetTiming style_sheet_timing;
 
   // If you add additional members, also be sure to update operator==,
   // page_load_metrics_messages.h, and IsEmpty().

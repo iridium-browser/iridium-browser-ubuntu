@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -18,12 +19,14 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/sys_info.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -223,20 +226,15 @@ class VpxVideoDecoder::MemoryPool
   void OnVideoFrameDestroyed(VP9FrameBuffer* frame_buffer);
 
   // Frame buffers to be used by libvpx for VP9 Decoding.
-  std::vector<VP9FrameBuffer*> frame_buffers_;
+  std::vector<std::unique_ptr<VP9FrameBuffer>> frame_buffers_;
 
   DISALLOW_COPY_AND_ASSIGN(MemoryPool);
 };
 
 VpxVideoDecoder::MemoryPool::MemoryPool() {
-  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
-      this, "VpxVideoDecoder", base::ThreadTaskRunnerHandle::Get());
 }
 
 VpxVideoDecoder::MemoryPool::~MemoryPool() {
-  base::STLDeleteElements(&frame_buffers_);
-  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
-      this);
 }
 
 VpxVideoDecoder::MemoryPool::VP9FrameBuffer*
@@ -250,13 +248,13 @@ VpxVideoDecoder::MemoryPool::GetFreeFrameBuffer(size_t min_size) {
 
   if (i == frame_buffers_.size()) {
     // Create a new frame buffer.
-    frame_buffers_.push_back(new VP9FrameBuffer());
+    frame_buffers_.push_back(base::MakeUnique<VP9FrameBuffer>());
   }
 
   // Resize the frame buffer if necessary.
   if (frame_buffers_[i]->data.size() < min_size)
     frame_buffers_[i]->data.resize(min_size);
-  return frame_buffers_[i];
+  return frame_buffers_[i].get();
 }
 
 int32_t VpxVideoDecoder::MemoryPool::GetVP9FrameBuffer(
@@ -317,7 +315,7 @@ bool VpxVideoDecoder::MemoryPool::OnMemoryDump(
                             ->system_allocator_pool_name());
   size_t bytes_used = 0;
   size_t bytes_reserved = 0;
-  for (const VP9FrameBuffer* frame_buffer : frame_buffers_) {
+  for (const auto& frame_buffer : frame_buffers_) {
     if (frame_buffer->ref_cnt)
       bytes_used += frame_buffer->data.size();
     bytes_reserved += frame_buffer->data.size();
@@ -397,8 +395,16 @@ void VpxVideoDecoder::DecodeBuffer(const scoped_refptr<DecoderBuffer>& buffer,
     return;
   }
 
+  bool decode_okay;
   scoped_refptr<VideoFrame> video_frame;
-  if (!VpxDecode(buffer, &video_frame)) {
+  if (config_.codec() == kCodecVP9) {
+    SCOPED_UMA_HISTOGRAM_TIMER("Media.VpxVideoDecoder.Vp9DecodeTime");
+    decode_okay = VpxDecode(buffer, &video_frame);
+  } else {
+    decode_okay = VpxDecode(buffer, &video_frame);
+  }
+
+  if (!decode_okay) {
     state_ = kError;
     bound_decode_cb.Run(DecodeStatus::DECODE_ERROR);
     return;
@@ -482,7 +488,12 @@ bool VpxVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config) {
           g_vpx_offload_thread.Pointer()->RequestOffloadThread();
     }
 
+    DCHECK(!memory_pool_);
     memory_pool_ = new MemoryPool();
+    base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+        memory_pool_.get(), "VpxVideoDecoder",
+        base::ThreadTaskRunnerHandle::Get());
+
     if (vpx_codec_set_frame_buffer_functions(vpx_codec_,
                                              &MemoryPool::GetVP9FrameBuffer,
                                              &MemoryPool::ReleaseVP9FrameBuffer,
@@ -511,6 +522,8 @@ void VpxVideoDecoder::CloseDecoder() {
     vpx_codec_destroy(vpx_codec_);
     delete vpx_codec_;
     vpx_codec_ = nullptr;
+    base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+        memory_pool_.get());
     memory_pool_ = nullptr;
   }
   if (vpx_codec_alpha_) {
@@ -586,56 +599,64 @@ bool VpxVideoDecoder::VpxDecode(const scoped_refptr<DecoderBuffer>& buffer,
       ->metadata()
       ->SetInteger(VideoFrameMetadata::COLOR_SPACE, color_space);
 
-  gfx::ColorSpace::PrimaryID primaries =
-      gfx::ColorSpace::PrimaryID::UNSPECIFIED;
-  gfx::ColorSpace::TransferID transfer =
-      gfx::ColorSpace::TransferID::UNSPECIFIED;
-  gfx::ColorSpace::MatrixID matrix = gfx::ColorSpace::MatrixID::UNSPECIFIED;
-  gfx::ColorSpace::RangeID range = vpx_image->range == VPX_CR_FULL_RANGE
-                                       ? gfx::ColorSpace::RangeID::FULL
-                                       : gfx::ColorSpace::RangeID::LIMITED;
+  if (config_.color_space_info() != gfx::ColorSpace()) {
+    // config_.color_space_info() comes from the color tag which is
+    // more expressive than the bitstream, so prefer it over the
+    // bitstream data below.
+    (*video_frame)->set_color_space(config_.color_space_info());
+  } else {
+    gfx::ColorSpace::PrimaryID primaries =
+        gfx::ColorSpace::PrimaryID::UNSPECIFIED;
+    gfx::ColorSpace::TransferID transfer =
+        gfx::ColorSpace::TransferID::UNSPECIFIED;
+    gfx::ColorSpace::MatrixID matrix = gfx::ColorSpace::MatrixID::UNSPECIFIED;
+    gfx::ColorSpace::RangeID range = vpx_image->range == VPX_CR_FULL_RANGE
+                                         ? gfx::ColorSpace::RangeID::FULL
+                                         : gfx::ColorSpace::RangeID::LIMITED;
 
-  switch (vpx_image->cs) {
-    case VPX_CS_BT_601:
-    case VPX_CS_SMPTE_170:
-      primaries = gfx::ColorSpace::PrimaryID::SMPTE170M;
-      transfer = gfx::ColorSpace::TransferID::SMPTE170M;
-      matrix = gfx::ColorSpace::MatrixID::SMPTE170M;
-      break;
-    case VPX_CS_SMPTE_240:
-      primaries = gfx::ColorSpace::PrimaryID::SMPTE240M;
-      transfer = gfx::ColorSpace::TransferID::SMPTE240M;
-      matrix = gfx::ColorSpace::MatrixID::SMPTE240M;
-      break;
-    case VPX_CS_BT_709:
-      primaries = gfx::ColorSpace::PrimaryID::BT709;
-      transfer = gfx::ColorSpace::TransferID::BT709;
-      matrix = gfx::ColorSpace::MatrixID::BT709;
-      break;
-    case VPX_CS_BT_2020:
-      primaries = gfx::ColorSpace::PrimaryID::BT2020;
-      if (vpx_image->bit_depth >= 12) {
-        transfer = gfx::ColorSpace::TransferID::BT2020_12;
-      } else if (vpx_image->bit_depth >= 10) {
-        transfer = gfx::ColorSpace::TransferID::BT2020_10;
-      } else {
+    switch (vpx_image->cs) {
+      case VPX_CS_BT_601:
+      case VPX_CS_SMPTE_170:
+        primaries = gfx::ColorSpace::PrimaryID::SMPTE170M;
+        transfer = gfx::ColorSpace::TransferID::SMPTE170M;
+        matrix = gfx::ColorSpace::MatrixID::SMPTE170M;
+        break;
+      case VPX_CS_SMPTE_240:
+        primaries = gfx::ColorSpace::PrimaryID::SMPTE240M;
+        transfer = gfx::ColorSpace::TransferID::SMPTE240M;
+        matrix = gfx::ColorSpace::MatrixID::SMPTE240M;
+        break;
+      case VPX_CS_BT_709:
+        primaries = gfx::ColorSpace::PrimaryID::BT709;
         transfer = gfx::ColorSpace::TransferID::BT709;
-      }
-      matrix = gfx::ColorSpace::MatrixID::BT2020_NCL;  // is this right?
-      break;
-    case VPX_CS_SRGB:
-      primaries = gfx::ColorSpace::PrimaryID::BT709;
-      transfer = gfx::ColorSpace::TransferID::IEC61966_2_1;
-      matrix = gfx::ColorSpace::MatrixID::BT709;
-      break;
+        matrix = gfx::ColorSpace::MatrixID::BT709;
+        break;
+      case VPX_CS_BT_2020:
+        primaries = gfx::ColorSpace::PrimaryID::BT2020;
+        if (vpx_image->bit_depth >= 12) {
+          transfer = gfx::ColorSpace::TransferID::BT2020_12;
+        } else if (vpx_image->bit_depth >= 10) {
+          transfer = gfx::ColorSpace::TransferID::BT2020_10;
+        } else {
+          transfer = gfx::ColorSpace::TransferID::BT709;
+        }
+        matrix = gfx::ColorSpace::MatrixID::BT2020_NCL;  // is this right?
+        break;
+      case VPX_CS_SRGB:
+        primaries = gfx::ColorSpace::PrimaryID::BT709;
+        transfer = gfx::ColorSpace::TransferID::IEC61966_2_1;
+        matrix = gfx::ColorSpace::MatrixID::BT709;
+        break;
 
-    default:
-      break;
-  }
+      default:
+        break;
+    }
 
-  if (primaries != gfx::ColorSpace::PrimaryID::UNSPECIFIED) {
-    (*video_frame)
-        ->set_color_space(gfx::ColorSpace(primaries, transfer, matrix, range));
+    if (primaries != gfx::ColorSpace::PrimaryID::UNSPECIFIED) {
+      (*video_frame)
+          ->set_color_space(
+              gfx::ColorSpace(primaries, transfer, matrix, range));
+    }
   }
 
   return true;
@@ -723,6 +744,48 @@ bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
 
     case VPX_IMG_FMT_I444:
       codec_format = PIXEL_FORMAT_YV24;
+      break;
+
+    case VPX_IMG_FMT_I42016:
+      switch (vpx_image->bit_depth) {
+        case 10:
+          codec_format = PIXEL_FORMAT_YUV420P10;
+          break;
+        case 12:
+          codec_format = PIXEL_FORMAT_YUV420P12;
+          break;
+        default:
+          DLOG(ERROR) << "Unsupported bit depth: " << vpx_image->bit_depth;
+          return false;
+      }
+      break;
+
+    case VPX_IMG_FMT_I42216:
+      switch (vpx_image->bit_depth) {
+        case 10:
+          codec_format = PIXEL_FORMAT_YUV422P10;
+          break;
+        case 12:
+          codec_format = PIXEL_FORMAT_YUV422P12;
+          break;
+        default:
+          DLOG(ERROR) << "Unsupported bit depth: " << vpx_image->bit_depth;
+          return false;
+      }
+      break;
+
+    case VPX_IMG_FMT_I44416:
+      switch (vpx_image->bit_depth) {
+        case 10:
+          codec_format = PIXEL_FORMAT_YUV444P10;
+          break;
+        case 12:
+          codec_format = PIXEL_FORMAT_YUV444P12;
+          break;
+        default:
+          DLOG(ERROR) << "Unsupported bit depth: " << vpx_image->bit_depth;
+          return false;
+      }
       break;
 
     default:

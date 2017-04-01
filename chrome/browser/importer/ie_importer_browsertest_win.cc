@@ -21,9 +21,9 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -318,14 +318,6 @@ class TestObserver : public ProfileWriter,
     }
   }
 
-  virtual void AddKeyword(std::vector<TemplateURL*> template_url,
-                          int default_keyword_index) {
-    // TODO(jcampan): bug 1169230: we should test keyword importing for IE.
-    // In order to do that we'll probably need to mock the Windows registry.
-    NOTREACHED();
-    base::STLDeleteContainerPointers(template_url.begin(), template_url.end());
-  }
-
   void AddFavicons(const favicon_base::FaviconUsageDataList& usage) override {
     // Importer should group the favicon information for each favicon URL.
     for (size_t i = 0; i < arraysize(kIEFaviconGroup); ++i) {
@@ -402,7 +394,7 @@ class MalformedFavoritesRegistryTestObserver
   void AddPasswordForm(const autofill::PasswordForm& form) override {}
   void AddHistoryPage(const history::URLRows& page,
                       history::VisitSource visit_source) override {}
-  void AddKeywords(ScopedVector<TemplateURL> template_urls,
+  void AddKeywords(TemplateURLService::OwnedTemplateURLVector template_urls,
                    bool unique_on_host_and_path) override {}
   void AddBookmarks(const std::vector<ImportedBookmarkEntry>& bookmarks,
                     const base::string16& top_level_folder_name) override {
@@ -444,7 +436,7 @@ class IEImporterBrowserTest : public InProcessBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
   // Sets up a favorites folder.
-  base::FilePath path = temp_dir_.path().AppendASCII("Favorites");
+  base::FilePath path = temp_dir_.GetPath().AppendASCII("Favorites");
   CreateDirectory(path.value().c_str(), NULL);
   CreateDirectory(path.AppendASCII("SubFolder").value().c_str(), NULL);
   base::FilePath links_path = path.AppendASCII("Links");
@@ -515,7 +507,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
 
   importer::SourceProfile source_profile;
   source_profile.importer_type = importer::TYPE_IE;
-  source_profile.source_path = temp_dir_.path();
+  source_profile.source_path = temp_dir_.GetPath();
 
   host->StartImportSettings(
       source_profile,
@@ -533,7 +525,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
 IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest,
                        IEImporterMalformedFavoritesRegistry) {
   // Sets up a favorites folder.
-  base::FilePath path = temp_dir_.path().AppendASCII("Favorites");
+  base::FilePath path = temp_dir_.GetPath().AppendASCII("Favorites");
   CreateDirectory(path.value().c_str(), NULL);
   CreateDirectory(path.AppendASCII("b").value().c_str(), NULL);
   ASSERT_TRUE(CreateUrlFile(path.AppendASCII("a.url"),
@@ -593,7 +585,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest,
 
     importer::SourceProfile source_profile;
     source_profile.importer_type = importer::TYPE_IE;
-    source_profile.source_path = temp_dir_.path();
+    source_profile.source_path = temp_dir_.GetPath();
 
     host->StartImportSettings(
         source_profile,
@@ -620,7 +612,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IE7ImporterPasswordsTest) {
 
   importer::SourceProfile source_profile;
   source_profile.importer_type = importer::TYPE_IE;
-  source_profile.source_path = temp_dir_.path();
+  source_profile.source_path = temp_dir_.GetPath();
 
   host->StartImportSettings(
       source_profile,
@@ -646,7 +638,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporterHomePageTest) {
 
   importer::SourceProfile source_profile;
   source_profile.importer_type = importer::TYPE_IE;
-  source_profile.source_path = temp_dir_.path();
+  source_profile.source_path = temp_dir_.GetPath();
 
   host->StartImportSettings(
       source_profile,

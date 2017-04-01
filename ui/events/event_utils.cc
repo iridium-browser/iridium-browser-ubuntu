@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 
@@ -62,25 +62,20 @@ int RegisterCustomEventType() {
 }
 
 void ValidateEventTimeClock(base::TimeTicks* timestamp) {
-// Restrict this validation to DCHECK builds except when using X11 which is
-// known to provide bogus timestamps that require correction (crbug.com/611950).
-#if defined(USE_X11) || DCHECK_IS_ON()
   if (base::debug::BeingDebugged())
     return;
 
   base::TimeTicks now = EventTimeForNow();
   int64_t delta = (now - *timestamp).InMilliseconds();
-  if (delta < 0 || delta > 60 * 1000) {
-    UMA_HISTOGRAM_BOOLEAN("Event.TimestampHasValidTimebase", false);
-#if defined(USE_X11)
-    *timestamp = now;
-#else
-    NOTREACHED() << "Unexpected event timestamp, now:" << now
-                 << " event timestamp:" << *timestamp;
-#endif
-  }
+  bool has_valid_timebase = delta >= 0 && delta <= 60 * 1000;
+  UMA_HISTOGRAM_BOOLEAN("Event.TimestampHasValidTimebase.Browser",
+                        has_valid_timebase);
 
-  UMA_HISTOGRAM_BOOLEAN("Event.TimestampHasValidTimebase", true);
+#if defined(USE_X11)
+  // Restrict this correction to X11 which is known to provide bogus timestamps
+  // that require correction (crbug.com/611950).
+  if (!has_valid_timebase)
+    *timestamp = now;
 #endif
 }
 
@@ -110,6 +105,10 @@ void ComputeEventLatencyOS(const base::NativeEvent& native_event) {
 
   EventType type = EventTypeFromNative(native_event);
   switch (type) {
+#if defined(OS_MACOSX)
+    // On Mac, ET_SCROLL and ET_MOUSEWHEEL represent the same class of events.
+    case ET_SCROLL:
+#endif
     case ET_MOUSEWHEEL:
       UMA_HISTOGRAM_CUSTOM_COUNTS("Event.Latency.OS.MOUSE_WHEEL",
                                   delta.InMicroseconds(), 1, 1000000, 50);

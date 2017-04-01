@@ -10,6 +10,8 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string16.h"
 #include "base/test/mock_entropy_provider.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -416,7 +418,8 @@ TEST_F(TabManagerTest, ReloadDiscardedTabContextMenu) {
   tab_manager.DiscardWebContentsAt(1, &tabstrip);
   EXPECT_TRUE(tab_manager.IsTabDiscarded(tabstrip.GetWebContentsAt(1)));
 
-  tabstrip.GetWebContentsAt(1)->GetController().Reload(false);
+  tabstrip.GetWebContentsAt(1)->GetController().Reload(
+      content::ReloadType::NORMAL, false);
   EXPECT_FALSE(tab_manager.IsTabDiscarded(tabstrip.GetWebContentsAt(1)));
   tabstrip.CloseAllTabs();
   EXPECT_TRUE(tabstrip.empty());
@@ -449,7 +452,7 @@ TEST_F(TabManagerTest, DiscardedTabKeepsLastActiveTime) {
 
 // Test to see if a tab can only be discarded once. On Windows and Mac, this
 // defaults to true unless overridden through a variation parameter. On other
-// platforms, it's always false
+// platforms, it's always false.
 #if defined(OS_WIN) || defined(OS_MACOSX)
 TEST_F(TabManagerTest, CanOnlyDiscardOnce) {
   TabManager tab_manager;
@@ -465,7 +468,8 @@ TEST_F(TabManagerTest, CanOnlyDiscardOnce) {
   {
     std::unique_ptr<base::FieldTrialList> field_trial_list_;
     field_trial_list_.reset(
-        new base::FieldTrialList(new base::MockEntropyProvider()));
+        new base::FieldTrialList(
+            base::MakeUnique<base::MockEntropyProvider>()));
     variations::testing::ClearAllVariationParams();
 
     std::map<std::string, std::string> params;
@@ -481,7 +485,8 @@ TEST_F(TabManagerTest, CanOnlyDiscardOnce) {
   {
     std::unique_ptr<base::FieldTrialList> field_trial_list_;
     field_trial_list_.reset(
-        new base::FieldTrialList(new base::MockEntropyProvider()));
+        new base::FieldTrialList(
+            base::MakeUnique<base::MockEntropyProvider>()));
     variations::testing::ClearAllVariationParams();
 
     std::map<std::string, std::string> params;
@@ -665,6 +670,110 @@ TEST_F(TabManagerTest, MAYBE_ChildProcessNotifications) {
   // Clean up the tabstrip.
   tabstrip.CloseAllTabs();
   ASSERT_TRUE(tabstrip.empty());
+}
+
+TEST_F(TabManagerTest, NextPurgeAndSuspendState) {
+  TabManager tab_manager;
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+  tabstrip.AddObserver(&tab_manager);
+
+  WebContents* test_contents = CreateWebContents();
+  tabstrip.AppendWebContents(test_contents, false);
+
+  base::TimeDelta threshold = base::TimeDelta::FromSeconds(180);
+  base::SimpleTestTickClock test_clock;
+
+  tab_manager.GetWebContentsData(test_contents)
+      ->SetPurgeAndSuspendState(TabManager::RUNNING);
+  tab_manager.GetWebContentsData(test_contents)
+      ->SetLastPurgeAndSuspendModifiedTimeForTesting(test_clock.NowTicks());
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(180));
+  EXPECT_EQ(TabManager::RUNNING,
+            tab_manager.GetNextPurgeAndSuspendState(
+                test_contents, test_clock.NowTicks(), threshold));
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(1));
+  EXPECT_EQ(TabManager::SUSPENDED,
+            tab_manager.GetNextPurgeAndSuspendState(
+                test_contents, test_clock.NowTicks(), threshold));
+
+  tab_manager.GetWebContentsData(test_contents)
+      ->SetPurgeAndSuspendState(TabManager::SUSPENDED);
+  tab_manager.GetWebContentsData(test_contents)
+      ->SetLastPurgeAndSuspendModifiedTimeForTesting(test_clock.NowTicks());
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(1200));
+  EXPECT_EQ(TabManager::SUSPENDED,
+            tab_manager.GetNextPurgeAndSuspendState(
+                test_contents, test_clock.NowTicks(), threshold));
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(1));
+  EXPECT_EQ(TabManager::RESUMED,
+            tab_manager.GetNextPurgeAndSuspendState(
+                test_contents, test_clock.NowTicks(), threshold));
+
+  tab_manager.GetWebContentsData(test_contents)
+      ->SetPurgeAndSuspendState(TabManager::RESUMED);
+  tab_manager.GetWebContentsData(test_contents)
+      ->SetLastPurgeAndSuspendModifiedTimeForTesting(test_clock.NowTicks());
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(10));
+  EXPECT_EQ(TabManager::RESUMED,
+            tab_manager.GetNextPurgeAndSuspendState(
+                test_contents, test_clock.NowTicks(), threshold));
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(1));
+  EXPECT_EQ(TabManager::SUSPENDED,
+            tab_manager.GetNextPurgeAndSuspendState(
+                test_contents, test_clock.NowTicks(), threshold));
+
+  // Clean up the tabstrip.
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
+}
+
+TEST_F(TabManagerTest, ActivateTabResetPurgeAndSuspendState) {
+  TabManager tab_manager;
+  TabStripDummyDelegate delegate;
+  TabStripModel tabstrip(&delegate, profile());
+  tabstrip.AddObserver(&tab_manager);
+
+  WebContents* tab1 = CreateWebContents();
+  WebContents* tab2 = CreateWebContents();
+  tabstrip.AppendWebContents(tab1, true);
+  tabstrip.AppendWebContents(tab2, false);
+
+  base::SimpleTestTickClock test_clock;
+
+  // Initially PurgeAndSuspend state should be RUNNING.
+  EXPECT_EQ(TabManager::RUNNING,
+            tab_manager.GetWebContentsData(tab2)->GetPurgeAndSuspendState());
+
+  tab_manager.GetWebContentsData(tab2)->SetPurgeAndSuspendState(
+      TabManager::SUSPENDED);
+  tab_manager.GetWebContentsData(tab2)
+      ->SetLastPurgeAndSuspendModifiedTimeForTesting(test_clock.NowTicks());
+
+  // Activate tab2. Tab2's PurgeAndSuspend state should be RUNNING.
+  tabstrip.ActivateTabAt(1, true /* user_gesture */);
+  EXPECT_EQ(TabManager::RUNNING,
+            tab_manager.GetWebContentsData(tab2)->GetPurgeAndSuspendState());
+
+  tab_manager.GetWebContentsData(tab1)->SetPurgeAndSuspendState(
+      TabManager::RESUMED);
+  tab_manager.GetWebContentsData(tab1)
+      ->SetLastPurgeAndSuspendModifiedTimeForTesting(test_clock.NowTicks());
+
+  // Activate tab1. Tab1's PurgeAndSuspend state should be RUNNING.
+  tabstrip.ActivateTabAt(0, true /* user_gesture */);
+  EXPECT_EQ(TabManager::RUNNING,
+            tab_manager.GetWebContentsData(tab1)->GetPurgeAndSuspendState());
+
+  // Clean up the tabstrip.
+  tabstrip.CloseAllTabs();
+  EXPECT_TRUE(tabstrip.empty());
 }
 
 }  // namespace memory

@@ -25,6 +25,21 @@ CGPoint ScreenPointFromWindow(NSPoint window_point, NSWindow* window) {
 }
 
 NSEvent* AttachWindowToCGEvent(CGEventRef event, NSWindow* window) {
+  // -[NSEvent locationInWindow] changes from screen coordinates to window
+  // coordinates when a window is attached to the mouse event. -[NSEvent
+  // eventWithCGEvent:] handles the Quartz -> AppKit coordinate flipping, but
+  // not the offset. Unfortunately -eventWithCGEvent: uses the *screen* height
+  // to flip, not the window height (it doesn't know about the window yet). So
+  // to get the correct -[NSEvent locationInWindow], anticipate the bogus screen
+  // flip that eventWithCGEvent: will do. This is yuck, but NSEvent does not
+  // provide a way to generate test scrolling events any other way. Fortunately,
+  // once you do all the algebra, all we need to do here is offset by the window
+  // origin, but in different directions for x/y.
+  CGPoint location = CGEventGetLocation(event);
+  location.y += NSMinY([window frame]);
+  location.x -= NSMinX([window frame]);
+  CGEventSetLocation(event, location);
+
   // These CGEventFields were made public in the 10.7 SDK, but don't help to
   // populate the -[NSEvent window] pointer when creating an event with
   // +[NSEvent eventWithCGEvent:]. Set that separately, using reflection.
@@ -135,18 +150,81 @@ std::pair<NSEvent*, NSEvent*> RightMouseClickInView(NSView* view,
   return std::make_pair(down, up);
 }
 
-NSEvent* TestScrollEvent(NSPoint location,
+NSEvent* TestScrollEvent(NSPoint window_point,
                          NSWindow* window,
                          CGFloat delta_x,
-                         CGFloat delta_y) {
+                         CGFloat delta_y,
+                         bool has_precise_deltas,
+                         NSEventPhase event_phase,
+                         NSEventPhase momentum_phase) {
   const uint32_t wheel_count = 2;
   int32_t wheel1 = static_cast<int>(delta_y);
   int32_t wheel2 = static_cast<int>(delta_x);
-  CGScrollEventUnit units = kCGScrollEventUnitLine;
+  CGScrollEventUnit units =
+      has_precise_deltas ? kCGScrollEventUnitPixel : kCGScrollEventUnitLine;
   base::ScopedCFTypeRef<CGEventRef> scroll(CGEventCreateScrollWheelEvent(
       nullptr, units, wheel_count, wheel1, wheel2));
-  CGEventSetLocation(scroll, ScreenPointFromWindow(location, window));
-  return AttachWindowToCGEvent(scroll, window);
+  CGEventSetLocation(scroll, ScreenPointFromWindow(window_point, window));
+
+  // Always set event flags, otherwise +[NSEvent eventWithCGEvent:] populates
+  // flags from current keyboard state which can make tests flaky.
+  CGEventSetFlags(scroll, static_cast<CGEventFlags>(0));
+
+  if (has_precise_deltas) {
+    // kCGScrollWheelEventIsContinuous is -[NSEvent hasPreciseScrollingDeltas].
+    // CGEventTypes.h says it should be non-zero for pixel-based scrolling.
+    // Verify that CGEventCreateScrollWheelEvent() set it.
+    DCHECK_EQ(1, CGEventGetIntegerValueField(scroll,
+                                             kCGScrollWheelEventIsContinuous));
+  }
+
+  // Don't set phase information when neither.
+  if (event_phase != NSEventPhaseNone || momentum_phase != NSEventPhaseNone) {
+    // AppKit conflates CGScrollPhase (bitmask flags) and CGMomentumScrollPhase
+    // (an enum) into NSEventPhase, where it is used for both -[NSEvent phase]
+    // and -[NSEvent momentumPhase]. Do a reverse mapping here.
+    int cg_event_phase = 0;
+    if (event_phase & NSEventPhaseBegan)
+      cg_event_phase |= kCGScrollPhaseBegan;
+    if (event_phase & NSEventPhaseChanged)
+      cg_event_phase |= kCGScrollPhaseChanged;
+    if (event_phase & NSEventPhaseEnded)
+      cg_event_phase |= kCGScrollPhaseEnded;
+    if (event_phase & NSEventPhaseCancelled)
+      cg_event_phase |= kCGScrollPhaseCancelled;
+    if (event_phase & NSEventPhaseMayBegin)
+      cg_event_phase |= kCGScrollPhaseMayBegin;
+
+    CGMomentumScrollPhase cg_momentum_phase = kCGMomentumScrollPhaseNone;
+    switch (momentum_phase) {
+      case NSEventPhaseNone:
+        break;
+      case NSEventPhaseBegan:
+        cg_momentum_phase = kCGMomentumScrollPhaseBegin;
+        break;
+      case NSEventPhaseChanged:
+        cg_momentum_phase = kCGMomentumScrollPhaseContinue;
+        break;
+      case NSEventPhaseEnded:
+        cg_momentum_phase = kCGMomentumScrollPhaseEnd;
+        break;
+      default:
+        // Those are the only 4 options for CGMomentumScrollPhase. If something
+        // else was provided it should probably never appear on an NSEvent.
+        NOTREACHED();
+    }
+    CGEventSetIntegerValueField(scroll, kCGScrollWheelEventScrollPhase,
+                                cg_event_phase);
+    CGEventSetIntegerValueField(scroll, kCGScrollWheelEventMomentumPhase,
+                                cg_momentum_phase);
+  }
+  NSEvent* event = AttachWindowToCGEvent(scroll, window);
+  DCHECK_EQ(has_precise_deltas, [event hasPreciseScrollingDeltas]);
+  DCHECK_EQ(event_phase, [event phase]);
+  DCHECK_EQ(momentum_phase, [event momentumPhase]);
+  DCHECK_EQ(window_point.x, [event locationInWindow].x);
+  DCHECK_EQ(window_point.y, [event locationInWindow].y);
+  return event;
 }
 
 NSEvent* KeyEventWithCharacter(unichar c) {
@@ -170,6 +248,20 @@ NSEvent* KeyEventWithKeyCode(unsigned short key_code,
                            context:nil
                         characters:chars
        charactersIgnoringModifiers:chars
+                         isARepeat:NO
+                           keyCode:key_code];
+}
+
+NSEvent* KeyEventWithModifierOnly(unsigned short key_code,
+                                  NSUInteger modifiers) {
+  return [NSEvent keyEventWithType:NSFlagsChanged
+                          location:NSZeroPoint
+                     modifierFlags:modifiers
+                         timestamp:TimeIntervalSinceSystemStartup()
+                      windowNumber:0
+                           context:nil
+                        characters:@""
+       charactersIgnoringModifiers:@""
                          isARepeat:NO
                            keyCode:key_code];
 }

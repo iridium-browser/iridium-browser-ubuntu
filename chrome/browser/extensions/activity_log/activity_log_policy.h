@@ -28,12 +28,12 @@ class Profile;
 class GURL;
 
 namespace base {
+class Clock;
 class FilePath;
 }
 
 namespace extensions {
 
-class Extension;
 
 // An abstract class for processing and summarizing activity log data.
 // Subclasses will generally store data in an SQLite database (the
@@ -119,12 +119,6 @@ class ActivityLogPolicy {
                                           int days_ago,
                                           int64_t* early_bound,
                                           int64_t* late_bound);
-
-    // Deletes obsolete database tables from an activity log database.  This
-    // can be used in InitDatabase() methods of ActivityLogDatabasePolicy
-    // subclasses to clean up data from old versions of the activity logging
-    // code.  Returns true on success, false on database error.
-    static bool DropObsoleteTables(sql::Connection* db);
 
    private:
     DISALLOW_IMPLICIT_CONSTRUCTORS(Util);

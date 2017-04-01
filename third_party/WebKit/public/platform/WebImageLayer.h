@@ -29,20 +29,19 @@
 #include "WebCommon.h"
 #include "WebLayer.h"
 
-class SkBitmap;
 class SkImage;
 
 namespace blink {
 
 class WebImageLayer {
-public:
-    virtual ~WebImageLayer() { }
+ public:
+  virtual ~WebImageLayer() {}
 
-    virtual WebLayer* layer() = 0;
-    virtual void setImage(const SkImage*) = 0;
-    virtual void setNearestNeighbor(bool) = 0;
+  virtual WebLayer* layer() = 0;
+  virtual void setImage(const SkImage*) = 0;
+  virtual void setNearestNeighbor(bool) = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebImageLayer_h
+#endif  // WebImageLayer_h

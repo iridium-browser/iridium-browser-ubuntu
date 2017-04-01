@@ -7,13 +7,14 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
@@ -123,7 +124,7 @@ MobileConfig::Carrier::~Carrier() {
 
 const MobileConfig::CarrierDeal* MobileConfig::Carrier::GetDefaultDeal() const {
   // TODO(nkostylev): Use carrier "default_deal_id" attribute.
-  CarrierDeals::const_iterator iter = deals_.begin();
+  auto iter = deals_.begin();
   if (iter != deals_.end())
     return GetDeal((*iter).first);
   else
@@ -132,9 +133,9 @@ const MobileConfig::CarrierDeal* MobileConfig::Carrier::GetDefaultDeal() const {
 
 const MobileConfig::CarrierDeal* MobileConfig::Carrier::GetDeal(
     const std::string& deal_id) const {
-  CarrierDeals::const_iterator iter = deals_.find(deal_id);
+  auto iter = deals_.find(deal_id);
   if (iter != deals_.end()) {
-    CarrierDeal* deal = iter->second;
+    CarrierDeal* deal = iter->second.get();
     // Make sure that deal is still active,
     // i.e. if deal expire date is defined, check it.
     if (!deal->expire_date().is_null() &&
@@ -180,13 +181,11 @@ void MobileConfig::Carrier::InitFromDictionary(
       if (deals_list->GetDictionary(i, &deal_dict)) {
         std::unique_ptr<CarrierDeal> deal(new CarrierDeal(deal_dict));
         // Filter out deals by initial_locale right away.
-        std::vector<std::string>::const_iterator iter =
-            std::find(deal->locales().begin(),
-                      deal->locales().end(),
-                      initial_locale);
+        auto iter = std::find(deal->locales().begin(), deal->locales().end(),
+                              initial_locale);
         if (iter != deal->locales().end()) {
           const std::string& deal_id = deal->deal_id();
-          deals_[deal_id] = deal.release();
+          deals_[deal_id] = std::move(deal);
         }
       }
     }
@@ -194,7 +193,7 @@ void MobileConfig::Carrier::InitFromDictionary(
 }
 
 void MobileConfig::Carrier::RemoveDeals() {
-  base::STLDeleteValues(&deals_);
+  deals_.clear();
 }
 
 // MobileConfig::LocaleConfig implementation. ----------------------------------
@@ -221,15 +220,15 @@ MobileConfig* MobileConfig::GetInstance() {
 
 const MobileConfig::Carrier* MobileConfig::GetCarrier(
     const std::string& carrier_id) const {
-  CarrierIdMap::const_iterator id_iter = carrier_id_map_.find(carrier_id);
+  auto id_iter = carrier_id_map_.find(carrier_id);
   std::string internal_id;
   if (id_iter != carrier_id_map_.end())
     internal_id = id_iter->second;
   else
     return NULL;
-  Carriers::const_iterator iter = carriers_.find(internal_id);
+  auto iter = carriers_.find(internal_id);
   if (iter != carriers_.end())
-    return iter->second;
+    return iter->second.get();
   else
     return NULL;
 }
@@ -249,8 +248,7 @@ bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
   if (root_.get() &&
       root_->GetBoolean(kExcludeDealsAttr, &exclude_deals) &&
       exclude_deals) {
-    for (Carriers::iterator iter = carriers_.begin();
-         iter != carriers_.end(); ++iter) {
+    for (auto iter = carriers_.begin(); iter != carriers_.end(); ++iter) {
       iter->second->RemoveDeals();
     }
   }
@@ -263,17 +261,17 @@ bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
       const base::DictionaryValue* carrier_dict = NULL;
       if (iter.value().GetAsDictionary(&carrier_dict)) {
         const std::string& internal_id = iter.key();
-        Carriers::iterator inner_iter = carriers_.find(internal_id);
+        auto inner_iter = carriers_.find(internal_id);
         if (inner_iter != carriers_.end()) {
           // Carrier already defined i.e. loading from the local config.
           // New ID mappings in local config is not supported.
           inner_iter->second->InitFromDictionary(carrier_dict, initial_locale_);
         } else {
-          Carrier* carrier = new Carrier(carrier_dict, initial_locale_);
+          std::unique_ptr<Carrier> carrier =
+              base::MakeUnique<Carrier>(carrier_dict, initial_locale_);
           if (!carrier->external_ids().empty()) {
             // Map all external IDs to a single internal one.
-            for (std::vector<std::string>::const_iterator
-                 i = carrier->external_ids().begin();
+            for (auto i = carrier->external_ids().begin();
                  i != carrier->external_ids().end(); ++i) {
               carrier_id_map_[*i] = internal_id;
             }
@@ -281,7 +279,7 @@ bool MobileConfig::LoadManifestFromString(const std::string& manifest) {
             // Trivial case - using same ID for external/internal one.
             carrier_id_map_[internal_id] = internal_id;
           }
-          carriers_[internal_id] = carrier;
+          carriers_[internal_id] = std::move(carrier);
         }
       }
     }
@@ -317,7 +315,6 @@ MobileConfig::MobileConfig(const std::string& config,
 }
 
 MobileConfig::~MobileConfig() {
-  base::STLDeleteValues(&carriers_);
 }
 
 void MobileConfig::LoadConfig() {
@@ -339,18 +336,18 @@ void MobileConfig::ProcessConfig(const std::string& global_config,
     global_initialized = LoadManifestFromString(global_config);
     // Backup global config root as it might be
     // owerwritten while loading local config.
-    global_config_root.reset(root_.release());
+    global_config_root = std::move(root_);
   }
   if (!local_config.empty())
     local_initialized = LoadManifestFromString(local_config);
 
   // Treat any parser errors as fatal.
   if (!global_initialized || !local_initialized) {
-    root_.reset(NULL);
-    local_config_root_.reset(NULL);
+    root_.reset();
+    local_config_root_.reset();
   } else {
-    local_config_root_.reset(root_.release());
-    root_.reset(global_config_root.release());
+    local_config_root_ = std::move(root_);
+    root_ = std::move(global_config_root);
   }
 }
 

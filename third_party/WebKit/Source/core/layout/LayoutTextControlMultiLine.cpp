@@ -1,6 +1,7 @@
 /**
  * Copyright (C) 2006, 2007 Apple Inc. All rights reserved.
- *           (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ *           (C) 2008 Torch Mobile Inc. All rights reserved.
+ *               (http://www.torchmobile.com/)
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -27,79 +28,94 @@
 
 namespace blink {
 
-LayoutTextControlMultiLine::LayoutTextControlMultiLine(HTMLTextAreaElement* element)
-    : LayoutTextControl(element)
-{
-    ASSERT(element);
+LayoutTextControlMultiLine::LayoutTextControlMultiLine(
+    HTMLTextAreaElement* element)
+    : LayoutTextControl(element) {
+  ASSERT(element);
 }
 
-LayoutTextControlMultiLine::~LayoutTextControlMultiLine()
-{
+LayoutTextControlMultiLine::~LayoutTextControlMultiLine() {}
+
+bool LayoutTextControlMultiLine::nodeAtPoint(
+    HitTestResult& result,
+    const HitTestLocation& locationInContainer,
+    const LayoutPoint& accumulatedOffset,
+    HitTestAction hitTestAction) {
+  if (!LayoutTextControl::nodeAtPoint(result, locationInContainer,
+                                      accumulatedOffset, hitTestAction))
+    return false;
+
+  if (result.innerNode() == node() ||
+      result.innerNode() == innerEditorElement())
+    hitInnerEditorElement(result, locationInContainer.point(),
+                          accumulatedOffset);
+
+  return true;
 }
 
-bool LayoutTextControlMultiLine::nodeAtPoint(HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
-{
-    if (!LayoutTextControl::nodeAtPoint(result, locationInContainer, accumulatedOffset, hitTestAction))
-        return false;
+float LayoutTextControlMultiLine::getAvgCharWidth(
+    const AtomicString& family) const {
+  // Match the default system font to the width of MS Shell Dlg, the default
+  // font for textareas in Firefox, Safari Win and IE for some encodings (in
+  // IE, the default font is encoding specific). 1229 is the avgCharWidth
+  // value in the OS/2 table for Courier New.
+  if (LayoutTheme::theme().needsHackForTextControlWithFontFamily(family))
+    return scaleEmToUnits(1229);
 
-    if (result.innerNode() == node() || result.innerNode() == innerEditorElement())
-        hitInnerEditorElement(result, locationInContainer.point(), accumulatedOffset);
-
-    return true;
+  return LayoutTextControl::getAvgCharWidth(family);
 }
 
-float LayoutTextControlMultiLine::getAvgCharWidth(const AtomicString& family) const
-{
-    // Match the default system font to the width of MS Shell Dlg, the default
-    // font for textareas in Firefox, Safari Win and IE for some encodings (in
-    // IE, the default font is encoding specific). 1229 is the avgCharWidth
-    // value in the OS/2 table for Courier New.
-    if (LayoutTheme::theme().needsHackForTextControlWithFontFamily(family))
-        return scaleEmToUnits(1229);
-
-    return LayoutTextControl::getAvgCharWidth(family);
+LayoutUnit LayoutTextControlMultiLine::preferredContentLogicalWidth(
+    float charWidth) const {
+  int factor = toHTMLTextAreaElement(node())->cols();
+  return static_cast<LayoutUnit>(ceilf(charWidth * factor)) +
+         scrollbarThickness();
 }
 
-LayoutUnit LayoutTextControlMultiLine::preferredContentLogicalWidth(float charWidth) const
-{
-    int factor = toHTMLTextAreaElement(node())->cols();
-    return static_cast<LayoutUnit>(ceilf(charWidth * factor)) + scrollbarThickness();
+LayoutUnit LayoutTextControlMultiLine::computeControlLogicalHeight(
+    LayoutUnit lineHeight,
+    LayoutUnit nonContentHeight) const {
+  return lineHeight * toHTMLTextAreaElement(node())->rows() + nonContentHeight;
 }
 
-LayoutUnit LayoutTextControlMultiLine::computeControlLogicalHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const
-{
-    return lineHeight * toHTMLTextAreaElement(node())->rows() + nonContentHeight;
+int LayoutTextControlMultiLine::baselinePosition(
+    FontBaseline baselineType,
+    bool firstLine,
+    LineDirectionMode direction,
+    LinePositionMode linePositionMode) const {
+  return LayoutBox::baselinePosition(baselineType, firstLine, direction,
+                                     linePositionMode);
 }
 
-int LayoutTextControlMultiLine::baselinePosition(FontBaseline baselineType, bool firstLine, LineDirectionMode direction, LinePositionMode linePositionMode) const
-{
-    return LayoutBox::baselinePosition(baselineType, firstLine, direction, linePositionMode);
+PassRefPtr<ComputedStyle> LayoutTextControlMultiLine::createInnerEditorStyle(
+    const ComputedStyle& startStyle) const {
+  RefPtr<ComputedStyle> textBlockStyle = ComputedStyle::create();
+  textBlockStyle->inheritFrom(startStyle);
+  adjustInnerEditorStyle(*textBlockStyle);
+  textBlockStyle->setDisplay(EDisplay::Block);
+  textBlockStyle->setUnique();
+
+  return textBlockStyle.release();
 }
 
-PassRefPtr<ComputedStyle> LayoutTextControlMultiLine::createInnerEditorStyle(const ComputedStyle& startStyle) const
-{
-    RefPtr<ComputedStyle> textBlockStyle = ComputedStyle::create();
-    textBlockStyle->inheritFrom(startStyle);
-    adjustInnerEditorStyle(*textBlockStyle);
-    textBlockStyle->setDisplay(BLOCK);
-    textBlockStyle->setUnique();
-
-    return textBlockStyle.release();
-}
-
-LayoutObject* LayoutTextControlMultiLine::layoutSpecialExcludedChild(bool relayoutChildren, SubtreeLayoutScope& layoutScope)
-{
-    LayoutObject* placeholderLayoutObject = LayoutTextControl::layoutSpecialExcludedChild(relayoutChildren, layoutScope);
-    if (!placeholderLayoutObject)
-        return nullptr;
-    if (!placeholderLayoutObject->isBox())
-        return placeholderLayoutObject;
-    LayoutBox* placeholderBox = toLayoutBox(placeholderLayoutObject);
-    placeholderBox->mutableStyleRef().setLogicalWidth(Length(contentLogicalWidth() - placeholderBox->borderAndPaddingLogicalWidth(), Fixed));
-    placeholderBox->layoutIfNeeded();
-    placeholderBox->setX(borderLeft() + paddingLeft());
-    placeholderBox->setY(borderTop() + paddingTop());
+LayoutObject* LayoutTextControlMultiLine::layoutSpecialExcludedChild(
+    bool relayoutChildren,
+    SubtreeLayoutScope& layoutScope) {
+  LayoutObject* placeholderLayoutObject =
+      LayoutTextControl::layoutSpecialExcludedChild(relayoutChildren,
+                                                    layoutScope);
+  if (!placeholderLayoutObject)
+    return nullptr;
+  if (!placeholderLayoutObject->isBox())
     return placeholderLayoutObject;
+  LayoutBox* placeholderBox = toLayoutBox(placeholderLayoutObject);
+  placeholderBox->mutableStyleRef().setLogicalWidth(Length(
+      contentLogicalWidth() - placeholderBox->borderAndPaddingLogicalWidth(),
+      Fixed));
+  placeholderBox->layoutIfNeeded();
+  placeholderBox->setX(borderLeft() + paddingLeft());
+  placeholderBox->setY(borderTop() + paddingTop());
+  return placeholderLayoutObject;
 }
 
-} // namespace blink
+}  // namespace blink

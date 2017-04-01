@@ -14,9 +14,9 @@ import os
 import shutil
 
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
+from chromite.lib import failures_lib
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.cbuildbot import prebuilts
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cros_build_lib
@@ -207,23 +207,12 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
         if config['factory_install_netboot']:
           commands.MakeNetboot(buildroot, board, factory_install_symlink)
 
-      # Build the factory toolkit.
-      chroot_dir = os.path.join(buildroot, constants.DEFAULT_CHROOT_DIR)
-      chroot_tmp_dir = os.path.join(chroot_dir, 'tmp')
-      with osutils.TempDir(base_dir=chroot_tmp_dir, sudo_rm=True) as tempdir:
-        # Build the factory toolkit.
-        if config['factory_toolkit']:
-          toolkit_dir = os.path.join(tempdir, 'factory_toolkit')
-          os.makedirs(toolkit_dir)
-          commands.MakeFactoryToolkit(
-              buildroot, board, toolkit_dir, self._run.attrs.release_tag)
-
-        # Build and upload factory zip if needed.
-        if factory_install_symlink or config['factory_toolkit']:
-          filename = commands.BuildFactoryZip(
-              buildroot, board, archive_path, factory_install_symlink,
-              toolkit_dir, self._run.attrs.release_tag)
-          self._release_upload_queue.put([filename])
+      # Build and upload factory zip if needed.
+      if factory_install_symlink or config['factory_toolkit']:
+        filename = commands.BuildFactoryZip(
+            buildroot, board, archive_path, factory_install_symlink,
+            self._run.attrs.release_tag)
+        self._release_upload_queue.put([filename])
 
     def ArchiveStandaloneArtifact(artifact_info):
       """Build and upload a single archive."""
@@ -330,7 +319,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       self.GetParallel('debug_tarball_generated', pretty_name='debug tarball')
 
       # Needed for stateful.tgz
-      self.GetParallel('payloads_generated', pretty_name='payloads')
+      self.GetParallel('test_artifacts_uploaded', pretty_name='test artifacts')
 
       # Now that all data has been generated, we can upload the final result to
       # the image server.
@@ -384,7 +373,7 @@ class CPEExportStage(generic_stages.BoardSpecificBuilderStage,
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
-    """Generate debug symbols and upload debug.tgz."""
+    """Generate and upload CPE files."""
     buildroot = self._build_root
     board = self._current_board
     useflags = self._run.config.useflags
@@ -418,15 +407,19 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
     buildroot = self._build_root
     board = self._current_board
 
+    # Create breakpad symbols.
     commands.GenerateBreakpadSymbols(buildroot, board, self._run.debug)
     self.board_runattrs.SetParallel('breakpad_symbols_generated', True)
 
-    steps = [self.UploadDebugTarball]
-    failed_list = os.path.join(self.archive_path, 'failed_upload_symbols.list')
-    if self._run.config.upload_symbols:
-      steps.append(lambda: self.UploadSymbols(buildroot, board, failed_list))
+    # Upload them.
+    self.UploadDebugTarball()
 
-    parallel.RunParallelSteps(steps)
+    # Upload debug/breakpad tarball.
+    self.UploadDebugBreakpadTarball()
+
+    # Upload them to crash server.
+    if self._run.config.upload_symbols:
+      self.UploadSymbols(buildroot, board)
 
   def UploadDebugTarball(self):
     """Generate and upload the debug tarball."""
@@ -437,8 +430,17 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
     logging.info('Announcing availability of debug tarball now.')
     self.board_runattrs.SetParallel('debug_tarball_generated', True)
 
-  def UploadSymbols(self, buildroot, board, failed_list):
+  def UploadDebugBreakpadTarball(self):
+    """Generate and upload the debug tarball with only breakpad files."""
+    filename = commands.GenerateDebugTarball(
+        self._build_root, self._current_board, self.archive_path, False,
+        archive_name='debug_breakpad.tar.xz')
+    self.UploadArtifact(filename, archive=False)
+
+  def UploadSymbols(self, buildroot, board):
     """Upload generated debug symbols."""
+    failed_list = os.path.join(self.archive_path, 'failed_upload_symbols.list')
+
     if self._run.options.remote_trybot or self._run.debug:
       # For debug builds, limit ourselves to just uploading 1 symbol.
       # This way trybots and such still exercise this code.
@@ -470,8 +472,7 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
     """Tell other stages to not wait on us if we die for some reason."""
     self._SymbolsNotGenerated()
 
-    # TODO(dgarrett): Convert this to a fatal error.
-    # See http://crbug.com/212437
+    # TODO(dgarrett): Get failures tracked in metrics (crbug.com/652463).
     exc_type, e, _ = exc_info
     if (issubclass(exc_type, DebugSymbolsUploadException) or
         (isinstance(e, failures_lib.CompoundFailure) and
@@ -676,46 +677,50 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
 
   def BuildUpdatePayloads(self):
     """Archives update payloads when they are ready."""
-    try:
-      # If we are not configured to generate payloads, don't.
-      if not (self._run.config.upload_hw_test_artifacts and
-              self._run.config.images):
-        return
+    # If we are not configured to generate payloads, don't.
+    if not (self._run.options.build and
+            self._run.options.tests and
+            self._run.config.upload_hw_test_artifacts and
+            self._run.config.images):
+      return
 
-      # If there are no images to generate payloads from, don't.
-      got_images = self.GetParallel('images_generated', pretty_name='images')
-      if not got_images:
-        return
+    # If there are no images to generate payloads from, don't.
+    got_images = self.GetParallel('images_generated', pretty_name='images')
+    if not got_images:
+      return
 
-      payload_type = self._run.config.payload_image
-      if payload_type is None:
-        payload_type = 'base'
-        for t in ['test', 'dev']:
-          if t in self._run.config.images:
-            payload_type = t
-            break
-      image_name = constants.IMAGE_TYPE_TO_NAME[payload_type]
-      logging.info('Generating payloads to upload for %s', image_name)
-      self._GeneratePayloads(image_name, full=True, stateful=True)
-      self.board_runattrs.SetParallel('payloads_generated', True)
-      self._GeneratePayloads(image_name, delta=True)
-      self.board_runattrs.SetParallel('delta_payloads_generated', True)
-
-    finally:
-      # Make sure these flags are set to some value, no matter now we exit.
-      self.board_runattrs.SetParallelDefault('payloads_generated', False)
-      self.board_runattrs.SetParallelDefault('delta_payloads_generated', False)
+    payload_type = self._run.config.payload_image
+    if payload_type is None:
+      payload_type = 'base'
+      for t in ['test', 'dev']:
+        if t in self._run.config.images:
+          payload_type = t
+          break
+    image_name = constants.IMAGE_TYPE_TO_NAME[payload_type]
+    logging.info('Generating payloads to upload for %s', image_name)
+    self._GeneratePayloads(image_name, full=True, stateful=True, delta=True)
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
     """Upload any needed HWTest artifacts."""
+    # BuildUpdatePayloads also uploads the payloads to GS.
     steps = [self.BuildUpdatePayloads]
+
     if (self._run.ShouldBuildAutotest() and
         self._run.config.upload_hw_test_artifacts):
       steps.append(self.BuildAutotestTarballs)
 
     parallel.RunParallelSteps(steps)
+    # If we encountered any exceptions with any of the steps, they should have
+    # set the attribute to False.
+    self.board_runattrs.SetParallelDefault('test_artifacts_uploaded', True)
 
+  def _HandleStageException(self, exc_info):
+    # Tell the test stages not to wait for artifacts to be uploaded in case
+    # UploadTestArtifacts throws an exception.
+    self.board_runattrs.SetParallel('test_artifacts_uploaded', False)
+
+    return super(UploadTestArtifactsStage, self)._HandleStageException(exc_info)
 
 # TODO(mtennant): This class continues to exist only for subclasses that still
 # need self.archive_stage.  Hopefully, we can get rid of that need, eventually.

@@ -10,6 +10,7 @@
 
 #include "base/format_macros.h"
 #include "base/logging.h"
+#include "base/numerics/safe_math.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -105,12 +106,13 @@ void BufferManager::StopTracking(Buffer* buffer) {
 
 Buffer::MappedRange::MappedRange(
     GLintptr offset, GLsizeiptr size, GLenum access, void* pointer,
-    scoped_refptr<gpu::Buffer> shm)
+    scoped_refptr<gpu::Buffer> shm, unsigned int shm_offset)
     : offset(offset),
       size(size),
       access(access),
       pointer(pointer),
-      shm(shm) {
+      shm(shm),
+      shm_offset(shm_offset) {
   DCHECK(pointer);
   DCHECK(shm.get() && GetShmPointer());
 }
@@ -120,8 +122,7 @@ Buffer::MappedRange::~MappedRange() {
 
 void* Buffer::MappedRange::GetShmPointer() const {
   DCHECK(shm.get());
-  return shm->GetDataAddress(static_cast<unsigned int>(offset),
-                             static_cast<unsigned int>(size));
+  return shm->GetDataAddress(shm_offset, static_cast<unsigned int>(size));
 }
 
 Buffer::Buffer(BufferManager* manager, GLuint service_id)
@@ -141,8 +142,9 @@ Buffer::~Buffer() {
       GLuint id = service_id();
       glDeleteBuffersARB(1, &id);
     }
+    RemoveMappedRange();
     manager_->StopTracking(this);
-    manager_ = NULL;
+    manager_ = nullptr;
   }
 }
 
@@ -157,6 +159,7 @@ const GLvoid* Buffer::StageShadow(bool use_shadow,
                      static_cast<const uint8_t*>(data) + size);
     } else {
       shadow_.resize(size);
+      memset(shadow_.data(), 0, static_cast<size_t>(size));
     }
     return shadow_.data();
   } else {
@@ -179,30 +182,26 @@ void Buffer::SetInfo(GLsizeiptr size,
   mapped_range_.reset(nullptr);
 }
 
-bool Buffer::CheckRange(
-    GLintptr offset, GLsizeiptr size) const {
-  int32_t end = 0;
-  return offset >= 0 && size >= 0 &&
-         offset <= std::numeric_limits<int32_t>::max() &&
-         size <= std::numeric_limits<int32_t>::max() &&
-         SafeAddInt32(offset, size, &end) && end <= size_;
-}
-
-bool Buffer::SetRange(
-    GLintptr offset, GLsizeiptr size, const GLvoid * data) {
-  if (!CheckRange(offset, size)) {
+bool Buffer::CheckRange(GLintptr offset, GLsizeiptr size) const {
+  if (offset < 0 || offset > std::numeric_limits<int32_t>::max() ||
+      size < 0 || size > std::numeric_limits<int32_t>::max()) {
     return false;
   }
+  base::CheckedNumeric<int32_t> max = offset;
+  max += size;
+  return max.IsValid() && max.ValueOrDefault(0) <= size_;
+}
+
+void Buffer::SetRange(GLintptr offset, GLsizeiptr size, const GLvoid * data) {
+  DCHECK(CheckRange(offset, size));
   if (!shadow_.empty()) {
     DCHECK_LE(static_cast<size_t>(offset + size), shadow_.size());
     memcpy(shadow_.data() + offset, data, size);
     ClearCache();
   }
-  return true;
 }
 
-const void* Buffer::GetRange(
-    GLintptr offset, GLsizeiptr size) const {
+const void* Buffer::GetRange(GLintptr offset, GLsizeiptr size) const {
   if (shadow_.empty()) {
     return NULL;
   }
@@ -334,6 +333,17 @@ bool Buffer::GetMaxValueForRange(
   return true;
 }
 
+void Buffer::SetMappedRange(GLintptr offset, GLsizeiptr size, GLenum access,
+                            void* pointer, scoped_refptr<gpu::Buffer> shm,
+                            unsigned int shm_offset) {
+  mapped_range_.reset(
+      new MappedRange(offset, size, access, pointer, shm, shm_offset));
+}
+
+void Buffer::RemoveMappedRange() {
+  mapped_range_.reset(nullptr);
+}
+
 bool BufferManager::GetClientId(GLuint service_id, GLuint* client_id) const {
   // This doesn't need to be fast. It's only used during slow queries.
   for (BufferMap::const_iterator it = buffers_.begin();
@@ -437,20 +447,30 @@ void BufferManager::DoBufferData(
     const GLvoid* data) {
   // Stage the shadow buffer first if we are using a shadow buffer so that we
   // validate what we store internally.
-  const bool use_shadow = UseShadowBuffer(target, usage);
+  const bool use_shadow = UseShadowBuffer(buffer->initial_target(), usage);
   data = buffer->StageShadow(use_shadow, size, data);
 
   ERRORSTATE_COPY_REAL_GL_ERRORS_TO_WRAPPER(error_state, "glBufferData");
   if (IsUsageClientSideArray(usage)) {
     GLsizei empty_size = UseNonZeroSizeForClientSideArrayBuffer() ? 1 : 0;
-    glBufferData(target, empty_size, NULL, usage);
+    glBufferData(target, empty_size, nullptr, usage);
   } else {
-    glBufferData(target, size, data, usage);
+    if (data || !size) {
+      glBufferData(target, size, data, usage);
+    } else {
+      std::unique_ptr<char[]> zero(new char[size]);
+      memset(zero.get(), 0, size);
+      glBufferData(target, size, zero.get(), usage);
+    }
   }
   GLenum error = ERRORSTATE_PEEK_GL_ERROR(error_state, "glBufferData");
   if (error != GL_NO_ERROR) {
+    DCHECK_EQ(static_cast<GLenum>(GL_OUT_OF_MEMORY), error);
     size = 0;
+    // TODO(zmo): This doesn't seem correct. There might be shadow data from
+    // a previous successful BufferData() call.
     buffer->StageShadow(false, 0, nullptr);  // Also clear the shadow.
+    return;
   }
 
   SetInfo(buffer, target, size, usage, use_shadow);
@@ -459,33 +479,78 @@ void BufferManager::DoBufferData(
 void BufferManager::ValidateAndDoBufferSubData(
   ContextState* context_state, GLenum target, GLintptr offset, GLsizeiptr size,
   const GLvoid * data) {
-  ErrorState* error_state = context_state->GetErrorState();
-  Buffer* buffer = GetBufferInfoForTarget(context_state, target);
+  Buffer* buffer = RequestBufferAccess(
+      context_state, target, offset, size, "glBufferSubData");
   if (!buffer) {
-    ERRORSTATE_SET_GL_ERROR(error_state, GL_INVALID_VALUE, "glBufferSubData",
-                            "unknown buffer");
     return;
   }
-
-  DoBufferSubData(error_state, buffer, target, offset, size, data);
+  DoBufferSubData(buffer, target, offset, size, data);
 }
 
 void BufferManager::DoBufferSubData(
-    ErrorState* error_state,
-    Buffer* buffer,
-    GLenum target,
-    GLintptr offset,
-    GLsizeiptr size,
+    Buffer* buffer, GLenum target, GLintptr offset, GLsizeiptr size,
     const GLvoid* data) {
-  if (!buffer->SetRange(offset, size, data)) {
-    ERRORSTATE_SET_GL_ERROR(
-        error_state, GL_INVALID_VALUE, "glBufferSubData", "out of range");
-    return;
-  }
+  buffer->SetRange(offset, size, data);
 
   if (!buffer->IsClientSideArray()) {
     glBufferSubData(target, offset, size, data);
   }
+}
+
+void BufferManager::ValidateAndDoCopyBufferSubData(
+    ContextState* context_state, GLenum readtarget, GLenum writetarget,
+    GLintptr readoffset, GLintptr writeoffset, GLsizeiptr size) {
+  const char* func_name = "glCopyBufferSubData";
+  Buffer* readbuffer = RequestBufferAccess(
+      context_state, readtarget, readoffset, size, func_name);
+  if (!readbuffer)
+    return;
+  Buffer* writebuffer = RequestBufferAccess(
+      context_state, writetarget, writeoffset, size, func_name);
+  if (!writebuffer)
+    return;
+
+  ErrorState* error_state = context_state->GetErrorState();
+  if (readbuffer == writebuffer &&
+      ((writeoffset >= readoffset && writeoffset < readoffset + size) ||
+       (readoffset >= writeoffset && readoffset < writeoffset + size))) {
+    ERRORSTATE_SET_GL_ERROR(error_state, GL_INVALID_VALUE, func_name,
+        "read/write ranges overlap");
+    return;
+  }
+
+  if (!allow_buffers_on_multiple_targets_) {
+    if ((readbuffer->initial_target() == GL_ELEMENT_ARRAY_BUFFER &&
+         writebuffer->initial_target() != GL_ELEMENT_ARRAY_BUFFER) ||
+        (writebuffer->initial_target() == GL_ELEMENT_ARRAY_BUFFER &&
+         readbuffer->initial_target() != GL_ELEMENT_ARRAY_BUFFER)) {
+      ERRORSTATE_SET_GL_ERROR(error_state, GL_INVALID_OPERATION, func_name,
+          "copying between ELEMENT_ARRAY_BUFFER and another buffer type");
+      return;
+    }
+  }
+
+  DoCopyBufferSubData(readbuffer, readtarget, readoffset,
+                      writebuffer, writetarget, writeoffset, size);
+}
+
+void BufferManager::DoCopyBufferSubData(
+    Buffer* readbuffer,
+    GLenum readtarget,
+    GLintptr readoffset,
+    Buffer* writebuffer,
+    GLenum writetarget,
+    GLintptr writeoffset,
+    GLsizeiptr size) {
+  DCHECK(readbuffer);
+  DCHECK(writebuffer);
+  if (writebuffer->shadowed()) {
+    const void* data = readbuffer->GetRange(readoffset, size);
+    DCHECK(data);
+    writebuffer->SetRange(writeoffset, size, data);
+  }
+
+  glCopyBufferSubData(readtarget, writetarget, readoffset, writeoffset, size);
 }
 
 void BufferManager::ValidateAndDoGetBufferParameteri64v(
@@ -643,6 +708,21 @@ void BufferManager::SetPrimitiveRestartFixedIndexIfNecessary(GLenum type) {
 
 bool BufferManager::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                                  base::trace_event::ProcessMemoryDump* pmd) {
+  using base::trace_event::MemoryAllocatorDump;
+  using base::trace_event::MemoryDumpLevelOfDetail;
+
+  if (args.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND) {
+    std::string dump_name =
+        base::StringPrintf("gpu/gl/buffers/share_group_%" PRIu64 "",
+                           memory_tracker_->ShareGroupTracingGUID());
+    MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
+    dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                    MemoryAllocatorDump::kUnitsBytes, mem_represented());
+
+    // Early out, no need for more detail in a BACKGROUND dump.
+    return true;
+  }
+
   const uint64_t share_group_tracing_guid =
       memory_tracker_->ShareGroupTracingGUID();
   for (const auto& buffer_entry : buffers_) {
@@ -652,16 +732,152 @@ bool BufferManager::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
     std::string dump_name =
         base::StringPrintf("gpu/gl/buffers/share_group_%" PRIu64 "/buffer_%d",
                            share_group_tracing_guid, client_buffer_id);
-    base::trace_event::MemoryAllocatorDump* dump =
-        pmd->CreateAllocatorDump(dump_name);
-    dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
-                    base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+    MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
+    dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                    MemoryAllocatorDump::kUnitsBytes,
                     static_cast<uint64_t>(buffer->size()));
 
     auto guid = gl::GetGLBufferGUIDForTracing(share_group_tracing_guid,
                                               client_buffer_id);
     pmd->CreateSharedGlobalAllocatorDump(guid);
     pmd->AddOwnershipEdge(dump->guid(), guid);
+  }
+
+  return true;
+}
+
+Buffer* BufferManager::RequestBufferAccess(ContextState* context_state,
+                                           GLenum target,
+                                           GLintptr offset,
+                                           GLsizeiptr size,
+                                           const char* func_name) {
+  DCHECK(context_state);
+  ErrorState* error_state = context_state->GetErrorState();
+
+  Buffer* buffer = GetBufferInfoForTarget(context_state, target);
+  if (!RequestBufferAccess(error_state, buffer, func_name,
+                           "bound to target 0x%04x", target)) {
+    return nullptr;
+  }
+  if (!buffer->CheckRange(offset, size)) {
+    std::string msg = base::StringPrintf(
+        "bound to target 0x%04x : offset/size out of range", target);
+    ERRORSTATE_SET_GL_ERROR(
+        error_state, GL_INVALID_VALUE, func_name, msg.c_str());
+    return nullptr;
+  }
+  return buffer;
+}
+
+Buffer* BufferManager::RequestBufferAccess(ContextState* context_state,
+                                           GLenum target,
+                                           const char* func_name) {
+  DCHECK(context_state);
+  ErrorState* error_state = context_state->GetErrorState();
+
+  Buffer* buffer = GetBufferInfoForTarget(context_state, target);
+  return RequestBufferAccess(
+      error_state, buffer, func_name,
+      "bound to target 0x%04x", target) ? buffer : nullptr;
+}
+
+bool BufferManager::RequestBufferAccess(ErrorState* error_state,
+                                        Buffer* buffer,
+                                        const char* func_name,
+                                        const char* error_message_format, ...) {
+  DCHECK(error_state);
+
+  va_list varargs;
+  va_start(varargs, error_message_format);
+  bool result = RequestBufferAccessV(error_state, buffer, func_name,
+                                     error_message_format, varargs);
+  va_end(varargs);
+  return result;
+}
+
+bool BufferManager::RequestBufferAccess(ErrorState* error_state,
+                                        Buffer* buffer,
+                                        GLintptr offset,
+                                        GLsizeiptr size,
+                                        const char* func_name,
+                                        const char* error_message) {
+  if (!RequestBufferAccess(error_state, buffer, func_name, error_message)) {
+    return false;
+  }
+  if (!buffer->CheckRange(offset, size)) {
+    std::string msg = base::StringPrintf(
+        "%s : offset/size out of range", error_message);
+    ERRORSTATE_SET_GL_ERROR(
+        error_state, GL_INVALID_OPERATION, func_name, msg.c_str());
+    return false;
+  }
+  return true;
+}
+
+bool BufferManager::RequestBuffersAccess(
+    ErrorState* error_state,
+    const IndexedBufferBindingHost* bindings,
+    const std::vector<GLsizeiptr>& variable_sizes,
+    GLsizei count,
+    const char* func_name,
+    const char* message_tag) {
+  DCHECK(error_state);
+  DCHECK(bindings);
+  for (size_t ii = 0; ii < variable_sizes.size(); ++ii) {
+    if (variable_sizes[ii] == 0)
+      continue;
+    Buffer* buffer = bindings->GetBufferBinding(ii);
+    if (!buffer) {
+      std::string msg = base::StringPrintf(
+          "%s : no buffer bound at index %zu", message_tag, ii);
+      ERRORSTATE_SET_GL_ERROR(
+          error_state, GL_INVALID_OPERATION, func_name, msg.c_str());
+      return false;
+    }
+    if (buffer->GetMappedRange()) {
+      std::string msg = base::StringPrintf(
+          "%s : buffer is mapped at index %zu", message_tag, ii);
+      ERRORSTATE_SET_GL_ERROR(
+          error_state, GL_INVALID_OPERATION, func_name, msg.c_str());
+      return false;
+    }
+    GLsizeiptr size = bindings->GetEffectiveBufferSize(ii);
+    base::CheckedNumeric<GLsizeiptr> required_size = variable_sizes[ii];
+    required_size *= count;
+    if (size < required_size.ValueOrDefault(
+            std::numeric_limits<GLsizeiptr>::max())) {
+      std::string msg = base::StringPrintf(
+          "%s : buffer or buffer range not large enough at index %zu",
+          message_tag, ii);
+      ERRORSTATE_SET_GL_ERROR(
+          error_state, GL_INVALID_OPERATION, func_name, msg.c_str());
+      return false;
+    }
+  }
+  return true;
+}
+
+bool BufferManager::RequestBufferAccessV(ErrorState* error_state,
+                                         Buffer* buffer,
+                                         const char* func_name,
+                                         const char* error_message_format,
+                                         va_list varargs) {
+  DCHECK(error_state);
+
+  if (!buffer || buffer->IsDeleted()) {
+    std::string message_tag = base::StringPrintV(error_message_format, varargs);
+    std::string msg = base::StringPrintf("%s : no buffer", message_tag.c_str());
+    ERRORSTATE_SET_GL_ERROR(error_state, GL_INVALID_OPERATION, func_name,
+                            msg.c_str());
+    return false;
+  }
+  if (buffer->GetMappedRange()) {
+    std::string message_tag = base::StringPrintV(error_message_format, varargs);
+    std::string msg = base::StringPrintf("%s : buffer is mapped",
+                                         message_tag.c_str());
+    ERRORSTATE_SET_GL_ERROR(error_state, GL_INVALID_OPERATION, func_name,
+                            msg.c_str());
+    return false;
   }
   return true;
 }

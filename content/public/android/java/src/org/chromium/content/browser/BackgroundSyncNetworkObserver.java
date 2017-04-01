@@ -41,7 +41,7 @@ class BackgroundSyncNetworkObserver implements NetworkChangeNotifierAutoDetect.O
     private Context mContext;
 
     // The singleton instance.
-    private static BackgroundSyncNetworkObserver sInstance = null;
+    private static BackgroundSyncNetworkObserver sInstance;
 
     // List of native observers. These are each called when the network state changes.
     private List<Long> mNativePtrs;
@@ -85,7 +85,8 @@ class BackgroundSyncNetworkObserver implements NetworkChangeNotifierAutoDetect.O
         mNativePtrs.add(nativePtr);
 
         nativeNotifyConnectionTypeChanged(
-                nativePtr, mNotifier.getCurrentConnectionType(mNotifier.getCurrentNetworkState()));
+                nativePtr, NetworkChangeNotifierAutoDetect.convertToConnectionType(
+                                   mNotifier.getCurrentNetworkState()));
     }
 
     @CalledByNative

@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 
+#include "net/cert/internal/cert_errors.h"
 #include "net/cert/internal/signature_algorithm.h"
 #include "net/cert/internal/signature_policy.h"
 #include "net/cert/internal/test_helpers.h"
@@ -14,8 +15,7 @@
 #include "net/der/parse_values.h"
 #include "net/der/parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#include <openssl/obj.h>
+#include "third_party/boringssl/src/include/openssl/obj.h"
 
 namespace net {
 
@@ -54,9 +54,10 @@ void RunTestCaseUsingPolicy(VerifyResult expected_result,
 
   ASSERT_TRUE(ReadTestDataFromPemFile(path, mappings));
 
+  CertErrors algorithm_errors;
   std::unique_ptr<SignatureAlgorithm> signature_algorithm =
-      SignatureAlgorithm::CreateFromDer(der::Input(&algorithm));
-  ASSERT_TRUE(signature_algorithm);
+      SignatureAlgorithm::Create(der::Input(&algorithm), &algorithm_errors);
+  ASSERT_TRUE(signature_algorithm) << algorithm_errors.ToDebugString();
 
   der::BitString signature_value_bit_string;
   der::Parser signature_value_parser((der::Input(&signature_value)));
@@ -65,10 +66,15 @@ void RunTestCaseUsingPolicy(VerifyResult expected_result,
 
   bool expected_result_bool = expected_result == SUCCESS;
 
-  EXPECT_EQ(expected_result_bool,
-            VerifySignedData(*signature_algorithm, der::Input(&signed_data),
-                             signature_value_bit_string,
-                             der::Input(&public_key), policy));
+  CertErrors verify_errors;
+  bool result =
+      VerifySignedData(*signature_algorithm, der::Input(&signed_data),
+                       signature_value_bit_string, der::Input(&public_key),
+                       policy, &verify_errors);
+  EXPECT_EQ(expected_result_bool, result);
+  // TODO(crbug.com/634443): Verify the returned errors.
+  // if (!result)
+  //   EXPECT_FALSE(verify_errors.empty());
 }
 
 // RunTestCase() is the same as RunTestCaseUsingPolicy(), only it uses a
@@ -215,7 +221,8 @@ TEST(VerifySignedDataTest, EcdsaPrime256v1Sha512UnusedBitsSignature) {
 // This policy rejects specifically secp384r1 curves.
 class RejectSecp384r1Policy : public SignaturePolicy {
  public:
-  bool IsAcceptableCurveForEcdsa(int curve_nid) const override {
+  bool IsAcceptableCurveForEcdsa(int curve_nid,
+                                 CertErrors* errors) const override {
     if (curve_nid == NID_secp384r1)
       return false;
     return true;
@@ -253,8 +260,8 @@ class RejectSha512 : public SignaturePolicy {
  public:
   RejectSha512() : SignaturePolicy() {}
 
-  bool IsAcceptableSignatureAlgorithm(
-      const SignatureAlgorithm& algorithm) const override {
+  bool IsAcceptableSignatureAlgorithm(const SignatureAlgorithm& algorithm,
+                                      CertErrors* errors) const override {
     if (algorithm.algorithm() == SignatureAlgorithmId::RsaPss &&
         algorithm.ParamsForRsaPss()->mgf1_hash() == DigestAlgorithm::Sha512) {
       return false;
@@ -263,8 +270,8 @@ class RejectSha512 : public SignaturePolicy {
     return algorithm.digest() != DigestAlgorithm::Sha512;
   }
 
-  bool IsAcceptableModulusLengthForRsa(
-      size_t modulus_length_bits) const override {
+  bool IsAcceptableModulusLengthForRsa(size_t modulus_length_bits,
+                                       CertErrors* errors) const override {
     return true;
   }
 };

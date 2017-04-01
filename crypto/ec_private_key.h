@@ -15,9 +15,7 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "crypto/crypto_export.h"
-
-// Forward declaration for openssl/*.h
-typedef struct evp_pkey_st EVP_PKEY;
+#include "third_party/boringssl/src/include/openssl/base.h"
 
 namespace crypto {
 
@@ -43,35 +41,30 @@ class CRYPTO_EXPORT ECPrivateKey {
 
   // Creates a new instance by importing an existing key pair.
   // The key pair is given as an ASN.1-encoded PKCS #8 EncryptedPrivateKeyInfo
-  // block and an X.509 SubjectPublicKeyInfo block.
+  // block with empty password and an X.509 SubjectPublicKeyInfo block.
   // Returns nullptr if initialization fails.
   //
   // This function is deprecated. Use CreateFromPrivateKeyInfo for new code.
   // See https://crbug.com/603319.
   static std::unique_ptr<ECPrivateKey> CreateFromEncryptedPrivateKeyInfo(
-      const std::string& password,
       const std::vector<uint8_t>& encrypted_private_key_info,
       const std::vector<uint8_t>& subject_public_key_info);
 
   // Returns a copy of the object.
   std::unique_ptr<ECPrivateKey> Copy() const;
 
-  EVP_PKEY* key() { return key_; }
+  EVP_PKEY* key() { return key_.get(); }
 
   // Exports the private key to a PKCS #8 PrivateKeyInfo block.
   bool ExportPrivateKey(std::vector<uint8_t>* output) const;
 
   // Exports the private key as an ASN.1-encoded PKCS #8 EncryptedPrivateKeyInfo
-  // block and the public key as an X.509 SubjectPublicKeyInfo block.
-  // The |password| and |iterations| are used as inputs to the key derivation
-  // function for generating the encryption key.  PKCS #5 recommends a minimum
-  // of 1000 iterations, on modern systems a larger value may be preferrable.
+  // block wth empty password. This was historically used as a workaround for
+  // NSS API deficiencies and does not provide security.
   //
   // This function is deprecated. Use ExportPrivateKey for new code. See
   // https://crbug.com/603319.
-  bool ExportEncryptedPrivateKey(const std::string& password,
-                                 int iterations,
-                                 std::vector<uint8_t>* output) const;
+  bool ExportEncryptedPrivateKey(std::vector<uint8_t>* output) const;
 
   // Exports the public key to an X.509 SubjectPublicKeyInfo block.
   bool ExportPublicKey(std::vector<uint8_t>* output) const;
@@ -83,7 +76,7 @@ class CRYPTO_EXPORT ECPrivateKey {
   // Constructor is private. Use one of the Create*() methods above instead.
   ECPrivateKey();
 
-  EVP_PKEY* key_;
+  bssl::UniquePtr<EVP_PKEY> key_;
 
   DISALLOW_COPY_AND_ASSIGN(ECPrivateKey);
 };

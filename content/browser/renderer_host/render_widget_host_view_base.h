@@ -26,6 +26,7 @@
 #include "content/common/input/input_event_ack_state.h"
 #include "content/public/browser/readback_types.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/common/screen_info.h"
 #include "ipc/ipc_listener.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
@@ -41,7 +42,6 @@
 
 class SkBitmap;
 
-struct AccessibilityHostMsg_EventParams;
 struct ViewHostMsg_SelectionBounds_Params;
 
 namespace media {
@@ -49,7 +49,6 @@ class VideoFrame;
 }
 
 namespace blink {
-struct WebScreenInfo;
 class WebMouseEvent;
 class WebMouseWheelEvent;
 }
@@ -68,7 +67,6 @@ class BrowserAccessibilityDelegate;
 class BrowserAccessibilityManager;
 class RenderWidgetHostImpl;
 class RenderWidgetHostViewBaseObserver;
-class SyntheticGesture;
 class SyntheticGestureTarget;
 class TextInputManager;
 class WebCursor;
@@ -91,6 +89,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // RenderWidgetHostView implementation.
   RenderWidgetHost* GetRenderWidgetHost() const override;
   void SetBackgroundColor(SkColor color) override;
+  SkColor background_color() override;
   void SetBackgroundColorToDefault() final;
   bool GetBackgroundOpaque() override;
   ui::TextInputClient* GetTextInputClient() override;
@@ -98,6 +97,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   void WasOccluded() override {}
   bool IsShowingContextMenu() const override;
   void SetShowingContextMenu(bool showing_menu) override;
+  void SetIsInVR(bool is_in_vr) override;
   base::string16 GetSelectedText() override;
   bool IsMouseLocked() override;
   gfx::Size GetVisibleViewportSize() const override;
@@ -161,9 +161,9 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // Whether or not Blink's viewport size should be shrunk by the height of the
   // URL-bar.
-  virtual bool DoTopControlsShrinkBlinkSize() const;
+  virtual bool DoBrowserControlsShrinkBlinkSize() const;
 
-  // The height of the URL-bar top controls.
+  // The height of the URL-bar browser controls.
   virtual float GetTopControlsHeight() const;
 
   // The height of the bottom bar.
@@ -204,9 +204,10 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   virtual gfx::NativeViewAccessible AccessibilityGetNativeViewAccessible();
 
   // Informs that the focused DOM node has changed.
-  virtual void FocusedNodeChanged(bool is_editable_node) {}
+  virtual void FocusedNodeChanged(bool is_editable_node,
+                                  const gfx::Rect& node_bounds_in_screen) {}
 
-  virtual void OnSwapCompositorFrame(uint32_t output_surface_id,
+  virtual void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
                                      cc::CompositorFrame frame) {}
 
   // This method exists to allow removing of displayed graphics, after a new
@@ -228,16 +229,17 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // Returns the compositing surface ID namespace, or 0 if Surfaces are not
   // enabled.
-  virtual uint32_t GetSurfaceClientId();
+  virtual cc::FrameSinkId GetFrameSinkId();
 
   // When there are multiple RenderWidgetHostViews for a single page, input
   // events need to be targeted to the correct one for handling. The following
   // methods are invoked on the RenderWidgetHostView that should be able to
   // properly handle the event (i.e. it has focus for keyboard events, or has
   // been identified by hit testing mouse, touch or gesture events).
-  virtual uint32_t SurfaceClientIdAtPoint(cc::SurfaceHittestDelegate* delegate,
-                                          const gfx::Point& point,
-                                          gfx::Point* transformed_point);
+  virtual cc::FrameSinkId FrameSinkIdAtPoint(
+      cc::SurfaceHittestDelegate* delegate,
+      const gfx::Point& point,
+      gfx::Point* transformed_point);
   virtual void ProcessKeyboardEvent(const NativeWebKeyboardEvent& event) {}
   virtual void ProcessMouseEvent(const blink::WebMouseEvent& event,
                                  const ui::LatencyInfo& latency) {}
@@ -255,18 +257,38 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // RenderWidget and needs to be translated to viewport coordinates for the
   // root RWHV, in which case this method is called on the root RWHV with the
   // out-of-process iframe's SurfaceId.
-  // This does not transform points between surfaces where one does not
-  // contain the other. To transform between sibling surfaces, the point must
-  // be transformed to the root's coordinate space as an intermediate step.
-  virtual gfx::Point TransformPointToLocalCoordSpace(
+  // Returns false when this attempts to transform a point between coordinate
+  // spaces of surfaces where one does not contain the other. To transform
+  // between sibling surfaces, the point must be transformed to the root's
+  // coordinate space as an intermediate step.
+  virtual bool TransformPointToLocalCoordSpace(
       const gfx::Point& point,
-      const cc::SurfaceId& original_surface);
+      const cc::SurfaceId& original_surface,
+      gfx::Point* transformed_point);
 
   // Transform a point that is in the coordinate space for the current
   // RenderWidgetHostView to the coordinate space of the target_view.
-  virtual gfx::Point TransformPointToCoordSpaceForView(
+  virtual bool TransformPointToCoordSpaceForView(
       const gfx::Point& point,
-      RenderWidgetHostViewBase* target_view);
+      RenderWidgetHostViewBase* target_view,
+      gfx::Point* transformed_point);
+
+  // TODO(kenrb, wjmaclean): This is a temporary subclass identifier for
+  // RenderWidgetHostViewGuests that is needed for special treatment during
+  // input event routing. It can be removed either when RWHVGuests properly
+  // support direct mouse event routing, or when RWHVGuest is removed
+  // entirely, which comes first.
+  virtual bool IsRenderWidgetHostViewGuest();
+
+  // Subclass identifier for RenderWidgetHostViewChildFrames. This is useful
+  // to be able to know if this RWHV is embedded within another RWHV. If
+  // other kinds of embeddable RWHVs are created, this should be renamed to
+  // a more generic term -- in which case, static casts to RWHVChildFrame will
+  // need to also be resolved.
+  virtual bool IsRenderWidgetHostViewChildFrame();
+
+  // Returns true if the current view is in virtual reality mode.
+  virtual bool IsInVR() const;
 
   //----------------------------------------------------------------------------
   // The following methods are related to IME.
@@ -368,11 +390,11 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   virtual bool HasAcceleratedSurface(const gfx::Size& desired_size) = 0;
 
   // Compute the orientation type of the display assuming it is a mobile device.
-  static blink::WebScreenOrientationType GetOrientationTypeForMobile(
+  static ScreenOrientationValues GetOrientationTypeForMobile(
       const display::Display& display);
 
   // Compute the orientation type of the display assuming it is a desktop.
-  static blink::WebScreenOrientationType GetOrientationTypeForDesktop(
+  static ScreenOrientationValues GetOrientationTypeForDesktop(
       const display::Display& display);
 
   // Gets the bounds of the window, in screen coordinates.
@@ -397,16 +419,6 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   void AddObserver(RenderWidgetHostViewBaseObserver* observer);
   void RemoveObserver(RenderWidgetHostViewBaseObserver* observer);
 
-  // Exposed for testing.
-  virtual bool IsChildFrameForTesting() const;
-  virtual cc::SurfaceId SurfaceIdForTesting() const;
-
- protected:
-  // Interface class only, do not construct.
-  RenderWidgetHostViewBase();
-
-  void NotifyObserversAboutShutdown();
-
   // Returns a reference to the current instance of TextInputManager. The
   // reference is obtained from RenderWidgetHostDelegate. The first time a non-
   // null reference is obtained, its value is cached in |text_input_manager_|
@@ -418,6 +430,21 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // It is safer to use this method rather than directly dereferencing
   // |text_input_manager_|.
   TextInputManager* GetTextInputManager();
+
+  bool is_fullscreen() { return is_fullscreen_; }
+
+  // Exposed for testing.
+  virtual bool IsChildFrameForTesting() const;
+  virtual cc::SurfaceId SurfaceIdForTesting() const;
+
+ protected:
+  // Interface class only, do not construct.
+  RenderWidgetHostViewBase();
+
+  void NotifyObserversAboutShutdown();
+
+  // Is this a fullscreen view?
+  bool is_fullscreen_;
 
   // Whether this view is a popup and what kind of popup it is (select,
   // autofill...).
@@ -457,10 +484,6 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // The orientation of the display the renderer is currently on.
   display::Display::Rotation current_display_rotation_;
-
-  // Whether pinch-to-zoom should be enabled and pinch events forwarded to the
-  // renderer.
-  bool pinch_zoom_enabled_;
 
   // A reference to current TextInputManager instance this RWHV is registered
   // with. This is initially nullptr until the first time the view calls

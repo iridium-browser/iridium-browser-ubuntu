@@ -15,9 +15,11 @@
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/focusable_border.h"
-#include "ui/views/controls/scrollbar/native_scroll_bar.h"
+#include "ui/views/controls/scrollbar/scroll_bar_views.h"
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS)
+#include "ui/views/controls/scrollbar/overlay_scroll_bar.h"
+#elif defined(OS_LINUX)
 #define DESKTOP_LINUX
 #endif
 
@@ -39,10 +41,16 @@ const int PlatformStyle::kMinLabelButtonWidth = 70;
 const int PlatformStyle::kMinLabelButtonHeight = 33;
 const bool PlatformStyle::kDefaultLabelButtonHasBoldFont = true;
 const bool PlatformStyle::kDialogDefaultButtonCanBeCancel = true;
-const bool PlatformStyle::kTextfieldDragVerticallyDragsToEnd = false;
+const bool PlatformStyle::kSelectWordOnRightClick = false;
 const CustomButton::NotifyAction PlatformStyle::kMenuNotifyActivationAction =
     CustomButton::NOTIFY_ON_RELEASE;
+const CustomButton::KeyClickAction PlatformStyle::kKeyClickActionOnSpace =
+    CustomButton::CLICK_ON_KEY_RELEASE;
+const bool PlatformStyle::kReturnClicksFocusedControl = true;
+const bool PlatformStyle::kTreeViewHasFocusRing = false;
 const bool PlatformStyle::kTreeViewSelectionPaintsEntireRow = false;
+const bool PlatformStyle::kUseRipples = true;
+const bool PlatformStyle::kMirrorBubbleArrowInRTLByDefault = true;
 
 // static
 gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
@@ -52,33 +60,12 @@ gfx::ImageSkia PlatformStyle::CreateComboboxArrow(bool is_enabled,
 }
 
 // static
-std::unique_ptr<FocusableBorder> PlatformStyle::CreateComboboxBorder() {
-  return base::MakeUnique<FocusableBorder>();
-}
-
-// static
-std::unique_ptr<Background> PlatformStyle::CreateComboboxBackground(
-    int shoulder_width) {
-  return nullptr;
-}
-
-// static
-std::unique_ptr<LabelButtonBorder> PlatformStyle::CreateLabelButtonBorder(
-    Button::ButtonStyle style) {
-  if (!ui::MaterialDesignController::IsModeMaterial() ||
-      style != Button::STYLE_TEXTBUTTON) {
-    return base::MakeUnique<LabelButtonAssetBorder>(style);
-  }
-
-  std::unique_ptr<LabelButtonBorder> border(new views::LabelButtonBorder());
-  border->set_insets(views::LabelButtonAssetBorder::GetDefaultInsetsForStyle(
-      Button::STYLE_TEXTBUTTON));
-  return border;
-}
-
-// static
 std::unique_ptr<ScrollBar> PlatformStyle::CreateScrollBar(bool is_horizontal) {
-  return base::MakeUnique<NativeScrollBar>(is_horizontal);
+#if defined(OS_CHROMEOS)
+  return base::MakeUnique<OverlayScrollBar>(is_horizontal);
+#else
+  return base::MakeUnique<ScrollBarViews>(is_horizontal);
+#endif
 }
 
 // static
@@ -87,6 +74,9 @@ SkColor PlatformStyle::TextColorForButton(
     const LabelButton& button) {
   return color_by_state[button.state()];
 }
+
+// static
+void PlatformStyle::OnTextfieldEditFailed() {}
 
 #endif  // OS_MACOSX
 
@@ -100,10 +90,6 @@ void PlatformStyle::ApplyLabelButtonTextStyle(
   colors[Button::STATE_HOVERED] = kStyleButtonTextColor;
   colors[Button::STATE_PRESSED] = kStyleButtonTextColor;
 
-  const ui::NativeTheme* theme = label->GetNativeTheme();
-  label->SetBackgroundColor(
-      theme->GetSystemColor(ui::NativeTheme::kColorId_ButtonBackgroundColor));
-  label->SetAutoColorReadabilityEnabled(false);
   label->SetShadows(gfx::ShadowValues(
       1, gfx::ShadowValue(gfx::Vector2d(0, 1), 0, kStyleButtonShadowColor)));
 }

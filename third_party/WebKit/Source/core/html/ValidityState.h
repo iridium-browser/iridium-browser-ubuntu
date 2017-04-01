@@ -25,43 +25,43 @@
 #define ValidityState_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "core/html/FormAssociatedElement.h"
+#include "core/html/ListedElement.h"
 
 namespace blink {
 
-class ValidityState final : public GarbageCollected<ValidityState>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-    WTF_MAKE_NONCOPYABLE(ValidityState);
-public:
-    static ValidityState* create(FormAssociatedElement* control)
-    {
-        return new ValidityState(control);
-    }
-    DEFINE_INLINE_TRACE() { visitor->trace(m_control); }
+class ValidityState final : public GarbageCollected<ValidityState>,
+                            public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
+  WTF_MAKE_NONCOPYABLE(ValidityState);
 
-    String validationMessage() const;
+ public:
+  static ValidityState* create(ListedElement* control) {
+    return new ValidityState(control);
+  }
+  DEFINE_INLINE_TRACE() { visitor->trace(m_control); }
 
-    void setCustomErrorMessage(const String&);
+  String validationMessage() const;
 
-    bool valueMissing() const;
-    bool typeMismatch() const;
-    bool patternMismatch() const;
-    bool tooLong() const;
-    bool tooShort() const;
-    bool rangeUnderflow() const;
-    bool rangeOverflow() const;
-    bool stepMismatch() const;
-    bool badInput() const;
-    bool customError() const;
-    bool valid() const;
+  void setCustomErrorMessage(const String&);
 
-private:
-    explicit ValidityState(FormAssociatedElement* control)
-        : m_control(control) { }
+  bool valueMissing() const;
+  bool typeMismatch() const;
+  bool patternMismatch() const;
+  bool tooLong() const;
+  bool tooShort() const;
+  bool rangeUnderflow() const;
+  bool rangeOverflow() const;
+  bool stepMismatch() const;
+  bool badInput() const;
+  bool customError() const;
+  bool valid() const;
 
-    Member<FormAssociatedElement> m_control;
+ private:
+  explicit ValidityState(ListedElement* control) : m_control(control) {}
+
+  Member<ListedElement> m_control;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ValidityState_h
+#endif  // ValidityState_h

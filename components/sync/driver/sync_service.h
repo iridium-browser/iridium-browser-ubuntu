@@ -14,34 +14,29 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/core/connection_status.h"
 #include "components/sync/driver/data_type_encryption_handler.h"
 #include "components/sync/driver/sync_service_observer.h"
+#include "components/sync/engine/connection_status.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
 class GoogleServiceAuthError;
 
-namespace browser_sync {
-class ProtocolEventObserver;
-}
+namespace sync_sessions {
+class OpenTabsUIDelegate;
+}  // namespace sync_sessions
 
 namespace syncer {
 
 class BaseTransaction;
+class DataTypeController;
 class JsController;
+class LocalDeviceInfoProvider;
+class ProtocolEventObserver;
+class SyncClient;
 class SyncCycleSnapshot;
 class TypeDebugInfoObserver;
 struct SyncStatus;
 struct UserShare;
-
-}  // namespace syncer
-
-namespace sync_driver {
-
-class DataTypeController;
-class LocalDeviceInfoProvider;
-class OpenTabsUIDelegate;
-class SyncClient;
 
 // UIs that need to prevent Sync startup should hold an instance of this class
 // until the user has finished modifying sync settings. This is not an inner
@@ -69,7 +64,7 @@ class SyncService : public DataTypeEncryptionHandler {
   };
 
   // Passed as an argument to RequestStop to control whether or not the sync
-  // backend should clear its data directory when it shuts down. See
+  // engine should clear its data directory when it shuts down. See
   // RequestStop for more information.
   enum SyncStopDataFate {
     KEEP_DATA,
@@ -80,9 +75,9 @@ class SyncService : public DataTypeEncryptionHandler {
   struct SyncTokenStatus {
     SyncTokenStatus();
 
-    // Sync server connection status reported by sync backend.
+    // Sync server connection status reported by sync engine.
     base::Time connection_status_update_time;
-    syncer::ConnectionStatus connection_status;
+    ConnectionStatus connection_status;
 
     // Times when OAuth2 access token is requested and received.
     base::Time token_request_time;
@@ -113,16 +108,22 @@ class SyncService : public DataTypeEncryptionHandler {
   // datetypes are actually syncing, see GetActiveTypes() below.
   virtual bool IsSyncActive() const = 0;
 
+  // Returns true if the local sync backend server has been enabled through a
+  // command line flag or policy. In this case sync is considered active but any
+  // implied consent for further related services e.g. Suggestions, Web History
+  // etc. is considered not granted.
+  virtual bool IsLocalSyncEnabled() const = 0;
+
   // Triggers a GetUpdates call for the specified |types|, pulling any new data
   // from the sync server.
-  virtual void TriggerRefresh(const syncer::ModelTypeSet& types) = 0;
+  virtual void TriggerRefresh(const ModelTypeSet& types) = 0;
 
   // Get the set of current active data types (those chosen or configured by
   // the user which have not also encountered a runtime error).
   // Note that if the Sync engine is in the middle of a configuration, this
   // will the the empty set. Once the configuration completes the set will
   // be updated.
-  virtual syncer::ModelTypeSet GetActiveDataTypes() const = 0;
+  virtual ModelTypeSet GetActiveDataTypes() const = 0;
 
   // Returns the SyncClient instance associated with this service.
   virtual SyncClient* GetSyncClient() const = 0;
@@ -143,7 +144,7 @@ class SyncService : public DataTypeEncryptionHandler {
   // ASAP, presumably because a local change event has occurred but we're
   // still in deferred start mode, meaning the SyncableService hasn't been
   // told to MergeDataAndStartSyncing yet.
-  virtual void OnDataTypeRequestsSyncStartup(syncer::ModelType type) = 0;
+  virtual void OnDataTypeRequestsSyncStartup(ModelType type) = 0;
 
   // Returns true if sync is allowed, requested, and the user is logged in.
   // (being logged in does not mean that tokens are available - tokens may
@@ -152,7 +153,7 @@ class SyncService : public DataTypeEncryptionHandler {
   virtual bool CanSyncStart() const = 0;
 
   // Stops sync at the user's request. |data_fate| controls whether the sync
-  // backend should clear its data directory when it shuts down. Generally
+  // engine should clear its data directory when it shuts down. Generally
   // KEEP_DATA is used when the user just stops sync, and CLEAR_DATA is used
   // when they sign out of the profile entirely.
   virtual void RequestStop(SyncStopDataFate data_fate) = 0;
@@ -165,15 +166,15 @@ class SyncService : public DataTypeEncryptionHandler {
 
   // Returns the set of types which are preferred for enabling. This is a
   // superset of the active types (see GetActiveDataTypes()).
-  virtual syncer::ModelTypeSet GetPreferredDataTypes() const = 0;
+  virtual ModelTypeSet GetPreferredDataTypes() const = 0;
 
   // Called when a user chooses which data types to sync. |sync_everything|
   // represents whether they chose the "keep everything synced" option; if
   // true, |chosen_types| will be ignored and all data types will be synced.
   // |sync_everything| means "sync all current and future data types."
-  // |chosen_types| must be a subset of syncer::UserSelectableTypes().
+  // |chosen_types| must be a subset of UserSelectableTypes().
   virtual void OnUserChoseDatatypes(bool sync_everything,
-                                    syncer::ModelTypeSet chosen_types) = 0;
+                                    ModelTypeSet chosen_types) = 0;
 
   // Called whe Sync has been setup by the user and can be started.
   virtual void SetFirstSetupComplete() = 0;
@@ -205,14 +206,12 @@ class SyncService : public DataTypeEncryptionHandler {
   virtual const GoogleServiceAuthError& GetAuthError() const = 0;
   virtual bool HasUnrecoverableError() const = 0;
 
-  // Returns true if the SyncBackendHost has told us it's ready to accept
-  // changes. This should only be used for sync's internal configuration logic
-  // (such as deciding when to prompt for an encryption passphrase).
-  virtual bool IsBackendInitialized() const = 0;
+  // Returns true if the SyncEngine has told us it's ready to accept changes.
+  virtual bool IsEngineInitialized() const = 0;
 
-  // Return the active OpenTabsUIDelegate. If sessions is not enabled or not
-  // currently syncing, returns nullptr.
-  virtual OpenTabsUIDelegate* GetOpenTabsUIDelegate() = 0;
+  // Return the active OpenTabsUIDelegate. If open/proxy tabs is not enabled or
+  // not currently syncing, returns nullptr.
+  virtual sync_sessions::OpenTabsUIDelegate* GetOpenTabsUIDelegate() = 0;
 
   // Returns true if OnPassphraseRequired has been called for decryption and
   // we have an encrypted data type enabled.
@@ -224,7 +223,7 @@ class SyncService : public DataTypeEncryptionHandler {
   virtual base::Time GetExplicitPassphraseTime() const = 0;
 
   // Returns true if a secondary (explicit) passphrase is being used. It is not
-  // legal to call this method before the backend is initialized.
+  // legal to call this method before the engine is initialized.
   virtual bool IsUsingSecondaryPassphrase() const = 0;
 
   // Turns on encryption for all data. Callers must call OnUserChoseDatatypes()
@@ -251,14 +250,13 @@ class SyncService : public DataTypeEncryptionHandler {
   // Checks whether the Cryptographer is ready to encrypt and decrypt updates
   // for sensitive data types. Caller must be holding a
   // syncapi::BaseTransaction to ensure thread safety.
-  virtual bool IsCryptographerReady(
-      const syncer::BaseTransaction* trans) const = 0;
+  virtual bool IsCryptographerReady(const BaseTransaction* trans) const = 0;
 
   // TODO(akalin): This is called mostly by ModelAssociators and
   // tests.  Figure out how to pass the handle to the ModelAssociators
   // directly, figure out how to expose this to tests, and remove this
   // function.
-  virtual syncer::UserShare* GetUserShare() const = 0;
+  virtual UserShare* GetUserShare() const = 0;
 
   // Returns DeviceInfo provider for the local device.
   virtual LocalDeviceInfoProvider* GetLocalDeviceInfoProvider() const = 0;
@@ -268,12 +266,12 @@ class SyncService : public DataTypeEncryptionHandler {
   // enable or activate the synchronization of the data type (see
   // ActivateDataType).  Takes ownership of the pointer.
   virtual void RegisterDataTypeController(
-      DataTypeController* data_type_controller) = 0;
+      std::unique_ptr<DataTypeController> data_type_controller) = 0;
 
   // Called to re-enable a type disabled by DisableDatatype(..). Note, this does
   // not change the preferred state of a datatype, and is not persisted across
   // restarts.
-  virtual void ReenableDatatype(syncer::ModelType type) = 0;
+  virtual void ReenableDatatype(ModelType type) = 0;
 
   // Return sync token status.
   virtual SyncTokenStatus GetSyncTokenStatus() const = 0;
@@ -281,18 +279,18 @@ class SyncService : public DataTypeEncryptionHandler {
   // Get a description of the sync status for displaying in the user interface.
   virtual std::string QuerySyncStatusSummaryString() = 0;
 
-  // Initializes a struct of status indicators with data from the backend.
-  // Returns false if the backend was not available for querying; in that case
+  // Initializes a struct of status indicators with data from the engine.
+  // Returns false if the engine was not available for querying; in that case
   // the struct will be filled with default data.
-  virtual bool QueryDetailedSyncStatus(syncer::SyncStatus* result) = 0;
+  virtual bool QueryDetailedSyncStatus(SyncStatus* result) = 0;
 
   // Returns a user-friendly string form of last synced time (in minutes).
   virtual base::string16 GetLastSyncedTimeString() const = 0;
 
-  // Returns a human readable string describing backend initialization state.
-  virtual std::string GetBackendInitializationStateString() const = 0;
+  // Returns a human readable string describing engine initialization state.
+  virtual std::string GetEngineInitializationStateString() const = 0;
 
-  virtual syncer::SyncCycleSnapshot GetLastCycleSnapshot() const = 0;
+  virtual SyncCycleSnapshot GetLastCycleSnapshot() const = 0;
 
   // Returns a ListValue indicating the status of all registered types.
   //
@@ -305,25 +303,21 @@ class SyncService : public DataTypeEncryptionHandler {
   // This function is used by about_sync_util.cc to help populate the about:sync
   // page.  It returns a ListValue rather than a DictionaryValue in part to make
   // it easier to iterate over its elements when constructing that page.
-  virtual base::Value* GetTypeStatusMap() const = 0;
+  virtual std::unique_ptr<base::Value> GetTypeStatusMap() = 0;
 
   virtual const GURL& sync_service_url() const = 0;
 
   virtual std::string unrecoverable_error_message() const = 0;
   virtual tracked_objects::Location unrecoverable_error_location() const = 0;
 
-  virtual void AddProtocolEventObserver(
-      browser_sync::ProtocolEventObserver* observer) = 0;
-  virtual void RemoveProtocolEventObserver(
-      browser_sync::ProtocolEventObserver* observer) = 0;
+  virtual void AddProtocolEventObserver(ProtocolEventObserver* observer) = 0;
+  virtual void RemoveProtocolEventObserver(ProtocolEventObserver* observer) = 0;
 
-  virtual void AddTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) = 0;
-  virtual void RemoveTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) = 0;
+  virtual void AddTypeDebugInfoObserver(TypeDebugInfoObserver* observer) = 0;
+  virtual void RemoveTypeDebugInfoObserver(TypeDebugInfoObserver* observer) = 0;
 
   // Returns a weak pointer to the service's JsController.
-  virtual base::WeakPtr<syncer::JsController> GetJsController() = 0;
+  virtual base::WeakPtr<JsController> GetJsController() = 0;
 
   // Asynchronously fetches base::Value representations of all sync nodes and
   // returns them to the specified callback on this thread.
@@ -342,6 +336,6 @@ class SyncService : public DataTypeEncryptionHandler {
   DISALLOW_COPY_AND_ASSIGN(SyncService);
 };
 
-}  // namespace sync_driver
+}  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_DRIVER_SYNC_SERVICE_H_

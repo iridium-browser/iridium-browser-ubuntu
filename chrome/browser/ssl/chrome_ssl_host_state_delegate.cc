@@ -7,9 +7,12 @@
 #include <stdint.h>
 
 #include <set>
+#include <string>
+#include <utility>
 
 #include "base/base64.h"
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/guid.h"
 #include "base/logging.h"
@@ -21,10 +24,10 @@
 #include "base/values.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_switches.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/variations/variations_associated_data.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/hash_value.h"
 #include "net/base/url_util.h"
 #include "net/cert/x509_certificate.h"
@@ -137,6 +140,18 @@ void MigrateOldSettings(HostContentSettingsMap* map) {
       }
     }
   }
+}
+
+bool HostFilterToPatternFilter(
+    const base::Callback<bool(const std::string&)>& host_filter,
+    const ContentSettingsPattern& primary_pattern,
+    const ContentSettingsPattern& secondary_pattern) {
+  // We only ever set origin-scoped exceptions which are of the form
+  // "https://<host>:443". That is a valid URL, so we can compare |host_filter|
+  // against its host.
+  GURL url = GURL(primary_pattern.ToString());
+  DCHECK(url.is_valid());
+  return host_filter.Run(url.host());
 }
 
 }  // namespace
@@ -286,7 +301,7 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
-  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
+  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
     value.reset(new base::DictionaryValue());
 
   base::DictionaryValue* dict;
@@ -313,9 +328,22 @@ void ChromeSSLHostStateDelegate::AllowCert(const std::string& host,
                                      std::string(), std::move(value));
 }
 
-void ChromeSSLHostStateDelegate::Clear() {
+void ChromeSSLHostStateDelegate::Clear(
+    const base::Callback<bool(const std::string&)>& host_filter) {
+  // Convert host matching to content settings pattern matching. Content
+  // settings deletion is done synchronously on the UI thread, so we can use
+  // |host_filter| by reference.
+  base::Callback<bool(const ContentSettingsPattern& primary_pattern,
+                      const ContentSettingsPattern& secondary_pattern)>
+      pattern_filter;
+  if (!host_filter.is_null()) {
+    pattern_filter =
+        base::Bind(&HostFilterToPatternFilter, base::ConstRef(host_filter));
+  }
+
   HostContentSettingsMapFactory::GetForProfile(profile_)
-      ->ClearSettingsForOneType(CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS);
+      ->ClearSettingsForOneTypeWithPredicate(
+          CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, pattern_filter);
 }
 
 content::SSLHostStateDelegate::CertJudgment
@@ -341,7 +369,7 @@ ChromeSSLHostStateDelegate::QueryPolicy(const std::string& host,
   if (allow_localhost && net::IsLocalhost(url.host()))
     return ALLOWED;
 
-  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
+  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
     return DENIED;
 
   base::DictionaryValue* dict;  // Owned by value
@@ -417,7 +445,7 @@ bool ChromeSSLHostStateDelegate::HasAllowException(
   std::unique_ptr<base::Value> value(map->GetWebsiteSetting(
       url, url, CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS, std::string(), NULL));
 
-  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY))
+  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY))
     return false;
 
   base::DictionaryValue* dict;  // Owned by value
@@ -464,5 +492,5 @@ bool ChromeSSLHostStateDelegate::DidHostRunInsecureContent(
   return false;
 }
 void ChromeSSLHostStateDelegate::SetClock(std::unique_ptr<base::Clock> clock) {
-  clock_.reset(clock.release());
+  clock_ = std::move(clock);
 }

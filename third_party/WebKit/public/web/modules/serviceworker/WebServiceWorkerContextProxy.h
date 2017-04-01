@@ -39,41 +39,76 @@
 
 namespace blink {
 
+class WebDataConsumerHandle;
 class WebServiceWorkerRequest;
 class WebString;
 struct WebNotificationData;
+struct WebPaymentAppRequestData;
 struct WebServiceWorkerClientInfo;
+struct WebServiceWorkerError;
+class WebURLResponse;
 
 // A proxy interface to talk to the worker's GlobalScope implementation.
 // All methods of this class must be called on the worker thread.
 class WebServiceWorkerContextProxy {
-public:
-    virtual ~WebServiceWorkerContextProxy() { }
+ public:
+  virtual ~WebServiceWorkerContextProxy() {}
 
-    virtual void setRegistration(std::unique_ptr<WebServiceWorkerRegistration::Handle>) = 0;
+  virtual void setRegistration(
+      std::unique_ptr<WebServiceWorkerRegistration::Handle>) = 0;
 
-    virtual void dispatchActivateEvent(int eventID) = 0;
-    virtual void dispatchExtendableMessageEvent(int eventID, const WebString& message, const WebSecurityOrigin& sourceOrigin, const WebMessagePortChannelArray&, const WebServiceWorkerClientInfo&) = 0;
-    virtual void dispatchExtendableMessageEvent(int eventID, const WebString& message, const WebSecurityOrigin& sourceOrigin, const WebMessagePortChannelArray&, std::unique_ptr<WebServiceWorker::Handle>) = 0;
-    virtual void dispatchInstallEvent(int eventID) = 0;
-    virtual void dispatchFetchEvent(int responseID, int eventFinishID, const WebServiceWorkerRequest& webRequest) = 0;
-    virtual void dispatchForeignFetchEvent(int responseID, int eventFinishID, const WebServiceWorkerRequest& webRequest) = 0;
-    virtual void dispatchNotificationClickEvent(int eventID, int64_t notificationID, const WebNotificationData&, int actionIndex) = 0;
-    virtual void dispatchNotificationCloseEvent(int eventID, int64_t notificationID, const WebNotificationData&) = 0;
-    virtual void dispatchPushEvent(int eventID, const WebString& data) = 0;
+  virtual void dispatchActivateEvent(int eventID) = 0;
+  virtual void dispatchExtendableMessageEvent(
+      int eventID,
+      const WebString& message,
+      const WebSecurityOrigin& sourceOrigin,
+      const WebMessagePortChannelArray&,
+      const WebServiceWorkerClientInfo&) = 0;
+  virtual void dispatchExtendableMessageEvent(
+      int eventID,
+      const WebString& message,
+      const WebSecurityOrigin& sourceOrigin,
+      const WebMessagePortChannelArray&,
+      std::unique_ptr<WebServiceWorker::Handle>) = 0;
+  virtual void dispatchInstallEvent(int eventID) = 0;
+  virtual void dispatchFetchEvent(int fetchEventID,
+                                  const WebServiceWorkerRequest& webRequest,
+                                  bool navigationPreloadSent) = 0;
+  virtual void dispatchForeignFetchEvent(
+      int fetchEventID,
+      const WebServiceWorkerRequest& webRequest) = 0;
+  virtual void dispatchNotificationClickEvent(int eventID,
+                                              const WebString& notificationID,
+                                              const WebNotificationData&,
+                                              int actionIndex,
+                                              const WebString& reply) = 0;
+  virtual void dispatchNotificationCloseEvent(int eventID,
+                                              const WebString& notificationID,
+                                              const WebNotificationData&) = 0;
+  virtual void dispatchPushEvent(int eventID, const WebString& data) = 0;
 
-    virtual bool hasFetchEventHandler() = 0;
+  virtual bool hasFetchEventHandler() = 0;
 
-    enum LastChanceOption {
-        IsNotLastChance,
-        IsLastChance
-    };
+  enum LastChanceOption { IsNotLastChance, IsLastChance };
 
-    // Once the ServiceWorker has finished handling the sync event,
-    // didHandleSyncEvent is called on the context client.
-    virtual void dispatchSyncEvent(int syncEventID, const WebString& tag, LastChanceOption) = 0;
+  // Once the ServiceWorker has finished handling the sync event,
+  // didHandleSyncEvent is called on the context client.
+  virtual void dispatchSyncEvent(int syncEventID,
+                                 const WebString& tag,
+                                 LastChanceOption) = 0;
+
+  virtual void dispatchPaymentRequestEvent(int eventID,
+                                           const WebPaymentAppRequestData&) = 0;
+
+  virtual void onNavigationPreloadResponse(
+      int fetchEventID,
+      std::unique_ptr<WebURLResponse>,
+      std::unique_ptr<WebDataConsumerHandle>) = 0;
+  virtual void onNavigationPreloadError(
+      int fetchEventID,
+      std::unique_ptr<WebServiceWorkerError>) = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebServiceWorkerContextProxy_h
+#endif  // WebServiceWorkerContextProxy_h

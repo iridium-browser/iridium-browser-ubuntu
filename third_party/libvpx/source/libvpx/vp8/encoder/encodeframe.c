@@ -345,8 +345,8 @@ static void encode_mb_row(VP8_COMP *cpi, VP8_COMMON *cm, int mb_row,
 #if CONFIG_MULTITHREAD
   const int nsync = cpi->mt_sync_range;
   const int rightmost_col = cm->mb_cols + nsync;
-  volatile const int *last_row_current_mb_col;
-  volatile int *current_mb_col = &cpi->mt_current_mb_col[mb_row];
+  const int *last_row_current_mb_col;
+  int *current_mb_col = &cpi->mt_current_mb_col[mb_row];
 
   if ((cpi->b_multi_threaded != 0) && (mb_row != 0)) {
     last_row_current_mb_col = &cpi->mt_current_mb_col[mb_row - 1];
@@ -419,13 +419,14 @@ static void encode_mb_row(VP8_COMP *cpi, VP8_COMMON *cm, int mb_row,
 
 #if CONFIG_MULTITHREAD
     if (cpi->b_multi_threaded != 0) {
-      *current_mb_col = mb_col - 1; /* set previous MB done */
+      if (((mb_col - 1) % nsync) == 0) {
+        pthread_mutex_t *mutex = &cpi->pmutex[mb_row];
+        protected_write(mutex, current_mb_col, mb_col - 1);
+      }
 
-      if ((mb_col & (nsync - 1)) == 0) {
-        while (mb_col > (*last_row_current_mb_col - nsync)) {
-          x86_pause_hint();
-          thread_sleep(0);
-        }
+      if (mb_row && !(mb_col & (nsync - 1))) {
+        pthread_mutex_t *mutex = &cpi->pmutex[mb_row - 1];
+        sync_read(mutex, mb_col, last_row_current_mb_col, nsync);
       }
     }
 #endif
@@ -565,7 +566,9 @@ static void encode_mb_row(VP8_COMP *cpi, VP8_COMMON *cm, int mb_row,
                     xd->dst.u_buffer + 8, xd->dst.v_buffer + 8);
 
 #if CONFIG_MULTITHREAD
-  if (cpi->b_multi_threaded != 0) *current_mb_col = rightmost_col;
+  if (cpi->b_multi_threaded != 0) {
+    protected_write(&cpi->pmutex[mb_row], current_mb_col, rightmost_col);
+  }
 #endif
 
   /* this is to account for the border */
@@ -788,14 +791,11 @@ void vp8_encode_frame(VP8_COMP *cpi) {
             xd->mode_info_stride * cpi->encoding_thread_count;
         x->partition_info += xd->mode_info_stride * cpi->encoding_thread_count;
         x->gf_active_ptr += cm->mb_cols * cpi->encoding_thread_count;
-
-        if (mb_row == cm->mb_rows - 1) {
-          sem_post(&cpi->h_event_end_encoding); /* signal frame encoding end */
-        }
       }
-
-      sem_wait(
-          &cpi->h_event_end_encoding); /* wait for other threads to finish */
+      /* Wait for all the threads to finish. */
+      for (i = 0; i < cpi->encoding_thread_count; ++i) {
+        sem_wait(&cpi->h_event_end_encoding[i]);
+      }
 
       for (mb_row = 0; mb_row < cm->mb_rows; ++mb_row) {
         cpi->tok_count += (unsigned int)(cpi->tplist[mb_row].stop -

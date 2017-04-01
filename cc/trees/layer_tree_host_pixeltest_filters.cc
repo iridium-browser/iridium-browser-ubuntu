@@ -7,6 +7,7 @@
 #include "build/build_config.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/layers/solid_color_layer.h"
+#include "cc/test/fake_content_layer_client.h"
 #include "cc/test/layer_tree_pixel_test.h"
 #include "cc/test/pixel_comparator.h"
 #include "cc/test/solid_color_content_layer_client.h"
@@ -570,6 +571,79 @@ TEST_F(ImageScaledRenderSurface, ImageRenderSurfaceScaled_Software) {
       base::FilePath(FILE_PATH_LITERAL("scaled_render_surface_layer_sw.png")));
 }
 
+class ZoomFilterTest : public LayerTreeHostFiltersPixelTest {
+ protected:
+  void RunPixelTestType(PixelTestType test_type, base::FilePath image_name) {
+    scoped_refptr<SolidColorLayer> root =
+        CreateSolidColorLayer(gfx::Rect(300, 300), SK_ColorWHITE);
+
+    // Create the pattern. Two blue/yellow side by side blocks with a horizontal
+    // green strip.
+    scoped_refptr<SolidColorLayer> left =
+        CreateSolidColorLayer(gfx::Rect(0, 0, 100, 150), SK_ColorBLUE);
+    root->AddChild(left);
+    scoped_refptr<SolidColorLayer> right =
+        CreateSolidColorLayer(gfx::Rect(100, 0, 200, 150), SK_ColorYELLOW);
+    root->AddChild(right);
+    scoped_refptr<SolidColorLayer> horizontal_strip =
+        CreateSolidColorLayer(gfx::Rect(0, 10, 300, 10), SK_ColorGREEN);
+    root->AddChild(horizontal_strip);
+
+    // Test a zoom that extends past the edge of the screen.
+    scoped_refptr<SolidColorLayer> border_edge_zoom =
+        CreateSolidColorLayer(gfx::Rect(-10, -10, 50, 50), SK_ColorTRANSPARENT);
+    FilterOperations border_filters;
+    border_filters.Append(
+        FilterOperation::CreateZoomFilter(2.f /* zoom */, 0 /* inset */));
+    border_edge_zoom->SetBackgroundFilters(border_filters);
+    root->AddChild(border_edge_zoom);
+
+    // Test a zoom that extends past the edge of the screen.
+    scoped_refptr<SolidColorLayer> top_edge_zoom =
+        CreateSolidColorLayer(gfx::Rect(70, -10, 50, 50), SK_ColorTRANSPARENT);
+    FilterOperations top_filters;
+    top_filters.Append(
+        FilterOperation::CreateZoomFilter(2.f /* zoom */, 0 /* inset */));
+    top_edge_zoom->SetBackgroundFilters(top_filters);
+    root->AddChild(top_edge_zoom);
+
+    // Test a zoom that is fully within the screen.
+    scoped_refptr<SolidColorLayer> contained_zoom =
+        CreateSolidColorLayer(gfx::Rect(150, 5, 50, 50), SK_ColorTRANSPARENT);
+    FilterOperations mid_filters;
+    mid_filters.Append(
+        FilterOperation::CreateZoomFilter(2.f /* zoom */, 0 /* inset */));
+    contained_zoom->SetBackgroundFilters(mid_filters);
+    root->AddChild(contained_zoom);
+
+#if defined(OS_WIN)
+    // Windows has 1 pixel off by 1: crbug.com/259915
+    float percentage_pixels_large_error = 0.00111112f;  // 1px / (300*300)
+    float percentage_pixels_small_error = 0.0f;
+    float average_error_allowed_in_bad_pixels = 1.f;
+    int large_error_allowed = 1;
+    int small_error_allowed = 0;
+    pixel_comparator_.reset(new FuzzyPixelComparator(
+        true,  // discard_alpha
+        percentage_pixels_large_error, percentage_pixels_small_error,
+        average_error_allowed_in_bad_pixels, large_error_allowed,
+        small_error_allowed));
+#endif
+
+    RunPixelTest(test_type, std::move(root), image_name);
+  }
+};
+
+TEST_F(ZoomFilterTest, ZoomFilterTest_GL) {
+  RunPixelTestType(PIXEL_TEST_GL,
+                   base::FilePath(FILE_PATH_LITERAL("zoom_filter_gl.png")));
+}
+
+TEST_F(ZoomFilterTest, ZoomFilterTest_Software) {
+  RunPixelTestType(PIXEL_TEST_SOFTWARE,
+                   base::FilePath(FILE_PATH_LITERAL("zoom_filter_sw.png")));
+}
+
 class RotatedFilterTest : public LayerTreeHostFiltersPixelTest {
  protected:
   void RunPixelTestType(PixelTestType test_type, base::FilePath image_name) {
@@ -679,6 +753,58 @@ TEST_F(RotatedDropShadowFilterTest, RotatedDropShadowFilterTest_Software) {
   RunPixelTestType(
       PIXEL_TEST_SOFTWARE,
       base::FilePath(FILE_PATH_LITERAL("rotated_drop_shadow_filter_sw.png")));
+}
+
+class TranslatedFilterTest : public LayerTreeHostFiltersPixelTest {
+ protected:
+  void RunPixelTestType(PixelTestType test_type, base::FilePath image_name) {
+    scoped_refptr<Layer> clip = Layer::Create();
+    clip->SetBounds(gfx::Size(300, 300));
+    clip->SetMasksToBounds(true);
+
+    scoped_refptr<Layer> parent = Layer::Create();
+    parent->SetPosition(gfx::PointF(30.f, 30.f));
+
+    gfx::Rect child_rect(100, 100);
+    // Use two colors to bypass solid color detection, so we get a tile quad.
+    // This is intended to test render pass removal optimizations.
+    FakeContentLayerClient client;
+    client.set_bounds(child_rect.size());
+    SkPaint paint;
+    paint.setColor(SK_ColorGREEN);
+    client.add_draw_rect(child_rect, paint);
+    paint.setColor(SK_ColorBLUE);
+    client.add_draw_rect(gfx::Rect(100, 50), paint);
+    scoped_refptr<PictureLayer> child = PictureLayer::Create(&client);
+    child->SetBounds(child_rect.size());
+    child->SetIsDrawable(true);
+    FilterOperations filters;
+    filters.Append(FilterOperation::CreateOpacityFilter(0.5f));
+    child->SetFilters(filters);
+
+    // This layer will be clipped by |clip|, so the RenderPass created for
+    // |child| will only have one visible quad.
+    scoped_refptr<SolidColorLayer> grand_child =
+        CreateSolidColorLayer(gfx::Rect(-300, -300, 100, 100), SK_ColorRED);
+
+    child->AddChild(grand_child);
+    parent->AddChild(child);
+    clip->AddChild(parent);
+
+    RunPixelTest(test_type, clip, image_name);
+  }
+};
+
+TEST_F(TranslatedFilterTest, GL) {
+  RunPixelTestType(
+      PIXEL_TEST_GL,
+      base::FilePath(FILE_PATH_LITERAL("translated_blue_green_alpha_gl.png")));
+}
+
+TEST_F(TranslatedFilterTest, Software) {
+  RunPixelTestType(
+      PIXEL_TEST_SOFTWARE,
+      base::FilePath(FILE_PATH_LITERAL("translated_blue_green_alpha_sw.png")));
 }
 
 class EnlargedTextureWithAlphaThresholdFilter

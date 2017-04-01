@@ -16,7 +16,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "content/public/common/origin_util.h"
-#include "device/core/device_client.h"
+#include "device/base/device_client.h"
 #include "device/usb/usb_device.h"
 #include "device/usb/usb_ids.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -67,14 +67,14 @@ void RecordNotificationClosure(WebUsbNotificationClosed disposition) {
 
 Browser* GetBrowser() {
   chrome::ScopedTabbedBrowserDisplayer browser_displayer(
-      ProfileManager::GetActiveUserProfile());
+      ProfileManager::GetLastUsedProfileAllowedByPolicy());
   DCHECK(browser_displayer.browser());
   return browser_displayer.browser();
 }
 
 void OpenURL(const GURL& url) {
   GetBrowser()->OpenURL(content::OpenURLParams(
-      url, content::Referrer(), NEW_FOREGROUND_TAB,
+      url, content::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL, false /* is_renderer_initialized */));
 }
 

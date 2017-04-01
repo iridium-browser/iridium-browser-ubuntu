@@ -6,10 +6,12 @@ package org.chromium.chrome.browser.tab;
 
 import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
 
-import android.test.suitebuilder.annotation.LargeTest;
+import android.support.test.filters.LargeTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -51,8 +53,10 @@ public class UndoIntegrationTest extends ChromeTabbedActivityTestBase {
      * @throws InterruptedException
      * @throws TimeoutException
      */
+    @FlakyTest(message = "https://crbug.com/679480")
     @LargeTest
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
+    @RetryOnFailure
     public void testAddNewContentsFromClosingTab() throws InterruptedException, TimeoutException {
         loadUrl(WINDOW_OPEN_BUTTON_URL);
 

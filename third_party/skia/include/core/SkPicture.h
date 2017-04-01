@@ -52,21 +52,6 @@ public:
      */
     typedef bool (*InstallPixelRefProc)(const void* src, size_t length, SkBitmap* dst);
 
-#ifdef SK_SUPPORT_LEGACY_PICTUREINSTALLPIXELREF
-    /**
-     *  Recreate a picture that was serialized into a stream.
-     *  @param SkStream Serialized picture data. Ownership is unchanged by this call.
-     *  @param proc Function pointer for installing pixelrefs on SkBitmaps representing the
-     *              encoded bitmap data from the stream.
-     *  @return A new SkPicture representing the serialized data, or NULL if the stream is
-     *          invalid.
-     */
-    static sk_sp<SkPicture> MakeFromStream(SkStream*, InstallPixelRefProc proc);
-    static sk_sp<SkPicture> MakeFromStream(SkStream* stream, std::nullptr_t) {
-        return MakeFromStream(stream);
-    }
-#endif
-
     /**
      *  Recreate a picture that was serialized into a stream.
      *
@@ -75,6 +60,9 @@ public:
      */
     static sk_sp<SkPicture> MakeFromStream(SkStream*, SkImageDeserializer*);
     static sk_sp<SkPicture> MakeFromStream(SkStream*);
+    static sk_sp<SkPicture> MakeFromData(const void* data, size_t size,
+                                         SkImageDeserializer* = nullptr);
+    static sk_sp<SkPicture> MakeFromData(const SkData* data, SkImageDeserializer* = nullptr);
 
     /**
      *  Recreate a picture that was serialized into a buffer. If the creation requires bitmap
@@ -121,10 +109,16 @@ public:
     uint32_t uniqueID() const;
 
     /**
-     *  Serialize to a stream. If non NULL, serializer will be used to serialize
-     *  bitmaps and images in the picture.
+     *  Serialize the picture to SkData. If non nullptr, pixel-serializer will be used to
+     *  customize how images reference by the picture are serialized/compressed.
      */
-    void serialize(SkWStream*, SkPixelSerializer* = NULL) const;
+    sk_sp<SkData> serialize(SkPixelSerializer* = nullptr) const;
+
+    /**
+     *  Serialize to a stream. If non nullptr, pixel-serializer will be used to
+     *  customize how images reference by the picture are serialized/compressed.
+     */
+    void serialize(SkWStream*, SkPixelSerializer* = nullptr) const;
 
     /**
      *  Serialize to a buffer.
@@ -173,18 +167,6 @@ public:
     static void SetPictureIOSecurityPrecautionsEnabled_Dangerous(bool set);
     static bool PictureIOSecurityPrecautionsEnabled();
 
-#ifdef SK_SUPPORT_LEGACY_PICTURE_PTR
-    static SkPicture* CreateFromStream(SkStream* stream, InstallPixelRefProc proc) {
-        return MakeFromStream(stream, proc).release();
-    }
-    static SkPicture* CreateFromStream(SkStream* stream) {
-        return MakeFromStream(stream).release();
-    }
-    static SkPicture* CreateFromBuffer(SkReadBuffer& rbuf) {
-        return MakeFromBuffer(rbuf).release();
-    }
-#endif
-
 private:
     // Subclass whitelist.
     SkPicture();
@@ -213,10 +195,14 @@ private:
     // V45: Add invNormRotation to SkLightingShader.
     // V46: Add drawTextRSXform
     // V47: Add occluder rect to SkBlurMaskFilter
+    // V48: Read and write extended SkTextBlobs.
+    // V49: Gradients serialized as SkColor4f + SkColorSpace
+    // V50: SkXfermode -> SkBlendMode
+    // V51: more SkXfermode -> SkBlendMode
 
     // Only SKPs within the min/current picture version range (inclusive) can be read.
     static const uint32_t     MIN_PICTURE_VERSION = 35;     // Produced by Chrome M39.
-    static const uint32_t CURRENT_PICTURE_VERSION = 47;
+    static const uint32_t CURRENT_PICTURE_VERSION = 51;
 
     static_assert(MIN_PICTURE_VERSION <= 41,
                   "Remove kFontFileName and related code from SkFontDescriptor.cpp.");
@@ -230,10 +216,13 @@ private:
     static_assert(MIN_PICTURE_VERSION <= 45,
                   "Remove decoding of old SkTypeface::Style from SkFontDescriptor.cpp.");
 
+    static_assert(MIN_PICTURE_VERSION <= 48,
+                  "Remove legacy gradient deserialization code from SkGradientShader.cpp.");
+
     static bool IsValidPictInfo(const SkPictInfo& info);
     static sk_sp<SkPicture> Forwardport(const SkPictInfo&,
                                         const SkPictureData*,
-                                        const SkReadBuffer* buffer);
+                                        SkReadBuffer* buffer);
 
     SkPictInfo createHeader() const;
     SkPictureData* backport() const;

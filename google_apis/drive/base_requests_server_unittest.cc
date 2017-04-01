@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "google_apis/drive/dummy_auth_service.h"
@@ -46,16 +47,17 @@ class BaseRequestsServerTest : public testing::Test {
         message_loop_.task_runner(),
         kTestUserAgent));
 
-    ASSERT_TRUE(test_server_.Start());
+    ASSERT_TRUE(test_server_.InitializeAndListen());
     test_server_.RegisterRequestHandler(
         base::Bind(&test_util::HandleDownloadFileRequest,
                    test_server_.base_url(),
                    base::Unretained(&http_request_)));
+    test_server_.StartAcceptingConnections();
   }
 
   // Returns a temporary file path suitable for storing the cache file.
   base::FilePath GetTestCachedFilePath(const base::FilePath& file_name) {
-    return temp_dir_.path().Append(file_name);
+    return temp_dir_.GetPath().Append(file_name);
   }
 
   base::MessageLoopForIO message_loop_;  // Test server needs IO thread.
@@ -75,17 +77,17 @@ TEST_F(BaseRequestsServerTest, DownloadFileRequest_ValidFile) {
   base::FilePath temp_file;
   {
     base::RunLoop run_loop;
-    DownloadFileRequestBase* request = new DownloadFileRequestBase(
-        request_sender_.get(),
-        test_util::CreateQuitCallback(
-            &run_loop,
-            test_util::CreateCopyResultCallback(&result_code, &temp_file)),
-        GetContentCallback(),
-        ProgressCallback(),
-        test_server_.GetURL("/files/drive/testfile.txt"),
-        GetTestCachedFilePath(
-            base::FilePath::FromUTF8Unsafe("cached_testfile.txt")));
-    request_sender_->StartRequestWithAuthRetry(request);
+    std::unique_ptr<DownloadFileRequestBase> request =
+        base::MakeUnique<DownloadFileRequestBase>(
+            request_sender_.get(),
+            test_util::CreateQuitCallback(
+                &run_loop,
+                test_util::CreateCopyResultCallback(&result_code, &temp_file)),
+            GetContentCallback(), ProgressCallback(),
+            test_server_.GetURL("/files/drive/testfile.txt"),
+            GetTestCachedFilePath(
+                base::FilePath::FromUTF8Unsafe("cached_testfile.txt")));
+    request_sender_->StartRequestWithAuthRetry(std::move(request));
     run_loop.Run();
   }
 
@@ -109,17 +111,17 @@ TEST_F(BaseRequestsServerTest, DownloadFileRequest_NonExistentFile) {
   base::FilePath temp_file;
   {
     base::RunLoop run_loop;
-    DownloadFileRequestBase* request = new DownloadFileRequestBase(
-        request_sender_.get(),
-        test_util::CreateQuitCallback(
-            &run_loop,
-            test_util::CreateCopyResultCallback(&result_code, &temp_file)),
-        GetContentCallback(),
-        ProgressCallback(),
-        test_server_.GetURL("/files/gdata/no-such-file.txt"),
-        GetTestCachedFilePath(
-            base::FilePath::FromUTF8Unsafe("cache_no-such-file.txt")));
-    request_sender_->StartRequestWithAuthRetry(request);
+    std::unique_ptr<DownloadFileRequestBase> request =
+        base::MakeUnique<DownloadFileRequestBase>(
+            request_sender_.get(),
+            test_util::CreateQuitCallback(
+                &run_loop,
+                test_util::CreateCopyResultCallback(&result_code, &temp_file)),
+            GetContentCallback(), ProgressCallback(),
+            test_server_.GetURL("/files/gdata/no-such-file.txt"),
+            GetTestCachedFilePath(
+                base::FilePath::FromUTF8Unsafe("cache_no-such-file.txt")));
+    request_sender_->StartRequestWithAuthRetry(std::move(request));
     run_loop.Run();
   }
   EXPECT_EQ(HTTP_NOT_FOUND, result_code);

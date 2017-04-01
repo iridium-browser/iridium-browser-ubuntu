@@ -11,7 +11,9 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -20,8 +22,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/win/enumerate_modules_model.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -30,9 +35,6 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -77,11 +79,11 @@ content::WebUIDataSource* CreateConflictsUIHTMLSource() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-// The handler for JavaScript messages for the about:flags page.
+// The handler for JavaScript messages for the about:conflicts page.
 class ConflictsDOMHandler : public WebUIMessageHandler,
-                            public content::NotificationObserver {
+                            public EnumerateModulesModel::Observer {
  public:
-  ConflictsDOMHandler() {}
+  ConflictsDOMHandler();
   ~ConflictsDOMHandler() override {}
 
   // WebUIMessageHandler implementation.
@@ -93,14 +95,18 @@ class ConflictsDOMHandler : public WebUIMessageHandler,
  private:
   void SendModuleList();
 
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // EnumerateModulesModel::Observer implementation.
+  void OnScanCompleted() override;
 
-  content::NotificationRegistrar registrar_;
+  ScopedObserver<EnumerateModulesModel,
+                 EnumerateModulesModel::Observer> observer_;
 
   DISALLOW_COPY_AND_ASSIGN(ConflictsDOMHandler);
 };
+
+ConflictsDOMHandler::ConflictsDOMHandler()
+    : observer_(this) {
+}
 
 void ConflictsDOMHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("requestModuleList",
@@ -109,14 +115,23 @@ void ConflictsDOMHandler::RegisterMessages() {
 }
 
 void ConflictsDOMHandler::HandleRequestModuleList(const base::ListValue* args) {
-  // This request is handled asynchronously. See Observe for when we reply back.
-  registrar_.Add(this, chrome::NOTIFICATION_MODULE_LIST_ENUMERATED,
-                 content::NotificationService::AllSources());
-  EnumerateModulesModel::GetInstance()->ScanNow();
+  // The request is handled asynchronously, and will callback via
+  // OnScanCompleted on completion.
+  auto* model = EnumerateModulesModel::GetInstance();
+
+  // The JS shouldn't be abusive and call 'requestModuleList' twice, but it's
+  // easy enough to defend against this.
+  if (!observer_.IsObserving(model)) {
+    observer_.Add(model);
+
+    // Ask the scan to be performed immediately, and not in background mode.
+    // This ensures the results are available ASAP for the UI.
+    model->ScanNow(false);
+  }
 }
 
 void ConflictsDOMHandler::SendModuleList() {
-  EnumerateModulesModel* loaded_modules = EnumerateModulesModel::GetInstance();
+  auto* loaded_modules = EnumerateModulesModel::GetInstance();
   base::ListValue* list = loaded_modules->GetModuleList();
   base::DictionaryValue results;
   results.Set("moduleList", list);
@@ -141,13 +156,9 @@ void ConflictsDOMHandler::SendModuleList() {
   web_ui()->CallJavascriptFunctionUnsafe("returnModuleList", results);
 }
 
-void ConflictsDOMHandler::Observe(int type,
-                                  const content::NotificationSource& source,
-                                  const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_MODULE_LIST_ENUMERATED, type);
-
+void ConflictsDOMHandler::OnScanCompleted() {
   SendModuleList();
-  registrar_.RemoveAll();
+  observer_.Remove(EnumerateModulesModel::GetInstance());
 }
 
 }  // namespace
@@ -160,7 +171,7 @@ void ConflictsDOMHandler::Observe(int type,
 
 ConflictsUI::ConflictsUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   content::RecordAction(UserMetricsAction("ViewAboutConflicts"));
-  web_ui->AddMessageHandler(new ConflictsDOMHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<ConflictsDOMHandler>());
 
   // Set up the about:conflicts source.
   Profile* profile = Profile::FromWebUI(web_ui);

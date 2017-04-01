@@ -10,16 +10,17 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
+ * DAMAGE.
  */
 
 #ifndef BiquadProcessor_h
@@ -35,61 +36,74 @@
 
 namespace blink {
 
-// BiquadProcessor is an AudioDSPKernelProcessor which uses Biquad objects to implement several common filters.
+// BiquadProcessor is an AudioDSPKernelProcessor which uses Biquad objects to
+// implement several common filters.
 
 class BiquadProcessor final : public AudioDSPKernelProcessor {
-public:
-    // This values are used in histograms and should not be renumbered or deleted.
-    enum FilterType {
-        LowPass = 0,
-        HighPass = 1,
-        BandPass = 2,
-        LowShelf = 3,
-        HighShelf = 4,
-        Peaking = 5,
-        Notch = 6,
-        Allpass = 7
-    };
+ public:
+  // This values are used in histograms and should not be renumbered or deleted.
+  enum FilterType {
+    LowPass = 0,
+    HighPass = 1,
+    BandPass = 2,
+    LowShelf = 3,
+    HighShelf = 4,
+    Peaking = 5,
+    Notch = 6,
+    Allpass = 7
+  };
 
-    BiquadProcessor(float sampleRate, size_t numberOfChannels, AudioParamHandler& frequency, AudioParamHandler& q, AudioParamHandler& gain, AudioParamHandler& detune);
-    ~BiquadProcessor() override;
+  BiquadProcessor(float sampleRate,
+                  size_t numberOfChannels,
+                  AudioParamHandler& frequency,
+                  AudioParamHandler& q,
+                  AudioParamHandler& gain,
+                  AudioParamHandler& detune);
+  ~BiquadProcessor() override;
 
-    std::unique_ptr<AudioDSPKernel> createKernel() override;
+  std::unique_ptr<AudioDSPKernel> createKernel() override;
 
-    void process(const AudioBus* source, AudioBus* destination, size_t framesToProcess) override;
+  void process(const AudioBus* source,
+               AudioBus* destination,
+               size_t framesToProcess) override;
 
-    // Get the magnitude and phase response of the filter at the given
-    // set of frequencies (in Hz). The phase response is in radians.
-    void getFrequencyResponse(int nFrequencies, const float* frequencyHz, float* magResponse, float* phaseResponse);
+  void processOnlyAudioParams(size_t framesToProcess) override;
 
-    void checkForDirtyCoefficients();
+  // Get the magnitude and phase response of the filter at the given
+  // set of frequencies (in Hz). The phase response is in radians.
+  void getFrequencyResponse(int nFrequencies,
+                            const float* frequencyHz,
+                            float* magResponse,
+                            float* phaseResponse);
 
-    bool filterCoefficientsDirty() const { return m_filterCoefficientsDirty; }
-    bool hasSampleAccurateValues() const { return m_hasSampleAccurateValues; }
+  void checkForDirtyCoefficients();
 
-    AudioParamHandler& parameter1() { return *m_parameter1; }
-    AudioParamHandler& parameter2() { return *m_parameter2; }
-    AudioParamHandler& parameter3() { return *m_parameter3; }
-    AudioParamHandler& parameter4() { return *m_parameter4; }
+  bool filterCoefficientsDirty() const { return m_filterCoefficientsDirty; }
+  bool hasSampleAccurateValues() const { return m_hasSampleAccurateValues; }
 
-    FilterType type() const { return m_type; }
-    void setType(FilterType);
+  AudioParamHandler& parameter1() { return *m_parameter1; }
+  AudioParamHandler& parameter2() { return *m_parameter2; }
+  AudioParamHandler& parameter3() { return *m_parameter3; }
+  AudioParamHandler& parameter4() { return *m_parameter4; }
 
-private:
-    FilterType m_type;
+  FilterType type() const { return m_type; }
+  void setType(FilterType);
 
-    RefPtr<AudioParamHandler> m_parameter1;
-    RefPtr<AudioParamHandler> m_parameter2;
-    RefPtr<AudioParamHandler> m_parameter3;
-    RefPtr<AudioParamHandler> m_parameter4;
+ private:
+  FilterType m_type;
 
-    // so DSP kernels know when to re-compute coefficients
-    bool m_filterCoefficientsDirty;
+  RefPtr<AudioParamHandler> m_parameter1;
+  RefPtr<AudioParamHandler> m_parameter2;
+  RefPtr<AudioParamHandler> m_parameter3;
+  RefPtr<AudioParamHandler> m_parameter4;
 
-    // Set to true if any of the filter parameters are sample-accurate.
-    bool m_hasSampleAccurateValues;
+  // so DSP kernels know when to re-compute coefficients
+  bool m_filterCoefficientsDirty;
+
+  // Set to true if any of the filter parameters are sample-accurate.
+  bool m_hasSampleAccurateValues;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // BiquadProcessor_h
+#endif  // BiquadProcessor_h

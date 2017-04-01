@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_SPDY_HPACK_OUTPUT_STREAM_H_
-#define NET_SPDY_HPACK_OUTPUT_STREAM_H_
+#ifndef NET_SPDY_HPACK_HPACK_OUTPUT_STREAM_H_
+#define NET_SPDY_HPACK_HPACK_OUTPUT_STREAM_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -49,15 +49,22 @@ class NET_EXPORT_PRIVATE HpackOutputStream {
   // boundary after this function is called.
   void AppendUint32(uint32_t I);
 
-  // Swaps the interal buffer with |output|.
+  // Swaps the internal buffer with |output|, then resets state.
   void TakeString(std::string* output);
+
+  // Gives up to |max_size| bytes of the internal buffer to |output|. Resets
+  // internal state with the overflow.
+  void BoundedTakeString(size_t max_size, std::string* output);
+
+  // Size in bytes of stream's internal buffer.
+  size_t size() const { return buffer_.size(); }
 
  private:
   // The internal bit buffer.
   std::string buffer_;
 
   // If 0, the buffer ends on a byte boundary. If non-zero, the buffer
-  // ends on the most significant nth bit. Guaranteed to be < 8.
+  // ends on the nth most significant bit. Guaranteed to be < 8.
   size_t bit_offset_;
 
   DISALLOW_COPY_AND_ASSIGN(HpackOutputStream);
@@ -65,4 +72,4 @@ class NET_EXPORT_PRIVATE HpackOutputStream {
 
 }  // namespace net
 
-#endif  // NET_SPDY_HPACK_OUTPUT_STREAM_H_
+#endif  // NET_SPDY_HPACK_HPACK_OUTPUT_STREAM_H_

@@ -170,8 +170,8 @@ class MockDriveServiceWithUploadExpectation : public DummyDriveService {
     EXPECT_EQ(expected_chunk_end, end_position);
 
     // The upload URL returned by InitiateUpload() must be used.
-    EXPECT_TRUE(GURL(kTestUploadNewFileURL) == upload_location ||
-                GURL(kTestUploadExistingFileURL) == upload_location);
+    EXPECT_TRUE(upload_location == kTestUploadNewFileURL ||
+                upload_location == kTestUploadExistingFileURL);
 
     // Other parameters should be the exact values passed to DriveUploader.
     EXPECT_EQ(expected_content_length_, content_length);
@@ -200,8 +200,8 @@ class MockDriveServiceWithUploadExpectation : public DummyDriveService {
                                  const UploadRangeCallback& callback) override {
     EXPECT_EQ(expected_content_length_, content_length);
     // The upload URL returned by InitiateUpload() must be used.
-    EXPECT_TRUE(GURL(kTestUploadNewFileURL) == upload_location ||
-                GURL(kTestUploadExistingFileURL) == upload_location);
+    EXPECT_TRUE(upload_location == kTestUploadNewFileURL ||
+                upload_location == kTestUploadExistingFileURL);
 
     SendUploadRangeResponse(upload_location, callback);
     return CancelCallback();
@@ -215,7 +215,7 @@ class MockDriveServiceWithUploadExpectation : public DummyDriveService {
     std::unique_ptr<FileResource> entry;
     if (received_bytes_ == expected_content_length_) {
       DriveApiErrorCode response_code =
-          upload_location == GURL(kTestUploadNewFileURL) ?
+          upload_location == kTestUploadNewFileURL ?
           HTTP_CREATED : HTTP_SUCCESS;
       response = UploadRangeResponse(response_code, -1, -1);
 
@@ -429,8 +429,8 @@ class DriveUploaderTest : public testing::Test {
 TEST_F(DriveUploaderTest, UploadExisting0KB) {
   base::FilePath local_path;
   std::string data;
-  ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 0, &local_path, &data));
+  ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(temp_dir_.GetPath(), 0,
+                                                   &local_path, &data));
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
@@ -463,7 +463,7 @@ TEST_F(DriveUploaderTest, UploadExisting512KB) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 512 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 512 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
@@ -498,7 +498,7 @@ TEST_F(DriveUploaderTest, UploadExisting2MB) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 2 * 1024 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
@@ -533,7 +533,7 @@ TEST_F(DriveUploaderTest, InitiateUploadFail) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 2 * 1024 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
@@ -557,8 +557,8 @@ TEST_F(DriveUploaderTest, InitiateUploadFail) {
 TEST_F(DriveUploaderTest, MultipartUploadFail) {
   base::FilePath local_path;
   std::string data;
-  ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(temp_dir_.path(), 512 * 1024,
-                                                   &local_path, &data));
+  ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
+      temp_dir_.GetPath(), 512 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
@@ -583,7 +583,7 @@ TEST_F(DriveUploaderTest, InitiateUploadNoConflict) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 512 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 512 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
@@ -611,7 +611,7 @@ TEST_F(DriveUploaderTest, MultipartUploadConflict) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 512 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 512 * 1024, &local_path, &data));
   const std::string kDestinationETag("destination_etag");
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
@@ -640,7 +640,7 @@ TEST_F(DriveUploaderTest, InitiateUploadConflict) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 2 * 1024 * 1024, &local_path, &data));
   const std::string kDestinationETag("destination_etag");
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
@@ -666,7 +666,7 @@ TEST_F(DriveUploaderTest, ResumeUploadFail) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 2 * 1024 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
@@ -690,7 +690,7 @@ TEST_F(DriveUploaderTest, GetUploadStatusFail) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 2 * 1024 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
@@ -720,7 +720,7 @@ TEST_F(DriveUploaderTest, NonExistingSourceFile) {
                          base::ThreadTaskRunnerHandle::Get().get());
   uploader.UploadExistingFile(
       kTestInitiateUploadResourceId,
-      temp_dir_.path().AppendASCII("_this_path_should_not_exist_"),
+      temp_dir_.GetPath().AppendASCII("_this_path_should_not_exist_"),
       kTestMimeType, UploadExistingFileOptions(),
       test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
       google_apis::ProgressCallback());
@@ -735,7 +735,7 @@ TEST_F(DriveUploaderTest, ResumeUpload) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), 1024 * 1024, &local_path, &data));
+      temp_dir_.GetPath(), 1024 * 1024, &local_path, &data));
 
   DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
@@ -863,7 +863,7 @@ TEST_F(DriveUploaderTest, BatchProcessing) {
   base::FilePath local_path;
   std::string data;
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
-      temp_dir_.path(), kTestFileSize, &local_path, &data));
+      temp_dir_.GetPath(), kTestFileSize, &local_path, &data));
 
   // Prepare test target.
   MockDriveServiceForBatchProcessing service;

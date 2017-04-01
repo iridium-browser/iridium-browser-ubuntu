@@ -6,8 +6,7 @@
 
 #include <memory>
 
-#include "ash/common/shell_window_ids.h"
-#include "ash/display/display_manager.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -17,7 +16,8 @@
 #include "ui/aura/window_tracker.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/layout.h"
-#include "ui/display/manager/display_layout.h"
+#include "ui/display/display_layout.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/test/event_generator.h"
 
@@ -46,16 +46,6 @@ namespace ash {
 namespace test {
 
 namespace {
-
-void SetSecondaryDisplayLayout(display::DisplayPlacement::Position position) {
-  std::unique_ptr<display::DisplayLayout> layout(Shell::GetInstance()
-                                                     ->display_manager()
-                                                     ->GetCurrentDisplayLayout()
-                                                     .Copy());
-  layout->placement_list[0].position = position;
-  Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
-      std::move(layout));
-}
 
 ScreenPositionController* GetScreenPositionController() {
   ShellTestApi test_api(Shell::GetInstance());
@@ -90,6 +80,13 @@ class ScreenPositionControllerTest : public test::AshTestBase {
     return point.ToString();
   }
 
+  void SetSecondaryDisplayLayout(display::DisplayPlacement::Position position) {
+    std::unique_ptr<display::DisplayLayout> layout(
+        display_manager()->GetCurrentDisplayLayout().Copy());
+    layout->placement_list[0].position = position;
+    display_manager()->SetLayoutForCurrentDisplays(std::move(layout));
+  }
+
  protected:
   std::unique_ptr<aura::Window> window_;
   aura::test::TestWindowDelegate window_delegate_;
@@ -110,14 +107,16 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreen) {
 
   aura::Window::Windows root_windows =
       Shell::GetInstance()->GetAllRootWindows();
-  EXPECT_EQ("100,100",
-            root_windows[0]->GetHost()->GetBounds().origin().ToString());
+  EXPECT_EQ(
+      "100,100",
+      root_windows[0]->GetHost()->GetBoundsInPixels().origin().ToString());
   EXPECT_EQ("200x200",
-            root_windows[0]->GetHost()->GetBounds().size().ToString());
-  EXPECT_EQ("100,500",
-            root_windows[1]->GetHost()->GetBounds().origin().ToString());
+            root_windows[0]->GetHost()->GetBoundsInPixels().size().ToString());
+  EXPECT_EQ(
+      "100,500",
+      root_windows[1]->GetHost()->GetBoundsInPixels().origin().ToString());
   EXPECT_EQ("200x200",
-            root_windows[1]->GetHost()->GetBounds().size().ToString());
+            root_windows[1]->GetHost()->GetBoundsInPixels().size().ToString());
 
   const gfx::Point window_pos(100, 100);
   window_->SetBoundsInScreen(
@@ -198,9 +197,9 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreenHiDPI) {
   aura::Window::Windows root_windows =
       Shell::GetInstance()->GetAllRootWindows();
   EXPECT_EQ("50,50 200x200",
-            root_windows[0]->GetHost()->GetBounds().ToString());
+            root_windows[0]->GetHost()->GetBoundsInPixels().ToString());
   EXPECT_EQ("50,300 300x300",
-            root_windows[1]->GetHost()->GetBounds().ToString());
+            root_windows[1]->GetHost()->GetBoundsInPixels().ToString());
 
   // Put |window_| to the primary 2x display.
   window_->SetBoundsInScreen(gfx::Rect(20, 20, 50, 50),
@@ -242,7 +241,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreenRotate) {
 
   // Move |window_| to the 2nd.
   window_->SetBoundsInScreen(gfx::Rect(300, 20, 50, 50),
-                             ScreenUtil::GetSecondaryDisplay());
+                             display_manager()->GetSecondaryDisplay());
   aura::Window::Windows root_windows =
       Shell::GetInstance()->GetAllRootWindows();
   EXPECT_EQ(root_windows[1], window_->GetRootWindow());
@@ -274,7 +273,7 @@ TEST_F(ScreenPositionControllerTest, MAYBE_ConvertHostPointToScreenUIScale) {
 
   // Move |window_| to the 2nd.
   window_->SetBoundsInScreen(gfx::Rect(300, 20, 50, 50),
-                             ScreenUtil::GetSecondaryDisplay());
+                             display_manager()->GetSecondaryDisplay());
   aura::Window::Windows root_windows =
       Shell::GetInstance()->GetAllRootWindows();
   EXPECT_EQ(root_windows[1], window_->GetRootWindow());
@@ -332,7 +331,7 @@ TEST_F(ScreenPositionControllerTest,
 
   // Create a window on the secondary display.
   window_->SetBoundsInScreen(gfx::Rect(600, 0, 400, 400),
-                             ScreenUtil::GetSecondaryDisplay());
+                             display_manager()->GetSecondaryDisplay());
 
   // Move the mouse cursor over |window_|. Synthetic mouse moves are dispatched
   // asynchronously when a window which contains the mouse cursor is destroyed.

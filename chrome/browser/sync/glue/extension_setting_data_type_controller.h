@@ -9,44 +9,30 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "components/sync/driver/non_ui_data_type_controller.h"
+#include "components/sync/driver/async_directory_type_controller.h"
 
 class Profile;
 
-namespace extensions {
-class StorageFrontend;
-}
-
-namespace sync_driver {
+namespace syncer {
 class SyncClient;
 }
 
 namespace browser_sync {
 
 class ExtensionSettingDataTypeController
-    : public sync_driver::NonUIDataTypeController {
+    : public syncer::AsyncDirectoryTypeController {
  public:
-  ExtensionSettingDataTypeController(
-      // Either EXTENSION_SETTINGS or APP_SETTINGS.
-      syncer::ModelType type,
-      const base::Closure& error_callback,
-      sync_driver::SyncClient* sync_client,
-      Profile* profile);
-
-  // NonFrontendDataTypeController implementation
-  syncer::ModelType type() const override;
-  syncer::ModelSafeGroup model_safe_group() const override;
-
- private:
+  // |type| is either EXTENSION_SETTINGS or APP_SETTINGS.
+  // |dump_stack| is called when an unrecoverable error occurs.
+  ExtensionSettingDataTypeController(syncer::ModelType type,
+                                     const base::Closure& dump_stack,
+                                     syncer::SyncClient* sync_client,
+                                     Profile* profile);
   ~ExtensionSettingDataTypeController() override;
 
-  // NonFrontendDataTypeController implementation.
-  bool PostTaskOnBackendThread(const tracked_objects::Location& from_here,
-                               const base::Closure& task) override;
+ private:
+  // AsyncDirectoryTypeController implementation.
   bool StartModels() override;
-
-  // Either EXTENSION_SETTINGS or APP_SETTINGS.
-  syncer::ModelType type_;
 
   // Only used on the UI thread.
   Profile* profile_;

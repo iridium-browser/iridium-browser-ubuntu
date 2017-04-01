@@ -21,9 +21,8 @@ class ExtensionAppWindowLauncherItemController
     : public AppWindowLauncherItemController {
  public:
   ExtensionAppWindowLauncherItemController(
-      Type type,
-      const std::string& app_shelf_id,
       const std::string& app_id,
+      const std::string& launch_id,
       ChromeLauncherController* controller);
 
   ~ExtensionAppWindowLauncherItemController() override;
@@ -32,12 +31,6 @@ class ExtensionAppWindowLauncherItemController
 
   // LauncherItemController overrides:
   ChromeLauncherAppMenuItems GetApplicationList(int event_flags) override;
-  ash::ShelfItemDelegate::PerformedAction ItemSelected(
-      const ui::Event& event) override;
-  base::string16 GetTitle() override;
-  ash::ShelfMenuModel* CreateApplicationMenu(int event_flags) override;
-  bool IsDraggable() override;
-  bool ShouldShowTooltip() override;
 
  protected:
   // AppWindowLauncherItemController:

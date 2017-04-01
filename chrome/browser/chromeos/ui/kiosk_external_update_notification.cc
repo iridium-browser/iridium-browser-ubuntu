@@ -4,7 +4,7 @@
 
 #include "chrome/browser/chromeos/ui/kiosk_external_update_notification.h"
 
-#include "ash/common/shell_window_ids.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "base/macros.h"
 #include "ui/aura/window.h"
@@ -141,7 +141,6 @@ void KioskExternalUpdateNotification::CreateAndShowNotificationView(
       root_window, ash::kShellWindowId_SettingBubbleContainer);
   views::Widget* widget = new views::Widget;
   widget->Init(params);
-  widget->SetContentsView(view_);
   gfx::NativeView native_view = widget->GetNativeView();
   native_view->SetName("KioskExternalUpdateNotification");
   widget->Show();

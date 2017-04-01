@@ -11,7 +11,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -239,16 +238,16 @@ TEST_F(PermissionsUpdaterTest, RevokingPermissions) {
   auto api_permission_set = [](APIPermission::ID id) {
     APIPermissionSet apis;
     apis.insert(id);
-    return base::WrapUnique(new PermissionSet(
-        apis, ManifestPermissionSet(), URLPatternSet(), URLPatternSet()));
+    return base::MakeUnique<PermissionSet>(apis, ManifestPermissionSet(),
+                                           URLPatternSet(), URLPatternSet());
   };
 
   auto url_permission_set = [](const GURL& url) {
     URLPatternSet set;
     URLPattern pattern(URLPattern::SCHEME_ALL, url.spec());
     set.AddPattern(pattern);
-    return base::WrapUnique(new PermissionSet(
-        APIPermissionSet(), ManifestPermissionSet(), set, URLPatternSet()));
+    return base::MakeUnique<PermissionSet>(
+        APIPermissionSet(), ManifestPermissionSet(), set, URLPatternSet());
   };
 
   {

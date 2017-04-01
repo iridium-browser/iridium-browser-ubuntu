@@ -4,15 +4,15 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "fpdfsdk/include/cpdfsdk_annot.h"
+#include "fpdfsdk/cpdfsdk_annot.h"
 
 #include <algorithm>
 
-#include "fpdfsdk/include/fsdk_mgr.h"
+#include "fpdfsdk/cpdfsdk_pageview.h"
 #include "third_party/base/stl_util.h"
 
 #ifdef PDF_ENABLE_XFA
-#include "fpdfsdk/fpdfxfa/include/fpdfxfa_doc.h"
+#include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 #endif  // PDF_ENABLE_XFA
 
 namespace {
@@ -22,44 +22,15 @@ const float kMinHeight = 1.0f;
 
 }  // namespace
 
-CPDFSDK_Annot::Observer::Observer(CPDFSDK_Annot** pWatchedPtr)
-    : m_pWatchedPtr(pWatchedPtr) {
-  (*m_pWatchedPtr)->AddObserver(this);
-}
-
-CPDFSDK_Annot::Observer::~Observer() {
-  if (m_pWatchedPtr)
-    (*m_pWatchedPtr)->RemoveObserver(this);
-}
-
-void CPDFSDK_Annot::Observer::OnAnnotDestroyed() {
-  ASSERT(m_pWatchedPtr);
-  *m_pWatchedPtr = nullptr;
-  m_pWatchedPtr = nullptr;
-}
-
 CPDFSDK_Annot::CPDFSDK_Annot(CPDFSDK_PageView* pPageView)
-    : m_pPageView(pPageView), m_bSelected(FALSE) {}
+    : m_pPageView(pPageView), m_bSelected(false) {}
 
-CPDFSDK_Annot::~CPDFSDK_Annot() {
-  for (auto* pObserver : m_Observers)
-    pObserver->OnAnnotDestroyed();
-}
-
-void CPDFSDK_Annot::AddObserver(Observer* pObserver) {
-  ASSERT(!pdfium::ContainsKey(m_Observers, pObserver));
-  m_Observers.insert(pObserver);
-}
-
-void CPDFSDK_Annot::RemoveObserver(Observer* pObserver) {
-  ASSERT(pdfium::ContainsKey(m_Observers, pObserver));
-  m_Observers.erase(pObserver);
-}
+CPDFSDK_Annot::~CPDFSDK_Annot() {}
 
 #ifdef PDF_ENABLE_XFA
 
-FX_BOOL CPDFSDK_Annot::IsXFAField() {
-  return FALSE;
+bool CPDFSDK_Annot::IsXFAField() {
+  return false;
 }
 
 CXFA_FFWidget* CPDFSDK_Annot::GetXFAWidget() const {
@@ -88,12 +59,12 @@ CPDF_Annot* CPDFSDK_Annot::GetPDFAnnot() const {
   return nullptr;
 }
 
-CFX_ByteString CPDFSDK_Annot::GetType() const {
-  return "";
+CPDF_Annot::Subtype CPDFSDK_Annot::GetAnnotSubtype() const {
+  return CPDF_Annot::Subtype::UNKNOWN;
 }
 
-CFX_ByteString CPDFSDK_Annot::GetSubType() const {
-  return "";
+bool CPDFSDK_Annot::IsSignatureWidget() const {
+  return false;
 }
 
 void CPDFSDK_Annot::SetRect(const CFX_FloatRect& rect) {}
@@ -106,11 +77,11 @@ void CPDFSDK_Annot::Annot_OnDraw(CFX_RenderDevice* pDevice,
                                  CFX_Matrix* pUser2Device,
                                  CPDF_RenderOptions* pOptions) {}
 
-FX_BOOL CPDFSDK_Annot::IsSelected() {
+bool CPDFSDK_Annot::IsSelected() {
   return m_bSelected;
 }
 
-void CPDFSDK_Annot::SetSelected(FX_BOOL bSelected) {
+void CPDFSDK_Annot::SetSelected(bool bSelected) {
   m_bSelected = bSelected;
 }
 

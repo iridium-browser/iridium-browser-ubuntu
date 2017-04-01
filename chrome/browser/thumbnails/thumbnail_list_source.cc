@@ -97,12 +97,11 @@ std::string ThumbnailListSource::GetSource() const {
 
 void ThumbnailListSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!top_sites_) {
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
 
@@ -116,11 +115,12 @@ std::string ThumbnailListSource::GetMimeType(const std::string& path) const {
   return "text/html";
 }
 
-base::MessageLoop* ThumbnailListSource::MessageLoopForRequestPath(
-    const std::string& path) const {
+scoped_refptr<base::SingleThreadTaskRunner>
+ThumbnailListSource::TaskRunnerForRequestPath(const std::string& path) const {
   // TopSites can be accessed from the IO thread.
-  return thumbnail_service_.get() ?
-      NULL : content::URLDataSource::MessageLoopForRequestPath(path);
+  return thumbnail_service_.get()
+             ? nullptr
+             : content::URLDataSource::TaskRunnerForRequestPath(path);
 }
 
 bool ThumbnailListSource::ShouldServiceRequest(

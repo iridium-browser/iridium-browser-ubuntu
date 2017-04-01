@@ -5,41 +5,50 @@
 #ifndef CSSSkew_h
 #define CSSSkew_h
 
+#include "core/css/cssom/CSSAngleValue.h"
 #include "core/css/cssom/CSSMatrixTransformComponent.h"
 #include "core/css/cssom/CSSTransformComponent.h"
 
 namespace blink {
 
 class CORE_EXPORT CSSSkew final : public CSSTransformComponent {
-    WTF_MAKE_NONCOPYABLE(CSSSkew);
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static CSSSkew* create(double ax, double ay)
-    {
-        return new CSSSkew(ax, ay);
-    }
+  WTF_MAKE_NONCOPYABLE(CSSSkew);
+  DEFINE_WRAPPERTYPEINFO();
 
-    static CSSSkew* fromCSSValue(const CSSFunctionValue& value) { return nullptr; }
+ public:
+  static CSSSkew* create(const CSSAngleValue* ax, const CSSAngleValue* ay) {
+    return new CSSSkew(ax, ay);
+  }
 
-    double ax() const { return m_ax; }
-    double ay() const { return m_ay; }
+  static CSSSkew* fromCSSValue(const CSSFunctionValue&);
 
-    TransformComponentType type() const override { return SkewType; }
+  // Bindings requires returning non-const pointers. This is safe because
+  // CSSAngleValues are immutable.
+  CSSAngleValue* ax() const { return const_cast<CSSAngleValue*>(m_ax.get()); }
+  CSSAngleValue* ay() const { return const_cast<CSSAngleValue*>(m_ay.get()); }
 
-    CSSMatrixTransformComponent* asMatrix() const override
-    {
-        return CSSMatrixTransformComponent::skew(m_ax, m_ay);
-    }
+  TransformComponentType type() const override { return SkewType; }
 
-    CSSFunctionValue* toCSSValue() const override;
+  CSSMatrixTransformComponent* asMatrix() const override {
+    return CSSMatrixTransformComponent::skew(m_ax->degrees(), m_ay->degrees());
+  }
 
-private:
-    CSSSkew(double ax, double ay) : CSSTransformComponent(), m_ax(ax), m_ay(ay) { }
+  CSSFunctionValue* toCSSValue() const override;
 
-    double m_ax;
-    double m_ay;
+  DEFINE_INLINE_VIRTUAL_TRACE() {
+    visitor->trace(m_ax);
+    visitor->trace(m_ay);
+    CSSTransformComponent::trace(visitor);
+  }
+
+ private:
+  CSSSkew(const CSSAngleValue* ax, const CSSAngleValue* ay)
+      : CSSTransformComponent(), m_ax(ax), m_ay(ay) {}
+
+  Member<const CSSAngleValue> m_ax;
+  Member<const CSSAngleValue> m_ay;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

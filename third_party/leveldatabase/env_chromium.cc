@@ -14,9 +14,11 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
+#include "base/macros.h"
 #include "base/metrics/histogram.h"
 #include "base/process/process_metrics.h"
 #include "base/stl_util.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -101,8 +103,14 @@ static base::File::Error GetDirectoryEntries(const FilePath& dir_param,
 
 class ChromiumFileLock : public FileLock {
  public:
+  ChromiumFileLock(base::File file, const std::string& name)
+      : file_(std::move(file)), name_(name) {}
+
   base::File file_;
   std::string name_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ChromiumFileLock);
 };
 
 class Retrier {
@@ -147,6 +155,8 @@ class Retrier {
   MethodID method_;
   base::File::Error last_error_;
   RetrierProvider* provider_;
+
+  DISALLOW_COPY_AND_ASSIGN(Retrier);
 };
 
 class ChromiumSequentialFile : public leveldb::SequentialFile {
@@ -185,6 +195,8 @@ class ChromiumSequentialFile : public leveldb::SequentialFile {
   std::string filename_;
   base::File file_;
   const UMALogger* uma_logger_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromiumSequentialFile);
 };
 
 class ChromiumRandomAccessFile : public leveldb::RandomAccessFile {
@@ -215,6 +227,8 @@ class ChromiumRandomAccessFile : public leveldb::RandomAccessFile {
   std::string filename_;
   mutable base::File file_;
   const UMALogger* uma_logger_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromiumRandomAccessFile);
 };
 
 class ChromiumWritableFile : public leveldb::WritableFile {
@@ -237,6 +251,8 @@ class ChromiumWritableFile : public leveldb::WritableFile {
   const UMALogger* uma_logger_;
   Type file_type_;
   std::string parent_dir_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromiumWritableFile);
 };
 
 ChromiumWritableFile::ChromiumWritableFile(const std::string& fname,
@@ -246,6 +262,7 @@ ChromiumWritableFile::ChromiumWritableFile(const std::string& fname,
       file_(std::move(f)),
       uma_logger_(uma_logger),
       file_type_(kOther) {
+  DCHECK(uma_logger);
   FilePath path = FilePath::FromUTF8Unsafe(fname);
   if (path.BaseName().AsUTF8Unsafe().find("MANIFEST") == 0)
     file_type_ = kManifest;
@@ -273,6 +290,8 @@ Status ChromiumWritableFile::SyncParent() {
 }
 
 Status ChromiumWritableFile::Append(const Slice& data) {
+  DCHECK(file_.IsValid());
+  DCHECK(uma_logger_);
   int bytes_written = file_.WriteAtCurrentPos(data.data(), data.size());
   if (bytes_written != data.size()) {
     base::File::Error error = LastFileError();
@@ -378,7 +397,7 @@ Status MakeIOError(Slice filename,
                    base::File::Error error) {
   DCHECK_LT(error, 0);
   char buf[512];
-  snprintf(buf, sizeof(buf), "%s (ChromeMethodBFE: %d::%s::%d)",
+  base::snprintf(buf, sizeof(buf), "%s (ChromeMethodBFE: %d::%s::%d)",
            message.c_str(), method, MethodIDToString(method), -error);
   return Status::IOError(filename, buf);
 }
@@ -387,7 +406,7 @@ Status MakeIOError(Slice filename,
                    const std::string& message,
                    MethodID method) {
   char buf[512];
-  snprintf(buf, sizeof(buf), "%s (ChromeMethodOnly: %d::%s)", message.c_str(),
+  base::snprintf(buf, sizeof(buf), "%s (ChromeMethodOnly: %d::%s)", message.c_str(),
            method, MethodIDToString(method));
   return Status::IOError(filename, buf);
 }
@@ -689,7 +708,7 @@ Status ChromiumEnv::RenameFile(const std::string& src, const std::string& dst) {
   DCHECK(error != base::File::FILE_OK);
   RecordOSError(kRenameFile, error);
   char buf[100];
-  snprintf(buf,
+  base::snprintf(buf,
            sizeof(buf),
            "Could not rename file: %s",
            FileErrorString(error));
@@ -737,7 +756,7 @@ Status ChromiumEnv::LockFile(const std::string& fname, FileLock** lock) {
     return result;
   }
 
-  Retrier lock_retrier = Retrier(kLockFile, this);
+  Retrier lock_retrier(kLockFile, this);
   do {
     error_code = file.Lock();
   } while (error_code != base::File::FILE_OK &&
@@ -751,15 +770,13 @@ Status ChromiumEnv::LockFile(const std::string& fname, FileLock** lock) {
     return result;
   }
 
-  ChromiumFileLock* my_lock = new ChromiumFileLock;
-  my_lock->file_ = std::move(file);
-  my_lock->name_ = fname;
-  *lock = my_lock;
+  *lock = new ChromiumFileLock(std::move(file), fname);
   return result;
 }
 
 Status ChromiumEnv::UnlockFile(FileLock* lock) {
-  ChromiumFileLock* my_lock = reinterpret_cast<ChromiumFileLock*>(lock);
+  std::unique_ptr<ChromiumFileLock> my_lock(
+      reinterpret_cast<ChromiumFileLock*>(lock));
   Status result;
 
   base::File::Error error_code = my_lock->file_.Unlock();
@@ -770,7 +787,6 @@ Status ChromiumEnv::UnlockFile(FileLock* lock) {
   }
   bool removed = locks_.Remove(my_lock->name_);
   DCHECK(removed);
-  delete my_lock;
   return result;
 }
 
@@ -984,6 +1000,8 @@ class Thread : public base::PlatformThread::Delegate {
  private:
   void (*function_)(void* arg);
   void* arg_;
+
+  DISALLOW_COPY_AND_ASSIGN(Thread);
 };
 
 void ChromiumEnv::Schedule(ScheduleFunc* function, void* arg) {

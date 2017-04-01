@@ -6,7 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/event.h"
 #include "ui/views/controls/label.h"
@@ -86,10 +86,6 @@ void CryptoModulePasswordDialogView::Init(const std::string& hostname,
   const base::string16& hostname16 = base::UTF8ToUTF16(hostname);
   const base::string16& slot16 = base::UTF8ToUTF16(slot_name);
   switch (reason) {
-    case chrome::kCryptoModulePasswordKeygen:
-      text = l10n_util::GetStringFUTF8(
-          IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_KEYGEN, slot16, hostname16);
-      break;
     case chrome::kCryptoModulePasswordCertEnrollment:
       text = l10n_util::GetStringFUTF8(
           IDS_CRYPTO_MODULE_AUTH_DIALOG_TEXT_CERT_ENROLLMENT,

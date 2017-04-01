@@ -12,6 +12,7 @@
 #include "vpx_dsp_rtcd.h"
 #include "vp8_rtcd.h"
 #include "vpx_dsp/postproc.h"
+#include "vpx_ports/system_state.h"
 #include "vpx_scale_rtcd.h"
 #include "vpx_scale/yv12config.h"
 #include "postproc.h"
@@ -37,52 +38,13 @@
                   (0.071 * (float)(t & 0xff)) + 128)
 /* clang-format on */
 
-/* global constants */
-#if CONFIG_POSTPROC_VISUALIZER
-static const unsigned char MB_PREDICTION_MODE_colors[MB_MODE_COUNT][3] = {
-  { RGB_TO_YUV(0x98FB98) }, /* PaleGreen */
-  { RGB_TO_YUV(0x00FF00) }, /* Green */
-  { RGB_TO_YUV(0xADFF2F) }, /* GreenYellow */
-  { RGB_TO_YUV(0x228B22) }, /* ForestGreen */
-  { RGB_TO_YUV(0x006400) }, /* DarkGreen */
-  { RGB_TO_YUV(0x98F5FF) }, /* Cadet Blue */
-  { RGB_TO_YUV(0x6CA6CD) }, /* Sky Blue */
-  { RGB_TO_YUV(0x00008B) }, /* Dark blue */
-  { RGB_TO_YUV(0x551A8B) }, /* Purple */
-  { RGB_TO_YUV(0xFF0000) }  /* Red */
-};
-
-static const unsigned char B_PREDICTION_MODE_colors[B_MODE_COUNT][3] = {
-  { RGB_TO_YUV(0x6633ff) }, /* Purple */
-  { RGB_TO_YUV(0xcc33ff) }, /* Magenta */
-  { RGB_TO_YUV(0xff33cc) }, /* Pink */
-  { RGB_TO_YUV(0xff3366) }, /* Coral */
-  { RGB_TO_YUV(0x3366ff) }, /* Blue */
-  { RGB_TO_YUV(0xed00f5) }, /* Dark Blue */
-  { RGB_TO_YUV(0x2e00b8) }, /* Dark Purple */
-  { RGB_TO_YUV(0xff6633) }, /* Orange */
-  { RGB_TO_YUV(0x33ccff) }, /* Light Blue */
-  { RGB_TO_YUV(0x8ab800) }, /* Green */
-  { RGB_TO_YUV(0xffcc33) }, /* Light Orange */
-  { RGB_TO_YUV(0x33ffcc) }, /* Aqua */
-  { RGB_TO_YUV(0x66ff33) }, /* Light Green */
-  { RGB_TO_YUV(0xccff33) }, /* Yellow */
-};
-
-static const unsigned char MV_REFERENCE_FRAME_colors[MAX_REF_FRAMES][3] = {
-  { RGB_TO_YUV(0x00ff00) }, /* Blue */
-  { RGB_TO_YUV(0x0000ff) }, /* Green */
-  { RGB_TO_YUV(0xffff00) }, /* Yellow */
-  { RGB_TO_YUV(0xff0000) }, /* Red */
-};
-#endif
-
 extern void vp8_blit_text(const char *msg, unsigned char *address,
                           const int pitch);
 extern void vp8_blit_line(int x0, int x1, int y0, int y1, unsigned char *image,
                           const int pitch);
 /***********************************************************************************************************
  */
+#if CONFIG_POSTPROC
 static int q2mbl(int x) {
   if (x < 20) x = 20;
 
@@ -90,7 +52,6 @@ static int q2mbl(int x) {
   return x * x / 3;
 }
 
-#if CONFIG_POSTPROC
 static void vp8_de_mblock(YV12_BUFFER_CONFIG *post, int q) {
   vpx_mbpost_proc_across_ip(post->y_buffer, post->y_stride, post->y_height,
                             post->y_width, q2mbl(q));
@@ -154,7 +115,6 @@ void vp8_deblock(VP8_COMMON *cm, YV12_BUFFER_CONFIG *source,
     vp8_yv12_copy_frame(source, post);
   }
 }
-#endif
 
 void vp8_de_noise(VP8_COMMON *cm, YV12_BUFFER_CONFIG *source,
                   YV12_BUFFER_CONFIG *post, int q, int low_var_thresh, int flag,
@@ -189,6 +149,7 @@ void vp8_de_noise(VP8_COMMON *cm, YV12_BUFFER_CONFIG *source,
     }
   }
 }
+#endif  // CONFIG_POSTPROC
 
 /* Blend the macro block with a solid colored square.  Leave the
  * edges unblended to give distinction to macro blocks in areas
@@ -308,43 +269,6 @@ void vp8_blend_b_c(unsigned char *y, unsigned char *u, unsigned char *v,
   }
 }
 
-#if CONFIG_POSTPROC_VISUALIZER
-static void constrain_line(int x_0, int *x_1, int y_0, int *y_1, int width,
-                           int height) {
-  int dx;
-  int dy;
-
-  if (*x_1 > width) {
-    dx = *x_1 - x_0;
-    dy = *y_1 - y_0;
-
-    *x_1 = width;
-    if (dx) *y_1 = ((width - x_0) * dy) / dx + y_0;
-  }
-  if (*x_1 < 0) {
-    dx = *x_1 - x_0;
-    dy = *y_1 - y_0;
-
-    *x_1 = 0;
-    if (dx) *y_1 = ((0 - x_0) * dy) / dx + y_0;
-  }
-  if (*y_1 > height) {
-    dx = *x_1 - x_0;
-    dy = *y_1 - y_0;
-
-    *y_1 = height;
-    if (dy) *x_1 = ((height - y_0) * dx) / dy + x_0;
-  }
-  if (*y_1 < 0) {
-    dx = *x_1 - x_0;
-    dy = *y_1 - y_0;
-
-    *y_1 = 0;
-    if (dy) *x_1 = ((0 - y_0) * dx) / dy + x_0;
-  }
-}
-#endif  // CONFIG_POSTPROC_VISUALIZER
-
 #if CONFIG_POSTPROC
 int vp8_post_proc_frame(VP8_COMMON *oci, YV12_BUFFER_CONFIG *dest,
                         vp8_ppflags_t *ppflags) {
@@ -398,7 +322,7 @@ int vp8_post_proc_frame(VP8_COMMON *oci, YV12_BUFFER_CONFIG *dest,
     }
   }
 
-  vp8_clear_system_state();
+  vpx_clear_system_state();
 
   if ((flags & VP8D_MFQE) && oci->postproc_state.last_frame_valid &&
       oci->current_video_frame >= 2 &&
@@ -440,7 +364,7 @@ int vp8_post_proc_frame(VP8_COMMON *oci, YV12_BUFFER_CONFIG *dest,
         oci->postproc_state.last_noise != noise_level) {
       double sigma;
       struct postproc_state *ppstate = &oci->postproc_state;
-      vp8_clear_system_state();
+      vpx_clear_system_state();
       sigma = noise_level + .5 + .6 * q / 63.0;
       ppstate->clamp =
           vpx_setup_noise(sigma, ppstate->generated_noise, oci->Width + 256);
@@ -454,331 +378,6 @@ int vp8_post_proc_frame(VP8_COMMON *oci, YV12_BUFFER_CONFIG *dest,
         oci->post_proc_buffer.y_width, oci->post_proc_buffer.y_height,
         oci->post_proc_buffer.y_stride);
   }
-
-#if CONFIG_POSTPROC_VISUALIZER
-  if (flags & VP8D_DEBUG_TXT_FRAME_INFO) {
-    char message[512];
-    sprintf(message, "F%1dG%1dQ%3dF%3dP%d_s%dx%d",
-            (oci->frame_type == KEY_FRAME), oci->refresh_golden_frame,
-            oci->base_qindex, oci->filter_level, flags, oci->mb_cols,
-            oci->mb_rows);
-    vp8_blit_text(message, oci->post_proc_buffer.y_buffer,
-                  oci->post_proc_buffer.y_stride);
-  }
-
-  if (flags & VP8D_DEBUG_TXT_MBLK_MODES) {
-    int i, j;
-    unsigned char *y_ptr;
-    YV12_BUFFER_CONFIG *post = &oci->post_proc_buffer;
-    int mb_rows = post->y_height >> 4;
-    int mb_cols = post->y_width >> 4;
-    int mb_index = 0;
-    MODE_INFO *mi = oci->mi;
-
-    y_ptr = post->y_buffer + 4 * post->y_stride + 4;
-
-    /* vp8_filter each macro block */
-    for (i = 0; i < mb_rows; ++i) {
-      for (j = 0; j < mb_cols; ++j) {
-        char zz[4];
-
-        sprintf(zz, "%c", mi[mb_index].mbmi.mode + 'a');
-
-        vp8_blit_text(zz, y_ptr, post->y_stride);
-        mb_index++;
-        y_ptr += 16;
-      }
-
-      mb_index++; /* border */
-      y_ptr += post->y_stride * 16 - post->y_width;
-    }
-  }
-
-  if (flags & VP8D_DEBUG_TXT_DC_DIFF) {
-    int i, j;
-    unsigned char *y_ptr;
-    YV12_BUFFER_CONFIG *post = &oci->post_proc_buffer;
-    int mb_rows = post->y_height >> 4;
-    int mb_cols = post->y_width >> 4;
-    int mb_index = 0;
-    MODE_INFO *mi = oci->mi;
-
-    y_ptr = post->y_buffer + 4 * post->y_stride + 4;
-
-    /* vp8_filter each macro block */
-    for (i = 0; i < mb_rows; ++i) {
-      for (j = 0; j < mb_cols; ++j) {
-        char zz[4];
-        int dc_diff = !(mi[mb_index].mbmi.mode != B_PRED &&
-                        mi[mb_index].mbmi.mode != SPLITMV &&
-                        mi[mb_index].mbmi.mb_skip_coeff);
-
-        if (oci->frame_type == KEY_FRAME)
-          sprintf(zz, "a");
-        else
-          sprintf(zz, "%c", dc_diff + '0');
-
-        vp8_blit_text(zz, y_ptr, post->y_stride);
-        mb_index++;
-        y_ptr += 16;
-      }
-
-      mb_index++; /* border */
-      y_ptr += post->y_stride * 16 - post->y_width;
-    }
-  }
-
-  if (flags & VP8D_DEBUG_TXT_RATE_INFO) {
-    char message[512];
-    sprintf(message, "Bitrate: %10.2f framerate: %10.2f ", oci->bitrate,
-            oci->framerate);
-    vp8_blit_text(message, oci->post_proc_buffer.y_buffer,
-                  oci->post_proc_buffer.y_stride);
-  }
-
-  /* Draw motion vectors */
-  if ((flags & VP8D_DEBUG_DRAW_MV) && ppflags->display_mv_flag) {
-    YV12_BUFFER_CONFIG *post = &oci->post_proc_buffer;
-    int width = post->y_width;
-    int height = post->y_height;
-    unsigned char *y_buffer = oci->post_proc_buffer.y_buffer;
-    int y_stride = oci->post_proc_buffer.y_stride;
-    MODE_INFO *mi = oci->mi;
-    int x0, y0;
-
-    for (y0 = 0; y0 < height; y0 += 16) {
-      for (x0 = 0; x0 < width; x0 += 16) {
-        int x1, y1;
-
-        if (!(ppflags->display_mv_flag & (1 << mi->mbmi.mode))) {
-          mi++;
-          continue;
-        }
-
-        if (mi->mbmi.mode == SPLITMV) {
-          switch (mi->mbmi.partitioning) {
-            case 0: /* mv_top_bottom */
-            {
-              union b_mode_info *bmi = &mi->bmi[0];
-              MV *mv = &bmi->mv.as_mv;
-
-              x1 = x0 + 8 + (mv->col >> 3);
-              y1 = y0 + 4 + (mv->row >> 3);
-
-              constrain_line(x0 + 8, &x1, y0 + 4, &y1, width, height);
-              vp8_blit_line(x0 + 8, x1, y0 + 4, y1, y_buffer, y_stride);
-
-              bmi = &mi->bmi[8];
-
-              x1 = x0 + 8 + (mv->col >> 3);
-              y1 = y0 + 12 + (mv->row >> 3);
-
-              constrain_line(x0 + 8, &x1, y0 + 12, &y1, width, height);
-              vp8_blit_line(x0 + 8, x1, y0 + 12, y1, y_buffer, y_stride);
-
-              break;
-            }
-            case 1: /* mv_left_right */
-            {
-              union b_mode_info *bmi = &mi->bmi[0];
-              MV *mv = &bmi->mv.as_mv;
-
-              x1 = x0 + 4 + (mv->col >> 3);
-              y1 = y0 + 8 + (mv->row >> 3);
-
-              constrain_line(x0 + 4, &x1, y0 + 8, &y1, width, height);
-              vp8_blit_line(x0 + 4, x1, y0 + 8, y1, y_buffer, y_stride);
-
-              bmi = &mi->bmi[2];
-
-              x1 = x0 + 12 + (mv->col >> 3);
-              y1 = y0 + 8 + (mv->row >> 3);
-
-              constrain_line(x0 + 12, &x1, y0 + 8, &y1, width, height);
-              vp8_blit_line(x0 + 12, x1, y0 + 8, y1, y_buffer, y_stride);
-
-              break;
-            }
-            case 2: /* mv_quarters   */
-            {
-              union b_mode_info *bmi = &mi->bmi[0];
-              MV *mv = &bmi->mv.as_mv;
-
-              x1 = x0 + 4 + (mv->col >> 3);
-              y1 = y0 + 4 + (mv->row >> 3);
-
-              constrain_line(x0 + 4, &x1, y0 + 4, &y1, width, height);
-              vp8_blit_line(x0 + 4, x1, y0 + 4, y1, y_buffer, y_stride);
-
-              bmi = &mi->bmi[2];
-
-              x1 = x0 + 12 + (mv->col >> 3);
-              y1 = y0 + 4 + (mv->row >> 3);
-
-              constrain_line(x0 + 12, &x1, y0 + 4, &y1, width, height);
-              vp8_blit_line(x0 + 12, x1, y0 + 4, y1, y_buffer, y_stride);
-
-              bmi = &mi->bmi[8];
-
-              x1 = x0 + 4 + (mv->col >> 3);
-              y1 = y0 + 12 + (mv->row >> 3);
-
-              constrain_line(x0 + 4, &x1, y0 + 12, &y1, width, height);
-              vp8_blit_line(x0 + 4, x1, y0 + 12, y1, y_buffer, y_stride);
-
-              bmi = &mi->bmi[10];
-
-              x1 = x0 + 12 + (mv->col >> 3);
-              y1 = y0 + 12 + (mv->row >> 3);
-
-              constrain_line(x0 + 12, &x1, y0 + 12, &y1, width, height);
-              vp8_blit_line(x0 + 12, x1, y0 + 12, y1, y_buffer, y_stride);
-              break;
-            }
-            default: {
-              union b_mode_info *bmi = mi->bmi;
-              int bx0, by0;
-
-              for (by0 = y0; by0 < (y0 + 16); by0 += 4) {
-                for (bx0 = x0; bx0 < (x0 + 16); bx0 += 4) {
-                  MV *mv = &bmi->mv.as_mv;
-
-                  x1 = bx0 + 2 + (mv->col >> 3);
-                  y1 = by0 + 2 + (mv->row >> 3);
-
-                  constrain_line(bx0 + 2, &x1, by0 + 2, &y1, width, height);
-                  vp8_blit_line(bx0 + 2, x1, by0 + 2, y1, y_buffer, y_stride);
-
-                  bmi++;
-                }
-              }
-            }
-          }
-        } else if (mi->mbmi.mode >= NEARESTMV) {
-          MV *mv = &mi->mbmi.mv.as_mv;
-          const int lx0 = x0 + 8;
-          const int ly0 = y0 + 8;
-
-          x1 = lx0 + (mv->col >> 3);
-          y1 = ly0 + (mv->row >> 3);
-
-          if (x1 != lx0 && y1 != ly0) {
-            constrain_line(lx0, &x1, ly0 - 1, &y1, width, height);
-            vp8_blit_line(lx0, x1, ly0 - 1, y1, y_buffer, y_stride);
-
-            constrain_line(lx0, &x1, ly0 + 1, &y1, width, height);
-            vp8_blit_line(lx0, x1, ly0 + 1, y1, y_buffer, y_stride);
-          } else
-            vp8_blit_line(lx0, x1, ly0, y1, y_buffer, y_stride);
-        }
-
-        mi++;
-      }
-      mi++;
-    }
-  }
-
-  /* Color in block modes */
-  if ((flags & VP8D_DEBUG_CLR_BLK_MODES) &&
-      (ppflags->display_mb_modes_flag || ppflags->display_b_modes_flag)) {
-    int y, x;
-    YV12_BUFFER_CONFIG *post = &oci->post_proc_buffer;
-    int width = post->y_width;
-    int height = post->y_height;
-    unsigned char *y_ptr = oci->post_proc_buffer.y_buffer;
-    unsigned char *u_ptr = oci->post_proc_buffer.u_buffer;
-    unsigned char *v_ptr = oci->post_proc_buffer.v_buffer;
-    int y_stride = oci->post_proc_buffer.y_stride;
-    MODE_INFO *mi = oci->mi;
-
-    for (y = 0; y < height; y += 16) {
-      for (x = 0; x < width; x += 16) {
-        int Y = 0, U = 0, V = 0;
-
-        if (mi->mbmi.mode == B_PRED &&
-            ((ppflags->display_mb_modes_flag & B_PRED) ||
-             ppflags->display_b_modes_flag)) {
-          int by, bx;
-          unsigned char *yl, *ul, *vl;
-          union b_mode_info *bmi = mi->bmi;
-
-          yl = y_ptr + x;
-          ul = u_ptr + (x >> 1);
-          vl = v_ptr + (x >> 1);
-
-          for (by = 0; by < 16; by += 4) {
-            for (bx = 0; bx < 16; bx += 4) {
-              if ((ppflags->display_b_modes_flag & (1 << mi->mbmi.mode)) ||
-                  (ppflags->display_mb_modes_flag & B_PRED)) {
-                Y = B_PREDICTION_MODE_colors[bmi->as_mode][0];
-                U = B_PREDICTION_MODE_colors[bmi->as_mode][1];
-                V = B_PREDICTION_MODE_colors[bmi->as_mode][2];
-
-                vp8_blend_b(yl + bx, ul + (bx >> 1), vl + (bx >> 1), Y, U, V,
-                            0xc000, y_stride);
-              }
-              bmi++;
-            }
-
-            yl += y_stride * 4;
-            ul += y_stride * 1;
-            vl += y_stride * 1;
-          }
-        } else if (ppflags->display_mb_modes_flag & (1 << mi->mbmi.mode)) {
-          Y = MB_PREDICTION_MODE_colors[mi->mbmi.mode][0];
-          U = MB_PREDICTION_MODE_colors[mi->mbmi.mode][1];
-          V = MB_PREDICTION_MODE_colors[mi->mbmi.mode][2];
-
-          vp8_blend_mb_inner(y_ptr + x, u_ptr + (x >> 1), v_ptr + (x >> 1), Y,
-                             U, V, 0xc000, y_stride);
-        }
-
-        mi++;
-      }
-      y_ptr += y_stride * 16;
-      u_ptr += y_stride * 4;
-      v_ptr += y_stride * 4;
-
-      mi++;
-    }
-  }
-
-  /* Color in frame reference blocks */
-  if ((flags & VP8D_DEBUG_CLR_FRM_REF_BLKS) &&
-      ppflags->display_ref_frame_flag) {
-    int y, x;
-    YV12_BUFFER_CONFIG *post = &oci->post_proc_buffer;
-    int width = post->y_width;
-    int height = post->y_height;
-    unsigned char *y_ptr = oci->post_proc_buffer.y_buffer;
-    unsigned char *u_ptr = oci->post_proc_buffer.u_buffer;
-    unsigned char *v_ptr = oci->post_proc_buffer.v_buffer;
-    int y_stride = oci->post_proc_buffer.y_stride;
-    MODE_INFO *mi = oci->mi;
-
-    for (y = 0; y < height; y += 16) {
-      for (x = 0; x < width; x += 16) {
-        int Y = 0, U = 0, V = 0;
-
-        if (ppflags->display_ref_frame_flag & (1 << mi->mbmi.ref_frame)) {
-          Y = MV_REFERENCE_FRAME_colors[mi->mbmi.ref_frame][0];
-          U = MV_REFERENCE_FRAME_colors[mi->mbmi.ref_frame][1];
-          V = MV_REFERENCE_FRAME_colors[mi->mbmi.ref_frame][2];
-
-          vp8_blend_mb_outer(y_ptr + x, u_ptr + (x >> 1), v_ptr + (x >> 1), Y,
-                             U, V, 0xc000, y_stride);
-        }
-
-        mi++;
-      }
-      y_ptr += y_stride * 16;
-      u_ptr += y_stride * 4;
-      v_ptr += y_stride * 4;
-
-      mi++;
-    }
-  }
-#endif
 
   *dest = oci->post_proc_buffer;
 

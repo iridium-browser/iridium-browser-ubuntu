@@ -4,15 +4,14 @@
 
 #include "components/sync/test/engine/mock_model_type_processor.h"
 
-#include <stddef.h>
-#include <stdint.h>
+#include <utility>
 
 #include "base/base64.h"
 #include "base/bind.h"
 #include "base/sha1.h"
 #include "components/sync/engine/commit_queue.h"
 
-namespace syncer_v2 {
+namespace syncer {
 
 MockModelTypeProcessor::MockModelTypeProcessor() : is_synchronous_(true) {}
 
@@ -30,7 +29,7 @@ void MockModelTypeProcessor::DisconnectSync() {
 }
 
 void MockModelTypeProcessor::OnCommitCompleted(
-    const sync_pb::DataTypeState& type_state,
+    const sync_pb::ModelTypeState& type_state,
     const CommitResponseDataList& response_list) {
   base::Closure task =
       base::Bind(&MockModelTypeProcessor::OnCommitCompletedImpl,
@@ -41,7 +40,7 @@ void MockModelTypeProcessor::OnCommitCompleted(
 }
 
 void MockModelTypeProcessor::OnUpdateReceived(
-    const sync_pb::DataTypeState& type_state,
+    const sync_pb::ModelTypeState& type_state,
     const UpdateResponseDataList& response_list) {
   base::Closure task =
       base::Bind(&MockModelTypeProcessor::OnUpdateReceivedImpl,
@@ -119,6 +118,8 @@ CommitRequestData MockModelTypeProcessor::DeleteRequest(
   request_data.sequence_number = GetNextSequenceNumber(tag_hash);
   request_data.base_version = base_version;
 
+  pending_deleted_hashes_.insert(tag_hash);
+
   return request_data;
 }
 
@@ -132,8 +133,7 @@ UpdateResponseDataList MockModelTypeProcessor::GetNthUpdateResponse(
   return received_update_responses_[n];
 }
 
-sync_pb::DataTypeState
-MockModelTypeProcessor::GetNthTypeStateReceivedInUpdateResponse(
+sync_pb::ModelTypeState MockModelTypeProcessor::GetNthUpdateState(
     size_t n) const {
   DCHECK_LT(n, GetNumUpdateResponses());
   return type_states_received_on_update_[n];
@@ -149,8 +149,7 @@ CommitResponseDataList MockModelTypeProcessor::GetNthCommitResponse(
   return received_commit_responses_[n];
 }
 
-sync_pb::DataTypeState
-MockModelTypeProcessor::GetNthTypeStateReceivedInCommitResponse(
+sync_pb::ModelTypeState MockModelTypeProcessor::GetNthCommitState(
     size_t n) const {
   DCHECK_LT(n, GetNumCommitResponses());
   return type_states_received_on_commit_[n];
@@ -192,22 +191,33 @@ void MockModelTypeProcessor::SetDisconnectCallback(
 }
 
 void MockModelTypeProcessor::OnCommitCompletedImpl(
-    const sync_pb::DataTypeState& type_state,
+    const sync_pb::ModelTypeState& type_state,
     const CommitResponseDataList& response_list) {
   received_commit_responses_.push_back(response_list);
   type_states_received_on_commit_.push_back(type_state);
   for (CommitResponseDataList::const_iterator it = response_list.begin();
        it != response_list.end(); ++it) {
-    commit_response_items_.insert(std::make_pair(it->client_tag_hash, *it));
+    const std::string tag_hash = it->client_tag_hash;
+    commit_response_items_.insert(std::make_pair(tag_hash, *it));
 
-    // Server wins.  Set the model's base version.
-    SetBaseVersion(it->client_tag_hash, it->response_version);
-    SetServerAssignedId(it->client_tag_hash, it->id);
+    if (pending_deleted_hashes_.find(tag_hash) !=
+        pending_deleted_hashes_.end()) {
+      // Delete request was committed on the server. Erase information we track
+      // about the entity.
+      sequence_numbers_.erase(tag_hash);
+      base_versions_.erase(tag_hash);
+      assigned_ids_.erase(tag_hash);
+      pending_deleted_hashes_.erase(tag_hash);
+    } else {
+      // Server wins.  Set the model's base version.
+      SetBaseVersion(tag_hash, it->response_version);
+      SetServerAssignedId(tag_hash, it->id);
+    }
   }
 }
 
 void MockModelTypeProcessor::OnUpdateReceivedImpl(
-    const sync_pb::DataTypeState& type_state,
+    const sync_pb::ModelTypeState& type_state,
     const UpdateResponseDataList& response_list) {
   received_update_responses_.push_back(response_list);
   type_states_received_on_update_.push_back(type_state);
@@ -276,4 +286,4 @@ void MockModelTypeProcessor::SetServerAssignedId(const std::string& tag_hash,
   assigned_ids_[tag_hash] = id;
 }
 
-}  // namespace syncer_v2
+}  // namespace syncer

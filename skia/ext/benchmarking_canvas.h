@@ -10,18 +10,12 @@
 #include "base/values.h"
 #include "third_party/skia/include/utils/SkNWayCanvas.h"
 
-class SkXfermode;
-
 namespace skia {
 
 class SK_API BenchmarkingCanvas : public SkNWayCanvas {
 public:
-  BenchmarkingCanvas(SkCanvas* canvas, unsigned flags = 0);
+  BenchmarkingCanvas(SkCanvas* canvas);
   ~BenchmarkingCanvas() override;
-
-  enum Flags {
-      kOverdrawVisualization_Flag = 0x01,
-  };
 
   // Returns the number of draw commands executed on this canvas.
   size_t CommandCount() const;
@@ -41,10 +35,10 @@ protected:
   void didConcat(const SkMatrix&) override;
   void didSetMatrix(const SkMatrix&) override;
 
-  void onClipRect(const SkRect&, SkRegion::Op, ClipEdgeStyle) override;
-  void onClipRRect(const SkRRect&, SkRegion::Op, ClipEdgeStyle) override;
-  void onClipPath(const SkPath&, SkRegion::Op, ClipEdgeStyle) override;
-  void onClipRegion(const SkRegion&, SkRegion::Op) override;
+  void onClipRect(const SkRect&, SkClipOp, ClipEdgeStyle) override;
+  void onClipRRect(const SkRRect&, SkClipOp, ClipEdgeStyle) override;
+  void onClipPath(const SkPath&, SkClipOp, ClipEdgeStyle) override;
+  void onClipRegion(const SkRegion&, SkClipOp) override;
 
   void onDrawPaint(const SkPaint&) override;
   void onDrawPoints(PointMode, size_t count, const SkPoint pts[],
@@ -83,8 +77,6 @@ private:
   class AutoOp;
 
   base::ListValue op_records_;
-  unsigned flags_;
-  sk_sp<SkXfermode> overdraw_xfermode_;
 };
 
 }

@@ -122,19 +122,6 @@ bool IsHiddenLoginItem(LSSharedFileListItemRef item) {
 
 }  // namespace
 
-std::string PathFromFSRef(const FSRef& ref) {
-  ScopedCFTypeRef<CFURLRef> url(
-      CFURLCreateFromFSRef(kCFAllocatorDefault, &ref));
-  NSString *path_string = [(NSURL *)url.get() path];
-  return [path_string fileSystemRepresentation];
-}
-
-bool FSRefFromPath(const std::string& path, FSRef* ref) {
-  OSStatus status = FSPathMakeRef((const UInt8*)path.c_str(),
-                                  ref, nil);
-  return status == noErr;
-}
-
 CGColorSpaceRef GetGenericRGBColorSpace() {
   // Leaked. That's OK, it's scoped to the lifetime of the application.
   static CGColorSpaceRef g_color_space_generic_rgb(
@@ -216,26 +203,6 @@ void SwitchFullScreenModes(FullScreenMode from_mode, FullScreenMode to_mode) {
   g_full_screen_requests[to_mode] =
       std::max(g_full_screen_requests[to_mode] + 1, 1);
   SetUIMode();
-}
-
-bool AmIForeground() {
-  ProcessSerialNumber foreground_psn = { 0 };
-  OSErr err = GetFrontProcess(&foreground_psn);
-  if (err != noErr) {
-    OSSTATUS_DLOG(WARNING, err) << "GetFrontProcess";
-    return false;
-  }
-
-  ProcessSerialNumber my_psn = { 0, kCurrentProcess };
-
-  Boolean result = FALSE;
-  err = SameProcess(&foreground_psn, &my_psn, &result);
-  if (err != noErr) {
-    OSSTATUS_DLOG(WARNING, err) << "SameProcess";
-    return false;
-  }
-
-  return result;
 }
 
 bool SetFileBackupExclusion(const FilePath& file_path) {
@@ -329,11 +296,21 @@ bool WasLaunchedAsLoginOrResumeItem() {
   ProcessInfoRec info = {};
   info.processInfoLength = sizeof(info);
 
+// GetProcessInformation has been deprecated since macOS 10.9, but there is no
+// replacement that provides the information we need. See
+// https://crbug.com/650854.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   if (GetProcessInformation(&psn, &info) == noErr) {
+#pragma clang diagnostic pop
     ProcessInfoRec parent_info = {};
     parent_info.processInfoLength = sizeof(parent_info);
-    if (GetProcessInformation(&info.processLauncher, &parent_info) == noErr)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if (GetProcessInformation(&info.processLauncher, &parent_info) == noErr) {
+#pragma clang diagnostic pop
       return parent_info.processSignature == 'lgnw';
+    }
   }
   return false;
 }
@@ -448,69 +425,14 @@ int MacOSXMinorVersionInternal() {
   return mac_os_x_minor_version;
 }
 
-// Returns the running system's Mac OS X minor version. This is the |y| value
-// in 10.y or 10.y.z.
+}  // namespace
+
+namespace internal {
 int MacOSXMinorVersion() {
   static int mac_os_x_minor_version = MacOSXMinorVersionInternal();
   return mac_os_x_minor_version;
 }
-
-enum {
-  MAVERICKS_MINOR_VERSION = 9,
-  YOSEMITE_MINOR_VERSION = 10,
-  EL_CAPITAN_MINOR_VERSION = 11,
-  SIERRA_MINOR_VERSION = 12,
-};
-
-}  // namespace
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GT_10_9)
-bool IsOSMavericks() {
-  return MacOSXMinorVersion() == MAVERICKS_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GT_10_10)
-bool IsOSYosemite() {
-  return MacOSXMinorVersion() == YOSEMITE_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GE_10_10)
-bool IsOSYosemiteOrLater() {
-  return MacOSXMinorVersion() >= YOSEMITE_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GT_10_11)
-bool IsOSElCapitan() {
-  return MacOSXMinorVersion() == EL_CAPITAN_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GE_10_11)
-bool IsOSElCapitanOrLater() {
-  return MacOSXMinorVersion() >= EL_CAPITAN_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GT_10_12)
-bool IsOSSierra() {
-  return MacOSXMinorVersion() == SIERRA_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GE_10_12)
-bool IsOSSierraOrLater() {
-  return MacOSXMinorVersion() >= SIERRA_MINOR_VERSION;
-}
-#endif
-
-#if !defined(BASE_MAC_MAC_UTIL_H_INLINED_GT_10_12)
-bool IsOSLaterThanSierra_DontCallThis() {
-  return MacOSXMinorVersion() > SIERRA_MINOR_VERSION;
-}
-#endif
+}  // namespace internal
 
 std::string GetModelIdentifier() {
   std::string return_string;

@@ -7,12 +7,17 @@
 namespace content {
 
 SecurityStyleExplanations::SecurityStyleExplanations()
-    : ran_insecure_content(false),
-      displayed_insecure_content(false),
-      ran_insecure_content_style(SECURITY_STYLE_UNKNOWN),
-      displayed_insecure_content_style(SECURITY_STYLE_UNKNOWN),
+    : ran_mixed_content(false),
+      displayed_mixed_content(false),
+      ran_content_with_cert_errors(false),
+      displayed_content_with_cert_errors(false),
+      ran_insecure_content_style(blink::WebSecurityStyleUnknown),
+      displayed_insecure_content_style(blink::WebSecurityStyleUnknown),
       scheme_is_cryptographic(false),
       pkp_bypassed(false) {}
+
+SecurityStyleExplanations::SecurityStyleExplanations(
+    const SecurityStyleExplanations& other) = default;
 
 SecurityStyleExplanations::~SecurityStyleExplanations() {
 }

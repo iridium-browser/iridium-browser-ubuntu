@@ -19,15 +19,10 @@
 #include "base/time/time.h"
 #include "cc/layers/video_frame_provider.h"
 #include "content/renderer/media/android/media_info_loader.h"
-#include "content/renderer/media/android/media_source_delegate.h"
 #include "content/renderer/media/android/renderer_media_player_manager.h"
 #include "content/renderer/media/android/stream_texture_factory.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "media/base/android/media_player_android.h"
-#include "media/base/cdm_context.h"
-#include "media/base/demuxer_stream.h"
-#include "media/base/eme_constants.h"
-#include "media/base/media_keys.h"
 #include "media/base/time_delta_interpolator.h"
 #include "media/blink/webmediaplayer_delegate.h"
 #include "media/blink/webmediaplayer_params.h"
@@ -42,12 +37,11 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
-class WebContentDecryptionModule;
-class WebContentDecryptionModuleResult;
 class WebFrame;
 class WebMediaPlayerClient;
 class WebMediaPlayerEncryptedMediaClient;
 class WebURL;
+enum class WebRemotePlaybackAvailability;
 }
 
 namespace cc_blink {
@@ -58,13 +52,10 @@ namespace gpu {
 namespace gles2 {
 class GLES2Interface;
 }
-struct MailboxHolder;
 }
 
 namespace media {
-class CdmContext;
 class MediaLog;
-class WebContentDecryptionModuleImpl;
 }
 
 namespace content {
@@ -120,6 +111,7 @@ class WebMediaPlayerAndroid
                  blink::WebSetSinkIdCallbacks* web_callback) override;
   void requestRemotePlayback() override;
   void requestRemotePlaybackControl() override;
+  void requestRemotePlaybackStop() override;
   blink::WebTimeRanges buffered() const override;
   blink::WebTimeRanges seekable() const override;
 
@@ -133,13 +125,10 @@ class WebMediaPlayerAndroid
   // https://code.google.com/p/skia/issues/detail?id=1189
   void paint(blink::WebCanvas* canvas,
              const blink::WebRect& rect,
-             unsigned char alpha,
-             SkXfermode::Mode mode) override;
+             SkPaint&) override;
 
   bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface* gl,
                                          unsigned int texture,
-                                         unsigned int internal_format,
-                                         unsigned int type,
                                          bool premultiply_alpha,
                                          bool flip_y) override;
 
@@ -197,7 +186,6 @@ class WebMediaPlayerAndroid
   void OnSeekComplete(const base::TimeDelta& current_time) override;
   void OnMediaError(int error_type) override;
   void OnVideoSizeChanged(int width, int height) override;
-  void OnDurationChanged(const base::TimeDelta& duration);
 
   // Called to update the current time.
   void OnTimeUpdate(base::TimeDelta current_timestamp,
@@ -208,10 +196,12 @@ class WebMediaPlayerAndroid
       override;
   void OnDisconnectedFromRemoteDevice() override;
   void OnCancelledRemotePlaybackRequest() override;
+  void OnRemotePlaybackStarted() override;
   void OnDidExitFullscreen() override;
   void OnMediaPlayerPlay() override;
   void OnMediaPlayerPause() override;
-  void OnRemoteRouteAvailabilityChanged(bool routes_available) override;
+  void OnRemoteRouteAvailabilityChanged(
+      blink::WebRemotePlaybackAvailability availability) override;
 
   // Called when the player is released.
   void OnPlayerReleased() override;
@@ -221,32 +211,11 @@ class WebMediaPlayerAndroid
   // However, the actual GlTexture is not released to keep the video screenshot.
   void SuspendAndReleaseResources() override;
 
-#if defined(VIDEO_HOLE)
-  // Calculate the boundary rectangle of the media player (i.e. location and
-  // size of the video frame).
-  // Returns true if the geometry has been changed since the last call.
-  bool UpdateBoundaryRectangle() override;
-
-  const gfx::RectF GetBoundaryRectangle() override;
-#endif  // defined(VIDEO_HOLE)
-
-  void setContentDecryptionModule(
-      blink::WebContentDecryptionModule* cdm,
-      blink::WebContentDecryptionModuleResult result) override;
-
-  void OnMediaSourceOpened(blink::WebMediaSource* web_media_source);
-
-  void OnEncryptedMediaInitData(media::EmeInitDataType init_data_type,
-                                const std::vector<uint8_t>& init_data);
-
-  // Called when a decoder detects that the key needed to decrypt the stream
-  // is not available.
-  void OnWaitingForDecryptionKey() override;
-
   // WebMediaPlayerDelegate::Observer implementation.
-  void OnHidden() override;
-  void OnShown() override;
-  void OnSuspendRequested(bool must_suspend) override;
+  void OnFrameHidden() override;
+  void OnFrameClosed() override;
+  void OnFrameShown() override;
+  void OnIdleTimeout() override;
   void OnPlay() override;
   void OnPause() override;
   void OnVolumeMultiplierUpdate(double multiplier) override;
@@ -259,7 +228,6 @@ class WebMediaPlayerAndroid
   void UpdateNetworkState(blink::WebMediaPlayer::NetworkState state);
   void UpdateReadyState(blink::WebMediaPlayer::ReadyState state);
   void TryCreateStreamTextureProxyIfNeeded();
-  void DoCreateStreamTexture();
 
   // Helper method to reestablish the surface texture peer for android
   // media player.
@@ -271,18 +239,15 @@ class WebMediaPlayerAndroid
  private:
   void InitializePlayer(const GURL& url,
                         const GURL& first_party_for_cookies,
-                        bool allowed_stored_credentials,
-                        int demuxer_client_id);
+                        bool allowed_stored_credentials);
   void Pause(bool is_media_related_action);
   void DrawRemotePlaybackText(const std::string& remote_playback_message);
   void ReallocateVideoFrame();
   void SetCurrentFrameInternal(scoped_refptr<media::VideoFrame>& frame);
-  void RemoveSurfaceTextureAndProxy();
   void DidLoadMediaInfo(MediaInfoLoader::Status status,
                         const GURL& redirected_url,
                         const GURL& first_party_for_cookies,
                         bool allow_stored_credentials);
-  bool IsKeySystemSupported(const std::string& key_system);
   bool IsLocalResource();
 
   // Called whenever we create a new StreamTextureProxy and had a VFP::Client,
@@ -291,29 +256,6 @@ class WebMediaPlayerAndroid
   // DidReceiveFrame().
   // Passing nullptr to this method will clear the previous callback.
   void UpdateStreamTextureProxyCallback(cc::VideoFrameProvider::Client* client);
-
-  // Called when |cdm_context| is ready.
-  void OnCdmContextReady(media::CdmContext* cdm_context);
-
-  // Sets the CDM. Should only be called when |is_player_initialized_| is true
-  // and a new non-null |cdm_context_| is available. Fires |cdm_attached_cb_| on
-  // the main thread with the result after the CDM is attached.
-  void SetCdmInternal(const media::CdmAttachedCB& cdm_attached_cb);
-
-  // Called when the CDM is attached.
-  void OnCdmAttached(const media::CdmAttachedCB& cdm_attached_cb, bool success);
-
-  // Requests that this object notifies when a CDM is ready through the
-  // |cdm_ready_cb| provided.
-  // If |cdm_ready_cb| is null, the existing callback will be fired with
-  // NULL immediately and reset.
-  void SetCdmReadyCB(const MediaSourceDelegate::CdmReadyCB& cdm_ready_cb);
-
-  // Called when the ContentDecryptionModule has been attached to the
-  // pipeline/decoders.
-  void ContentDecryptionModuleAttached(
-      blink::WebContentDecryptionModuleResult result,
-      bool success);
 
   bool IsHLSStream() const;
   // Report whether the loaded url, after following redirects, points to a HLS
@@ -330,7 +272,6 @@ class WebMediaPlayerAndroid
   blink::WebFrame* const frame_;
 
   blink::WebMediaPlayerClient* const client_;
-  blink::WebMediaPlayerEncryptedMediaClient* const encrypted_client_;
 
   // WebMediaPlayer notifies the |delegate_| of playback state changes using
   // |delegate_id_|; an id provided after registering with the delegate.  The
@@ -374,11 +315,6 @@ class WebMediaPlayerAndroid
   // Media duration.
   base::TimeDelta duration_;
 
-  // Flag to remember if we have a trusted duration_ value provided by
-  // MediaSourceDelegate notifying OnDurationChanged(). In this case, ignore
-  // any subsequent duration value passed to OnMediaMetadataChange().
-  bool ignore_metadata_duration_change_;
-
   // Seek gets pending if another seek is in progress. Only last pending seek
   // will have effect.
   bool pending_seek_;
@@ -398,13 +334,6 @@ class WebMediaPlayerAndroid
   // Player ID assigned by the |player_manager_|.
   int player_id_;
 
-  // User created media session id, if any.
-  //
-  // blink::WebMediaSession::DefaultID represents the non web
-  // exposed default media session. User created session ids are
-  // greater than blink::WebMediaSession::DefaultID.
-  const int media_session_id_;
-
   // Current player states.
   blink::WebMediaPlayer::NetworkState network_state_;
   blink::WebMediaPlayer::ReadyState ready_state_;
@@ -415,9 +344,6 @@ class WebMediaPlayerAndroid
   // GL texture mailbox for texture_id_ to provide in the VideoFrame, and sync
   // point for when the mailbox was produced.
   gpu::Mailbox texture_mailbox_;
-
-  // Stream texture ID allocated to the video.
-  unsigned int stream_id_;
 
   // Whether the media player has been initialized.
   bool is_player_initialized_;
@@ -445,10 +371,6 @@ class WebMediaPlayerAndroid
   // blocked.
   ScopedStreamTextureProxy stream_texture_proxy_;
 
-  // Whether media player needs external surface.
-  // Only used for the VIDEO_HOLE logic.
-  bool needs_external_surface_;
-
   // Whether the player is in fullscreen.
   bool is_fullscreen_;
 
@@ -460,16 +382,6 @@ class WebMediaPlayerAndroid
 
   std::unique_ptr<cc_blink::WebLayerImpl> video_weblayer_;
 
-#if defined(VIDEO_HOLE)
-  // A rectangle represents the geometry of video frame, when computed last
-  // time.
-  gfx::RectF last_computed_rect_;
-
-  // Whether to use the video overlay for all embedded video.
-  // True only for testing.
-  bool force_use_overlay_embedded_video_;
-#endif  // defined(VIDEO_HOLE)
-
   MediaPlayerHostMsg_Initialize_Type player_type_;
 
   // Whether the browser is currently connected to a remote media player.
@@ -478,16 +390,6 @@ class WebMediaPlayerAndroid
   scoped_refptr<media::MediaLog> media_log_;
 
   std::unique_ptr<MediaInfoLoader> info_loader_;
-
-  // Non-owned pointer to the CdmContext. Updated in the constructor,
-  // generateKeyRequest() or setContentDecryptionModule().
-  media::CdmContext* cdm_context_;
-
-  // This is only Used by Clear Key key system implementation, where a renderer
-  // side CDM will be used. This is similar to WebMediaPlayerImpl. For other key
-  // systems, a browser side CDM will be used and we set CDM by calling
-  // player_manager_->SetCdm() directly.
-  MediaSourceDelegate::CdmReadyCB cdm_ready_cb_;
 
   // Whether stored credentials are allowed to be passed to the server.
   bool allow_stored_credentials_;
@@ -501,8 +403,6 @@ class WebMediaPlayerAndroid
   // Tracks the most recent media time update and provides interpolated values
   // as playback progresses.
   media::TimeDeltaInterpolator interpolator_;
-
-  std::unique_ptr<MediaSourceDelegate> media_source_delegate_;
 
   int frame_id_;
 

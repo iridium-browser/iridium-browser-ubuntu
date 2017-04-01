@@ -25,8 +25,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "chrome/browser/chromeos/arc/arc_process.h"
-#include "chrome/browser/chromeos/arc/arc_process_service.h"
+#include "chrome/browser/chromeos/arc/process/arc_process.h"
+#include "chrome/browser/chromeos/arc/process/arc_process_service.h"
+#include "chrome/browser/memory/memory_kills_monitor.h"
 #include "chrome/browser/memory/tab_stats.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -35,8 +36,8 @@
 #include "chrome/common/chrome_features.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/arc/arc_service_manager.h"
 #include "components/arc/common/process.mojom.h"
-#include "components/arc/metrics/oom_kills_histogram.h"
 #include "components/exo/shell_surface.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -71,7 +72,7 @@ aura::client::ActivationClient* GetActivationClient() {
 
 // Checks if a window renders ARC apps.
 bool IsArcWindow(aura::Window* window) {
-  if (!window || window->name() != kExoShellSurfaceWindowName)
+  if (!window || window->GetName() != kExoShellSurfaceWindowName)
     return false;
   std::string application_id = exo::ShellSurface::GetApplicationId(window);
   return base::StartsWith(application_id, kArcProcessNamePrefix,
@@ -248,16 +249,24 @@ int TabManagerDelegate::MemoryStat::LowMemoryMarginKB() {
 int TabManagerDelegate::MemoryStat::TargetMemoryToFreeKB() {
   static const int kRamVsSwapWeight = 4;
   static const char kMinFilelistConfig[] = "/proc/sys/vm/min_filelist_kbytes";
+  static const char kMinFreeKbytes[] = "/proc/sys/vm/min_free_kbytes";
 
   base::SystemMemoryInfoKB system_mem;
   base::GetSystemMemoryInfo(&system_mem);
   const int file_mem_kb = system_mem.active_file + system_mem.inactive_file;
   const int min_filelist_kb = ReadIntFromFile(kMinFilelistConfig, 0);
+  const int min_free_kb = ReadIntFromFile(kMinFreeKbytes, 0);
   // Calculate current available memory in system.
   // File-backed memory should be easy to reclaim, unless they're dirty.
+  // TODO(cylee): On ChromeOS, kernel reports low memory condition when
+  // available memory is low. The following formula duplicates the logic in
+  // kernel to calculate how much memory should be released. In the future,
+  // kernel should try to report the amount of memory to release directly to
+  // eliminate the duplication here.
   const int available_mem_kb = system_mem.free +
       file_mem_kb - system_mem.dirty - min_filelist_kb +
-      system_mem.swap_free / kRamVsSwapWeight;
+      system_mem.swap_free / kRamVsSwapWeight -
+      min_free_kb;
 
   return LowMemoryMarginKB() - available_mem_kb;
 }
@@ -271,36 +280,6 @@ int TabManagerDelegate::MemoryStat::EstimatedMemoryFreedKB(
   return mem_usage.priv;
 }
 
-class TabManagerDelegate::UmaReporter {
- public:
-  UmaReporter() : total_kills_(0) {}
-  ~UmaReporter() {}
-
-  void ReportKill(const int memory_freed);
-
- private:
-  base::Time last_kill_time_;
-  int total_kills_;
-};
-
-void TabManagerDelegate::UmaReporter::ReportKill(const int memory_freed) {
-  base::Time now = base::Time::Now();
-  const TimeDelta time_delta =
-      last_kill_time_.is_null() ?
-      TimeDelta::FromSeconds(arc::kMaxOomMemoryKillTimeDeltaSecs) :
-      (now - last_kill_time_);
-  UMA_HISTOGRAM_OOM_KILL_TIME_INTERVAL(
-            "Arc.LowMemoryKiller.TimeDelta", time_delta);
-  last_kill_time_ = now;
-
-  ++total_kills_;
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "Arc.LowMemoryKiller.Count", total_kills_, 1, 1000, 1001);
-
-  UMA_HISTOGRAM_MEMORY_KB("Arc.LowMemoryKiller.FreedSize",
-                          memory_freed);
-}
-
 TabManagerDelegate::TabManagerDelegate(
     const base::WeakPtr<TabManager>& tab_manager)
   : TabManagerDelegate(tab_manager, new MemoryStat()) {
@@ -312,9 +291,6 @@ TabManagerDelegate::TabManagerDelegate(
     : tab_manager_(tab_manager),
       focused_process_(new FocusedProcess()),
       mem_stat_(mem_stat),
-      arc_process_instance_(nullptr),
-      arc_process_instance_version_(0),
-      uma_(new UmaReporter()),
       weak_ptr_factory_(this) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
                  content::NotificationService::AllBrowserContextsAndSources());
@@ -322,9 +298,6 @@ TabManagerDelegate::TabManagerDelegate(
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
                  content::NotificationService::AllBrowserContextsAndSources());
-  auto* arc_bridge_service = arc::ArcBridgeService::Get();
-  if (arc_bridge_service)
-    arc_bridge_service->process()->AddObserver(this);
   auto* activation_client = GetActivationClient();
   if (activation_client)
     activation_client->AddObserver(this);
@@ -336,9 +309,6 @@ TabManagerDelegate::~TabManagerDelegate() {
   auto* activation_client = GetActivationClient();
   if (activation_client)
     activation_client->RemoveObserver(this);
-  auto* arc_bridge_service = arc::ArcBridgeService::Get();
-  if (arc_bridge_service)
-    arc_bridge_service->process()->RemoveObserver(this);
 }
 
 void TabManagerDelegate::OnBrowserSetLastActive(Browser* browser) {
@@ -355,41 +325,6 @@ void TabManagerDelegate::OnBrowserSetLastActive(Browser* browser) {
 
   base::ProcessHandle pid = contents->GetRenderProcessHost()->GetHandle();
   AdjustFocusedTabScore(pid);
-}
-
-void TabManagerDelegate::OnInstanceReady() {
-  auto* arc_bridge_service = arc::ArcBridgeService::Get();
-  DCHECK(arc_bridge_service);
-
-  arc_process_instance_ = arc_bridge_service->process()->instance();
-  arc_process_instance_version_ = arc_bridge_service->process()->version();
-
-  DCHECK(arc_process_instance_);
-
-  if (!IsArcMemoryManagementEnabled())
-    return;
-
-  if (arc_process_instance_version_ < 2) {
-    VLOG(1) << "ProcessInstance version < 2 does not "
-               "support DisableBuiltinOomAdjustment() yet.";
-    return;
-  }
-  // Stop Android system-wide oom_adj adjustment since this class will
-  // take over oom_score_adj settings.
-  arc_process_instance_->DisableBuiltinOomAdjustment();
-
-  if (arc_process_instance_version_ < 3) {
-    VLOG(1) << "arc::ProcessInstance version < 3 does not "
-               "support DisableLowMemoryKiller() yet.";
-    return;
-  }
-  VLOG(2) << "Disable LowMemoryKiller";
-  arc_process_instance_->DisableLowMemoryKiller();
-}
-
-void TabManagerDelegate::OnInstanceClosed() {
-  arc_process_instance_ = nullptr;
-  arc_process_instance_version_ = 0;
 }
 
 // TODO(cylee): Remove this function if Android process OOM score settings
@@ -437,7 +372,7 @@ void TabManagerDelegate::LowMemoryKill(
     const TabStatsList& tab_list) {
   arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
   if (arc_process_service &&
-      arc_process_service->RequestProcessList(
+      arc_process_service->RequestAppProcessList(
           base::Bind(&TabManagerDelegate::LowMemoryKillImpl,
                      weak_ptr_factory_.GetWeakPtr(), tab_list))) {
     // LowMemoryKillImpl will be called asynchronously so nothing left to do.
@@ -569,7 +504,7 @@ void TabManagerDelegate::AdjustOomPriorities(const TabStatsList& tab_list) {
   if (IsArcMemoryManagementEnabled()) {
     arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
     if (arc_process_service &&
-        arc_process_service->RequestProcessList(
+        arc_process_service->RequestAppProcessList(
             base::Bind(&TabManagerDelegate::AdjustOomPrioritiesImpl,
                        weak_ptr_factory_.GetWeakPtr(), tab_list))) {
       return;
@@ -617,9 +552,16 @@ TabManagerDelegate::GetSortedCandidates(
 }
 
 bool TabManagerDelegate::KillArcProcess(const int nspid) {
-  if (!arc_process_instance_)
+  auto* arc_service_manager = arc::ArcServiceManager::Get();
+  if (!arc_service_manager)
     return false;
-  arc_process_instance_->KillProcess(nspid, "LowMemoryKill");
+
+  auto* arc_process_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_service_manager->arc_bridge_service()->process(), KillProcess);
+  if (!arc_process_instance)
+    return false;
+
+  arc_process_instance->KillProcess(nspid, "LowMemoryKill");
   return true;
 }
 
@@ -639,7 +581,8 @@ void TabManagerDelegate::LowMemoryKillImpl(
     const TabStatsList& tab_list,
     const std::vector<arc::ArcProcess>& arc_processes) {
 
-  VLOG(2) << "LowMemoryKilleImpl";
+  VLOG(2) << "LowMemoryKillImpl";
+
   const std::vector<TabManagerDelegate::Candidate> candidates =
       GetSortedCandidates(tab_list, arc_processes);
 
@@ -664,7 +607,7 @@ void TabManagerDelegate::LowMemoryKillImpl(
           mem_stat_->EstimatedMemoryFreedKB(it->app()->pid());
       if (KillArcProcess(it->app()->nspid())) {
         target_memory_to_free_kb -= estimated_memory_freed_kb;
-        uma_->ReportKill(estimated_memory_freed_kb);
+        MemoryKillsMonitor::LogLowMemoryKill("APP", estimated_memory_freed_kb);
         VLOG(2) << "Killed " << *it;
       }
     } else {
@@ -676,7 +619,7 @@ void TabManagerDelegate::LowMemoryKillImpl(
           mem_stat_->EstimatedMemoryFreedKB(it->tab()->renderer_handle);
       if (KillTab(tab_id)) {
         target_memory_to_free_kb -= estimated_memory_freed_kb;
-        uma_->ReportKill(estimated_memory_freed_kb);
+        MemoryKillsMonitor::LogLowMemoryKill("TAB", estimated_memory_freed_kb);
         VLOG(2) << "Killed " << *it;
       }
     }

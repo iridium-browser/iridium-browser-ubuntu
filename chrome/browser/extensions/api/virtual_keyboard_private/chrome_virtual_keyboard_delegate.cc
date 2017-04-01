@@ -9,7 +9,7 @@
 
 #include "ash/shell.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
@@ -140,7 +140,7 @@ bool ChromeVirtualKeyboardDelegate::LockKeyboard(bool state) {
   if (!controller)
     return false;
 
-  keyboard::KeyboardController::GetInstance()->set_lock_keyboard(state);
+  keyboard::KeyboardController::GetInstance()->set_keyboard_locked(state);
   return true;
 }
 
@@ -151,12 +151,8 @@ bool ChromeVirtualKeyboardDelegate::SendKeyEvent(const std::string& type,
                                                  int modifiers) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   aura::Window* window = GetKeyboardContainer();
-  return window && keyboard::SendKeyEvent(type,
-                                          char_value,
-                                          key_code,
-                                          key_name,
-                                          modifiers | ui::EF_IS_SYNTHESIZED,
-                                          window->GetHost());
+  return window && keyboard::SendKeyEvent(type, char_value, key_code, key_name,
+                                          modifiers, window->GetHost());
 }
 
 bool ChromeVirtualKeyboardDelegate::ShowLanguageSettings() {

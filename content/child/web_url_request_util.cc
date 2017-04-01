@@ -11,12 +11,14 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "content/child/request_extra_data.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
 #include "third_party/WebKit/public/platform/FilePathConversion.h"
 #include "third_party/WebKit/public/platform/WebCachePolicy.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
+#include "third_party/WebKit/public/platform/WebMixedContent.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -39,6 +41,7 @@ const char kThrottledErrorDescription[] =
 class HeaderFlattener : public blink::WebHTTPHeaderVisitor {
  public:
   HeaderFlattener() {}
+  ~HeaderFlattener() override {}
 
   void visitHeader(const WebString& name, const WebString& value) override {
     // Headers are latin1.
@@ -55,7 +58,7 @@ class HeaderFlattener : public blink::WebHTTPHeaderVisitor {
     buffer_.append(name_latin1 + ": " + value_latin1);
   }
 
-  const std::string& GetBuffer() {
+  const std::string& GetBuffer() const {
     return buffer_;
   }
 
@@ -197,15 +200,19 @@ int GetLoadFlagsForWebURLRequest(const blink::WebURLRequest& request) {
       load_flags |= net::LOAD_BYPASS_CACHE;
       break;
     case WebCachePolicy::ReturnCacheDataElseLoad:
-      load_flags |= net::LOAD_PREFERRING_CACHE;
+      load_flags |= net::LOAD_SKIP_CACHE_VALIDATION;
       break;
     case WebCachePolicy::ReturnCacheDataDontLoad:
+      load_flags |= net::LOAD_ONLY_FROM_CACHE | net::LOAD_SKIP_CACHE_VALIDATION;
+      break;
+    case WebCachePolicy::ReturnCacheDataIfValid:
       load_flags |= net::LOAD_ONLY_FROM_CACHE;
       break;
     case WebCachePolicy::UseProtocolCachePolicy:
       break;
-    default:
-      NOTREACHED();
+    case WebCachePolicy::BypassCacheLoadOnlyFromCache:
+      load_flags |= net::LOAD_ONLY_FROM_CACHE | net::LOAD_BYPASS_CACHE;
+      break;
   }
 
   if (!request.allowStoredCredentials()) {
@@ -216,6 +223,13 @@ int GetLoadFlagsForWebURLRequest(const blink::WebURLRequest& request) {
   if (!request.allowStoredCredentials())
     load_flags |= net::LOAD_DO_NOT_SEND_AUTH_DATA;
 
+  if (request.getExtraData()) {
+    RequestExtraData* extra_data =
+        static_cast<RequestExtraData*>(request.getExtraData());
+    if (extra_data->is_prefetch())
+      load_flags |= net::LOAD_PREFETCH;
+  }
+
   return load_flags;
 }
 
@@ -224,6 +238,7 @@ WebHTTPBody GetWebHTTPBodyForRequestBody(
   WebHTTPBody http_body;
   http_body.initialize();
   http_body.setIdentifier(input->identifier());
+  http_body.setContainsPasswordData(input->contains_sensitive_info());
   for (const auto& element : *input->elements()) {
     switch (element.type()) {
       case ResourceRequestBodyImpl::Element::TYPE_BYTES:
@@ -231,7 +246,7 @@ WebHTTPBody GetWebHTTPBodyForRequestBody(
         break;
       case ResourceRequestBodyImpl::Element::TYPE_FILE:
         http_body.appendFileRange(
-            element.path().AsUTF16Unsafe(), element.offset(),
+            blink::FilePathToWebString(element.path()), element.offset(),
             (element.length() != std::numeric_limits<uint64_t>::max())
                 ? element.length()
                 : -1,
@@ -246,7 +261,7 @@ WebHTTPBody GetWebHTTPBodyForRequestBody(
             element.expected_modification_time().ToDoubleT());
         break;
       case ResourceRequestBodyImpl::Element::TYPE_BLOB:
-        http_body.appendBlob(WebString::fromUTF8(element.blob_uuid()));
+        http_body.appendBlob(WebString::fromASCII(element.blob_uuid()));
         break;
       case ResourceRequestBodyImpl::Element::TYPE_BYTES_DESCRIPTION:
       case ResourceRequestBodyImpl::Element::TYPE_DISK_CACHE_ENTRY:
@@ -319,6 +334,7 @@ scoped_refptr<ResourceRequestBodyImpl> GetRequestBodyForWebHTTPBody(
     }
   }
   request_body->set_identifier(httpBody.identifier());
+  request_body->set_contains_sensitive_info(httpBody.containsPasswordData());
   return request_body;
 }
 
@@ -456,6 +472,19 @@ RequestContextType GetRequestContextTypeForWebURLRequest(
   return static_cast<RequestContextType>(request.getRequestContext());
 }
 
+blink::WebMixedContentContextType GetMixedContentContextTypeForWebURLRequest(
+    const blink::WebURLRequest& request) {
+  bool block_mixed_plugin_content = false;
+  if (request.getExtraData()) {
+    RequestExtraData* extra_data =
+        static_cast<RequestExtraData*>(request.getExtraData());
+    block_mixed_plugin_content = extra_data->block_mixed_plugin_content();
+  }
+
+  return blink::WebMixedContent::contextTypeFromRequestContext(
+      request.getRequestContext(), block_mixed_plugin_content);
+}
+
 STATIC_ASSERT_ENUM(SkipServiceWorker::NONE,
                    WebURLRequest::SkipServiceWorker::None);
 STATIC_ASSERT_ENUM(SkipServiceWorker::CONTROLLING,
@@ -472,18 +501,20 @@ blink::WebURLError CreateWebURLError(const blink::WebURL& unreachable_url,
                                      bool stale_copy_in_cache,
                                      int reason) {
   blink::WebURLError error;
-  error.domain = WebString::fromUTF8(net::kErrorDomain);
+  error.domain = WebString::fromASCII(net::kErrorDomain);
   error.reason = reason;
   error.unreachableURL = unreachable_url;
   error.staleCopyInCache = stale_copy_in_cache;
   if (reason == net::ERR_ABORTED) {
     error.isCancellation = true;
+  } else if (reason == net::ERR_CACHE_MISS) {
+    error.isCacheMiss = true;
   } else if (reason == net::ERR_TEMPORARILY_THROTTLED) {
     error.localizedDescription =
-        WebString::fromUTF8(kThrottledErrorDescription);
+        WebString::fromASCII(kThrottledErrorDescription);
   } else {
     error.localizedDescription =
-        WebString::fromUTF8(net::ErrorToString(reason));
+        WebString::fromASCII(net::ErrorToString(reason));
   }
   return error;
 }

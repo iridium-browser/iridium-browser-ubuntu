@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/i18n/message_formatter.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,28 +14,26 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/grit/components_resources.h"
+#include "components/strings/grit/components_chromium_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "components/version_ui/version_ui_constants.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/user_agent.h"
-#include "grit/browser_resources.h"
-#include "grit/components_chromium_strings.h"
-#include "grit/components_resources.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "v8/include/v8.h"
-
-#if defined(ENABLE_THEMES)
-#include "chrome/browser/ui/webui/theme_source.h"
-#endif
+#include "v8/include/v8-version-string.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
 #include "chrome/browser/ui/android/android_about_app_info.h"
+#else  // !defined(OS_ANDROID)
+#include "chrome/browser/ui/webui/theme_source.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -62,7 +61,7 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddLocalizedString(version_ui::kPlatform, IDS_PLATFORM_LABEL);
   html_source->AddString(version_ui::kOSType, version_info::GetOSType());
   html_source->AddString(version_ui::kJSEngine, "V8");
-  html_source->AddString(version_ui::kJSVersion, v8::V8::GetVersion());
+  html_source->AddString(version_ui::kJSVersion, V8_VERSION_STRING);
 
 #if defined(OS_ANDROID)
   html_source->AddString(version_ui::kOSVersion,
@@ -89,6 +88,12 @@ WebUIDataSource* CreateVersionUIDataSource() {
                                   version_info::IsOfficialBuild()
                                       ? IDS_VERSION_UI_OFFICIAL
                                       : IDS_VERSION_UI_UNOFFICIAL);
+
+#if defined(OS_CHROMEOS)
+  html_source->AddLocalizedString(version_ui::kCustomizationId,
+                                  IDS_VERSION_UI_CUSTOMIZATION_ID);
+#endif  // OS_CHROMEOS
+
 #if defined(ARCH_CPU_64_BITS)
   html_source->AddLocalizedString(version_ui::kVersionBitSize,
                                   IDS_VERSION_UI_64BIT);
@@ -162,12 +167,12 @@ VersionUI::VersionUI(content::WebUI* web_ui)
   Profile* profile = Profile::FromWebUI(web_ui);
 
 #if defined(OS_CHROMEOS)
-  web_ui->AddMessageHandler(new VersionHandlerChromeOS());
+  web_ui->AddMessageHandler(base::MakeUnique<VersionHandlerChromeOS>());
 #else
-  web_ui->AddMessageHandler(new VersionHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<VersionHandler>());
 #endif
 
-#if defined(ENABLE_THEMES)
+#if !defined(OS_ANDROID)
   // Set up the chrome://theme/ source.
   ThemeSource* theme = new ThemeSource(profile);
   content::URLDataSource::Add(profile, theme);

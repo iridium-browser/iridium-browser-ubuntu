@@ -4,12 +4,11 @@
 
 package org.chromium.chrome.browser.ntp;
 
-import android.os.Environment;
-import android.test.suitebuilder.annotation.LargeTest;
-import android.test.suitebuilder.annotation.MediumTest;
-import android.test.suitebuilder.annotation.Smoke;
+import android.support.test.filters.LargeTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
@@ -18,6 +17,7 @@ import org.chromium.net.test.EmbeddedTestServer;
 /**
  * Tests loading the NTP and navigating between it and other pages.
  */
+@RetryOnFailure
 public class NewTabPageNavigationTest extends ChromeTabbedActivityTestBase {
 
     private EmbeddedTestServer mTestServer;
@@ -25,8 +25,7 @@ public class NewTabPageNavigationTest extends ChromeTabbedActivityTestBase {
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 
     @Override
@@ -38,7 +37,6 @@ public class NewTabPageNavigationTest extends ChromeTabbedActivityTestBase {
     /**
      * Sanity check that we do start on the NTP by default.
      */
-    @Smoke
     @MediumTest
     @Feature({"NewTabPage", "Main"})
     public void testNTPIsDefault() {

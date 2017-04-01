@@ -20,11 +20,9 @@
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
-#include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
-#include "base/task_runner_util.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/threading/worker_pool.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/browser_process.h"
@@ -32,7 +30,7 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#include "chrome/browser/chromeos/arc/arc_service_launcher.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/boot_times_recorder.h"
 #include "chrome/browser/chromeos/first_run/first_run.h"
@@ -46,8 +44,6 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/profile_auth_data.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage.h"
-#include "chrome/browser/chromeos/login/quick_unlock/pin_storage_factory.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter.h"
 #include "chrome/browser/chromeos/login/saml/saml_offline_signin_limiter_factory.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
@@ -78,7 +74,7 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
-#include "chrome/browser/ui/app_list/start_page_service.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
@@ -93,12 +89,10 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/auth/stub_authenticator.h"
-#include "chromeos/login/user_names.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "chromeos/network/portal_detector/network_portal_detector_strategy.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/arc/arc_bridge_service.h"
-#include "components/arc/arc_service_manager.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -113,17 +107,20 @@
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "components/user_manager/user_names.h"
 #include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "extensions/common/features/feature_session_type.h"
 #include "net/cert/sth_distributor.h"
+#include "rlz/features/features.h"
 #include "ui/base/ime/chromeos/input_method_descriptor.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "url/gurl.h"
 
-#if defined(ENABLE_RLZ)
+#if BUILDFLAG(ENABLE_RLZ)
 #include "chrome/browser/rlz/chrome_rlz_tracker_delegate.h"
 #include "components/rlz/rlz_tracker.h"
 #endif
@@ -143,7 +140,8 @@ static const int kMaxRestartDelaySeconds = 10;
 // ChromeVox tutorial URL (used in place of "getting started" url when
 // accessibility is enabled).
 const char kChromeVoxTutorialURLPattern[] =
-    "http://www.chromevox.com/tutorial/index.html?lang=%s";
+    "chrome-extension://mndnfokpggljbaajbnioimlmbfngpief/"
+    "cvox2/background/panel.html?tutorial";
 
 void InitLocaleAndInputMethodsForNewUser(
     UserSessionManager* session_manager,
@@ -246,7 +244,7 @@ void InitLocaleAndInputMethodsForNewUser(
   prefs->SetBoolean(prefs::kLanguageShouldMergeInputMethods, true);
 }
 
-#if defined(ENABLE_RLZ)
+#if BUILDFLAG(ENABLE_RLZ)
 // Flag file that disables RLZ tracking, when present.
 const base::FilePath::CharType kRLZDisabledFlagName[] =
     FILE_PATH_LITERAL(".rlz_disabled");
@@ -443,7 +441,7 @@ void UserSessionManager::CompleteGuestSessionLogin(const GURL& start_url) {
   if (!about_flags::AreSwitchesIdenticalToCurrentCommandLine(
           user_flags, *base::CommandLine::ForCurrentProcess(), NULL)) {
     DBusThreadManager::Get()->GetSessionManagerClient()->SetFlagsForUser(
-        cryptohome::Identification(login::GuestAccountId()),
+        cryptohome::Identification(user_manager::GuestAccountId()),
         base::CommandLine::StringVector());
   }
 
@@ -482,18 +480,12 @@ void UserSessionManager::StartSession(
   delegate_ = delegate;
   start_session_type_ = start_session_type;
 
-  VLOG(1) << "Starting session for "
-          << user_context.GetAccountId().GetUserEmail();
-
+  VLOG(1) << "Starting user session.";
   PreStartSession();
   CreateUserSession(user_context, has_auth_cookies);
 
   if (!has_active_session)
     StartCrosSession();
-
-  // TODO(nkostylev): Notify UserLoggedIn() after profile is actually
-  // ready to be used (http://crbug.com/361528).
-  NotifyUserLoggedIn();
 
   if (!user_context.GetDeviceId().empty()) {
     user_manager::known_user::SetDeviceId(user_context.GetAccountId(),
@@ -515,6 +507,8 @@ void UserSessionManager::PerformPostUserLoggedInActions() {
       network_portal_detector::GetInstance()->SetStrategy(
           PortalDetectorStrategy::STRATEGY_ID_SESSION);
     }
+
+    InitNonKioskExtensionFeaturesSessionType(user_manager->GetPrimaryUser());
   }
 }
 
@@ -536,14 +530,15 @@ void UserSessionManager::RestoreAuthenticationSession(Profile* user_profile) {
       ProfileHelper::Get()->GetUserByProfile(user_profile);
   DCHECK(user);
   if (!net::NetworkChangeNotifier::IsOffline()) {
-    pending_signin_restore_sessions_.erase(user->email());
+    pending_signin_restore_sessions_.erase(user->GetAccountId().GetUserEmail());
     RestoreAuthSessionImpl(user_profile, false /* has_auth_cookies */);
   } else {
     // Even if we're online we should wait till initial
     // OnConnectionTypeChanged() call. Otherwise starting fetchers too early may
     // end up canceling all request when initial network connection type is
     // processed. See http://crbug.com/121643.
-    pending_signin_restore_sessions_.insert(user->email());
+    pending_signin_restore_sessions_.insert(
+        user->GetAccountId().GetUserEmail());
   }
 }
 
@@ -564,19 +559,47 @@ bool UserSessionManager::UserSessionsRestoreInProgress() const {
 }
 
 void UserSessionManager::InitRlz(Profile* profile) {
-#if defined(ENABLE_RLZ)
+#if BUILDFLAG(ENABLE_RLZ)
   if (!g_browser_process->local_state()->HasPrefPath(prefs::kRLZBrand)) {
     // Read brand code asynchronously from an OEM data and repost ourselves.
     google_brand::chromeos::InitBrand(
         base::Bind(&UserSessionManager::InitRlz, AsWeakPtr(), profile));
     return;
   }
-  base::PostTaskAndReplyWithResult(
-      base::WorkerPool::GetTaskRunner(false).get(),
-      FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, base::TaskTraits()
+                     .WithShutdownBehavior(
+                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN)
+                     .WithPriority(base::TaskPriority::BACKGROUND)
+                     .MayBlock(),
       base::Bind(&base::PathExists, GetRlzDisabledFlagPath()),
       base::Bind(&UserSessionManager::InitRlzImpl, AsWeakPtr(), profile));
 #endif
+}
+
+void UserSessionManager::InitNonKioskExtensionFeaturesSessionType(
+    const user_manager::User* user) {
+  // Kiosk session should be set as part of kiosk user session initialization
+  // in normal circumstances (to be able to properly determine whether kiosk
+  // was auto-launched); in case of user session restore, feature session
+  // type has be set before kiosk app controller takes over, as at that point
+  // kiosk app profile would already be initialized - feature session type
+  // should be set before that.
+  // TODO(tbarzic): Note that this does not work well for auto-launched
+  //     sessions, as information about whether session was auto-launched is not
+  //     persisted over session restart - http://crbug.com/677340.
+  if (user->GetType() == user_manager::USER_TYPE_KIOSK_APP) {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kLoginUser)) {
+      extensions::SetCurrentFeatureSessionType(
+          extensions::FeatureSessionType::KIOSK);
+    }
+    return;
+  }
+
+  extensions::SetCurrentFeatureSessionType(
+      user->HasGaiaAccount() ? extensions::FeatureSessionType::REGULAR
+                             : extensions::FeatureSessionType::UNKNOWN);
 }
 
 void UserSessionManager::SetFirstLoginPrefs(
@@ -700,6 +723,12 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
   if (ProfileHelper::IsSigninProfile(profile))
     return false;
 
+  // Kiosk sessions keeps the startup flags.
+  if (user_manager::UserManager::Get() &&
+      user_manager::UserManager::Get()->IsLoggedInAsKioskApp()) {
+    return false;
+  }
+
   if (early_restart && !CanPerformEarlyRestart())
     return false;
 
@@ -720,7 +749,8 @@ bool UserSessionManager::RestartToApplyPerSessionFlagsIfNeed(
 
   LogCustomSwitches(command_line_difference);
 
-  about_flags::ReportCustomFlags("Login.CustomFlags", command_line_difference);
+  about_flags::ReportAboutFlagsHistogram(
+      "Login.CustomFlags", command_line_difference, std::set<std::string>());
 
   base::CommandLine::StringVector flags;
   // argv[0] is the program name |base::CommandLine::NO_PROGRAM|.
@@ -793,7 +823,7 @@ void UserSessionManager::OnSessionRestoreStateChanged(
   if (!connection_error) {
     // We are in one of "done" states here.
     user_manager::UserManager::Get()->SaveUserOAuthStatus(
-        user_manager::UserManager::Get()->GetLoggedInUser()->GetAccountId(),
+        user_manager::UserManager::Get()->GetActiveUser()->GetAccountId(),
         user_status);
   }
 
@@ -840,9 +870,9 @@ void UserSessionManager::OnConnectionTypeChanged(
       continue;
 
     Profile* user_profile = ProfileHelper::Get()->GetProfileByUserUnsafe(*it);
-    bool should_restore_session =
-        pending_signin_restore_sessions_.find((*it)->email()) !=
-        pending_signin_restore_sessions_.end();
+    bool should_restore_session = pending_signin_restore_sessions_.find(
+                                      (*it)->GetAccountId().GetUserEmail()) !=
+                                  pending_signin_restore_sessions_.end();
     OAuth2LoginManager* login_manager =
         OAuth2LoginManagerFactory::GetInstance()->GetForProfile(user_profile);
     if (login_manager->SessionRestoreIsRunning()) {
@@ -850,7 +880,8 @@ void UserSessionManager::OnConnectionTypeChanged(
       // we need to kick off OAuth token verification process again.
       login_manager->ContinueSessionRestore();
     } else if (should_restore_session) {
-      pending_signin_restore_sessions_.erase((*it)->email());
+      pending_signin_restore_sessions_.erase(
+          (*it)->GetAccountId().GetUserEmail());
       RestoreAuthSessionImpl(user_profile, false /* has_auth_cookies */);
     }
   }
@@ -890,6 +921,8 @@ void UserSessionManager::CreateUserSession(const UserContext& user_context,
   has_auth_cookies_ = has_auth_cookies;
   InitSessionRestoreStrategy();
   StoreUserContextDataBeforeProfileIsCreated();
+  session_manager::SessionManager::Get()->CreateSession(
+      user_context_.GetAccountId(), user_context_.GetUserIDHash());
 }
 
 void UserSessionManager::PreStartSession() {
@@ -899,11 +932,7 @@ void UserSessionManager::PreStartSession() {
 }
 
 void UserSessionManager::StoreUserContextDataBeforeProfileIsCreated() {
-  // Store obfuscated GAIA ID.
-  if (!user_context_.GetGaiaID().empty()) {
-    user_manager::known_user::UpdateGaiaID(user_context_.GetAccountId(),
-                                           user_context_.GetGaiaID());
-  }
+  user_manager::known_user::UpdateId(user_context_.GetAccountId());
 }
 
 void UserSessionManager::StartCrosSession() {
@@ -912,15 +941,6 @@ void UserSessionManager::StartCrosSession() {
   DBusThreadManager::Get()->GetSessionManagerClient()->StartSession(
       cryptohome::Identification(user_context_.GetAccountId()));
   btl->AddLoginTimeMarker("StartSession-End", false);
-}
-
-void UserSessionManager::NotifyUserLoggedIn() {
-  BootTimesRecorder* btl = BootTimesRecorder::Get();
-  btl->AddLoginTimeMarker("UserLoggedIn-Start", false);
-  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-  user_manager->UserLoggedIn(user_context_.GetAccountId(),
-                             user_context_.GetUserIDHash(), false);
-  btl->AddLoginTimeMarker("UserLoggedIn-End", false);
 }
 
 void UserSessionManager::PrepareProfile() {
@@ -1102,6 +1122,15 @@ void UserSessionManager::UserProfileInitialized(Profile* profile,
     return;
   }
 
+  if (user_context_.GetAuthFlow() == UserContext::AUTH_FLOW_ACTIVE_DIRECTORY) {
+    // Call FinalizePrepareProfile directly and skip RestoreAuthSessionImpl
+    // because there is no need to merge session for Active Directory users.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&UserSessionManager::FinalizePrepareProfile,
+                              AsWeakPtr(), profile));
+    return;
+  }
+
   FinalizePrepareProfile(profile);
 }
 
@@ -1138,8 +1167,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
 
   profile->OnLogin();
 
-  g_browser_process->platform_part()->SessionManager()->SetSessionState(
-      session_manager::SESSION_STATE_LOGGED_IN_NOT_ACTIVE);
+  session_manager::SessionManager::Get()->SetSessionState(
+      session_manager::SessionState::LOGGED_IN_NOT_ACTIVE);
 
   // Send the notification before creating the browser so additional objects
   // that need the profile (e.g. the launcher) can be created first.
@@ -1159,17 +1188,7 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
 
     if (arc::ArcBridgeService::GetEnabled(
             base::CommandLine::ForCurrentProcess())) {
-      const AccountId& account_id =
-          multi_user_util::GetAccountIdFromProfile(profile);
-      std::unique_ptr<BooleanPrefMember> arc_enabled_pref =
-          base::MakeUnique<BooleanPrefMember>();
-      arc_enabled_pref->Init(prefs::kArcEnabled, profile->GetPrefs());
-      DCHECK(arc::ArcServiceManager::Get());
-      arc::ArcServiceManager::Get()->OnPrimaryUserProfilePrepared(
-          account_id, std::move(arc_enabled_pref));
-      arc::ArcAuthService* arc_auth_service = arc::ArcAuthService::Get();
-      DCHECK(arc_auth_service);
-      arc_auth_service->OnPrimaryUserProfilePrepared(profile);
+      arc::ArcServiceLauncher::Get()->OnPrimaryUserProfilePrepared(profile);
     }
   }
 
@@ -1212,10 +1231,10 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
     delegate_->OnProfilePrepared(profile, browser_launched);
 }
 
-void UserSessionManager::ActivateWizard(const std::string& screen_name) {
+void UserSessionManager::ActivateWizard(OobeScreen screen) {
   LoginDisplayHost* host = LoginDisplayHost::default_host();
   CHECK(host);
-  host->StartWizard(screen_name);
+  host->StartWizard(screen);
 }
 
 void UserSessionManager::InitializeStartUrls() const {
@@ -1231,11 +1250,7 @@ void UserSessionManager::InitializeStartUrls() const {
   if (!user_manager->IsLoggedInAsPublicAccount()) {
     if (AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
       const char* url = kChromeVoxTutorialURLPattern;
-      PrefService* prefs = g_browser_process->local_state();
-      const std::string current_locale =
-          base::ToLowerASCII(prefs->GetString(prefs::kApplicationLocale));
-      std::string vox_url = base::StringPrintf(url, current_locale.c_str());
-      start_urls.push_back(vox_url);
+      start_urls.push_back(url);
       can_show_getstarted_guide = false;
     }
   }
@@ -1283,12 +1298,6 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
         (oobe_controller && oobe_controller->skip_post_login_screens()) ||
         cmdline->HasSwitch(chromeos::switches::kOobeSkipPostLogin);
 
-    // The user just signed into the profile session, so it means that they
-    // entered a password (or used easy unlock). We will enable quick unlock.
-    PinStorage* pin_storage = PinStorageFactory::GetForProfile(profile);
-    if (pin_storage)
-      pin_storage->MarkStrongAuth();
-
     if (user_manager->IsCurrentUserNew() && !skip_post_login_screens) {
       // Don't specify start URLs if the administrator has configured the start
       // URLs via policy.
@@ -1304,7 +1313,7 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
       if (!StartupUtils::IsDeviceRegistered())
         StartupUtils::MarkDeviceRegistered(base::Closure());
 
-      ActivateWizard(WizardController::kTermsOfServiceScreenName);
+      ActivateWizard(OobeScreen::SCREEN_TERMS_OF_SERVICE);
       return false;
     }
   }
@@ -1348,7 +1357,6 @@ void UserSessionManager::RestoreAuthSessionImpl(
     bool restore_from_auth_cookies) {
   CHECK((authenticator_.get() && authenticator_->authentication_context()) ||
         !restore_from_auth_cookies);
-
   if (chrome::IsRunningInForcedAppMode() ||
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kDisableGaiaServices)) {
@@ -1386,7 +1394,7 @@ void UserSessionManager::RestoreAuthSessionImpl(
 }
 
 void UserSessionManager::InitRlzImpl(Profile* profile, bool disabled) {
-#if defined(ENABLE_RLZ)
+#if BUILDFLAG(ENABLE_RLZ)
   PrefService* local_state = g_browser_process->local_state();
   if (disabled) {
     // Empty brand code means an organic install (no RLZ pings are sent).
@@ -1530,9 +1538,8 @@ void UserSessionManager::NotifyPendingUserSessionsRestoreFinished() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   user_sessions_restored_ = true;
   user_sessions_restore_in_progress_ = false;
-  FOR_EACH_OBSERVER(chromeos::UserSessionStateObserver,
-                    session_state_observer_list_,
-                    PendingUserSessionsRestoreFinished());
+  for (auto& observer : session_state_observer_list_)
+    observer.PendingUserSessionsRestoreFinished();
 }
 
 void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
@@ -1577,21 +1584,11 @@ void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
 
 net::URLRequestContextGetter*
 UserSessionManager::GetAuthRequestContext() const {
-  net::URLRequestContextGetter* auth_request_context = nullptr;
+  content::StoragePartition* signin_partition = login::GetSigninPartition();
+  if (!signin_partition)
+    return nullptr;
 
-  if (StartupUtils::IsWebviewSigninEnabled()) {
-    // Webview uses different partition storage than iframe. We need to get
-    // cookies from the right storage for url request to get auth token into
-    // session.
-    content::StoragePartition* signin_partition = login::GetSigninPartition();
-    if (signin_partition)
-      auth_request_context = signin_partition->GetURLRequestContext();
-  } else if (authenticator_.get() && authenticator_->authentication_context()) {
-    auth_request_context =
-        content::BrowserContext::GetDefaultStoragePartition(
-            authenticator_->authentication_context())->GetURLRequestContext();
-  }
-  return auth_request_context;
+  return signin_partition->GetURLRequestContext();
 }
 
 void UserSessionManager::AttemptRestart(Profile* profile) {
@@ -1731,8 +1728,16 @@ void UserSessionManager::DoBrowserLaunchInternal(Profile* profile,
         *base::CommandLine::ForCurrentProcess(), profile, base::FilePath(),
         chrome::startup::IS_PROCESS_STARTUP, first_run);
 
-    // Triggers app launcher start page service to load start page web contents.
-    app_list::StartPageService::Get(profile);
+    // ApplistService is usually initialized as part of browser launching
+    // process. However, kSilentLaunch flag is used for a new user on the device
+    // to skip browser launching (so that first-run app is not blocked by a
+    // browser window). As a result, AppListService init is skipped. This would
+    // cause AppListPresenterService not created and result in no app launcher.
+    // TODO(xiyuan): Remove this with http://crbug.com/681045
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            ::switches::kSilentLaunch)) {
+      AppListService::InitAll(profile, profile->GetPath());
+    }
   } else {
     LOG(WARNING) << "Browser hasn't been launched, should_launch_browser_"
                  << " is false. This is normal in some tests.";
@@ -1755,15 +1760,14 @@ void UserSessionManager::DoBrowserLaunchInternal(Profile* profile,
   // browser before it is dereferenced by the login host.
   if (login_host)
     login_host->Finalize();
-  user_manager::UserManager::Get()->SessionStarted();
+  session_manager::SessionManager::Get()->SessionStarted();
   chromeos::BootTimesRecorder::Get()->LoginDone(
       user_manager::UserManager::Get()->IsCurrentUserNew());
 
   // Check to see if this profile should show EndOfLife Notification and show
   // the message accordingly.
-  if (!ShouldShowEolNotification(profile))
-    return;
-  CheckEolStatus(profile);
+  if (ShouldShowEolNotification(profile))
+    CheckEolStatus(profile);
 }
 
 void UserSessionManager::RespectLocalePreferenceWrapper(
@@ -1771,12 +1775,6 @@ void UserSessionManager::RespectLocalePreferenceWrapper(
     const base::Closure& callback) {
   if (browser_shutdown::IsTryingToQuit())
     return;
-
-  // InputEventsBlocker is not available in Mash
-  if (chrome::IsRunningInMash()) {
-    callback.Run();
-    return;
-  }
 
   const user_manager::User* const user =
       ProfileHelper::Get()->GetUserByProfile(profile);
@@ -1831,16 +1829,17 @@ void UserSessionManager::SendUserPodsMetrics() {
 }
 
 void UserSessionManager::OnOAuth2TokensFetched(UserContext context) {
-  if (StartupUtils::IsWebviewSigninEnabled() && TokenHandlesEnabled()) {
-    CreateTokenUtilIfMissing();
-    if (!token_handle_util_->HasToken(context.GetAccountId())) {
-      token_handle_fetcher_.reset(new TokenHandleFetcher(
-          token_handle_util_.get(), context.GetAccountId()));
-      token_handle_fetcher_->FillForNewUser(
-          context.GetAccessToken(),
-          base::Bind(&UserSessionManager::OnTokenHandleObtained,
-                     weak_factory_.GetWeakPtr()));
-    }
+  if (!TokenHandlesEnabled())
+    return;
+
+  CreateTokenUtilIfMissing();
+  if (!token_handle_util_->HasToken(context.GetAccountId())) {
+    token_handle_fetcher_.reset(new TokenHandleFetcher(token_handle_util_.get(),
+                                                       context.GetAccountId()));
+    token_handle_fetcher_->FillForNewUser(
+        context.GetAccessToken(),
+        base::Bind(&UserSessionManager::OnTokenHandleObtained,
+                   weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -1865,13 +1864,6 @@ bool UserSessionManager::TokenHandlesEnabled() {
 }
 
 void UserSessionManager::Shutdown() {
-  if (arc::ArcBridgeService::GetEnabled(
-          base::CommandLine::ForCurrentProcess())) {
-    DCHECK(arc::ArcServiceManager::Get());
-    arc::ArcAuthService* arc_auth_service = arc::ArcAuthService::Get();
-    if (arc_auth_service)
-      arc_auth_service->Shutdown();
-  }
   token_handle_fetcher_.reset();
   token_handle_util_.reset();
   first_run::GoodiesDisplayer::Delete();

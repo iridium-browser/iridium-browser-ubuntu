@@ -9,38 +9,44 @@
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
-#include "cc/test/test_shared_bitmap_manager.h"
-#include "cc/trees/layer_tree_host.h"
+#include "cc/trees/layer_tree_host_in_process.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/tree_synchronizer.h"
 
 namespace cc {
+
 class ImageSerializationProcessor;
+class MutatorHost;
 class TestTaskGraphRunner;
 
-class FakeLayerTreeHost : public LayerTreeHost {
+class FakeLayerTreeHost : public LayerTreeHostInProcess {
  public:
   static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
-      TestTaskGraphRunner* task_graph_runner);
+      TestTaskGraphRunner* task_graph_runner,
+      MutatorHost* mutator_host);
   static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner,
+      MutatorHost* mutator_host,
       const LayerTreeSettings& settings);
   static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner,
+      MutatorHost* mutator_host,
       const LayerTreeSettings& settings,
       CompositorMode mode);
   static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner,
+      MutatorHost* mutator_host,
       const LayerTreeSettings& settings,
       CompositorMode mode,
       InitParams params);
   static std::unique_ptr<FakeLayerTreeHost> Create(
       FakeLayerTreeHostClient* client,
       TestTaskGraphRunner* task_graph_runner,
+      MutatorHost* mutator_host,
       const LayerTreeSettings& settings,
       CompositorMode mode,
       ImageSerializationProcessor* image_serialization_processor);
@@ -56,6 +62,9 @@ class FakeLayerTreeHost : public LayerTreeHost {
   PropertyTrees* property_trees() const {
     return layer_tree_->property_trees();
   }
+  void BuildPropertyTreesForTesting() {
+    layer_tree_->BuildPropertyTreesForTesting();
+  }
 
   LayerImpl* CommitAndCreateLayerImplTree();
   LayerImpl* CommitAndCreatePendingTree();
@@ -64,31 +73,30 @@ class FakeLayerTreeHost : public LayerTreeHost {
   LayerTreeImpl* active_tree() { return host_impl_.active_tree(); }
   LayerTreeImpl* pending_tree() { return host_impl_.pending_tree(); }
 
-  using LayerTreeHost::ScheduleMicroBenchmark;
-  using LayerTreeHost::SendMessageToMicroBenchmark;
-  using LayerTreeHost::SetOutputSurfaceLostForTesting;
-  using LayerTreeHost::InitializeSingleThreaded;
-  using LayerTreeHost::InitializeForTesting;
-  using LayerTreeHost::InitializePictureCacheForTesting;
-  using LayerTreeHost::RecordGpuRasterizationHistogram;
+  using LayerTreeHostInProcess::ScheduleMicroBenchmark;
+  using LayerTreeHostInProcess::SendMessageToMicroBenchmark;
+  using LayerTreeHostInProcess::InitializeSingleThreaded;
+  using LayerTreeHostInProcess::InitializeForTesting;
+  using LayerTreeHostInProcess::InitializePictureCacheForTesting;
+  using LayerTreeHostInProcess::RecordGpuRasterizationHistogram;
+  using LayerTreeHostInProcess::SetUIResourceManagerForTesting;
 
-  void UpdateLayers() { LayerTreeHost::UpdateLayers(); }
+  void UpdateLayers() { LayerTreeHostInProcess::UpdateLayers(); }
 
   MicroBenchmarkController* GetMicroBenchmarkController() {
     return &micro_benchmark_controller_;
   }
 
   bool needs_commit() { return needs_commit_; }
+  void reset_needs_commit() { needs_commit_ = false; }
 
- protected:
   FakeLayerTreeHost(FakeLayerTreeHostClient* client,
-                    LayerTreeHost::InitParams* params,
+                    LayerTreeHostInProcess::InitParams* params,
                     CompositorMode mode);
 
  private:
   FakeImplTaskRunnerProvider task_runner_provider_;
   FakeLayerTreeHostClient* client_;
-  TestSharedBitmapManager manager_;
   FakeLayerTreeHostImpl host_impl_;
   bool needs_commit_;
 };

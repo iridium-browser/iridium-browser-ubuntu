@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//chrome/version.gni")
+import("//chrome/process_version_rc_template.gni")
 import("//testing/test.gni")
 
 source_set("client") {
@@ -47,8 +47,7 @@ group("kasko_util") {
   ]
 }
 
-process_version("chrome_watcher_resources") {
-  template_file = chrome_version_rc_template
+process_version_rc_template("chrome_watcher_resources") {
   sources = [
     "chrome_watcher.ver",
   ]
@@ -70,7 +69,8 @@ shared_library("chrome_watcher") {
     "//base:base_static",
     "//build/config/sanitizers:deps",
     "//chrome/common:metrics_constants_util_win",
-    "//chrome/installer/util:with_no_strings",
+    "//chrome/install_static:secondary_module",
+    "//chrome_elf",
     "//components/browser_watcher",
   ]
   ldflags = [ "/DEF:" + rebase_path("chrome_watcher.def", root_build_dir) ]

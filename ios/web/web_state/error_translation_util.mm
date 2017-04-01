@@ -7,8 +7,12 @@
 #include <CFNetwork/CFNetwork.h>
 
 #import "base/ios/ns_error_util.h"
-#include "base/mac/scoped_nsobject.h"
+#import "base/mac/scoped_nsobject.h"
 #include "net/base/net_errors.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 

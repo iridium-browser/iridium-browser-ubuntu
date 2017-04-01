@@ -13,8 +13,8 @@
 #include "SkColorFilterImageFilter.h"
 #include "SkPictureImageFilter.h"
 
-static const int kTestRectSize = 50;
-static const int kDetectorGreenValue = 50;
+constexpr int kTestRectSize = 50;
+constexpr int kDetectorGreenValue = 50;
 
 // Below are few functions to install "detector" color filters. The filter is there to assert that
 // the color value it sees is the expected. It will trigger only with kDetectorGreenValue, and
@@ -39,11 +39,8 @@ static void install_detector_color_filter(SkPaint* drawPaint) {
 
 // This detector detects that image filter phase of the pixel pipeline receives the correct value.
 static void install_detector_image_filter(SkPaint* drawPaint) {
-    sk_sp<SkColorFilter> colorFilter(make_detector_color_filter());
-    sk_sp<SkImageFilter> imageFilter(
-        SkColorFilterImageFilter::Make(std::move(colorFilter),
-                                       sk_ref_sp(drawPaint->getImageFilter())));
-    drawPaint->setImageFilter(std::move(imageFilter));
+    drawPaint->setImageFilter(SkColorFilterImageFilter::Make(make_detector_color_filter(),
+                                                             drawPaint->refImageFilter()));
 }
 
 static void no_detector_install(SkPaint*) {

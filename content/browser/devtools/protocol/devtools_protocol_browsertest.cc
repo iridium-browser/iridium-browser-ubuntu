@@ -6,20 +6,32 @@
 #include <utility>
 
 #include "base/base64.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "content/browser/frame_host/interstitial_page_impl.h"
+#include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/devtools_agent_host.h"
+#include "content/public/browser/interstitial_page_delegate.h"
 #include "content/public/browser/javascript_dialog_manager.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -27,12 +39,20 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/shell/browser/shell.h"
+#include "content/test/content_browser_test_utils_internal.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/test/cert_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/test_data_directory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/layout.h"
 #include "ui/compositor/compositor_switches.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/skia_util.h"
 
 #define EXPECT_SIZE_EQ(expected, actual)               \
   do {                                                 \
@@ -98,9 +118,9 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
     return true;
   }
 
-  void CancelActiveAndPendingDialogs(WebContents* web_contents) override {}
-
-  void ResetDialogState(WebContents* web_contents) override {}
+  void CancelDialogs(WebContents* web_contents,
+                     bool suppress_callbacks,
+                     bool reset_state) override {}
 
  private:
   DialogClosedCallback callback_;
@@ -117,18 +137,33 @@ class DevToolsProtocolTest : public ContentBrowserTest,
   DevToolsProtocolTest()
       : last_sent_id_(0),
         waiting_for_command_result_id_(0),
-        in_dispatch_(false) {
+        in_dispatch_(false),
+        last_shown_certificate_(nullptr),
+        ok_cert_(nullptr),
+        expired_cert_(nullptr) {}
+
+  void SetUpOnMainThread() override {
+    ok_cert_ =
+        net::ImportCertFromFile(net::GetTestCertsDirectory(), "ok_cert.pem");
+    expired_cert_ = net::ImportCertFromFile(net::GetTestCertsDirectory(),
+                                            "expired_cert.pem");
   }
 
  protected:
   // WebContentsDelegate method:
-  bool AddMessageToConsole(WebContents* source,
-                           int32_t level,
-                           const base::string16& message,
-                           int32_t line_no,
-                           const base::string16& source_id) override {
+  bool DidAddMessageToConsole(WebContents* source,
+                              int32_t level,
+                              const base::string16& message,
+                              int32_t line_no,
+                              const base::string16& source_id) override {
     console_messages_.push_back(base::UTF16ToUTF8(message));
     return true;
+  }
+
+  void ShowCertificateViewerInDevTools(
+      WebContents* web_contents,
+      scoped_refptr<net::X509Certificate> certificate) override {
+    last_shown_certificate_ = certificate;
   }
 
   void SendCommand(const std::string& method,
@@ -196,9 +231,34 @@ class DevToolsProtocolTest : public ContentBrowserTest,
     }
   }
 
-  void WaitForNotification(const std::string& notification) {
+  std::unique_ptr<base::DictionaryValue> WaitForNotification(
+      const std::string& notification) {
+    return WaitForNotification(notification, false);
+  }
+
+  std::unique_ptr<base::DictionaryValue> WaitForNotification(
+      const std::string& notification,
+      bool allow_existing) {
+    if (allow_existing) {
+      for (size_t i = 0; i < notifications_.size(); i++) {
+        if (notifications_[i] == notification) {
+          std::unique_ptr<base::DictionaryValue> result =
+              std::move(notification_params_[i]);
+          notifications_.erase(notifications_.begin() + i);
+          notification_params_.erase(notification_params_.begin() + i);
+          return result;
+        }
+      }
+    }
+
     waiting_for_notification_ = notification;
     RunMessageLoop();
+    return std::move(waiting_for_notification_params_);
+  }
+
+  void ClearNotifications() {
+    notifications_.clear();
+    notification_params_.clear();
   }
 
   struct ExpectedNavigation {
@@ -220,24 +280,21 @@ class DevToolsProtocolTest : public ContentBrowserTest,
   void ProcessNavigationsAnyOrder(
       std::vector<ExpectedNavigation> expected_navigations) {
     while (!expected_navigations.empty()) {
-      WaitForNotification("Page.navigationRequested");
-      ASSERT_TRUE(requested_notification_params_.get());
+      std::unique_ptr<base::DictionaryValue> params =
+          WaitForNotification("Page.navigationRequested");
 
       std::string url;
-      ASSERT_TRUE(requested_notification_params_->GetString("url", &url));
+      ASSERT_TRUE(params->GetString("url", &url));
 
       // The url will typically have a random port which we want to remove.
       url = RemovePort(GURL(url));
 
       int navigation_id;
-      ASSERT_TRUE(requested_notification_params_->GetInteger("navigationId",
-                                                             &navigation_id));
+      ASSERT_TRUE(params->GetInteger("navigationId", &navigation_id));
       bool is_in_main_frame;
-      ASSERT_TRUE(requested_notification_params_->GetBoolean(
-          "isInMainFrame", &is_in_main_frame));
+      ASSERT_TRUE(params->GetBoolean( "isInMainFrame", &is_in_main_frame));
       bool is_redirect;
-      ASSERT_TRUE(requested_notification_params_->GetBoolean("isRedirect",
-                                                             &is_redirect));
+      ASSERT_TRUE(params->GetBoolean("isRedirect", &is_redirect));
 
       bool navigation_was_expected;
       for (auto it = expected_navigations.begin();
@@ -247,11 +304,11 @@ class DevToolsProtocolTest : public ContentBrowserTest,
           continue;
         }
 
-        std::unique_ptr<base::DictionaryValue> params(
+        std::unique_ptr<base::DictionaryValue> process_params(
             new base::DictionaryValue());
-        params->SetString("response", it->navigation_response);
-        params->SetInteger("navigationId", navigation_id);
-        SendCommand("Page.processNavigation", std::move(params), false);
+        process_params->SetString("response", it->navigation_response);
+        process_params->SetInteger("navigationId", navigation_id);
+        SendCommand("Page.processNavigation", std::move(process_params), false);
 
         navigation_was_expected = true;
         expected_navigations.erase(it);
@@ -272,13 +329,23 @@ class DevToolsProtocolTest : public ContentBrowserTest,
     return urls;
   }
 
+  const scoped_refptr<net::X509Certificate>& last_shown_certificate() {
+    return last_shown_certificate_;
+  }
+
+  const scoped_refptr<net::X509Certificate>& ok_cert() { return ok_cert_; }
+
+  const scoped_refptr<net::X509Certificate>& expired_cert() {
+    return expired_cert_;
+  }
+
   std::unique_ptr<base::DictionaryValue> result_;
   scoped_refptr<DevToolsAgentHost> agent_host_;
   int last_sent_id_;
   std::vector<int> result_ids_;
   std::vector<std::string> notifications_;
   std::vector<std::string> console_messages_;
-  std::unique_ptr<base::DictionaryValue> requested_notification_params_;
+  std::vector<std::unique_ptr<base::DictionaryValue>> notification_params_;
 
  private:
   void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
@@ -301,14 +368,17 @@ class DevToolsProtocolTest : public ContentBrowserTest,
       std::string notification;
       EXPECT_TRUE(root->GetString("method", &notification));
       notifications_.push_back(notification);
+      base::DictionaryValue* params;
+      if (root->GetDictionary("params", &params)) {
+        notification_params_.push_back(params->CreateDeepCopy());
+      } else {
+        notification_params_.push_back(
+            base::WrapUnique(new base::DictionaryValue()));
+      }
       if (waiting_for_notification_ == notification) {
-        base::DictionaryValue* params;
-        if (root->GetDictionary("params", &params)) {
-          requested_notification_params_ = params->CreateDeepCopy();
-        } else {
-          requested_notification_params_.reset();
-        }
         waiting_for_notification_ = std::string();
+        waiting_for_notification_params_ = base::WrapUnique(
+            notification_params_[notification_params_.size() - 1]->DeepCopy());
         base::MessageLoop::current()->QuitNow();
       }
     }
@@ -319,8 +389,18 @@ class DevToolsProtocolTest : public ContentBrowserTest,
   }
 
   std::string waiting_for_notification_;
+  std::unique_ptr<base::DictionaryValue> waiting_for_notification_params_;
   int waiting_for_command_result_id_;
   bool in_dispatch_;
+  scoped_refptr<net::X509Certificate> last_shown_certificate_;
+  scoped_refptr<net::X509Certificate> ok_cert_;
+  scoped_refptr<net::X509Certificate> expired_cert_;
+};
+
+class TestInterstitialDelegate : public InterstitialPageDelegate {
+ private:
+  // InterstitialPageDelegate:
+  std::string GetHTMLContents() override { return "<p>Interstitial</p>"; }
 };
 
 class SyntheticKeyEventTest : public DevToolsProtocolTest {
@@ -374,7 +454,143 @@ IN_PROC_BROWSER_TEST_F(SyntheticKeyEventTest, KeyEventSynthesizeKey) {
   EXPECT_EQ("\"Escape\"", key);
 }
 
+namespace {
+bool DecodePNG(std::string base64_data, SkBitmap* bitmap) {
+  std::string png_data;
+  if (!base::Base64Decode(base64_data, &png_data))
+    return false;
+  return gfx::PNGCodec::Decode(
+      reinterpret_cast<unsigned const char*>(png_data.data()), png_data.size(),
+      bitmap);
+}
+
+// Adapted from cc::ExactPixelComparator.
+bool MatchesBitmap(const SkBitmap& expected_bmp,
+                   const SkBitmap& actual_bmp,
+                   const gfx::Rect& matching_mask) {
+  // Number of pixels with an error
+  int error_pixels_count = 0;
+
+  gfx::Rect error_bounding_rect = gfx::Rect();
+
+  // Check that bitmaps have identical dimensions.
+  EXPECT_EQ(expected_bmp.width(), actual_bmp.width());
+  EXPECT_EQ(expected_bmp.height(), actual_bmp.height());
+  if (expected_bmp.width() != actual_bmp.width() ||
+      expected_bmp.height() != actual_bmp.height()) {
+    return false;
+  }
+
+  SkAutoLockPixels lock_actual_bmp(actual_bmp);
+  SkAutoLockPixels lock_expected_bmp(expected_bmp);
+
+  DCHECK(gfx::SkIRectToRect(actual_bmp.bounds()).Contains(matching_mask));
+
+  for (int x = matching_mask.x(); x < matching_mask.width(); ++x) {
+    for (int y = matching_mask.y(); y < matching_mask.height(); ++y) {
+      SkColor actual_color = actual_bmp.getColor(x, y);
+      SkColor expected_color = expected_bmp.getColor(x, y);
+      if (actual_color != expected_color) {
+        if (error_pixels_count < 10) {
+          LOG(ERROR) << "Pixel (" << x << "," << y << "): expected "
+                     << expected_color << " actual " << actual_color;
+        }
+        error_pixels_count++;
+        error_bounding_rect.Union(gfx::Rect(x, y, 1, 1));
+      }
+    }
+  }
+
+  if (error_pixels_count != 0) {
+    LOG(ERROR) << "Number of pixel with an error: " << error_pixels_count;
+    LOG(ERROR) << "Error Bounding Box : " << error_bounding_rect.ToString();
+    return false;
+  }
+
+  return true;
+}
+}  // namespace
+
 class CaptureScreenshotTest : public DevToolsProtocolTest {
+ protected:
+  void CaptureScreenshotAndCompareTo(const SkBitmap& expected_bitmap) {
+    SendCommand("Page.captureScreenshot", nullptr);
+    std::string base64;
+    EXPECT_TRUE(result_->GetString("data", &base64));
+    SkBitmap result_bitmap;
+    EXPECT_TRUE(DecodePNG(base64, &result_bitmap));
+    gfx::Rect matching_mask(gfx::SkIRectToRect(expected_bitmap.bounds()));
+#if defined(OS_MACOSX)
+    // Mask out the corners, which may be drawn differently on Mac because of
+    // rounded corners.
+    matching_mask.Inset(4, 4, 4, 4);
+#endif
+    EXPECT_TRUE(MatchesBitmap(expected_bitmap, result_bitmap, matching_mask));
+  }
+
+  // Takes a screenshot of a colored box that is positioned inside the frame.
+  void PlaceAndCaptureBox(const gfx::Size& frame_size,
+                          const gfx::Size& box_size,
+                          float screenshot_scale) {
+    static const int kBoxOffsetHeight = 100;
+    const gfx::Size scaled_box_size =
+        ScaleToFlooredSize(box_size, screenshot_scale);
+    std::unique_ptr<base::DictionaryValue> params;
+
+    VLOG(1) << "Testing screenshot of box with size " << box_size.width() << "x"
+            << box_size.height() << "px at scale " << screenshot_scale
+            << " ...";
+
+    // Draw a blue box of provided size in the horizontal center of the page.
+    EXPECT_TRUE(content::ExecuteScript(
+        shell()->web_contents()->GetRenderViewHost(),
+        base::StringPrintf(
+            "var style = document.body.style;                             "
+            "style.overflow = 'hidden';                                   "
+            "style.minHeight = '%dpx';                                    "
+            "style.backgroundImage = 'linear-gradient(#0000ff, #0000ff)'; "
+            "style.backgroundSize = '%dpx %dpx';                          "
+            "style.backgroundPosition = '50%% %dpx';                      "
+            "style.backgroundRepeat = 'no-repeat';                        ",
+            box_size.height() + kBoxOffsetHeight, box_size.width(),
+            box_size.height(), kBoxOffsetHeight)));
+
+    // Force frame size: The offset of the blue box within the frame shouldn't
+    // change during screenshotting. This verifies that the page doesn't observe
+    // a change in frame size as a side effect of screenshotting.
+    params.reset(new base::DictionaryValue());
+    params->SetInteger("width", frame_size.width());
+    params->SetInteger("height", frame_size.height());
+    params->SetDouble("deviceScaleFactor", 0);
+    params->SetBoolean("mobile", false);
+    params->SetBoolean("fitWindow", false);
+    SendCommand("Emulation.setDeviceMetricsOverride", std::move(params));
+
+    // Resize frame to scaled blue box size.
+    params.reset(new base::DictionaryValue());
+    params->SetInteger("width", scaled_box_size.width());
+    params->SetInteger("height", scaled_box_size.height());
+    SendCommand("Emulation.setVisibleSize", std::move(params));
+
+    // Force viewport to match scaled blue box.
+    params.reset(new base::DictionaryValue());
+    params->SetDouble("x", (frame_size.width() - box_size.width()) / 2.);
+    params->SetDouble("y", kBoxOffsetHeight);
+    params->SetDouble("scale", screenshot_scale);
+    SendCommand("Emulation.forceViewport", std::move(params));
+
+    // Capture screenshot and verify that it is indeed blue.
+    SkBitmap expected_bitmap;
+    expected_bitmap.allocN32Pixels(scaled_box_size.width(),
+                                   scaled_box_size.height());
+    expected_bitmap.eraseColor(SkColorSetRGB(0x00, 0x00, 0xff));
+    CaptureScreenshotAndCompareTo(expected_bitmap);
+
+    // Reset for next screenshot.
+    SendCommand("Emulation.resetViewport", nullptr);
+    SendCommand("Emulation.clearDeviceMetricsOverride", nullptr);
+  }
+
  private:
 #if !defined(OS_ANDROID)
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -383,32 +599,49 @@ class CaptureScreenshotTest : public DevToolsProtocolTest {
 #endif
 };
 
-// Does not link on Android
-#if !defined(OS_ANDROID)
 IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest, CaptureScreenshot) {
+  // This test fails consistently on low-end Android devices.
+  // See crbug.com/653637.
+  if (base::SysInfo::IsLowEndDevice()) return;
+
   shell()->LoadURL(GURL("about:blank"));
   Attach();
-  EXPECT_TRUE(content::ExecuteScript(
-      shell()->web_contents()->GetRenderViewHost(),
-      "document.body.style.background = '#123456'"));
-  SendCommand("Page.captureScreenshot", nullptr);
-  std::string base64;
-  EXPECT_TRUE(result_->GetString("data", &base64));
-  std::string png;
-  EXPECT_TRUE(base::Base64Decode(base64, &png));
-  SkBitmap bitmap;
-  gfx::PNGCodec::Decode(reinterpret_cast<const unsigned char*>(png.data()),
-                        png.size(), &bitmap);
-  SkColor color(bitmap.getColor(0, 0));
-  EXPECT_GE(1, std::abs(0x12-(int)SkColorGetR(color)));
-  EXPECT_GE(1, std::abs(0x34-(int)SkColorGetG(color)));
-  EXPECT_GE(1, std::abs(0x56-(int)SkColorGetB(color)));
-  color = bitmap.getColor(1, 1);
-  EXPECT_GE(1, std::abs(0x12-(int)SkColorGetR(color)));
-  EXPECT_GE(1, std::abs(0x34-(int)SkColorGetG(color)));
-  EXPECT_GE(1, std::abs(0x56-(int)SkColorGetB(color)));
+  EXPECT_TRUE(
+      content::ExecuteScript(shell()->web_contents()->GetRenderViewHost(),
+                             "document.body.style.background = '#123456'"));
+  SkBitmap expected_bitmap;
+  // We compare against the actual physical backing size rather than the
+  // view size, because the view size is stored adjusted for DPI and only in
+  // integer precision.
+  gfx::Size view_size = static_cast<RenderWidgetHostViewBase*>(
+                            shell()->web_contents()->GetRenderWidgetHostView())
+                            ->GetPhysicalBackingSize();
+  expected_bitmap.allocN32Pixels(view_size.width(), view_size.height());
+  expected_bitmap.eraseColor(SkColorSetRGB(0x12, 0x34, 0x56));
+  CaptureScreenshotAndCompareTo(expected_bitmap);
 }
+
+// Setting frame size (through RWHV) is not supported on Android.
+#if defined(OS_ANDROID)
+#define MAYBE_CaptureScreenshotArea DISABLED_CaptureScreenshotArea
+#else
+#define MAYBE_CaptureScreenshotArea CaptureScreenshotArea
 #endif
+IN_PROC_BROWSER_TEST_F(CaptureScreenshotTest,
+                       MAYBE_CaptureScreenshotArea) {
+  static const gfx::Size kFrameSize(800, 600);
+
+  shell()->LoadURL(GURL("about:blank"));
+  Attach();
+
+  // Test capturing a subarea inside the emulated frame at different scales.
+  PlaceAndCaptureBox(kFrameSize, gfx::Size(100, 200), 1.0);
+  PlaceAndCaptureBox(kFrameSize, gfx::Size(100, 200), 2.0);
+  PlaceAndCaptureBox(kFrameSize, gfx::Size(100, 200), 0.5);
+
+  // Ensure that content outside the emulated frame is painted, too.
+  PlaceAndCaptureBox(kFrameSize, gfx::Size(10, 10000), 1.0);
+}
 
 #if defined(OS_ANDROID)
 // Disabled, see http://crbug.com/469947.
@@ -529,8 +762,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, NavigationPreservesMessages) {
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CrossSiteNoDetach) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(embedded_test_server()->Start());
   content::SetupCrossSiteRedirector(embedded_test_server());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL test_url1 = embedded_test_server()->GetURL(
       "A.com", "/devtools/navigation.html");
@@ -562,8 +795,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ReconnectPreservesState) {
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CrossSitePauseInBeforeUnload) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(embedded_test_server()->Start());
   content::SetupCrossSiteRedirector(embedded_test_server());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   NavigateToURLBlockUntilNavigationsComplete(shell(),
       embedded_test_server()->GetURL("A.com", "/devtools/navigation.html"), 1);
@@ -584,8 +817,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, CrossSitePauseInBeforeUnload) {
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, InspectDuringFrameSwap) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(embedded_test_server()->Start());
   content::SetupCrossSiteRedirector(embedded_test_server());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL test_url1 =
       embedded_test_server()->GetURL("A.com", "/devtools/navigation.html");
@@ -711,7 +944,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, BrowserCreateAndCloseTarget) {
   EXPECT_EQ(1u, shell()->windows().size());
   std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
   params->SetString("url", "about:blank");
-  SendCommand("Browser.createTarget", std::move(params), true);
+  SendCommand("Target.createTarget", std::move(params), true);
   std::string target_id;
   EXPECT_TRUE(result_->GetString("targetId", &target_id));
   EXPECT_EQ(2u, shell()->windows().size());
@@ -721,7 +954,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, BrowserCreateAndCloseTarget) {
   bool success;
   params.reset(new base::DictionaryValue());
   params->SetString("targetId", target_id);
-  SendCommand("Browser.closeTarget", std::move(params), true);
+  SendCommand("Target.closeTarget", std::move(params), true);
   EXPECT_TRUE(result_->GetBoolean("success", &success));
   EXPECT_TRUE(success);
 }
@@ -729,9 +962,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, BrowserCreateAndCloseTarget) {
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, BrowserGetTargets) {
   NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
   Attach();
-  SendCommand("Browser.getTargets", nullptr, true);
+  SendCommand("Target.getTargets", nullptr, true);
   base::ListValue* target_infos;
-  EXPECT_TRUE(result_->GetList("targetInfo", &target_infos));
+  EXPECT_TRUE(result_->GetList("targetInfos", &target_infos));
   EXPECT_EQ(1u, target_infos->GetSize());
   base::DictionaryValue* target_info;
   EXPECT_TRUE(target_infos->GetDictionary(0u, &target_info));
@@ -740,9 +973,9 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, BrowserGetTargets) {
   EXPECT_TRUE(target_info->GetString("type", &type));
   EXPECT_TRUE(target_info->GetString("title", &title));
   EXPECT_TRUE(target_info->GetString("url", &url));
-  EXPECT_EQ(type, "web_contents");
-  EXPECT_EQ(title, "about:blank");
-  EXPECT_EQ(url, "about:blank");
+  EXPECT_EQ("page", type);
+  EXPECT_EQ("about:blank", title);
+  EXPECT_EQ("about:blank", url);
 }
 
 namespace {
@@ -779,6 +1012,36 @@ class NavigationFinishedObserver : public content::WebContentsObserver {
   int num_to_wait_for_;
 };
 }  // namespace
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, PageStopLoading) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // Navigate to about:blank first so we can make sure there is a target page we
+  // can attach to, and have Page.setControlNavigations complete before we start
+  // the navigations we're interested in.
+  NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  Attach();
+
+  std::unique_ptr<base::DictionaryValue> params(new base::DictionaryValue());
+  params->SetBoolean("enabled", true);
+  SendCommand("Page.setControlNavigations", std::move(params), true);
+
+  NavigationFinishedObserver navigation_finished_observer(
+      shell()->web_contents());
+
+  // The page will try to navigate twice, however since
+  // Page.setControlNavigations is true, it'll wait for confirmation before
+  // committing to the navigation.
+  GURL test_url = embedded_test_server()->GetURL(
+      "/devtools/control_navigations/meta_tag.html");
+  shell()->LoadURL(test_url);
+
+  // Stop all navigations.
+  SendCommand("Page.stopLoading", nullptr);
+
+  // Wait for the initial navigation to finish.
+  navigation_finished_observer.WaitForNavigationsToFinish(1);
+}
 
 IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ControlNavigationsMainFrame) {
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -833,8 +1096,8 @@ class IsolatedDevToolsProtocolTest : public DevToolsProtocolTest {
 IN_PROC_BROWSER_TEST_F(IsolatedDevToolsProtocolTest,
                        ControlNavigationsChildFrames) {
   host_resolver()->AddRule("*", "127.0.0.1");
-  ASSERT_TRUE(embedded_test_server()->Start());
   content::SetupCrossSiteRedirector(embedded_test_server());
+  ASSERT_TRUE(embedded_test_server()->Start());
 
   // Navigate to about:blank first so we can make sure there is a target page we
   // can attach to, and have Page.setControlNavigations complete before we start
@@ -956,6 +1219,298 @@ IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, VirtualTimeTest) {
   WaitForNotification("Emulation.virtualTimeBudgetExpired");
 
   EXPECT_THAT(console_messages_, ElementsAre("before", "done", "after"));
+}
+
+// Tests that the Security.showCertificateViewer command shows the
+// certificate corresponding to the visible navigation entry, even when
+// an interstitial is showing. Regression test for
+// https://crbug.com/647759.
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, ShowCertificateViewer) {
+  // First test that the correct certificate is shown for a normal
+  // (non-interstitial) page.
+  NavigateToURLBlockUntilNavigationsComplete(shell(), GURL("about:blank"), 1);
+  Attach();
+
+  // Set a dummy certificate on the NavigationEntry.
+  shell()
+      ->web_contents()
+      ->GetController()
+      .GetVisibleEntry()
+      ->GetSSL()
+      .certificate = ok_cert();
+
+  std::unique_ptr<base::DictionaryValue> params1(new base::DictionaryValue());
+  SendCommand("Security.showCertificateViewer", std::move(params1), true);
+
+  scoped_refptr<net::X509Certificate> normal_page_cert = shell()
+                                                             ->web_contents()
+                                                             ->GetController()
+                                                             .GetVisibleEntry()
+                                                             ->GetSSL()
+                                                             .certificate;
+  ASSERT_TRUE(normal_page_cert);
+  EXPECT_EQ(normal_page_cert, last_shown_certificate());
+
+  // Now test that the correct certificate is shown on an interstitial.
+  TestInterstitialDelegate* delegate = new TestInterstitialDelegate;
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  GURL interstitial_url("https://example.test");
+  InterstitialPageImpl* interstitial = new InterstitialPageImpl(
+      web_contents, static_cast<RenderWidgetHostDelegate*>(web_contents), true,
+      interstitial_url, delegate);
+  interstitial->Show();
+  WaitForInterstitialAttach(web_contents);
+
+  // Set the transient navigation entry certificate.
+  NavigationEntry* transient_entry =
+      web_contents->GetController().GetTransientEntry();
+  ASSERT_TRUE(transient_entry);
+  transient_entry->GetSSL().certificate = expired_cert();
+  ASSERT_TRUE(transient_entry->GetSSL().certificate);
+
+  std::unique_ptr<base::DictionaryValue> params2(new base::DictionaryValue());
+  SendCommand("Security.showCertificateViewer", std::move(params2), true);
+  EXPECT_EQ(transient_entry->GetSSL().certificate, last_shown_certificate());
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, TargetDiscovery) {
+  std::string temp;
+  std::set<std::string> ids;
+  std::unique_ptr<base::DictionaryValue> command_params;
+  std::unique_ptr<base::DictionaryValue> params;
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL first_url = embedded_test_server()->GetURL("/devtools/navigation.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), first_url, 1);
+
+  GURL second_url = embedded_test_server()->GetURL("/devtools/navigation.html");
+  Shell* second = CreateBrowser();
+  NavigateToURLBlockUntilNavigationsComplete(second, second_url, 1);
+
+  Attach();
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("discover", true);
+  SendCommand("Target.setDiscoverTargets", std::move(command_params), true);
+  params = WaitForNotification("Target.targetCreated", true);
+  EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
+  EXPECT_EQ("page", temp);
+  EXPECT_TRUE(params->GetString("targetInfo.targetId", &temp));
+  EXPECT_TRUE(ids.find(temp) == ids.end());
+  ids.insert(temp);
+  params = WaitForNotification("Target.targetCreated", true);
+  EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
+  EXPECT_EQ("page", temp);
+  EXPECT_TRUE(params->GetString("targetInfo.targetId", &temp));
+  EXPECT_TRUE(ids.find(temp) == ids.end());
+  ids.insert(temp);
+  EXPECT_TRUE(notifications_.empty());
+
+  GURL third_url = embedded_test_server()->GetURL("/devtools/navigation.html");
+  Shell* third = CreateBrowser();
+  NavigateToURLBlockUntilNavigationsComplete(third, third_url, 1);
+  params = WaitForNotification("Target.targetCreated", true);
+  EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
+  EXPECT_EQ("page", temp);
+  EXPECT_TRUE(params->GetString("targetInfo.targetId", &temp));
+  EXPECT_TRUE(ids.find(temp) == ids.end());
+  std::string attached_id = temp;
+  ids.insert(temp);
+  EXPECT_TRUE(notifications_.empty());
+
+  second->Close();
+  second = nullptr;
+  params = WaitForNotification("Target.targetDestroyed", true);
+  EXPECT_TRUE(params->GetString("targetId", &temp));
+  EXPECT_TRUE(ids.find(temp) != ids.end());
+  ids.erase(temp);
+  EXPECT_TRUE(notifications_.empty());
+
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetString("targetId", attached_id);
+  SendCommand("Target.attachToTarget", std::move(command_params), true);
+  params = WaitForNotification("Target.attachedToTarget", true);
+  EXPECT_TRUE(params->GetString("targetInfo.targetId", &temp));
+  EXPECT_EQ(attached_id, temp);
+  EXPECT_TRUE(notifications_.empty());
+
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("discover", false);
+  SendCommand("Target.setDiscoverTargets", std::move(command_params), true);
+  params = WaitForNotification("Target.targetDestroyed", true);
+  EXPECT_TRUE(params->GetString("targetId", &temp));
+  EXPECT_TRUE(ids.find(temp) != ids.end());
+  ids.erase(temp);
+  params = WaitForNotification("Target.targetDestroyed", true);
+  EXPECT_TRUE(params->GetString("targetId", &temp));
+  EXPECT_TRUE(ids.find(temp) != ids.end());
+  ids.erase(temp);
+  EXPECT_TRUE(notifications_.empty());
+
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetString("targetId", attached_id);
+  SendCommand("Target.detachFromTarget", std::move(command_params), true);
+  params = WaitForNotification("Target.detachedFromTarget", true);
+  EXPECT_TRUE(params->GetString("targetId", &temp));
+  EXPECT_EQ(attached_id, temp);
+  EXPECT_TRUE(notifications_.empty());
+}
+
+// Tests that an interstitialShown event is sent when an interstitial is showing
+// on attach.
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, InterstitialShownOnAttach) {
+  TestInterstitialDelegate* delegate = new TestInterstitialDelegate;
+  WebContentsImpl* web_contents =
+      static_cast<WebContentsImpl*>(shell()->web_contents());
+  GURL interstitial_url("https://example.test");
+  InterstitialPageImpl* interstitial = new InterstitialPageImpl(
+      web_contents, static_cast<RenderWidgetHostDelegate*>(web_contents), true,
+      interstitial_url, delegate);
+  interstitial->Show();
+  WaitForInterstitialAttach(web_contents);
+  Attach();
+  SendCommand("Page.enable", nullptr, false);
+  WaitForNotification("Page.interstitialShown", true);
+}
+
+class SitePerProcessDevToolsProtocolTest : public DevToolsProtocolTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    DevToolsProtocolTest::SetUpCommandLine(command_line);
+    IsolateAllSitesForTesting(command_line);
+  };
+
+  void SetUpOnMainThread() override {
+    DevToolsProtocolTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    content::SetupCrossSiteRedirector(embedded_test_server());
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(SitePerProcessDevToolsProtocolTest, TargetNoDiscovery) {
+  std::string temp;
+  std::string target_id;
+  std::unique_ptr<base::DictionaryValue> command_params;
+  std::unique_ptr<base::DictionaryValue> params;
+
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
+  NavigateToURLBlockUntilNavigationsComplete(shell(), main_url, 1);
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root =
+      static_cast<WebContentsImpl*>(shell()->web_contents())->
+          GetFrameTree()->root();
+
+  // Load cross-site page into iframe.
+  GURL::Replacements replace_host;
+  GURL cross_site_url(embedded_test_server()->GetURL("/title1.html"));
+  replace_host.SetHostStr("foo.com");
+  cross_site_url = cross_site_url.ReplaceComponents(replace_host);
+  NavigateFrameToURL(root->child_at(0), cross_site_url);
+
+  // Enable auto-attach.
+  Attach();
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("autoAttach", true);
+  command_params->SetBoolean("waitForDebuggerOnStart", true);
+  SendCommand("Target.setAutoAttach", std::move(command_params), true);
+  EXPECT_TRUE(notifications_.empty());
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("value", true);
+  SendCommand("Target.setAttachToFrames", std::move(command_params), false);
+  params = WaitForNotification("Target.attachedToTarget", true);
+  EXPECT_TRUE(params->GetString("targetInfo.targetId", &target_id));
+  EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
+  EXPECT_EQ("iframe", temp);
+
+  // Load same-site page into iframe.
+  FrameTreeNode* child = root->child_at(0);
+  GURL http_url(embedded_test_server()->GetURL("/title1.html"));
+  NavigateFrameToURL(child, http_url);
+  params = WaitForNotification("Target.detachedFromTarget", true);
+  EXPECT_TRUE(params->GetString("targetId", &temp));
+  EXPECT_EQ(target_id, temp);
+
+  // Navigate back to cross-site iframe.
+  NavigateFrameToURL(root->child_at(0), cross_site_url);
+  params = WaitForNotification("Target.attachedToTarget", true);
+  EXPECT_TRUE(params->GetString("targetInfo.targetId", &target_id));
+  EXPECT_TRUE(params->GetString("targetInfo.type", &temp));
+  EXPECT_EQ("iframe", temp);
+
+  // Disable auto-attach.
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetBoolean("autoAttach", false);
+  command_params->SetBoolean("waitForDebuggerOnStart", false);
+  SendCommand("Target.setAutoAttach", std::move(command_params), false);
+  params = WaitForNotification("Target.detachedFromTarget", true);
+  EXPECT_TRUE(params->GetString("targetId", &temp));
+  EXPECT_EQ(target_id, temp);
+}
+
+IN_PROC_BROWSER_TEST_F(DevToolsProtocolTest, SetAndGetCookies) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  GURL test_url = embedded_test_server()->GetURL("/title1.html");
+  NavigateToURLBlockUntilNavigationsComplete(shell(), test_url, 1);
+  Attach();
+
+  // Set two cookies, one of which matches the loaded URL and another that
+  // doesn't.
+  std::unique_ptr<base::DictionaryValue> command_params;
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetString("url", test_url.spec());
+  command_params->SetString("name", "cookie_for_this_url");
+  command_params->SetString("value", "mendacious");
+  SendCommand("Network.setCookie", std::move(command_params), false);
+
+  command_params.reset(new base::DictionaryValue());
+  command_params->SetString("url", "https://www.chromium.org");
+  command_params->SetString("name", "cookie_for_another_url");
+  command_params->SetString("value", "polyglottal");
+  SendCommand("Network.setCookie", std::move(command_params), false);
+
+  // First get the cookies for just the loaded URL.
+  SendCommand("Network.getCookies", nullptr, true);
+
+  base::ListValue* cookies;
+  EXPECT_TRUE(result_->HasKey("cookies"));
+  EXPECT_TRUE(result_->GetList("cookies", &cookies));
+  EXPECT_EQ(1u, cookies->GetSize());
+
+  base::DictionaryValue* cookie;
+  std::string name;
+  std::string value;
+  EXPECT_TRUE(cookies->GetDictionary(0, &cookie));
+  EXPECT_TRUE(cookie->GetString("name", &name));
+  EXPECT_TRUE(cookie->GetString("value", &value));
+  EXPECT_EQ("cookie_for_this_url", name);
+  EXPECT_EQ("mendacious", value);
+
+  // Then get all the cookies in the cookie jar.
+  SendCommand("Network.getAllCookies", nullptr, true);
+
+  EXPECT_TRUE(result_->HasKey("cookies"));
+  EXPECT_TRUE(result_->GetList("cookies", &cookies));
+  EXPECT_EQ(2u, cookies->GetSize());
+
+  // Note: the cookies will be returned in unspecified order.
+  size_t found = 0;
+  for (size_t i = 0; i < cookies->GetSize(); i++) {
+    EXPECT_TRUE(cookies->GetDictionary(i, &cookie));
+    EXPECT_TRUE(cookie->GetString("name", &name));
+    if (name == "cookie_for_this_url") {
+      EXPECT_TRUE(cookie->GetString("value", &value));
+      EXPECT_EQ("mendacious", value);
+      found++;
+    } else if (name == "cookie_for_another_url") {
+      EXPECT_TRUE(cookie->GetString("value", &value));
+      EXPECT_EQ("polyglottal", value);
+      found++;
+    } else {
+      FAIL();
+    }
+  }
+  EXPECT_EQ(2u, found);
 }
 
 }  // namespace content

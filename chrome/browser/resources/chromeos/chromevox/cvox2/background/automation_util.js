@@ -241,27 +241,6 @@ AutomationUtil.isInSameTree = function(a, b) {
 };
 
 /**
- * Determines whether the two given nodes come from the same webpage.
- * @param {AutomationNode} a
- * @param {AutomationNode} b
- * @return {boolean}
- */
-AutomationUtil.isInSameWebpage = function(a, b) {
-  if (!a || !b)
-    return false;
-
-  a = a.root;
-  while (a && a.parent && AutomationUtil.isInSameTree(a.parent, a))
-    a = a.parent.root;
-
-  b = b.root;
-  while (b && b.parent && AutomationUtil.isInSameTree(b.parent, b))
-    b = b.parent.root;
-
-  return a == b;
-};
-
-/**
  * Determines whether or not a node is or is the descendant of another node.
  * @param {!AutomationNode} node
  * @param {!AutomationNode} ancestor
@@ -316,6 +295,36 @@ AutomationUtil.getTopLevelRoot = function(node) {
     root = root.parent.root;
   }
   return root;
+};
+
+/**
+ * @param {!AutomationNode} prevNode
+ * @param {!AutomationNode} node
+ * @return {AutomationNode}
+ */
+AutomationUtil.getLeastCommonAncestor = function(prevNode, node) {
+  if (prevNode == node)
+    return node;
+
+  var prevAncestors = AutomationUtil.getAncestors(prevNode);
+  var ancestors = AutomationUtil.getAncestors(node);
+  var divergence = AutomationUtil.getDivergence(prevAncestors, ancestors);
+  return ancestors[divergence - 1];
+};
+
+/**
+ * Gets the accessible text for this node based on its role.
+ * This text is suitable for caret navigation and selection in the node.
+ * @param {AutomationNode} node
+ * @return {string}
+ */
+AutomationUtil.getText = function(node) {
+  if (!node)
+    return '';
+
+  if (node.role === RoleType.textField)
+    return node.value;
+  return node.name || '';
 };
 
 });  // goog.scope

@@ -5,7 +5,7 @@
 #ifndef COMPONENTS_SYNC_DRIVER_USER_SELECTABLE_SYNC_TYPE_H_
 #define COMPONENTS_SYNC_DRIVER_USER_SELECTABLE_SYNC_TYPE_H_
 
-namespace sync_driver {
+namespace syncer {
 namespace user_selectable_type {
 
 // An enumeration of the sync datatypes that are explicitly exposed to the user
@@ -36,6 +36,8 @@ enum UserSelectableSyncType {
   SYNCED_NOTIFICATIONS = 9,
   WIFI_CREDENTIAL = 10,
 
+  READING_LIST = 11,
+
   // The datatypes below are implicitly synced, and are not exposed via user
   // selectable checkboxes.
   // TODO(lgcheng) ARC_PACKAGE would be selectable.
@@ -57,13 +59,14 @@ enum UserSelectableSyncType {
   // FAVICON_TRACKING,
   // ARTICLE,
   // SYNCED_NOTIFICATION_APP_INFO,
-  // ARC_PACKAGE
+  // ARC_PACKAGE,
+  // PRINTERS
 
   // Number of sync datatypes exposed to the user via checboxes in the UI.
-  SELECTABLE_DATATYPE_COUNT = 11,
+  SELECTABLE_DATATYPE_COUNT = 12,
 };
 
 }  // namespace user_selectable_type
-}  // namespace sync_driver
+}  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_DRIVER_USER_SELECTABLE_SYNC_TYPE_H_

@@ -118,6 +118,42 @@ BIGNUM *BN_bin2bn(const uint8_t *in, size_t len, BIGNUM *ret) {
   return ret;
 }
 
+BIGNUM *BN_le2bn(const uint8_t *in, size_t len, BIGNUM *ret) {
+  BIGNUM *bn = NULL;
+  if (ret == NULL) {
+    bn = BN_new();
+    ret = bn;
+  }
+
+  if (ret == NULL) {
+    return NULL;
+  }
+
+  if (len == 0) {
+    ret->top = 0;
+    ret->neg = 0;
+    return ret;
+  }
+
+  /* Reserve enough space in |ret|. */
+  size_t num_words = ((len - 1) / BN_BYTES) + 1;
+  if (!bn_wexpand(ret, num_words)) {
+    BN_free(bn);
+    return NULL;
+  }
+  ret->top = num_words;
+
+  /* Make sure the top bytes will be zeroed. */
+  ret->d[num_words - 1] = 0;
+
+  /* We only support little-endian platforms, so we can simply memcpy the
+   * internal representation. */
+  OPENSSL_memcpy(ret->d, in, len);
+
+  bn_correct_top(ret);
+  return ret;
+}
+
 size_t BN_bn2bin(const BIGNUM *in, uint8_t *out) {
   size_t n, i;
   BN_ULONG l;
@@ -128,6 +164,23 @@ size_t BN_bn2bin(const BIGNUM *in, uint8_t *out) {
     *(out++) = (unsigned char)(l >> (8 * (i % BN_BYTES))) & 0xff;
   }
   return n;
+}
+
+int BN_bn2le_padded(uint8_t *out, size_t len, const BIGNUM *in) {
+  /* If we don't have enough space, fail out. */
+  size_t num_bytes = BN_num_bytes(in);
+  if (len < num_bytes) {
+    return 0;
+  }
+
+  /* We only support little-endian platforms, so we can simply memcpy into the
+   * internal representation. */
+  OPENSSL_memcpy(out, in->d, num_bytes);
+
+  /* Pad out the rest of the buffer with zeroes. */
+  OPENSSL_memset(out + num_bytes, 0, len - num_bytes);
+
+  return 1;
 }
 
 /* constant_time_select_ulong returns |x| if |v| is 1 and |y| if |v| is 0. Its
@@ -160,12 +213,9 @@ static BN_ULONG read_word_padded(const BIGNUM *in, size_t i) {
 }
 
 int BN_bn2bin_padded(uint8_t *out, size_t len, const BIGNUM *in) {
-  size_t i;
-  BN_ULONG l;
-
   /* Special case for |in| = 0. Just branch as the probability is negligible. */
   if (BN_is_zero(in)) {
-    memset(out, 0, len);
+    OPENSSL_memset(out, 0, len);
     return 1;
   }
 
@@ -175,7 +225,7 @@ int BN_bn2bin_padded(uint8_t *out, size_t len, const BIGNUM *in) {
     return 0;
   }
   if ((len % BN_BYTES) != 0) {
-    l = read_word_padded(in, len / BN_BYTES);
+    BN_ULONG l = read_word_padded(in, len / BN_BYTES);
     if (l >> (8 * (len % BN_BYTES)) != 0) {
       return 0;
     }
@@ -188,9 +238,9 @@ int BN_bn2bin_padded(uint8_t *out, size_t len, const BIGNUM *in) {
    * leading zero octets is low.
    *
    * See Falko Stenzke, "Manger's Attack revisited", ICICS 2010. */
-  i = len;
+  size_t i = len;
   while (i--) {
-    l = read_word_padded(in, i / BN_BYTES);
+    BN_ULONG l = read_word_padded(in, i / BN_BYTES);
     *(out++) = (uint8_t)(l >> (8 * (i % BN_BYTES))) & 0xff;
   }
   return 1;
@@ -518,6 +568,24 @@ BN_ULONG BN_get_word(const BIGNUM *bn) {
   }
 }
 
+int BN_get_u64(const BIGNUM *bn, uint64_t *out) {
+  switch (bn->top) {
+    case 0:
+      *out = 0;
+      return 1;
+    case 1:
+      *out = bn->d[0];
+      return 1;
+#if defined(OPENSSL_32_BIT)
+    case 2:
+      *out = (uint64_t) bn->d[0] | (((uint64_t) bn->d[1]) << 32);
+      return 1;
+#endif
+    default:
+      return 0;
+  }
+}
+
 size_t BN_bn2mpi(const BIGNUM *in, uint8_t *out) {
   const size_t bits = BN_num_bits(in);
   const size_t bytes = (bits + 7) / 8;
@@ -535,7 +603,7 @@ size_t BN_bn2mpi(const BIGNUM *in, uint8_t *out) {
     /* If we cannot represent the number then we emit zero as the interface
      * doesn't allow an error to be signalled. */
     if (out) {
-      memset(out, 0, 4);
+      OPENSSL_memset(out, 0, 4);
     }
     return 4;
   }

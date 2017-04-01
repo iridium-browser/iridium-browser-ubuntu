@@ -5,33 +5,41 @@
 #ifndef WindowAnimationWorklet_h
 #define WindowAnimationWorklet_h
 
-#include "core/frame/DOMWindowProperty.h"
+#include "core/dom/ContextLifecycleObserver.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class DOMWindow;
 class AnimationWorklet;
+class DOMWindow;
+class LocalDOMWindow;
 class Worklet;
 
-class MODULES_EXPORT WindowAnimationWorklet final : public GarbageCollected<WindowAnimationWorklet>, public Supplement<LocalDOMWindow>, public DOMWindowProperty {
-    USING_GARBAGE_COLLECTED_MIXIN(WindowAnimationWorklet);
-public:
-    static WindowAnimationWorklet& from(LocalDOMWindow&);
-    static Worklet* animationWorklet(DOMWindow&);
-    AnimationWorklet* animationWorklet();
+class MODULES_EXPORT WindowAnimationWorklet final
+    : public GarbageCollected<WindowAnimationWorklet>,
+      public Supplement<LocalDOMWindow>,
+      public ContextLifecycleObserver {
+  USING_GARBAGE_COLLECTED_MIXIN(WindowAnimationWorklet);
 
-    DECLARE_TRACE();
+ public:
+  static WindowAnimationWorklet& from(LocalDOMWindow&);
+  static Worklet* animationWorklet(DOMWindow&);
+  AnimationWorklet* animationWorklet(LocalDOMWindow&);
 
-private:
-    explicit WindowAnimationWorklet(LocalDOMWindow&);
-    static const char* supplementName();
+  void contextDestroyed(ExecutionContext*) override;
 
-    Member<AnimationWorklet> m_animationWorklet;
+  DECLARE_TRACE();
+
+ private:
+  explicit WindowAnimationWorklet(LocalDOMWindow&);
+  static const char* supplementName();
+
+  Member<AnimationWorklet> m_animationWorklet;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WindowAnimationWorklet_h
+#endif  // WindowAnimationWorklet_h

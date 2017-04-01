@@ -5,17 +5,16 @@
  * found in the LICENSE file.
  */
 
+#include "Test.h"
+
+#ifdef SK_SUPPORT_PDF
+
 #include "SkDeflate.h"
 #include "SkRandom.h"
-#include "Test.h"
 
 namespace {
 
-#ifdef ZLIB_INCLUDE
-    #include ZLIB_INCLUDE
-#else
-    #include "zlib.h"
-#endif
+#include "zlib.h"
 
 // Different zlib implementations use different T.
 // We've seen size_t and unsigned.
@@ -105,7 +104,7 @@ SkStreamAsset* stream_inflate(skiatest::Reporter* reporter, SkStream* src) {
 }
 }  // namespace
 
-DEF_TEST(SkDeflateWStream, r) {
+DEF_TEST(SkPDF_DeflateWStream, r) {
     SkRandom random(123456);
     for (int i = 0; i < 50; ++i) {
         uint32_t size = random.nextULessThan(10000);
@@ -127,10 +126,10 @@ DEF_TEST(SkDeflateWStream, r) {
                 }
                 j += writeSize;
             }
+            REPORTER_ASSERT(r, deflateWStream.bytesWritten() == size);
         }
-        SkAutoTDelete<SkStreamAsset> compressed(
-                dynamicMemoryWStream.detachAsStream());
-        SkAutoTDelete<SkStreamAsset> decompressed(stream_inflate(r, compressed));
+        std::unique_ptr<SkStreamAsset> compressed(dynamicMemoryWStream.detachAsStream());
+        std::unique_ptr<SkStreamAsset> decompressed(stream_inflate(r, compressed.get()));
 
         if (!decompressed) {
             ERRORF(r, "Decompression failed.");
@@ -163,4 +162,8 @@ DEF_TEST(SkDeflateWStream, r) {
             }
         }
     }
+    SkDeflateWStream emptyDeflateWStream(nullptr);
+    REPORTER_ASSERT(r, !emptyDeflateWStream.writeText("FOO"));
 }
+
+#endif

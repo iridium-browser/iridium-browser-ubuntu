@@ -10,6 +10,8 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLElement.h"
+#include "core/layout/api/LayoutAPIShim.h"
+#include "core/layout/api/LayoutViewItem.h"
 #include "core/loader/EmptyClients.h"
 #include "core/testing/DummyPageHolder.h"
 #include "wtf/Allocator.h"
@@ -18,93 +20,103 @@
 
 namespace blink {
 
-class RenderingTest : public testing::Test {
-    USING_FAST_MALLOC(RenderingTest);
-public:
-    virtual FrameSettingOverrideFunction settingOverrider() const { return nullptr; }
-
-    RenderingTest(FrameLoaderClient* = nullptr);
-
-protected:
-    void SetUp() override;
-    void TearDown() override;
-
-    Document& document() const { return m_pageHolder->document(); }
-
-    // Both sets the inner html and runs the document lifecycle.
-    void setBodyInnerHTML(const String& htmlContent)
-    {
-        document().body()->setInnerHTML(htmlContent, ASSERT_NO_EXCEPTION);
-        document().view()->updateAllLifecyclePhases();
-    }
-
-    // Returns the Document for the iframe.
-    Document& setupChildIframe(const AtomicString& iframeElementId, const String& htmlContentOfIframe);
-
-    // Both enables compositing and runs the document lifecycle.
-    void enableCompositing()
-    {
-        m_pageHolder->page().settings().setAcceleratedCompositingEnabled(true);
-        document().view()->setParentVisible(true);
-        document().view()->setSelfVisible(true);
-        document().view()->updateAllLifecyclePhases();
-    }
-
-    LayoutObject* getLayoutObjectByElementId(const char* id) const
-    {
-        Node* node = document().getElementById(id);
-        return node ? node->layoutObject() : nullptr;
-    }
-
-private:
-    Persistent<LocalFrame> m_subframe;
-    Persistent<FrameLoaderClient> m_frameLoaderClient;
-    Persistent<FrameLoaderClient> m_childFrameLoaderClient;
-    std::unique_ptr<DummyPageHolder> m_pageHolder;
-};
-
 class SingleChildFrameLoaderClient final : public EmptyFrameLoaderClient {
-public:
-    static SingleChildFrameLoaderClient* create() { return new SingleChildFrameLoaderClient; }
+ public:
+  static SingleChildFrameLoaderClient* create() {
+    return new SingleChildFrameLoaderClient();
+  }
 
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_child);
-        EmptyFrameLoaderClient::trace(visitor);
-    }
+  DEFINE_INLINE_VIRTUAL_TRACE() {
+    visitor->trace(m_child);
+    EmptyFrameLoaderClient::trace(visitor);
+  }
 
-    Frame* firstChild() const override { return m_child.get(); }
-    Frame* lastChild() const override { return m_child.get(); }
+  // FrameLoaderClient overrides:
+  LocalFrame* firstChild() const override { return m_child.get(); }
+  LocalFrame* createFrame(const FrameLoadRequest&,
+                          const AtomicString& name,
+                          HTMLFrameOwnerElement*) override;
 
-    void setChild(Frame* child) { m_child = child; }
+  void didDetachChild() { m_child = nullptr; }
 
-private:
-    SingleChildFrameLoaderClient() : m_child(nullptr) { }
+ private:
+  explicit SingleChildFrameLoaderClient() {}
 
-    Member<Frame> m_child;
+  Member<LocalFrame> m_child;
 };
 
 class FrameLoaderClientWithParent final : public EmptyFrameLoaderClient {
-public:
-    static FrameLoaderClientWithParent* create(Frame* parent)
-    {
-        return new FrameLoaderClientWithParent(parent);
-    }
+ public:
+  static FrameLoaderClientWithParent* create(LocalFrame* parent) {
+    return new FrameLoaderClientWithParent(parent);
+  }
 
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_parent);
-        EmptyFrameLoaderClient::trace(visitor);
-    }
+  DEFINE_INLINE_VIRTUAL_TRACE() {
+    visitor->trace(m_parent);
+    EmptyFrameLoaderClient::trace(visitor);
+  }
 
-    Frame* parent() const override { return m_parent.get(); }
+  // FrameClient overrides:
+  void detached(FrameDetachType) override;
+  LocalFrame* parent() const override { return m_parent.get(); }
 
-private:
-    explicit FrameLoaderClientWithParent(Frame* parent) : m_parent(parent) { }
+ private:
+  explicit FrameLoaderClientWithParent(LocalFrame* parent) : m_parent(parent) {}
 
-    Member<Frame> m_parent;
+  Member<LocalFrame> m_parent;
 };
 
-} // namespace blink
+class RenderingTest : public testing::Test {
+  USING_FAST_MALLOC(RenderingTest);
 
-#endif // LayoutTestHelper_h
+ public:
+  virtual FrameSettingOverrideFunction settingOverrider() const {
+    return nullptr;
+  }
+  virtual ChromeClient& chromeClient() const;
+
+  RenderingTest(FrameLoaderClient* = nullptr);
+
+ protected:
+  void SetUp() override;
+  void TearDown() override;
+
+  Document& document() const { return m_pageHolder->document(); }
+  LayoutView& layoutView() const {
+    return *toLayoutView(
+        LayoutAPIShim::layoutObjectFrom(document().view()->layoutViewItem()));
+  }
+
+  // Both sets the inner html and runs the document lifecycle.
+  void setBodyInnerHTML(const String& htmlContent) {
+    document().body()->setInnerHTML(htmlContent, ASSERT_NO_EXCEPTION);
+    document().view()->updateAllLifecyclePhases();
+  }
+
+  Document& childDocument() {
+    return *toLocalFrame(m_pageHolder->frame().tree().firstChild())->document();
+  }
+
+  void setChildFrameHTML(const String&);
+
+  // Both enables compositing and runs the document lifecycle.
+  void enableCompositing() {
+    m_pageHolder->page().settings().setAcceleratedCompositingEnabled(true);
+    document().view()->setParentVisible(true);
+    document().view()->setSelfVisible(true);
+    document().view()->updateAllLifecyclePhases();
+  }
+
+  LayoutObject* getLayoutObjectByElementId(const char* id) const {
+    Node* node = document().getElementById(id);
+    return node ? node->layoutObject() : nullptr;
+  }
+
+ private:
+  Persistent<FrameLoaderClient> m_frameLoaderClient;
+  std::unique_ptr<DummyPageHolder> m_pageHolder;
+};
+
+}  // namespace blink
+
+#endif  // LayoutTestHelper_h

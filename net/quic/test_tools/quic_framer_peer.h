@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "net/quic/core/crypto/quic_encrypter.h"
 #include "net/quic/core/quic_framer.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 
 namespace net {
 
@@ -25,6 +25,8 @@ class QuicFramerPeer {
                                             QuicConnectionId connection_id);
   static void SetLastPacketNumber(QuicFramer* framer,
                                   QuicPacketNumber packet_number);
+  static void SetLargestPacketNumber(QuicFramer* framer,
+                                     QuicPacketNumber packet_number);
   static void SetPerspective(QuicFramer* framer, Perspective perspective);
 
   // SwapCrypters exchanges the state of the crypters of |framer1| with

@@ -43,11 +43,28 @@ Polymer({
      * @private {!Array<string>}
      */
     yearList_: Array,
+
+    /** @private */
+    expirationYear_: String,
+
+    /** @private {string|undefined} */
+    expirationMonth_: String,
   },
 
   behaviors: [
     I18nBehavior,
   ],
+
+  /**
+   * @return {boolean} True iff the provided expiration date is passed.
+   * @private
+   */
+  checkIfCardExpired_: function(expirationMonth_, expirationYear_) {
+    var now = new Date();
+    return (expirationYear_ < now.getFullYear() ||
+           (expirationYear_ == now.getFullYear() &&
+            expirationMonth_ <= now.getMonth()));
+  },
 
   /** @override */
   attached: function() {
@@ -77,10 +94,11 @@ Polymer({
     }
     this.yearList_ = yearList;
 
-    this.expirationYear = this.creditCard.expirationYear;
-    this.expirationMonth = this.creditCard.expirationMonth;
-
-    this.$.dialog.showModal();
+    this.async(function() {
+      this.expirationYear_ = selectedYear.toString();
+      this.expirationMonth_ = this.creditCard.expirationMonth;
+      this.$.dialog.showModal();
+    }.bind(this));
   },
 
   /** Closes the dialog. */
@@ -101,10 +119,25 @@ Polymer({
    * @private
    */
   onSaveButtonTap_: function() {
-    this.creditCard.expirationYear = this.expirationYear;
-    this.creditCard.expirationMonth = this.expirationMonth;
-    this.fire('save-credit-card', this.creditCard);
-    this.close();
+    // If the card is expired, reflect the error to the user.
+    // Otherwise, update the card, save and close the dialog.
+    if (!this.checkIfCardExpired_(this.expirationMonth_,
+                                  this.expirationYear_)) {
+      this.creditCard.expirationYear = this.expirationYear_;
+      this.creditCard.expirationMonth = this.expirationMonth_;
+      this.fire('save-credit-card', this.creditCard);
+      this.close();
+    }
+  },
+
+  /** @private */
+  onMonthChange_: function() {
+    this.expirationMonth_ = this.monthList_[this.$.month.selectedIndex];
+  },
+
+  /** @private */
+  onYearChange_: function() {
+    this.expirationYear_ = this.yearList_[this.$.year.selectedIndex];
   },
 });
 })();

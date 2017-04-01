@@ -14,8 +14,9 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner_helpers.h"
 #include "base/threading/non_thread_safe.h"
 #include "content/common/content_export.h"
 
@@ -40,7 +41,7 @@ struct ResourceResponse;
 class CONTENT_EXPORT ResourceHandler
     : public NON_EXPORTED_BASE(base::NonThreadSafe) {
  public:
-  virtual ~ResourceHandler() {}
+  virtual ~ResourceHandler();
 
   // Sets the controller for this handler.
   virtual void SetController(ResourceController* controller);
@@ -92,7 +93,6 @@ class CONTENT_EXPORT ResourceHandler
   // |*defer| to true to defer destruction to a later time.  Otherwise, the
   // request will be destroyed upon return.
   virtual void OnResponseCompleted(const net::URLRequestStatus& status,
-                                   const std::string& security_info,
                                    bool* defer) = 0;
 
   // This notification is synthesized by the RedirectToFileResourceHandler
@@ -115,6 +115,8 @@ class CONTENT_EXPORT ResourceHandler
  private:
   ResourceController* controller_;
   net::URLRequest* request_;
+
+  DISALLOW_COPY_AND_ASSIGN(ResourceHandler);
 };
 
 }  // namespace content

@@ -6,7 +6,9 @@
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_TEST_AUTOFILL_CLIENT_H_
 
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/i18n/rtl.h"
@@ -29,9 +31,9 @@ class TestAutofillClient : public AutofillClient {
   PersonalDataManager* GetPersonalDataManager() override;
   scoped_refptr<AutofillWebDataService> GetDatabase() override;
   PrefService* GetPrefs() override;
-  sync_driver::SyncService* GetSyncService() override;
+  syncer::SyncService* GetSyncService() override;
   IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporService* GetRapporService() override;
+  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
                         UnmaskCardReason reason,
@@ -68,16 +70,13 @@ class TestAutofillClient : public AutofillClient {
   bool IsContextSecure(const GURL& form_origin) override;
   bool ShouldShowSigninPromo() override;
   void StartSigninFlow() override;
-
-  void set_is_context_secure(bool is_context_secure) {
-    is_context_secure_ = is_context_secure;
-  };
+  void ShowHttpNotSecureExplanation() override;
 
   void SetPrefs(std::unique_ptr<PrefService> prefs) {
     prefs_ = std::move(prefs);
   }
 
-  rappor::TestRapporService* test_rappor_service() {
+  rappor::TestRapporServiceImpl* test_rappor_service() {
     return rappor_service_.get();
   }
 
@@ -86,9 +85,7 @@ class TestAutofillClient : public AutofillClient {
   std::unique_ptr<PrefService> prefs_;
   std::unique_ptr<FakeOAuth2TokenService> token_service_;
   std::unique_ptr<FakeIdentityProvider> identity_provider_;
-  std::unique_ptr<rappor::TestRapporService> rappor_service_;
-
-  bool is_context_secure_;
+  std::unique_ptr<rappor::TestRapporServiceImpl> rappor_service_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillClient);
 };

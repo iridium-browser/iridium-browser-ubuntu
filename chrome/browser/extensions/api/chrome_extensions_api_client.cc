@@ -8,10 +8,12 @@
 #include "base/files/file_path.h"
 #include "base/memory/ptr_util.h"
 #include "build/build_config.h"
+#include "chrome/browser/data_use_measurement/data_use_web_contents_observer.h"
 #include "chrome/browser/extensions/api/chrome_device_permissions_prompt.h"
 #include "chrome/browser/extensions/api/declarative_content/chrome_content_rules_registry.h"
 #include "chrome/browser/extensions/api/declarative_content/default_content_predicate_evaluators.h"
 #include "chrome/browser/extensions/api/management/chrome_management_api_delegate.h"
+#include "chrome/browser/extensions/api/metrics_private/chrome_metrics_private_delegate.h"
 #include "chrome/browser/extensions/api/storage/managed_value_store_cache.h"
 #include "chrome/browser/extensions/api/storage/sync_value_store_cache.h"
 #include "chrome/browser/extensions/api/web_request/chrome_extension_web_request_event_router_delegate.h"
@@ -30,19 +32,21 @@
 #include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_delegate.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
+#include "printing/features/features.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/extensions/api/virtual_keyboard_private/chrome_virtual_keyboard_delegate.h"
+#include "chrome/browser/extensions/clipboard_extension_helper_chromeos.h"
 #endif
 
-#if defined(ENABLE_PRINTING)
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_PRINT_PREVIEW)
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 
 namespace extensions {
 
@@ -68,18 +72,20 @@ void ChromeExtensionsAPIClient::AddAdditionalValueStoreCaches(
 void ChromeExtensionsAPIClient::AttachWebContentsHelpers(
     content::WebContents* web_contents) const {
   favicon::CreateContentFaviconDriverForWebContents(web_contents);
-#if defined(ENABLE_PRINTING)
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   printing::PrintViewManager::CreateForWebContents(web_contents);
   printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
 #else
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
-#endif  // defined(ENABLE_PRINT_PREVIEW)
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
   pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
       web_contents, std::unique_ptr<pdf::PDFWebContentsHelperClient>(
                         new ChromePDFWebContentsHelperClient()));
 
+  data_use_measurement::DataUseWebContentsObserver::CreateForWebContents(
+      web_contents);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
 }
@@ -98,13 +104,13 @@ ChromeExtensionsAPIClient::CreateExtensionOptionsGuestDelegate(
 std::unique_ptr<guest_view::GuestViewManagerDelegate>
 ChromeExtensionsAPIClient::CreateGuestViewManagerDelegate(
     content::BrowserContext* context) const {
-  return base::WrapUnique(new ChromeGuestViewManagerDelegate(context));
+  return base::MakeUnique<ChromeGuestViewManagerDelegate>(context);
 }
 
 std::unique_ptr<MimeHandlerViewGuestDelegate>
 ChromeExtensionsAPIClient::CreateMimeHandlerViewGuestDelegate(
     MimeHandlerViewGuest* guest) const {
-  return base::WrapUnique(new ChromeMimeHandlerViewGuestDelegate());
+  return base::MakeUnique<ChromeMimeHandlerViewGuestDelegate>();
 }
 
 WebViewGuestDelegate* ChromeExtensionsAPIClient::CreateWebViewGuestDelegate(
@@ -120,7 +126,7 @@ WebViewPermissionHelperDelegate* ChromeExtensionsAPIClient::
 
 std::unique_ptr<WebRequestEventRouterDelegate>
 ChromeExtensionsAPIClient::CreateWebRequestEventRouterDelegate() const {
-  return base::WrapUnique(new ChromeExtensionWebRequestEventRouterDelegate());
+  return base::MakeUnique<ChromeExtensionWebRequestEventRouterDelegate>();
 }
 
 scoped_refptr<ContentRulesRegistry>
@@ -138,13 +144,13 @@ ChromeExtensionsAPIClient::CreateContentRulesRegistry(
 std::unique_ptr<DevicePermissionsPrompt>
 ChromeExtensionsAPIClient::CreateDevicePermissionsPrompt(
     content::WebContents* web_contents) const {
-  return base::WrapUnique(new ChromeDevicePermissionsPrompt(web_contents));
+  return base::MakeUnique<ChromeDevicePermissionsPrompt>(web_contents);
 }
 
 std::unique_ptr<VirtualKeyboardDelegate>
 ChromeExtensionsAPIClient::CreateVirtualKeyboardDelegate() const {
 #if defined(OS_CHROMEOS)
-  return base::WrapUnique(new ChromeVirtualKeyboardDelegate());
+  return base::MakeUnique<ChromeVirtualKeyboardDelegate>();
 #else
   return nullptr;
 #endif
@@ -154,5 +160,24 @@ ManagementAPIDelegate* ChromeExtensionsAPIClient::CreateManagementAPIDelegate()
     const {
   return new ChromeManagementAPIDelegate;
 }
+
+MetricsPrivateDelegate* ChromeExtensionsAPIClient::GetMetricsPrivateDelegate() {
+  if (!metrics_private_delegate_)
+    metrics_private_delegate_.reset(new ChromeMetricsPrivateDelegate());
+  return metrics_private_delegate_.get();
+}
+
+#if defined(OS_CHROMEOS)
+void ChromeExtensionsAPIClient::SaveImageDataToClipboard(
+    const std::vector<char>& image_data,
+    api::clipboard::ImageType type,
+    const base::Closure& success_callback,
+    const base::Callback<void(const std::string&)>& error_callback) {
+  if (!clipboard_extension_helper_)
+    clipboard_extension_helper_ = base::MakeUnique<ClipboardExtensionHelper>();
+  clipboard_extension_helper_->DecodeAndSaveImageData(
+      image_data, type, success_callback, error_callback);
+}
+#endif
 
 }  // namespace extensions

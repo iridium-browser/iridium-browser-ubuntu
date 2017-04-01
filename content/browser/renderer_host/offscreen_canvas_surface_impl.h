@@ -5,47 +5,45 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_OFFSCREEN_CANVAS_SURFACE_IMPL_H_
 #define CONTENT_BROWSER_RENDERER_HOST_OFFSCREEN_CANVAS_SURFACE_IMPL_H_
 
-#include "cc/surfaces/surface_factory.h"
-#include "cc/surfaces/surface_factory_client.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_id_allocator.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/string.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/WebKit/public/platform/modules/offscreencanvas/offscreen_canvas_surface.mojom.h"
 
 namespace content {
 
-class OffscreenCanvasSurfaceImpl : public blink::mojom::OffscreenCanvasSurface,
-                                   public cc::SurfaceFactoryClient {
+class CONTENT_EXPORT OffscreenCanvasSurfaceImpl
+    : public blink::mojom::OffscreenCanvasSurface {
  public:
-  static void Create(
-      mojo::InterfaceRequest<blink::mojom::OffscreenCanvasSurface> request);
+  OffscreenCanvasSurfaceImpl(
+      const cc::FrameSinkId& frame_sink_id,
+      blink::mojom::OffscreenCanvasSurfaceClientPtr client);
+  ~OffscreenCanvasSurfaceImpl() override;
+
+  static void Create(const cc::FrameSinkId& frame_sink_id,
+                     blink::mojom::OffscreenCanvasSurfaceClientPtr client,
+                     blink::mojom::OffscreenCanvasSurfaceRequest request);
+
+  void OnSurfaceCreated(const cc::SurfaceInfo& surface_info);
 
   // blink::mojom::OffscreenCanvasSurface implementation.
-  void GetSurfaceId(const GetSurfaceIdCallback& callback) override;
-  void RequestSurfaceCreation(const cc::SurfaceId& surface_id) override;
   void Require(const cc::SurfaceId& surface_id,
                const cc::SurfaceSequence& sequence) override;
   void Satisfy(const cc::SurfaceSequence& sequence) override;
 
-  // cc::SurfaceFactoryClient implementation.
-  void ReturnResources(const cc::ReturnedResourceArray& resources) override;
-  void WillDrawSurface(const cc::SurfaceId& id,
-                       const gfx::Rect& damage_rect) override;
-  void SetBeginFrameSource(cc::BeginFrameSource* begin_frame_source) override;
+  const cc::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
+  const cc::LocalFrameId& current_local_frame_id() const {
+    return current_local_frame_id_;
+  }
 
  private:
-  ~OffscreenCanvasSurfaceImpl() override;
-  explicit OffscreenCanvasSurfaceImpl(
-      mojo::InterfaceRequest<blink::mojom::OffscreenCanvasSurface> request);
+  blink::mojom::OffscreenCanvasSurfaceClientPtr client_;
+  mojo::StrongBindingPtr<blink::mojom::OffscreenCanvasSurface> binding_;
 
   // Surface-related state
-  std::unique_ptr<cc::SurfaceIdAllocator> id_allocator_;
-  cc::SurfaceId surface_id_;
-  std::unique_ptr<cc::SurfaceFactory> surface_factory_;
-
-  mojo::StrongBinding<blink::mojom::OffscreenCanvasSurface> binding_;
+  cc::FrameSinkId frame_sink_id_;
+  cc::LocalFrameId current_local_frame_id_;
 
   DISALLOW_COPY_AND_ASSIGN(OffscreenCanvasSurfaceImpl);
 };

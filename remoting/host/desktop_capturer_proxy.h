@@ -23,24 +23,29 @@ class DesktopCaptureOptions;
 
 namespace remoting {
 
-namespace protocol {
-class CursorShapeInfo;
-}  // namespace protocol
-
 // DesktopCapturerProxy is responsible for calling webrtc::DesktopCapturer on
 // the capturer thread and then returning results to the caller's thread.
+// GetSourceList() and SelectSource() functions are not implemented by this
+// class, they always return false.
 class DesktopCapturerProxy : public webrtc::DesktopCapturer {
  public:
-  DesktopCapturerProxy(
-      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
-      const webrtc::DesktopCaptureOptions& options);
+  explicit DesktopCapturerProxy(
+      scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner);
   ~DesktopCapturerProxy() override;
+
+  // CreateCapturer() should be used if the capturer needs to be created on the
+  // capturer thread. Alternatively the capturer can be passed to
+  // set_capturer().
+  void CreateCapturer(const webrtc::DesktopCaptureOptions& options);
+  void set_capturer(std::unique_ptr<webrtc::DesktopCapturer> capturer);
 
   // webrtc::DesktopCapturer interface.
   void Start(Callback* callback) override;
   void SetSharedMemoryFactory(std::unique_ptr<webrtc::SharedMemoryFactory>
                                   shared_memory_factory) override;
-  void Capture(const webrtc::DesktopRegion& rect) override;
+  void CaptureFrame() override;
+  bool GetSourceList(SourceList* sources) override;
+  bool SelectSource(SourceId id) override;
 
  private:
   class Core;

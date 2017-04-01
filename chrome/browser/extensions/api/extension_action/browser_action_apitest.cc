@@ -4,6 +4,9 @@
 
 #include <stdint.h>
 
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
@@ -23,8 +26,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/extensions/extension_process_policy.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
@@ -41,7 +46,6 @@
 #include "extensions/common/feature_switch.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
-#include "grit/theme_resources.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -63,6 +67,18 @@ void ExecuteExtensionAction(Browser* browser, const Extension* extension) {
   ExtensionActionRunner::GetForWebContents(
       browser->tab_strip_model()->GetActiveWebContents())
       ->RunAction(extension, true);
+}
+
+std::unique_ptr<base::ScopedTempDir> CreateAndSetDownloadsDirectory(
+    PrefService* pref_service) {
+  std::unique_ptr<base::ScopedTempDir> dir(new base::ScopedTempDir);
+
+  if (!dir->CreateUniqueTempDir())
+    return nullptr;
+
+  pref_service->SetFilePath(prefs::kDownloadDefaultDirectory, dir->GetPath());
+  pref_service->SetFilePath(prefs::kSaveFileDefaultDirectory, dir->GetPath());
+  return dir;
 }
 
 // An ImageSkia source that will do nothing (i.e., have a blank skia). We need
@@ -778,7 +794,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionOpenPopupOnPopup) {
   // Open a new web popup window.
   chrome::NavigateParams params(browser(), GURL("http://www.google.com/"),
                                 ui::PAGE_TRANSITION_LINK);
-  params.disposition = NEW_POPUP;
+  params.disposition = WindowOpenDisposition::NEW_POPUP;
   params.window_action = chrome::NavigateParams::SHOW_WINDOW;
   ui_test_utils::NavigateToURL(&params);
   Browser* popup_browser = params.browser;
@@ -993,6 +1009,14 @@ IN_PROC_BROWSER_TEST_F(NavigatingExtensionPopupBrowserTest,
 // TODO(lukasza): https://crbug.com/650694: Add a "Get" flavour of the test once
 // the download works both for GET and POST requests.
 IN_PROC_BROWSER_TEST_F(NavigatingExtensionPopupBrowserTest, DownloadViaPost) {
+  // Override the default downloads directory, so that the test can cleanup
+  // after itself.  This section is based on CreateAndSetDownloadsDirectory
+  // method defined in a few other source files with tests.
+  std::unique_ptr<base::ScopedTempDir> downloads_directory =
+      CreateAndSetDownloadsDirectory(browser()->profile()->GetPrefs());
+  ASSERT_TRUE(downloads_directory);
+
+  // Setup monitoring of the downloads.
   content::DownloadTestObserverTerminal downloads_observer(
       content::BrowserContext::GetDownloadManager(browser()->profile()),
       1,  // == wait_count (only waiting for "download-test3.gif").
@@ -1010,6 +1034,8 @@ IN_PROC_BROWSER_TEST_F(NavigatingExtensionPopupBrowserTest, DownloadViaPost) {
   EXPECT_EQ(0u, downloads_observer.NumDangerousDownloadsSeen());
   EXPECT_EQ(1u, downloads_observer.NumDownloadsSeenInState(
                     content::DownloadItem::COMPLETE));
+  EXPECT_TRUE(base::PathExists(downloads_directory->GetPath().AppendASCII(
+      "download-test3-attachment.gif")));
 
   // The test verification below is applicable only to scenarios where the
   // download shelf is supported - on ChromeOS, instead of the download shelf,

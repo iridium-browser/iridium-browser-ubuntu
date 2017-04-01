@@ -4,10 +4,11 @@
 
 #include "chrome/browser/chromeos/dbus/chrome_display_power_service_provider_delegate.h"
 
+#include "ash/common/wm/screen_dimmer.h"
 #include "ash/shell.h"
-#include "ash/wm/screen_dimmer.h"
+#include "base/memory/ptr_util.h"
 #include "ui/base/user_activity/user_activity_detector.h"
-#include "ui/display/chromeos/display_configurator.h"
+#include "ui/display/manager/chromeos/display_configurator.h"
 
 namespace chromeos {
 
@@ -29,11 +30,16 @@ void ChromeDisplayPowerServiceProviderDelegate::SetDisplayPower(
   ui::UserActivityDetector::Get()->OnDisplayPowerChanging();
 
   ash::Shell::GetInstance()->display_configurator()->SetDisplayPower(
-      power_state, ui::DisplayConfigurator::kSetDisplayPowerNoFlags, callback);
+      power_state, display::DisplayConfigurator::kSetDisplayPowerNoFlags,
+      callback);
 }
 
 void ChromeDisplayPowerServiceProviderDelegate::SetDimming(bool dimmed) {
-  ash::ScreenDimmer::GetForRoot()->SetDimming(dimmed);
+  if (!screen_dimmer_) {
+    screen_dimmer_ =
+        base::MakeUnique<ash::ScreenDimmer>(ash::ScreenDimmer::Container::ROOT);
+  }
+  screen_dimmer_->SetDimming(dimmed);
 }
 
 }  // namespace chromeos

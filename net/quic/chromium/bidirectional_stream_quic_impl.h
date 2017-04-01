@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_BIDIRECTIONAL_STREAM_QUIC_IMPL_H_
-#define NET_QUIC_BIDIRECTIONAL_STREAM_QUIC_IMPL_H_
+#ifndef NET_QUIC_CHROMIUM_BIDIRECTIONAL_STREAM_QUIC_IMPL_H_
+#define NET_QUIC_CHROMIUM_BIDIRECTIONAL_STREAM_QUIC_IMPL_H_
 
 #include <stdint.h>
 
@@ -12,8 +12,9 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "net/base/load_timing_info.h"
+#include "net/base/net_export.h"
 #include "net/http/bidirectional_stream_impl.h"
-#include "net/log/net_log.h"
 #include "net/quic/chromium/quic_chromium_client_session.h"
 #include "net/quic/chromium/quic_chromium_client_stream.h"
 #include "net/spdy/spdy_header_block.h"
@@ -39,7 +40,7 @@ class NET_EXPORT_PRIVATE BidirectionalStreamQuicImpl
 
   // BidirectionalStreamImpl implementation:
   void Start(const BidirectionalStreamRequestInfo* request_info,
-             const BoundNetLog& net_log,
+             const NetLogWithSource& net_log,
              bool send_request_headers_automatically,
              BidirectionalStreamImpl::Delegate* delegate,
              std::unique_ptr<base::Timer> timer) override;
@@ -54,6 +55,7 @@ class NET_EXPORT_PRIVATE BidirectionalStreamQuicImpl
   NextProto GetProtocol() const override;
   int64_t GetTotalReceivedBytes() const override;
   int64_t GetTotalSentBytes() const override;
+  bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
 
  private:
   // QuicChromiumClientStream::Delegate implementation:
@@ -66,6 +68,7 @@ class NET_EXPORT_PRIVATE BidirectionalStreamQuicImpl
 
   // QuicChromiumClientSession::Observer implementation:
   void OnCryptoHandshakeConfirmed() override;
+  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
   void OnSessionClosed(int error, bool port_migration_detected) override;
 
   void OnStreamReady(int rv);
@@ -93,6 +96,10 @@ class NET_EXPORT_PRIVATE BidirectionalStreamQuicImpl
 
   // The protocol that is negotiated.
   NextProto negotiated_protocol_;
+  // Connect timing information for this stream. Populated when headers are
+  // received.
+  LoadTimingInfo::ConnectTiming connect_timing_;
+
   // User provided read buffer for ReadData() response.
   scoped_refptr<IOBuffer> read_buffer_;
   int read_buffer_len_;
@@ -107,6 +114,10 @@ class NET_EXPORT_PRIVATE BidirectionalStreamQuicImpl
   // After |stream_| has been closed, this keeps track of the total number of
   // bytes sent over the network for |stream_| while it was open.
   int64_t closed_stream_sent_bytes_;
+  // True if the stream is the first stream negotiated on the session. Set when
+  // the stream was closed. If |stream_| is failed to be created, this takes on
+  // the default value of false.
+  bool closed_is_first_stream_;
   // Indicates whether initial headers have been sent.
   bool has_sent_headers_;
   // Indicates whether initial headers have been received.
@@ -129,4 +140,4 @@ class NET_EXPORT_PRIVATE BidirectionalStreamQuicImpl
 
 }  // namespace net
 
-#endif  // NET_QUIC_BIDIRECTIONAL_STREAM_QUIC_IMPL_H_
+#endif  // NET_QUIC_CHROMIUM_BIDIRECTIONAL_STREAM_QUIC_IMPL_H_

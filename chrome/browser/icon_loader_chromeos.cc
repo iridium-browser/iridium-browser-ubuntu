@@ -17,8 +17,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
-#include "chrome/browser/icon_loader.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -184,14 +183,9 @@ int IconSizeToDIPSize(IconLoader::IconSize size) {
 }  // namespace
 
 // static
-IconGroupID IconLoader::ReadGroupIDFromFilepath(
-    const base::FilePath& filepath) {
-  return base::ToLowerASCII(filepath.Extension());
-}
-
-// static
-bool IconLoader::IsIconMutableFromFilepath(const base::FilePath&) {
-  return false;
+IconLoader::IconGroup IconLoader::GroupForFilepath(
+    const base::FilePath& file_path) {
+  return base::ToLowerASCII(file_path.Extension());
 }
 
 // static
@@ -209,5 +203,6 @@ void IconLoader::ReadIcon() {
   image_skia.MakeThreadSafe();
   image_.reset(new gfx::Image(image_skia));
   target_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&IconLoader::NotifyDelegate, this));
+      FROM_HERE, base::Bind(callback_, base::Passed(&image_), group_));
+  delete this;
 }

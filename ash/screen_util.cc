@@ -4,34 +4,23 @@
 
 #include "ash/screen_util.h"
 
-#include "ash/common/shelf/shelf_widget.h"
-#include "ash/display/display_manager.h"
+#include "ash/common/shelf/wm_shelf.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/display/display.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 namespace ash {
 
-namespace {
-DisplayManager* GetDisplayManager() {
-  return Shell::GetInstance()->display_manager();
-}
-}
-
-// static
-display::Display ScreenUtil::FindDisplayContainingPoint(
-    const gfx::Point& point) {
-  return GetDisplayManager()->FindDisplayContainingPoint(point);
-}
-
 // static
 gfx::Rect ScreenUtil::GetMaximizedWindowBoundsInParent(aura::Window* window) {
-  if (GetRootWindowController(window->GetRootWindow())->shelf_widget())
+  aura::Window* root_window = window->GetRootWindow();
+  if (GetRootWindowController(root_window)->wm_shelf()->shelf_widget())
     return GetDisplayWorkAreaBoundsInParent(window);
   else
     return GetDisplayBoundsInParent(window);
@@ -71,13 +60,5 @@ gfx::Rect ScreenUtil::ConvertRectFromScreen(aura::Window* window,
 }
 
 // static
-const display::Display& ScreenUtil::GetSecondaryDisplay() {
-  DisplayManager* display_manager = GetDisplayManager();
-  CHECK_LE(2U, display_manager->GetNumDisplays());
-  return display_manager->GetDisplayAt(0).id() ==
-                 display::Screen::GetScreen()->GetPrimaryDisplay().id()
-             ? display_manager->GetDisplayAt(1)
-             : display_manager->GetDisplayAt(0);
-}
 
 }  // namespace ash

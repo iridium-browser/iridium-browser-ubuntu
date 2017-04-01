@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 var fs = require("fs");
 var http = require("http");
-var https = require("https");
 var path = require("path");
 var parseURL = require("url").parse;
-var Stream = require("stream").Transform;
+
+var utils = require("../utils");
 
 var remoteDebuggingPort = parseInt(process.env.REMOTE_DEBUGGING_PORT, 10) || 9222;
 var serverPort = parseInt(process.env.PORT, 10) || 8090;
@@ -16,13 +16,13 @@ http.createServer(requestHandler).listen(serverPort);
 console.log(`Started hosted mode server at http://localhost:${serverPort}\n`);
 console.log("For info on using the hosted mode server, see our contributing docs:");
 console.log("https://bit.ly/devtools-contribution-guide");
-console.log("Tip: Look for the 'Hosted Mode Server Options' section");
+console.log("Tip: Look for the 'Hosted Mode Server Options' section\n");
 
 function requestHandler(request, response)
 {
     var filePath = parseURL(request.url).pathname;
     if (filePath === "/") {
-        var landingURL = `http://localhost:${remoteDebuggingPort}#http://localhost:${serverPort}/front_end/inspector.html?experiments=true`;
+        var landingURL = `http://localhost:${remoteDebuggingPort}#custom=true&experiments=true`;
         sendResponse(200, `<html>Please go to <a href="${landingURL}">${landingURL}</a></html>`);
         return;
     }
@@ -98,7 +98,7 @@ function proxy(filePath)
         return null;
     if (process.env.CHROMIUM_COMMIT)
         return onProxyFileURL(proxyFilePathToURL[filePath](process.env.CHROMIUM_COMMIT));
-    return fetch(`http://localhost:${remoteDebuggingPort}/json/version`)
+    return utils.fetch(`http://localhost:${remoteDebuggingPort}/json/version`)
         .then(onBrowserMetadata)
         .then(onProxyFileURL);
 
@@ -115,8 +115,28 @@ function proxy(filePath)
     {
         if (proxyFileCache.has(proxyFileURL))
             return Promise.resolve(proxyFileCache.get(proxyFileURL));
-        return fetch(proxyFileURL)
-            .then(cacheProxyFile.bind(null, proxyFileURL));
+        return utils.fetch(proxyFileURL)
+            .then(cacheProxyFile.bind(null, proxyFileURL))
+            .catch(onMissingFile);
+    }
+
+    function onMissingFile() {
+        var isFullCheckout = utils.shellOutput("git config --get remote.origin.url") === "https://chromium.googlesource.com/chromium/src.git";
+        var earlierCommitHash;
+        var gitLogCommand = `git log --max-count=1 --grep="Commit-Position" --before="12 hours ago"`;
+        if (isFullCheckout) {
+            earlierCommitHash = utils.shellOutput(`${gitLogCommand} --pretty=format:"%H"`);
+        } else {
+            var commitMessage = utils.shellOutput(`${gitLogCommand}`);
+            earlierCommitHash = commitMessage.match(/Cr-Mirrored-Commit: (.*)/)[1];
+        }
+        var fallbackURL = proxyFilePathToURL[filePath](earlierCommitHash);
+        console.log("WARNING: Unable to fetch generated file based on browser's revision");
+        console.log("Fetching earlier revision of same file as fallback");
+        console.log("There may be a mismatch between the front-end and back-end");
+        console.log(fallbackURL, "\n");
+        return utils.fetch(fallbackURL)
+            .then(cacheProxyFile.bind(null, fallbackURL));
     }
 
     function cacheProxyFile(proxyFileURL, data)
@@ -125,36 +145,3 @@ function proxy(filePath)
         return data;
     }
 }
-
-function fetch(url)
-{
-    return new Promise(fetchPromise);
-
-    function fetchPromise(resolve, reject)
-    {
-        var request;
-        var protocol = parseURL(url).protocol;
-        var handleResponse = getCallback.bind(null, resolve, reject);
-        if (protocol === "https:") {
-            request = https.get(url, handleResponse);
-        } else if (protocol === "http:") {
-            request = http.get(url, handleResponse);
-        } else {
-            reject(new Error(`Invalid protocol for url: ${url}`));
-            return;
-        }
-        request.on("error", err => reject(err));
-    }
-
-    function getCallback(resolve, reject, response)
-    {
-        if (response.statusCode !== 200) {
-            reject(new Error(`Request error: + ${response.statusCode}`));
-            return;
-        }
-        var body = new Stream();
-        response.on("data", chunk => body.push(chunk));
-        response.on("end", () => resolve(body.read()));
-    }
-}
-

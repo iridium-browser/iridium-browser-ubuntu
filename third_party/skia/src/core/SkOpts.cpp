@@ -11,17 +11,32 @@
 #include "SkOpts.h"
 
 #if defined(SK_ARM_HAS_NEON)
-    #define SK_OPTS_NS neon
+    #if defined(SK_ARM_HAS_CRC32)
+        #define SK_OPTS_NS neon_and_crc32
+    #else
+        #define SK_OPTS_NS neon
+    #endif
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
+    #define SK_OPTS_NS avx2
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX
+    #define SK_OPTS_NS avx
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE42
+    #define SK_OPTS_NS sse42
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE41
+    #define SK_OPTS_NS sse41
 #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSSE3
     #define SK_OPTS_NS ssse3
 #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE3
     #define SK_OPTS_NS sse3
 #elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE2
     #define SK_OPTS_NS sse2
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE1
+    #define SK_OPTS_NS sse
 #else
     #define SK_OPTS_NS portable
 #endif
 
+#include "SkBitmapFilter_opts.h"
 #include "SkBlend_opts.h"
 #include "SkBlitMask_opts.h"
 #include "SkBlitRow_opts.h"
@@ -29,6 +44,7 @@
 #include "SkChecksum_opts.h"
 #include "SkColorCubeFilter_opts.h"
 #include "SkMorphologyImageFilter_opts.h"
+#include "SkRasterPipeline_opts.h"
 #include "SkSwizzler_opts.h"
 #include "SkTextureCompressor_opts.h"
 #include "SkXfermode_opts.h"
@@ -73,6 +89,14 @@ namespace SkOpts {
     DEFINE_DEFAULT(srcover_srgb_srgb);
 
     DEFINE_DEFAULT(hash_fn);
+
+    DEFINE_DEFAULT(run_pipeline);
+    DEFINE_DEFAULT(compile_pipeline);
+
+    DEFINE_DEFAULT(convolve_vertically);
+    DEFINE_DEFAULT(convolve_horizontally);
+    DEFINE_DEFAULT(convolve_4_rows_horizontally);
+
 #undef DEFINE_DEFAULT
 
     // Each Init_foo() is defined in src/opts/SkOpts_foo.cpp.
@@ -80,7 +104,7 @@ namespace SkOpts {
     void Init_sse41();
     void Init_sse42();
     void Init_avx();
-    void Init_avx2() {}
+    void Init_hsw();
     void Init_crc32();
 
     static void init() {
@@ -90,7 +114,7 @@ namespace SkOpts {
         if (SkCpu::Supports(SkCpu::SSE41)) { Init_sse41(); }
         if (SkCpu::Supports(SkCpu::SSE42)) { Init_sse42(); }
         if (SkCpu::Supports(SkCpu::AVX  )) { Init_avx();   }
-        if (SkCpu::Supports(SkCpu::AVX2 )) { Init_avx2();  }
+        if (SkCpu::Supports(SkCpu::HSW  )) { Init_hsw();   }
 
     #elif defined(SK_CPU_ARM64)
         if (SkCpu::Supports(SkCpu::CRC32)) { Init_crc32(); }

@@ -16,9 +16,9 @@ from os.path import join as pathjoin
 from os.path import abspath as abspath
 
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import failures_lib
+from chromite.lib import config_lib
+from chromite.lib import constants
+from chromite.lib import failures_lib
 from chromite.cbuildbot import swarming_lib
 from chromite.cbuildbot import topology
 from chromite.lib import cros_build_lib
@@ -125,6 +125,7 @@ class RunTestSuiteTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
                           '/tmp/taco', archive_dir='/fake/root',
                           whitelist_chrome_crashes=False,
                           test_type=test_type)
+    self.assertCommandContains(['--no_graphics', '--verbose'])
 
   def testFull(self):
     """Test running FULL config."""
@@ -294,6 +295,12 @@ The suite job has another 2:39:39.789250 till timeout.
       swarming_hard_timeout_secs: swarming client hard timeout.
       swarming_expiration_secs: swarming task expiration.
     """
+    # Pull out the test priority for the swarming tag.
+    priority = None
+    priority_flag = '--priority'
+    if priority_flag in args:
+      priority = args[args.index(priority_flag) + 1]
+
     base_cmd = [swarming_lib._SWARMING_PROXY_CLIENT, 'run',
                 '--swarming', topology.topology.get(
                     topology.SWARMING_PROXY_HOST_KEY),
@@ -307,6 +314,11 @@ The suite job has another 2:39:39.789250 till timeout.
                 '--io-timeout', swarming_io_timeout_secs,
                 '--hard-timeout', swarming_hard_timeout_secs,
                 '--expiration', swarming_expiration_secs,
+                '--tags=priority:%s' % priority,
+                '--tags=suite:test-suite',
+                '--tags=build:test-build',
+                '--tags=task_name:test-build-test-suite',
+                '--tags=board:test-board',
                 '--', commands._RUN_SUITE_PATH,
                 '--build', 'test-build', '--board', 'test-board']
     args = list(args)
@@ -361,6 +373,7 @@ The suite job has another 2:39:39.789250 till timeout.
         self.json_dump_cmd,
         side_effect=lambda *args, **kwargs: dump_json_results.next(),
     )
+
   def PatchJson(self, task_outputs):
     """Mock out the code that loads from json.
 
@@ -621,6 +634,10 @@ class CBuildBotTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
     kwargs.setdefault('usepkg', default)
     kwargs.setdefault('chrome_binhost_only', default)
     kwargs.setdefault('skip_chroot_upgrade', default)
+
+    kwargs.setdefault('event_file',
+                      os.path.join(self._buildroot, 'events',
+                                   'build-test-events.json'))
     commands.Build(buildroot=self._buildroot, board='x86-generic', **kwargs)
     self.assertCommandContains(['./build_packages'])
 

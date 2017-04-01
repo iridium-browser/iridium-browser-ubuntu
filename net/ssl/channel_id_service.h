@@ -31,7 +31,6 @@ class ECPrivateKey;
 namespace net {
 
 class ChannelIDServiceJob;
-class ChannelIDServiceWorker;
 
 // A class for creating and fetching Channel IDs.
 
@@ -69,11 +68,6 @@ class NET_EXPORT ChannelIDService
     std::unique_ptr<crypto::ECPrivateKey>* key_;
     ChannelIDServiceJob* job_;
   };
-
-  // Password used on EncryptedPrivateKeyInfo data stored in EC private_key
-  // values.  (This is not used to provide any security, but to workaround NSS
-  // being unable to import unencrypted PrivateKeyInfo for EC keys.)
-  static const char kEPKIPassword[];
 
   // This object owns |channel_id_store|.  |task_runner| will
   // be used to post channel ID generation worker tasks.  The tasks are
@@ -179,7 +173,7 @@ class NET_EXPORT ChannelIDService
 
   // inflight_ maps from a server to an active generation which is taking
   // place.
-  std::map<std::string, ChannelIDServiceJob*> inflight_;
+  std::map<std::string, std::unique_ptr<ChannelIDServiceJob>> inflight_;
 
   uint64_t requests_;
   uint64_t key_store_hits_;

@@ -17,11 +17,6 @@ namespace base {
 class SequencedTaskRunner;
 }
 
-// TODO(michaelpg): Remove dependency on user_manager.
-namespace user_manager {
-class UserImage;
-}
-
 namespace chromeos {
 
 // Data source that reads and decodes an image from the RO file system.
@@ -34,8 +29,7 @@ class ImageSource : public content::URLDataSource {
   std::string GetSource() const override;
   void StartDataRequest(
       const std::string& path,
-      int render_process_id,
-      int render_frame_id,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& got_data_callback)
       override;
 

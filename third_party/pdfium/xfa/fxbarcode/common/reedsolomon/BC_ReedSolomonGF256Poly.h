@@ -7,7 +7,7 @@
 #ifndef XFA_FXBARCODE_COMMON_REEDSOLOMON_BC_REEDSOLOMONGF256POLY_H_
 #define XFA_FXBARCODE_COMMON_REEDSOLOMON_BC_REEDSOLOMONGF256POLY_H_
 
-#include "core/fxcrt/include/fx_basic.h"
+#include "core/fxcrt/fx_basic.h"
 
 class CBC_ReedSolomonGF256;
 
@@ -23,7 +23,7 @@ class CBC_ReedSolomonGF256Poly final {
   int32_t GetCoefficients(int32_t degree);
   CFX_Int32Array* GetCoefficients();
   int32_t GetDegree();
-  FX_BOOL IsZero();
+  bool IsZero();
   int32_t EvaluateAt(int32_t a);
   CBC_ReedSolomonGF256Poly* AddOrSubtract(CBC_ReedSolomonGF256Poly* other,
                                           int32_t& e);

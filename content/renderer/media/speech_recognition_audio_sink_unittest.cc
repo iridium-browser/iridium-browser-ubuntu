@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop.h"
 #include "content/renderer/media/media_stream_audio_source.h"
 #include "content/renderer/media/media_stream_audio_track.h"
 #include "content/renderer/media/webrtc/mock_peer_connection_dependency_factory.h"
@@ -387,6 +388,8 @@ class SpeechRecognitionAudioSinkTest : public testing::Test {
   base::TimeTicks first_frame_capture_time_;
   int64_t sample_frames_captured_;
 
+  base::MessageLoop message_loop_;
+
   DISALLOW_COPY_AND_ASSIGN(SpeechRecognitionAudioSinkTest);
 };
 
@@ -404,7 +407,6 @@ TEST_F(SpeechRecognitionAudioSinkTest, CheckIsSupportedAudioTrack) {
   p[MEDIA_TAB_VIDEO_CAPTURE] = false;
   p[MEDIA_DESKTOP_VIDEO_CAPTURE] = false;
   p[MEDIA_DESKTOP_AUDIO_CAPTURE] = false;
-  p[MEDIA_DEVICE_AUDIO_OUTPUT] = false;
 
   // Ensure this test gets updated along with |content::MediaStreamType| enum.
   EXPECT_EQ(NUM_MEDIA_TYPES, p.size());

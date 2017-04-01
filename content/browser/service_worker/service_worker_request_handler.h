@@ -32,17 +32,33 @@ class BlobStorageContext;
 namespace content {
 
 class ResourceContext;
-class ResourceMessageFilter;
 class ResourceRequestBodyImpl;
 class ServiceWorkerContextCore;
 class ServiceWorkerContextWrapper;
+class ServiceWorkerNavigationHandleCore;
 class ServiceWorkerProviderHost;
+class WebContents;
 
 // Abstract base class for routing network requests to ServiceWorkers.
 // Created one per URLRequest and attached to each request.
 class CONTENT_EXPORT ServiceWorkerRequestHandler
     : public base::SupportsUserData::Data {
  public:
+  // PlzNavigate
+  // Attaches a newly created handler if the given |request| needs to be handled
+  // by ServiceWorker.
+  static void InitializeForNavigation(
+      net::URLRequest* request,
+      ServiceWorkerNavigationHandleCore* navigation_handle_core,
+      storage::BlobStorageContext* blob_storage_context,
+      bool skip_service_worker,
+      ResourceType resource_type,
+      RequestContextType request_context_type,
+      RequestContextFrameType frame_type,
+      bool is_parent_frame_secure,
+      scoped_refptr<ResourceRequestBodyImpl> body,
+      const base::Callback<WebContents*(void)>& web_contents_getter);
+
   // Attaches a newly created handler if the given |request| needs to
   // be handled by ServiceWorker.
   // TODO(kinuko): While utilizing UserData to attach data to URLRequest

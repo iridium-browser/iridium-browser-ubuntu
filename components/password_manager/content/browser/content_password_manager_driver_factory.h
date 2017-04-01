@@ -11,16 +11,13 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/supports_user_data.h"
+#include "components/autofill/content/common/autofill_driver.mojom.h"
 #include "components/password_manager/core/browser/password_autofill_manager.h"
 #include "components/password_manager/core/browser/password_generation_manager.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
 #include "content/public/browser/web_contents_observer.h"
-
-namespace autofill {
-class AutofillManager;
-struct PasswordForm;
-}
+#include "third_party/WebKit/public/platform/modules/sensitive_input_visibility/sensitive_input_visibility_service.mojom.h"
 
 namespace content {
 class WebContents;
@@ -44,20 +41,22 @@ class ContentPasswordManagerDriverFactory
   static ContentPasswordManagerDriverFactory* FromWebContents(
       content::WebContents* web_contents);
 
+  static void BindPasswordManagerDriver(
+      content::RenderFrameHost* render_frame_host,
+      autofill::mojom::PasswordManagerDriverRequest request);
+
+  static void BindSensitiveInputVisibilityService(
+      content::RenderFrameHost* render_frame_host,
+      blink::mojom::SensitiveInputVisibilityServiceRequest request);
+
   ContentPasswordManagerDriver* GetDriverForFrame(
       content::RenderFrameHost* render_frame_host);
-
-  void TestingSetDriverForFrame(
-      content::RenderFrameHost* render_frame_host,
-      std::unique_ptr<ContentPasswordManagerDriver> driver);
 
   // Requests all drivers to inform their renderers whether
   // chrome://password-manager-internals is available.
   void RequestSendLoggingAvailability();
 
   // content::WebContentsObserver:
-  bool OnMessageReceived(const IPC::Message& message,
-                         content::RenderFrameHost* render_frame_host) override;
   void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void DidNavigateAnyFrame(content::RenderFrameHost* render_frame_host,

@@ -23,6 +23,15 @@ namespace sw
 	class VertexShader : public Shader
 	{
 	public:
+		enum AttribType : unsigned char
+		{
+			ATTRIBTYPE_FLOAT,
+			ATTRIBTYPE_INT,
+			ATTRIBTYPE_UINT,
+
+			ATTRIBTYPE_LAST = ATTRIBTYPE_UINT
+		};
+
 		explicit VertexShader(const VertexShader *vs = 0);
 		explicit VertexShader(const unsigned long *token);
 
@@ -31,21 +40,34 @@ namespace sw
 		static int validate(const unsigned long *const token);   // Returns number of instructions if valid
 		bool containsTextureSampling() const;
 
-		virtual void analyze();
+		void setInput(int inputIdx, const Semantic& semantic, AttribType attribType = ATTRIBTYPE_FLOAT);
+		void setOutput(int outputIdx, int nbComponents, const Semantic& semantic);
+		void setPositionRegister(int posReg);
+		void setPointSizeRegister(int ptSizeReg);
+		void declareInstanceId() { instanceIdDeclared = true; }
 
-		int positionRegister;     // FIXME: Private
-		int pointSizeRegister;    // FIXME: Private
-
-		bool instanceIdDeclared;
-
-		Semantic input[MAX_VERTEX_INPUTS];        // FIXME: Private
-		Semantic output[MAX_VERTEX_OUTPUTS][4];   // FIXME: Private
+		const Semantic& getInput(int inputIdx) const;
+		const Semantic& getOutput(int outputIdx, int component) const;
+		AttribType getAttribType(int inputIndex) const;
+		int getPositionRegister() const { return positionRegister; }
+		int getPointSizeRegister() const { return pointSizeRegister; }
+		bool isInstanceIdDeclared() const { return instanceIdDeclared; }
 
 	private:
+		void analyze();
 		void analyzeInput();
 		void analyzeOutput();
 		void analyzeTextureSampling();
 
+		Semantic input[MAX_VERTEX_INPUTS];
+		Semantic output[MAX_VERTEX_OUTPUTS][4];
+
+		AttribType attribType[MAX_VERTEX_INPUTS];
+
+		int positionRegister;
+		int pointSizeRegister;
+
+		bool instanceIdDeclared;
 		bool textureSampling;
 	};
 }

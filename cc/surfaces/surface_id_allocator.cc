@@ -7,18 +7,17 @@
 #include <stdint.h>
 
 #include "base/rand_util.h"
+#include "base/unguessable_token.h"
 
 namespace cc {
 
-SurfaceIdAllocator::SurfaceIdAllocator(uint32_t client_id)
-    : client_id_(client_id), next_id_(1u) {}
+SurfaceIdAllocator::SurfaceIdAllocator() : next_id_(1u) {}
 
 SurfaceIdAllocator::~SurfaceIdAllocator() {
 }
 
-SurfaceId SurfaceIdAllocator::GenerateId() {
-  uint64_t nonce = base::RandUint64();
-  SurfaceId id(client_id_, next_id_, nonce);
+LocalFrameId SurfaceIdAllocator::GenerateId() {
+  LocalFrameId id(next_id_, base::UnguessableToken::Create());
   next_id_++;
   return id;
 }

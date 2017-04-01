@@ -70,6 +70,8 @@ EVENTS_EXPORT void ValidateEventTimeClock(base::TimeTicks* timestamp);
 // TODO(tdresser): Return gfx::PointF here. See crbug.com/337827.
 EVENTS_EXPORT gfx::Point EventLocationFromNative(
     const base::NativeEvent& native_event);
+EVENTS_EXPORT gfx::PointF EventLocationFromNativeF(
+    const base::NativeEvent& native_event);
 
 // Gets the location in native system coordinate space.
 EVENTS_EXPORT gfx::Point EventSystemLocationFromNative(
@@ -146,7 +148,8 @@ EVENTS_EXPORT bool GetScrollOffsets(const base::NativeEvent& native_event,
                                     float* y_offset,
                                     float* x_offset_ordinal,
                                     float* y_offset_ordinal,
-                                    int* finger_count);
+                                    int* finger_count,
+                                    EventMomentumPhase* momentum_phase);
 
 // Returns whether natural scrolling should be used for touchpad.
 EVENTS_EXPORT bool ShouldDefaultToNaturalScroll();

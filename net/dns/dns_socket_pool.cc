@@ -6,14 +6,15 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
-#include "base/stl_util.h"
 #include "net/base/address_list.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
+#include "net/log/net_log_source.h"
 #include "net/socket/client_socket_factory.h"
+#include "net/socket/datagram_client_socket.h"
 #include "net/socket/stream_socket.h"
-#include "net/udp/datagram_client_socket.h"
 
 namespace net {
 
@@ -59,7 +60,7 @@ void DnsSocketPool::InitializeInternal(
 
 std::unique_ptr<StreamSocket> DnsSocketPool::CreateTCPSocket(
     unsigned server_index,
-    const NetLog::Source& source) {
+    const NetLogSource& source) {
   DCHECK_LT(server_index, nameservers_->size());
 
   return std::unique_ptr<StreamSocket>(
@@ -73,7 +74,7 @@ std::unique_ptr<DatagramClientSocket> DnsSocketPool::CreateConnectedSocket(
 
   std::unique_ptr<DatagramClientSocket> socket;
 
-  NetLog::Source no_source;
+  NetLogSource no_source;
   socket = socket_factory_->CreateDatagramClientSocket(
       kBindType, rand_int_callback_, net_log_, no_source);
 
@@ -145,12 +146,14 @@ class DefaultDnsSocketPool : public DnsSocketPool {
  private:
   void FillPool(unsigned server_index, unsigned size);
 
-  typedef std::vector<DatagramClientSocket*> SocketVector;
+  typedef std::vector<std::unique_ptr<DatagramClientSocket>> SocketVector;
 
   std::vector<SocketVector> pools_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultDnsSocketPool);
 };
+
+DnsSocketPool::~DnsSocketPool() {}
 
 // static
 std::unique_ptr<DnsSocketPool> DnsSocketPool::CreateDefault(
@@ -173,11 +176,6 @@ void DefaultDnsSocketPool::Initialize(
 }
 
 DefaultDnsSocketPool::~DefaultDnsSocketPool() {
-  unsigned num_servers = pools_.size();
-  for (unsigned server_index = 0; server_index < num_servers; ++server_index) {
-    SocketVector& pool = pools_[server_index];
-    base::STLDeleteElements(&pool);
-  }
 }
 
 std::unique_ptr<DatagramClientSocket> DefaultDnsSocketPool::AllocateSocket(
@@ -198,11 +196,11 @@ std::unique_ptr<DatagramClientSocket> DefaultDnsSocketPool::AllocateSocket(
   }
 
   unsigned socket_index = GetRandomInt(0, pool.size() - 1);
-  DatagramClientSocket* socket = pool[socket_index];
-  pool[socket_index] = pool.back();
+  std::unique_ptr<DatagramClientSocket> socket = std::move(pool[socket_index]);
+  pool[socket_index] = std::move(pool.back());
   pool.pop_back();
 
-  return std::unique_ptr<DatagramClientSocket>(socket);
+  return socket;
 }
 
 void DefaultDnsSocketPool::FreeSocket(
@@ -215,11 +213,11 @@ void DefaultDnsSocketPool::FillPool(unsigned server_index, unsigned size) {
   SocketVector& pool = pools_[server_index];
 
   for (unsigned pool_index = pool.size(); pool_index < size; ++pool_index) {
-    DatagramClientSocket* socket =
-        CreateConnectedSocket(server_index).release();
+    std::unique_ptr<DatagramClientSocket> socket =
+        CreateConnectedSocket(server_index);
     if (!socket)
       break;
-    pool.push_back(socket);
+    pool.push_back(std::move(socket));
   }
 }
 

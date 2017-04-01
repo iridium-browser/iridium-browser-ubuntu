@@ -37,18 +37,21 @@ UserCloudPolicyStoreBase::CreateValidator(
   validator->ValidateAgainstCurrentPolicy(
       policy_.get(),
       timestamp_option,
-      CloudPolicyValidatorBase::DM_TOKEN_REQUIRED);
+      CloudPolicyValidatorBase::DM_TOKEN_REQUIRED,
+      CloudPolicyValidatorBase::DEVICE_ID_REQUIRED);
   validator->ValidatePayload();
   return std::unique_ptr<UserCloudPolicyValidator>(validator);
 }
 
 void UserCloudPolicyStoreBase::InstallPolicy(
     std::unique_ptr<enterprise_management::PolicyData> policy_data,
-    std::unique_ptr<enterprise_management::CloudPolicySettings> payload) {
+    std::unique_ptr<enterprise_management::CloudPolicySettings> payload,
+    const std::string& policy_signature_public_key) {
   // Decode the payload.
   policy_map_.Clear();
   DecodePolicy(*payload, external_data_manager(), &policy_map_);
   policy_ = std::move(policy_data);
+  policy_signature_public_key_ = policy_signature_public_key;
 }
 
 }  // namespace policy

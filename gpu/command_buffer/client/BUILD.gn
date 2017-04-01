@@ -4,9 +4,7 @@
 
 # The files here go into the "gpu" component in a component build (with
 # "command_buffer_client" and "gles2_cmd_helper" just forwarding) and goes into
-# separate static libraries in non-component build. This needs to match the
-# GYP build which was likely an attempt to make larger components to help with
-# loading.
+# separate static libraries in non-component build.
 group("client") {
   if (is_component_build) {
     public_deps = [
@@ -66,6 +64,7 @@ source_set("client_sources") {
   ]
   deps = [
     "//gpu/command_buffer/common:common_sources",
+    "//gpu/ipc/common:surface_handle_type",
     "//ui/gfx:memory_buffer",
     "//ui/gfx/geometry",
   ]
@@ -186,26 +185,6 @@ component("gles2_implementation_no_check") {
   ]
 }
 
-component("gl_in_process_context") {
-  sources = [
-    "gl_in_process_context.cc",
-    "gl_in_process_context.h",
-    "gl_in_process_context_export.h",
-  ]
-
-  defines = [ "GL_IN_PROCESS_CONTEXT_IMPLEMENTATION" ]
-
-  deps = [
-    ":gles2_implementation",
-    "//base",
-    "//base/third_party/dynamic_annotations",
-    "//gpu",
-    "//gpu/command_buffer/common:gles2_utils",
-    "//ui/gfx/geometry",
-    "//ui/gl",
-  ]
-}
-
 component("gles2_c_lib") {
   sources = gles2_c_lib_source_files
   defines = [ "GLES2_C_LIB_IMPLEMENTATION" ]
@@ -222,7 +201,6 @@ component("gles2_c_lib") {
   ]
 }
 
-# GYP version: gpu/gpu.gyp:gles2_c_lib_nocheck
 # Same as gles2_c_lib except with no parameter checking. Required for
 # OpenGL ES 2.0 conformance tests.
 component("gles2_c_lib_nocheck") {

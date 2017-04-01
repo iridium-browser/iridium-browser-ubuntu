@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: components/security_interstitials.gyp:security_interstitials_core
 static_library("core") {
   sources = [
     "bad_clock_ui.cc",
@@ -13,6 +12,8 @@ static_library("core") {
     "controller_client.h",
     "metrics_helper.cc",
     "metrics_helper.h",
+    "safe_browsing_error_ui.cc",
+    "safe_browsing_error_ui.h",
     "ssl_error_ui.cc",
     "ssl_error_ui.h",
   ]
@@ -24,7 +25,6 @@ static_library("core") {
     "//components/history/core/browser",
     "//components/metrics",
     "//components/prefs",
-    "//components/rappor",
     "//components/ssl_errors",
     "//components/strings",
     "//components/url_formatter",

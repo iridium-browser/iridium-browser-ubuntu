@@ -4,29 +4,36 @@
 
 #include "services/ui/public/cpp/window_tree_host_factory.h"
 
-#include "services/shell/public/cpp/connector.h"
+#include "base/memory/ptr_util.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/ui/public/cpp/window_tree_client.h"
 #include "services/ui/public/cpp/window_tree_client_delegate.h"
+#include "services/ui/public/interfaces/constants.mojom.h"
 
 namespace ui {
 
-void CreateWindowTreeHost(mojom::WindowTreeHostFactory* factory,
-                          WindowTreeClientDelegate* delegate,
-                          mojom::WindowTreeHostPtr* host,
-                          WindowManagerDelegate* window_manager_delegate) {
+std::unique_ptr<WindowTreeClient> CreateWindowTreeHost(
+    mojom::WindowTreeHostFactory* factory,
+    WindowTreeClientDelegate* delegate,
+    mojom::WindowTreeHostPtr* host,
+    WindowManagerDelegate* window_manager_delegate) {
   mojom::WindowTreeClientPtr tree_client;
-  new WindowTreeClient(delegate, window_manager_delegate,
-                       GetProxy(&tree_client));
-  factory->CreateWindowTreeHost(GetProxy(host), std::move(tree_client));
+  std::unique_ptr<WindowTreeClient> window_tree_client =
+      base::MakeUnique<WindowTreeClient>(delegate, window_manager_delegate,
+                                         MakeRequest(&tree_client));
+  factory->CreateWindowTreeHost(MakeRequest(host), std::move(tree_client));
+  return window_tree_client;
 }
 
-void CreateWindowTreeHost(shell::Connector* connector,
-                          WindowTreeClientDelegate* delegate,
-                          mojom::WindowTreeHostPtr* host,
-                          WindowManagerDelegate* window_manager_delegate) {
+std::unique_ptr<WindowTreeClient> CreateWindowTreeHost(
+    service_manager::Connector* connector,
+    WindowTreeClientDelegate* delegate,
+    mojom::WindowTreeHostPtr* host,
+    WindowManagerDelegate* window_manager_delegate) {
   mojom::WindowTreeHostFactoryPtr factory;
-  connector->ConnectToInterface("mojo:ui", &factory);
-  CreateWindowTreeHost(factory.get(), delegate, host, window_manager_delegate);
+  connector->BindInterface(ui::mojom::kServiceName, &factory);
+  return CreateWindowTreeHost(factory.get(), delegate, host,
+                              window_manager_delegate);
 }
 
 }  // namespace ui

@@ -5,7 +5,7 @@
 #include "chrome/browser/chromeos/login/screens/reset_screen.h"
 
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
@@ -47,11 +47,6 @@ ResetScreen::~ResetScreen() {
   if (view_)
     view_->Unbind();
   DBusThreadManager::Get()->GetUpdateEngineClient()->RemoveObserver(this);
-}
-
-void ResetScreen::PrepareToShow() {
-  if (view_)
-    view_->PrepareToShow();
 }
 
 void ResetScreen::Show() {

@@ -1,8 +1,7 @@
 // Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-//
-// A class to schedule syncer tasks intelligently.
+
 #ifndef COMPONENTS_SYNC_ENGINE_IMPL_SYNC_SCHEDULER_H_
 #define COMPONENTS_SYNC_ENGINE_IMPL_SYNC_SCHEDULER_H_
 
@@ -21,8 +20,6 @@ class Location;
 }  // namespace tracked_objects
 
 namespace syncer {
-
-struct ServerConnectionEvent;
 
 struct ConfigurationParams {
   ConfigurationParams();
@@ -56,6 +53,7 @@ struct ClearParams {
   base::Closure report_success_task;
 };
 
+// A class to schedule syncer tasks intelligently.
 class SyncScheduler : public SyncCycle::Delegate {
  public:
   enum Mode {
@@ -131,7 +129,7 @@ class SyncScheduler : public SyncCycle::Delegate {
   // careful to pass along the "hints" delivered with those invalidations) in
   // order to fetch the update.
   virtual void ScheduleInvalidationNudge(
-      syncer::ModelType type,
+      ModelType type,
       std::unique_ptr<InvalidationInterface> invalidation,
       const tracked_objects::Location& nudge_location) = 0;
 
@@ -141,7 +139,7 @@ class SyncScheduler : public SyncCycle::Delegate {
   // configure mode, but a few of them are able to perform their initial sync
   // while the scheduler is in normal mode.  This non-blocking initial sync
   // can be requested through this function.
-  virtual void ScheduleInitialSyncNudge(syncer::ModelType model_type) = 0;
+  virtual void ScheduleInitialSyncNudge(ModelType model_type) = 0;
 
   // Change status of notifications in the SyncCycleContext.
   virtual void SetNotificationsEnabled(bool notifications_enabled) = 0;

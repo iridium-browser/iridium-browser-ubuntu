@@ -13,24 +13,19 @@
 #include "build/build_config.h"
 #include "cc/blink/web_compositor_support_impl.h"
 #include "content/child/blink_platform_impl.h"
-#include "content/child/simple_webmimeregistry_impl.h"
 #include "content/child/webfileutilities_impl.h"
 #include "content/test/mock_webblob_registry_impl.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "third_party/WebKit/public/platform/WebURLLoaderMockFactory.h"
 
-namespace base {
-class StatsTable;
-}
-
-namespace blink {
-class WebLayerTreeView;
-}
-
 namespace blink {
 namespace scheduler {
 class RendererScheduler;
 }
+}
+
+namespace cc {
+class TestSharedBitmapManager;
 }
 
 namespace content {
@@ -41,11 +36,10 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
   TestBlinkWebUnitTestSupport();
   ~TestBlinkWebUnitTestSupport() override;
 
-  blink::WebBlobRegistry* blobRegistry() override;
+  blink::WebBlobRegistry* getBlobRegistry() override;
   blink::WebClipboard* clipboard() override;
   blink::WebFileUtilities* fileUtilities() override;
   blink::WebIDBFactory* idbFactory() override;
-  blink::WebMimeRegistry* mimeRegistry() override;
 
   blink::WebURLLoader* createURLLoader() override;
   blink::WebString userAgent() override;
@@ -75,12 +69,17 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
 
   blink::WebThread* currentThread() override;
 
+  std::unique_ptr<cc::SharedBitmap> allocateSharedBitmap(
+      const blink::WebSize& size) override;
+
   void getPluginList(bool refresh,
+                     const blink::WebSecurityOrigin& mainFrameOrigin,
                      blink::WebPluginListBuilder* builder) override;
+
+  blink::WebRTCCertificateGenerator* createRTCCertificateGenerator() override;
 
  private:
   MockWebBlobRegistryImpl blob_registry_;
-  SimpleWebMimeRegistryImpl mime_registry_;
   std::unique_ptr<MockWebClipboardImpl> mock_clipboard_;
   WebFileUtilitiesImpl file_utilities_;
   base::ScopedTempDir file_system_root_;
@@ -88,6 +87,7 @@ class TestBlinkWebUnitTestSupport : public BlinkPlatformImpl {
   cc_blink::WebCompositorSupportImpl compositor_support_;
   std::unique_ptr<blink::scheduler::RendererScheduler> renderer_scheduler_;
   std::unique_ptr<blink::WebThread> web_thread_;
+  std::unique_ptr<cc::TestSharedBitmapManager> shared_bitmap_manager_;
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
   blink::WebThemeEngine* active_theme_engine_ = nullptr;

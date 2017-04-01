@@ -149,6 +149,15 @@ cr.define('bmm', function() {
 
       this.fixWidth_();
       cr.dispatchSimpleEvent(this, 'load');
+
+      // Use the same histogram configuration as UMA_HISTOGRAM_COUNTS_1000().
+      chrome.metricsPrivate.recordValue({
+        'metricName': 'Bookmarks.BookmarksInFolder',
+        'type': chrome.metricsPrivate.MetricTypeType.HISTOGRAM_LOG,
+        'min': 1,
+        'max': 1000,
+        'buckets': 50
+      }, this.dataModel.length);
     },
 
     /**
@@ -423,20 +432,31 @@ cr.define('bmm', function() {
 
       var labelEl = this.ownerDocument.createElement('div');
       labelEl.className = 'label';
-      labelEl.textContent = bookmarkNode.title;
+      var labelImgWrapper = this.ownerDocument.createElement('div');
+      labelImgWrapper.className = 'label-img-wrapper';
+      var labelImg = this.ownerDocument.createElement('div');
+      var labelText = this.ownerDocument.createElement('div');
+      labelText.className = 'label-text';
+      labelText.textContent = bookmarkNode.title;
 
       var urlEl = this.ownerDocument.createElement('div');
       urlEl.className = 'url';
 
       if (bmm.isFolder(bookmarkNode)) {
         this.className = 'folder';
+        // TODO(pkasting): Condense folder icon resources together.
+        labelImg.style.content = cr.icon.getImage(
+            cr.isMac ?
+                'chrome://theme/IDR_BOOKMARK_BAR_FOLDER' :
+                'chrome://theme/IDR_FOLDER_CLOSED');
       } else {
-        labelEl.style.backgroundImage = cr.icon.getFaviconImageSet(
-            bookmarkNode.url);
-        labelEl.style.backgroundSize = '16px';
+        labelImg.style.content = cr.icon.getFavicon(bookmarkNode.url);
         urlEl.textContent = bookmarkNode.url;
       }
 
+      labelImgWrapper.appendChild(labelImg);
+      labelEl.appendChild(labelImgWrapper);
+      labelEl.appendChild(labelText);
       this.appendChild(labelEl);
       this.appendChild(urlEl);
 
@@ -468,8 +488,6 @@ cr.define('bmm', function() {
       var title = this.bookmarkNode.title;
       var isFolder = bmm.isFolder(this.bookmarkNode);
       var listItem = this;
-      var labelEl = this.firstChild;
-      var urlEl = labelEl.nextSibling;
       var labelInput, urlInput;
 
       // Handles enter and escape which trigger reset and commit respectively.
@@ -535,6 +553,8 @@ cr.define('bmm', function() {
       }
 
       var doc = this.ownerDocument;
+      var labelTextEl = queryRequiredElement('.label-text', this);
+      var urlEl = queryRequiredElement('.url', this);
       if (editing) {
         this.setAttribute('editing', '');
         this.draggable = false;
@@ -542,7 +562,7 @@ cr.define('bmm', function() {
         labelInput = /** @type {HTMLElement} */(doc.createElement('input'));
         labelInput.placeholder =
             loadTimeData.getString('name_input_placeholder');
-        replaceAllChildren(labelEl, labelInput);
+        replaceAllChildren(labelTextEl, labelInput);
         labelInput.value = title;
 
         if (!isFolder) {
@@ -618,7 +638,7 @@ cr.define('bmm', function() {
 
         labelInput = this.querySelector('.label input');
         var newLabel = labelInput.value;
-        labelEl.textContent = this.bookmarkNode.title = newLabel;
+        labelTextEl.textContent = this.bookmarkNode.title = newLabel;
 
         if (isFolder) {
           if (newLabel != title) {

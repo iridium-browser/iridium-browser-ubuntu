@@ -4,9 +4,10 @@
 
 package org.chromium.chrome.browser.autofill;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.CreditCard;
 import org.chromium.chrome.test.util.ApplicationData;
@@ -41,6 +42,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testAddAndEditProfiles() throws InterruptedException, ExecutionException,
             TimeoutException {
         AutofillProfile profile = new AutofillProfile(
@@ -77,6 +79,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testUpdateLanguageCodeInProfile() throws InterruptedException, ExecutionException,
             TimeoutException {
         AutofillProfile profile = new AutofillProfile(
@@ -108,6 +111,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testAddAndDeleteProfile() throws InterruptedException, ExecutionException,
             TimeoutException {
         String profileOneGUID = mHelper.setProfile(createTestProfile());
@@ -119,6 +123,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testAddAndEditCreditCards() throws InterruptedException, ExecutionException,
             TimeoutException {
         CreditCard card = new CreditCard(
@@ -146,12 +151,14 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
         assertEquals("Visa", storedCard.getName());
         assertEquals("10", storedCard.getMonth());
         assertEquals("4012888888881881", storedCard.getNumber());
-        assertEquals("Visa\u00a0\u22ef1881", storedCard.getObfuscatedNumber());
+        assertEquals("Visa\u0020\u0020\u2022\u2006\u2022\u2006\u2022\u2006\u2022\u20061881",
+                storedCard.getObfuscatedNumber());
         assertNotNull(mHelper.getCreditCard(cardTwoGUID));
     }
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testAddAndDeleteCreditCard() throws InterruptedException, ExecutionException,
             TimeoutException {
         CreditCard card = new CreditCard(
@@ -197,6 +204,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testMultilineStreetAddress() throws InterruptedException, ExecutionException,
             TimeoutException {
         final String streetAddress1 = "Chez Mireille COPEAU Appartment. 2\n"
@@ -318,7 +326,8 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
         // a bigger use count that the first profile. It should be second.
         mHelper.setProfileUseStatsForTesting(guid3, 6, 5000);
 
-        List<AutofillProfile> profiles = mHelper.getProfilesToSuggest(false /* includeName */);
+        List<AutofillProfile> profiles =
+                mHelper.getProfilesToSuggest(false /* includeNameInLabel */);
         assertEquals(3, profiles.size());
         assertTrue("Profile2 should be ranked first", guid2.equals(profiles.get(0).getGUID()));
         assertTrue("Profile3 should be ranked second", guid3.equals(profiles.get(1).getGUID()));
@@ -362,6 +371,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testCreditCardsDeduping() throws InterruptedException, ExecutionException,
             TimeoutException {
         // Create a local card and an identical server card.
@@ -387,6 +397,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testProfileUseStatsSettingAndGetting() throws InterruptedException,
             ExecutionException, TimeoutException {
         String guid = mHelper.setProfile(createTestProfile());
@@ -406,6 +417,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testCreditCardUseStatsSettingAndGetting() throws InterruptedException,
             ExecutionException, TimeoutException {
         String guid = mHelper.setCreditCard(
@@ -428,6 +440,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testRecordAndLogProfileUse() throws InterruptedException, ExecutionException,
             TimeoutException {
         String guid = mHelper.setProfile(createTestProfile());
@@ -453,6 +466,7 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testRecordAndLogCreditCardUse() throws InterruptedException, ExecutionException,
             TimeoutException {
         String guid = mHelper.setCreditCard(
@@ -482,22 +496,26 @@ public class PersonalDataManagerTest extends NativeLibraryTestBase {
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testGetProfilesToSuggest_NoName() throws InterruptedException, ExecutionException,
             TimeoutException {
         mHelper.setProfile(createTestProfile());
 
-        List<AutofillProfile> profiles = mHelper.getProfilesToSuggest(false /* includeName */);
+        List<AutofillProfile> profiles =
+                mHelper.getProfilesToSuggest(false /* includeNameInLabel */);
         assertEquals("Acme Inc., 123 Main, Los Angeles, California 90210, United States",
                 profiles.get(0).getLabel());
     }
 
     @SmallTest
     @Feature({"Autofill"})
+    @RetryOnFailure
     public void testGetProfilesToSuggest_WithName() throws InterruptedException, ExecutionException,
             TimeoutException {
         mHelper.setProfile(createTestProfile());
 
-        List<AutofillProfile> profiles = mHelper.getProfilesToSuggest(true /* includeName */);
+        List<AutofillProfile> profiles =
+                mHelper.getProfilesToSuggest(true /* includeNameInLabel */);
         assertEquals("John Major, Acme Inc., 123 Main, Los Angeles, California 90210, "
                 + "United States", profiles.get(0).getLabel());
     }

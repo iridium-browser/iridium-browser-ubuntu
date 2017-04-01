@@ -49,29 +49,35 @@ ContextMenuHelper::~ContextMenuHelper() {
   Java_ContextMenuHelper_destroy(env, java_obj_);
 }
 
-bool ContextMenuHelper::ShowContextMenu(
+void ContextMenuHelper::ShowContextMenu(
     content::RenderFrameHost* render_frame_host,
     const content::ContextMenuParams& params) {
   content::ContentViewCore* content_view_core =
       content::ContentViewCore::FromWebContents(web_contents_);
 
   if (!content_view_core)
-    return false;
+    return;
 
   base::android::ScopedJavaLocalRef<jobject> jcontent_view_core(
       content_view_core->GetJavaObject());
 
   if (jcontent_view_core.is_null())
-    return false;
+    return;
 
   JNIEnv* env = base::android::AttachCurrentThread();
   context_menu_params_ = params;
   render_frame_id_ = render_frame_host->GetRoutingID();
   render_process_id_ = render_frame_host->GetProcess()->GetID();
 
-  return Java_ContextMenuHelper_showContextMenu(
+  Java_ContextMenuHelper_showContextMenu(
       env, java_obj_, jcontent_view_core,
       ContextMenuHelper::CreateJavaContextMenuParams(params));
+}
+
+void ContextMenuHelper::OnContextMenuClosed(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj) {
+  web_contents_->NotifyContextMenuClosed(context_menu_params_.custom_context);
 }
 
 void ContextMenuHelper::SetPopulator(jobject jpopulator) {
@@ -86,10 +92,11 @@ ContextMenuHelper::CreateJavaContextMenuParams(
       params.page_url : params.frame_url).GetAsReferrer();
 
   std::map<std::string, std::string>::const_iterator it =
-      params.properties.find(data_reduction_proxy::chrome_proxy_header());
+      params.properties.find(
+          data_reduction_proxy::chrome_proxy_content_transform_header());
   bool image_was_fetched_lo_fi =
       it != params.properties.end() &&
-      it->second == data_reduction_proxy::chrome_proxy_lo_fi_directive();
+      it->second == data_reduction_proxy::empty_image_directive();
   bool can_save = params.media_flags & blink::WebContextMenuData::MediaCanSave;
   JNIEnv* env = base::android::AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobject> jmenu_info =

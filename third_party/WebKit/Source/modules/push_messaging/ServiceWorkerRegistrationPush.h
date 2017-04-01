@@ -5,6 +5,7 @@
 #ifndef ServiceWorkerRegistrationPush_h
 #define ServiceWorkerRegistrationPush_h
 
+#include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
@@ -13,26 +14,29 @@ namespace blink {
 class PushManager;
 class ServiceWorkerRegistration;
 
-class ServiceWorkerRegistrationPush final : public GarbageCollectedFinalized<ServiceWorkerRegistrationPush>, public Supplement<ServiceWorkerRegistration> {
-    USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistrationPush);
-    WTF_MAKE_NONCOPYABLE(ServiceWorkerRegistrationPush);
-public:
-    virtual ~ServiceWorkerRegistrationPush();
-    static ServiceWorkerRegistrationPush& from(ServiceWorkerRegistration&);
+class ServiceWorkerRegistrationPush final
+    : public GarbageCollectedFinalized<ServiceWorkerRegistrationPush>,
+      public Supplement<ServiceWorkerRegistration> {
+  USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistrationPush);
+  WTF_MAKE_NONCOPYABLE(ServiceWorkerRegistrationPush);
 
-    static PushManager* pushManager(ServiceWorkerRegistration&);
-    PushManager* pushManager();
+ public:
+  virtual ~ServiceWorkerRegistrationPush();
+  static ServiceWorkerRegistrationPush& from(ServiceWorkerRegistration&);
 
-    DECLARE_VIRTUAL_TRACE();
+  static PushManager* pushManager(ServiceWorkerRegistration&);
+  PushManager* pushManager();
 
-private:
-    explicit ServiceWorkerRegistrationPush(ServiceWorkerRegistration*);
-    static const char* supplementName();
+  DECLARE_VIRTUAL_TRACE();
 
-    Member<ServiceWorkerRegistration> m_registration;
-    Member<PushManager> m_pushManager;
+ private:
+  explicit ServiceWorkerRegistrationPush(ServiceWorkerRegistration*);
+  static const char* supplementName();
+
+  Member<ServiceWorkerRegistration> m_registration;
+  Member<PushManager> m_pushManager;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ServiceWorkerRegistrationPush_h
+#endif  // ServiceWorkerRegistrationPush_h

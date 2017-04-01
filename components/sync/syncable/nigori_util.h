@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Various utility methods for nigori-based multi-type encryption.
-
 #ifndef COMPONENTS_SYNC_SYNCABLE_NIGORI_UTIL_H_
 #define COMPONENTS_SYNC_SYNCABLE_NIGORI_UTIL_H_
 
@@ -13,10 +11,9 @@
 
 namespace sync_pb {
 class EntitySpecifics;
-}
+}  // namespace sync_pb
 
 namespace syncer {
-class Cryptographer;
 
 namespace syncable {
 
@@ -26,6 +23,8 @@ class BaseTransaction;
 class Entry;
 class MutableEntry;
 class WriteTransaction;
+
+// Various utility methods for nigori-based multi-type encryption.
 
 // Check if our unsyced changes are encrypted if they need to be based on
 // |encrypted_types|.

@@ -62,6 +62,7 @@ class DevToolsEmbedderMessageDispatcher {
                               const std::string& file_system_path,
                               const std::string& query) = 0;
     virtual void SetWhitelistedShortcuts(const std::string& message) = 0;
+    virtual void ShowCertificateViewer(const std::string& cert_chain) = 0;
     virtual void ZoomIn() = 0;
     virtual void ZoomOut() = 0;
     virtual void ResetZoom() = 0;
@@ -74,6 +75,7 @@ class DevToolsEmbedderMessageDispatcher {
                                            const std::string& action) = 0;
     virtual void OpenRemotePage(const std::string& browser_id,
                                 const std::string& url) = 0;
+    virtual void OpenNodeFrontend() = 0;
     virtual void GetPreferences(const DispatchCallback& callback) = 0;
     virtual void SetPreference(const std::string& name,
                                const std::string& value) = 0;
@@ -87,6 +89,7 @@ class DevToolsEmbedderMessageDispatcher {
     virtual void SendJsonRequest(const DispatchCallback& callback,
                                  const std::string& browser_id,
                                  const std::string& url) = 0;
+    virtual void Reattach(const DispatchCallback& callback) = 0;
     virtual void ReadyForTest() = 0;
   };
 

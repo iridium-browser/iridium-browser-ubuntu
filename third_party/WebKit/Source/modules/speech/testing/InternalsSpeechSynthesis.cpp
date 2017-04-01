@@ -31,7 +31,7 @@
 #include "InternalsSpeechSynthesis.h"
 
 #include "core/dom/Document.h"
-#include "core/frame/LocalDOMWindow.h"
+#include "core/frame/DOMWindow.h"
 #include "core/testing/Internals.h"
 #include "modules/speech/DOMWindowSpeechSynthesis.h"
 #include "modules/speech/SpeechSynthesis.h"
@@ -39,15 +39,17 @@
 
 namespace blink {
 
-void InternalsSpeechSynthesis::enableMockSpeechSynthesizer(Internals&, Document* document)
-{
-    ASSERT(document && document->domWindow());
+void InternalsSpeechSynthesis::enableMockSpeechSynthesizer(
+    ScriptState* scriptState,
+    Internals&,
+    DOMWindow* window) {
+  SpeechSynthesis* synthesis =
+      DOMWindowSpeechSynthesis::speechSynthesis(scriptState, *window);
+  if (!synthesis)
+    return;
 
-    SpeechSynthesis* synthesis = DOMWindowSpeechSynthesis::speechSynthesis(*document->domWindow());
-    if (!synthesis)
-        return;
-
-    synthesis->setPlatformSynthesizer(PlatformSpeechSynthesizerMock::create(synthesis));
+  synthesis->setPlatformSynthesizer(
+      PlatformSpeechSynthesizerMock::create(synthesis));
 }
 
-} // namespace blink
+}  // namespace blink

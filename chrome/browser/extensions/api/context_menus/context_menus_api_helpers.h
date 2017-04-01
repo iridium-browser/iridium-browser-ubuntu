@@ -8,8 +8,8 @@
 #define CHROME_BROWSER_EXTENSIONS_API_CONTEXT_MENUS_CONTEXT_MENUS_API_HELPERS_H_
 
 #include "chrome/browser/extensions/menu_manager.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/api/context_menus.h"
+#include "content/public/browser/browser_context.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 
@@ -62,14 +62,14 @@ MenuItem::Type GetType(extensions::api::context_menus::ItemType type,
                        MenuItem::Type default_type);
 
 // Creates and adds a menu item from |create_properties|.
-template<typename PropertyWithEnumT>
+template <typename PropertyWithEnumT>
 bool CreateMenuItem(const PropertyWithEnumT& create_properties,
-                    Profile* profile,
+                    content::BrowserContext* browser_context,
                     const Extension* extension,
                     const MenuItem::Id& item_id,
                     std::string* error) {
   bool is_webview = item_id.extension_key.webview_instance_id != 0;
-  MenuManager* menu_manager = MenuManager::Get(profile);
+  MenuManager* menu_manager = MenuManager::Get(browser_context);
 
   if (menu_manager->GetItemById(item_id)) {
     *error = ErrorUtils::FormatErrorMessage(kDuplicateIDError,
@@ -141,15 +141,16 @@ bool CreateMenuItem(const PropertyWithEnumT& create_properties,
 
   // Parent id.
   bool success = true;
-  std::unique_ptr<MenuItem::Id> parent_id(GetParentId(
-      create_properties, profile->IsOffTheRecord(), item_id.extension_key));
+  std::unique_ptr<MenuItem::Id> parent_id(
+      GetParentId(create_properties, browser_context->IsOffTheRecord(),
+                  item_id.extension_key));
   if (parent_id.get()) {
     MenuItem* parent = GetParent(*parent_id, menu_manager, error);
     if (!parent)
       return false;
-    success = menu_manager->AddChildItem(parent->id(), item.release());
+    success = menu_manager->AddChildItem(parent->id(), std::move(item));
   } else {
-    success = menu_manager->AddContextItem(extension, item.release());
+    success = menu_manager->AddContextItem(extension, std::move(item));
   }
 
   if (!success)
@@ -160,15 +161,15 @@ bool CreateMenuItem(const PropertyWithEnumT& create_properties,
 }
 
 // Updates a menu item from |update_properties|.
-template<typename PropertyWithEnumT>
+template <typename PropertyWithEnumT>
 bool UpdateMenuItem(const PropertyWithEnumT& update_properties,
-                    Profile* profile,
+                    content::BrowserContext* browser_context,
                     const Extension* extension,
                     const MenuItem::Id& item_id,
                     std::string* error) {
   bool radio_item_updated = false;
   bool is_webview = item_id.extension_key.webview_instance_id != 0;
-  MenuManager* menu_manager = MenuManager::Get(profile);
+  MenuManager* menu_manager = MenuManager::Get(browser_context);
 
   MenuItem* item = menu_manager->GetItemById(item_id);
   if (!item || item->extension_id() != extension->id()){
@@ -237,8 +238,9 @@ bool UpdateMenuItem(const PropertyWithEnumT& update_properties,
 
   // Parent id.
   MenuItem* parent = NULL;
-  std::unique_ptr<MenuItem::Id> parent_id(GetParentId(
-      update_properties, profile->IsOffTheRecord(), item_id.extension_key));
+  std::unique_ptr<MenuItem::Id> parent_id(
+      GetParentId(update_properties, browser_context->IsOffTheRecord(),
+                  item_id.extension_key));
   if (parent_id.get()) {
     MenuItem* parent = GetParent(*parent_id, menu_manager, error);
     if (!parent || !menu_manager->ChangeParent(item->id(), &parent->id()))

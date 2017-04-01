@@ -18,7 +18,8 @@
 #include "net/base/net_errors.h"
 #include "net/base/proxy_delegate.h"
 #include "net/base/test_completion_callback.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_with_source.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/log/test_net_log_util.h"
@@ -28,6 +29,7 @@
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_resolver.h"
 #include "net/proxy/proxy_script_fetcher.h"
+#include "net/proxy/proxy_server.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -158,8 +160,8 @@ class MockProxyConfigService: public ProxyConfigService {
   void SetConfig(const ProxyConfig& config) {
     availability_ = CONFIG_VALID;
     config_ = config;
-    FOR_EACH_OBSERVER(Observer, observers_,
-                      OnProxyConfigChanged(config_, availability_));
+    for (auto& observer : observers_)
+      observer.OnProxyConfigChanged(config_, availability_);
   }
 
  private:
@@ -223,6 +225,15 @@ class TestResolveProxyDelegate : public ProxyDelegate {
   bool IsTrustedSpdyProxy(const net::ProxyServer& proxy_server) override {
     return true;
   }
+  void GetAlternativeProxy(
+      const GURL& url,
+      const ProxyServer& resolved_proxy_server,
+      ProxyServer* alternative_proxy_server) const override {}
+  void OnAlternativeProxyBroken(
+      const ProxyServer& alternative_proxy_server) override {}
+  ProxyServer GetDefaultAlternativeProxy() const override {
+    return ProxyServer();
+  }
 
  private:
   bool on_resolve_proxy_called_;
@@ -260,6 +271,15 @@ class TestProxyFallbackProxyDelegate : public ProxyDelegate {
   bool IsTrustedSpdyProxy(const net::ProxyServer& proxy_server) override {
     return true;
   }
+  void GetAlternativeProxy(
+      const GURL& url,
+      const ProxyServer& resolved_proxy_server,
+      ProxyServer* alternative_proxy_server) const override {}
+  void OnAlternativeProxyBroken(
+      const ProxyServer& alternative_proxy_server) override {}
+  ProxyServer GetDefaultAlternativeProxy() const override {
+    return ProxyServer();
+  }
 
   bool on_proxy_fallback_called() const {
     return on_proxy_fallback_called_;
@@ -279,25 +299,14 @@ class TestProxyFallbackProxyDelegate : public ProxyDelegate {
   int proxy_fallback_net_error_;
 };
 
-using RequestMap =
-    std::map<GURL, scoped_refptr<MockAsyncProxyResolver::Request>>;
+using JobMap = std::map<GURL, MockAsyncProxyResolver::Job*>;
 
-// Given a list of requests |list| from a MockAsyncProxyResolver and a list of
-// target URLs |_urls|, asserts that the set of URLs of the requests appearing
-// in |list| is exactly the set of URLs in |_urls|, and produces a RequestMap in
-// |*map| containing the requests corresponding to those target |_urls|.
-//
-// Note that this function must return void to allow use of gtest's ASSERT_*
-// macros inside it.
-RequestMap GetRequestsForURLs(
-    const MockAsyncProxyResolver::RequestsList& requests,
-    const std::vector<GURL>& urls) {
-  RequestMap map;
-
-  for (const auto& it : requests)
-    map[it->url()] = it;
-
-  if (urls.size() != map.size()) {
+// Given a jobmap and a list of target URLs |urls|, asserts that the set of URLs
+// of the jobs appearing in |list| is exactly the set of URLs in |urls|.
+JobMap GetJobsForURLs(const JobMap& map, const std::vector<GURL>& urls) {
+  size_t a = urls.size();
+  size_t b = map.size();
+  if (a != b) {
     ADD_FAILURE() << "map size (" << map.size() << ") != urls size ("
                   << urls.size() << ")";
     return map;
@@ -313,11 +322,11 @@ RequestMap GetRequestsForURLs(
 
 // Given a MockAsyncProxyResolver |resolver| and some GURLs, validates that the
 // set of pending request URLs for |resolver| is exactly the supplied list of
-// URLs and returns a map from URLs to the corresponding pending requests.
-RequestMap GetPendingRequestsForURLs(const MockAsyncProxyResolver& resolver,
-                                     const GURL& url1 = GURL(),
-                                     const GURL& url2 = GURL(),
-                                     const GURL& url3 = GURL()) {
+// URLs and returns a map from URLs to the corresponding pending jobs.
+JobMap GetPendingJobsForURLs(const MockAsyncProxyResolver& resolver,
+                             const GURL& url1 = GURL(),
+                             const GURL& url2 = GURL(),
+                             const GURL& url3 = GURL()) {
   std::vector<GURL> urls;
   if (!url1.is_empty())
     urls.push_back(url1);
@@ -325,16 +334,23 @@ RequestMap GetPendingRequestsForURLs(const MockAsyncProxyResolver& resolver,
     urls.push_back(url2);
   if (!url3.is_empty())
     urls.push_back(url3);
-  return GetRequestsForURLs(resolver.pending_requests(), urls);
+
+  JobMap map;
+  for (MockAsyncProxyResolver::Job* it : resolver.pending_jobs()) {
+    DCHECK(it);
+    map[it->url()] = it;
+  }
+
+  return GetJobsForURLs(map, urls);
 }
 
 // Given a MockAsyncProxyResolver |resolver| and some GURLs, validates that the
 // set of cancelled request URLs for |resolver| is exactly the supplied list of
-// URLs and returns a map from URLs to the corresponding cancelled requests.
-RequestMap GetCancelledRequestsForURLs(const MockAsyncProxyResolver& resolver,
-                                       const GURL& url1 = GURL(),
-                                       const GURL& url2 = GURL(),
-                                       const GURL& url3 = GURL()) {
+// URLs and returns a map from URLs to the corresponding cancelled jobs.
+JobMap GetCancelledJobsForURLs(const MockAsyncProxyResolver& resolver,
+                               const GURL& url1 = GURL(),
+                               const GURL& url2 = GURL(),
+                               const GURL& url3 = GURL()) {
   std::vector<GURL> urls;
   if (!url1.is_empty())
     urls.push_back(url1);
@@ -342,7 +358,15 @@ RequestMap GetCancelledRequestsForURLs(const MockAsyncProxyResolver& resolver,
     urls.push_back(url2);
   if (!url3.is_empty())
     urls.push_back(url3);
-  return GetRequestsForURLs(resolver.cancelled_requests(), urls);
+
+  JobMap map;
+  for (const std::unique_ptr<MockAsyncProxyResolver::Job>& it :
+       resolver.cancelled_jobs()) {
+    DCHECK(it);
+    map[it->url()] = it.get();
+  }
+
+  return GetJobsForURLs(map, urls);
 }
 
 }  // namespace
@@ -351,7 +375,7 @@ TEST_F(ProxyServiceTest, Direct) {
   MockAsyncProxyResolverFactory* factory =
       new MockAsyncProxyResolverFactory(false);
   ProxyService service(
-      base::WrapUnique(new MockProxyConfigService(ProxyConfig::CreateDirect())),
+      base::MakeUnique<MockProxyConfigService>(ProxyConfig::CreateDirect()),
       base::WrapUnique(factory), nullptr);
 
   GURL url("http://www.google.com/");
@@ -373,13 +397,12 @@ TEST_F(ProxyServiceTest, Direct) {
   log.GetEntries(&entries);
 
   EXPECT_EQ(3u, entries.size());
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SERVICE));
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SERVICE));
   EXPECT_TRUE(LogContainsEvent(
-      entries, 1, NetLog::TYPE_PROXY_SERVICE_RESOLVED_PROXY_LIST,
-      NetLog::PHASE_NONE));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SERVICE));
+      entries, 1, NetLogEventType::PROXY_SERVICE_RESOLVED_PROXY_LIST,
+      NetLogEventPhase::NONE));
+  EXPECT_TRUE(LogContainsEndEvent(entries, 2, NetLogEventType::PROXY_SERVICE));
 }
 
 TEST_F(ProxyServiceTest, OnResolveProxyCallbackAddProxy) {
@@ -388,7 +411,7 @@ TEST_F(ProxyServiceTest, OnResolveProxyCallbackAddProxy) {
   config.set_auto_detect(false);
   config.proxy_rules().bypass_rules.ParseFromString("*.org");
 
-  ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+  ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                        nullptr, nullptr);
 
   GURL url("http://www.google.com/");
@@ -413,7 +436,7 @@ TEST_F(ProxyServiceTest, OnResolveProxyCallbackAddProxy) {
 
   // Verify that the ProxyDelegate's behavior is stateless across
   // invocations of ResolveProxy. Start by having the callback add a proxy
-  // and checking that subsequent requests are not affected.
+  // and checking that subsequent jobs are not affected.
   delegate.set_add_proxy(true);
 
   // Callback should interpose:
@@ -444,7 +467,7 @@ TEST_F(ProxyServiceTest, OnResolveProxyCallbackRemoveProxy) {
   config.set_auto_detect(false);
   config.proxy_rules().bypass_rules.ParseFromString("*.org");
 
-  ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+  ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                        nullptr, nullptr);
 
   GURL url("http://www.google.com/");
@@ -509,12 +532,12 @@ TEST_F(ProxyServiceTest, PAC) {
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("foopy");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("foopy");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -530,14 +553,13 @@ TEST_F(ProxyServiceTest, PAC) {
   log.GetEntries(&entries);
 
   EXPECT_EQ(5u, entries.size());
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries, 0, NetLogEventType::PROXY_SERVICE));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 0, NetLog::TYPE_PROXY_SERVICE));
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries, 1, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
+      entries, 1, NetLogEventType::PROXY_SERVICE_WAITING_FOR_INIT_PAC));
   EXPECT_TRUE(LogContainsEndEvent(
-      entries, 2, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries, 4, NetLog::TYPE_PROXY_SERVICE));
+      entries, 2, NetLogEventType::PROXY_SERVICE_WAITING_FOR_INIT_PAC));
+  EXPECT_TRUE(LogContainsEndEvent(entries, 4, NetLogEventType::PROXY_SERVICE));
 }
 
 // Test that the proxy resolver does not see the URL's username/password
@@ -558,17 +580,17 @@ TEST_F(ProxyServiceTest, PAC_NoIdentityOrHash) {
   ProxyInfo info;
   TestCompletionCallback callback;
   int rv = service.ResolveProxy(url, std::string(), &info, callback.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
   // The URL should have been simplified, stripping the username/password/hash.
   EXPECT_EQ(GURL("http://www.google.com/?ref"),
-            resolver.pending_requests()[0]->url());
+            resolver.pending_jobs()[0]->url());
 
   // We end here without ever completing the request -- destruction of
   // ProxyService will cancel the outstanding request.
@@ -589,19 +611,19 @@ TEST_F(ProxyServiceTest, PAC_FailoverWithoutDirect) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("foopy:8080");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("foopy:8080");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -620,7 +642,7 @@ TEST_F(ProxyServiceTest, PAC_FailoverWithoutDirect) {
   ProxyServer expected_proxy_server = info.proxy_server();
   rv = service.ReconsiderProxyAfterError(
       url, "GET", ERR_PROXY_CONNECTION_FAILED, &info, callback2.callback(),
-      nullptr, &proxy_delegate, BoundNetLog());
+      nullptr, &proxy_delegate, NetLogWithSource());
   // ReconsiderProxyAfterError returns error indicating nothing left.
   EXPECT_THAT(rv, IsError(ERR_FAILED));
   EXPECT_TRUE(info.is_empty());
@@ -643,18 +665,18 @@ TEST_F(ProxyServiceTest, PAC_RuntimeError) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Simulate a failure in the PAC executor.
-  resolver.pending_requests()[0]->CompleteNow(ERR_PAC_SCRIPT_FAILED);
+  resolver.pending_jobs()[0]->CompleteNow(ERR_PAC_SCRIPT_FAILED);
 
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
 
@@ -701,20 +723,20 @@ TEST_F(ProxyServiceTest, PAC_FailoverAfterDirect) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UsePacString(
+  resolver.pending_jobs()[0]->results()->UsePacString(
       "DIRECT ; PROXY foobar:10 ; DIRECT ; PROXY foobar:20");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
   EXPECT_TRUE(info.is_direct());
@@ -723,7 +745,7 @@ TEST_F(ProxyServiceTest, PAC_FailoverAfterDirect) {
   TestCompletionCallback callback2;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback2.callback(), nullptr, nullptr, BoundNetLog());
+      callback2.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_FALSE(info.is_direct());
   EXPECT_EQ("foobar:10", info.proxy_server().ToURI());
@@ -734,7 +756,7 @@ TEST_F(ProxyServiceTest, PAC_FailoverAfterDirect) {
   TestCompletionCallback callback3;
   rv = service.ReconsiderProxyAfterError(
       url, "GET", ERR_PROXY_CONNECTION_FAILED, &info, callback3.callback(),
-      nullptr, &proxy_delegate, BoundNetLog());
+      nullptr, &proxy_delegate, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(info.is_direct());
 
@@ -743,7 +765,7 @@ TEST_F(ProxyServiceTest, PAC_FailoverAfterDirect) {
   TestCompletionCallback callback4;
   rv = service.ReconsiderProxyAfterError(
       url, "GET", ERR_PROXY_CONNECTION_FAILED, &info, callback4.callback(),
-      nullptr, &proxy_delegate, BoundNetLog());
+      nullptr, &proxy_delegate, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_FALSE(info.is_direct());
   EXPECT_EQ("foobar:20", info.proxy_server().ToURI());
@@ -753,7 +775,7 @@ TEST_F(ProxyServiceTest, PAC_FailoverAfterDirect) {
   TestCompletionCallback callback5;
   rv = service.ReconsiderProxyAfterError(
       url, "GET", ERR_PROXY_CONNECTION_FAILED, &info, callback5.callback(),
-      nullptr, &proxy_delegate, BoundNetLog());
+      nullptr, &proxy_delegate, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_FAILED));
   EXPECT_TRUE(info.is_empty());
 }
@@ -777,14 +799,14 @@ TEST_F(ProxyServiceTest, PAC_ConfigSourcePropagates) {
   ProxyInfo info;
   TestCompletionCallback callback;
   int rv = service.ResolveProxy(url, std::string(), &info, callback.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   ASSERT_THAT(rv, IsError(ERR_IO_PENDING));
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
-  ASSERT_EQ(1u, resolver.pending_requests().size());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("foopy");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("foopy");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback.WaitForResult(), IsOk());
   EXPECT_EQ(PROXY_CONFIG_SOURCE_TEST, info.config_source());
@@ -815,18 +837,18 @@ TEST_F(ProxyServiceTest, ProxyResolverFails) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Fail the first resolve request in MockAsyncProxyResolver.
-  resolver.pending_requests()[0]->CompleteNow(ERR_FAILED);
+  resolver.pending_jobs()[0]->CompleteNow(ERR_FAILED);
 
   // Although the proxy resolver failed the request, ProxyService implicitly
   // falls-back to DIRECT.
@@ -842,16 +864,16 @@ TEST_F(ProxyServiceTest, ProxyResolverFails) {
   // regardless of whether the first request failed in it.
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(url, std::string(), &info, callback2.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // This time we will have the resolver succeed (perhaps the PAC script has
   // a dependency on the current time).
-  resolver.pending_requests()[0]->results()->UseNamedProxy("foopy_valid:8080");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("foopy_valid:8080");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -877,7 +899,7 @@ TEST_F(ProxyServiceTest, ProxyResolverTerminatedDuringRequest) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ASSERT_EQ(1u, factory->pending_requests().size());
@@ -885,11 +907,11 @@ TEST_F(ProxyServiceTest, ProxyResolverTerminatedDuringRequest) {
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Fail the first resolve request in MockAsyncProxyResolver.
-  resolver.pending_requests()[0]->CompleteNow(ERR_PAC_SCRIPT_TERMINATED);
+  resolver.pending_jobs()[0]->CompleteNow(ERR_PAC_SCRIPT_TERMINATED);
 
   // Although the proxy resolver failed the request, ProxyService implicitly
   // falls-back to DIRECT.
@@ -907,7 +929,7 @@ TEST_F(ProxyServiceTest, ProxyResolverTerminatedDuringRequest) {
 
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(url, std::string(), &info, callback2.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ASSERT_EQ(1u, factory->pending_requests().size());
@@ -915,12 +937,12 @@ TEST_F(ProxyServiceTest, ProxyResolverTerminatedDuringRequest) {
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // This time we will have the resolver succeed.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("foopy_valid:8080");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("foopy_valid:8080");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -949,11 +971,11 @@ TEST_F(ProxyServiceTest,
   TestCompletionCallback callback1;
   int rv =
       service.ResolveProxy(url1, std::string(), &info, callback1.callback(),
-                           nullptr, nullptr, BoundNetLog());
+                           nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(url2, std::string(), &info, callback2.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ASSERT_EQ(1u, factory->pending_requests().size());
@@ -961,10 +983,10 @@ TEST_F(ProxyServiceTest,
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  RequestMap requests = GetPendingRequestsForURLs(resolver, url1, url2);
+  JobMap jobs = GetPendingJobsForURLs(resolver, url1, url2);
 
   // Fail the first resolve request in MockAsyncProxyResolver.
-  requests[url1]->CompleteNow(ERR_PAC_SCRIPT_TERMINATED);
+  jobs[url1]->CompleteNow(ERR_PAC_SCRIPT_TERMINATED);
 
   // Although the proxy resolver failed the request, ProxyService implicitly
   // falls-back to DIRECT.
@@ -977,7 +999,7 @@ TEST_F(ProxyServiceTest,
   EXPECT_LE(info.proxy_resolve_start_time(), info.proxy_resolve_end_time());
 
   // The second request is cancelled when the proxy resolver terminates.
-  requests = GetCancelledRequestsForURLs(resolver, url2);
+  jobs = GetCancelledJobsForURLs(resolver, url2);
 
   // Since a second request was in progress, the ProxyService starts
   // initializating a new ProxyResolver.
@@ -986,11 +1008,11 @@ TEST_F(ProxyServiceTest,
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  requests = GetPendingRequestsForURLs(resolver, url2);
+  jobs = GetPendingJobsForURLs(resolver, url2);
 
   // This request succeeds.
-  requests[url2]->results()->UseNamedProxy("foopy_valid:8080");
-  requests[url2]->CompleteNow(OK);
+  jobs[url2]->results()->UseNamedProxy("foopy_valid:8080");
+  jobs[url2]->CompleteNow(OK);
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -1018,7 +1040,7 @@ TEST_F(ProxyServiceTest, ProxyScriptFetcherFailsDownloadingMandatoryPac) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
@@ -1036,7 +1058,7 @@ TEST_F(ProxyServiceTest, ProxyScriptFetcherFailsDownloadingMandatoryPac) {
   // mandatory PAC script, ProxyService must not implicitly fall-back to DIRECT.
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(url, std::string(), &info, callback2.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_MANDATORY_PROXY_CONFIGURATION_FAILED));
   EXPECT_FALSE(info.is_direct());
 }
@@ -1060,14 +1082,14 @@ TEST_F(ProxyServiceTest, ProxyResolverFailsParsingJavaScriptMandatoryPac) {
 
   MockProxyScriptFetcher* fetcher = new MockProxyScriptFetcher;
   service.SetProxyScriptFetchers(
-      fetcher, base::WrapUnique(new DoNothingDhcpProxyScriptFetcher()));
+      fetcher, base::MakeUnique<DoNothingDhcpProxyScriptFetcher>());
 
   // Start resolve request.
   GURL url("http://www.google.com/");
   ProxyInfo info;
   TestCompletionCallback callback;
   int rv = service.ResolveProxy(url, std::string(), &info, callback.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that nothing has been sent to the proxy resolver factory yet.
@@ -1113,18 +1135,18 @@ TEST_F(ProxyServiceTest, ProxyResolverFailsInJavaScriptMandatoryPac) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Fail the first resolve request in MockAsyncProxyResolver.
-  resolver.pending_requests()[0]->CompleteNow(ERR_FAILED);
+  resolver.pending_jobs()[0]->CompleteNow(ERR_FAILED);
 
   // As the proxy resolver failed the request and is configured for a mandatory
   // PAC script, ProxyService must not implicitly fall-back to DIRECT.
@@ -1136,16 +1158,16 @@ TEST_F(ProxyServiceTest, ProxyResolverFailsInJavaScriptMandatoryPac) {
   // regardless of whether the first request failed in it.
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(url, std::string(), &info, callback2.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // This time we will have the resolver succeed (perhaps the PAC script has
   // a dependency on the current time).
-  resolver.pending_requests()[0]->results()->UseNamedProxy("foopy_valid:8080");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("foopy_valid:8080");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -1172,20 +1194,20 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first item is valid.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -1202,7 +1224,7 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
   TestCompletionCallback callback2;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback2.callback(), nullptr, nullptr, BoundNetLog());
+      callback2.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
 
   // Proxy times should not have been modified by fallback.
@@ -1221,17 +1243,17 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
 
   TestCompletionCallback callback3;
   rv = service.ResolveProxy(url, std::string(), &info, callback3.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver -- the second result is already known
   // to be bad, so we will not try to use it initially.
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy3:7070;foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback3.WaitForResult(), IsOk());
   EXPECT_FALSE(info.is_direct());
@@ -1249,7 +1271,7 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
   TestCompletionCallback callback4;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback4.callback(), nullptr, nullptr, BoundNetLog());
+      callback4.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("foopy2:9090", info.proxy_server().ToURI());
 
@@ -1259,7 +1281,7 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
   TestCompletionCallback callback5;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback5.callback(), nullptr, nullptr, BoundNetLog());
+      callback5.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
 
@@ -1268,7 +1290,7 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
   TestCompletionCallback callback6;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback6.callback(), nullptr, nullptr, BoundNetLog());
+      callback6.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_FAILED));
   EXPECT_FALSE(info.is_direct());
   EXPECT_TRUE(info.is_empty());
@@ -1280,17 +1302,17 @@ TEST_F(ProxyServiceTest, ProxyFallback) {
   // Look up proxies again
   TestCompletionCallback callback7;
   rv = service.ResolveProxy(url, std::string(), &info, callback7.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // This time, the first 3 results have been found to be bad, but only the
   // first proxy has been confirmed ...
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy3:7070;foopy2:9090;foopy4:9091");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // ... therefore, we should see the second proxy first.
   EXPECT_THAT(callback7.WaitForResult(), IsOk());
@@ -1322,20 +1344,20 @@ TEST_F(ProxyServiceTest, ProxyFallbackToDirect) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UsePacString(
+  resolver.pending_jobs()[0]->results()->UsePacString(
       "PROXY foopy1:8080; PROXY foopy2:9090; DIRECT");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Get the first result.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -1346,7 +1368,7 @@ TEST_F(ProxyServiceTest, ProxyFallbackToDirect) {
   TestCompletionCallback callback2;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback2.callback(), nullptr, nullptr, BoundNetLog());
+      callback2.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
 
   // Now we get back the second proxy.
@@ -1356,7 +1378,7 @@ TEST_F(ProxyServiceTest, ProxyFallbackToDirect) {
   TestCompletionCallback callback3;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback3.callback(), nullptr, nullptr, BoundNetLog());
+      callback3.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
 
   // Finally, we get back DIRECT.
@@ -1370,7 +1392,7 @@ TEST_F(ProxyServiceTest, ProxyFallbackToDirect) {
   TestCompletionCallback callback4;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback4.callback(), nullptr, nullptr, BoundNetLog());
+      callback4.callback(), nullptr, nullptr, NetLogWithSource());
   // There was nothing left to try after DIRECT, so we are out of
   // choices.
   EXPECT_THAT(rv, IsError(ERR_FAILED));
@@ -1395,20 +1417,20 @@ TEST_F(ProxyServiceTest, ProxyFallback_NewSettings) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // Set the result in proxy resolver.
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first item is valid.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -1422,19 +1444,19 @@ TEST_F(ProxyServiceTest, ProxyFallback_NewSettings) {
   TestCompletionCallback callback2;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback2.callback(), nullptr, nullptr, BoundNetLog());
+      callback2.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy-new/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first proxy is still there since the configuration changed.
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -1444,7 +1466,7 @@ TEST_F(ProxyServiceTest, ProxyFallback_NewSettings) {
   TestCompletionCallback callback3;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback3.callback(), nullptr, nullptr, BoundNetLog());
+      callback3.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("foopy2:9090", info.proxy_server().ToURI());
 
@@ -1457,19 +1479,19 @@ TEST_F(ProxyServiceTest, ProxyFallback_NewSettings) {
   TestCompletionCallback callback4;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback4.callback(), nullptr, nullptr, BoundNetLog());
+      callback4.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy-new2/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback4.WaitForResult(), IsOk());
   EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
@@ -1498,18 +1520,18 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfig) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first item is valid.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -1520,7 +1542,7 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfig) {
   TestCompletionCallback callback2;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback2.callback(), nullptr, nullptr, BoundNetLog());
+      callback2.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
 
   // The first proxy is ignored, and the second one is selected.
@@ -1531,14 +1553,14 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfig) {
   ProxyInfo info2;
   TestCompletionCallback callback3;
   rv = service.ResolveProxy(url, std::string(), &info2, callback3.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // This simulates a javascript runtime error in the PAC script.
-  resolver.pending_requests()[0]->CompleteNow(ERR_FAILED);
+  resolver.pending_jobs()[0]->CompleteNow(ERR_FAILED);
 
   // Although the resolver failed, the ProxyService will implicitly fall-back
   // to a DIRECT connection.
@@ -1553,15 +1575,15 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfig) {
   TestCompletionCallback callback4;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info3,
-      callback4.callback(), nullptr, nullptr, BoundNetLog());
+      callback4.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first proxy is not there since the it was added to the bad proxies
   // list by the earlier ReconsiderProxyAfterError().
@@ -1596,18 +1618,18 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfigMandatory) {
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(url, std::string(), &info, callback1.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first item is valid.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -1618,7 +1640,7 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfigMandatory) {
   TestCompletionCallback callback2;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info,
-      callback2.callback(), nullptr, nullptr, BoundNetLog());
+      callback2.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
 
   // The first proxy is ignored, and the second one is selected.
@@ -1629,14 +1651,14 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfigMandatory) {
   ProxyInfo info2;
   TestCompletionCallback callback3;
   rv = service.ResolveProxy(url, std::string(), &info2, callback3.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
   // This simulates a javascript runtime error in the PAC script.
-  resolver.pending_requests()[0]->CompleteNow(ERR_FAILED);
+  resolver.pending_jobs()[0]->CompleteNow(ERR_FAILED);
 
   // Although the resolver failed, the ProxyService will NOT fall-back
   // to a DIRECT connection as it is configured as mandatory.
@@ -1652,15 +1674,15 @@ TEST_F(ProxyServiceTest, ProxyFallback_BadConfigMandatory) {
   TestCompletionCallback callback4;
   rv = service.ReconsiderProxyAfterError(
       url, std::string(), ERR_PROXY_CONNECTION_FAILED, &info3,
-      callback4.callback(), nullptr, nullptr, BoundNetLog());
+      callback4.callback(), nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
-  resolver.pending_requests()[0]->results()->UseNamedProxy(
+  resolver.pending_jobs()[0]->results()->UseNamedProxy(
       "foopy1:8080;foopy2:9090");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // The first proxy is not there since the it was added to the bad proxies
   // list by the earlier ReconsiderProxyAfterError().
@@ -1679,7 +1701,7 @@ TEST_F(ProxyServiceTest, ProxyBypassList) {
   config.set_auto_detect(false);
   config.proxy_rules().bypass_rules.ParseFromString("*.org");
 
-  ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+  ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                        nullptr, nullptr);
 
   int rv;
@@ -1689,14 +1711,14 @@ TEST_F(ProxyServiceTest, ProxyBypassList) {
   // Request for a .org domain should bypass proxy.
   rv = service.ResolveProxy(url1, std::string(), &info[0],
                             callback[0].callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(info[0].is_direct());
 
   // Request for a .com domain hits the proxy.
   rv = service.ResolveProxy(url2, std::string(), &info[1],
                             callback[1].callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("foopy1:8080", info[1].proxy_server().ToURI());
 }
@@ -1720,13 +1742,13 @@ TEST_F(ProxyServiceTest, MarkProxiesAsBadTests) {
 
   EXPECT_EQ(3u, additional_bad_proxies.size());
 
-  ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+  ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                        nullptr, nullptr);
   ProxyInfo proxy_info;
   proxy_info.UseProxyList(proxy_list);
   const ProxyRetryInfoMap& retry_info = service.proxy_retry_info();
   service.MarkProxiesAsBadUntil(proxy_info, base::TimeDelta::FromSeconds(1),
-                                additional_bad_proxies, BoundNetLog());
+                                additional_bad_proxies, NetLogWithSource());
   ASSERT_EQ(4u, retry_info.size());
   for (const ProxyServer& proxy_server :
        config.proxy_rules().proxies_for_http.GetAll()) {
@@ -1741,54 +1763,54 @@ TEST_F(ProxyServiceTest, PerProtocolProxyTests) {
   config.proxy_rules().ParseFromString("http=foopy1:8080;https=foopy2:8080");
   config.set_auto_detect(false);
   {
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("http://www.msn.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
   }
   {
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("ftp://ftp.google.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_TRUE(info.is_direct());
     EXPECT_EQ("direct://", info.proxy_server().ToURI());
   }
   {
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("https://webbranch.techcu.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("foopy2:8080", info.proxy_server().ToURI());
   }
   {
     config.proxy_rules().ParseFromString("foopy1:8080");
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("http://www.microsoft.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
@@ -1803,14 +1825,14 @@ TEST_F(ProxyServiceTest, ProxyConfigSourcePropagates) {
     ProxyConfig config;
     config.set_source(PROXY_CONFIG_SOURCE_TEST);
     config.proxy_rules().ParseFromString("https=foopy2:8080");
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("http://www.google.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     ASSERT_THAT(rv, IsOk());
     // Should be SOURCE_TEST, even if there are no HTTP proxies configured.
     EXPECT_EQ(PROXY_CONFIG_SOURCE_TEST, info.config_source());
@@ -1819,14 +1841,14 @@ TEST_F(ProxyServiceTest, ProxyConfigSourcePropagates) {
     ProxyConfig config;
     config.set_source(PROXY_CONFIG_SOURCE_TEST);
     config.proxy_rules().ParseFromString("https=foopy2:8080");
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("https://www.google.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     ASSERT_THAT(rv, IsOk());
     // Used the HTTPS proxy. So source should be TEST.
     EXPECT_EQ(PROXY_CONFIG_SOURCE_TEST, info.config_source());
@@ -1834,14 +1856,14 @@ TEST_F(ProxyServiceTest, ProxyConfigSourcePropagates) {
   {
     ProxyConfig config;
     config.set_source(PROXY_CONFIG_SOURCE_TEST);
-    ProxyService service(base::WrapUnique(new MockProxyConfigService(config)),
+    ProxyService service(base::MakeUnique<MockProxyConfigService>(config),
                          nullptr, nullptr);
     GURL test_url("http://www.google.com");
     ProxyInfo info;
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     ASSERT_THAT(rv, IsOk());
     // ProxyConfig is empty. Source should still be TEST.
     EXPECT_EQ(PROXY_CONFIG_SOURCE_TEST, info.config_source());
@@ -1865,7 +1887,7 @@ TEST_F(ProxyServiceTest, DefaultProxyFallbackToSOCKS) {
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
@@ -1878,7 +1900,7 @@ TEST_F(ProxyServiceTest, DefaultProxyFallbackToSOCKS) {
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("socks4://foopy2:1080", info.proxy_server().ToURI());
@@ -1891,7 +1913,7 @@ TEST_F(ProxyServiceTest, DefaultProxyFallbackToSOCKS) {
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("socks4://foopy2:1080", info.proxy_server().ToURI());
@@ -1904,7 +1926,7 @@ TEST_F(ProxyServiceTest, DefaultProxyFallbackToSOCKS) {
     TestCompletionCallback callback;
     int rv = service.ResolveProxy(test_url, std::string(), &info,
                                   callback.callback(), nullptr, nullptr,
-                                  BoundNetLog());
+                                  NetLogWithSource());
     EXPECT_THAT(rv, IsOk());
     EXPECT_FALSE(info.is_direct());
     EXPECT_EQ("socks4://foopy2:1080", info.proxy_server().ToURI());
@@ -1932,7 +1954,7 @@ TEST_F(ProxyServiceTest, CancelInProgressRequest) {
   TestCompletionCallback callback1;
   int rv =
       service.ResolveProxy(url1, std::string(), &info1, callback1.callback(),
-                           nullptr, nullptr, BoundNetLog());
+                           nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Successfully initialize the PAC script.
@@ -1940,43 +1962,42 @@ TEST_F(ProxyServiceTest, CancelInProgressRequest) {
             factory->pending_requests()[0]->script_data()->url());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  GetPendingRequestsForURLs(resolver, url1);
+  GetPendingJobsForURLs(resolver, url1);
 
   ProxyInfo info2;
   TestCompletionCallback callback2;
   ProxyService::PacRequest* request2;
   rv = service.ResolveProxy(url2, std::string(), &info2, callback2.callback(),
-                            &request2, nullptr, BoundNetLog());
+                            &request2, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  GetPendingRequestsForURLs(resolver, url1, url2);
+  GetPendingJobsForURLs(resolver, url1, url2);
 
   ProxyInfo info3;
   TestCompletionCallback callback3;
   rv = service.ResolveProxy(url3, std::string(), &info3, callback3.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
-  GetPendingRequestsForURLs(resolver, url1, url2, url3);
+  GetPendingJobsForURLs(resolver, url1, url2, url3);
 
   // Cancel the second request
   service.CancelPacRequest(request2);
 
-  RequestMap requests = GetPendingRequestsForURLs(resolver, url1, url3);
+  JobMap jobs = GetPendingJobsForURLs(resolver, url1, url3);
 
-  // Complete the two un-cancelled requests.
+  // Complete the two un-cancelled jobs.
   // We complete the last one first, just to mix it up a bit.
-  requests[url3]->results()->UseNamedProxy("request3:80");
-  requests[url3]->CompleteNow(OK);
+  jobs[url3]->results()->UseNamedProxy("request3:80");
+  jobs[url3]->CompleteNow(OK);  // dsaadsasd
 
-  requests[url1]->results()->UseNamedProxy("request1:80");
-  requests[url1]->CompleteNow(OK);
+  jobs[url1]->results()->UseNamedProxy("request1:80");
+  jobs[url1]->CompleteNow(OK);
 
-  // Complete and verify that requests ran as expected.
-  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  EXPECT_EQ(OK, callback1.WaitForResult());
   EXPECT_EQ("request1:80", info1.proxy_server().ToURI());
 
   EXPECT_FALSE(callback2.have_result());  // Cancelled.
-  GetCancelledRequestsForURLs(resolver, url2);
+  GetCancelledJobsForURLs(resolver, url2);
 
   EXPECT_THAT(callback3.WaitForResult(), IsOk());
   EXPECT_EQ("request3:80", info3.proxy_server().ToURI());
@@ -2008,7 +2029,7 @@ TEST_F(ProxyServiceTest, InitialPACScriptDownload) {
   ProxyService::PacRequest* request1;
   int rv =
       service.ResolveProxy(url1, std::string(), &info1, callback1.callback(),
-                           &request1, nullptr, BoundNetLog());
+                           &request1, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered download of PAC script.
@@ -2019,14 +2040,14 @@ TEST_F(ProxyServiceTest, InitialPACScriptDownload) {
   TestCompletionCallback callback2;
   ProxyService::PacRequest* request2;
   rv = service.ResolveProxy(url2, std::string(), &info2, callback2.callback(),
-                            &request2, nullptr, BoundNetLog());
+                            &request2, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ProxyInfo info3;
   TestCompletionCallback callback3;
   ProxyService::PacRequest* request3;
   rv = service.ResolveProxy(url3, std::string(), &info3, callback3.callback(),
-                            &request3, nullptr, BoundNetLog());
+                            &request3, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Nothing has been sent to the factory yet.
@@ -2050,25 +2071,33 @@ TEST_F(ProxyServiceTest, InitialPACScriptDownload) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  RequestMap requests = GetPendingRequestsForURLs(resolver, url1, url2, url3);
+  JobMap jobs = GetPendingJobsForURLs(resolver, url1, url2, url3);
 
   EXPECT_EQ(LOAD_STATE_RESOLVING_PROXY_FOR_URL, service.GetLoadState(request1));
   EXPECT_EQ(LOAD_STATE_RESOLVING_PROXY_FOR_URL, service.GetLoadState(request2));
   EXPECT_EQ(LOAD_STATE_RESOLVING_PROXY_FOR_URL, service.GetLoadState(request3));
 
-  // Complete all the requests (in some order).
+  // Complete all the jobs (in some order).
 
-  requests[url3]->results()->UseNamedProxy("request3:80");
-  requests[url3]->CompleteNow(OK);
+  jobs[url3]->results()->UseNamedProxy("request3:80");
+  jobs[url3]->CompleteNow(OK);
 
-  requests[url1]->results()->UseNamedProxy("request1:80");
-  requests[url1]->CompleteNow(OK);
+  jobs[url1]->results()->UseNamedProxy("request1:80");
+  jobs[url1]->CompleteNow(OK);
 
-  requests[url2]->results()->UseNamedProxy("request2:80");
-  requests[url2]->CompleteNow(OK);
+  jobs[url2]->results()->UseNamedProxy("request2:80");
+  jobs[url2]->CompleteNow(OK);
 
-  // Complete and verify that requests ran as expected.
-  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  //<<<<<<< HEAD
+  //  // Complete and verify that requests ran as expected.
+  //  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  //=======
+  // Complete and verify that jobs ran as expected.
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  //>>>>>>> parent of 9c8f424... Revert of Change
+  // ProxyResolver::GetProxyForURL() to take a std::unique_ptr<Request>* rather
+  // than a RequestHandle* (patchset #11 id:200001 of
+  // https://codereview.chromium.org/1439053002/ )
   EXPECT_EQ("request1:80", info1.proxy_server().ToURI());
   EXPECT_FALSE(info1.proxy_resolve_start_time().is_null());
   EXPECT_FALSE(info1.proxy_resolve_end_time().is_null());
@@ -2105,13 +2134,13 @@ TEST_F(ProxyServiceTest, ChangeScriptFetcherWhilePACDownloadInProgress) {
   service.SetProxyScriptFetchers(
       fetcher, base::WrapUnique(new DoNothingDhcpProxyScriptFetcher()));
 
-  // Start 2 requests.
+  // Start 2 jobs.
 
   ProxyInfo info1;
   TestCompletionCallback callback1;
   int rv =
       service.ResolveProxy(url1, std::string(), &info1, callback1.callback(),
-                           nullptr, nullptr, BoundNetLog());
+                           nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered download of PAC script.
@@ -2121,7 +2150,7 @@ TEST_F(ProxyServiceTest, ChangeScriptFetcherWhilePACDownloadInProgress) {
   ProxyInfo info2;
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(url2, std::string(), &info2, callback2.callback(),
-                            nullptr, nullptr, BoundNetLog());
+                            nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // At this point the ProxyService should be waiting for the
@@ -2146,7 +2175,7 @@ TEST_F(ProxyServiceTest, ChangeScriptFetcherWhilePACDownloadInProgress) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  GetPendingRequestsForURLs(resolver, url1, url2);
+  GetPendingJobsForURLs(resolver, url1, url2);
 }
 
 // Test cancellation of a request, while the PAC script is being fetched.
@@ -2184,20 +2213,20 @@ TEST_F(ProxyServiceTest, CancelWhilePACFetching) {
   ProxyService::PacRequest* request2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), &request2, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ProxyInfo info3;
   TestCompletionCallback callback3;
   rv = service.ResolveProxy(GURL("http://request3"), std::string(), &info3,
                             callback3.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Nothing has been sent to the factory yet.
   EXPECT_TRUE(factory->pending_requests().empty());
 
-  // Cancel the first 2 requests.
+  // Cancel the first 2 jobs.
   service.CancelPacRequest(request1);
   service.CancelPacRequest(request2);
 
@@ -2212,17 +2241,17 @@ TEST_F(ProxyServiceTest, CancelWhilePACFetching) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request3"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request3"), resolver.pending_jobs()[0]->url());
 
-  // Complete all the requests.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request3:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  // Complete all the jobs.
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request3:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback3.WaitForResult(), IsOk());
   EXPECT_EQ("request3:80", info3.proxy_server().ToURI());
 
-  EXPECT_TRUE(resolver.cancelled_requests().empty());
+  EXPECT_TRUE(resolver.cancelled_jobs().empty());
 
   EXPECT_FALSE(callback1.have_result());  // Cancelled.
   EXPECT_FALSE(callback2.have_result());  // Cancelled.
@@ -2232,16 +2261,15 @@ TEST_F(ProxyServiceTest, CancelWhilePACFetching) {
 
   // Check the NetLog for request 1 (which was cancelled) got filled properly.
   EXPECT_EQ(4u, entries1.size());
+  EXPECT_TRUE(
+      LogContainsBeginEvent(entries1, 0, NetLogEventType::PROXY_SERVICE));
   EXPECT_TRUE(LogContainsBeginEvent(
-      entries1, 0, NetLog::TYPE_PROXY_SERVICE));
-  EXPECT_TRUE(LogContainsBeginEvent(
-      entries1, 1, NetLog::TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC));
-  // Note that TYPE_PROXY_SERVICE_WAITING_FOR_INIT_PAC is never completed before
+      entries1, 1, NetLogEventType::PROXY_SERVICE_WAITING_FOR_INIT_PAC));
+  // Note that PROXY_SERVICE_WAITING_FOR_INIT_PAC is never completed before
   // the cancellation occured.
-  EXPECT_TRUE(LogContainsEvent(
-      entries1, 2, NetLog::TYPE_CANCELLED, NetLog::PHASE_NONE));
-  EXPECT_TRUE(LogContainsEndEvent(
-      entries1, 3, NetLog::TYPE_PROXY_SERVICE));
+  EXPECT_TRUE(LogContainsEvent(entries1, 2, NetLogEventType::CANCELLED,
+                               NetLogEventPhase::NONE));
+  EXPECT_TRUE(LogContainsEndEvent(entries1, 3, NetLogEventType::PROXY_SERVICE));
 }
 
 // Test that if auto-detect fails, we fall-back to the custom pac.
@@ -2270,14 +2298,14 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomPac) {
   TestCompletionCallback callback1;
   int rv =
       service.ResolveProxy(url1, std::string(), &info1, callback1.callback(),
-                           nullptr, nullptr, BoundNetLog());
+                           nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ProxyInfo info2;
   TestCompletionCallback callback2;
   ProxyService::PacRequest* request2;
   rv = service.ResolveProxy(url2, std::string(), &info2, callback2.callback(),
-                            &request2, nullptr, BoundNetLog());
+                            &request2, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that nothing has been sent to the proxy resolver factory yet.
@@ -2298,19 +2326,27 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomPac) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  // Now finally, the pending requests should have been sent to the resolver
+  // Now finally, the pending jobs should have been sent to the resolver
   // (which was initialized with custom PAC script).
 
-  RequestMap requests = GetPendingRequestsForURLs(resolver, url1, url2);
+  JobMap jobs = GetPendingJobsForURLs(resolver, url1, url2);
 
-  // Complete the pending requests.
-  requests[url2]->results()->UseNamedProxy("request2:80");
-  requests[url2]->CompleteNow(OK);
-  requests[url1]->results()->UseNamedProxy("request1:80");
-  requests[url1]->CompleteNow(OK);
+  // Complete the pending jobs.
+  jobs[url2]->results()->UseNamedProxy("request2:80");
+  jobs[url2]->CompleteNow(OK);
+  jobs[url1]->results()->UseNamedProxy("request1:80");
+  jobs[url1]->CompleteNow(OK);
 
-  // Verify that requests ran as expected.
-  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  //<<<<<<< HEAD
+  //  // Verify that requests ran as expected.
+  //  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  //=======
+  // Verify that jobs ran as expected.
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  //>>>>>>> parent of 9c8f424... Revert of Change
+  // ProxyResolver::GetProxyForURL() to take a std::unique_ptr<Request>* rather
+  // than a RequestHandle* (patchset #11 id:200001 of
+  // https://codereview.chromium.org/1439053002/ )
   EXPECT_EQ("request1:80", info1.proxy_server().ToURI());
   EXPECT_FALSE(info1.proxy_resolve_start_time().is_null());
   EXPECT_FALSE(info1.proxy_resolve_end_time().is_null());
@@ -2350,14 +2386,14 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomPac2) {
   TestCompletionCallback callback1;
   int rv =
       service.ResolveProxy(url1, std::string(), &info1, callback1.callback(),
-                           nullptr, nullptr, BoundNetLog());
+                           nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ProxyInfo info2;
   TestCompletionCallback callback2;
   ProxyService::PacRequest* request2;
   rv = service.ResolveProxy(url2, std::string(), &info2, callback2.callback(),
-                            &request2, nullptr, BoundNetLog());
+                            &request2, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that nothing has been sent to the proxy resolver factory yet.
@@ -2380,19 +2416,27 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomPac2) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  // Now finally, the pending requests should have been sent to the resolver
+  // Now finally, the pending jobs should have been sent to the resolver
   // (which was initialized with custom PAC script).
 
-  RequestMap requests = GetPendingRequestsForURLs(resolver, url1, url2);
+  JobMap jobs = GetPendingJobsForURLs(resolver, url1, url2);
 
-  // Complete the pending requests.
-  requests[url2]->results()->UseNamedProxy("request2:80");
-  requests[url2]->CompleteNow(OK);
-  requests[url1]->results()->UseNamedProxy("request1:80");
-  requests[url1]->CompleteNow(OK);
+  // Complete the pending jobs.
+  jobs[url2]->results()->UseNamedProxy("request2:80");
+  jobs[url2]->CompleteNow(OK);
+  jobs[url1]->results()->UseNamedProxy("request1:80");
+  jobs[url1]->CompleteNow(OK);
 
-  // Verify that requests ran as expected.
-  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  //<<<<<<< HEAD
+  //  // Verify that requests ran as expected.
+  //  EXPECT_THAT(callback1.WaitForResult(), IsOk());
+  //=======
+  // Verify that jobs ran as expected.
+  EXPECT_EQ(OK, callback1.WaitForResult());
+  //>>>>>>> parent of 9c8f424... Revert of Change
+  // ProxyResolver::GetProxyForURL() to take a std::unique_ptr<Request>* rather
+  // than a RequestHandle* (patchset #11 id:200001 of
+  // https://codereview.chromium.org/1439053002/ )
   EXPECT_EQ("request1:80", info1.proxy_server().ToURI());
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -2417,13 +2461,13 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomToManual) {
   service.SetProxyScriptFetchers(
       fetcher, base::WrapUnique(new DoNothingDhcpProxyScriptFetcher()));
 
-  // Start 2 requests.
+  // Start 2 jobs.
 
   ProxyInfo info1;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   ProxyInfo info2;
@@ -2431,7 +2475,7 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomToManual) {
   ProxyService::PacRequest* request2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), &request2, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that nothing has been sent to the proxy resolver factory yet.
@@ -2451,7 +2495,7 @@ TEST_F(ProxyServiceTest, FallbackFromAutodetectToCustomToManual) {
   // sent to it.
   ASSERT_EQ(0u, factory->pending_requests().size());
 
-  // Verify that requests ran as expected -- they should have fallen back to
+  // Verify that jobs ran as expected -- they should have fallen back to
   // the manual proxy configuration for HTTP urls.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
   EXPECT_EQ("foopy:80", info1.proxy_server().ToURI());
@@ -2485,7 +2529,7 @@ TEST_F(ProxyServiceTest, BypassDoesntApplyToPac) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://www.google.com"), std::string(),
                                 &info1, callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that nothing has been sent to the proxy resolver factory yet.
@@ -2500,13 +2544,12 @@ TEST_F(ProxyServiceTest, BypassDoesntApplyToPac) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://www.google.com"),
-            resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://www.google.com"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Verify that request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -2517,16 +2560,15 @@ TEST_F(ProxyServiceTest, BypassDoesntApplyToPac) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://www.google.com"), std::string(),
                             &info2, callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://www.google.com"),
-            resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://www.google.com"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request2:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request2:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
   EXPECT_EQ("request2:80", info2.proxy_server().ToURI());
@@ -2556,7 +2598,7 @@ TEST_F(ProxyServiceTest, DeleteWhileInitProxyResolverHasOutstandingFetch) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://www.google.com"), std::string(),
                                 &info1, callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that nothing has been sent to the proxy resolver factory yet.
@@ -2587,7 +2629,7 @@ TEST_F(ProxyServiceTest, DeleteWhileInitProxyResolverHasOutstandingSet) {
   ProxyInfo info;
   TestCompletionCallback callback;
   int rv = service.ResolveProxy(url, std::string(), &info, callback.callback(),
-                                nullptr, nullptr, BoundNetLog());
+                                nullptr, nullptr, NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   EXPECT_EQ(GURL("http://foopy/proxy.pac"),
@@ -2598,26 +2640,25 @@ TEST_F(ProxyServiceTest, ResetProxyConfigService) {
   ProxyConfig config1;
   config1.proxy_rules().ParseFromString("foopy1:8080");
   config1.set_auto_detect(false);
-  ProxyService service(base::WrapUnique(new MockProxyConfigService(config1)),
+  ProxyService service(base::MakeUnique<MockProxyConfigService>(config1),
                        nullptr, nullptr);
 
   ProxyInfo info;
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("foopy1:8080", info.proxy_server().ToURI());
 
   ProxyConfig config2;
   config2.proxy_rules().ParseFromString("foopy2:8080");
   config2.set_auto_detect(false);
-  service.ResetConfigService(
-      base::WrapUnique(new MockProxyConfigService(config2)));
+  service.ResetConfigService(base::MakeUnique<MockProxyConfigService>(config2));
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_EQ("foopy2:8080", info.proxy_server().ToURI());
 }
@@ -2640,7 +2681,7 @@ TEST_F(ProxyServiceTest, UpdateConfigFromPACToDirect) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://www.google.com"), std::string(),
                                 &info1, callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Successfully set the autodetect script.
@@ -2649,9 +2690,9 @@ TEST_F(ProxyServiceTest, UpdateConfigFromPACToDirect) {
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
   // Complete the pending request.
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Verify that request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -2661,7 +2702,7 @@ TEST_F(ProxyServiceTest, UpdateConfigFromPACToDirect) {
   // (Even though the configuration isn't old/bad).
   //
   // This new configuration no longer has auto_detect set, so
-  // requests should complete synchronously now as direct-connect.
+  // jobs should complete synchronously now as direct-connect.
   config_service->SetConfig(ProxyConfig::CreateDirect());
 
   // Start another request -- the effective configuration has changed.
@@ -2669,7 +2710,7 @@ TEST_F(ProxyServiceTest, UpdateConfigFromPACToDirect) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://www.google.com"), std::string(),
                             &info2, callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
 
   EXPECT_TRUE(info2.is_direct());
@@ -2690,7 +2731,7 @@ TEST_F(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
 
   MockProxyScriptFetcher* fetcher = new MockProxyScriptFetcher;
   service.SetProxyScriptFetchers(
-      fetcher, base::WrapUnique(new DoNothingDhcpProxyScriptFetcher()));
+      fetcher, base::MakeUnique<DoNothingDhcpProxyScriptFetcher>());
 
   // Disable the "wait after IP address changes" hack, so this unit-test can
   // complete quickly.
@@ -2702,7 +2743,7 @@ TEST_F(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered initial download of PAC script.
@@ -2723,12 +2764,12 @@ TEST_F(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request1"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request1"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -2745,7 +2786,7 @@ TEST_F(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // This second request should have triggered the re-download of the PAC
@@ -2766,12 +2807,12 @@ TEST_F(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request2"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request2"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending second request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request2:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request2:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -2784,10 +2825,10 @@ TEST_F(ProxyServiceTest, NetworkChangeTriggersPacRefetch) {
   log.GetEntries(&entries);
 
   EXPECT_TRUE(LogContainsEntryWithType(entries, 0,
-                                       NetLog::TYPE_PROXY_CONFIG_CHANGED));
+                                       NetLogEventType::PROXY_CONFIG_CHANGED));
   ASSERT_EQ(9u, entries.size());
   for (size_t i = 1; i < entries.size(); ++i)
-    EXPECT_NE(NetLog::TYPE_PROXY_CONFIG_CHANGED, entries[i].type);
+    EXPECT_NE(NetLogEventType::PROXY_CONFIG_CHANGED, entries[i].type);
 }
 
 // This test verifies that the PAC script specified by the settings is
@@ -2820,7 +2861,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterFailure) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered initial download of PAC script.
@@ -2881,16 +2922,16 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterFailure) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that it was sent to the resolver.
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request2"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request2"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending second request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request2:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request2:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -2927,7 +2968,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentChange) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered initial download of PAC script.
@@ -2948,12 +2989,12 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentChange) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request1"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request1"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -2969,7 +3010,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentChange) {
   fetcher->WaitUntilFetch();
 
   ASSERT_TRUE(factory->pending_requests().empty());
-  ASSERT_TRUE(resolver.pending_requests().empty());
+  ASSERT_TRUE(resolver.pending_jobs().empty());
 
   // Make sure that our background checker is trying to download the expected
   // PAC script (same one as before). This time we will simulate a successful
@@ -2994,16 +3035,16 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentChange) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that it was sent to the resolver.
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request2"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request2"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending second request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request2:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request2:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -3040,7 +3081,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentUnchanged) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered initial download of PAC script.
@@ -3061,12 +3102,12 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentUnchanged) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request1"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request1"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -3082,7 +3123,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentUnchanged) {
   fetcher->WaitUntilFetch();
 
   ASSERT_TRUE(factory->pending_requests().empty());
-  ASSERT_TRUE(resolver.pending_requests().empty());
+  ASSERT_TRUE(resolver.pending_jobs().empty());
 
   // Make sure that our background checker is trying to download the expected
   // PAC script (same one as before). We will simulate the same response as
@@ -3094,7 +3135,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentUnchanged) {
   base::RunLoop().RunUntilIdle();
 
   ASSERT_TRUE(factory->pending_requests().empty());
-  ASSERT_TRUE(resolver.pending_requests().empty());
+  ASSERT_TRUE(resolver.pending_jobs().empty());
 
   // At this point the ProxyService is still running the same PAC script as
   // before.
@@ -3104,16 +3145,16 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterContentUnchanged) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // Check that it was sent to the resolver.
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request2"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request2"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending second request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request2:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request2:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
@@ -3150,7 +3191,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterSuccess) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered initial download of PAC script.
@@ -3171,12 +3212,12 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterSuccess) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request1"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request1"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -3192,7 +3233,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterSuccess) {
   fetcher->WaitUntilFetch();
 
   ASSERT_TRUE(factory->pending_requests().empty());
-  ASSERT_TRUE(resolver.pending_requests().empty());
+  ASSERT_TRUE(resolver.pending_jobs().empty());
 
   // Make sure that our background checker is trying to download the expected
   // PAC script (same one as before). This time we will simulate a failure
@@ -3211,7 +3252,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterSuccess) {
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(info2.is_direct());
 }
@@ -3305,7 +3346,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterActivity) {
   TestCompletionCallback callback1;
   int rv = service.ResolveProxy(GURL("http://request1"), std::string(), &info1,
                                 callback1.callback(), nullptr, nullptr,
-                                BoundNetLog());
+                                NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // The first request should have triggered initial download of PAC script.
@@ -3326,12 +3367,12 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterActivity) {
             factory->pending_requests()[0]->script_data()->utf16());
   factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request1"), resolver.pending_requests()[0]->url());
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request1"), resolver.pending_jobs()[0]->url());
 
   // Complete the pending request.
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request1:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request1:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   // Wait for completion callback, and verify that the request ran as expected.
   EXPECT_THAT(callback1.WaitForResult(), IsOk());
@@ -3343,21 +3384,21 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterActivity) {
 
   ASSERT_FALSE(fetcher->has_pending_request());
   ASSERT_TRUE(factory->pending_requests().empty());
-  ASSERT_TRUE(resolver.pending_requests().empty());
+  ASSERT_TRUE(resolver.pending_jobs().empty());
 
   // Start a second request.
   ProxyInfo info2;
   TestCompletionCallback callback2;
   rv = service.ResolveProxy(GURL("http://request2"), std::string(), &info2,
                             callback2.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
   // This request should have sent work to the resolver; complete it.
-  ASSERT_EQ(1u, resolver.pending_requests().size());
-  EXPECT_EQ(GURL("http://request2"), resolver.pending_requests()[0]->url());
-  resolver.pending_requests()[0]->results()->UseNamedProxy("request2:80");
-  resolver.pending_requests()[0]->CompleteNow(OK);
+  ASSERT_EQ(1u, resolver.pending_jobs().size());
+  EXPECT_EQ(GURL("http://request2"), resolver.pending_jobs()[0]->url());
+  resolver.pending_jobs()[0]->results()->UseNamedProxy("request2:80");
+  resolver.pending_jobs()[0]->CompleteNow(OK);
 
   EXPECT_THAT(callback2.WaitForResult(), IsOk());
   EXPECT_EQ("request2:80", info2.proxy_server().ToURI());
@@ -3381,7 +3422,7 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterActivity) {
   TestCompletionCallback callback3;
   rv = service.ResolveProxy(GURL("http://request3"), std::string(), &info3,
                             callback3.callback(), nullptr, nullptr,
-                            BoundNetLog());
+                            NetLogWithSource());
   EXPECT_THAT(rv, IsOk());
   EXPECT_TRUE(info3.is_direct());
 }
@@ -3462,7 +3503,7 @@ class SanitizeUrlHelper {
     TestCompletionCallback callback;
     int rv =
         service_->ResolveProxy(url, std::string(), &info, callback.callback(),
-                               nullptr, nullptr, BoundNetLog());
+                               nullptr, nullptr, NetLogWithSource());
     EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
     // First step is to download the PAC script.
@@ -3470,12 +3511,12 @@ class SanitizeUrlHelper {
               factory->pending_requests()[0]->script_data()->url());
     factory->pending_requests()[0]->CompleteNowWithForwarder(OK, &resolver);
 
-    EXPECT_EQ(1u, resolver.pending_requests().size());
-    EXPECT_EQ(url, resolver.pending_requests()[0]->url());
+    EXPECT_EQ(1u, resolver.pending_jobs().size());
+    EXPECT_EQ(url, resolver.pending_jobs()[0]->url());
 
     // Complete the request.
-    resolver.pending_requests()[0]->results()->UsePacString("DIRECT");
-    resolver.pending_requests()[0]->CompleteNow(OK);
+    resolver.pending_jobs()[0]->results()->UsePacString("DIRECT");
+    resolver.pending_jobs()[0]->CompleteNow(OK);
     EXPECT_THAT(callback.WaitForResult(), IsOk());
     EXPECT_TRUE(info.is_direct());
   }
@@ -3494,16 +3535,16 @@ class SanitizeUrlHelper {
     TestCompletionCallback callback;
     int rv = service_->ResolveProxy(raw_url, std::string(), &info,
                                     callback.callback(), nullptr, nullptr,
-                                    BoundNetLog());
+                                    NetLogWithSource());
     EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
 
-    EXPECT_EQ(1u, resolver.pending_requests().size());
+    EXPECT_EQ(1u, resolver.pending_jobs().size());
 
-    GURL sanitized_url = resolver.pending_requests()[0]->url();
+    GURL sanitized_url = resolver.pending_jobs()[0]->url();
 
     // Complete the request.
-    resolver.pending_requests()[0]->results()->UsePacString("DIRECT");
-    resolver.pending_requests()[0]->CompleteNow(OK);
+    resolver.pending_jobs()[0]->results()->UsePacString("DIRECT");
+    resolver.pending_jobs()[0]->CompleteNow(OK);
     EXPECT_THAT(callback.WaitForResult(), IsOk());
     EXPECT_TRUE(info.is_direct());
 

@@ -90,8 +90,8 @@ class AvSettings {
     // (or HDMI sinks connected to the device) are changed including screen
     // resolution, HDCP version and supported EOTFs.
     // On this event, GetScreenResolution(), GetHDCPVersion() and
-    // GetSupportedEotfs() will be called on the thread where Initialize()
-    // was called.
+    // GetSupportedEotfs(), GetScreenWidthMm(), GetScreenHeightMm() will be
+    // called on the thread where Initialize() was called.
     SCREEN_INFO_CHANGED = 3,
 
     // This event should be fired whenever the active output restrictions on the
@@ -112,6 +112,11 @@ class AvSettings {
     // by the device is changed, for e.g. when connecting to an AVR setup
     // where step interval should be 1%.
     AUDIO_VOLUME_STEP_INTERVAL_CHANGED = 7,
+
+    // This event shall be fired whenever the HDR output type changes.
+    // On this event, GetHdrOutputType() will be called on the thread where
+    // Initialize() was called.
+    HDR_OUTPUT_TYPE_CHANGED = 8,
 
     // This event should be fired when the device is connected to HDMI sinks.
     HDMI_CONNECTED = 100,
@@ -257,6 +262,10 @@ class AvSettings {
   // indicating support for DolbyVision and various DV-related features.
   virtual int GetDolbyVisionFlags() = 0;
 
+  // Returns physical screen size in millimeters.
+  virtual int GetScreenWidthMm() = 0;
+  virtual int GetScreenHeightMm() = 0;
+
   // If supported, retrieves the restrictions active on the device outputs (as
   // specified by the PlayReady CDM; see output_restrictions.h). If reporting
   // output restrictions is unsupported, should return false.
@@ -276,6 +285,46 @@ class AvSettings {
   // Enables/Disables Wake-On-Cast status.
   // Returns false if failed or not supported.
   virtual bool EnableWakeOnCast(bool enabled) = 0;
+
+  // Supported HDR output modes.
+  enum HdrOutputType {
+    HDR_OUTPUT_SDR,  // not HDR
+    HDR_OUTPUT_HDR,  // HDR with static metadata
+    HDR_OUTPUT_DOLBYVISION  // DolbyVision output
+  };
+
+  // Gets the current HDR output type.
+  virtual HdrOutputType GetHdrOutputType() = 0;
+
+  // Sets the HDMI video mode according to the given parameters:
+  // |allow_4k|: if false, the resolution set will not be a 4K resolution.
+  // |optimize_for_fps|: *Attempts* to pick a refresh rate optimal for the
+  // given content frame rate.  |optimize_for_fps| is expressed as framerate
+  // * 100. I.e. 24hz -> 2400, 23.98hz -> 2398, etc.  Values <= 0 are ignored.
+  // |output_type|: if set to HDR_OUTPUT_DOLBYVISION, the video mode set will
+  // be a DV supported resolution. If set to HDR_OUTPUT_HDR, the video mode set
+  // will be a 10-bit or greater video mode.
+  //
+  // Returns:
+  // - true if HDMI video mode change is beginning.  Caller should wait for
+  //   SCREEN_INFO_CHANGED event for mode change to complete.
+  // - false if no HDMI video mode change has begun.  This could be because
+  // HDMI is disconnected, or the current resolution is already good for the
+  // given parameters, or no valid resolution with the given parameters is
+  // found (ie. setting require_dolby_vision/require_hdr to true when the
+  // sink doesn't support those features).
+  //
+  // Non-HDMI devices should return false.
+  virtual bool SetHdmiVideoMode(bool allow_4k,
+                                int optimize_for_fps,
+                                HdrOutputType output_type) = 0;
+
+  // Returns true if the HDMI sink supports the specified HDR output type in
+  // the current HDMI mode.  Returns false otherwise.
+  //
+  // Non-HDMI devices should return false.
+  virtual bool IsHdrOutputSupportedByCurrentHdmiVideoMode(
+      HdrOutputType output_type) = 0;
 };
 
 }  // namespace chromecast

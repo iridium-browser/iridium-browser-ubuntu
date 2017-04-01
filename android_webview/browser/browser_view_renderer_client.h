@@ -10,8 +10,11 @@
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
+namespace ui {
+class TouchHandleDrawable;
+}
+
 namespace android_webview {
-struct ParentCompositorDrawConstraints;
 
 class BrowserViewRendererClient {
  public:
@@ -45,6 +48,9 @@ class BrowserViewRendererClient {
   // Handle overscroll.
   virtual void DidOverscroll(const gfx::Vector2d& overscroll_delta,
                              const gfx::Vector2dF& overscroll_velocity) = 0;
+
+  // Create a text selection handle on demand.
+  virtual ui::TouchHandleDrawable* CreateDrawable() = 0;
 
  protected:
   virtual ~BrowserViewRendererClient() {}

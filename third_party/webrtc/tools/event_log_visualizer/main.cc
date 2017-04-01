@@ -11,7 +11,8 @@
 #include <iostream>
 
 #include "gflags/gflags.h"
-#include "webrtc/call/rtc_event_log_parser.h"
+#include "webrtc/logging/rtc_event_log/rtc_event_log_parser.h"
+#include "webrtc/test/field_trial.h"
 #include "webrtc/tools/event_log_visualizer/analyzer.h"
 #include "webrtc/tools/event_log_visualizer/plot_base.h"
 #include "webrtc/tools/event_log_visualizer/plot_python.h"
@@ -25,6 +26,9 @@ DEFINE_bool(plot_packets,
 DEFINE_bool(plot_audio_playout,
             false,
             "Plot bar graph showing the time between each audio playout.");
+DEFINE_bool(plot_audio_level,
+            false,
+            "Plot line graph showing the audio level.");
 DEFINE_bool(
     plot_sequence_number,
     false,
@@ -55,6 +59,13 @@ DEFINE_bool(plot_fraction_loss,
             false,
             "Plot packet loss in percent for outgoing packets (as perceived by "
             "the send-side bandwidth estimator).");
+DEFINE_string(
+    force_fieldtrials,
+    "",
+    "Field trials control experimental feature code which can be forced. "
+    "E.g. running with --force_fieldtrials=WebRTC-FooFeature/Enabled/"
+    " will assign the group Enabled to field trial WebRTC-FooFeature. Multiple "
+    "trials are separated by \"/\"");
 
 int main(int argc, char* argv[]) {
   std::string program_name = argv[0];
@@ -71,6 +82,8 @@ int main(int argc, char* argv[]) {
     std::cout << google::ProgramUsage();
     return 0;
   }
+
+  webrtc::test::InitFieldTrialsFromString(FLAGS_force_fieldtrials);
 
   std::string filename = argv[1];
 
@@ -91,15 +104,25 @@ int main(int argc, char* argv[]) {
     if (FLAGS_incoming) {
       analyzer.CreatePacketGraph(webrtc::PacketDirection::kIncomingPacket,
                                  collection->AppendNewPlot());
+      analyzer.CreateAccumulatedPacketsGraph(
+          webrtc::PacketDirection::kIncomingPacket,
+          collection->AppendNewPlot());
     }
     if (FLAGS_outgoing) {
       analyzer.CreatePacketGraph(webrtc::PacketDirection::kOutgoingPacket,
                                  collection->AppendNewPlot());
+      analyzer.CreateAccumulatedPacketsGraph(
+          webrtc::PacketDirection::kOutgoingPacket,
+          collection->AppendNewPlot());
     }
   }
 
   if (FLAGS_plot_all || FLAGS_plot_audio_playout) {
     analyzer.CreatePlayoutGraph(collection->AppendNewPlot());
+  }
+
+  if (FLAGS_plot_all || FLAGS_plot_audio_level) {
+    analyzer.CreateAudioLevelGraph(collection->AppendNewPlot());
   }
 
   if (FLAGS_plot_all || FLAGS_plot_sequence_number) {
@@ -122,6 +145,7 @@ int main(int argc, char* argv[]) {
 
   if (FLAGS_plot_all || FLAGS_plot_fraction_loss) {
     analyzer.CreateFractionLossGraph(collection->AppendNewPlot());
+    analyzer.CreateIncomingPacketLossGraph(collection->AppendNewPlot());
   }
 
   if (FLAGS_plot_all || FLAGS_plot_total_bitrate) {

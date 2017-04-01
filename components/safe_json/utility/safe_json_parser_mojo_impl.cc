@@ -8,35 +8,33 @@
 #include <utility>
 
 #include "base/json/json_reader.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace safe_json {
+
+SafeJsonParserMojoImpl::SafeJsonParserMojoImpl() = default;
+
+SafeJsonParserMojoImpl::~SafeJsonParserMojoImpl() = default;
 
 // static
 void SafeJsonParserMojoImpl::Create(
     mojo::InterfaceRequest<mojom::SafeJsonParser> request) {
-  new SafeJsonParserMojoImpl(std::move(request));
+  mojo::MakeStrongBinding(base::MakeUnique<SafeJsonParserMojoImpl>(),
+                          std::move(request));
 }
 
-SafeJsonParserMojoImpl::SafeJsonParserMojoImpl(
-    mojo::InterfaceRequest<mojom::SafeJsonParser> request)
-    : binding_(this, std::move(request)) {}
-
-SafeJsonParserMojoImpl::~SafeJsonParserMojoImpl() {
-}
-
-void SafeJsonParserMojoImpl::Parse(const mojo::String& json,
+void SafeJsonParserMojoImpl::Parse(const std::string& json,
                                    const ParseCallback& callback) {
   int error_code;
   std::string error;
   std::unique_ptr<base::Value> value = base::JSONReader::ReadAndReturnError(
-      json.get(), base::JSON_PARSE_RFC, &error_code, &error);
-  base::ListValue wrapper;
+      json, base::JSON_PARSE_RFC, &error_code, &error);
   if (value) {
-    wrapper.Append(std::move(value));
-    callback.Run(wrapper, nullptr);
+    callback.Run(std::move(value), base::nullopt);
   } else {
-    callback.Run(wrapper, error);
+    callback.Run(nullptr, base::make_optional(std::move(error)));
   }
 }
 

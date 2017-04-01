@@ -7,15 +7,22 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/run_loop.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/histogram_tester.h"
+#include "chrome/renderer/autofill/fake_content_password_manager_driver.h"
+#include "chrome/renderer/autofill/fake_password_manager_client.h"
 #include "chrome/renderer/autofill/password_generation_test_utils.h"
 #include "chrome/test/base/chrome_render_view_test.h"
-#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/content/renderer/autofill_agent.h"
 #include "components/autofill/content/renderer/test_password_generation_agent.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/password_generation_util.h"
+#include "content/public/common/associated_interface_provider.h"
+#include "content/public/renderer/render_frame.h"
+#include "content/public/renderer/render_view.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -34,6 +41,27 @@ namespace autofill {
 class PasswordGenerationAgentTest : public ChromeRenderViewTest {
  public:
   PasswordGenerationAgentTest() {}
+
+  void RegisterMainFrameRemoteInterfaces() override {
+    // We only use the fake driver for main frame
+    // because our test cases only involve the main frame.
+    service_manager::InterfaceProvider* remote_interfaces =
+        view_->GetMainRenderFrame()->GetRemoteInterfaces();
+    service_manager::InterfaceProvider::TestApi test_api(remote_interfaces);
+    test_api.SetBinderForName(
+        mojom::PasswordManagerDriver::Name_,
+        base::Bind(&PasswordGenerationAgentTest::BindPasswordManagerDriver,
+                   base::Unretained(this)));
+
+    // Because the test cases only involve the main frame in this test,
+    // the fake password client is only used for the main frame.
+    content::AssociatedInterfaceProvider* remote_associated_interfaces =
+        view_->GetMainRenderFrame()->GetRemoteAssociatedInterfaces();
+    remote_associated_interfaces->OverrideBinderForTesting(
+        mojom::PasswordManagerClient::Name_,
+        base::Bind(&PasswordGenerationAgentTest::BindPasswordManagerClient,
+                   base::Unretained(this)));
+  }
 
   void TearDown() override {
     LoadHTML("");
@@ -61,46 +89,59 @@ class PasswordGenerationAgentTest : public ChromeRenderViewTest {
   void ExpectGenerationAvailable(const char* element_id,
                                  bool available) {
     FocusField(element_id);
-    const IPC::Message* message =
-        render_thread_->sink().GetFirstMessageMatching(
-            AutofillHostMsg_ShowPasswordGenerationPopup::ID);
+    base::RunLoop().RunUntilIdle();
+    fake_pw_client_.Flush();
+    bool called = fake_pw_client_.called_show_pw_generation_popup();
     if (available)
-      ASSERT_TRUE(message);
+      ASSERT_TRUE(called);
     else
-      ASSERT_FALSE(message);
+      ASSERT_FALSE(called);
 
-    render_thread_->sink().ClearMessages();
+    fake_pw_client_.reset_called_show_pw_generation_popup();
   }
 
   void AllowToRunFormClassifier() {
-    AutofillMsg_AllowToRunFormClassifier msg(0);
-    static_cast<IPC::Listener*>(password_generation_)->OnMessageReceived(msg);
+    password_generation_->AllowToRunFormClassifier();
   }
 
   void ExpectFormClassifierVoteReceived(
       bool received,
       const base::string16& expected_generation_element) {
-    const IPC::Message* message =
-        render_thread_->sink().GetFirstMessageMatching(
-            AutofillHostMsg_SaveGenerationFieldDetectedByClassifier::ID);
+    base::RunLoop().RunUntilIdle();
     if (received) {
-      ASSERT_TRUE(message);
-      std::tuple<autofill::PasswordForm, base::string16> actual_parameters;
-      AutofillHostMsg_SaveGenerationFieldDetectedByClassifier::Read(
-          message, &actual_parameters);
-      EXPECT_EQ(expected_generation_element, std::get<1>(actual_parameters));
+      ASSERT_TRUE(fake_driver_.called_save_generation_field());
+      EXPECT_EQ(expected_generation_element,
+                fake_driver_.save_generation_field());
     } else {
-      ASSERT_FALSE(message);
+      ASSERT_FALSE(fake_driver_.called_save_generation_field());
     }
 
-    render_thread_->sink().ClearMessages();
+    fake_driver_.reset_save_generation_field();
+  }
+
+  bool GetCalledShowPasswordGenerationPopup() {
+    fake_pw_client_.Flush();
+    return fake_pw_client_.called_show_pw_generation_popup();
   }
 
   void ShowGenerationPopUpManually(const char* element_id) {
     FocusField(element_id);
-    AutofillMsg_UserTriggeredGeneratePassword msg(0);
-    static_cast<IPC::Listener*>(password_generation_)->OnMessageReceived(msg);
+    password_generation_->UserTriggeredGeneratePassword();
   }
+
+  void BindPasswordManagerDriver(mojo::ScopedMessagePipeHandle handle) {
+    fake_driver_.BindRequest(
+        mojo::MakeRequest<mojom::PasswordManagerDriver>(std::move(handle)));
+  }
+
+  void BindPasswordManagerClient(mojo::ScopedInterfaceEndpointHandle handle) {
+    fake_pw_client_.BindRequest(
+        mojo::MakeAssociatedRequest<mojom::PasswordManagerClient>(
+            std::move(handle)));
+  }
+
+  FakeContentPasswordManagerDriver fake_driver_;
+  FakePasswordManagerClient fake_pw_client_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordGenerationAgentTest);
@@ -288,8 +329,7 @@ TEST_F(PasswordGenerationAgentTest, FillTest) {
   EXPECT_TRUE(second_password_element.value().isNull());
 
   base::string16 password = base::ASCIIToUTF16("random_password");
-  AutofillMsg_GeneratedPasswordAccepted msg(0, password);
-  static_cast<IPC::Listener*>(password_generation_)->OnMessageReceived(msg);
+  password_generation_->GeneratedPasswordAccepted(password);
 
   // Password fields are filled out and set as being autofilled.
   EXPECT_EQ(password, first_password_element.value());
@@ -335,8 +375,7 @@ TEST_F(PasswordGenerationAgentTest, EditingTest) {
   WebInputElement second_password_element = element.to<WebInputElement>();
 
   base::string16 password = base::ASCIIToUTF16("random_password");
-  AutofillMsg_GeneratedPasswordAccepted msg(0, password);
-  static_cast<IPC::Listener*>(password_generation_)->OnMessageReceived(msg);
+  password_generation_->GeneratedPasswordAccepted(password);
 
   // Passwords start out the same.
   EXPECT_EQ(password, first_password_element.value());
@@ -350,8 +389,7 @@ TEST_F(PasswordGenerationAgentTest, EditingTest) {
   EXPECT_EQ(edited_password, first_password_element.value());
   EXPECT_EQ(edited_password, second_password_element.value());
 
-  // Clear any uninteresting sent messages.
-  render_thread_->sink().ClearMessages();
+  fake_driver_.reset_called_password_no_longer_generated();
 
   // Verify that password mirroring works correctly even when the password
   // is deleted.
@@ -361,10 +399,9 @@ TEST_F(PasswordGenerationAgentTest, EditingTest) {
 
   // Should have notified the browser that the password is no longer generated
   // and trigger generation again.
-  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_PasswordNoLongerGenerated::ID));
-  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_ShowPasswordGenerationPopup::ID));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(fake_driver_.called_password_no_longer_generated());
+  EXPECT_TRUE(GetCalledShowPasswordGenerationPopup());
 }
 
 TEST_F(PasswordGenerationAgentTest, BlacklistedTest) {
@@ -437,39 +474,36 @@ TEST_F(PasswordGenerationAgentTest, MaximumOfferSize) {
       &first_password_element,
       std::string(password_generation_->kMaximumOfferSize - 1, 'a'));
   // There should now be a message to show the UI.
-  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_ShowPasswordGenerationPopup::ID));
-  render_thread_->sink().ClearMessages();
+  EXPECT_TRUE(GetCalledShowPasswordGenerationPopup());
+  fake_pw_client_.reset_called_show_pw_generation_popup();
 
+  fake_pw_client_.reset_called_hide_pw_generation_popup();
   // Simulate a user typing a password just over maximum offer size.
   SimulateUserTypingASCIICharacter('a', false);
   SimulateUserTypingASCIICharacter('a', true);
   // There should now be a message to hide the UI.
-  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_HidePasswordGenerationPopup::ID));
-  render_thread_->sink().ClearMessages();
+  fake_pw_client_.Flush();
+  EXPECT_TRUE(fake_pw_client_.called_hide_pw_generation_popup());
+  fake_pw_client_.reset_called_show_pw_generation_popup();
 
   // Simulate the user deleting characters. The generation popup should be shown
   // again.
   SimulateUserTypingASCIICharacter(ui::VKEY_BACK, true);
   // There should now be a message to show the UI.
-  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_ShowPasswordGenerationPopup::ID));
-  render_thread_->sink().ClearMessages();
+  EXPECT_TRUE(GetCalledShowPasswordGenerationPopup());
+  fake_pw_client_.reset_called_show_pw_generation_popup();
 
   // Change focus. Bubble should be hidden, but that is handled by AutofilAgent,
   // so no messages are sent.
   ExecuteJavaScriptForTests("document.getElementById('username').focus();");
-  EXPECT_FALSE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_ShowPasswordGenerationPopup::ID));
-  render_thread_->sink().ClearMessages();
+  EXPECT_FALSE(GetCalledShowPasswordGenerationPopup());
+  fake_pw_client_.reset_called_show_pw_generation_popup();
 
   // Focusing the password field will bring up the generation UI again.
   ExecuteJavaScriptForTests(
       "document.getElementById('first_password').focus();");
-  EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_ShowPasswordGenerationPopup::ID));
-  render_thread_->sink().ClearMessages();
+  EXPECT_TRUE(GetCalledShowPasswordGenerationPopup());
+  fake_pw_client_.reset_called_show_pw_generation_popup();
 
   // Loading a different page triggers UMA stat upload. Verify that only one
   // display event is sent even though
@@ -551,7 +585,6 @@ TEST_F(PasswordGenerationAgentTest, MessagesAfterAccountSignupFormFound) {
 
 // Losing focus should not trigger a password generation popup.
 TEST_F(PasswordGenerationAgentTest, BlurTest) {
-  render_thread_->sink().ClearMessages();
   LoadHTMLWithUserGesture(kDisabledElementAccountCreationFormHTML);
   SetNotBlacklistedMessage(password_generation_,
                            kDisabledElementAccountCreationFormHTML);
@@ -562,13 +595,13 @@ TEST_F(PasswordGenerationAgentTest, BlurTest) {
   // up.
   ExpectGenerationAvailable("first_password", true);
 
+  fake_pw_client_.reset_called_generation_available_for_form();
   // Remove focus from everywhere by clicking an unfocusable element: password
   // generation popup should not show up.
   EXPECT_TRUE(SimulateElementClick("disabled"));
-  EXPECT_FALSE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_GenerationAvailableForForm::ID));
-  EXPECT_FALSE(render_thread_->sink().GetFirstMessageMatching(
-      AutofillHostMsg_ShowPasswordGenerationPopup::ID));
+  fake_pw_client_.Flush();
+  EXPECT_FALSE(fake_pw_client_.called_generation_available_for_form());
+  EXPECT_FALSE(GetCalledShowPasswordGenerationPopup());
 }
 
 TEST_F(PasswordGenerationAgentTest, AutocompleteAttributesTest) {
@@ -650,24 +683,23 @@ TEST_F(PasswordGenerationAgentTest, PresavingGeneratedPassword) {
     ExpectGenerationAvailable(test_case.generation_element, true);
 
     base::string16 password = base::ASCIIToUTF16("random_password");
-    AutofillMsg_GeneratedPasswordAccepted msg(0, password);
-    static_cast<IPC::Listener*>(password_generation_)->OnMessageReceived(msg);
-    EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-        AutofillHostMsg_PresaveGeneratedPassword::ID));
-    render_thread_->sink().ClearMessages();
+    password_generation_->GeneratedPasswordAccepted(password);
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(fake_driver_.called_presave_generated_password());
+    fake_driver_.reset_called_presave_generated_password();
 
     FocusField(test_case.generation_element);
     SimulateUserTypingASCIICharacter('a', true);
-    EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-        AutofillHostMsg_PresaveGeneratedPassword::ID));
-    render_thread_->sink().ClearMessages();
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(fake_driver_.called_presave_generated_password());
+    fake_driver_.reset_called_presave_generated_password();
 
     for (size_t i = 0; i < password.length(); ++i)
       SimulateUserTypingASCIICharacter(ui::VKEY_BACK, false);
     SimulateUserTypingASCIICharacter(ui::VKEY_BACK, true);
-    EXPECT_TRUE(render_thread_->sink().GetFirstMessageMatching(
-        AutofillHostMsg_PasswordNoLongerGenerated::ID));
-    render_thread_->sink().ClearMessages();
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(fake_driver_.called_password_no_longer_generated());
+    fake_driver_.reset_called_password_no_longer_generated();
   }
 }
 

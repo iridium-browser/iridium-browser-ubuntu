@@ -4,12 +4,13 @@
 
 #include "ash/wm/ash_focus_rules.h"
 
-#include "ash/aura/wm_window_aura.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm/container_finder.h"
 #include "ash/common/wm/focus_rules.h"
 #include "ash/common/wm/mru_window_tracker.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state_aura.h"
 #include "ui/aura/window.h"
@@ -37,14 +38,14 @@ AshFocusRules::AshFocusRules() {}
 AshFocusRules::~AshFocusRules() {}
 
 bool AshFocusRules::IsWindowConsideredActivatable(aura::Window* window) const {
-  return ash::IsWindowConsideredActivatable(WmWindowAura::Get(window));
+  return ash::IsWindowConsideredActivatable(WmWindow::Get(window));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // AshFocusRules, ::wm::FocusRules:
 
 bool AshFocusRules::IsToplevelWindow(aura::Window* window) const {
-  return ash::IsToplevelWindow(WmWindowAura::Get(window));
+  return ash::IsToplevelWindow(WmWindow::Get(window));
 }
 
 bool AshFocusRules::SupportsChildActivation(aura::Window* window) const {
@@ -53,7 +54,7 @@ bool AshFocusRules::SupportsChildActivation(aura::Window* window) const {
 
 bool AshFocusRules::IsWindowConsideredVisibleForActivation(
     aura::Window* window) const {
-  return ash::IsWindowConsideredVisibleForActivation(WmWindowAura::Get(window));
+  return ash::IsWindowConsideredVisibleForActivation(WmWindow::Get(window));
 }
 
 bool AshFocusRules::CanActivateWindow(aura::Window* window) const {
@@ -82,7 +83,7 @@ aura::Window* AshFocusRules::GetNextActivatableWindow(
   MruWindowTracker* mru = WmShell::Get()->mru_window_tracker();
   std::vector<WmWindow*> windows = mru->BuildMruWindowList();
   aura::Window* starting_window =
-      windows.empty() ? ignore : WmWindowAura::GetAuraWindow(windows[0]);
+      windows.empty() ? ignore : WmWindow::GetAuraWindow(windows[0]);
 
   // Look for windows to focus in |starting_window|'s container. If none are
   // found, we look in all the containers in front of |starting_window|'s
@@ -117,13 +118,15 @@ aura::Window* AshFocusRules::GetNextActivatableWindow(
 aura::Window* AshFocusRules::GetTopmostWindowToActivateForContainerIndex(
     int index,
     aura::Window* ignore) const {
-  aura::Window* window = NULL;
-  aura::Window* root = ignore ? ignore->GetRootWindow() : NULL;
-  aura::Window::Windows containers = Shell::GetContainersFromAllRootWindows(
-      kActivatableShellWindowIds[index], root);
-  for (aura::Window::Windows::const_iterator iter = containers.begin();
-       iter != containers.end() && !window; ++iter) {
-    window = GetTopmostWindowToActivateInContainer((*iter), ignore);
+  aura::Window* window = nullptr;
+  aura::Window* root = ignore ? ignore->GetRootWindow() : nullptr;
+  WmWindow::Windows containers = GetContainersFromAllRootWindows(
+      kActivatableShellWindowIds[index], WmWindow::Get(root));
+  for (WmWindow* container : containers) {
+    window = GetTopmostWindowToActivateInContainer(
+        WmWindow::GetAuraWindow(container), ignore);
+    if (window)
+      return window;
   }
   return window;
 }

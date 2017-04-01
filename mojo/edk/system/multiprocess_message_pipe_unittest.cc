@@ -428,7 +428,7 @@ TEST_P(MultiprocessMessagePipeTestWithPipeCount, PlatformHandlePassing) {
     for (size_t i = 0; i < pipe_count; ++i) {
       base::FilePath unused;
       base::ScopedFILE fp(
-          CreateAndOpenTemporaryFileInDir(temp_dir.path(), &unused));
+          CreateAndOpenTemporaryFileInDir(temp_dir.GetPath(), &unused));
       const std::string world("world");
       CHECK_EQ(fwrite(&world[0], 1, world.size(), fp.get()), world.size());
       fflush(fp.get());
@@ -443,7 +443,8 @@ TEST_P(MultiprocessMessagePipeTestWithPipeCount, PlatformHandlePassing) {
     }
 
     char message[128];
-    sprintf(message, "hello %d", static_cast<int>(pipe_count));
+    snprintf(message, sizeof(message), "hello %d",
+             static_cast<int>(pipe_count));
     ASSERT_EQ(MOJO_RESULT_OK,
               MojoWriteMessage(h, message,
                                static_cast<uint32_t>(strlen(message)),
@@ -465,9 +466,9 @@ TEST_P(MultiprocessMessagePipeTestWithPipeCount, PlatformHandlePassing) {
 #if !defined(OS_ANDROID)
 INSTANTIATE_TEST_CASE_P(PipeCount,
                         MultiprocessMessagePipeTestWithPipeCount,
-                        // TODO: Re-enable the 140-pipe case when ChannelPosix
-                        // has support for sending lots of handles.
-                        testing::Values(1u, 128u/*, 140u*/));
+                        // TODO(rockot): Re-enable the 140-pipe case when
+                        // ChannelPosix has support for sending lots of handles.
+                        testing::Values(1u, 128u /*, 140u*/));
 #endif
 
 DEFINE_TEST_CLIENT_WITH_PIPE(CheckMessagePipe, MultiprocessMessagePipeTest, h) {
@@ -697,8 +698,6 @@ TEST_F(MultiprocessMessagePipeTest, DataPipeConsumer) {
 TEST_P(MultiprocessMessagePipeTestWithPeerSupport, CreateMessagePipe) {
   MojoHandle p0, p1;
   CreateMessagePipe(&p0, &p1);
-  VerifyTransmission(p0, p1, "hey man");
-  VerifyTransmission(p1, p0, "slow down");
   VerifyTransmission(p0, p1, std::string(10 * 1024 * 1024, 'a'));
   VerifyTransmission(p1, p0, std::string(10 * 1024 * 1024, 'e'));
 
@@ -999,7 +998,7 @@ DEFINE_TEST_CLIENT_WITH_PIPE(CommandDrivenClient, MultiprocessMessagePipeTest,
     }
   }
 
-  for (auto& pipe: named_pipes)
+  for (auto& pipe : named_pipes)
     CloseHandle(pipe.second);
 
   return 0;
@@ -1018,8 +1017,8 @@ TEST_F(MultiprocessMessagePipeTest, ChildToChildPipes) {
       b.SendHandle("y", p1);
 
       // Make sure they can talk.
-      a.Send("say:x:hello sir");
-      b.Send("hear:y:hello sir");
+      a.Send("say:x:hello");
+      b.Send("hear:y:hello");
 
       b.Send("say:y:i love multiprocess pipes!");
       a.Send("hear:x:i love multiprocess pipes!");
@@ -1419,10 +1418,13 @@ TEST_F(MultiprocessMessagePipeTest, NotifyBadMessage) {
   EXPECT_NE(std::string::npos, first_process_error.find(kFirstErrorMessage));
   EXPECT_NE(std::string::npos, second_process_error.find(kSecondErrorMessage));
 }
-INSTANTIATE_TEST_CASE_P(,
-                        MultiprocessMessagePipeTestWithPeerSupport,
-                        testing::Values(test::MojoTestBase::LaunchType::CHILD,
-                                        test::MojoTestBase::LaunchType::PEER));
+INSTANTIATE_TEST_CASE_P(
+    ,
+    MultiprocessMessagePipeTestWithPeerSupport,
+    testing::Values(test::MojoTestBase::LaunchType::CHILD,
+                    test::MojoTestBase::LaunchType::PEER,
+                    test::MojoTestBase::LaunchType::NAMED_CHILD,
+                    test::MojoTestBase::LaunchType::NAMED_PEER));
 }  // namespace
 }  // namespace edk
 }  // namespace mojo

@@ -25,6 +25,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
 #include "content/public/common/sandbox_init.h"
+#include "mojo/edk/embedder/embedder.h"
 #include "sandbox/win/src/sandbox_types.h"
 
 extern int NaClMain(const content::MainFunctionParams&);
@@ -35,6 +36,8 @@ namespace {
 int NaClBrokerMain(const content::MainFunctionParams& parameters) {
   base::MessageLoopForIO main_message_loop;
   base::PlatformThread::SetName("CrNaClBrokerMain");
+
+  mojo::edk::Init();
 
   std::unique_ptr<base::PowerMonitorSource> power_monitor_source(
       new base::PowerMonitorDeviceSource());

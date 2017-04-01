@@ -13,19 +13,15 @@ namespace scheduler {
 
 SingleThreadIdleTaskRunner::SingleThreadIdleTaskRunner(
     scoped_refptr<base::SingleThreadTaskRunner> idle_priority_task_runner,
-    scoped_refptr<base::SingleThreadTaskRunner> after_wakeup_task_runner,
     Delegate* delegate,
     const char* tracing_category)
     : idle_priority_task_runner_(idle_priority_task_runner),
-      after_wakeup_task_runner_(after_wakeup_task_runner),
       delegate_(delegate),
       tracing_category_(tracing_category),
       blame_context_(nullptr),
       weak_factory_(this) {
   DCHECK(!idle_priority_task_runner_ ||
          idle_priority_task_runner_->RunsTasksOnCurrentThread());
-  DCHECK(!after_wakeup_task_runner_ ||
-         after_wakeup_task_runner_->RunsTasksOnCurrentThread());
   weak_scheduler_ptr_ = weak_factory_.GetWeakPtr();
 }
 
@@ -48,6 +44,17 @@ void SingleThreadIdleTaskRunner::PostIdleTask(
                             weak_scheduler_ptr_, idle_task));
 }
 
+void SingleThreadIdleTaskRunner::PostDelayedIdleTask(
+    const tracked_objects::Location& from_here,
+    const base::TimeDelta delay,
+    const IdleTask& idle_task) {
+  base::TimeTicks first_run_time = delegate_->NowTicks() + delay;
+  delayed_idle_tasks_.insert(std::make_pair(
+      first_run_time,
+      std::make_pair(from_here, base::Bind(&SingleThreadIdleTaskRunner::RunTask,
+                                           weak_scheduler_ptr_, idle_task))));
+}
+
 void SingleThreadIdleTaskRunner::PostNonNestableIdleTask(
     const tracked_objects::Location& from_here,
     const IdleTask& idle_task) {
@@ -57,14 +64,18 @@ void SingleThreadIdleTaskRunner::PostNonNestableIdleTask(
                             weak_scheduler_ptr_, idle_task));
 }
 
-void SingleThreadIdleTaskRunner::PostIdleTaskAfterWakeup(
-    const tracked_objects::Location& from_here,
-    const IdleTask& idle_task) {
-  // Don't signal posting of idle task to the delegate here, wait until the
-  // after-wakeup task posts the real idle task.
-  after_wakeup_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&SingleThreadIdleTaskRunner::PostIdleTask,
-                            weak_scheduler_ptr_, from_here, idle_task));
+void SingleThreadIdleTaskRunner::EnqueueReadyDelayedIdleTasks() {
+  if (delayed_idle_tasks_.empty())
+    return;
+
+  base::TimeTicks now = delegate_->NowTicks();
+  while (!delayed_idle_tasks_.empty() &&
+         delayed_idle_tasks_.begin()->first <= now) {
+    idle_priority_task_runner_->PostTask(
+        delayed_idle_tasks_.begin()->second.first,
+        std::move(delayed_idle_tasks_.begin()->second.second));
+    delayed_idle_tasks_.erase(delayed_idle_tasks_.begin());
+  }
 }
 
 void SingleThreadIdleTaskRunner::RunTask(IdleTask idle_task) {

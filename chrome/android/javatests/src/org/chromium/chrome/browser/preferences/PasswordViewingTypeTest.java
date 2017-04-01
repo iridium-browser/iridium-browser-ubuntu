@@ -9,17 +9,17 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.components.signin.AccountManagerHelper;
+import org.chromium.components.signin.test.util.AccountHolder;
+import org.chromium.components.signin.test.util.MockAccountManager;
 import org.chromium.components.sync.AndroidSyncSettings;
-import org.chromium.components.sync.signin.AccountManagerHelper;
-import org.chromium.components.sync.test.util.AccountHolder;
-import org.chromium.components.sync.test.util.MockAccountManager;
 import org.chromium.components.sync.test.util.MockSyncContentResolverDelegate;
 import org.chromium.content.browser.test.NativeLibraryTestBase;
 
@@ -89,7 +89,7 @@ public class PasswordViewingTypeTest extends NativeLibraryTestBase {
             }
 
             @Override
-            public boolean isBackendInitialized() {
+            public boolean isEngineInitialized() {
                 return true;
             }
         }
@@ -133,7 +133,7 @@ public class PasswordViewingTypeTest extends NativeLibraryTestBase {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                assertTrue(ProfileSyncService.get().isBackendInitialized());
+                assertTrue(ProfileSyncService.get().isEngineInitialized());
                 assertFalse(ProfileSyncService.get().isUsingSecondaryPassphrase());
             }
         });

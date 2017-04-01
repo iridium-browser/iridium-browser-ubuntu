@@ -6,21 +6,28 @@ Polymer({
   is: 'history-synced-device-card',
 
   properties: {
-    // Name of the synced device.
-    device: String,
-
-    // When the device information was last updated.
-    lastUpdateTime: String,
-
     /**
      * The list of tabs open for this device.
      * @type {!Array<!ForeignSessionTab>}
      */
     tabs: {
       type: Array,
-      value: function() { return []; },
+      value: function() {
+        return [];
+      },
       observer: 'updateIcons_'
     },
+
+    // Name of the synced device.
+    device: String,
+
+    // When the device information was last updated.
+    lastUpdateTime: String,
+
+    // Whether the card is open.
+    opened: Boolean,
+
+    searchTerm: String,
 
     /**
      * The indexes where a window separator should be shown. The use of a
@@ -30,13 +37,34 @@ Polymer({
      */
     separatorIndexes: Array,
 
-    // Whether the card is open.
-    opened: Boolean,
-
-    searchTerm: String,
-
     // Internal identifier for the device.
     sessionTag: String,
+  },
+
+  listeners: {
+    'dom-change': 'notifyFocusUpdate_',
+  },
+
+  /**
+   * Create FocusRows for this card. One is always made for the card heading and
+   * one for each result if the card is open.
+   * @return {!Array<!cr.ui.FocusRow>}
+   */
+  createFocusRows: function() {
+    var titleRow = new cr.ui.FocusRow(this.$['card-heading'], null);
+    titleRow.addItem('menu', '#menu-button');
+    titleRow.addItem('collapse', '#collapse-button');
+    var rows = [titleRow];
+    if (this.opened) {
+      Polymer.dom(this.root)
+          .querySelectorAll('.item-container')
+          .forEach(function(el) {
+            var row = new cr.ui.FocusRow(el, null);
+            row.addItem('title', '.website-title');
+            rows.push(row);
+          });
+    }
+    return rows;
   },
 
   /**
@@ -46,7 +74,7 @@ Polymer({
    * @private
    */
   openTab_: function(e) {
-    var tab = /** @type {ForeignSessionTab} */(e.model.tab);
+    var tab = /** @type {ForeignSessionTab} */ (e.model.tab);
     var browserService = md_history.BrowserService.getInstance();
     browserService.recordHistogram(
         SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.LINK_CLICKED,
@@ -65,12 +93,19 @@ Polymer({
         SyncedTabsHistogram.EXPAND_SESSION;
 
     md_history.BrowserService.getInstance().recordHistogram(
-        SYNCED_TABS_HISTOGRAM_NAME, histogramValue,
-        SyncedTabsHistogram.LIMIT);
+        SYNCED_TABS_HISTOGRAM_NAME, histogramValue, SyncedTabsHistogram.LIMIT);
 
     this.$.collapse.toggle();
     this.$['dropdown-indicator'].icon =
         this.$.collapse.opened ? 'cr:expand-less' : 'cr:expand-more';
+
+    this.fire('update-focus-grid');
+  },
+
+  /** @private */
+  notifyFocusUpdate_: function() {
+    // Refresh focus after all rows are rendered.
+    this.fire('update-focus-grid');
   },
 
   /**
@@ -83,8 +118,7 @@ Polymer({
       var icons = Polymer.dom(this.root).querySelectorAll('.website-icon');
 
       for (var i = 0; i < this.tabs.length; i++) {
-        icons[i].style.backgroundImage =
-            cr.icon.getFaviconImageSet(this.tabs[i].url);
+        icons[i].style.backgroundImage = cr.icon.getFavicon(this.tabs[i].url);
       }
     });
   },
@@ -118,9 +152,9 @@ Polymer({
    * @private
    */
   onMenuButtonTap_: function(e) {
-    this.fire('toggle-menu', {
+    this.fire('open-menu', {
       target: Polymer.dom(e).localTarget,
-      tag: this.sessionTag
+      tag: this.sessionTag,
     });
     e.stopPropagation();  // Prevent iron-collapse.
   },

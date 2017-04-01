@@ -6,34 +6,30 @@
 
 #include <utility>
 
+#include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/appcache/appcache_interceptor.h"
 #include "content/browser/child_process_security_policy_impl.h"
-#include "content/browser/loader/cross_site_resource_handler.h"
 #include "content/browser/loader/detachable_resource_handler.h"
+#include "content/browser/loader/resource_handler.h"
 #include "content/browser/loader/resource_loader_delegate.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/service_worker/service_worker_request_handler.h"
 #include "content/browser/service_worker/service_worker_response_info.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/browser/ssl/ssl_manager.h"
-#include "content/browser/ssl/ssl_policy.h"
-#include "content/common/ssl_status_serialization.h"
-#include "content/public/browser/cert_store.h"
 #include "content/public/browser/resource_dispatcher_host_login_delegate.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/process_type.h"
 #include "content/public/common/resource_response.h"
 #include "content/public/common/resource_type.h"
-#include "content/public/common/security_style.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
@@ -52,22 +48,8 @@ using base::TimeTicks;
 namespace content {
 namespace {
 
-void GetSSLStatusForRequest(const GURL& url,
-                            const net::SSLInfo& ssl_info,
-                            int child_id,
-                            CertStore* cert_store,
-                            SSLStatus* ssl_status) {
-  DCHECK(ssl_info.cert);
-  int cert_id = cert_store->StoreCert(ssl_info.cert.get(), child_id);
-
-  *ssl_status = SSLStatus(SSLPolicy::GetSecurityStyleForResource(
-                              url, cert_id, ssl_info.cert_status),
-                          cert_id, ssl_info);
-}
-
 void PopulateResourceResponse(ResourceRequestInfoImpl* info,
                               net::URLRequest* request,
-                              CertStore* cert_store,
                               ResourceResponse* response) {
   response->head.request_time = request->request_time();
   response->head.response_time = request->response_time();
@@ -77,17 +59,15 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
   request->GetMimeType(&response->head.mime_type);
   net::HttpResponseInfo response_info = request->response_info();
   response->head.was_fetched_via_spdy = response_info.was_fetched_via_spdy;
-  response->head.was_npn_negotiated = response_info.was_npn_negotiated;
-  response->head.npn_negotiated_protocol =
-      response_info.npn_negotiated_protocol;
+  response->head.was_alpn_negotiated = response_info.was_alpn_negotiated;
+  response->head.alpn_negotiated_protocol =
+      response_info.alpn_negotiated_protocol;
   response->head.connection_info = response_info.connection_info;
-  response->head.was_fetched_via_proxy = request->was_fetched_via_proxy();
-  response->head.proxy_server = response_info.proxy_server;
   response->head.socket_address = response_info.socket_address;
   const content::ResourceRequestInfo* request_info =
       content::ResourceRequestInfo::ForRequest(request);
   if (request_info)
-    response->head.is_using_lofi = request_info->IsUsingLoFi();
+    response->head.previews_state = request_info->GetPreviewsState();
 
   response->head.effective_connection_type =
       net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
@@ -113,25 +93,37 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
     request->GetLoadTimingInfo(&response->head.load_timing);
 
   if (request->ssl_info().cert.get()) {
-    SSLStatus ssl_status;
-    GetSSLStatusForRequest(request->url(), request->ssl_info(),
-                           info->GetChildID(), cert_store, &ssl_status);
-    response->head.security_info = SerializeSecurityInfo(ssl_status);
     response->head.has_major_certificate_errors =
-        net::IsCertStatusError(ssl_status.cert_status) &&
-        !net::IsCertStatusMinorError(ssl_status.cert_status);
+        net::IsCertStatusError(request->ssl_info().cert_status) &&
+        !net::IsCertStatusMinorError(request->ssl_info().cert_status);
     if (info->ShouldReportRawHeaders()) {
-      // Only pass the Signed Certificate Timestamps (SCTs) when the network
-      // panel of the DevTools is open, i.e. ShouldReportRawHeaders() is set.
-      // These data are used to populate the requests in the security panel too.
+      // Only pass these members when the network panel of the DevTools is open,
+      // i.e. ShouldReportRawHeaders() is set. These data are used to populate
+      // the requests in the security panel too.
+      response->head.cert_status = request->ssl_info().cert_status;
+      response->head.ssl_connection_status =
+          request->ssl_info().connection_status;
+      response->head.ssl_key_exchange_group =
+          request->ssl_info().key_exchange_group;
       response->head.signed_certificate_timestamps =
           request->ssl_info().signed_certificate_timestamps;
+      std::string encoded;
+      bool rv = net::X509Certificate::GetDEREncoded(
+          request->ssl_info().cert->os_cert_handle(), &encoded);
+      DCHECK(rv);
+      response->head.certificate.push_back(encoded);
+      for (auto& cert :
+               request->ssl_info().cert->GetIntermediateCertificates()) {
+        rv = net::X509Certificate::GetDEREncoded(cert, &encoded);
+        DCHECK(rv);
+        response->head.certificate.push_back(encoded);
+      }
     }
   } else {
     // We should not have any SSL state.
     DCHECK(!request->ssl_info().cert_status);
     DCHECK_EQ(request->ssl_info().security_bits, -1);
-    DCHECK_EQ(request->ssl_info().key_exchange_info, 0);
+    DCHECK_EQ(request->ssl_info().key_exchange_group, 0);
     DCHECK(!request->ssl_info().connection_status);
   }
 }
@@ -140,7 +132,6 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
 
 ResourceLoader::ResourceLoader(std::unique_ptr<net::URLRequest> request,
                                std::unique_ptr<ResourceHandler> handler,
-                               CertStore* cert_store,
                                ResourceLoaderDelegate* delegate)
     : deferred_stage_(DEFERRED_NONE),
       request_(std::move(request)),
@@ -150,7 +141,6 @@ ResourceLoader::ResourceLoader(std::unique_ptr<net::URLRequest> request,
       times_cancelled_before_request_start_(0),
       started_request_(false),
       times_cancelled_after_request_start_(0),
-      cert_store_(cert_store),
       weak_ptr_factory_(this) {
   request_->set_delegate(this);
   handler_->SetController(this);
@@ -167,11 +157,6 @@ ResourceLoader::~ResourceLoader() {
 }
 
 void ResourceLoader::StartRequest() {
-  if (delegate_->HandleExternalProtocol(this, request_->url())) {
-    CancelAndIgnore();
-    return;
-  }
-
   // Give the handler a chance to delay the URLRequest from being started.
   bool defer_start = false;
   if (!handler_->OnWillStart(request_->url(), &defer_start)) {
@@ -207,11 +192,11 @@ void ResourceLoader::CancelWithError(int error_code) {
 }
 
 void ResourceLoader::MarkAsTransferring(
-    const scoped_refptr<ResourceResponse>& response) {
+    const base::Closure& on_transfer_complete_callback) {
   CHECK(IsResourceTypeFrame(GetRequestInfo()->GetResourceType()))
       << "Can only transfer for navigations";
   is_transferring_ = true;
-  transferring_response_ = response;
+  on_transfer_complete_callback_ = on_transfer_complete_callback;
 
   int child_id = GetRequestInfo()->GetChildID();
   AppCacheInterceptor::PrepareForCrossSiteTransfer(request(), child_id);
@@ -222,14 +207,14 @@ void ResourceLoader::MarkAsTransferring(
 }
 
 void ResourceLoader::CompleteTransfer() {
-  // Although CrossSiteResourceHandler defers at OnResponseStarted
+  // Although NavigationResourceThrottle defers at WillProcessResponse
   // (DEFERRED_READ), it may be seeing a replay of events via
-  // MimeTypeResourceHandler, and so the request itself is actually deferred
-  // at a later read stage.
+  // MimeTypeResourceHandler, and so the request itself is actually deferred at
+  // a later read stage.
   DCHECK(DEFERRED_READ == deferred_stage_ ||
          DEFERRED_RESPONSE_COMPLETE == deferred_stage_);
   DCHECK(is_transferring_);
-  DCHECK(transferring_response_);
+  DCHECK(!on_transfer_complete_callback_.is_null());
 
   // In some cases, a process transfer doesn't really happen and the
   // request is resumed in the original process. Real transfers to a new process
@@ -243,8 +228,7 @@ void ResourceLoader::CompleteTransfer() {
     handler->MaybeCompleteCrossSiteTransferInOldProcess(child_id);
 
   is_transferring_ = false;
-  transferring_response_ = nullptr;
-  GetRequestInfo()->cross_site_handler()->ResumeResponse();
+  base::ResetAndReturn(&on_transfer_complete_callback_).Run();
 }
 
 ResourceRequestInfoImpl* ResourceLoader::GetRequestInfo() {
@@ -267,29 +251,36 @@ void ResourceLoader::OnReceivedRedirect(net::URLRequest* unused,
 
   ResourceRequestInfoImpl* info = GetRequestInfo();
 
-  if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
-          info->GetChildID(), redirect_info.new_url)) {
-    DVLOG(1) << "Denied unauthorized request for "
-             << redirect_info.new_url.possibly_invalid_spec();
+  // With PlzNavigate for frame navigations this check is done in the
+  // NavigationRequest::OnReceivedRedirect() function.
+  bool check_handled_elsewhere = IsBrowserSideNavigationEnabled() &&
+      IsResourceTypeFrame(info->GetResourceType());
 
-    // Tell the renderer that this request was disallowed.
-    Cancel();
-    return;
-  }
+  if (!check_handled_elsewhere) {
+    if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
+            info->GetChildID(), redirect_info.new_url)) {
+      DVLOG(1) << "Denied unauthorized request for "
+               << redirect_info.new_url.possibly_invalid_spec();
 
-  if (delegate_->HandleExternalProtocol(this, redirect_info.new_url)) {
-    // The request is complete so we can remove it.
-    CancelAndIgnore();
-    return;
+      // Tell the renderer that this request was disallowed.
+      Cancel();
+      return;
+    }
   }
 
   scoped_refptr<ResourceResponse> response = new ResourceResponse();
-  PopulateResourceResponse(info, request_.get(), cert_store_, response.get());
+  PopulateResourceResponse(info, request_.get(), response.get());
   delegate_->DidReceiveRedirect(this, redirect_info.new_url, response.get());
   if (!handler_->OnRequestRedirected(redirect_info, response.get(), defer)) {
     Cancel();
   } else if (*defer) {
     deferred_stage_ = DEFERRED_REDIRECT;  // Follow redirect when resumed.
+    DCHECK(deferred_redirect_url_.is_empty());
+    deferred_redirect_url_ = redirect_info.new_url;
+  } else if (delegate_->HandleExternalProtocol(this, redirect_info.new_url)) {
+    // The request is complete so we can remove it.
+    CancelAndIgnore();
+    return;
   }
 }
 
@@ -354,13 +345,13 @@ void ResourceLoader::OnResponseStarted(net::URLRequest* unused) {
 
   CompleteResponseStarted();
 
-  if (is_deferred())
+  // If the handler deferred the request, it will resume the request later. If
+  // the request was cancelled, the request will call back into |this| with a
+  // bogus read completed error.
+  if (is_deferred() || !request_->status().is_success())
     return;
 
-  if (request_->status().is_success())
-    StartReading(false);  // Read the first chunk.
-  else
-    ResponseCompleted();
+  ReadMore(false);  // Read the first chunk.
 }
 
 void ResourceLoader::OnReadCompleted(net::URLRequest* unused, int bytes_read) {
@@ -379,17 +370,14 @@ void ResourceLoader::OnReadCompleted(net::URLRequest* unused, int bytes_read) {
   CompleteRead(bytes_read);
 
   // If the handler cancelled or deferred the request, do not continue
-  // processing the read. If cancelled, the URLRequest has already been
-  // cancelled and will schedule an erroring OnReadCompleted later. If deferred,
-  // do nothing until resumed.
-  //
-  // Note: if bytes_read is 0 (EOF) and the handler defers, resumption will call
-  // ResponseCompleted().
+  // processing the read. If canceled, either the request will call into |this|
+  // with a bogus read error, or, if the request was completed, a task posted
+  // from ResourceLoader::CancelREquestInternal will run OnResponseCompleted.
   if (is_deferred() || !request_->status().is_success())
     return;
 
   if (bytes_read > 0) {
-    StartReading(true);  // Read the next chunk.
+    ReadMore(true);  // Read the next chunk.
   } else {
     // TODO(darin): Remove ScopedTracker below once crbug.com/475761 is fixed.
     tracked_objects::ScopedTracker tracking_profile(
@@ -456,11 +444,8 @@ void ResourceLoader::Resume() {
     case DEFERRED_START:
       StartRequestInternal();
       break;
-    case DEFERRED_NETWORK_START:
-      request_->ResumeNetworkStart();
-      break;
     case DEFERRED_REDIRECT:
-      request_->FollowDeferredRedirect();
+      FollowDeferredRedirectInternal();
       break;
     case DEFERRED_READ:
       base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -488,7 +473,14 @@ void ResourceLoader::Cancel() {
 void ResourceLoader::StartRequestInternal() {
   DCHECK(!request_->is_pending());
 
+  // Note: at this point any possible deferred start actions are already over.
+
   if (!request_->status().is_success()) {
+    return;
+  }
+
+  if (delegate_->HandleExternalProtocol(this, request_->url())) {
+    CancelAndIgnore();
     return;
   }
 
@@ -544,10 +536,21 @@ void ResourceLoader::CancelRequestInternal(int error, bool from_renderer) {
   }
 }
 
+void ResourceLoader::FollowDeferredRedirectInternal() {
+  DCHECK(!deferred_redirect_url_.is_empty());
+  GURL redirect_url = deferred_redirect_url_;
+  deferred_redirect_url_ = GURL();
+  if (delegate_->HandleExternalProtocol(this, redirect_url)) {
+    CancelAndIgnore();
+  } else {
+    request_->FollowDeferredRedirect();
+  }
+}
+
 void ResourceLoader::CompleteResponseStarted() {
   ResourceRequestInfoImpl* info = GetRequestInfo();
   scoped_refptr<ResourceResponse> response = new ResourceResponse();
-  PopulateResourceResponse(info, request_.get(), cert_store_, response.get());
+  PopulateResourceResponse(info, request_.get(), response.get());
 
   delegate_->DidReceiveResponse(this);
 
@@ -564,42 +567,7 @@ void ResourceLoader::CompleteResponseStarted() {
   }
 }
 
-void ResourceLoader::StartReading(bool is_continuation) {
-  int bytes_read = 0;
-  ReadMore(&bytes_read);
-
-  // If IO is pending, wait for the URLRequest to call OnReadCompleted.
-  if (request_->status().is_io_pending())
-    return;
-
-  if (!is_continuation || bytes_read <= 0) {
-    OnReadCompleted(request_.get(), bytes_read);
-  } else {
-    // Else, trigger OnReadCompleted asynchronously to avoid starving the IO
-    // thread in case the URLRequest can provide data synchronously.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&ResourceLoader::OnReadCompleted,
-                   weak_ptr_factory_.GetWeakPtr(), request_.get(), bytes_read));
-  }
-}
-
-void ResourceLoader::ResumeReading() {
-  DCHECK(!is_deferred());
-
-  if (!read_deferral_start_time_.is_null()) {
-    UMA_HISTOGRAM_TIMES("Net.ResourceLoader.ReadDeferral",
-                        base::TimeTicks::Now() - read_deferral_start_time_);
-    read_deferral_start_time_ = base::TimeTicks();
-  }
-  if (request_->status().is_success()) {
-    StartReading(false);  // Read the next chunk (OK to complete synchronously).
-  } else {
-    ResponseCompleted();
-  }
-}
-
-void ResourceLoader::ReadMore(int* bytes_read) {
+void ResourceLoader::ReadMore(bool is_continuation) {
   TRACE_EVENT_WITH_FLOW0("loading", "ResourceLoader::ReadMore", this,
                          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
   DCHECK(!is_deferred());
@@ -615,6 +583,8 @@ void ResourceLoader::ReadMore(int* bytes_read) {
         FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnWillRead()"));
 
     if (!handler_->OnWillRead(&buf, &buf_size, -1)) {
+      // Cancel the request, which will then call back into |this| to inform it
+      // of a "read error".
       Cancel();
       return;
     }
@@ -623,10 +593,36 @@ void ResourceLoader::ReadMore(int* bytes_read) {
   DCHECK(buf.get());
   DCHECK(buf_size > 0);
 
-  request_->Read(buf.get(), buf_size, bytes_read);
+  int result = request_->Read(buf.get(), buf_size);
 
-  // No need to check the return value here as we'll detect errors by
-  // inspecting the URLRequest's status.
+  if (result == net::ERR_IO_PENDING)
+    return;
+
+  if (!is_continuation || result <= 0) {
+    OnReadCompleted(request_.get(), result);
+  } else {
+    // Else, trigger OnReadCompleted asynchronously to avoid starving the IO
+    // thread in case the URLRequest can provide data synchronously.
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::Bind(&ResourceLoader::OnReadCompleted,
+                   weak_ptr_factory_.GetWeakPtr(), request_.get(), result));
+  }
+}
+
+void ResourceLoader::ResumeReading() {
+  DCHECK(!is_deferred());
+
+  if (!read_deferral_start_time_.is_null()) {
+    UMA_HISTOGRAM_TIMES("Net.ResourceLoader.ReadDeferral",
+                        base::TimeTicks::Now() - read_deferral_start_time_);
+    read_deferral_start_time_ = base::TimeTicks();
+  }
+  if (request_->status().is_success()) {
+    ReadMore(false);  // Read the next chunk (OK to complete synchronously).
+  } else {
+    ResponseCompleted();
+  }
 }
 
 void ResourceLoader::CompleteRead(int bytes_read) {
@@ -660,17 +656,6 @@ void ResourceLoader::ResponseCompleted() {
 
   DVLOG(1) << "ResponseCompleted: " << request_->url().spec();
   RecordHistograms();
-  ResourceRequestInfoImpl* info = GetRequestInfo();
-
-  std::string security_info;
-  const net::SSLInfo& ssl_info = request_->ssl_info();
-  if (ssl_info.cert.get() != NULL) {
-    SSLStatus ssl_status;
-    GetSSLStatusForRequest(request_->url(), ssl_info, info->GetChildID(),
-                           cert_store_, &ssl_status);
-
-    security_info = SerializeSecurityInfo(ssl_status);
-  }
 
   bool defer = false;
   {
@@ -678,7 +663,7 @@ void ResourceLoader::ResponseCompleted() {
     tracked_objects::ScopedTracker tracking_profile(
         FROM_HERE_WITH_EXPLICIT_FUNCTION("475761 OnResponseCompleted()"));
 
-    handler_->OnResponseCompleted(request_->status(), security_info, &defer);
+    handler_->OnResponseCompleted(request_->status(), &defer);
   }
   if (defer) {
     // The handler is not ready to die yet.  We will call DidFinishLoading when
@@ -711,33 +696,50 @@ void ResourceLoader::RecordHistograms() {
     }
   }
 
-  if (info->GetResourceType() == RESOURCE_TYPE_PREFETCH) {
-    PrefetchStatus status = STATUS_UNDEFINED;
+  if (request_->load_flags() & net::LOAD_PREFETCH) {
+    // Note that RESOURCE_TYPE_PREFETCH requests are a subset of
+    // net::LOAD_PREFETCH requests. In the histograms below, "Prefetch" means
+    // RESOURCE_TYPE_PREFETCH and "LoadPrefetch" means net::LOAD_PREFETCH.
+    bool is_resource_type_prefetch =
+        info->GetResourceType() == RESOURCE_TYPE_PREFETCH;
+    PrefetchStatus prefetch_status = STATUS_UNDEFINED;
     TimeDelta total_time = base::TimeTicks::Now() - request_->creation_time();
 
     switch (request_->status().status()) {
       case net::URLRequestStatus::SUCCESS:
         if (request_->was_cached()) {
-          status = STATUS_SUCCESS_FROM_CACHE;
-          UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeSpentPrefetchingFromCache",
-                              total_time);
+          prefetch_status = request_->response_info().unused_since_prefetch
+                                ? STATUS_SUCCESS_ALREADY_PREFETCHED
+                                : STATUS_SUCCESS_FROM_CACHE;
+          if (is_resource_type_prefetch) {
+            UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeSpentPrefetchingFromCache",
+                                total_time);
+          }
         } else {
-          status = STATUS_SUCCESS_FROM_NETWORK;
-          UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeSpentPrefetchingFromNetwork",
-                              total_time);
+          prefetch_status = STATUS_SUCCESS_FROM_NETWORK;
+          if (is_resource_type_prefetch) {
+            UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeSpentPrefetchingFromNetwork",
+                                total_time);
+          }
         }
         break;
       case net::URLRequestStatus::CANCELED:
-        status = STATUS_CANCELED;
-        UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeBeforeCancel", total_time);
+        prefetch_status = STATUS_CANCELED;
+        if (is_resource_type_prefetch)
+          UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeBeforeCancel", total_time);
         break;
       case net::URLRequestStatus::IO_PENDING:
       case net::URLRequestStatus::FAILED:
-        status = STATUS_UNDEFINED;
+        prefetch_status = STATUS_UNDEFINED;
         break;
     }
 
-    UMA_HISTOGRAM_ENUMERATION("Net.Prefetch.Pattern", status, STATUS_MAX);
+    UMA_HISTOGRAM_ENUMERATION("Net.LoadPrefetch.Pattern", prefetch_status,
+                              STATUS_MAX);
+    if (is_resource_type_prefetch) {
+      UMA_HISTOGRAM_ENUMERATION("Net.Prefetch.Pattern", prefetch_status,
+                                STATUS_MAX);
+    }
   } else if (request_->response_info().unused_since_prefetch) {
     TimeDelta total_time = base::TimeTicks::Now() - request_->creation_time();
     UMA_HISTOGRAM_TIMES("Net.Prefetch.TimeSpentOnPrefetchHit", total_time);

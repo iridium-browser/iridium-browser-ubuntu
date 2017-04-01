@@ -256,6 +256,52 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallerTest,
   RunTest(popup_contents, "runTest");
 }
 
+// Prevent inline install while in browser fullscreen mode. Browser fullscreen
+// is initiated by the user using F11.
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallerTest,
+                       BlockInlineInstallFromFullscreenForBrowser) {
+  const GURL install_url =
+      GenerateTestServerUrl(kAppDomain, "install_from_fullscreen.html");
+  ui_test_utils::NavigateToURL(browser(), install_url);
+  AutoAcceptInstall();
+
+  // Enter browser fullscreen mode.
+  FullscreenController* controller =
+      browser()->exclusive_access_manager()->fullscreen_controller();
+  controller->ToggleBrowserFullscreenMode();
+
+  RunTest("runTest");
+
+  // Ensure extension is not installed.
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
+  EXPECT_FALSE(registry->GenerateInstalledExtensionsSet()->Contains(
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+}
+
+// Prevent inline install while in tab fullscreen mode. Tab fullscreen is
+// initiated using the browser API.
+IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallerTest,
+                       BlockInlineInstallFromFullscreenForTab) {
+  const GURL install_url =
+      GenerateTestServerUrl(kAppDomain, "install_from_fullscreen.html");
+  ui_test_utils::NavigateToURL(browser(), install_url);
+  AutoAcceptInstall();
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  FullscreenController* controller =
+      browser()->exclusive_access_manager()->fullscreen_controller();
+
+  // Enter tab fullscreen mode.
+  controller->EnterFullscreenModeForTab(web_contents, install_url);
+
+  RunTest("runTest");
+
+  // Ensure extension is not installed.
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
+  EXPECT_FALSE(registry->GenerateInstalledExtensionsSet()->Contains(
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+}
+
 // Ensure that inline-installing a disabled extension simply re-enables it.
 IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallerTest,
                        ReinstallDisabledExtension) {
@@ -357,7 +403,8 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallerListenerTest, BothListenersTest) {
   int old_tab_index = browser()->tab_strip_model()->active_index();
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), GenerateTestServerUrl(kAppDomain, "both_listeners.html"),
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   DCHECK_NE(old_tab_index, browser()->tab_strip_model()->active_index());
   browser()->tab_strip_model()->CloseWebContentsAt(old_tab_index,
                                                    TabStripModel::CLOSE_NONE);

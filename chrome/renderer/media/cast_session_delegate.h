@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
@@ -27,11 +26,9 @@ class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace media {
-class VideoFrame;
 
 namespace cast {
 class CastEnvironment;
-class FrameInput;
 class RawEventSubscriberBundle;
 
 namespace transport {
@@ -115,6 +112,13 @@ class CastSessionDelegate : public CastSessionDelegateBase {
       const media::cast::CreateVideoEncodeAcceleratorCallback& create_vea_cb,
       const media::cast::CreateVideoEncodeMemoryCallback&
           create_video_encode_mem_cb);
+
+  // Start remoting session for one stream. After calling this method, a
+  // remoting sender will be ready for sending the demuxed stream. StartUDP()
+  // must be called before calling this method.
+  void StartRemotingStream(int32_t stream_id,
+                           const media::cast::FrameSenderConfig& config,
+                           const ErrorCallback& error_callback);
 
   void ToggleLogging(bool is_audio, bool enable);
   void GetEventLogsAndReset(bool is_audio,

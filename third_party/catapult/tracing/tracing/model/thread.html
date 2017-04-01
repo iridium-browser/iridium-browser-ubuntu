@@ -72,7 +72,7 @@ tr.exportTo('tr.model', function() {
       return Thread.compare(this, that);
     },
 
-    childEventContainers: function*() {
+    childEventContainers: function* () {
       if (this.sliceGroup.length)
         yield this.sliceGroup;
       if (this.kernelSliceGroup.length)
@@ -81,9 +81,9 @@ tr.exportTo('tr.model', function() {
         yield this.asyncSliceGroup;
     },
 
-    childEvents: function*() {
+    childEvents: function* () {
       if (this.timeSlices)
-        yield * this.timeSlices;
+        yield* this.timeSlices;
     },
 
     iterateAllPersistableObjects: function(cb) {
@@ -191,7 +191,7 @@ tr.exportTo('tr.model', function() {
     createSubSlices: function() {
       this.sliceGroup.createSubSlices();
       this.samples_ = this.parent.model.samples.filter(function(sample) {
-        return sample.thread == this;
+        return sample.thread === this;
       }, this);
     },
 
@@ -255,7 +255,7 @@ tr.exportTo('tr.model', function() {
             threadTimeSlice.end);
         var intersection = freqRange.findIntersection(range);
 
-        if (threadTimeSlice.schedulingState ==
+        if (threadTimeSlice.schedulingState ===
             tr.model.SCHEDULING_STATE.RUNNING) {
           var cpu = threadTimeSlice.cpuOnWhichThreadWasRunning;
           if (!(cpu.cpuNumber in stats))
@@ -327,7 +327,7 @@ tr.exportTo('tr.model', function() {
   };
 
   return {
-    Thread: Thread
+    Thread,
   };
 });
 </script>

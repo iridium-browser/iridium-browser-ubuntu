@@ -1,14 +1,14 @@
 {
-  "manifest_version":  1,
-  "name": "mojo:media",
-  "process-group": "browser",
+  "name": "media",
   "display_name": "Media Service",
-  "capabilities": {
-    "provided": {
-      "all_interfaces": [ "*" ]
-    },
-    "required": {
-      "*": { "classes": [ "app" ] }
+  "interface_provider_specs": {
+    "service_manager:connector": {
+      "provides": {
+        "media:media": [ "media::mojom::MediaService" ]
+      },
+      "requires": {
+        "*": [ "app" ]
+      }
     }
   }
 }

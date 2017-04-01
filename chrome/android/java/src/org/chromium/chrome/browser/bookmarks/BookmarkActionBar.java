@@ -130,7 +130,7 @@ public class BookmarkActionBar extends SelectionToolbar<BookmarkId> implements B
         // try to set the title when a selection is cleared.
         int titleResId = 0;
         initialize(delegate.getSelectionDelegate(), titleResId, delegate.getDrawerLayout(),
-                R.id.normal_menu_group, R.id.selection_mode_menu_group);
+                R.id.normal_menu_group, R.id.selection_mode_menu_group, null);
     }
 
     @Override
@@ -140,26 +140,17 @@ public class BookmarkActionBar extends SelectionToolbar<BookmarkId> implements B
     }
 
     @Override
-    public void onAllBookmarksStateSet() {
-        setTitle(R.string.bookmark_title_bar_all_items);
-        setNavigationButton(NAVIGATION_BUTTON_MENU);
-        getMenu().findItem(R.id.search_menu_id).setVisible(true);
-        getMenu().findItem(R.id.edit_menu_id).setVisible(false);
-    }
-
-    @Override
     public void onFolderStateSet(BookmarkId folder) {
         mCurrentFolder = mDelegate.getModel().getBookmarkById(folder);
 
-        getMenu().findItem(R.id.search_menu_id)
-                .setVisible(!BookmarkUtils.isAllBookmarksViewEnabled());
+        getMenu().findItem(R.id.search_menu_id).setVisible(true);
         getMenu().findItem(R.id.edit_menu_id).setVisible(mCurrentFolder.isEditable());
 
         // If the parent folder is a top level node, we don't go up anymore.
         if (mDelegate.getModel().getTopLevelFolderParentIDs().contains(
                 mCurrentFolder.getParentId())) {
             if (TextUtils.isEmpty(mCurrentFolder.getTitle())) {
-                setTitle(R.string.bookmark_title_bar_all_items);
+                setTitle(R.string.bookmarks);
             } else {
                 setTitle(mCurrentFolder.getTitle());
             }

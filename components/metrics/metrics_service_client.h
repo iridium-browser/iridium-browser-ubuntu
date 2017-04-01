@@ -41,9 +41,6 @@ class MetricsServiceClient {
   // when metrics recording gets enabled.
   virtual void SetMetricsClientId(const std::string& client_id) = 0;
 
-  // Whether there's an "off the record" (aka "Incognito") session active.
-  virtual bool IsOffTheRecordSessionActive() = 0;
-
   // Returns the product value to use in uploaded reports, which will be used to
   // set the ChromeUserMetricsExtension.product field. See comments on that
   // field on why it's an int32_t rather than an enum.
@@ -62,8 +59,14 @@ class MetricsServiceClient {
   // Returns the version of the application as a string.
   virtual std::string GetVersionString() = 0;
 
-  // Called by the metrics service when a log has been uploaded.
-  virtual void OnLogUploadComplete() = 0;
+  // Called by the metrics service when a new environment has been recorded.
+  // Takes the serialized environment as a parameter. The contents of
+  // |serialized_environment| are consumed by the call, but the caller maintains
+  // ownership.
+  virtual void OnEnvironmentUpdate(std::string* serialized_environment) {}
+
+  // Called by the metrics service to record a clean shutdown.
+  virtual void OnLogCleanShutdown() {}
 
   // Gathers metrics that will be filled into the system profile protobuf,
   // calling |done_callback| when complete.
@@ -76,9 +79,14 @@ class MetricsServiceClient {
   virtual void CollectFinalMetricsForLog(
       const base::Closure& done_callback) = 0;
 
+  // Get the URL of the metrics server.
+  virtual std::string GetMetricsServerUrl();
+
   // Creates a MetricsLogUploader with the specified parameters (see comments on
   // MetricsLogUploader for details).
   virtual std::unique_ptr<MetricsLogUploader> CreateUploader(
+      const std::string& server_url,
+      const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) = 0;
 
   // Returns the standard interval between upload attempts.

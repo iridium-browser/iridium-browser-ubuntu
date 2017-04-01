@@ -55,7 +55,7 @@ void PepperFlashSettingsHelperImpl::OnPpapiChannelOpened(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!callback_.is_null());
 
-  if (!channel_handle.name.empty())
+  if (channel_handle.is_mojo_channel_handle())
     callback_.Run(true, channel_handle);
   else
     callback_.Run(false, IPC::ChannelHandle());
@@ -65,7 +65,7 @@ void PepperFlashSettingsHelperImpl::OnPpapiChannelOpened(
   Release();
 }
 
-bool PepperFlashSettingsHelperImpl::OffTheRecord() {
+bool PepperFlashSettingsHelperImpl::Incognito() {
   return false;
 }
 

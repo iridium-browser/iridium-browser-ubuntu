@@ -13,8 +13,8 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/ui/base/dom_helpers.html">
 <link rel="import" href="/tracing/ui/side_panel/side_panel.html">
 <link rel="import" href="/tracing/ui/side_panel/side_panel_registry.html">
-<link rel="import" href="/tracing/value/ui/all_value_set_views.html">
-<link rel="import" href="/tracing/value/value_set.html">
+<link rel="import" href="/tracing/value/histogram_set.html">
+<link rel="import" href="/tracing/value/ui/histogram_set_view.html">
 
 <dom-module id="tr-ui-sp-metrics-side-panel">
   <template>
@@ -23,10 +23,19 @@ found in the LICENSE file.
       display: flex;
       flex-direction: column;
     }
+    div#error {
+      color: red;
+    }
+    #results {
+      font-size: 12px;
+    }
     </style>
 
     <top-left-controls id="top_left_controls"></top-left-controls>
-    <tr-v-ui-value-set-view id="results"></tr-v-ui-value-set-view>
+
+    <tr-v-ui-histogram-set-view id="results"></tr-v-ui-histogram-set-view>
+
+    <div id="error"></div>
   </template>
 </dom-module>
 
@@ -159,23 +168,14 @@ tr.exportTo('tr.ui', function() {
     },
 
     updateContents_: function() {
-      this.style.width = '';
-      tr.b.requestAnimationFrame(function() {
-        var width = this.$.results.getBoundingClientRect().width + 15;
-        this.style.width = width + 'px';
-      }, this);
+      Polymer.dom(this.$.error).textContent = '';
+      this.$.results.style.display = 'none';
 
       if (!this.model_) {
-        this.$.results.values = new tr.v.ValueSet([
-            new tr.v.FailureValue('missing', {
-              description: 'Missing model',
-              stack: ''
-            })
-        ]);
+        Polymer.dom(this.$.error).textContent = 'Missing model';
         return;
       }
 
-      var values = new tr.v.ValueSet();
       var options = {metrics: [this.currentMetricName_]};
 
       if (this.currentMetricTypeInfo_ &&
@@ -186,20 +186,13 @@ tr.exportTo('tr.ui', function() {
 
       var startDate = new Date();
       try {
-        var mreResult = new tr.mre.MreResult();
-        tr.metrics.metricMapFunction(mreResult, this.model_, options);
-        values.addValuesFromDicts(mreResult.pairs.values);
+        var histograms = tr.metrics.runMetrics(this.model_, options);
       } catch (err) {
         console.warn(
             this.currentMetricName_ +
             ' could not be computed for the current model:\n' +
             err.stack);
-        this.$.results.values = new tr.v.ValueSet([
-            new tr.v.FailureValue('error', {
-              description: err.message,
-              stack: err.stack
-            })
-        ]);
+        Polymer.dom(this.$.error).textContent = err.message;
         return;
       }
 
@@ -208,7 +201,9 @@ tr.exportTo('tr.ui', function() {
         this.metricLatenciesMs_.shift();
 
       this.recomputeButton_.style.background = '';
-      this.$.results.values = values;
+
+      this.$.results.style.display = '';
+      this.$.results.histograms = histograms;
     }
   });
 

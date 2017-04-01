@@ -7,14 +7,21 @@ package org.chromium.net;
 import android.support.annotation.Nullable;
 
 import java.util.Collection;
+import java.util.Date;
 import java.util.concurrent.Executor;
 
 /**
  * Information about a finished request. Passed to {@link RequestFinishedInfo.Listener}.
  *
+ * To associate the data with the original request, use
+ * {@link ExperimentalUrlRequest.Builder#addRequestAnnotation} or
+ * {@link ExperimentalBidirectionalStream.Builder#addRequestAnnotation} to add a unique identifier
+ * when creating the request, and call {@link #getAnnotations} when the {@link RequestFinishedInfo}
+ * is received to retrieve the identifier.
+ *
  * {@hide} as it's a prototype.
  */
-public final class RequestFinishedInfo {
+public abstract class RequestFinishedInfo {
     /**
      * Listens for finished requests for the purpose of collecting metrics.
      *
@@ -47,91 +54,235 @@ public final class RequestFinishedInfo {
     }
 
     /**
-     * Metrics collected for a single request.
+     * Metrics collected for a single request. Most of these metrics are timestamps for events
+     * during the lifetime of the request, which can be used to build a detailed timeline for
+     * investigating performance.
+     *
+     * Events happen in this order:
+     * <ol>
+     * <li>{@link #getRequestStart request start}</li>
+     * <li>{@link #getDnsStart DNS start}</li>
+     * <li>{@link #getDnsEnd DNS end}</li>
+     * <li>{@link #getConnectStart connect start}</li>
+     * <li>{@link #getSslStart SSL start}</li>
+     * <li>{@link #getSslEnd SSL end}</li>
+     * <li>{@link #getConnectEnd connect end}</li>
+     * <li>{@link #getSendingStart sending start}</li>
+     * <li>{@link #getSendingEnd sending end}</li>
+     * <li>{@link #getResponseStart response start}</li>
+     * <li>{@link #getRequestEnd request end}</li>
+     * </ol>
+     *
+     * Start times are reported as the time when a request started blocking on event, not when the
+     * event actually occurred, with the exception of push start and end. If a metric is not
+     * meaningful or not available, including cases when a request finished before reaching that
+     * stage, start and end times will be {@code null}. If no time was spent blocking on an event,
+     * start and end will be the same time.
+     *
+     * If the system clock is adjusted during the request, some of the {@link java.util.Date} values
+     * might not match it. Timestamps are recorded using a clock that is guaranteed not to run
+     * backwards. All timestamps are correct relative to the system clock at the time of request
+     * start, and taking the difference between two timestamps will give the correct difference
+     * between the events. In order to preserve this property, timestamps for events other than
+     * request start are not guaranteed to match the system clock at the times they represent.
+     *
+     * Most timing metrics are taken from
+     * <a
+     * href="https://cs.chromium.org/chromium/src/net/base/load_timing_info.h">LoadTimingInfo</a>,
+     * which holds the information for <a href="http://w3c.github.io/navigation-timing/"></a> and
+     * <a href="https://www.w3.org/TR/resource-timing/"></a>.
      *
      * {@hide} as it's a prototype.
      */
-    public static class Metrics {
+    public abstract static class Metrics {
+        /**
+         * Returns time when the request started.
+         * @return {@link java.util.Date} representing when the native request actually started.
+         * This timestamp will match the system clock at the time it represents.
+         */
         @Nullable
-        private final Long mTtfbMs;
-        @Nullable
-        private final Long mTotalTimeMs;
-        @Nullable
-        private final Long mSentBytesCount;
-        @Nullable
-        private final Long mReceivedBytesCount;
+        public abstract Date getRequestStart();
 
-        public Metrics(@Nullable Long ttfbMs, @Nullable Long totalTimeMs,
-                @Nullable Long sentBytesCount, @Nullable Long receivedBytesCount) {
-            mTtfbMs = ttfbMs;
-            mTotalTimeMs = totalTimeMs;
-            mSentBytesCount = sentBytesCount;
-            mReceivedBytesCount = receivedBytesCount;
-        }
+        /**
+         * Returns time when DNS lookup started. This and {@link #getDnsEnd} will return non-null
+         * values regardless of whether the result came from a DNS server or the local cache.
+         * @return {@link java.util.Date} representing when DNS lookup started. {@code null} if the
+         * socket was reused (see {@link #getSocketReused}).
+         */
+        @Nullable
+        public abstract Date getDnsStart();
+
+        /**
+         * Returns time when DNS lookup finished. This and {@link #getDnsStart} will return non-null
+         * values regardless of whether the result came from a DNS server or the local cache.
+         * @return {@link java.util.Date} representing when DNS lookup finished. {@code null} if the
+         * socket was reused (see {@link #getSocketReused}).
+         */
+        @Nullable
+        public abstract Date getDnsEnd();
+
+        /**
+         * Returns time when connection establishment started.
+         * @return {@link java.util.Date} representing when connection establishment started,
+         * typically when DNS resolution finishes. {@code null} if the socket was reused (see
+         * {@link #getSocketReused}).
+         */
+        @Nullable
+        public abstract Date getConnectStart();
+
+        /**
+         * Returns time when connection establishment finished.
+         * @return {@link java.util.Date} representing when connection establishment finished,
+         * after TCP connection is established and, if using HTTPS, SSL handshake is completed.
+         * For QUIC 0-RTT, this represents the time of handshake confirmation and might happen
+         * later than {@link #getSendingStart}.
+         * {@code null} if the socket was reused (see {@link #getSocketReused}).
+         */
+        @Nullable
+        public abstract Date getConnectEnd();
+
+        /**
+         * Returns time when SSL handshake started. For QUIC, this will be the same time as
+         * {@link #getConnectStart}.
+         * @return {@link java.util.Date} representing when SSL handshake started. {@code null} if
+         * SSL is not used or if the socket was reused (see {@link #getSocketReused}).
+         */
+        @Nullable
+        public abstract Date getSslStart();
+
+        /**
+         * Returns time when SSL handshake finished. For QUIC, this will be the same time as
+         * {@link #getConnectEnd}.
+         * @return {@link java.util.Date} representing when SSL handshake finished. {@code null} if
+         * SSL is not used or if the socket was reused (see {@link #getSocketReused}).
+         */
+        @Nullable
+        public abstract Date getSslEnd();
+
+        /**
+         * Returns time when sending the request started.
+         * @return {@link java.util.Date} representing when sending HTTP request headers started.
+         */
+        @Nullable
+        public abstract Date getSendingStart();
+
+        /**
+         * Returns time when sending the request finished.
+         * @return {@link java.util.Date} representing when sending HTTP request body finished.
+         * (Sending request body happens after sending request headers.)
+         */
+        @Nullable
+        public abstract Date getSendingEnd();
+
+        /**
+         * Returns time when first byte of HTTP/2 server push was received.
+         * @return {@link java.util.Date} representing when the first byte of an HTTP/2 server push
+         * was received. {@code null} if server push is not used.
+         */
+        @Nullable
+        public abstract Date getPushStart();
+
+        /**
+         * Returns time when last byte of HTTP/2 server push was received.
+         * @return {@link java.util.Date} representing when the last byte of an HTTP/2 server push
+         * was received. {@code null} if server push is not used.
+         */
+        @Nullable
+        public abstract Date getPushEnd();
+
+        /**
+         * Returns time when the end of the response headers was received.
+         * @return {@link java.util.Date} representing when the end of the response headers was
+         * received.
+         */
+        @Nullable
+        public abstract Date getResponseStart();
+
+        /**
+         * Returns time when the request finished.
+         * @return {@link java.util.Date} representing when the request finished.
+         */
+        @Nullable
+        public abstract Date getRequestEnd();
+
+        /**
+         * Returns whether the socket was reused from a previous request. In HTTP/2 or QUIC, if
+         * streams are multiplexed in a single connection, returns {@code true} for all streams
+         * after the first.
+         * @return whether this request reused a socket from a previous request. When {@code true},
+         * DNS, connection, and SSL times will be {@code null}.
+         */
+        @Nullable
+        public abstract boolean getSocketReused();
 
         /**
          * Returns milliseconds between request initiation and first byte of response headers,
-         * or null if not collected.
+         * or {@code null} if not collected.
+         * TODO(mgersh): Remove once new API works http://crbug.com/629194
+         * {@hide}
          */
         @Nullable
-        public Long getTtfbMs() {
-            return mTtfbMs;
-        }
+        public abstract Long getTtfbMs();
 
         /**
          * Returns milliseconds between request initiation and finish,
-         * including a failure or cancellation, or null if not collected.
+         * including a failure or cancellation, or {@code null} if not collected.
+         * TODO(mgersh): Remove once new API works http://crbug.com/629194
+         * {@hide}
          */
         @Nullable
-        public Long getTotalTimeMs() {
-            return mTotalTimeMs;
-        }
+        public abstract Long getTotalTimeMs();
 
         /**
-         * Returns total bytes sent over the network transport layer, or null if not collected.
+         * Returns total bytes sent over the network transport layer, or {@code null} if not
+         * collected.
          */
         @Nullable
-        public Long getSentBytesCount() {
-            return mSentBytesCount;
-        }
+        public abstract Long getSentByteCount();
 
         /**
-         * Returns total bytes received over the network transport layer, or null if not collected.
+         * Returns total bytes received over the network transport layer, or {@code null} if not
+         * collected. Number of bytes does not include any previous redirects.
          */
         @Nullable
-        public Long getReceivedBytesCount() {
-            return mReceivedBytesCount;
-        }
+        public abstract Long getReceivedByteCount();
     }
-
-    private final String mUrl;
-    private final Collection<Object> mAnnotations;
-    private final Metrics mMetrics;
-    @Nullable
-    private final UrlResponseInfo mResponseInfo;
 
     /**
-     * @hide only used by internal implementation.
+     * Reason value indicating that the request succeeded. Returned from {@link #getFinishedReason}.
      */
-    public RequestFinishedInfo(String url, Collection<Object> annotations, Metrics metrics,
-            @Nullable UrlResponseInfo responseInfo) {
-        mUrl = url;
-        mAnnotations = annotations;
-        mMetrics = metrics;
-        mResponseInfo = responseInfo;
-    }
+    public static final int SUCCEEDED = 0;
+    /**
+     * Reason value indicating that the request failed or returned an error. Returned from
+     * {@link #getFinishedReason}.
+     */
+    public static final int FAILED = 1;
+    /**
+     * Reason value indicating that the request was canceled. Returned from
+     * {@link #getFinishedReason}.
+     */
+    public static final int CANCELED = 2;
 
-    /** Returns the request's original URL. */
-    public String getUrl() {
-        return mUrl;
-    }
+    /**
+     * Returns the request's original URL.
+     *
+     * @return the request's original URL
+     */
+    public abstract String getUrl();
 
-    /** Returns the objects that the caller has supplied when initiating the request. */
-    public Collection<Object> getAnnotations() {
-        return mAnnotations;
-    }
+    /**
+     * Returns the objects that the caller has supplied when initiating the request, using
+     * {@link ExperimentalUrlRequest.Builder#addRequestAnnotation} or
+     * {@link ExperimentalBidirectionalStream.Builder#addRequestAnnotation}.
+     * Annotations can be used to associate a {@link RequestFinishedInfo} with the original request
+     * or type of request.
+     *
+     * @return annotations supplied when creating the request
+     */
+    public abstract Collection<Object> getAnnotations();
 
     // TODO(klm): Collect and return a chain of Metrics objects for redirect responses.
+    // TODO(mgersh): Update this javadoc when new metrics are fully implemented
     /**
      * Returns metrics collected for this request.
      *
@@ -144,16 +295,27 @@ public final class RequestFinishedInfo {
      *
      * @return metrics collected for this request.
      */
-    public Metrics getMetrics() {
-        return mMetrics;
-    }
+    public abstract Metrics getMetrics();
+
+    /**
+     * Returns the reason why the request finished.
+     * @return one of {@link #SUCCEEDED}, {@link #FAILED}, or {@link #CANCELED}
+     */
+    public abstract int getFinishedReason();
 
     /**
      * Returns a {@link UrlResponseInfo} for the request, if its response had started.
      * @return {@link UrlResponseInfo} for the request, if its response had started.
      */
     @Nullable
-    public UrlResponseInfo getResponseInfo() {
-        return mResponseInfo;
-    }
+    public abstract UrlResponseInfo getResponseInfo();
+
+    /**
+     * If the request failed, returns the same {@link CronetException} provided to
+     * {@link UrlRequest.Callback#onFailed}.
+     *
+     * @return the request's {@link CronetException}, if the request failed
+     */
+    @Nullable
+    public abstract CronetException getException();
 }

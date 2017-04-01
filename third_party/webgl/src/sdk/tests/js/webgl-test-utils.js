@@ -739,7 +739,16 @@ var glTypeToTypedArrayType = function(gl, type) {
     case gl.INT:
       return window.Int32Array;
     case gl.UNSIGNED_INT:
+    case gl.UNSIGNED_INT_5_9_9_9_REV:
+    case gl.UNSIGNED_INT_10F_11F_11F_REV:
+    case gl.UNSIGNED_INT_2_10_10_10_REV:
+    case gl.UNSIGNED_INT_24_8:
       return window.Uint32Array;
+    case gl.HALF_FLOAT:
+    case 0x8D61:  // HALF_FLOAT_OES
+      return window.Uint16Array;
+    case gl.FLOAT:
+      return window.Float32Array;
     default:
       throw 'unknown gl type ' + glEnumToString(gl, type);
   }
@@ -761,9 +770,16 @@ var getBytesPerComponent = function(gl, type) {
     case gl.UNSIGNED_SHORT_5_6_5:
     case gl.UNSIGNED_SHORT_4_4_4_4:
     case gl.UNSIGNED_SHORT_5_5_5_1:
+    case gl.HALF_FLOAT:
+    case 0x8D61:  // HALF_FLOAT_OES
       return 2;
     case gl.INT:
     case gl.UNSIGNED_INT:
+    case gl.UNSIGNED_INT_5_9_9_9_REV:
+    case gl.UNSIGNED_INT_10F_11F_11F_REV:
+    case gl.UNSIGNED_INT_2_10_10_10_REV:
+    case gl.UNSIGNED_INT_24_8:
+    case gl.FLOAT:
       return 4;
     default:
       throw 'unknown gl type ' + glEnumToString(gl, type);
@@ -827,12 +843,21 @@ var fillTexture = function(gl, tex, width, height, color, opt_level, opt_format,
   var numComponents = color.length;
   var bytesPerComponent = getBytesPerComponent(gl, opt_type);
   var rowSize = numComponents * width * bytesPerComponent;
-  var paddedRowSize = Math.floor((rowSize + pack - 1) / pack) * pack;
-  var size = rowSize + (height - 1) * paddedRowSize;
-  size = Math.floor((size + bytesPerComponent - 1) / bytesPerComponent) * bytesPerComponent;
+  // See equation 3.10 in ES 2.0 spec and equation 3.13 in ES 3.0 spec for paddedRowLength calculation.
+  // k is paddedRowLength.
+  // n is numComponents.
+  // l is width.
+  // a is pack.
+  // s is bytesPerComponent.
+  var paddedRowLength;
+  if (bytesPerComponent >= pack)
+    paddedRowLength = numComponents * width;
+  else
+    paddedRowLength = Math.floor((rowSize + pack - 1) / pack) * pack / bytesPerComponent;
+  var size = width * numComponents + (height - 1) * paddedRowLength;
   var buf = new (glTypeToTypedArrayType(gl, opt_type))(size);
   for (var yy = 0; yy < height; ++yy) {
-    var off = yy * paddedRowSize;
+    var off = yy * paddedRowLength;
     for (var xx = 0; xx < width; ++xx) {
       for (var jj = 0; jj < numComponents; ++jj) {
         buf[off++] = color[jj];
@@ -1246,10 +1271,9 @@ var checkFloatBuffer = function(gl, target, expected, opt_msg, opt_errorRange) {
   if (opt_errorRange === undefined)
     opt_errorRange = 0.001;
 
-  var outData = new ArrayBuffer(Float32Array.BYTES_PER_ELEMENT * expected.length);
-  gl.getBufferSubData(target, 0, outData);
+  var floatArray = new Float32Array(expected.length);
+  gl.getBufferSubData(target, 0, floatArray);
 
-  var floatArray = new Float32Array(outData);
   for (var i = 0; i < expected.length; i++) {
     if (Math.abs(floatArray[i] - expected[i]) > opt_errorRange) {
       testFailed(opt_msg);
@@ -1519,7 +1543,7 @@ function create3DContextWithWrapperThatThrowsOnGLError(canvas, opt_attributes, o
  * @param {number|Array.<number>} glErrors The expected gl error or an array of expected errors.
  * @param {string} evalStr The string to evaluate.
  */
-var shouldGenerateGLError = function(gl, glErrors, evalStr) {
+var shouldGenerateGLError = function(gl, glErrors, evalStr, opt_msg) {
   var exception;
   try {
     eval(evalStr);
@@ -1529,7 +1553,10 @@ var shouldGenerateGLError = function(gl, glErrors, evalStr) {
   if (exception) {
     testFailed(evalStr + " threw exception " + exception);
   } else {
-    glErrorShouldBe(gl, glErrors, "after evaluating: " + evalStr);
+    if (!opt_msg) {
+      opt_msg = "after evaluating: " + evalStr;
+    }
+    glErrorShouldBe(gl, glErrors, opt_msg);
   }
 };
 
@@ -1771,6 +1798,7 @@ var getFileListAsync = function(url, callback) {
 var readFile = function(file) {
   var xhr = new XMLHttpRequest();
   xhr.open("GET", file, false);
+  xhr.overrideMimeType("text/plain");
   xhr.send();
   return xhr.responseText.replace(/\r/g, "");
 };
@@ -2930,6 +2958,118 @@ var setupImageForCrossOriginTest = function(img, imgUrl, localUrl, callback) {
   }, false);
 }
 
+/**
+ * Convert sRGB color to linear color.
+ * @param {!Array.<number>} color The color to be converted.
+ *        The array has 4 elements, for example [R, G, B, A].
+ *        where each element is in the range 0 to 255.
+ * @return {!Array.<number>} color The color to be converted.
+ *        The array has 4 elements, for example [R, G, B, A].
+ *        where each element is in the range 0 to 255.
+ */
+var sRGBToLinear = function(color) {
+    return [sRGBChannelToLinear(color[0]),
+            sRGBChannelToLinear(color[1]),
+            sRGBChannelToLinear(color[2]),
+            color[3]]
+}
+
+/**
+ * Convert linear color to sRGB color.
+ * @param {!Array.<number>} color The color to be converted.
+ *        The array has 4 elements, for example [R, G, B, A].
+ *        where each element is in the range 0 to 255.
+ * @return {!Array.<number>} color The color to be converted.
+ *        The array has 4 elements, for example [R, G, B, A].
+ *        where each element is in the range 0 to 255.
+ */
+var linearToSRGB = function(color) {
+    return [linearChannelToSRGB(color[0]),
+            linearChannelToSRGB(color[1]),
+            linearChannelToSRGB(color[2]),
+            color[3]]
+}
+
+function sRGBChannelToLinear(value) {
+    value = value / 255;
+    if (value <= 0.04045)
+        value = value / 12.92;
+    else
+        value = Math.pow((value + 0.055) / 1.055, 2.4);
+    return Math.trunc(value * 255 + 0.5);
+}
+
+function linearChannelToSRGB(value) {
+    value = value / 255;
+    if (value <= 0.0) {
+        value = 0.0;
+    } else if (value < 0.0031308) {
+        value = value * 12.92;
+    } else if (value < 1) {
+        value = Math.pow(value, 0.41666) * 1.055 - 0.055;
+    } else {
+        value = 1.0;
+    }
+    return Math.trunc(value * 255 + 0.5);
+}
+
+function comparePixels(cmp, ref, tolerance, diff) {
+    if (cmp.length != ref.length) {
+        testFailed("invalid pixel size.");
+    }
+
+    var count = 0;
+    for (var i = 0; i < cmp.length; i++) {
+        diff[i * 4] = 0;
+        diff[i * 4 + 1] = 255;
+        diff[i * 4 + 2] = 0;
+        diff[i * 4 + 3] = 255;
+        if (Math.abs(cmp[i * 4] - ref[i * 4]) > tolerance ||
+            Math.abs(cmp[i * 4 + 1] - ref[i * 4 + 1]) > tolerance ||
+            Math.abs(cmp[i * 4 + 2] - ref[i * 4 + 2]) > tolerance ||
+            Math.abs(cmp[i * 4 + 3] - ref[i * 4 + 3]) > tolerance) {
+            if (count < 10) {
+                testFailed("Pixel " + i + ": expected (" +
+                [ref[i * 4], ref[i * 4 + 1], ref[i * 4 + 2], ref[i * 4 + 3]] + "), got (" +
+                [cmp[i * 4], cmp[i * 4 + 1], cmp[i * 4 + 2], cmp[i * 4 + 3]] + ")");
+            }
+            count++;
+            diff[i * 4] = 255;
+            diff[i * 4 + 1] = 0;
+        }
+    }
+
+    return count;
+}
+
+function displayImageDiff(cmp, ref, diff, width, height) {
+    var div = document.createElement("div");
+
+    var cmpImg = createImageFromPixel(cmp, width, height);
+    var refImg = createImageFromPixel(ref, width, height);
+    var diffImg = createImageFromPixel(diff, width, height);
+    wtu.insertImage(div, "Reference", refImg);
+    wtu.insertImage(div, "Result", cmpImg);
+    wtu.insertImage(div, "Difference", diffImg);
+
+    var console = document.getElementById("console");
+    console.appendChild(div);
+}
+
+function createImageFromPixel(buf, width, height) {
+    var canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    var ctx = canvas.getContext("2d");
+    var imgData = ctx.getImageData(0, 0, width, height);
+
+    for (var i = 0; i < buf.length; i++)
+        imgData.data[i] = buf[i];
+    ctx.putImageData(imgData, 0, 0);
+    var img = wtu.makeImageFromCanvas(canvas);
+    return img;
+}
+
 var API = {
   addShaderSource: addShaderSource,
   addShaderSources: addShaderSources,
@@ -2949,6 +3089,8 @@ var API = {
   createProgram: createProgram,
   clearAndDrawUnitQuad: clearAndDrawUnitQuad,
   clearAndDrawIndexedQuad: clearAndDrawIndexedQuad,
+  comparePixels: comparePixels,
+  displayImageDiff: displayImageDiff,
   drawUnitQuad: drawUnitQuad,
   drawIndexedQuad: drawIndexedQuad,
   drawUByteColorQuad: drawUByteColorQuad,
@@ -3036,6 +3178,10 @@ var API = {
   // fullscreen api
   setupFullscreen: setupFullscreen,
 
+  // sRGB converter api
+  sRGBToLinear: sRGBToLinear,
+  linearToSRGB: linearToSRGB,
+
   getHost: getHost,
   getBaseDomain: getBaseDomain,
   runningOnLocalhost: runningOnLocalhost,
@@ -3053,7 +3199,6 @@ Object.defineProperties(API, {
   simpleVertexShader: { value: simpleVertexShader, writable: false },
   simpleTextureFragmentShader: { value: simpleTextureFragmentShader, writable: false },
   simpleCubeMapTextureFragmentShader: { value: simpleCubeMapTextureFragmentShader, writable: false },
-  simpleTextureVertexShader: { value: simpleTextureVertexShader, writable: false },
   simpleVertexColorFragmentShader: { value: simpleVertexColorFragmentShader, writable: false },
   simpleVertexColorVertexShader: { value: simpleVertexColorVertexShader, writable: false }
 });

@@ -137,7 +137,7 @@ void PasswordManagerPresenterTest::SortAndCheckPositions(
     const SortEntry& entry = test_entries[i];
     std::unique_ptr<autofill::PasswordForm> form(new autofill::PasswordForm());
     form->signon_realm = entry.origin;
-    form->origin = GURL(base::ASCIIToUTF16(entry.origin));
+    form->origin = GURL(entry.origin);
     if (entry_type == PasswordEntryType::SAVED) {
       form->username_value = base::ASCIIToUTF16(entry.username);
       form->password_value = base::ASCIIToUTF16(entry.password);
@@ -163,8 +163,7 @@ void PasswordManagerPresenterTest::SortAndCheckPositions(
     if (entry.expected_position >= 0) {
       SCOPED_TRACE(testing::Message("position in sorted list: ")
                    << entry.expected_position);
-      EXPECT_EQ(GURL(base::ASCIIToUTF16(entry.origin)),
-                list[entry.expected_position]->origin);
+      EXPECT_EQ(GURL(entry.origin), list[entry.expected_position]->origin);
       if (entry_type == PasswordEntryType::SAVED) {
         EXPECT_EQ(base::ASCIIToUTF16(entry.username),
                   list[entry.expected_position]->username_value);
@@ -253,6 +252,15 @@ TEST_F(PasswordManagerPresenterTest, Sorting_DifferentPasswords) {
                         PasswordEntryType::SAVED);
 }
 
+TEST_F(PasswordManagerPresenterTest, Sorting_DifferentSchemes) {
+  const SortEntry test_cases[] = {
+      {"https://example.com", "user", "1", nullptr, nullptr, 1},
+      {"https://example.com", "user", "1", nullptr, nullptr, -1},  // Hide it.
+      {"http://example.com", "user", "1", nullptr, nullptr, 0}};
+  SortAndCheckPositions(test_cases, arraysize(test_cases),
+                        PasswordEntryType::SAVED);
+}
+
 TEST_F(PasswordManagerPresenterTest, Sorting_HideDuplicates) {
   const SortEntry test_cases[] = {
       {"http://example.com", "user_a", "pwd", nullptr, nullptr, 0},
@@ -263,6 +271,20 @@ TEST_F(PasswordManagerPresenterTest, Sorting_HideDuplicates) {
       // Different origin.
       {"http://sub1.example.com", "user_a", "pwd", nullptr, nullptr, 3},
       {"http://example.com", "user_a", "pwd", nullptr, nullptr, -1}  // Hide it.
+  };
+  SortAndCheckPositions(test_cases, arraysize(test_cases),
+                        PasswordEntryType::SAVED);
+}
+
+TEST_F(PasswordManagerPresenterTest, Sorting_Subdomains) {
+  const SortEntry test_cases[] = {
+      {"http://example.com", "u", "p", nullptr, nullptr, 0},
+      {"http://b.example.com", "u", "p", nullptr, nullptr, 6},
+      {"http://a.example.com", "u", "p", nullptr, nullptr, 1},
+      {"http://1.a.example.com", "u", "p", nullptr, nullptr, 2},
+      {"http://2.a.example.com", "u", "p", nullptr, nullptr, 3},
+      {"http://x.2.a.example.com", "u", "p", nullptr, nullptr, 4},
+      {"http://y.2.a.example.com", "u", "p", nullptr, nullptr, 5},
   };
   SortAndCheckPositions(test_cases, arraysize(test_cases),
                         PasswordEntryType::SAVED);
@@ -281,9 +303,9 @@ TEST_F(PasswordManagerPresenterTest, Sorting_PasswordExceptions) {
 
 TEST_F(PasswordManagerPresenterTest, Sorting_AndroidCredentials) {
   const SortEntry test_cases[] = {
-      {"https://alpha.com", "user", "secret", nullptr, nullptr, 0},
+      {"https://alpha.com", "user", "secret", nullptr, nullptr, 1},
       {"android://hash@com.alpha", "user", "secret", "https://alpha.com",
-       nullptr, 1},
+       nullptr, 0},
       {"android://hash@com.alpha", "user", "secret", "https://alpha.com",
        nullptr, -1},
       {"android://hash@com.alpha", "user", "secret", nullptr, nullptr, 2},
@@ -301,6 +323,21 @@ TEST_F(PasswordManagerPresenterTest, Sorting_Federations) {
       {"https://example.com", "user", "secret", nullptr, "https://fed1.com", 1},
       {"https://example.com", "user", "secret", nullptr, "https://fed2.com",
        2}};
+  SortAndCheckPositions(test_cases, arraysize(test_cases),
+                        PasswordEntryType::SAVED);
+}
+
+TEST_F(PasswordManagerPresenterTest, Sorting_SpecialCharacters) {
+  // URLs with encoded special characters should not cause crash during sorting.
+  const SortEntry test_cases[] = {
+      {"https://xn--bea5m6d.com/", "user_a", "pwd", nullptr, nullptr, 4},
+      {"https://uoy.com/", "user_a", "pwd", nullptr, nullptr, 1},
+      {"https://zrc.com/", "user_a", "pwd", nullptr, nullptr, 6},
+      {"https://abc.com/", "user_a", "pwd", nullptr, nullptr, 0},
+      {"https://xn--ab-fma.com/", "user_a", "pwd", nullptr, nullptr, 2},
+      {"https://xn--bc-lia.com/", "user_a", "pwd", nullptr, nullptr, 3},
+      {"https://xn--ndalk.com/", "user_a", "pwd", nullptr, nullptr, 5},
+  };
   SortAndCheckPositions(test_cases, arraysize(test_cases),
                         PasswordEntryType::SAVED);
 }

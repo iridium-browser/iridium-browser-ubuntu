@@ -4,8 +4,9 @@
 
 package org.chromium.chrome.browser.hardware_acceleration;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 
 /**
@@ -18,6 +19,7 @@ public class ChromeTabbedActivityHWATest extends ChromeTabbedActivityTestBase {
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testHardwareAcceleration() throws Exception {
         Utils.assertHardwareAcceleration(getActivity());
     }

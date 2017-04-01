@@ -10,15 +10,12 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "components/test_runner/web_task.h"
 #include "components/test_runner/web_test_delegate.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/WebKit/public/platform/WebMediaDeviceInfo.h"
 #include "third_party/WebKit/public/platform/WebMediaStream.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
-#include "third_party/WebKit/public/platform/WebMediaStreamTrackSourcesRequest.h"
-#include "third_party/WebKit/public/platform/WebSourceInfo.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebMediaDevicesRequest.h"
@@ -30,8 +27,6 @@ using blink::WebMediaDevicesRequest;
 using blink::WebMediaStream;
 using blink::WebMediaStreamSource;
 using blink::WebMediaStreamTrack;
-using blink::WebMediaStreamTrackSourcesRequest;
-using blink::WebSourceInfo;
 using blink::WebString;
 using blink::WebUserMediaRequest;
 using blink::WebVector;
@@ -54,9 +49,9 @@ void MockWebUserMediaClient::requestUserMedia(
     WebUserMediaRequest request = stream_request;
 
     if (request.ownerDocument().isNull() || !request.ownerDocument().frame()) {
-      delegate_->PostTask(new WebCallbackTask(base::Bind(
+      delegate_->PostTask(base::Bind(
           &WebUserMediaRequest::requestFailed,
-          base::Owned(new WebUserMediaRequest(request)), WebString())));
+          base::Owned(new WebUserMediaRequest(request)), WebString()));
       return;
     }
 
@@ -89,9 +84,9 @@ void MockWebUserMediaClient::requestUserMedia(
       stream.addTrack(web_track);
     }
 
-    delegate_->PostTask(new WebCallbackTask(
+    delegate_->PostTask(
         base::Bind(&WebUserMediaRequest::requestSucceeded,
-                   base::Owned(new WebUserMediaRequest(request)), stream)));
+                   base::Owned(new WebUserMediaRequest(request)), stream));
 }
 
 void MockWebUserMediaClient::cancelUserMediaRequest(
@@ -143,52 +138,13 @@ void MockWebUserMediaClient::requestMediaDevices(
                           WebString::fromUTF8(test_devices[i].group_id));
   }
 
-  delegate_->PostTask(new WebCallbackTask(
+  delegate_->PostTask(
       base::Bind(&WebMediaDevicesRequest::requestSucceeded,
-                 base::Owned(new WebMediaDevicesRequest(request)), devices)));
+                 base::Owned(new WebMediaDevicesRequest(request)), devices));
 
   should_enumerate_extra_device_ = !should_enumerate_extra_device_;
   if (!media_device_change_observer_.isNull())
     media_device_change_observer_.didChangeMediaDevices();
-}
-
-void MockWebUserMediaClient::cancelMediaDevicesRequest(
-    const WebMediaDevicesRequest&) {
-}
-
-void MockWebUserMediaClient::requestSources(
-    const blink::WebMediaStreamTrackSourcesRequest& request) {
-  struct {
-    const char* id;
-    WebSourceInfo::SourceKind kind;
-    const char* label;
-    WebSourceInfo::VideoFacingMode facing;
-  } test_sources[] = {
-    {
-      "device1",
-      WebSourceInfo::SourceKindAudio,
-      "Built-in microphone",
-      WebSourceInfo::VideoFacingModeNone,
-    },
-    {
-      "device2",
-      WebSourceInfo::SourceKindVideo,
-      "Build-in webcam",
-      WebSourceInfo::VideoFacingModeEnvironment,
-    },
-  };
-
-  WebVector<WebSourceInfo> sources(arraysize(test_sources));
-  for (size_t i = 0; i < arraysize(test_sources); ++i) {
-  sources[i].initialize(WebString::fromUTF8(test_sources[i].id),
-                        test_sources[i].kind,
-                        WebString::fromUTF8(test_sources[i].label),
-                        test_sources[i].facing);
-  }
-
-  delegate_->PostTask(new WebCallbackTask(base::Bind(
-      &WebMediaStreamTrackSourcesRequest::requestSucceeded,
-      base::Owned(new WebMediaStreamTrackSourcesRequest(request)), sources)));
 }
 
 void MockWebUserMediaClient::setMediaDeviceChangeObserver(

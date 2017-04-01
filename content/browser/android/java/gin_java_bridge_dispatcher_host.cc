@@ -28,13 +28,13 @@ namespace content {
 
 GinJavaBridgeDispatcherHost::GinJavaBridgeDispatcherHost(
     WebContents* web_contents,
-    jobject retained_object_set)
+    const base::android::JavaRef<jobject>& retained_object_set)
     : WebContentsObserver(web_contents),
       next_object_id_(1),
       retained_object_set_(base::android::AttachCurrentThread(),
                            retained_object_set),
       allow_object_contents_inspection_(true) {
-  DCHECK(retained_object_set);
+  DCHECK(!retained_object_set.is_null());
 }
 
 GinJavaBridgeDispatcherHost::~GinJavaBridgeDispatcherHost() {
@@ -110,9 +110,10 @@ GinJavaBoundObject::ObjectID GinJavaBridgeDispatcherHost::AddObject(
       is_named ? GinJavaBoundObject::CreateNamed(ref, safe_annotation_clazz)
                : GinJavaBoundObject::CreateTransient(ref, safe_annotation_clazz,
                                                      holder);
-  GinJavaBoundObject::ObjectID object_id = next_object_id_++;
+  GinJavaBoundObject::ObjectID object_id;
   {
     base::AutoLock locker(objects_lock_);
+    object_id = next_object_id_++;
     objects_[object_id] = new_object;
   }
 #if DCHECK_IS_ON()
@@ -335,7 +336,7 @@ void GinJavaBridgeDispatcherHost::OnInvokeMethod(
   }
   scoped_refptr<GinJavaMethodInvocationHelper> result =
       new GinJavaMethodInvocationHelper(
-          base::WrapUnique(new GinJavaBoundObjectDelegate(object)), method_name,
+          base::MakeUnique<GinJavaBoundObjectDelegate>(object), method_name,
           arguments);
   result->Init(this);
   result->Invoke();
@@ -374,7 +375,7 @@ void GinJavaBridgeDispatcherHost::OnObjectWrapperDeleted(
     return;
   JavaObjectWeakGlobalRef ref =
       RemoveHolderAndAdvanceLocked(routing_id, &iter);
-  if (!ref.is_empty()) {
+  if (!ref.is_uninitialized()) {
     RemoveFromRetainedObjectSetLocked(ref);
   }
 }

@@ -1,3 +1,4 @@
+#include "ImageIndex.h"
 //
 // Copyright 2014 The ANGLE Project Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -62,6 +63,11 @@ ImageIndex ImageIndex::MakeGeneric(GLenum target, GLint mipIndex)
     return ImageIndex(target, mipIndex, layerIndex);
 }
 
+ImageIndex ImageIndex::Make2DMultisample()
+{
+    return ImageIndex(GL_TEXTURE_2D_MULTISAMPLE, 0, ENTIRE_LEVEL);
+}
+
 ImageIndex ImageIndex::MakeInvalid()
 {
     return ImageIndex(GL_NONE, -1, -1);
@@ -102,18 +108,21 @@ ImageIndex::ImageIndex(GLenum typeIn, GLint mipIndexIn, GLint layerIndexIn)
 ImageIndexIterator ImageIndexIterator::Make2D(GLint minMip, GLint maxMip)
 {
     return ImageIndexIterator(GL_TEXTURE_2D, Range<GLint>(minMip, maxMip),
-                              Range<GLint>(ImageIndex::ENTIRE_LEVEL, ImageIndex::ENTIRE_LEVEL), NULL);
+                              Range<GLint>(ImageIndex::ENTIRE_LEVEL, ImageIndex::ENTIRE_LEVEL),
+                              nullptr);
 }
 
 ImageIndexIterator ImageIndexIterator::MakeCube(GLint minMip, GLint maxMip)
 {
-    return ImageIndexIterator(GL_TEXTURE_CUBE_MAP, Range<GLint>(minMip, maxMip), Range<GLint>(0, 6), NULL);
+    return ImageIndexIterator(GL_TEXTURE_CUBE_MAP, Range<GLint>(minMip, maxMip), Range<GLint>(0, 6),
+                              nullptr);
 }
 
 ImageIndexIterator ImageIndexIterator::Make3D(GLint minMip, GLint maxMip,
                                               GLint minLayer, GLint maxLayer)
 {
-    return ImageIndexIterator(GL_TEXTURE_3D, Range<GLint>(minMip, maxMip), Range<GLint>(minLayer, maxLayer), NULL);
+    return ImageIndexIterator(GL_TEXTURE_3D, Range<GLint>(minMip, maxMip),
+                              Range<GLint>(minLayer, maxLayer), nullptr);
 }
 
 ImageIndexIterator ImageIndexIterator::Make2DArray(GLint minMip, GLint maxMip,
@@ -121,6 +130,13 @@ ImageIndexIterator ImageIndexIterator::Make2DArray(GLint minMip, GLint maxMip,
 {
     return ImageIndexIterator(GL_TEXTURE_2D_ARRAY, Range<GLint>(minMip, maxMip),
                               Range<GLint>(0, IMPLEMENTATION_MAX_2D_ARRAY_TEXTURE_LAYERS), layerCounts);
+}
+
+ImageIndexIterator ImageIndexIterator::Make2DMultisample()
+{
+    return ImageIndexIterator(GL_TEXTURE_2D_MULTISAMPLE, Range<GLint>(0, 0),
+                              Range<GLint>(ImageIndex::ENTIRE_LEVEL, ImageIndex::ENTIRE_LEVEL),
+                              nullptr);
 }
 
 ImageIndexIterator::ImageIndexIterator(GLenum type, const Range<GLint> &mipRange,
@@ -135,7 +151,12 @@ ImageIndexIterator::ImageIndexIterator(GLenum type, const Range<GLint> &mipRange
 
 GLint ImageIndexIterator::maxLayer() const
 {
-    return (mLayerCounts ? static_cast<GLint>(mLayerCounts[mCurrentMip]) : mLayerRange.end);
+    if (mLayerCounts)
+    {
+        ASSERT(mCurrentMip >= 0);
+        return (mCurrentMip < mMipRange.end) ? mLayerCounts[mCurrentMip] : 0;
+    }
+    return mLayerRange.end;
 }
 
 ImageIndex ImageIndexIterator::next()
@@ -149,20 +170,28 @@ ImageIndex ImageIndexIterator::next()
 
     if (mCurrentLayer != ImageIndex::ENTIRE_LEVEL)
     {
-        if (mCurrentLayer < maxLayer()-1)
+        if (mCurrentLayer < maxLayer() - 1)
         {
             mCurrentLayer++;
         }
-        else if (mCurrentMip < mMipRange.end-1)
+        else if (mCurrentMip < mMipRange.end - 1)
         {
             mCurrentMip++;
             mCurrentLayer = mLayerRange.start;
         }
+        else
+        {
+            done();
+        }
     }
-    else if (mCurrentMip < mMipRange.end-1)
+    else if (mCurrentMip < mMipRange.end - 1)
     {
         mCurrentMip++;
         mCurrentLayer = mLayerRange.start;
+    }
+    else
+    {
+        done();
     }
 
     return value;
@@ -185,4 +214,10 @@ bool ImageIndexIterator::hasNext() const
     return (mCurrentMip < mMipRange.end || mCurrentLayer < maxLayer());
 }
 
+void ImageIndexIterator::done()
+{
+    mCurrentMip   = mMipRange.end;
+    mCurrentLayer = maxLayer();
 }
+
+}  // namespace gl

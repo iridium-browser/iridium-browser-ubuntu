@@ -27,6 +27,7 @@
 #include "net/http/http_response_info.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/url_request/redirect_info.h"
+#include "third_party/WebKit/public/platform/WebMixedContentContextType.h"
 
 #ifndef CONTENT_COMMON_RESOURCE_MESSAGES_H_
 #define CONTENT_COMMON_RESOURCE_MESSAGES_H_
@@ -135,6 +136,9 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::SkipServiceWorker,
 IPC_ENUM_TRAITS_MAX_VALUE(net::EffectiveConnectionType,
                           net::EFFECTIVE_CONNECTION_TYPE_LAST - 1)
 
+IPC_ENUM_TRAITS_MAX_VALUE(blink::WebMixedContentContextType,
+                          blink::WebMixedContentContextType::Last)
+
 IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseHead)
 IPC_STRUCT_TRAITS_PARENT(content::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(request_start)
@@ -154,7 +158,6 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(headers)
   IPC_STRUCT_TRAITS_MEMBER(mime_type)
   IPC_STRUCT_TRAITS_MEMBER(charset)
-  IPC_STRUCT_TRAITS_MEMBER(security_info)
   IPC_STRUCT_TRAITS_MEMBER(has_major_certificate_errors)
   IPC_STRUCT_TRAITS_MEMBER(content_length)
   IPC_STRUCT_TRAITS_MEMBER(encoded_data_length)
@@ -165,23 +168,25 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(devtools_info)
   IPC_STRUCT_TRAITS_MEMBER(download_file_path)
   IPC_STRUCT_TRAITS_MEMBER(was_fetched_via_spdy)
-  IPC_STRUCT_TRAITS_MEMBER(was_npn_negotiated)
+  IPC_STRUCT_TRAITS_MEMBER(was_alpn_negotiated)
   IPC_STRUCT_TRAITS_MEMBER(was_alternate_protocol_available)
   IPC_STRUCT_TRAITS_MEMBER(connection_info)
-  IPC_STRUCT_TRAITS_MEMBER(was_fetched_via_proxy)
-  IPC_STRUCT_TRAITS_MEMBER(npn_negotiated_protocol)
+  IPC_STRUCT_TRAITS_MEMBER(alpn_negotiated_protocol)
   IPC_STRUCT_TRAITS_MEMBER(socket_address)
   IPC_STRUCT_TRAITS_MEMBER(was_fetched_via_service_worker)
   IPC_STRUCT_TRAITS_MEMBER(was_fallback_required_by_service_worker)
-  IPC_STRUCT_TRAITS_MEMBER(original_url_via_service_worker)
+  IPC_STRUCT_TRAITS_MEMBER(url_list_via_service_worker)
   IPC_STRUCT_TRAITS_MEMBER(response_type_via_service_worker)
   IPC_STRUCT_TRAITS_MEMBER(service_worker_start_time)
   IPC_STRUCT_TRAITS_MEMBER(service_worker_ready_time)
   IPC_STRUCT_TRAITS_MEMBER(is_in_cache_storage)
   IPC_STRUCT_TRAITS_MEMBER(cache_storage_cache_name)
-  IPC_STRUCT_TRAITS_MEMBER(proxy_server)
-  IPC_STRUCT_TRAITS_MEMBER(is_using_lofi)
+  IPC_STRUCT_TRAITS_MEMBER(previews_state)
   IPC_STRUCT_TRAITS_MEMBER(effective_connection_type)
+  IPC_STRUCT_TRAITS_MEMBER(certificate)
+  IPC_STRUCT_TRAITS_MEMBER(cert_status)
+  IPC_STRUCT_TRAITS_MEMBER(ssl_connection_status)
+  IPC_STRUCT_TRAITS_MEMBER(ssl_key_exchange_group)
   IPC_STRUCT_TRAITS_MEMBER(signed_certificate_timestamps)
   IPC_STRUCT_TRAITS_MEMBER(cors_exposed_header_names)
 IPC_STRUCT_TRAITS_END()
@@ -213,7 +218,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceRequest)
   IPC_STRUCT_TRAITS_MEMBER(request_initiator)
   IPC_STRUCT_TRAITS_MEMBER(referrer)
   IPC_STRUCT_TRAITS_MEMBER(referrer_policy)
-  IPC_STRUCT_TRAITS_MEMBER(visiblity_state)
+  IPC_STRUCT_TRAITS_MEMBER(visibility_state)
   IPC_STRUCT_TRAITS_MEMBER(headers)
   IPC_STRUCT_TRAITS_MEMBER(load_flags)
   IPC_STRUCT_TRAITS_MEMBER(origin_pid)
@@ -229,6 +234,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceRequest)
   IPC_STRUCT_TRAITS_MEMBER(fetch_credentials_mode)
   IPC_STRUCT_TRAITS_MEMBER(fetch_redirect_mode)
   IPC_STRUCT_TRAITS_MEMBER(fetch_request_context_type)
+  IPC_STRUCT_TRAITS_MEMBER(fetch_mixed_content_context_type)
   IPC_STRUCT_TRAITS_MEMBER(fetch_frame_type)
   IPC_STRUCT_TRAITS_MEMBER(request_body)
   IPC_STRUCT_TRAITS_MEMBER(download_to_file)
@@ -246,9 +252,10 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceRequest)
   IPC_STRUCT_TRAITS_MEMBER(transferred_request_request_id)
   IPC_STRUCT_TRAITS_MEMBER(allow_download)
   IPC_STRUCT_TRAITS_MEMBER(report_raw_headers)
-  IPC_STRUCT_TRAITS_MEMBER(lofi_state)
+  IPC_STRUCT_TRAITS_MEMBER(previews_state)
   IPC_STRUCT_TRAITS_MEMBER(resource_body_stream_url)
   IPC_STRUCT_TRAITS_MEMBER(initiated_in_secure_context)
+  IPC_STRUCT_TRAITS_MEMBER(download_to_network_cache_only)
 IPC_STRUCT_TRAITS_END()
 
 // Parameters for a ResourceMsg_RequestComplete
@@ -256,9 +263,9 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceRequestCompletionStatus)
   IPC_STRUCT_TRAITS_MEMBER(error_code)
   IPC_STRUCT_TRAITS_MEMBER(was_ignored_by_handler)
   IPC_STRUCT_TRAITS_MEMBER(exists_in_cache)
-  IPC_STRUCT_TRAITS_MEMBER(security_info)
   IPC_STRUCT_TRAITS_MEMBER(completion_time)
   IPC_STRUCT_TRAITS_MEMBER(encoded_data_length)
+  IPC_STRUCT_TRAITS_MEMBER(encoded_body_length)
 IPC_STRUCT_TRAITS_END()
 
 // Resource messages sent from the browser to the renderer.
@@ -307,21 +314,19 @@ IPC_MESSAGE_CONTROL4(ResourceMsg_SetDataBuffer,
 // Sent when a chunk of data from a resource request is ready, and the resource
 // is expected to be small enough to fit in the inlined buffer.
 // The data is sent as a part of IPC message.
-IPC_MESSAGE_CONTROL4(ResourceMsg_InlinedDataChunkReceived,
+IPC_MESSAGE_CONTROL3(ResourceMsg_InlinedDataChunkReceived,
                      int /* request_id */,
                      std::vector<char> /* data */,
-                     int /* encoded_data_length */,
-                     int /* encoded_body_length */)
+                     int /* encoded_data_length */)
 
 // Sent when some data from a resource request is ready.  The data offset and
 // length specify a byte range into the shared memory buffer provided by the
 // SetDataBuffer message.
-IPC_MESSAGE_CONTROL5(ResourceMsg_DataReceived,
+IPC_MESSAGE_CONTROL4(ResourceMsg_DataReceived,
                      int /* request_id */,
                      int /* data_offset */,
                      int /* data_length */,
-                     int /* encoded_data_length */,
-                     int /* encoded_body_length */)
+                     int /* encoded_data_length */)
 
 // Sent when some data from a resource request has been downloaded to
 // file. This is only called in the 'download_to_file' case and replaces
@@ -362,10 +367,6 @@ IPC_SYNC_MESSAGE_ROUTED2_1(ResourceHostMsg_SyncLoad,
 // Sent when the renderer process is done processing a DataReceived
 // message.
 IPC_MESSAGE_CONTROL1(ResourceHostMsg_DataReceived_ACK,
-                     int /* request_id */)
-
-// Sent when the renderer has processed a DataDownloaded message.
-IPC_MESSAGE_CONTROL1(ResourceHostMsg_DataDownloaded_ACK,
                      int /* request_id */)
 
 // Sent by the renderer process to acknowledge receipt of a

@@ -4,18 +4,20 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fpdfdoc/include/cpdf_bookmark.h"
+#include "core/fpdfdoc/cpdf_bookmark.h"
 
-#include "core/fpdfapi/fpdf_parser/include/cpdf_array.h"
-#include "core/fpdfapi/fpdf_parser/include/cpdf_string.h"
-#include "core/fpdfdoc/include/cpdf_nametree.h"
-#include "core/fxge/include/fx_dib.h"
+#include <memory>
+
+#include "core/fpdfapi/parser/cpdf_array.h"
+#include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fpdfdoc/cpdf_nametree.h"
+#include "core/fxge/fx_dib.h"
 
 uint32_t CPDF_Bookmark::GetColorRef() const {
   if (!m_pDict)
     return FXSYS_RGB(0, 0, 0);
 
-  CPDF_Array* pColor = m_pDict->GetArrayBy("C");
+  CPDF_Array* pColor = m_pDict->GetArrayFor("C");
   if (!pColor)
     return FXSYS_RGB(0, 0, 0);
 
@@ -26,14 +28,14 @@ uint32_t CPDF_Bookmark::GetColorRef() const {
 }
 
 uint32_t CPDF_Bookmark::GetFontStyle() const {
-  return m_pDict ? m_pDict->GetIntegerBy("F") : 0;
+  return m_pDict ? m_pDict->GetIntegerFor("F") : 0;
 }
 
 CFX_WideString CPDF_Bookmark::GetTitle() const {
   if (!m_pDict)
     return CFX_WideString();
 
-  CPDF_String* pString = ToString(m_pDict->GetDirectObjectBy("Title"));
+  CPDF_String* pString = ToString(m_pDict->GetDirectObjectFor("Title"));
   if (!pString)
     return CFX_WideString();
 
@@ -54,7 +56,7 @@ CPDF_Dest CPDF_Bookmark::GetDest(CPDF_Document* pDocument) const {
   if (!m_pDict)
     return CPDF_Dest();
 
-  CPDF_Object* pDest = m_pDict->GetDirectObjectBy("Dest");
+  CPDF_Object* pDest = m_pDict->GetDirectObjectFor("Dest");
   if (!pDest)
     return CPDF_Dest();
   if (pDest->IsString() || pDest->IsName()) {
@@ -67,5 +69,5 @@ CPDF_Dest CPDF_Bookmark::GetDest(CPDF_Document* pDocument) const {
 }
 
 CPDF_Action CPDF_Bookmark::GetAction() const {
-  return m_pDict ? CPDF_Action(m_pDict->GetDictBy("A")) : CPDF_Action();
+  return m_pDict ? CPDF_Action(m_pDict->GetDictFor("A")) : CPDF_Action();
 }

@@ -12,8 +12,8 @@ import os
 import time
 
 from chromite.cbuildbot import buildbucket_lib
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import manifest_version
 from chromite.lib import cros_build_lib
@@ -22,8 +22,6 @@ from chromite.lib import cache
 from chromite.lib import git
 
 site_config = config_lib.GetConfig()
-
-BUILDBUCKET_BUCKET = 'master.chromiumos.tryserver'
 
 class ChromiteUpgradeNeeded(Exception):
   """Exception thrown when it's detected that we need to upgrade chromite."""
@@ -225,29 +223,29 @@ class RemoteTryJob(object):
     })
     return properties
 
-  def _PutConfigToBuildBucket(self, bot, http, buildbucket_put_url, dryrun):
+  def _PutConfigToBuildBucket(self, buildbucket_client, bot, dryrun):
     """Put the tryjob request to buildbucket.
 
     Args:
+      buildbucket_client: The buildbucket client instance.
       bot: The bot config to put.
-      http: An authorized http instance.
-      buildbucket_put_url: Target buildbucket url to put the config.
       dryrun: Whether a dryrun.
     """
 
     body = json.dumps({
-        'bucket': BUILDBUCKET_BUCKET,
+        'bucket': constants.TRYSERVER_BUILDBUCKET_BUCKET,
         'parameters_json': json.dumps({
             'builder_name': self._GetBuilder(bot),
             'properties': self._GetProperties(bot),
         }),
+        'tags':['build_type:%s' % constants.TRYJOB_TYPE]
     })
-    buildbucket_id = buildbucket_lib.PutBuildBucket(
-        body, http, buildbucket_put_url, dryrun)
+    content = buildbucket_client.PutBuildRequest(body, dryrun)
+    buildbucket_id = buildbucket_lib.GetBuildId(content)
 
     if buildbucket_id is not None:
       print(self.BUILDBUCKET_PUT_RESP_FORMAT %
-            (BUILDBUCKET_BUCKET, bot, buildbucket_id))
+            (constants.TRYSERVER_BUILDBUCKET_BUCKET, bot, buildbucket_id))
 
   def _PostConfigsToBuildBucket(self, testjob=False, dryrun=False):
     """Posts the tryjob configs to buildbucket.
@@ -256,14 +254,15 @@ class RemoteTryJob(object):
       dryrun: Whether to skip the request to buildbucket.
       testjob: Whether to use the test instance of the buildbucket server.
     """
-    http = buildbucket_lib.BuildBucketAuth(
+    host = (buildbucket_lib.BUILDBUCKET_TEST_HOST if testjob
+            else buildbucket_lib.BUILDBUCKET_HOST)
+    buildbucket_client = buildbucket_lib.BuildbucketClient(
         service_account=buildbucket_lib.GetServiceAccount(
-            constants.CHROMEOS_SERVICE_ACCOUNT))
-
-    buildbucket_put_url = buildbucket_lib.GetBuildBucketPutUrl(testjob)
+            constants.CHROMEOS_SERVICE_ACCOUNT),
+        host=host)
 
     for bot in self.bots:
-      self._PutConfigToBuildBucket(bot, http, buildbucket_put_url, dryrun)
+      self._PutConfigToBuildBucket(buildbucket_client, bot, dryrun)
 
   def _PushConfig(self, workdir, testjob, dryrun, current_time):
     """Pushes the tryjob config to Git as a file.

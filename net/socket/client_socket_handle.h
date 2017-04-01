@@ -20,7 +20,8 @@
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_info.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_source.h"
+#include "net/log/net_log_with_source.h"
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/connection_attempts.h"
 #include "net/socket/stream_socket.h"
@@ -82,7 +83,7 @@ class NET_EXPORT ClientSocketHandle {
            ClientSocketPool::RespectLimits respect_limits,
            const CompletionCallback& callback,
            PoolType* pool,
-           const BoundNetLog& net_log);
+           const NetLogWithSource& net_log);
 
   // An initialized handle can be reset, which causes it to return to the
   // un-initialized state.  This releases the underlying socket, which in the
@@ -113,12 +114,6 @@ class NET_EXPORT ClientSocketHandle {
   // Returns true when Init() has completed successfully.
   bool is_initialized() const { return is_initialized_; }
 
-  // Returns the time tick when Init() was called.
-  base::TimeTicks init_time() const { return init_time_; }
-
-  // Returns the time between Init() and when is_initialized() becomes true.
-  base::TimeDelta setup_time() const { return setup_time_; }
-
   // Sets the portion of LoadTimingInfo related to connection establishment, and
   // the socket id.  |is_reused| is needed because the handle may not have full
   // reuse information.  |load_timing_info| must have all default values when
@@ -126,6 +121,11 @@ class NET_EXPORT ClientSocketHandle {
   // |socket_| is NULL.
   bool GetLoadTimingInfo(bool is_reused,
                          LoadTimingInfo* load_timing_info) const;
+
+  // Dumps memory allocation stats into |stats|. |stats| can be assumed as being
+  // default initialized upon entry. Implementation overrides fields in
+  // |stats|.
+  void DumpMemoryStats(StreamSocket::SocketMemoryStats* stats) const;
 
   // Used by ClientSocketPool to initialize the ClientSocketHandle.
   //
@@ -216,10 +216,8 @@ class NET_EXPORT ClientSocketHandle {
   HttpResponseInfo ssl_error_response_info_;
   std::unique_ptr<ClientSocketHandle> pending_http_proxy_connection_;
   std::vector<ConnectionAttempt> connection_attempts_;
-  base::TimeTicks init_time_;
-  base::TimeDelta setup_time_;
 
-  NetLog::Source requesting_source_;
+  NetLogSource requesting_source_;
 
   // Timing information is set when a connection is successfully established.
   LoadTimingInfo::ConnectTiming connect_timing_;
@@ -236,7 +234,7 @@ int ClientSocketHandle::Init(
     ClientSocketPool::RespectLimits respect_limits,
     const CompletionCallback& callback,
     PoolType* pool,
-    const BoundNetLog& net_log) {
+    const NetLogWithSource& net_log) {
   requesting_source_ = net_log.source();
 
   CHECK(!group_name.empty());
@@ -244,7 +242,6 @@ int ClientSocketHandle::Init(
   ResetErrorState();
   pool_ = pool;
   group_name_ = group_name;
-  init_time_ = base::TimeTicks::Now();
   int rv = pool_->RequestSocket(group_name, &socket_params, priority,
                                 respect_limits, this, callback_, net_log);
   if (rv == ERR_IO_PENDING) {

@@ -8,9 +8,9 @@
 #include <stdint.h>
 
 #include "ash/ash_export.h"
-#include "ash/common/shelf/shelf_types.h"
 #include "ash/common/shelf/wm_shelf_observer.h"
 #include "ash/common/shell_observer.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "base/macros.h"
 #include "ui/display/display_observer.h"
 #include "ui/gfx/geometry/rect.h"
@@ -23,7 +23,6 @@ class Screen;
 namespace ash {
 
 class AshPopupAlignmentDelegateTest;
-class ShelfLayoutManager;
 class WebNotificationTrayTest;
 class WmShelf;
 
@@ -51,7 +50,7 @@ class ASH_EXPORT AshPopupAlignmentDelegate
   // Overridden from message_center::PopupAlignmentDelegate:
   int GetToastOriginX(const gfx::Rect& toast_bounds) const override;
   int GetBaseLine() const override;
-  int GetWorkAreaBottom() const override;
+  gfx::Rect GetWorkArea() const override;
   bool IsTopDown() const override;
   bool IsFromLeft() const override;
   void RecomputeAlignment(const display::Display& display) override;

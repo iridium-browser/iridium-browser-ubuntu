@@ -184,7 +184,7 @@ private:
 
         builder.add(SkLights::Light::MakeDirectional(
                 SkColor3f::Make(1.0f, 1.0f, 1.0f), fLightDir));
-        builder.add(SkLights::Light::MakeAmbient(SkColor3f::Make(0.2f, 0.2f, 0.2f)));
+        builder.setAmbientLightColor(SkColor3f::Make(0.2f, 0.2f, 0.2f));
 
         fLights = builder.finish();
     }
@@ -492,7 +492,7 @@ protected:
     }
 
     void onDrawContent(SkCanvas* canvas) override {
-        canvas->drawDrawable(fDrawable);
+        canvas->drawDrawable(fDrawable.get());
         this->inval(NULL);
     }
 
@@ -506,7 +506,7 @@ protected:
 #endif
 
 private:
-    SkAutoTUnref<DrawLitAtlasDrawable> fDrawable;
+    sk_sp<DrawLitAtlasDrawable> fDrawable;
 
     typedef SampleView INHERITED;
 };

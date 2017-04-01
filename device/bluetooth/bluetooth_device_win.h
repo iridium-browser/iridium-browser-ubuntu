@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,6 +16,11 @@
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_task_manager_win.h"
+#include "net/log/net_log_source.h"
+
+namespace net {
+class NetLog;
+}
 
 namespace device {
 
@@ -30,7 +36,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceWin : public BluetoothDevice {
       const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
       const scoped_refptr<BluetoothSocketThread>& socket_thread,
       net::NetLog* net_log,
-      const net::NetLog::Source& net_log_source);
+      const net::NetLogSource& net_log_source);
   ~BluetoothDeviceWin() override;
 
   // BluetoothDevice override
@@ -99,8 +105,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceWin : public BluetoothDevice {
  private:
   friend class BluetoothAdapterWin;
 
-  typedef ScopedVector<BluetoothServiceRecordWin> ServiceRecordList;
-
   // Used by BluetoothAdapterWin to update the visible state during
   // discovery.
   void SetVisible(bool visible);
@@ -115,19 +119,20 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceWin : public BluetoothDevice {
   // Checks if |service| still exist on device according to newly discovered
   // |service_state|.
   bool DoesGattServiceExist(
-      const ScopedVector<BluetoothTaskManagerWin::ServiceRecordState>&
-          service_state,
+      const std::vector<std::unique_ptr<
+          BluetoothTaskManagerWin::ServiceRecordState>>& service_state,
       BluetoothRemoteGattService* service);
 
   // Updates the GATT services with the services stored in |service_state|.
   void UpdateGattServices(
-      const ScopedVector<BluetoothTaskManagerWin::ServiceRecordState>&
+      const std::vector<
+          std::unique_ptr<BluetoothTaskManagerWin::ServiceRecordState>>&
           service_state);
 
   scoped_refptr<base::SequencedTaskRunner> ui_task_runner_;
   scoped_refptr<BluetoothSocketThread> socket_thread_;
   net::NetLog* net_log_;
-  net::NetLog::Source net_log_source_;
+  net::NetLogSource net_log_source_;
 
   // The Bluetooth class of the device, a bitmask that may be decoded using
   // https://www.bluetooth.org/Technical/AssignedNumbers/baseband.htm
@@ -152,7 +157,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDeviceWin : public BluetoothDevice {
   UUIDSet uuids_;
 
   // The service records retrieved from SDP.
-  ServiceRecordList service_record_list_;
+  std::vector<std::unique_ptr<BluetoothServiceRecordWin>> service_record_list_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothDeviceWin);
 };

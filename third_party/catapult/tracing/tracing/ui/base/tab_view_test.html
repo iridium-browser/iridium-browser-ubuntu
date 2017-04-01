@@ -21,11 +21,11 @@ found in the LICENSE file.
 <script>
 'use strict';
 
-var tr_ui_b_tab_view_test_non_sub_view_behavior = {};
+var nonSubViewBehavior = {};
 
 Polymer({
   is: 'tr-ui-b-tab-view-test-non-sub-view',
-  behaviors: [tr_ui_b_tab_view_test_non_sub_view_behavior]
+  behaviors: [nonSubViewBehavior]
 });
 
 tr.b.unittest.testSuite(function() {
@@ -61,25 +61,26 @@ tr.b.unittest.testSuite(function() {
     var subView = document.createElement('tr-ui-a-alert-sub-view');
     subView.selection = new tr.model.EventSet(alert);
     subView.tabLabel = 'Alerts';
+    subView.tabIcon = { text: '\u26A0', style: 'color: red;' };
 
     return subView;
   }
 
   test('instantiate_noTabs', function() {
-    var tabView = document.createElement('tr-ui-a-tab-view');
+    var tabView = document.createElement('tr-ui-b-tab-view');
     tabView.label = 'No items selected.';
     this.addHTMLOutput(tabView);
   });
 
   test('instantiate_oneTab', function() {
-    var tabView = document.createElement('tr-ui-a-tab-view');
+    var tabView = document.createElement('tr-ui-b-tab-view');
     tabView.label = '1 item selected.';
     tabView.addSubView(createPowerSampleSubView());
     this.addHTMLOutput(tabView);
   });
 
   test('instantiate_twoTabs', function() {
-    var tabView = document.createElement('tr-ui-a-tab-view');
+    var tabView = document.createElement('tr-ui-b-tab-view');
     tabView.label = '3 items selected.';
     tabView.addSubView(createPowerSampleSubView());
     tabView.addSubView(createAlertSubView());
@@ -87,7 +88,7 @@ tr.b.unittest.testSuite(function() {
   });
 
   test('clearSubViews_selectedSubViewNullAfter', function() {
-    var tabView = document.createElement('tr-ui-a-tab-view');
+    var tabView = document.createElement('tr-ui-b-tab-view');
     tabView.label = '3 items selected.';
     tabView.addSubView(createPowerSampleSubView());
     tabView.addSubView(createAlertSubView());
@@ -95,6 +96,31 @@ tr.b.unittest.testSuite(function() {
     tabView.clearSubViews();
 
     assert.isUndefined(tabView.selectedSubView);
+  });
+
+  test('changeSelectedSubView', function() {
+    var selectedTabChangeEventCount = 0;
+    var tabView = document.createElement('tr-ui-b-tab-view');
+    tabView.addEventListener('selected-tab-change', function() {
+      selectedTabChangeEventCount++;
+    });
+
+    assert.isUndefined(tabView.selectedSubView);
+    assert.strictEqual(selectedTabChangeEventCount, 0);
+
+    var view1 = createPowerSampleSubView();
+    tabView.addSubView(view1);
+    assert.strictEqual(tabView.selectedSubView, view1);
+    assert.strictEqual(selectedTabChangeEventCount, 1);
+
+    var view2 = createAlertSubView();
+    tabView.addSubView(view2);
+    assert.strictEqual(tabView.selectedSubView, view1);
+    assert.strictEqual(selectedTabChangeEventCount, 1);
+
+    tabView.selectedSubView = view2;
+    assert.strictEqual(tabView.selectedSubView, view2);
+    assert.strictEqual(selectedTabChangeEventCount, 2);
   });
 });
 </script>

@@ -5,6 +5,7 @@
 #ifndef NavigatorUSB_h
 #define NavigatorUSB_h
 
+#include "core/frame/Navigator.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
@@ -13,27 +14,27 @@ namespace blink {
 class Navigator;
 class USB;
 
-class NavigatorUSB final
-    : public GarbageCollected<NavigatorUSB>
-    , public Supplement<Navigator> {
-    USING_GARBAGE_COLLECTED_MIXIN(NavigatorUSB);
-public:
-    // Gets, or creates, NavigatorUSB supplement on Navigator.
-    // See platform/Supplementable.h
-    static NavigatorUSB& from(Navigator&);
+class NavigatorUSB final : public GarbageCollected<NavigatorUSB>,
+                           public Supplement<Navigator> {
+  USING_GARBAGE_COLLECTED_MIXIN(NavigatorUSB);
 
-    static USB* usb(Navigator&);
-    USB* usb();
+ public:
+  // Gets, or creates, NavigatorUSB supplement on Navigator.
+  // See platform/Supplementable.h
+  static NavigatorUSB& from(Navigator&);
 
-    DECLARE_TRACE();
+  static USB* usb(Navigator&);
+  USB* usb();
 
-private:
-    explicit NavigatorUSB(Navigator&);
-    static const char* supplementName();
+  DECLARE_TRACE();
 
-    Member<USB> m_usb;
+ private:
+  explicit NavigatorUSB(Navigator&);
+  static const char* supplementName();
+
+  Member<USB> m_usb;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // NavigatorUSB_h
+#endif  // NavigatorUSB_h

@@ -6,7 +6,9 @@
 
 #include "components/sync/driver/sync_service.h"
 
-SyncErrorController::SyncErrorController(sync_driver::SyncService* service)
+namespace syncer {
+
+SyncErrorController::SyncErrorController(SyncService* service)
     : service_(service) {
   DCHECK(service_);
 }
@@ -27,5 +29,8 @@ void SyncErrorController::RemoveObserver(Observer* observer) {
 }
 
 void SyncErrorController::OnStateChanged() {
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnErrorChanged());
+  for (auto& observer : observer_list_)
+    observer.OnErrorChanged();
 }
+
+}  // namespace syncer

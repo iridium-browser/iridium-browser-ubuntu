@@ -12,10 +12,10 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ResourceId;
+import org.chromium.components.autofill.AutofillDelegate;
+import org.chromium.components.autofill.AutofillKeyboardAccessory;
+import org.chromium.components.autofill.AutofillSuggestion;
 import org.chromium.ui.DropdownItem;
-import org.chromium.ui.autofill.AutofillDelegate;
-import org.chromium.ui.autofill.AutofillKeyboardAccessory;
-import org.chromium.ui.autofill.AutofillSuggestion;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -144,13 +144,15 @@ public class AutofillKeyboardAccessoryBridge
      *                 empty too.
      * @param iconId The resource ID for the icon associated with the suggestion, or 0 for no icon.
      * @param suggestionId Identifier for the suggestion type.
+     * @param isDeletable Whether the item can be deleted by the user.
      */
     @CalledByNative
     private static void addToAutofillSuggestionArray(AutofillSuggestion[] array, int index,
-            String label, String sublabel, int iconId, int suggestionId, boolean deletable) {
+            String label, String sublabel, int iconId, int suggestionId, boolean isDeletable) {
         int drawableId = iconId == 0 ? DropdownItem.NO_ICON : ResourceId.mapToDrawableId(iconId);
-        array[index] =
-                new AutofillSuggestion(label, sublabel, drawableId, suggestionId, deletable, false);
+        array[index] = new AutofillSuggestion(label, sublabel, drawableId,
+                false /* isIconAtStart */, suggestionId, isDeletable, false /* isMultilineLabel */,
+                false /* isBoldLabel */);
     }
 
     private native void nativeViewDismissed(long nativeAutofillKeyboardAccessoryView);

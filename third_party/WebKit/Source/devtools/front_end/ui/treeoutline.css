@@ -88,6 +88,20 @@ ol.tree-outline:focus li.selected * {
     color: inherit;
 }
 
+.tree-outline li .icons-container {
+    align-self: center;
+    display: flex;
+    align-items: center;
+}
+
+.tree-outline li .leading-icons {
+    margin-right: 4px;
+}
+
+.tree-outline li .trailing-icons {
+    margin-left: 4px;
+}
+
 .tree-outline li::before {
     -webkit-user-select: none;
     -webkit-mask-image: url(Images/toolbarButtonGlyphs.png);
@@ -103,7 +117,7 @@ ol.tree-outline:focus li.selected * {
     background-color: transparent;
 }
 
-@media (-webkit-min-device-pixel-ratio: 1.5) {
+@media (-webkit-min-device-pixel-ratio: 1.1) {
 .tree-outline li::before {
     -webkit-mask-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
@@ -124,4 +138,21 @@ ol.tree-outline:focus li.selected * {
 
 .tree-outline ol.children.expanded {
     display: block;
+}
+
+.tree-outline.tree-outline-dense li {
+    margin-top: 1px;
+    min-height: 12px;
+}
+
+.tree-outline.tree-outline-dense li.parent {
+    margin-top: 0;
+}
+
+.tree-outline.tree-outline-dense li.parent::before {
+    top: 0;
+}
+
+.tree-outline.tree-outline-dense ol {
+    padding-left: 10px;
 }

@@ -24,6 +24,7 @@ found in the LICENSE file.
     #table {
       flex: 1 1 auto;
       align-self: stretch;
+      font-size: 12px;
     }
     </style>
     <tr-ui-b-table id="table">
@@ -119,7 +120,7 @@ Polymer({
   },
 
   getRowsForAlerts_: function(alerts) {
-    if (alerts.length == 1) {
+    if (alerts.length === 1) {
       var rows = [{
         name: 'Alert',
         value: tr.b.getOnlyElement(alerts).title

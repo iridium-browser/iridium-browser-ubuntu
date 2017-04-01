@@ -25,6 +25,7 @@
 #ifndef HTMLViewSourceDocument_h
 #define HTMLViewSourceDocument_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLDocument.h"
 
 namespace blink {
@@ -33,51 +34,61 @@ class HTMLTableCellElement;
 class HTMLTableSectionElement;
 class HTMLToken;
 
-class HTMLViewSourceDocument final : public HTMLDocument {
-public:
-    enum SourceAnnotation {
-        AnnotateSourceAsSafe,
-        AnnotateSourceAsXSS
-    };
+class CORE_EXPORT HTMLViewSourceDocument final : public HTMLDocument {
+ public:
+  enum SourceAnnotation { AnnotateSourceAsSafe, AnnotateSourceAsXSS };
 
-    static HTMLViewSourceDocument* create(const DocumentInit& initializer, const String& mimeType)
-    {
-        return new HTMLViewSourceDocument(initializer, mimeType);
-    }
+  static HTMLViewSourceDocument* create(const DocumentInit& initializer,
+                                        const String& mimeType) {
+    return new HTMLViewSourceDocument(initializer, mimeType);
+  }
 
-    void addSource(const String&, HTMLToken&, SourceAnnotation);
+  void addSource(const String&, HTMLToken&, SourceAnnotation);
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    HTMLViewSourceDocument(const DocumentInit&, const String& mimeType);
+ private:
+  HTMLViewSourceDocument(const DocumentInit&, const String& mimeType);
 
-    DocumentParser* createParser() override;
+  DocumentParser* createParser() override;
 
-    void processDoctypeToken(const String& source, HTMLToken&);
-    void processEndOfFileToken(const String& source, HTMLToken&);
-    void processTagToken(const String& source, HTMLToken&, SourceAnnotation);
-    void processCommentToken(const String& source, HTMLToken&);
-    void processCharacterToken(const String& source, HTMLToken&, SourceAnnotation);
+  void processDoctypeToken(const String& source, HTMLToken&);
+  void processEndOfFileToken(const String& source, HTMLToken&);
+  void processTagToken(const String& source, HTMLToken&, SourceAnnotation);
+  void processCommentToken(const String& source, HTMLToken&);
+  void processCharacterToken(const String& source,
+                             HTMLToken&,
+                             SourceAnnotation);
 
-    void createContainingTable();
-    Element* addSpanWithClassName(const AtomicString&);
-    void addLine(const AtomicString& className);
-    void finishLine();
-    void addText(const String& text, const AtomicString& className, SourceAnnotation = AnnotateSourceAsSafe);
-    int addRange(const String& source, int start, int end, const AtomicString& className, bool isLink = false, bool isAnchor = false, const AtomicString& link = nullAtom);
-    void maybeAddSpanForAnnotation(SourceAnnotation);
+  void createContainingTable();
+  Element* addSpanWithClassName(const AtomicString&);
+  void addLine(const AtomicString& className);
+  void finishLine();
+  void addText(const String& text,
+               const AtomicString& className,
+               SourceAnnotation = AnnotateSourceAsSafe);
+  int addRange(const String& source,
+               int start,
+               int end,
+               const AtomicString& className,
+               bool isLink = false,
+               bool isAnchor = false,
+               const AtomicString& link = nullAtom);
+  int addSrcset(const String& source,
+               int start,
+               int end);
+  void maybeAddSpanForAnnotation(SourceAnnotation);
 
-    Element* addLink(const AtomicString& url, bool isAnchor);
-    Element* addBase(const AtomicString& href);
+  Element* addLink(const AtomicString& url, bool isAnchor);
+  Element* addBase(const AtomicString& href);
 
-    String m_type;
-    Member<Element> m_current;
-    Member<HTMLTableSectionElement> m_tbody;
-    Member<HTMLTableCellElement> m_td;
-    int m_lineNumber;
+  String m_type;
+  Member<Element> m_current;
+  Member<HTMLTableSectionElement> m_tbody;
+  Member<HTMLTableCellElement> m_td;
+  int m_lineNumber;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // HTMLViewSourceDocument_h
+#endif  // HTMLViewSourceDocument_h

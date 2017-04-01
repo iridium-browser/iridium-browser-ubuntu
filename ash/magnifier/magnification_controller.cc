@@ -9,7 +9,6 @@
 
 #include "ash/common/accelerators/accelerator_controller.h"
 #include "ash/common/accessibility_delegate.h"
-#include "ash/common/ash_switches.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wm_shell.h"
 #include "ash/display/root_window_transformers.h"
@@ -75,7 +74,7 @@ const int kCaretPanningMargin = 50;
 void MoveCursorTo(aura::WindowTreeHost* host, const gfx::Point& root_location) {
   auto host_location_3f = gfx::Point3F(gfx::PointF(root_location));
   host->GetRootTransform().TransformPoint(&host_location_3f);
-  host->MoveCursorToHostLocation(
+  host->MoveCursorToLocationInPixels(
       gfx::ToCeiledPoint(host_location_3f.AsPointF()));
 }
 
@@ -654,8 +653,11 @@ void MagnificationControllerImpl::OnMouseEvent(ui::MouseEvent* event) {
       SwitchTargetRootWindow(current_root, true);
     }
 
-    if (IsMagnified() && event->type() == ui::ET_MOUSE_MOVED)
+    if (IsMagnified() && event->type() == ui::ET_MOUSE_MOVED &&
+        event->pointer_details().pointer_type !=
+            ui::EventPointerType::POINTER_TYPE_PEN) {
       OnMouseMove(event->root_location());
+    }
   }
 }
 
@@ -810,9 +812,17 @@ void MagnificationControllerImpl::OnCaretBoundsChanged(
   if (caret_bounds.width() == 0 && caret_bounds.height() == 0)
     return;
 
-  caret_point_ = caret_bounds.CenterPoint();
+  gfx::Point new_caret_point = caret_bounds.CenterPoint();
   // |caret_point_| in |root_window_| coordinates.
-  ::wm::ConvertPointFromScreen(root_window_, &caret_point_);
+  ::wm::ConvertPointFromScreen(root_window_, &new_caret_point);
+
+  // When the caret point was not actually changed, nothing should happen.
+  // OnCaretBoundsChanged could be fired on every event that may change the
+  // caret bounds, in particular a window creation/movement, that may not result
+  // in an actual movement.
+  if (new_caret_point == caret_point_)
+    return;
+  caret_point_ = new_caret_point;
 
   // If the feature for centering the text input focus is disabled, the
   // magnifier window will be moved to follow the focus with a panning margin.

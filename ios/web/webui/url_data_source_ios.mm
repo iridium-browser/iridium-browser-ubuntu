@@ -4,9 +4,13 @@
 
 #include "ios/web/public/url_data_source_ios.h"
 
-#include "ios/web/public/web_client.h"
+#import "ios/web/public/web_client.h"
 #include "ios/web/webui/url_data_manager_ios.h"
 #include "net/url_request/url_request.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace web {
 

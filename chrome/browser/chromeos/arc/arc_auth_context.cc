@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/arc/arc_auth_context.h"
 
+#include "base/callback_helpers.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/chromeos/arc/arc_auth_context_delegate.h"
 #include "chrome/browser/chromeos/arc/arc_support_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -22,13 +22,12 @@ namespace arc {
 
 namespace {
 
-constexpr int kRefreshTokenTimeoutSeconds = 10;
+constexpr base::TimeDelta kRefreshTokenTimeout =
+    base::TimeDelta::FromSeconds(10);
 
 }  // namespace
 
-ArcAuthContext::ArcAuthContext(ArcAuthContextDelegate* delegate,
-                               Profile* profile)
-    : delegate_(delegate) {
+ArcAuthContext::ArcAuthContext(Profile* profile) {
   // Reuse storage used in ARC OptIn platform app.
   const std::string site_url = base::StringPrintf(
       "%s://%s/persist?%s", content::kGuestScheme, ArcSupportHost::kHostAppId,
@@ -49,6 +48,26 @@ ArcAuthContext::~ArcAuthContext() {
   token_service_->RemoveObserver(this);
 }
 
+void ArcAuthContext::Prepare(const PrepareCallback& callback) {
+  if (context_prepared_) {
+    callback.Run(storage_partition_->GetURLRequestContext());
+    return;
+  }
+
+  callback_ = callback;
+  token_service_->RemoveObserver(this);
+  refresh_token_timeout_.Stop();
+
+  if (!token_service_->RefreshTokenIsAvailable(account_id_)) {
+    token_service_->AddObserver(this);
+    refresh_token_timeout_.Start(FROM_HERE, kRefreshTokenTimeout, this,
+                                 &ArcAuthContext::OnRefreshTokenTimeout);
+    return;
+  }
+
+  StartFetchers();
+}
+
 void ArcAuthContext::OnRefreshTokenAvailable(const std::string& account_id) {
   if (account_id != account_id_)
     return;
@@ -64,21 +83,20 @@ void ArcAuthContext::OnRefreshTokensLoaded() {
 void ArcAuthContext::OnRefreshTokenTimeout() {
   VLOG(2) << "Failed to wait for refresh token.";
   token_service_->RemoveObserver(this);
-  delegate_->OnPrepareContextFailed();
+  base::ResetAndReturn(&callback_).Run(nullptr);
 }
 
-void ArcAuthContext::OnMergeSessionSuccess(const std::string& data) {
-  context_prepared_ = true;
-  delegate_->OnContextReady();
-}
-
-void ArcAuthContext::OnMergeSessionFailure(
-    const GoogleServiceAuthError& error) {
-  VLOG(2) << "Failed to merge gaia session " << error.ToString() << ".";
-  delegate_->OnPrepareContextFailed();
+void ArcAuthContext::StartFetchers() {
+  DCHECK(!refresh_token_timeout_.IsRunning());
+  ResetFetchers();
+  ubertoken_fetcher_.reset(
+      new UbertokenFetcher(token_service_, this, GaiaConstants::kChromeOSSource,
+                           storage_partition_->GetURLRequestContext()));
+  ubertoken_fetcher_->StartFetchingToken(account_id_);
 }
 
 void ArcAuthContext::OnUbertokenSuccess(const std::string& token) {
+  ResetFetchers();
   merger_fetcher_.reset(
       new GaiaAuthFetcher(this, GaiaConstants::kChromeOSSource,
                           storage_partition_->GetURLRequestContext()));
@@ -87,36 +105,27 @@ void ArcAuthContext::OnUbertokenSuccess(const std::string& token) {
 
 void ArcAuthContext::OnUbertokenFailure(const GoogleServiceAuthError& error) {
   VLOG(2) << "Failed to get ubertoken " << error.ToString() << ".";
-  delegate_->OnPrepareContextFailed();
+  ResetFetchers();
+  base::ResetAndReturn(&callback_).Run(nullptr);
 }
 
-void ArcAuthContext::PrepareContext() {
-  if (context_prepared_) {
-    delegate_->OnContextReady();
-    return;
-  }
-
-  token_service_->RemoveObserver(this);
-  refresh_token_timeout_.Stop();
-
-  if (!token_service_->RefreshTokenIsAvailable(account_id_)) {
-    token_service_->AddObserver(this);
-    refresh_token_timeout_.Start(
-        FROM_HERE, base::TimeDelta::FromSeconds(kRefreshTokenTimeoutSeconds),
-        this, &ArcAuthContext::OnRefreshTokenTimeout);
-    return;
-  }
-
-  StartFetchers();
+void ArcAuthContext::OnMergeSessionSuccess(const std::string& data) {
+  context_prepared_ = true;
+  ResetFetchers();
+  base::ResetAndReturn(&callback_)
+      .Run(storage_partition_->GetURLRequestContext());
 }
 
-void ArcAuthContext::StartFetchers() {
-  DCHECK(!refresh_token_timeout_.IsRunning());
+void ArcAuthContext::OnMergeSessionFailure(
+    const GoogleServiceAuthError& error) {
+  VLOG(2) << "Failed to merge gaia session " << error.ToString() << ".";
+  ResetFetchers();
+  base::ResetAndReturn(&callback_).Run(nullptr);
+}
+
+void ArcAuthContext::ResetFetchers() {
   merger_fetcher_.reset();
-  ubertoken_fetcher_.reset(
-      new UbertokenFetcher(token_service_, this, GaiaConstants::kChromeOSSource,
-                           storage_partition_->GetURLRequestContext()));
-  ubertoken_fetcher_->StartFetchingToken(account_id_);
+  ubertoken_fetcher_.reset();
 }
 
 }  // namespace arc

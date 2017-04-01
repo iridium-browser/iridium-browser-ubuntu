@@ -11,7 +11,6 @@
 #include "GrVkDescriptorSet.h"
 #include "GrVkGpu.h"
 #include "GrVkUniformHandler.h"
-#include "glsl/GrGLSLSampler.h"
 
 GrVkDescriptorSetManager::GrVkDescriptorSetManager(GrVkGpu* gpu,
                                                    VkDescriptorType type,
@@ -20,10 +19,30 @@ GrVkDescriptorSetManager::GrVkDescriptorSetManager(GrVkGpu* gpu,
     if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
         SkASSERT(uniformHandler);
         for (int i = 0; i < uniformHandler->numSamplers(); ++i) {
-            fBindingVisibilities.push_back(uniformHandler->getSampler(i).visibility());
+            fBindingVisibilities.push_back(uniformHandler->samplerVisibility(i));
         }
     } else {
         SkASSERT(type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        // We set the visibility of the first binding to the vertex shader and the second to the
+        // fragment shader.
+        fBindingVisibilities.push_back(kVertex_GrShaderFlag);
+        fBindingVisibilities.push_back(kFragment_GrShaderFlag);
+    }
+}
+
+GrVkDescriptorSetManager::GrVkDescriptorSetManager(GrVkGpu* gpu,
+                                                   VkDescriptorType type,
+                                                   const SkTArray<uint32_t>& visibilities)
+    : fPoolManager(type, gpu, visibilities) {
+    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+        for (int i = 0; i < visibilities.count(); ++i) {
+            fBindingVisibilities.push_back(visibilities[i]);
+        }
+    } else {
+        SkASSERT(type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        SkASSERT(2 == visibilities.count() &&
+                 kVertex_GrShaderFlag == visibilities[0] &&
+                 kFragment_GrShaderFlag == visibilities[1]);
         // We set the visibility of the first binding to the vertex shader and the second to the
         // fragment shader.
         fBindingVisibilities.push_back(kVertex_GrShaderFlag);
@@ -83,7 +102,26 @@ bool GrVkDescriptorSetManager::isCompatible(VkDescriptorType type,
             return false;
         }
         for (int i = 0; i < uniHandler->numSamplers(); ++i) {
-            if (uniHandler->getSampler(i).visibility() != fBindingVisibilities[i]) {
+            if (uniHandler->samplerVisibility(i) != fBindingVisibilities[i]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+bool GrVkDescriptorSetManager::isCompatible(VkDescriptorType type,
+                                            const SkTArray<uint32_t>& visibilities) const {
+    if (type != fPoolManager.fDescType) {
+        return false;
+    }
+
+    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+        if (fBindingVisibilities.count() != visibilities.count()) {
+            return false;
+        }
+        for (int i = 0; i < visibilities.count(); ++i) {
+            if (visibilities[i] != fBindingVisibilities[i]) {
                 return false;
             }
         }
@@ -115,20 +153,45 @@ GrVkDescriptorSetManager::DescriptorPoolManager::DescriptorPoolManager(
     : fDescType(type)
     , fCurrentDescriptorCount(0)
     , fPool(nullptr) {
-    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-        SkASSERT(uniformHandler);
-        uint32_t numSamplers = (uint32_t)uniformHandler->numSamplers();
+    this->init(gpu, type, uniformHandler, nullptr);
+}
 
-        SkAutoTDeleteArray<VkDescriptorSetLayoutBinding> dsSamplerBindings(
-                new VkDescriptorSetLayoutBinding[numSamplers]);
+GrVkDescriptorSetManager::DescriptorPoolManager::DescriptorPoolManager(
+        VkDescriptorType type,
+        GrVkGpu* gpu,
+        const SkTArray<uint32_t>& visibilities)
+    : fDescType(type)
+    , fCurrentDescriptorCount(0)
+    , fPool(nullptr) {
+    this->init(gpu, type, nullptr, &visibilities);
+}
+
+void GrVkDescriptorSetManager::DescriptorPoolManager::init(GrVkGpu* gpu,
+                                                           VkDescriptorType type,
+                                                           const GrVkUniformHandler* uniformHandler,
+                                                           const SkTArray<uint32_t>* visibilities) {
+    if (type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+        SkASSERT(SkToBool(uniformHandler) != SkToBool(visibilities));
+        uint32_t numSamplers;
+        if (uniformHandler) {
+            numSamplers = (uint32_t)uniformHandler->numSamplers();
+        } else {
+            numSamplers = (uint32_t)visibilities->count();
+        }
+
+        std::unique_ptr<VkDescriptorSetLayoutBinding[]> dsSamplerBindings(
+            new VkDescriptorSetLayoutBinding[numSamplers]);
         for (uint32_t i = 0; i < numSamplers; ++i) {
-            const GrVkGLSLSampler& sampler =
-                    static_cast<const GrVkGLSLSampler&>(uniformHandler->getSampler(i));
-            SkASSERT(sampler.binding() == i);
-            dsSamplerBindings[i].binding = sampler.binding();
+            uint32_t visibility;
+            if (uniformHandler) {
+                visibility = uniformHandler->samplerVisibility(i);
+            } else {
+                visibility = (*visibilities)[i];
+            }
+            dsSamplerBindings[i].binding = i;
             dsSamplerBindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             dsSamplerBindings[i].descriptorCount = 1;
-            dsSamplerBindings[i].stageFlags = visibility_to_vk_stage_flags(sampler.visibility());
+            dsSamplerBindings[i].stageFlags = visibility_to_vk_stage_flags(visibility);
             dsSamplerBindings[i].pImmutableSamplers = nullptr;
         }
 

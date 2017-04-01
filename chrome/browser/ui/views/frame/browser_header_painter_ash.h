@@ -10,7 +10,6 @@
 #include "ash/common/frame/header_painter.h"
 #include "base/compiler_specific.h"  // override
 #include "base/macros.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/animation/animation_delegate.h"
 
 class BrowserNonClientFrameViewAsh;
@@ -21,7 +20,6 @@ class FrameCaptionButtonContainerView;
 }
 
 namespace gfx {
-class ImageSkia;
 class Rect;
 class SlideAnimation;
 }
@@ -60,9 +58,6 @@ class BrowserHeaderPainterAsh : public ash::HeaderPainter,
   // Paints the frame image for the |active| state based on the current value of
   // the activation animation.
   void PaintFrameImages(gfx::Canvas* canvas, bool active);
-
-  // Paints highlight around the edge of the header for restored windows.
-  void PaintHighlightForRestoredWindow(gfx::Canvas* canvas);
 
   // Paints the title bar, primarily the title string.
   void PaintTitleBar(gfx::Canvas* canvas);

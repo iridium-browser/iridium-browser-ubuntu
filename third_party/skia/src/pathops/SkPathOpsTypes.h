@@ -8,12 +8,12 @@
 #define SkPathOpsTypes_DEFINED
 
 #include <float.h>  // for FLT_EPSILON
-#include <math.h>   // for fabs, sqrt
 
 #include "SkFloatingPoint.h"
 #include "SkPath.h"
 #include "SkPathOps.h"
 #include "SkPathOpsDebug.h"
+#include "SkSafe_math.h"  // for fabs, sqrt
 #include "SkScalar.h"
 
 enum SkPathOpsMask {
@@ -29,28 +29,29 @@ class SkOpContourHead;
 class SkIntersections;
 class SkIntersectionHelper;
 
+enum class SkOpPhase : char {
+    kNoChange,
+    kIntersecting,
+    kWalking,
+    kFixWinding,
+};
+
 class SkOpGlobalState {
 public:
     SkOpGlobalState(SkOpContourHead* head,
                     SkChunkAlloc* allocator  SkDEBUGPARAMS(bool debugSkipAssert)
                     SkDEBUGPARAMS(const char* testName));
 
-    enum Phase {
-        kIntersecting,
-        kWalking,
-        kFixWinding,
-    };
-
     enum {
         kMaxWindingTries = 10
     };
 
-    SkChunkAlloc* allocator() {
-        return fAllocator;
+    bool allocatedOpSpan() const {
+        return fAllocatedOpSpan;
     }
 
-    bool angleCoincidence() const {
-        return fAngleCoincidence;
+    SkChunkAlloc* allocator() {
+        return fAllocator;
     }
 
     void bumpNested() {
@@ -72,9 +73,13 @@ public:
 #ifdef SK_DEBUG
     const class SkOpAngle* debugAngle(int id) const;
     const SkOpCoincidence* debugCoincidence() const;
-    SkOpContour* debugContour(int id);
+    SkOpContour* debugContour(int id) const;
     const class SkOpPtT* debugPtT(int id) const;
-    bool debugRunFail() const;
+#endif
+
+    static bool DebugRunFail();
+
+#ifdef SK_DEBUG
     const class SkOpSegment* debugSegment(int id) const;
     bool debugSkipAssert() const { return fDebugSkipAssert; }
     const class SkOpSpanBase* debugSpan(int id) const;
@@ -93,6 +98,20 @@ public:
     void debugSetCheckHealth(bool check) { fDebugCheckHealth = check; }
     bool debugCheckHealth() const { return fDebugCheckHealth; }
 #endif
+
+#if DEBUG_VALIDATE || DEBUG_COIN
+    void debugSetPhase(const char* funcName  DEBUG_COIN_DECLARE_PARAMS()) const;
+#endif
+
+#if DEBUG_COIN
+    void debugAddToCoinChangedDict();
+    void debugAddToGlobalCoinDicts();
+    SkPathOpsDebug::CoinDict* debugCoinChangedDict() { return &fCoinChangedDict; }
+    const SkPathOpsDebug::CoinDictEntry& debugCoinDictEntry() const { return fCoinDictEntry; }
+
+    static void DumpCoinDict();
+#endif
+
 
     int nested() const {
         return fNested;
@@ -124,23 +143,30 @@ public:
     }
 #endif
 
-    Phase phase() const {
+    SkOpPhase phase() const {
         return fPhase;
     }
 
-    void setAngleCoincidence() {
-        fAngleCoincidence = true;
+    void resetAllocatedOpSpan() {
+        fAllocatedOpSpan = false;
+    }
+
+    void setAllocatedOpSpan() {
+        fAllocatedOpSpan = true;
     }
 
     void setCoincidence(SkOpCoincidence* coincidence) {
         fCoincidence = coincidence;
     }
-    
+
     void setContourHead(SkOpContourHead* contourHead) {
         fContourHead = contourHead;
     }
 
-    void setPhase(Phase phase) {
+    void setPhase(SkOpPhase phase) {
+        if (SkOpPhase::kNoChange == phase) {
+            return;
+        }
         SkASSERT(fPhase != phase);
         fPhase = phase;
     }
@@ -159,11 +185,12 @@ private:
     SkOpCoincidence* fCoincidence;
     SkOpContourHead* fContourHead;
     int fNested;
+    bool fAllocatedOpSpan;
     bool fWindingFailed;
-    bool fAngleCoincidence;
-    Phase fPhase;
+    SkOpPhase fPhase;
 #ifdef SK_DEBUG
     const char* fDebugTestName;
+    void* fDebugReporter;
     int fAngleID;
     int fCoinID;
     int fContourID;
@@ -178,16 +205,28 @@ private:
     SkPoint fDebugWorstPts[24];
     float fDebugWorstWeight[6];
 #endif
+#if DEBUG_COIN
+    SkPathOpsDebug::CoinDict fCoinChangedDict;
+    SkPathOpsDebug::CoinDict fCoinVisitedDict;
+    SkPathOpsDebug::CoinDictEntry fCoinDictEntry;
+    const char* fPreviousFuncName;
+#endif
 #if DEBUG_COINCIDENCE
     bool fDebugCheckHealth;
 #endif
 };
 
 #ifdef SK_DEBUG
+#if DEBUG_COINCIDENCE
 #define SkOPASSERT(cond) SkASSERT((this->globalState() && \
-        this->globalState()->debugSkipAssert()) || cond)
-#define SkOPOBJASSERT(obj, cond) SkASSERT((obj->debugGlobalState() && \
-        obj->debugGlobalState()->debugSkipAssert()) || cond)
+        (this->globalState()->debugCheckHealth() || \
+        this->globalState()->debugSkipAssert())) || (cond))
+#else
+#define SkOPASSERT(cond) SkASSERT((this->globalState() && \
+        this->globalState()->debugSkipAssert()) || (cond))
+#endif
+#define SkOPOBJASSERT(obj, cond) SkASSERT((obj->globalState() && \
+        obj->globalState()->debugSkipAssert()) || (cond))
 #else
 #define SkOPASSERT(cond)
 #define SkOPOBJASSERT(obj, cond)
@@ -271,7 +310,9 @@ const double FLT_EPSILON_HALF = FLT_EPSILON / 2;
 const double FLT_EPSILON_DOUBLE = FLT_EPSILON * 2;
 const double FLT_EPSILON_ORDERABLE_ERR = FLT_EPSILON * 16;
 const double FLT_EPSILON_SQUARED = FLT_EPSILON * FLT_EPSILON;
-const double FLT_EPSILON_SQRT = sqrt(FLT_EPSILON);
+// Use a compile-time constant for FLT_EPSILON_SQRT to avoid initializers.
+// A 17 digit constant guarantees exact results.
+const double FLT_EPSILON_SQRT = 0.00034526697709225118; // sqrt(FLT_EPSILON);
 const double FLT_EPSILON_INVERSE = 1 / FLT_EPSILON;
 const double DBL_EPSILON_ERR = DBL_EPSILON * 4;  // FIXME: tune -- allow a few bits of error
 const double DBL_EPSILON_SUBDIVIDE_ERR = DBL_EPSILON * 16;
@@ -514,10 +555,6 @@ inline bool roughly_between(double a, double b, double c) {
 
 inline bool more_roughly_equal(double x, double y) {
     return fabs(x - y) < MORE_ROUGH_EPSILON;
-}
-
-inline bool way_roughly_equal(double x, double y) {
-    return fabs(x - y) < WAY_ROUGH_EPSILON;
 }
 
 struct SkDPoint;

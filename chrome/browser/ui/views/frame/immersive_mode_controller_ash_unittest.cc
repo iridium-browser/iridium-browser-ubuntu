@@ -4,10 +4,9 @@
 
 #include "chrome/browser/ui/views/frame/immersive_mode_controller_ash.h"
 
-#include "ash/common/ash_switches.h"
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/shelf/shelf_layout_manager.h"
-#include "ash/common/shelf/shelf_types.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -132,16 +131,13 @@ TEST_F(ImmersiveModeControllerAshTest, Layout) {
   EXPECT_TRUE(controller()->IsEnabled());
   EXPECT_FALSE(controller()->IsRevealed());
   EXPECT_FALSE(toolbar->visible());
-  // For MD, the browser's top chrome is completely hidden in immersive
-  // fullscreen mode.
+  // For MD, the browser's top chrome is completely offscreen with tapstrip
+  // visible.
+  EXPECT_TRUE(tabstrip->visible());
   bool is_using_material_design =
-      ash::MaterialDesignController::IsShelfMaterial();
-  if (is_using_material_design) {
-    EXPECT_FALSE(tabstrip->visible());
-  } else {
-    EXPECT_TRUE(tabstrip->visible());
+      ash::MaterialDesignController::IsImmersiveModeMaterial();
+  if (!is_using_material_design)
     EXPECT_TRUE(tabstrip->IsImmersiveStyle());
-  }
 
   // The tab indicators should be flush with the top of the widget.
   EXPECT_EQ(0, GetBoundsInWidget(tabstrip).y());
@@ -196,12 +192,11 @@ TEST_F(ImmersiveModeControllerAshTest, Layout) {
   // both immersive and tab fullscreen.
   EXPECT_EQ(0, GetBoundsInWidget(contents_web_view).y());
 
-  // Hide the top-of-window views. Both the tab strip and the toolbar should
-  // hide when in both immersive and tab fullscreen.
+  // Hide the top-of-window views. Tabstrip is still considered as visible.
   AttemptUnreveal();
   EXPECT_FALSE(controller()->IsRevealed());
-  EXPECT_FALSE(tabstrip->visible());
   EXPECT_FALSE(toolbar->visible());
+  EXPECT_TRUE(tabstrip->visible());
 
   // The web contents should still be flush with the edge of the widget.
   EXPECT_EQ(0, GetBoundsInWidget(contents_web_view).y());
@@ -262,13 +257,13 @@ TEST_F(ImmersiveModeControllerAshTest, TabAndBrowserFullscreen) {
   ToggleFullscreen();
   ASSERT_TRUE(controller()->IsEnabled());
   EXPECT_EQ(ash::SHELF_AUTO_HIDE, shelf->visibility_state());
-  if (!ash::MaterialDesignController::IsShelfMaterial())
+  if (!ash::MaterialDesignController::IsImmersiveModeMaterial())
     EXPECT_FALSE(controller()->ShouldHideTabIndicators());
 
   SetTabFullscreen(true);
   ASSERT_TRUE(controller()->IsEnabled());
   EXPECT_EQ(ash::SHELF_HIDDEN, shelf->visibility_state());
-  if (!ash::MaterialDesignController::IsShelfMaterial())
+  if (!ash::MaterialDesignController::IsImmersiveModeMaterial())
     EXPECT_TRUE(controller()->ShouldHideTabIndicators());
 
   // 2) Test that exiting tab fullscreen shows the tab indicators and autohides
@@ -276,7 +271,7 @@ TEST_F(ImmersiveModeControllerAshTest, TabAndBrowserFullscreen) {
   SetTabFullscreen(false);
   ASSERT_TRUE(controller()->IsEnabled());
   EXPECT_EQ(ash::SHELF_AUTO_HIDE, shelf->visibility_state());
-  if (!ash::MaterialDesignController::IsShelfMaterial())
+  if (!ash::MaterialDesignController::IsImmersiveModeMaterial())
     EXPECT_FALSE(controller()->ShouldHideTabIndicators());
 
   // 3) Test that exiting tab fullscreen and immersive fullscreen
@@ -286,7 +281,7 @@ TEST_F(ImmersiveModeControllerAshTest, TabAndBrowserFullscreen) {
   ToggleFullscreen();
   ASSERT_FALSE(controller()->IsEnabled());
   EXPECT_EQ(ash::SHELF_VISIBLE, shelf->visibility_state());
-  if (!ash::MaterialDesignController::IsShelfMaterial())
+  if (!ash::MaterialDesignController::IsImmersiveModeMaterial())
     EXPECT_TRUE(controller()->ShouldHideTabIndicators());
 }
 
@@ -352,7 +347,8 @@ TEST_F(ImmersiveModeControllerAshTestHostedApp, Layout) {
   EXPECT_FALSE(controller()->IsRevealed());
 
   // Entering immersive fullscreen should make the web contents flush with the
-  // top of the widget.
+  // top of the widget. The popup browser type doesn't support tabstrip and
+  // toolbar feature, thus invisible.
   EXPECT_FALSE(tabstrip->visible());
   EXPECT_FALSE(toolbar->visible());
   EXPECT_TRUE(top_container->GetVisibleBounds().IsEmpty());

@@ -46,8 +46,8 @@ protected:
 
     void onOnceBeforeDraw() override {
         fBlur = SkBlurMaskFilter::Make(kNormal_SkBlurStyle,
-                    SkBlurMask::ConvertRadiusToSigma(10.0f),
-                    kLow_SkBlurQuality);
+                                       SkBlurMask::ConvertRadiusToSigma(10.0f),
+                                       kLow_SkBlurQuality);
     }
 
     void onDraw(SkCanvas* canvas) override {
@@ -57,12 +57,9 @@ protected:
         SkRect r = { 20, 20, 100, 100 };
         canvas->setDrawFilter(nullptr);
         canvas->drawRect(r, p);
-        TestFilter redNoBlur;
-        canvas->setDrawFilter(&redNoBlur);
+        canvas->setDrawFilter(new TestFilter)->unref();
         canvas->translate(120.0f, 40.0f);
         canvas->drawRect(r, p);
-
-        // Must unset if the DrawFilter is from the stack to avoid refcount errors!
         canvas->setDrawFilter(nullptr);
     }
 

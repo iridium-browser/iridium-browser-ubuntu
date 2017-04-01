@@ -18,7 +18,7 @@ tr.exportTo('tr.e.cc', function() {
   }
 
   Region.fromArray = function(array) {
-    if (array.length % 4 != 0)
+    if (array.length % 4 !== 0)
       throw new Error('Array must consist be a multiple of 4 in length');
 
     var r = new Region();
@@ -27,7 +27,7 @@ tr.exportTo('tr.e.cc', function() {
                                       array[i + 2], array[i + 3]));
     }
     return r;
-  }
+  };
 
   /**
    * @return {Region} If array is undefined, returns an empty region. Otherwise
@@ -56,7 +56,7 @@ tr.exportTo('tr.e.cc', function() {
   };
 
   return {
-    Region: Region
+    Region,
   };
 });
 </script>

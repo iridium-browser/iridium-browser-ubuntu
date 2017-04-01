@@ -10,11 +10,9 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/strings/string16.h"
-#include "chrome/browser/ui/views/website_settings/chosen_object_view_observer.h"
-#include "chrome/browser/ui/views/website_settings/permission_selector_view_observer.h"
+#include "chrome/browser/ui/views/website_settings/chosen_object_row_observer.h"
+#include "chrome/browser/ui/views/website_settings/permission_selector_row_observer.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
-#include "components/security_state/security_state_model.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
 #include "ui/views/controls/button/button.h"
@@ -30,14 +28,19 @@ namespace content {
 class WebContents;
 }
 
+namespace net {
+class X509Certificate;
+}
+
+namespace security_state {
+struct SecurityInfo;
+}  // namespace security_state
+
 namespace test {
 class WebsiteSettingsPopupViewTestApi;
 }
 
 namespace views {
-class ImageButton;
-class Label;
-class LabelButton;
 class Link;
 class Widget;
 }
@@ -46,13 +49,13 @@ enum : int {
   // Left icon margin.
   kPermissionIconMarginLeft = 6,
   // The width of the column that contains the permissions icons.
-  kPermissionIconColumnWidth = 20,
+  kPermissionIconColumnWidth = 16,
 };
 
 // The views implementation of the website settings UI.
 class WebsiteSettingsPopupView : public content::WebContentsObserver,
-                                 public PermissionSelectorViewObserver,
-                                 public ChosenObjectViewObserver,
+                                 public PermissionSelectorRowObserver,
+                                 public ChosenObjectRowObserver,
                                  public views::BubbleDialogDelegateView,
                                  public views::ButtonListener,
                                  public views::LinkListener,
@@ -61,43 +64,54 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
  public:
   ~WebsiteSettingsPopupView() override;
 
-  // If |anchor_view| is null, |anchor_rect| is used to anchor the bubble.
-  static void ShowPopup(
-      views::View* anchor_view,
-      const gfx::Rect& anchor_rect,
-      Profile* profile,
-      content::WebContents* web_contents,
-      const GURL& url,
-      const security_state::SecurityStateModel::SecurityInfo& security_info);
+  // Type of the popup being displayed.
+  enum PopupType {
+    POPUP_NONE,
+    // Usual page info bubble for websites.
+    POPUP_WEBSITE_SETTINGS,
+    // Custom bubble for internal pages like chrome:// and chrome-extensions://.
+    POPUP_INTERNAL_PAGE
+  };
 
-  static bool IsPopupShowing();
+  // If |anchor_view| is null, |anchor_rect| is used to anchor the bubble.
+  static void ShowPopup(views::View* anchor_view,
+                        const gfx::Rect& anchor_rect,
+                        Profile* profile,
+                        content::WebContents* web_contents,
+                        const GURL& url,
+                        const security_state::SecurityInfo& security_info);
+
+  // Returns the type of the popup bubble being shown.
+  static PopupType GetShownPopupType();
 
  private:
   friend class test::WebsiteSettingsPopupViewTestApi;
 
-  WebsiteSettingsPopupView(
-      views::View* anchor_view,
-      gfx::NativeView parent_window,
-      Profile* profile,
-      content::WebContents* web_contents,
-      const GURL& url,
-      const security_state::SecurityStateModel::SecurityInfo& security_info);
+  WebsiteSettingsPopupView(views::View* anchor_view,
+                           gfx::NativeView parent_window,
+                           Profile* profile,
+                           content::WebContents* web_contents,
+                           const GURL& url,
+                           const security_state::SecurityInfo& security_info);
 
   // WebContentsObserver implementation.
   void RenderFrameDeleted(content::RenderFrameHost* render_frame_host) override;
   void WebContentsDestroyed() override;
 
-  // PermissionSelectorViewObserver implementation.
+  // PermissionSelectorRowObserver implementation.
   void OnPermissionChanged(
       const WebsiteSettingsUI::PermissionInfo& permission) override;
 
-  // ChosenObjectViewObserver implementation.
+  // ChosenObjectRowObserver implementation.
   void OnChosenObjectDeleted(
       const WebsiteSettingsUI::ChosenObjectInfo& info) override;
 
   // views::BubbleDialogDelegateView implementation.
+  base::string16 GetWindowTitle() const override;
+  bool ShouldShowCloseButton() const override;
   void OnWidgetDestroying(views::Widget* widget) override;
   int GetDialogButtons() const override;
+  const gfx::FontList& GetTitleFontList() const override;
 
   // views::ButtonListener implementation.
   void ButtonPressed(views::Button* button, const ui::Event& event) override;
@@ -115,24 +129,13 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
 
   // WebsiteSettingsUI implementations.
   void SetCookieInfo(const CookieInfoList& cookie_info_list) override;
-  void SetPermissionInfo(
-      const PermissionInfoList& permission_info_list,
-      const ChosenObjectInfoList& chosen_object_info_list) override;
+  void SetPermissionInfo(const PermissionInfoList& permission_info_list,
+                         ChosenObjectInfoList chosen_object_info_list) override;
   void SetIdentityInfo(const IdentityInfo& identity_info) override;
-  // TODO(lgarron): Remove SetSelectedTab() with https://crbug.com/571533
-  void SetSelectedTab(TabId tab_id) override;
 
   // Creates the contents of the |site_settings_view_|. The ownership of the
   // returned view is transferred to the caller.
   views::View* CreateSiteSettingsView() WARN_UNUSED_RESULT;
-
-  // The site settings view contains several sections with a |headline|
-  // followed by the section |contents| and an optional |link|. This method
-  // creates a section for the given |headline|, |contents| and |link|. |link|
-  // can be NULL if the section should not contain a link.
-  views::View* CreateSection(const base::string16& headline,
-                             views::View* contents,
-                             views::Link* link) WARN_UNUSED_RESULT;
 
   // Used to asynchronously handle clicks since these calls may cause the
   // destruction of the settings view and the base class window still needs to
@@ -145,30 +148,29 @@ class WebsiteSettingsPopupView : public content::WebContentsObserver,
   // The presenter that controls the Website Settings UI.
   std::unique_ptr<WebsiteSettings> presenter_;
 
+  Profile* profile_;
+
   // The header section (containing security-related information).
   PopupHeaderView* header_;
+
+  // The security summary for the current page.
+  base::string16 summary_text_;
 
   // The separator between the header and the site settings view.
   views::Separator* separator_;
 
-  // The view that contains the site data and permissions sections.
+  // The view that contains the cookie and permissions sections.
   views::View* site_settings_view_;
-  // The view that contains the contents of the "Cookies and Site data" section
-  // of the site settings view.
-  views::View* site_data_content_;
+  // The view that contains the contents of the "Cookies" part of the site
+  // settings view.
+  views::View* cookies_view_;
   // The link that opens the "Cookies" dialog.
   views::Link* cookie_dialog_link_;
-  // The view that contains the contents of the "Permissions" section
-  // of the site settings view.
-  views::View* permissions_content_;
+  // The view that contains the "Permissions" table of the site settings view.
+  views::View* permissions_view_;
 
-  // The ID of the certificate provided by the site. If the site does not
-  // provide a certificate then |cert_id_| is 0.
-  int cert_id_;
-
-  // The link to open the site settings page that provides full control over
-  // the origin's permissions.
-  views::Link* site_settings_link_;
+  // The certificate provided by the site, if one exists.
+  scoped_refptr<net::X509Certificate> certificate_;
 
   base::WeakPtrFactory<WebsiteSettingsPopupView> weak_factory_;
 

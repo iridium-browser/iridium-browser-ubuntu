@@ -28,8 +28,11 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+// https://wicg.github.io/entries-api/#html-forms
+
 [
     RuntimeEnabled=FileSystem,
 ] partial interface HTMLInputElement {
-    [CallWith=ExecutionContext, Measure] readonly attribute Entry[] webkitEntries;
+    // TODO(jsbell): |webkitEntries| should be FrozenArray<Entry>.
+    [CallWith=ScriptState, Measure] readonly attribute Entry[] webkitEntries;
 };

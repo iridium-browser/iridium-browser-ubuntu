@@ -7,9 +7,8 @@ package org.chromium.chrome.browser.externalnav;
 import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ResolveInfo;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
-import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 
@@ -97,7 +96,21 @@ public class ExternalNavigationDelegateImplTest extends ChromeActivityTestCaseBa
     }
 
     @SmallTest
-    @CommandLineFlags.Add({"disable-features=SystemDownloadManager"})
+    public void testIsPackageSpecializeHandler_withEphemeralResolver() {
+        String packageName = "";
+        ResolveInfo info = new ResolveInfo();
+        info.filter = new IntentFilter();
+        info.filter.addDataPath("somepath", 2);
+        info.activityInfo = new ActivityInfo();
+        info.activityInfo.name = ExternalNavigationDelegateImpl.EPHEMERAL_INSTALLER_CLASS;
+        info.activityInfo.packageName = "com.google.android.gms";
+        List<ResolveInfo> resolveInfos = makeResolveInfos(info);
+        // Ephemeral resolver is not counted as a specialized handler.
+        assertEquals(0, ExternalNavigationDelegateImpl.getSpecializedHandlersWithFilter(
+                resolveInfos, packageName).size());
+    }
+
+    @SmallTest
     public void testIsDownload_noSystemDownloadManager() throws Exception {
         ExternalNavigationDelegateImpl delegate = new ExternalNavigationDelegateImpl(
                 getActivity().getActivityTab());
@@ -111,15 +124,6 @@ public class ExternalNavigationDelegateImplTest extends ChromeActivityTestCaseBa
                 delegate.isPdfDownload("http://somesampleurldne.com/image.jpg"));
         assertFalse("URL is a text file can be viewed in Chrome",
                 delegate.isPdfDownload("http://somesampleurldne.com/copy.txt"));
-    }
-
-    @SmallTest
-    @CommandLineFlags.Add({"enable-features=SystemDownloadManager"})
-    public void testIsDownload_withSystemDownloadManager() throws Exception {
-        ExternalNavigationDelegateImpl delegate = new ExternalNavigationDelegateImpl(
-                getActivity().getActivityTab());
-        assertFalse("isDownload should return false with SystemDownloadManager enabled",
-                delegate.isPdfDownload("http://somesampeleurldne.com/file.pdf"));
     }
 
     @Override

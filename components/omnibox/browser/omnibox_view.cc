@@ -79,26 +79,13 @@ bool OmniboxView::IsEditingOrEmpty() const {
       (GetOmniboxTextLength() == 0);
 }
 
-int OmniboxView::GetIcon() const {
-  if (!IsEditingOrEmpty())
-    return controller_->GetToolbarModel()->GetIcon();
-  int id = AutocompleteMatch::TypeToIcon(model_.get() ?
-      model_->CurrentTextType() : AutocompleteMatchType::URL_WHAT_YOU_TYPED);
-  return (id == IDR_OMNIBOX_HTTP) ? IDR_LOCATION_BAR_HTTP : id;
-}
-
 gfx::VectorIconId OmniboxView::GetVectorIcon() const {
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
   if (!IsEditingOrEmpty())
     return controller_->GetToolbarModel()->GetVectorIcon();
 
   return AutocompleteMatch::TypeToVectorIcon(
       model_ ? model_->CurrentTextType()
              : AutocompleteMatchType::URL_WHAT_YOU_TYPED);
-#else
-  NOTIMPLEMENTED();
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
-#endif
 }
 
 void OmniboxView::SetUserText(const base::string16& text) {
@@ -112,26 +99,7 @@ void OmniboxView::SetUserText(const base::string16& text,
   SetWindowTextAndCaretPos(text, text.length(), update_popup, true);
 }
 
-void OmniboxView::ShowURL() {
-  SetFocus();
-  controller_->GetToolbarModel()->set_url_replacement_enabled(false);
-  model_->UpdatePermanentText();
-  RevertWithoutResettingSearchTermReplacement();
-  SelectAll(true);
-}
-
-void OmniboxView::HideURL() {
-  controller_->GetToolbarModel()->set_url_replacement_enabled(true);
-  model_->UpdatePermanentText();
-  RevertWithoutResettingSearchTermReplacement();
-}
-
 void OmniboxView::RevertAll() {
-  controller_->GetToolbarModel()->set_url_replacement_enabled(true);
-  RevertWithoutResettingSearchTermReplacement();
-}
-
-void OmniboxView::RevertWithoutResettingSearchTermReplacement() {
   CloseOmniboxPopup();
   if (model_.get())
     model_->Revert();

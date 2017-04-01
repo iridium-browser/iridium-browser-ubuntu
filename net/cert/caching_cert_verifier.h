@@ -62,7 +62,7 @@ class NET_EXPORT CachingCertVerifier : public CertVerifier,
              CertVerifyResult* verify_result,
              const CompletionCallback& callback,
              std::unique_ptr<Request>* out_req,
-             const BoundNetLog& net_log) override;
+             const NetLogWithSource& net_log) override;
   bool SupportsOCSPStapling() override;
 
   // Opportunistically attempts to add |error| and |verify_result| as the
@@ -144,7 +144,7 @@ class NET_EXPORT CachingCertVerifier : public CertVerifier,
                         int error);
 
   // CertDatabase::Observer methods:
-  void OnCACertChanged(const X509Certificate* cert) override;
+  void OnCertDBChanged(const X509Certificate* cert) override;
 
   // For unit testing.
   void ClearCache();

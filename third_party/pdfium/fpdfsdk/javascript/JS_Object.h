@@ -10,13 +10,13 @@
 #include <map>
 #include <memory>
 
-#include "fpdfsdk/include/fsdk_define.h"
+#include "fpdfsdk/fsdk_define.h"
 #include "fpdfsdk/javascript/cjs_runtime.h"
-#include "fxjs/include/fxjs_v8.h"
+#include "fxjs/fxjs_v8.h"
 
 class CJS_Context;
 class CJS_Object;
-class CPDFDoc_Environment;
+class CPDFSDK_FormFillEnvironment;
 
 class CJS_EmbedObj {
  public:
@@ -38,7 +38,6 @@ class CJS_Object {
   void Dispose();
 
   virtual void InitInstance(IJS_Runtime* pIRuntime);
-  virtual void ExitInstance();
 
   v8::Local<v8::Object> ToV8Object() { return m_pV8Object.Get(m_pIsolate); }
 

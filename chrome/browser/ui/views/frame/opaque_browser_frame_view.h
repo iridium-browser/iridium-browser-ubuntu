@@ -59,7 +59,7 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   void SizeConstraintsChanged() override;
 
   // views::View:
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
@@ -89,7 +89,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   int GetTabStripHeight() const override;
   bool IsToolbarVisible() const override;
   gfx::Size GetTabstripPreferredSize() const override;
-  int GetToolbarLeadingCornerClientWidth() const override;
 
  protected:
   views::ImageButton* minimize_button() const { return minimize_button_; }
@@ -105,10 +104,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   void UpdateProfileIcons() override;
 
  private:
-  // views::NonClientFrameView:
-  bool DoesIntersectRect(const views::View* target,
-                         const gfx::Rect& rect) const override;
-
   // Creates, adds and returns a new image button with |this| as its listener.
   // Memory is owned by the caller.
   views::ImageButton* InitWindowCaptionButton(int normal_image_id,
@@ -120,7 +115,8 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
 
   // Returns the thickness of the border that makes up the window frame edges.
   // This does not include any client edge.  If |restored| is true, this is
-  // calculated as if the window was restored, regardless of its current state.
+  // calculated as if the window was restored, regardless of its current
+  // node_data.
   int FrameBorderThickness(bool restored) const;
 
   // Returns true if the specified point is within the avatar menu buttons.

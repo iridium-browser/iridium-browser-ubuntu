@@ -10,16 +10,16 @@
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef RTCDataChannelEvent_h
@@ -27,31 +27,41 @@
 
 #include "modules/EventModules.h"
 #include "modules/peerconnection/RTCDataChannel.h"
+#include "modules/peerconnection/RTCDataChannelEventInit.h"
 #include "wtf/text/AtomicString.h"
 
 namespace blink {
 
 class RTCDataChannelEvent final : public Event {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    ~RTCDataChannelEvent() override;
+  DEFINE_WRAPPERTYPEINFO();
 
-    static RTCDataChannelEvent* create();
-    static RTCDataChannelEvent* create(const AtomicString& type, bool canBubble, bool cancelable, RTCDataChannel*);
+ public:
+  ~RTCDataChannelEvent() override;
 
-    RTCDataChannel* channel() const;
+  static RTCDataChannelEvent* create(const AtomicString& type,
+                                     bool canBubble,
+                                     bool cancelable,
+                                     RTCDataChannel*);
 
-    const AtomicString& interfaceName() const override;
+  static RTCDataChannelEvent* create(const AtomicString& type,
+                                     const RTCDataChannelEventInit&);
 
-    DECLARE_VIRTUAL_TRACE();
+  RTCDataChannel* channel() const;
 
-private:
-    RTCDataChannelEvent();
-    RTCDataChannelEvent(const AtomicString& type, bool canBubble, bool cancelable, RTCDataChannel*);
+  const AtomicString& interfaceName() const override;
 
-    Member<RTCDataChannel> m_channel;
+  DECLARE_VIRTUAL_TRACE();
+
+ private:
+  RTCDataChannelEvent(const AtomicString& type,
+                      bool canBubble,
+                      bool cancelable,
+                      RTCDataChannel*);
+
+  RTCDataChannelEvent(const AtomicString& type, const RTCDataChannelEventInit&);
+  Member<RTCDataChannel> m_channel;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // RTCDataChannelEvent_h
+#endif  // RTCDataChannelEvent_h

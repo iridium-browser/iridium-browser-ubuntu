@@ -33,111 +33,77 @@
 
 namespace blink {
 
-class GlyphPageTreeNodeBase;
 class FontDescription;
 
 const int cAllFamiliesScanned = -1;
 
 class PLATFORM_EXPORT FontFallbackList : public RefCounted<FontFallbackList> {
-    WTF_MAKE_NONCOPYABLE(FontFallbackList);
-public:
-    typedef HashMap<int, GlyphPageTreeNodeBase*, DefaultHash<int>::Hash> GlyphPages;
+  WTF_MAKE_NONCOPYABLE(FontFallbackList);
 
-    class GlyphPagesStateSaver {
-        STACK_ALLOCATED();
-    public:
-        GlyphPagesStateSaver(FontFallbackList& fallbackList)
-            : m_fallbackList(fallbackList)
-            , m_pages(fallbackList.m_pages)
-            , m_pageZero(fallbackList.m_pageZero)
-        {
-        }
+ public:
 
-        ~GlyphPagesStateSaver()
-        {
-            m_fallbackList.m_pages = m_pages;
-            m_fallbackList.m_pageZero = m_pageZero;
-        }
+  static PassRefPtr<FontFallbackList> create() {
+    return adoptRef(new FontFallbackList());
+  }
 
-    private:
-        FontFallbackList& m_fallbackList;
-        GlyphPages& m_pages;
-        GlyphPageTreeNodeBase* m_pageZero;
-    };
+  ~FontFallbackList() { releaseFontData(); }
+  bool isValid() const;
+  void invalidate(FontSelector*);
 
-    static PassRefPtr<FontFallbackList> create() { return adoptRef(new FontFallbackList()); }
+  bool loadingCustomFonts() const;
+  bool shouldSkipDrawing() const;
 
-    ~FontFallbackList() { releaseFontData(); }
-    bool isValid() const;
-    void invalidate(FontSelector*);
+  FontSelector* getFontSelector() const { return m_fontSelector.get(); }
+  // FIXME: It should be possible to combine fontSelectorVersion and generation.
+  unsigned fontSelectorVersion() const { return m_fontSelectorVersion; }
+  unsigned generation() const { return m_generation; }
 
-    bool loadingCustomFonts() const;
-    bool shouldSkipDrawing() const;
-
-    FontSelector* getFontSelector() const { return m_fontSelector.get(); }
-    // FIXME: It should be possible to combine fontSelectorVersion and generation.
-    unsigned fontSelectorVersion() const { return m_fontSelectorVersion; }
-    unsigned generation() const { return m_generation; }
-
-    ShapeCache* shapeCache(const FontDescription& fontDescription) const
-    {
-        if (!m_shapeCache) {
-            FallbackListCompositeKey key = compositeKey(fontDescription);
-            m_shapeCache = FontCache::fontCache()->getShapeCache(key)->weakPtr();
-        }
-        ASSERT(m_shapeCache);
-        if (getFontSelector())
-            m_shapeCache->clearIfVersionChanged(getFontSelector()->version());
-        return m_shapeCache.get();
+  ShapeCache* shapeCache(const FontDescription& fontDescription) const {
+    if (!m_shapeCache) {
+      FallbackListCompositeKey key = compositeKey(fontDescription);
+      m_shapeCache = FontCache::fontCache()->getShapeCache(key)->weakPtr();
     }
+    ASSERT(m_shapeCache);
+    if (getFontSelector())
+      m_shapeCache->clearIfVersionChanged(getFontSelector()->version());
+    return m_shapeCache.get();
+  }
 
-    const SimpleFontData* primarySimpleFontData(const FontDescription& fontDescription)
-    {
-        ASSERT(isMainThread());
-        if (!m_cachedPrimarySimpleFontData) {
-            m_cachedPrimarySimpleFontData = determinePrimarySimpleFontData(fontDescription);
-            ASSERT(m_cachedPrimarySimpleFontData);
-        }
-        return m_cachedPrimarySimpleFontData;
+  const SimpleFontData* primarySimpleFontData(
+      const FontDescription& fontDescription) {
+    ASSERT(isMainThread());
+    if (!m_cachedPrimarySimpleFontData) {
+      m_cachedPrimarySimpleFontData =
+          determinePrimarySimpleFontData(fontDescription);
+      ASSERT(m_cachedPrimarySimpleFontData);
     }
-    const FontData* fontDataAt(const FontDescription&, unsigned index) const;
+    return m_cachedPrimarySimpleFontData;
+  }
+  const FontData* fontDataAt(const FontDescription&, unsigned index) const;
 
-    GlyphPageTreeNodeBase* getPageNode(unsigned pageNumber) const
-    {
-        return pageNumber ? m_pages.get(pageNumber) : m_pageZero;
-    }
+  FallbackListCompositeKey compositeKey(const FontDescription&) const;
 
-    void setPageNode(unsigned pageNumber, GlyphPageTreeNodeBase* node)
-    {
-        if (pageNumber)
-            m_pages.set(pageNumber, node);
-        else
-            m_pageZero = node;
-    }
+ private:
+  FontFallbackList();
 
-    FallbackListCompositeKey compositeKey(const FontDescription&) const;
+  PassRefPtr<FontData> getFontData(const FontDescription&,
+                                   int& familyIndex) const;
 
-private:
-    FontFallbackList();
+  const SimpleFontData* determinePrimarySimpleFontData(
+      const FontDescription&) const;
 
-    PassRefPtr<FontData> getFontData(const FontDescription&, int& familyIndex) const;
+  void releaseFontData();
 
-    const SimpleFontData* determinePrimarySimpleFontData(const FontDescription&) const;
-
-    void releaseFontData();
-
-    mutable Vector<RefPtr<FontData>, 1> m_fontList;
-    GlyphPages m_pages;
-    GlyphPageTreeNodeBase* m_pageZero;
-    mutable const SimpleFontData* m_cachedPrimarySimpleFontData;
-    Persistent<FontSelector> m_fontSelector;
-    unsigned m_fontSelectorVersion;
-    mutable int m_familyIndex;
-    unsigned short m_generation;
-    mutable bool m_hasLoadingFallback : 1;
-    mutable WeakPtr<ShapeCache> m_shapeCache;
+  mutable Vector<RefPtr<FontData>, 1> m_fontList;
+  mutable const SimpleFontData* m_cachedPrimarySimpleFontData;
+  Persistent<FontSelector> m_fontSelector;
+  unsigned m_fontSelectorVersion;
+  mutable int m_familyIndex;
+  unsigned short m_generation;
+  mutable bool m_hasLoadingFallback : 1;
+  mutable WeakPtr<ShapeCache> m_shapeCache;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

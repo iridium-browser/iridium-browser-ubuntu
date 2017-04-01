@@ -7,12 +7,11 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
 #include "base/values.h"
@@ -82,7 +81,8 @@ class ExtensionManagement : public KeyedService {
 
   // Get the list of ManagementPolicy::Provider controlled by extension
   // management policy settings.
-  std::vector<ManagementPolicy::Provider*> GetProviders() const;
+  const std::vector<std::unique_ptr<ManagementPolicy::Provider>>& GetProviders()
+      const;
 
   // Checks if extensions are blacklisted by default, by policy. When true,
   // this means that even extensions without an ID should be blacklisted (e.g.
@@ -130,12 +130,12 @@ class ExtensionManagement : public KeyedService {
                            std::string* required_version) const;
 
  private:
-  typedef base::ScopedPtrHashMap<ExtensionId,
-                                 std::unique_ptr<internal::IndividualSettings>>
-      SettingsIdMap;
-  typedef base::ScopedPtrHashMap<std::string,
-                                 std::unique_ptr<internal::IndividualSettings>>
-      SettingsUpdateUrlMap;
+  using SettingsIdMap =
+      std::unordered_map<ExtensionId,
+                         std::unique_ptr<internal::IndividualSettings>>;
+  using SettingsUpdateUrlMap =
+      std::unordered_map<std::string,
+                         std::unique_ptr<internal::IndividualSettings>>;
   friend class ExtensionManagementServiceTest;
 
   // Load all extension management preferences from |pref_service|, and
@@ -187,7 +187,7 @@ class ExtensionManagement : public KeyedService {
 
   base::ObserverList<Observer, true> observer_list_;
   PrefChangeRegistrar pref_change_registrar_;
-  ScopedVector<ManagementPolicy::Provider> providers_;
+  std::vector<std::unique_ptr<ManagementPolicy::Provider>> providers_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionManagement);
 };

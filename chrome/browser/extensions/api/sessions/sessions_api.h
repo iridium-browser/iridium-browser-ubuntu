@@ -19,7 +19,7 @@
 
 class Profile;
 
-namespace sync_driver {
+namespace sync_sessions {
 struct SyncedSession;
 }
 
@@ -27,10 +27,10 @@ namespace extensions {
 
 class SessionId;
 
-class SessionsGetRecentlyClosedFunction : public ChromeSyncExtensionFunction {
+class SessionsGetRecentlyClosedFunction : public UIThreadExtensionFunction {
  protected:
   ~SessionsGetRecentlyClosedFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("sessions.getRecentlyClosed",
                              SESSIONS_GETRECENTLYCLOSED)
 
@@ -43,10 +43,10 @@ class SessionsGetRecentlyClosedFunction : public ChromeSyncExtensionFunction {
       const sessions::TabRestoreService::Entry& entry);
 };
 
-class SessionsGetDevicesFunction : public ChromeSyncExtensionFunction {
+class SessionsGetDevicesFunction : public UIThreadExtensionFunction {
  protected:
   ~SessionsGetDevicesFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("sessions.getDevices", SESSIONS_GETDEVICES)
 
  private:
@@ -61,23 +61,23 @@ class SessionsGetDevicesFunction : public ChromeSyncExtensionFunction {
       const sessions::SessionWindow& window,
       const std::string& session_tag);
   api::sessions::Device CreateDeviceModel(
-      const sync_driver::SyncedSession* session);
+      const sync_sessions::SyncedSession* session);
 };
 
-class SessionsRestoreFunction : public ChromeSyncExtensionFunction {
+class SessionsRestoreFunction : public UIThreadExtensionFunction {
  protected:
   ~SessionsRestoreFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
   DECLARE_EXTENSION_FUNCTION("sessions.restore", SESSIONS_RESTORE)
 
  private:
-  void SetInvalidIdError(const std::string& invalid_id);
-  void SetResultRestoredTab(content::WebContents* contents);
-  bool SetResultRestoredWindow(int window_id);
-  bool RestoreMostRecentlyClosed(Browser* browser);
-  bool RestoreLocalSession(const SessionId& session_id, Browser* browser);
-  bool RestoreForeignSession(const SessionId& session_id,
-                             Browser* browser);
+  ResponseValue GetRestoredTabResult(content::WebContents* contents);
+  ResponseValue GetRestoredWindowResult(int window_id);
+  ResponseValue RestoreMostRecentlyClosed(Browser* browser);
+  ResponseValue RestoreLocalSession(const SessionId& session_id,
+                                    Browser* browser);
+  ResponseValue RestoreForeignSession(const SessionId& session_id,
+                                      Browser* browser);
 };
 
 class SessionsEventRouter : public sessions::TabRestoreServiceObserver {

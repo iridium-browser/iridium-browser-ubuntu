@@ -26,6 +26,7 @@
 #ifndef HTMLViewSourceParser_h
 #define HTMLViewSourceParser_h
 
+#include "core/CoreExport.h"
 #include "core/dom/DecodedDataDocumentParser.h"
 #include "core/html/HTMLViewSourceDocument.h"
 #include "core/html/parser/HTMLInputStream.h"
@@ -36,34 +37,38 @@
 
 namespace blink {
 
-class HTMLViewSourceParser final :  public DecodedDataDocumentParser {
-public:
-    static HTMLViewSourceParser* create(HTMLViewSourceDocument& document, const String& mimeType)
-    {
-        return new HTMLViewSourceParser(document, mimeType);
-    }
-    ~HTMLViewSourceParser() override { }
+class CORE_EXPORT HTMLViewSourceParser final
+    : public DecodedDataDocumentParser {
+ public:
+  static HTMLViewSourceParser* create(HTMLViewSourceDocument& document,
+                                      const String& mimeType) {
+    return new HTMLViewSourceParser(document, mimeType);
+  }
+  ~HTMLViewSourceParser() override {}
 
-private:
-    HTMLViewSourceParser(HTMLViewSourceDocument&, const String& mimeType);
+ private:
+  HTMLViewSourceParser(HTMLViewSourceDocument&, const String& mimeType);
 
-    // DocumentParser
-    void insert(const SegmentedString&) override { ASSERT_NOT_REACHED(); }
-    void append(const String&) override;
-    void finish() override;
+  // DocumentParser
+  void insert(const SegmentedString&) override { ASSERT_NOT_REACHED(); }
+  void append(const String&) override;
+  void finish() override;
 
-    HTMLViewSourceDocument* document() const { return static_cast<HTMLViewSourceDocument*>(DecodedDataDocumentParser::document()); }
+  HTMLViewSourceDocument* document() const {
+    return static_cast<HTMLViewSourceDocument*>(
+        DecodedDataDocumentParser::document());
+  }
 
-    void pumpTokenizer();
-    void updateTokenizerState();
+  void pumpTokenizer();
+  void updateTokenizerState();
 
-    HTMLInputStream m_input;
-    HTMLToken m_token;
-    HTMLSourceTracker m_sourceTracker;
-    std::unique_ptr<HTMLTokenizer> m_tokenizer;
-    XSSAuditor m_xssAuditor;
+  HTMLInputStream m_input;
+  HTMLToken m_token;
+  HTMLSourceTracker m_sourceTracker;
+  std::unique_ptr<HTMLTokenizer> m_tokenizer;
+  XSSAuditor m_xssAuditor;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

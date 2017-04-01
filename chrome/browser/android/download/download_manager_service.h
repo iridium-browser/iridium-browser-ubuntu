@@ -11,7 +11,9 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/memory/singleton.h"
 #include "chrome/browser/android/download/download_controller.h"
 #include "chrome/browser/download/all_download_item_notifier.h"
 #include "chrome/browser/download/download_history.h"
@@ -35,9 +37,16 @@ class DownloadManagerService : public AllDownloadItemNotifier::Observer,
       content::DownloadItem* download,
       DownloadController::DownloadCancelReason reason);
 
-  DownloadManagerService(JNIEnv* env,
-                         jobject jobj);
+  static DownloadManagerService* GetInstance();
+
+  static base::android::ScopedJavaLocalRef<jobject> CreateJavaDownloadInfo(
+      JNIEnv* env, content::DownloadItem* item);
+
+  DownloadManagerService();
   ~DownloadManagerService() override;
+
+  // Called to Initialize this object.
+  void Init(JNIEnv* env, jobject obj);
 
   // Called to resume downloading the item that has GUID equal to
   // |jdownload_guid|..
@@ -67,6 +76,12 @@ class DownloadManagerService : public AllDownloadItemNotifier::Observer,
                       const JavaParamRef<jstring>& jdownload_guid,
                       bool is_off_the_record);
 
+  // Returns whether or not the given download can be opened by the browser.
+  bool IsDownloadOpenableInBrowser(JNIEnv* env,
+                                   jobject obj,
+                                   const JavaParamRef<jstring>& jdownload_guid,
+                                   bool is_off_the_record);
+
   // Called to request that the DownloadManagerService return data about all
   // downloads in the user's history.
   void GetAllDownloads(JNIEnv* env,
@@ -83,6 +98,8 @@ class DownloadManagerService : public AllDownloadItemNotifier::Observer,
   void OnHistoryQueryComplete() override;
 
   // AllDownloadItemNotifier::Observer methods.
+  void OnDownloadCreated(content::DownloadManager* manager,
+                         content::DownloadItem* item) override;
   void OnDownloadUpdated(content::DownloadManager* manager,
                          content::DownloadItem* item) override;
   void OnDownloadRemoved(content::DownloadManager* manager,
@@ -95,6 +112,7 @@ class DownloadManagerService : public AllDownloadItemNotifier::Observer,
  private:
   // For testing.
   friend class DownloadManagerServiceTest;
+  friend struct base::DefaultSingletonTraits<DownloadManagerService>;
 
   // Helper function to start the download resumption.
   void ResumeDownloadInternal(const std::string& download_guid,

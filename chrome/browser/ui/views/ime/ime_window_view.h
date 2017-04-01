@@ -20,12 +20,6 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/widget_observer.h"
 
-class Profile;
-
-namespace extensions {
-class Extension;
-}
-
 namespace views {
 class WebView;
 }
@@ -33,7 +27,6 @@ class WebView;
 namespace ui {
 
 class ImeWindowFrameView;
-class ImeWindowHost;
 
 // The views implementation for the IME window UI.
 // This interacts with ImeWindow through the ImeNativeWindow interface.
@@ -67,7 +60,6 @@ class ImeWindowView : public ImeNativeWindow,
   bool IsVisible() const override;
 
   // views::WidgetDelegateView:
-  views::View* GetContentsView() override;
   views::NonClientFrameView* CreateNonClientFrameView(
       views::Widget* widget) override;
   bool CanActivate() const override;

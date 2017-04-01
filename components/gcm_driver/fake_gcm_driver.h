@@ -7,7 +7,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "components/gcm_driver/gcm_driver.h"
+
+namespace base {
+class SequencedTaskRunner;
+}
 
 namespace gcm {
 

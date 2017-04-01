@@ -9,7 +9,7 @@
 #include <limits>
 
 #include "base/bind.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
@@ -127,7 +127,7 @@ class PluginDataRemoverImpl::Context
     SignalDone();
   }
 
-  bool OffTheRecord() override { return false; }
+  bool Incognito() override { return false; }
 
   // PpapiPluginProcessHost::BrokerClient implementation.
   void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
@@ -139,7 +139,7 @@ class PluginDataRemoverImpl::Context
   void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
                             base::ProcessId /* peer_pid */,
                             int /* child_id */) override {
-    if (!channel_handle.name.empty())
+    if (channel_handle.is_mojo_channel_handle())
       ConnectToChannel(channel_handle);
 
     // Balancing the AddRef call.

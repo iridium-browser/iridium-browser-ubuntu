@@ -33,7 +33,7 @@ void GLImageTestSupport::InitializeGL() {
 
 // static
 void GLImageTestSupport::CleanupGL() {
-  init::ClearGLBindings();
+  init::ShutdownGL();
 }
 
 // static
@@ -46,6 +46,7 @@ void GLImageTestSupport::SetBufferDataToColor(int width,
                                               uint8_t* data) {
   switch (format) {
     case gfx::BufferFormat::R_8:
+    case gfx::BufferFormat::RG_88:
       DCHECK_EQ(0, plane);
       for (int y = 0; y < height; ++y) {
         memset(&data[y * stride], color[0], width);

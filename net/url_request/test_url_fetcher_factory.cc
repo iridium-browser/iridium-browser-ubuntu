@@ -125,7 +125,8 @@ void TestURLFetcher::SetRequestContext(
     URLRequestContextGetter* request_context_getter) {
 }
 
-void TestURLFetcher::SetInitiatorURL(const GURL& initiator) {}
+void TestURLFetcher::SetInitiator(
+    const base::Optional<url::Origin>& initiator) {}
 
 void TestURLFetcher::SetURLRequestUserData(
     const void* key,
@@ -188,7 +189,7 @@ void TestURLFetcher::SaveResponseWithWriter(
                                        fake_response_string_.size(),
                                        CompletionCallback());
     DCHECK_EQ(static_cast<int>(fake_response_string_.size()), response);
-    response = response_writer_->Finish(CompletionCallback());
+    response = response_writer_->Finish(OK, CompletionCallback());
     DCHECK_EQ(OK, response);
   } else if (fake_response_destination_ == TEMP_FILE) {
     // SaveResponseToFileAtPath() should be called instead of this method to

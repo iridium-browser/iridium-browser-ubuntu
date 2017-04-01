@@ -39,17 +39,13 @@ namespace content {
 // - When the SurfaceTexture's OnFrameAvailable() callback is fired (and routed
 // to the StreamTextureProxy living on the compositor thread), we notify
 // |client_| that a new frame is available, via the DidReceiveFrame() callback.
-//
-// TODO(tguilbert): Register the underlying SurfaceTexture for retrieval in the
-// browser process. See crbug.com/627658.
-//
-// TODO(tguilbert): Change StreamTextureProxy's interface to accept a
-// base::Closure instead of requiring a VideoFrameProvider::Client, to simplify
-// the MediaPlayerRendererHost interface. See crbug.com/631178.
 class CONTENT_EXPORT StreamTextureWrapperImpl
     : public media::StreamTextureWrapper {
  public:
+  // |enable_texture_copy| controls the VideoFrameMetadata::COPY_REQUIRED flag,
+  // making sure it is correctly set on |current_frame_|, for webview scenarios.
   static media::ScopedStreamTextureWrapper Create(
+      bool enable_texture_copy,
       scoped_refptr<StreamTextureFactory> factory,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
 
@@ -59,14 +55,15 @@ class CONTENT_EXPORT StreamTextureWrapperImpl
   // Additional threading considerations:
   //   - Can be called from any thread.
   //   - Initialization will be posted to |main_task_runner_|.
-  //   - |init_cb| will be run on the calling thread.
+  //   - |init_cb| will be run on the calling thread, and will be passed a bool
+  //     indicating whether the initialization was successful.
   //   - New frames will be signaled on |compositor_task_runner| via |client|'s
   //     DidReceiveFrame() method.
   void Initialize(
       const base::Closure& received_frame_cb,
       const gfx::Size& natural_size,
       scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
-      const base::Closure& init_cb) override;
+      const StreamTextureWrapperInitCB& init_cb) override;
 
   // Should be called when the Video size changes.
   // Can be called from any thread, but runs on |main_task_runner_|.
@@ -78,8 +75,16 @@ class CONTENT_EXPORT StreamTextureWrapperImpl
   // texture's changes are signalled via |client|'s DidReceiveFrame() callback.
   scoped_refptr<media::VideoFrame> GetCurrentFrame() override;
 
+  // Sends the StreamTexture to the browser process, to fulfill the request
+  // identified by |request_token|.
+  // Uses the gpu::ScopedSurfaceRequestConduit to forward the underlying
+  // SurfaceTexture to the ScopedSurfaceRequestManager.
+  void ForwardStreamTextureForSurfaceRequest(
+      const base::UnguessableToken& request_token) override;
+
  private:
   StreamTextureWrapperImpl(
+      bool enable_texture_copy,
       scoped_refptr<StreamTextureFactory> factory,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
   ~StreamTextureWrapperImpl() override;
@@ -88,21 +93,20 @@ class CONTENT_EXPORT StreamTextureWrapperImpl
   void Destroy() override;
 
   void InitializeOnMainThread(const base::Closure& received_frame_cb,
-                              const base::Closure& init_cb);
+                              const StreamTextureWrapperInitCB& init_cb);
 
   void ReallocateVideoFrame(const gfx::Size& natural_size);
 
   void SetCurrentFrameInternal(
       const scoped_refptr<media::VideoFrame>& video_frame);
 
+  bool enable_texture_copy_;
+
   // Client GL texture ID allocated to the StreamTexture.
   unsigned texture_id_;
 
   // GL texture mailbox for |texture_id_|.
   gpu::Mailbox texture_mailbox_;
-
-  // Stream texture ID.
-  unsigned stream_id_;
 
   // Object for calling back the compositor thread to repaint the video when a
   // frame is available. It should be bound to |compositor_task_runner_|.

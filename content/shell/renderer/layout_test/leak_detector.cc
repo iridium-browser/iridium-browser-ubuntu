@@ -28,10 +28,11 @@ const int kInitialNumberOfLiveLayoutObjects = 3;
 const int kInitialNumberOfLiveResources = 0;
 const int kInitialNumberOfScriptPromises = 0;
 const int kInitialNumberOfLiveFrames = 1;
+const int kInitialNumberOfWorkerGlobalScopes = 0;
 
-// In the initial state, there are two ActiveDOMObjects (FontFaceSet created by
-// HTMLDocument and SuspendableTimer created by DocumentLoader).
-const int kInitialNumberOfLiveActiveDOMObject = 2;
+// In the initial state, there are two SuspendableObjects (FontFaceSet created
+// by HTMLDocument and SuspendableTimer created by DocumentLoader).
+const int kInitialNumberOfLiveSuspendableObject = 2;
 
 // This includes not only about:blank's context but also ScriptRegexp (e.g.
 // created by isValidEmailAddress in EmailInputType.cpp). The leak detector
@@ -48,12 +49,14 @@ LeakDetector::LeakDetector(BlinkTestRunner* test_runner)
   previous_result_.numberOfLiveLayoutObjects =
       kInitialNumberOfLiveLayoutObjects;
   previous_result_.numberOfLiveResources = kInitialNumberOfLiveResources;
-  previous_result_.numberOfLiveActiveDOMObjects =
-    kInitialNumberOfLiveActiveDOMObject;
+  previous_result_.numberOfLiveSuspendableObjects =
+    kInitialNumberOfLiveSuspendableObject;
   previous_result_.numberOfLiveScriptPromises = kInitialNumberOfScriptPromises;
   previous_result_.numberOfLiveFrames = kInitialNumberOfLiveFrames;
   previous_result_.numberOfLiveV8PerContextData =
     kInitialNumberOfV8PerContextData;
+  previous_result_.numberOfWorkerGlobalScopes =
+    kInitialNumberOfWorkerGlobalScopes;
 }
 
 LeakDetector::~LeakDetector() {
@@ -101,12 +104,12 @@ void LeakDetector::onLeakDetectionComplete(
     list->AppendInteger(result.numberOfLiveResources);
     detail.Set("numberOfLiveResources", list);
   }
-  if (previous_result_.numberOfLiveActiveDOMObjects <
-      result.numberOfLiveActiveDOMObjects) {
+  if (previous_result_.numberOfLiveSuspendableObjects <
+      result.numberOfLiveSuspendableObjects) {
     base::ListValue* list = new base::ListValue();
-    list->AppendInteger(previous_result_.numberOfLiveActiveDOMObjects);
-    list->AppendInteger(result.numberOfLiveActiveDOMObjects);
-    detail.Set("numberOfLiveActiveDOMObjects", list);
+    list->AppendInteger(previous_result_.numberOfLiveSuspendableObjects);
+    list->AppendInteger(result.numberOfLiveSuspendableObjects);
+    detail.Set("numberOfLiveSuspendableObjects", list);
   }
   if (previous_result_.numberOfLiveScriptPromises <
       result.numberOfLiveScriptPromises) {
@@ -127,6 +130,13 @@ void LeakDetector::onLeakDetectionComplete(
     list->AppendInteger(previous_result_.numberOfLiveV8PerContextData);
     list->AppendInteger(result.numberOfLiveV8PerContextData);
     detail.Set("numberOfLiveV8PerContextData", list);
+  }
+  if (previous_result_.numberOfWorkerGlobalScopes <
+      result.numberOfWorkerGlobalScopes) {
+    base::ListValue* list = new base::ListValue();
+    list->AppendInteger(previous_result_.numberOfWorkerGlobalScopes);
+    list->AppendInteger(result.numberOfWorkerGlobalScopes);
+    detail.Set("numberOfWorkerGlobalScopes", list);
   }
 
   if (!detail.empty()) {

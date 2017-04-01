@@ -14,65 +14,62 @@
 
 # Need a separate config to ensure the warnings are added to the end.
 config("swiftshader_libEGL_private_config") {
-  if (is_clang) {
+  if (is_win) {
+    cflags = [
+      "/DEGLAPI=",
+      "/DEGL_EGLEXT_PROTOTYPES",
+      "/DLIBEGL_EXPORTS",
+      "/wd4201",  # nameless struct/union
+      "/wd4065",  # switch statement contains 'default' but no 'case' labels
+    ]
+  } else {
     cflags = [
       "-DLOG_TAG=\"swiftshader_libEGL\"",
       "-DEGLAPI=",
       "-DEGL_EGLEXT_PROTOTYPES",
       "-Wno-sign-compare",
     ]
-  } else {
-    if (host_os == "win") {
-      cflags = [
-        "/DEGLAPI=",
-        "/DEGL_EGLEXT_PROTOTYPES",
-        "/DLIBEGL_EXPORTS",
-        "/wd4201", # nameless struct/union
-        "/wd4065", # switch statement contains 'default' but no 'case' labels
-      ]
-    }
   }
 }
 
 shared_library("swiftshader_libEGL") {
-  output_name = "libEGL"
-  output_dir = "$root_out_dir/swiftshader"
+  if (!is_mac) {
+    output_name = "libEGL"
+    output_dir = "$root_out_dir/swiftshader"
+  }
 
   sources = [
+    "../common/Object.cpp",
     "Config.cpp",
     "Display.cpp",
-    "Surface.cpp",
+    "EGLSurface.cpp",
     "libEGL.cpp",
-    "main.cpp",
-    "../common/Object.cpp",
     "libEGL.def",
     "libEGL.rc",
+    "main.cpp",
     "resource.h",
   ]
 
-  if(is_debug)
-  {
+  if (is_debug) {
+    sources += [ "../common/debug.cpp" ]
+  } else if (is_linux) {
     sources += [
-      "../common/debug.cpp",
+      "../../Renderer/Surface.cpp",
+      "../common/Image.cpp",
     ]
   }
 
-  if (host_os == "mac") {
-    sources += [
-      "OSXUtils.mm",
+  if (is_mac) {
+    sources += [ "OSXUtils.mm" ]
+    libs = [
+      "Quartz.framework",
+      "Cocoa.framework",
     ]
-  } else if (host_os == "win") {
-    configs -= [
-      "//build/config/win:unicode"
-    ]
-
-    ldflags = [
-      "/DEF:" + rebase_path("libGLESv2.def", root_build_dir),
-    ]
-  } else if (host_os == "linux") {
-    sources += [
-      "../../Main/libX11.cpp",
-    ]
+  } else if (is_win) {
+    configs -= [ "//build/config/win:unicode" ]
+    ldflags = [ "/DEF:" + rebase_path("libGLESv2.def", root_build_dir) ]
+  } else if (is_linux) {
+    sources += [ "../../Main/libX11.cpp" ]
   }
 
   configs -= [ "//build/config/compiler:chromium_code" ]

@@ -398,6 +398,9 @@ void BrowserAccessibilityManager::OnAccessibilityEvents(
     // Fire the native event.
     BrowserAccessibility* event_target = GetFromAXNode(node);
     if (event_target) {
+      if (event_type == ui::AX_EVENT_HOVER)
+        GetRootManager()->CacheHitTestResult(event_target);
+
       NotifyAccessibilityEvent(
           BrowserAccessibilityEvent::FromBlink,
           event_type,
@@ -456,7 +459,10 @@ void BrowserAccessibilityManager::OnChildFrameHitTestResult(
   if (!child_manager || !child_manager->delegate())
     return;
 
-  return child_manager->delegate()->AccessibilityHitTest(point);
+  ui::AXActionData action_data;
+  action_data.target_point = point;
+  action_data.action = ui::AX_ACTION_HIT_TEST;
+  return child_manager->delegate()->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::ActivateFindInPageResult(
@@ -470,12 +476,7 @@ void BrowserAccessibilityManager::ActivateFindInPageResult(
     return;
 
   // If an ancestor of this node is a leaf node, fire the notification on that.
-  BrowserAccessibility* ancestor = node->GetParent();
-  while (ancestor && ancestor != GetRoot()) {
-    if (ancestor->PlatformIsLeaf())
-      node = ancestor;
-    ancestor = ancestor->GetParent();
-  }
+  node = node->GetClosestPlatformObject();
 
   // The "scrolled to anchor" notification is a great way to get a
   // screen reader to jump directly to a specific location in a document.
@@ -559,8 +560,13 @@ BrowserAccessibilityManager::GetFocusFromThisOrDescendantFrame() {
 }
 
 void BrowserAccessibilityManager::SetFocus(const BrowserAccessibility& node) {
-  if (delegate_)
-    delegate_->AccessibilitySetFocus(node.GetId());
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_FOCUS;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::SetFocusLocallyForTesting(
@@ -576,48 +582,147 @@ void BrowserAccessibilityManager::SetFocusChangeCallbackForTesting(
   g_focus_change_callback_for_testing.Get() = callback;
 }
 
+void BrowserAccessibilityManager::Decrement(
+    const BrowserAccessibility& node) {
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_DECREMENT;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
+}
+
 void BrowserAccessibilityManager::DoDefaultAction(
     const BrowserAccessibility& node) {
-  if (delegate_)
-    delegate_->AccessibilityDoDefaultAction(node.GetId());
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_DO_DEFAULT;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
+}
+
+void BrowserAccessibilityManager::GetImageData(
+    const BrowserAccessibility& node,
+    const gfx::Size& max_size) {
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_GET_IMAGE_DATA;
+  action_data.target_node_id = node.GetId();
+  action_data.target_rect = gfx::Rect(gfx::Point(), max_size);
+  delegate_->AccessibilityPerformAction(action_data);
+}
+
+void BrowserAccessibilityManager::Increment(
+    const BrowserAccessibility& node) {
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_INCREMENT;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
+}
+
+void BrowserAccessibilityManager::ShowContextMenu(
+    const BrowserAccessibility& node) {
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_SHOW_CONTEXT_MENU;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::ScrollToMakeVisible(
     const BrowserAccessibility& node, gfx::Rect subfocus) {
-  if (delegate_) {
-    delegate_->AccessibilityScrollToMakeVisible(node.GetId(), subfocus);
-  }
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.target_node_id = node.GetId();
+  action_data.action = ui::AX_ACTION_SCROLL_TO_MAKE_VISIBLE;
+  action_data.target_rect = subfocus;
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::ScrollToPoint(
     const BrowserAccessibility& node, gfx::Point point) {
-  if (delegate_) {
-    delegate_->AccessibilityScrollToPoint(node.GetId(), point);
-  }
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.target_node_id = node.GetId();
+  action_data.action = ui::AX_ACTION_SCROLL_TO_POINT;
+  action_data.target_point = point;
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::SetScrollOffset(
     const BrowserAccessibility& node, gfx::Point offset) {
-  if (delegate_) {
-    delegate_->AccessibilitySetScrollOffset(node.GetId(), offset);
-  }
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.target_node_id = node.GetId();
+  action_data.action = ui::AX_ACTION_SET_SCROLL_OFFSET;
+  action_data.target_point = offset;
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::SetValue(
     const BrowserAccessibility& node,
     const base::string16& value) {
-  if (delegate_)
-    delegate_->AccessibilitySetValue(node.GetId(), value);
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.target_node_id = node.GetId();
+  action_data.action = ui::AX_ACTION_SET_VALUE;
+  action_data.value = value;
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 void BrowserAccessibilityManager::SetTextSelection(
     const BrowserAccessibility& node,
     int start_offset,
     int end_offset) {
-  if (delegate_) {
-    delegate_->AccessibilitySetSelection(node.GetId(), start_offset,
-                                         node.GetId(), end_offset);
-  }
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.anchor_node_id = node.GetId();
+  action_data.anchor_offset = start_offset;
+  action_data.focus_node_id = node.GetId();
+  action_data.focus_offset = end_offset;
+  action_data.action = ui::AX_ACTION_SET_SELECTION;
+  delegate_->AccessibilityPerformAction(action_data);
+}
+
+void BrowserAccessibilityManager::SetAccessibilityFocus(
+    const BrowserAccessibility& node) {
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_SET_ACCESSIBILITY_FOCUS;
+  action_data.target_node_id = node.GetId();
+  delegate_->AccessibilityPerformAction(action_data);
+}
+
+void BrowserAccessibilityManager::HitTest(const gfx::Point& point) {
+  if (!delegate_)
+    return;
+
+  ui::AXActionData action_data;
+  action_data.action = ui::AX_ACTION_HIT_TEST;
+  action_data.target_point = point;
+  delegate_->AccessibilityPerformAction(action_data);
 }
 
 gfx::Rect BrowserAccessibilityManager::GetViewBounds() {
@@ -976,12 +1081,39 @@ void BrowserAccessibilityManager::OnSubtreeWillBeDeleted(ui::AXTree* tree,
     obj->OnSubtreeWillBeDeleted();
 }
 
+void BrowserAccessibilityManager::OnNodeWillBeReparented(ui::AXTree* tree,
+                                                         ui::AXNode* node) {
+  // BrowserAccessibility should probably ask the tree source for the AXNode via
+  // an id rather than weakly holding a pointer to a AXNode that might have been
+  // destroyed under the hood and re-created later on. Treat this as a delete to
+  // make things work.
+  OnNodeWillBeDeleted(tree, node);
+}
+
+void BrowserAccessibilityManager::OnSubtreeWillBeReparented(ui::AXTree* tree,
+                                                            ui::AXNode* node) {
+  // BrowserAccessibility should probably ask the tree source for the AXNode via
+  // an id rather than weakly holding a pointer to a AXNode that might have been
+  // destroyed under the hood and re-created later on. Treat this as a delete to
+  // make things work.
+  OnSubtreeWillBeDeleted(tree, node);
+}
+
 void BrowserAccessibilityManager::OnNodeCreated(ui::AXTree* tree,
                                                 ui::AXNode* node) {
   BrowserAccessibility* wrapper = factory_->Create();
   wrapper->Init(this, node);
   id_wrapper_map_[node->id()] = wrapper;
   wrapper->OnDataChanged();
+}
+
+void BrowserAccessibilityManager::OnNodeReparented(ui::AXTree* tree,
+                                                   ui::AXNode* node) {
+  // BrowserAccessibility should probably ask the tree source for the AXNode via
+  // an id rather than weakly holding a pointer to a AXNode that might have been
+  // destroyed under the hood and re-created later on. Treat this as a create to
+  // make things work.
+  OnNodeCreated(tree, node);
 }
 
 void BrowserAccessibilityManager::OnNodeChanged(ui::AXTree* tree,
@@ -1013,6 +1145,25 @@ void BrowserAccessibilityManager::OnAtomicUpdateFinished(
   if (root_changed && last_focused_manager_ == this) {
     last_focused_node_ = nullptr;
     last_focused_manager_ = nullptr;
+  }
+
+  // Notify ATs if any live regions have been created.
+  for (auto& change : changes) {
+    if (change.type != NODE_CREATED && change.type != SUBTREE_CREATED)
+      continue;
+
+    const ui::AXNode* created_node = change.node;
+    DCHECK(created_node);
+    BrowserAccessibility* object = GetFromAXNode(created_node);
+    if (object && object->HasStringAttribute(ui::AX_ATTR_LIVE_STATUS)) {
+      if (object->GetRole() == ui::AX_ROLE_ALERT) {
+        NotifyAccessibilityEvent(BrowserAccessibilityEvent::FromTreeChange,
+                                 ui::AX_EVENT_ALERT, object);
+      } else {
+        NotifyAccessibilityEvent(BrowserAccessibilityEvent::FromTreeChange,
+                                 ui::AX_EVENT_LIVE_REGION_CREATED, object);
+      }
+    }
   }
 }
 
@@ -1047,6 +1198,57 @@ BrowserAccessibilityManager::SnapshotAXTreeForTesting() {
   ui::AXTreeUpdate update;
   serializer.SerializeChanges(tree_->root(), &update);
   return update;
+}
+
+BrowserAccessibility* BrowserAccessibilityManager::CachingAsyncHitTest(
+    const gfx::Point& screen_point) {
+  BrowserAccessibilityManager* root_manager = GetRootManager();
+  if (root_manager && root_manager != this)
+    return root_manager->CachingAsyncHitTest(screen_point);
+
+  if (delegate()) {
+    // This triggers an asynchronous request to compute the true object that's
+    // under |screen_point|.
+    HitTest(screen_point - GetViewBounds().OffsetFromOrigin());
+
+    // Unfortunately we still have to return an answer synchronously because
+    // the APIs were designed that way. The best case scenario is that the
+    // screen point is within the bounds of the last result we got from a
+    // call to AccessibilityHitTest - in that case, we can return that object!
+    if (last_hover_bounds_.Contains(screen_point)) {
+      BrowserAccessibilityManager* manager =
+          BrowserAccessibilityManager::FromID(last_hover_ax_tree_id_);
+      if (manager) {
+        BrowserAccessibility* node = manager->GetFromID(last_hover_node_id_);
+        if (node)
+        return node;
+      }
+    }
+  }
+
+  // If that test failed we have to fall back on searching the accessibility
+  // tree locally for the best bounding box match. This is generally right
+  // for simple pages but wrong in cases of z-index, overflow, and other
+  // more complicated layouts. The hope is that if the user is moving the
+  // mouse, this fallback will only be used transiently, and the asynchronous
+  // result will be used for the next call.
+  return GetRoot()->ApproximateHitTest(screen_point);
+}
+
+void BrowserAccessibilityManager::CacheHitTestResult(
+    BrowserAccessibility* hit_test_result) {
+  // Walk up to the highest ancestor that's a leaf node; we don't want to
+  // return a node that's hidden from the tree.
+  BrowserAccessibility* parent = hit_test_result->GetParent();
+  while (parent) {
+    if (parent->PlatformChildCount() == 0)
+      hit_test_result = parent;
+    parent = parent->GetParent();
+  }
+
+  last_hover_ax_tree_id_ = hit_test_result->manager()->ax_tree_id();
+  last_hover_node_id_ = hit_test_result->GetId();
+  last_hover_bounds_ = hit_test_result->GetScreenBoundsRect();
 }
 
 }  // namespace content

@@ -6,8 +6,10 @@
 
 #include "fxjs/cfxjse_runtimedata.h"
 
+#include <utility>
+
 #include "fxjs/cfxjse_isolatetracker.h"
-#include "fxjs/include/fxjs_v8.h"
+#include "fxjs/fxjs_v8.h"
 
 namespace {
 
@@ -20,10 +22,8 @@ class FXJSE_ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
 };
 
 void Runtime_DisposeCallback(v8::Isolate* pIsolate, bool bOwned) {
-  if (FXJS_PerIsolateData* pData = FXJS_PerIsolateData::Get(pIsolate)) {
-    delete pData->m_pFXJSERuntimeData;
-    pData->m_pFXJSERuntimeData = nullptr;
-  }
+  if (FXJS_PerIsolateData* pData = FXJS_PerIsolateData::Get(pIsolate))
+    delete pData;
   if (bOwned)
     pIsolate->Dispose();
 }
@@ -38,11 +38,11 @@ void FXJSE_Initialize() {
   if (!CFXJSE_IsolateTracker::g_pInstance)
     CFXJSE_IsolateTracker::g_pInstance = new CFXJSE_IsolateTracker;
 
-  static FX_BOOL bV8Initialized = FALSE;
+  static bool bV8Initialized = false;
   if (bV8Initialized)
     return;
 
-  bV8Initialized = TRUE;
+  bV8Initialized = true;
   atexit(KillV8);
 }
 
@@ -77,8 +77,10 @@ CFXJSE_RuntimeData::CFXJSE_RuntimeData(v8::Isolate* pIsolate)
 
 CFXJSE_RuntimeData::~CFXJSE_RuntimeData() {}
 
-CFXJSE_RuntimeData* CFXJSE_RuntimeData::Create(v8::Isolate* pIsolate) {
-  CFXJSE_RuntimeData* pRuntimeData = new CFXJSE_RuntimeData(pIsolate);
+std::unique_ptr<CFXJSE_RuntimeData> CFXJSE_RuntimeData::Create(
+    v8::Isolate* pIsolate) {
+  std::unique_ptr<CFXJSE_RuntimeData> pRuntimeData(
+      new CFXJSE_RuntimeData(pIsolate));
   CFXJSE_ScopeUtil_IsolateHandle scope(pIsolate);
   v8::Local<v8::FunctionTemplate> hFuncTemplate =
       v8::FunctionTemplate::New(pIsolate);
@@ -101,7 +103,7 @@ CFXJSE_RuntimeData* CFXJSE_RuntimeData::Get(v8::Isolate* pIsolate) {
   FXJS_PerIsolateData* pData = FXJS_PerIsolateData::Get(pIsolate);
   if (!pData->m_pFXJSERuntimeData)
     pData->m_pFXJSERuntimeData = CFXJSE_RuntimeData::Create(pIsolate);
-  return pData->m_pFXJSERuntimeData;
+  return pData->m_pFXJSERuntimeData.get();
 }
 
 CFXJSE_IsolateTracker* CFXJSE_IsolateTracker::g_pInstance = nullptr;

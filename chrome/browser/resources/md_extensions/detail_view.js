@@ -28,7 +28,7 @@ cr.define('extensions', function() {
     },
 
     /** @private */
-    onCloseButtonClick_: function() {
+    onCloseButtonTap_: function() {
       this.fire('close');
     },
 
@@ -52,11 +52,36 @@ cr.define('extensions', function() {
      * @return {boolean}
      * @private
      */
+    shouldShowHomepageButton_: function() {
+      // Note: we ignore |data.homePage.specified| - we use an extension's
+      // webstore entry as a homepage if the extension didn't explicitly specify
+      // a homepage. (|url| can still be unset in the case of unpacked
+      // extensions.)
+      return this.data.homePage.url.length > 0;
+    },
+
+    /**
+     * @return {boolean}
+     * @private
+     */
+    shouldShowOptionsButton_: function() {
+      return !!this.data.optionsPage;
+    },
+
+    /**
+     * @return {boolean}
+     * @private
+     */
     shouldShowOptionsSection_: function() {
       return this.data.incognitoAccess.isEnabled ||
              this.data.fileAccess.isEnabled ||
              this.data.runOnAllUrls.isEnabled ||
              this.data.errorCollection.isEnabled;
+    },
+
+    /** @private */
+    onOptionsButtonTap_: function() {
+      this.delegate.showItemOptionsPage(this.data.id);
     },
 
     /** @private */
@@ -90,6 +115,12 @@ cr.define('extensions', function() {
     computeDependentEntry_: function(item) {
       return loadTimeData.getStringF('itemDependentEntry', item.name, item.id);
     },
+
+    /** @private */
+    computeSourceString_: function() {
+      return extensions.getItemSourceString(
+          extensions.getItemSource(this.data));
+    }
   });
 
   return {DetailView: DetailView};

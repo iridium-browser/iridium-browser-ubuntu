@@ -4,13 +4,13 @@
 
 #include "components/sync/syncable/entry_kernel.h"
 
-#include <stdint.h>
-
 #include <utility>
 
 #include "base/json/string_escape.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/memory_usage_estimator.h"
 #include "components/sync/base/cryptographer.h"
+#include "components/sync/protocol/proto_memory_estimations.h"
 #include "components/sync/protocol/proto_value_conversions.h"
 #include "components/sync/syncable/syncable_columns.h"
 #include "components/sync/syncable/syncable_enum_conversions.h"
@@ -18,7 +18,7 @@
 namespace syncer {
 namespace syncable {
 
-EntryKernel::EntryKernel() : dirty_(false) {
+EntryKernel::EntryKernel() : dirty_(false), memory_usage_(kMemoryUsageUnknown) {
   // Everything else should already be default-initialized.
   for (int i = 0; i < INT64_FIELDS_COUNT; ++i) {
     int64_fields[i] = 0;
@@ -213,9 +213,21 @@ base::DictionaryValue* EntryKernel::ToValue(
   return kernel_info;
 }
 
-base::ListValue* EntryKernelMutationMapToValue(
+size_t EntryKernel::EstimateMemoryUsage() const {
+  if (memory_usage_ == kMemoryUsageUnknown) {
+    using base::trace_event::EstimateMemoryUsage;
+    memory_usage_ = EstimateMemoryUsage(string_fields) +
+                    EstimateMemoryUsage(specifics_fields) +
+                    EstimateMemoryUsage(id_fields) +
+                    EstimateMemoryUsage(unique_position_fields) +
+                    EstimateMemoryUsage(attachment_metadata_fields);
+  }
+  return memory_usage_;
+}
+
+std::unique_ptr<base::ListValue> EntryKernelMutationMapToValue(
     const EntryKernelMutationMap& mutations) {
-  base::ListValue* list = new base::ListValue();
+  std::unique_ptr<base::ListValue> list(new base::ListValue());
   for (EntryKernelMutationMap::const_iterator it = mutations.begin();
        it != mutations.end(); ++it) {
     list->Append(EntryKernelMutationToValue(it->second));
@@ -223,11 +235,11 @@ base::ListValue* EntryKernelMutationMapToValue(
   return list;
 }
 
-base::DictionaryValue* EntryKernelMutationToValue(
+std::unique_ptr<base::DictionaryValue> EntryKernelMutationToValue(
     const EntryKernelMutation& mutation) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->Set("original", mutation.original.ToValue(NULL));
-  dict->Set("mutated", mutation.mutated.ToValue(NULL));
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  dict->Set("original", mutation.original.ToValue(nullptr));
+  dict->Set("mutated", mutation.mutated.ToValue(nullptr));
   return dict;
 }
 

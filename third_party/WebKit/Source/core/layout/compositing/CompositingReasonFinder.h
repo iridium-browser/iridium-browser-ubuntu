@@ -5,6 +5,7 @@
 #ifndef CompositingReasonFinder_h
 #define CompositingReasonFinder_h
 
+#include "core/CoreExport.h"
 #include "core/layout/compositing/CompositingTriggers.h"
 #include "platform/graphics/CompositingReasons.h"
 #include "wtf/Allocator.h"
@@ -17,33 +18,35 @@ class LayoutObject;
 class ComputedStyle;
 class LayoutView;
 
-class CompositingReasonFinder {
-    DISALLOW_NEW();
-    WTF_MAKE_NONCOPYABLE(CompositingReasonFinder);
-public:
-    explicit CompositingReasonFinder(LayoutView&);
+class CORE_EXPORT CompositingReasonFinder {
+  DISALLOW_NEW();
+  WTF_MAKE_NONCOPYABLE(CompositingReasonFinder);
 
-    CompositingReasons potentialCompositingReasonsFromStyle(LayoutObject*) const;
-    CompositingReasons directReasons(const PaintLayer*) const;
+ public:
+  explicit CompositingReasonFinder(LayoutView&);
 
-    void updateTriggers();
+  CompositingReasons potentialCompositingReasonsFromStyle(LayoutObject*) const;
+  CompositingReasons directReasons(const PaintLayer*) const;
 
-    bool hasOverflowScrollTrigger() const;
-    bool requiresCompositingForScrollableFrame() const;
-    bool requiresCompositingForAnimation(const ComputedStyle&) const;
+  void updateTriggers();
 
-private:
-    bool isMainFrame() const;
+  bool hasOverflowScrollTrigger() const;
+  bool requiresCompositingForScrollableFrame() const;
+  static bool requiresCompositingForAnimation(const ComputedStyle&);
+  static bool requiresCompositingForEffectAnimation(const ComputedStyle&);
+  static bool requiresCompositingForTransformAnimation(const ComputedStyle&);
+  static bool requiresCompositingForTransform(const LayoutObject&);
 
-    CompositingReasons nonStyleDeterminedDirectReasons(const PaintLayer*) const;
+ private:
+  bool isMainFrame() const;
 
-    bool requiresCompositingForTransform(LayoutObject*) const;
-    bool requiresCompositingForPositionFixed(const PaintLayer*) const;
+  CompositingReasons nonStyleDeterminedDirectReasons(const PaintLayer*) const;
+  bool requiresCompositingForScrollDependentPosition(const PaintLayer*) const;
 
-    LayoutView& m_layoutView;
-    CompositingTriggerFlags m_compositingTriggers;
+  LayoutView& m_layoutView;
+  CompositingTriggerFlags m_compositingTriggers;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // CompositingReasonFinder_h
+#endif  // CompositingReasonFinder_h

@@ -18,11 +18,11 @@
 #include "chrome/browser/safe_browsing/threat_details_history.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
-#include "chrome/common/safe_browsing/safebrowsing_messages.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/safe_browsing/common/safebrowsing_messages.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/web_contents_tester.h"
@@ -54,9 +54,11 @@ static const char* kSecondRedirectURL = "https://redirecttwo.com/with/path";
 static const char* kReferrerURL = "http://www.referrer.com/with/path";
 
 static const char* kThreatURL = "http://www.threat.com/with/path";
+static const char* kThreatURLHttps = "https://www.threat.com/with/path";
 static const char* kThreatHeaders =
     "HTTP/1.1 200 OK\n"
-    "Content-Type: image/jpeg\n";
+    "Content-Type: image/jpeg\n"
+    "Some-Other-Header: foo\n";  // Persisted for http, stripped for https
 static const char* kThreatData = "exploit();";
 
 static const char* kLandingURL = "http://www.landingpage.com/with/path";
@@ -121,7 +123,8 @@ void WriteToEntry(disk_cache::Backend* cache,
   entry->Close();
 }
 
-void FillCache(net::URLRequestContextGetter* context_getter) {
+void FillCacheBase(net::URLRequestContextGetter* context_getter,
+                   bool use_https_threat_url) {
   net::TestCompletionCallback cb;
   disk_cache::Backend* cache;
   int rv = context_getter->GetURLRequestContext()
@@ -130,8 +133,15 @@ void FillCache(net::URLRequestContextGetter* context_getter) {
                ->GetBackend(&cache, cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 
-  WriteToEntry(cache, kThreatURL, kThreatHeaders, kThreatData);
+  WriteToEntry(cache, use_https_threat_url ? kThreatURLHttps : kThreatURL,
+               kThreatHeaders, kThreatData);
   WriteToEntry(cache, kLandingURL, kLandingHeaders, kLandingData);
+}
+void FillCache(net::URLRequestContextGetter* context_getter) {
+  FillCacheBase(context_getter, /*use_https_threat_url=*/false);
+}
+void FillCacheHttps(net::URLRequestContextGetter* context_getter) {
+  FillCacheBase(context_getter, /*use_https_threat_url=*/true);
 }
 
 // Lets us provide a MockURLRequestContext with an HTTP Cache we pre-populate.
@@ -141,7 +151,7 @@ class ThreatDetailsWrap : public ThreatDetails {
   ThreatDetailsWrap(
       SafeBrowsingUIManager* ui_manager,
       WebContents* web_contents,
-      const SafeBrowsingUIManager::UnsafeResource& unsafe_resource,
+      const security_interstitials::UnsafeResource& unsafe_resource,
       net::URLRequestContextGetter* request_context_getter)
       : ThreatDetails(ui_manager, web_contents, unsafe_resource) {
     request_context_getter_ = request_context_getter;
@@ -338,7 +348,7 @@ TEST_F(ThreatDetailsTest, ThreatSubResource) {
   // Commit a load.
   content::WebContentsTester::For(web_contents())
       ->TestDidNavigateWithReferrer(
-          web_contents()->GetMainFrame(), 1 /* page_id */, 0 /* nav_entry_id */,
+          web_contents()->GetMainFrame(), 0 /* nav_entry_id */,
           true /* did_create_new_entry */, GURL(kLandingURL),
           content::Referrer(GURL(kReferrerURL),
                             blink::WebReferrerPolicyDefault),
@@ -558,7 +568,7 @@ TEST_F(ThreatDetailsTest, ThreatOnMainPageLoadBlocked) {
   // navigation entry.
   content::WebContentsTester::For(web_contents())
       ->TestDidNavigateWithReferrer(
-          web_contents()->GetMainFrame(), 1 /* page_id */, 0 /* nav_entry_id */,
+          web_contents()->GetMainFrame(), 0 /* nav_entry_id */,
           true /* did_create_new_entry */, GURL(kUnrelatedURL),
           content::Referrer(GURL(kUnrelatedReferrerURL),
                             blink::WebReferrerPolicyDefault),
@@ -619,7 +629,7 @@ TEST_F(ThreatDetailsTest, ThreatWithPendingLoad) {
   // Load and commit the landing URL with a referrer.
   content::WebContentsTester::For(web_contents())
       ->TestDidNavigateWithReferrer(
-          web_contents()->GetMainFrame(), 1 /* page_id */, 0 /* nav_entry_id */,
+          web_contents()->GetMainFrame(), 0 /* nav_entry_id */,
           true /* did_create_new_entry */, GURL(kLandingURL),
           content::Referrer(GURL(kReferrerURL),
                             blink::WebReferrerPolicyDefault),
@@ -773,7 +783,91 @@ TEST_F(ThreatDetailsTest, HTTPCache) {
   pb_header = pb_response->add_headers();
   pb_header->set_name("Content-Type");
   pb_header->set_value("image/jpeg");
+  pb_header = pb_response->add_headers();
+  pb_header->set_name("Some-Other-Header");
+  pb_header->set_value("foo");
   pb_response->set_body(kThreatData);
+  std::string threat_data(kThreatData);
+  pb_response->set_bodylength(threat_data.size());
+  pb_response->set_bodydigest(base::MD5String(threat_data));
+  pb_response->set_remote_ip("1.2.3.4:80");
+  expected.set_complete(true);
+
+  VerifyResults(actual, expected);
+}
+
+// Test that only some fields of the HTTPS resource (eg: whitelisted headers)
+// are reported.
+TEST_F(ThreatDetailsTest, HttpsResourceSanitization) {
+  content::WebContentsTester::For(web_contents())
+      ->NavigateAndCommit(GURL(kLandingURL));
+
+  UnsafeResource resource;
+  InitResource(&resource, SB_THREAT_TYPE_CLIENT_SIDE_PHISHING_URL,
+               true /* is_subresource */, GURL(kThreatURLHttps));
+
+  scoped_refptr<ThreatDetailsWrap> report =
+      new ThreatDetailsWrap(ui_manager_.get(), web_contents(), resource,
+                            profile()->GetRequestContext());
+
+  BrowserThread::PostTask(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&FillCacheHttps,
+                 base::RetainedRef(profile()->GetRequestContext())));
+
+  // The cache collection starts after the IPC from the DOM is fired.
+  std::vector<SafeBrowsingHostMsg_ThreatDOMDetails_Node> params;
+  report->OnReceivedThreatDOMDetails(params);
+
+  // Let the cache callbacks complete.
+  base::RunLoop().RunUntilIdle();
+
+  DVLOG(1) << "Getting serialized report";
+  std::string serialized = WaitForSerializedReport(
+      report.get(), true /* did_proceed*/, -1 /* num_visit */);
+  ClientSafeBrowsingReportRequest actual;
+  actual.ParseFromString(serialized);
+
+  ClientSafeBrowsingReportRequest expected;
+  expected.set_type(ClientSafeBrowsingReportRequest::CLIENT_SIDE_PHISHING_URL);
+  expected.set_url(kThreatURLHttps);
+  expected.set_page_url(kLandingURL);
+  expected.set_referrer_url("");
+  expected.set_did_proceed(true);
+
+  ClientSafeBrowsingReportRequest::Resource* pb_resource =
+      expected.add_resources();
+  pb_resource->set_id(0);
+  pb_resource->set_url(kLandingURL);
+  ClientSafeBrowsingReportRequest::HTTPResponse* pb_response =
+      pb_resource->mutable_response();
+  pb_response->mutable_firstline()->set_code(200);
+  ClientSafeBrowsingReportRequest::HTTPHeader* pb_header =
+      pb_response->add_headers();
+  pb_header->set_name("Content-Type");
+  pb_header->set_value("text/html");
+  pb_header = pb_response->add_headers();
+  pb_header->set_name("Content-Length");
+  pb_header->set_value("1024");
+  pb_header = pb_response->add_headers();
+  pb_header->set_name("Set-Cookie");
+  pb_header->set_value("");  // The cookie is dropped.
+  pb_response->set_body(kLandingData);
+  std::string landing_data(kLandingData);
+  pb_response->set_bodylength(landing_data.size());
+  pb_response->set_bodydigest(base::MD5String(landing_data));
+  pb_response->set_remote_ip("1.2.3.4:80");
+
+  // The threat URL is HTTP so the request and response are cleared (except for
+  // whitelisted headers and certain safe fields). Namely the firstline and body
+  // are missing.
+  pb_resource = expected.add_resources();
+  pb_resource->set_id(1);
+  pb_resource->set_url(kThreatURLHttps);
+  pb_response = pb_resource->mutable_response();
+  pb_header = pb_response->add_headers();
+  pb_header->set_name("Content-Type");
+  pb_header->set_value("image/jpeg");
   std::string threat_data(kThreatData);
   pb_response->set_bodylength(threat_data.size());
   pb_response->set_bodydigest(base::MD5String(threat_data));

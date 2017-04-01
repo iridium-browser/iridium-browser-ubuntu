@@ -37,8 +37,15 @@ void ServiceWorkerScriptCacheMap::NotifyStartedCaching(const GURL& url,
   DCHECK(owner_->status() == ServiceWorkerVersion::NEW ||
          owner_->status() == ServiceWorkerVersion::INSTALLING)
       << owner_->status();
-  if (!context_)
+  if (!context_) {
+    if (IsMainScript(url)) {
+      main_script_start_status_ = StartStatus::NO_CONTEXT;
+    }
     return;  // Our storage has been wiped via DeleteAndStartOver.
+  }
+  if (IsMainScript(url)) {
+    main_script_start_status_ = StartStatus::STARTED;
+  }
   resource_map_[url] =
       ServiceWorkerDatabase::ResourceRecord(resource_id, url, -1);
   context_->storage()->StoreUncommittedResourceId(resource_id);
@@ -47,22 +54,33 @@ void ServiceWorkerScriptCacheMap::NotifyStartedCaching(const GURL& url,
 void ServiceWorkerScriptCacheMap::NotifyFinishedCaching(
     const GURL& url,
     int64_t size_bytes,
-    const net::URLRequestStatus& status,
+    net::Error net_error,
     const std::string& status_message) {
   DCHECK_NE(kInvalidServiceWorkerResourceId, LookupResourceId(url));
+  DCHECK_NE(net::ERR_IO_PENDING, net_error);
   DCHECK(owner_->status() == ServiceWorkerVersion::NEW ||
          owner_->status() == ServiceWorkerVersion::INSTALLING ||
          owner_->status() == ServiceWorkerVersion::REDUNDANT);
-  if (!context_)
+  if (!context_) {
+    if (IsMainScript(url)) {
+      main_script_finish_status_ = FinishStatus::NO_CONTEXT;
+    }
     return;  // Our storage has been wiped via DeleteAndStartOver.
-  if (!status.is_success()) {
+  }
+  if (net_error != net::OK) {
+    if (IsMainScript(url)) {
+      main_script_finish_status_ = FinishStatus::NET_ERROR;
+    }
     context_->storage()->DoomUncommittedResource(LookupResourceId(url));
     resource_map_.erase(url);
-    if (owner_->script_url() == url) {
-      main_script_status_ = status;
+    if (IsMainScript(url)) {
+      main_script_status_ = net::URLRequestStatus::FromError(net_error);
       main_script_status_message_ = status_message;
     }
   } else {
+    if (IsMainScript(url)) {
+      main_script_finish_status_ = FinishStatus::FINISHED;
+    }
     resource_map_[url].size_bytes = size_bytes;
   }
 }
@@ -121,6 +139,10 @@ void ServiceWorkerScriptCacheMap::OnMetadataWritten(
     const net::CompletionCallback& callback,
     int result) {
   callback.Run(result);
+}
+
+bool ServiceWorkerScriptCacheMap::IsMainScript(const GURL& url) {
+  return owner_->script_url() == url;
 }
 
 }  // namespace content

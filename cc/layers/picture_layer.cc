@@ -6,6 +6,8 @@
 
 #include "base/auto_reset.h"
 #include "base/trace_event/trace_event.h"
+#include "cc/blimp/client_picture_cache.h"
+#include "cc/blimp/engine_picture_cache.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer_impl.h"
 #include "cc/playback/recording_source.h"
@@ -77,10 +79,10 @@ void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
   if (!recording_source_)
     recording_source_.reset(new RecordingSource);
   recording_source_->SetSlowdownRasterScaleFactor(
-      host->debug_state().slow_down_raster_scale_factor);
+      host->GetDebugState().slow_down_raster_scale_factor);
   // If we need to enable image decode tasks, then we have to generate the
   // discardable images metadata.
-  const LayerTreeSettings& settings = layer_tree_host()->settings();
+  const LayerTreeSettings& settings = layer_tree_host()->GetSettings();
   recording_source_->SetGenerateDiscardableImagesMetadata(
       settings.image_decode_tasks_enabled);
 }
@@ -93,7 +95,7 @@ void PictureLayer::SetNeedsDisplayRect(const gfx::Rect& layer_rect) {
 }
 
 bool PictureLayer::Update() {
-  update_source_frame_number_ = layer_tree_host()->source_frame_number();
+  update_source_frame_number_ = layer_tree_host()->SourceFrameNumber();
   bool updated = Layer::Update();
 
   gfx::Size layer_size = paint_properties().bounds;
@@ -103,11 +105,10 @@ bool PictureLayer::Update() {
       !contents_opaque() &&
       !picture_layer_inputs_.client->FillsBoundsCompletely());
 
-  TRACE_EVENT1("cc", "PictureLayer::Update",
-               "source_frame_number",
-               layer_tree_host()->source_frame_number());
+  TRACE_EVENT1("cc", "PictureLayer::Update", "source_frame_number",
+               layer_tree_host()->SourceFrameNumber());
   devtools_instrumentation::ScopedLayerTreeTask update_layer(
-      devtools_instrumentation::kUpdateLayer, id(), layer_tree_host()->id());
+      devtools_instrumentation::kUpdateLayer, id(), layer_tree_host()->GetId());
 
   // UpdateAndExpandInvalidation will give us an invalidation that covers
   // anything not explicitly recorded in this frame. We give this region
@@ -205,14 +206,15 @@ void PictureLayer::SetTypeForProtoSerialization(proto::LayerNode* proto) const {
   proto->set_type(proto::LayerNode::PICTURE_LAYER);
 }
 
-void PictureLayer::LayerSpecificPropertiesToProto(
-    proto::LayerProperties* proto) {
-  Layer::LayerSpecificPropertiesToProto(proto);
+void PictureLayer::ToLayerPropertiesProto(proto::LayerProperties* proto) {
+  DCHECK(GetLayerTree());
+  DCHECK(GetLayerTree()->engine_picture_cache());
+
+  Layer::ToLayerPropertiesProto(proto);
   DropRecordingSourceContentIfInvalid();
-
   proto::PictureLayerProperties* picture = proto->mutable_picture();
-  recording_source_->ToProtobuf(picture->mutable_recording_source());
 
+  picture->set_nearest_neighbor(picture_layer_inputs_.nearest_neighbor);
   RectToProto(picture_layer_inputs_.recorded_viewport,
               picture->mutable_recorded_viewport());
   if (picture_layer_inputs_.display_list) {
@@ -224,61 +226,9 @@ void PictureLayer::LayerSpecificPropertiesToProto(
       if (!picture)
         continue;
 
-      layer_tree_host()->engine_picture_cache()->MarkUsed(picture.get());
+      GetLayerTree()->engine_picture_cache()->MarkUsed(picture.get());
     }
   }
-
-  RegionToProto(last_updated_invalidation_, picture->mutable_invalidation());
-  picture->set_is_mask(is_mask_);
-  picture->set_nearest_neighbor(picture_layer_inputs_.nearest_neighbor);
-
-  picture->set_update_source_frame_number(update_source_frame_number_);
-
-  last_updated_invalidation_.Clear();
-}
-
-void PictureLayer::FromLayerSpecificPropertiesProto(
-    const proto::LayerProperties& proto) {
-  Layer::FromLayerSpecificPropertiesProto(proto);
-  const proto::PictureLayerProperties& picture = proto.picture();
-  // If this is a new layer, ensure it has a recording source. During layer
-  // hierarchy deserialization, ::SetLayerTreeHost(...) is not called, but
-  // instead the member is set directly, so it needs to be set here explicitly.
-  if (!recording_source_)
-    recording_source_.reset(new RecordingSource);
-
-  std::vector<uint32_t> used_engine_picture_ids;
-
-  picture_layer_inputs_.recorded_viewport =
-      ProtoToRect(picture.recorded_viewport());
-
-  ClientPictureCache* client_picture_cache =
-      layer_tree_host()->client_picture_cache();
-  DCHECK(client_picture_cache);
-  // This might not exist if the |input_.display_list| of the serialized
-  // RecordingSource was null, which can happen if |Clear()| is
-  // called.
-  if (picture.has_display_list()) {
-    picture_layer_inputs_.display_list = DisplayItemList::CreateFromProto(
-        picture.display_list(), client_picture_cache, &used_engine_picture_ids);
-  } else {
-    picture_layer_inputs_.display_list = nullptr;
-  }
-
-  recording_source_->FromProtobuf(picture.recording_source(),
-                                  picture_layer_inputs_.display_list,
-                                  picture_layer_inputs_.recorded_viewport);
-
-  // Inform picture cache about which SkPictures are now in use.
-  for (uint32_t engine_picture_id : used_engine_picture_ids)
-    layer_tree_host()->client_picture_cache()->MarkUsed(engine_picture_id);
-
-  Region new_invalidation = RegionFromProto(picture.invalidation());
-  last_updated_invalidation_.Swap(&new_invalidation);
-  is_mask_ = picture.is_mask();
-  picture_layer_inputs_.nearest_neighbor = picture.nearest_neighbor();
-
-  update_source_frame_number_ = picture.update_source_frame_number();
 }
 
 void PictureLayer::RunMicroBenchmark(MicroBenchmark* benchmark) {
@@ -286,7 +236,7 @@ void PictureLayer::RunMicroBenchmark(MicroBenchmark* benchmark) {
 }
 
 void PictureLayer::DropRecordingSourceContentIfInvalid() {
-  int source_frame_number = layer_tree_host()->source_frame_number();
+  int source_frame_number = layer_tree_host()->SourceFrameNumber();
   gfx::Size recording_source_bounds = recording_source_->GetSize();
 
   gfx::Size layer_bounds = bounds();

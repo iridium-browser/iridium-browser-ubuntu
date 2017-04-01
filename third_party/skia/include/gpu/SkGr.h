@@ -9,16 +9,16 @@
 #define SkGr_DEFINED
 
 #include "GrColor.h"
-#include "GrTextureAccess.h"
+#include "GrSamplerParams.h"
 #include "SkColor.h"
 #include "SkColorPriv.h"
 #include "SkFilterQuality.h"
 #include "SkImageInfo.h"
 
 class GrCaps;
+class GrColorSpaceXform;
 class GrContext;
 class GrTexture;
-class GrTextureParams;
 class SkBitmap;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -40,6 +40,17 @@ static inline GrColor SkColorToUnpremulGrColor(SkColor c) {
     unsigned a = SkColorGetA(c);
     return GrColorPackRGBA(r, g, b, a);
 }
+
+/** Transform an SkColor (sRGB bytes) to GrColor4f for the specified color space. */
+GrColor4f SkColorToPremulGrColor4f(SkColor c, SkColorSpace* dstColorSpace);
+GrColor4f SkColorToUnpremulGrColor4f(SkColor c, SkColorSpace* dstColorSpace);
+
+/**
+ * As above, but with explicit control over the linearization and gamut xform steps.
+ * Typically used when you have easy access to a pre-computed xform.
+ */
+GrColor4f SkColorToPremulGrColor4f(SkColor c, bool gammaCorrect, GrColorSpaceXform* gamutXform);
+GrColor4f SkColorToUnpremulGrColor4f(SkColor c, bool gammaCorrect, GrColorSpaceXform* gamutXform);
 
 static inline GrColor SkColorToOpaqueGrColor(SkColor c) {
     unsigned r = SkColorGetR(c);
@@ -65,24 +76,17 @@ static inline GrColor SkPMColorToGrColor(SkPMColor c) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-/** Returns a texture representing the bitmap that is compatible with the GrTextureParams. The
+/** Returns a texture representing the bitmap that is compatible with the GrSamplerParams. The
     texture is inserted into the cache (unless the bitmap is marked volatile) and can be
     retrieved again via this function. */
-GrTexture* GrRefCachedBitmapTexture(GrContext*, const SkBitmap&, const GrTextureParams&,
-                                    SkSourceGammaTreatment);
+GrTexture* GrRefCachedBitmapTexture(GrContext*, const SkBitmap&, const GrSamplerParams&);
 
-sk_sp<GrTexture> GrMakeCachedBitmapTexture(GrContext*, const SkBitmap&, const GrTextureParams&,
-                                           SkSourceGammaTreatment);
+sk_sp<GrTexture> GrMakeCachedBitmapTexture(GrContext*, const SkBitmap&, const GrSamplerParams&);
 
 // TODO: Move SkImageInfo2GrPixelConfig to SkGrPriv.h (requires cleanup to SkWindow its subclasses).
-GrPixelConfig SkImageInfo2GrPixelConfig(SkColorType, SkAlphaType, const SkColorSpace*,
-                                        const GrCaps&);
+GrPixelConfig SkImageInfo2GrPixelConfig(const SkImageInfo& info, const GrCaps& caps);
 
-static inline GrPixelConfig SkImageInfo2GrPixelConfig(const SkImageInfo& info, const GrCaps& caps) {
-    return SkImageInfo2GrPixelConfig(info.colorType(), info.alphaType(), info.colorSpace(), caps);
-}
-
-GrTextureParams::FilterMode GrSkFilterQualityToGrFilterMode(SkFilterQuality paintFilterQuality,
+GrSamplerParams::FilterMode GrSkFilterQualityToGrFilterMode(SkFilterQuality paintFilterQuality,
                                                             const SkMatrix& viewM,
                                                             const SkMatrix& localM,
                                                             bool* doBicubic);

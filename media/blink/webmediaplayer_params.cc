@@ -22,7 +22,7 @@ WebMediaPlayerParams::WebMediaPlayerParams(
     const AdjustAllocatedMemoryCB& adjust_allocated_memory_cb,
     blink::WebContentDecryptionModule* initial_cdm,
     SurfaceManager* surface_manager,
-    blink::WebMediaSession* media_session)
+    base::WeakPtr<MediaObserver> media_observer)
     : defer_load_cb_(defer_load_cb),
       audio_renderer_sink_(audio_renderer_sink),
       media_log_(media_log),
@@ -33,7 +33,7 @@ WebMediaPlayerParams::WebMediaPlayerParams(
       adjust_allocated_memory_cb_(adjust_allocated_memory_cb),
       initial_cdm_(initial_cdm),
       surface_manager_(surface_manager),
-      media_session_(media_session) {}
+      media_observer_(media_observer) {}
 
 WebMediaPlayerParams::~WebMediaPlayerParams() {}
 

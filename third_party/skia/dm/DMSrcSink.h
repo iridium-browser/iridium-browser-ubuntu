@@ -118,6 +118,7 @@ public:
         kStripe_Mode, // Tests the skipping of scanlines
         kCroppedScanline_Mode, // Tests (jpeg) cropped scanline optimization
         kSubset_Mode, // For codecs that support subsets directly.
+        kAnimated_Mode, // For codecs that support animation.
     };
     enum DstColorType {
         kGetFromCanvas_DstColorType,
@@ -218,11 +219,6 @@ public:
         kDst_HPZR30w_Mode,
 
         kDst_sRGB_Mode,
-
-#if defined(SK_TEST_QCMS)
-        // Use QCMS for color correction.
-        kQCMS_HPZR30w_Mode,
-#endif
     };
 
     ColorCodecSrc(Path, Mode, SkColorType);
@@ -249,6 +245,12 @@ private:
 };
 
 #if defined(SK_XML)
+} // namespace DM
+
+class SkSVGDOM;
+
+namespace DM {
+
 class SVGSrc : public Src {
 public:
     explicit SVGSrc(Path path);
@@ -259,7 +261,9 @@ public:
     bool veto(SinkFlags) const override;
 
 private:
-    Path fPath;
+    Name            fName;
+    sk_sp<SkSVGDOM> fDom;
+    SkScalar        fScale;
 
     typedef Src INHERITED;
 };
@@ -333,6 +337,15 @@ public:
     SinkFlags flags() const override { return SinkFlags{ SinkFlags::kVector, SinkFlags::kDirect }; }
 };
 
+class PipeSink : public Sink {
+public:
+    PipeSink();
+    
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+    const char* fileExtension() const override { return "skpipe"; }
+    SinkFlags flags() const override { return SinkFlags{ SinkFlags::kVector, SinkFlags::kDirect }; }
+};
+
 class RasterSink : public Sink {
 public:
     explicit RasterSink(SkColorType, sk_sp<SkColorSpace> = nullptr);
@@ -351,6 +364,13 @@ public:
 
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
     const char* fileExtension() const override { return "skp"; }
+    SinkFlags flags() const override { return SinkFlags{ SinkFlags::kVector, SinkFlags::kDirect }; }
+};
+
+class DebugSink : public Sink {
+public:
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+    const char* fileExtension() const override { return "json"; }
     SinkFlags flags() const override { return SinkFlags{ SinkFlags::kVector, SinkFlags::kDirect }; }
 };
 
@@ -377,7 +397,7 @@ public:
         return flags;
     }
 protected:
-    SkAutoTDelete<Sink> fSink;
+    std::unique_ptr<Sink> fSink;
 };
 
 class ViaMatrix : public Via {
@@ -408,6 +428,12 @@ public:
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
 };
 
+class ViaPipe : public Via {
+public:
+    explicit ViaPipe(Sink* sink) : Via(sink) {}
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+};
+
 class ViaDefer : public Via {
 public:
     explicit ViaDefer(Sink* sink) : Via(sink) {}
@@ -420,7 +446,7 @@ public:
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
 private:
     const int                   fW, fH;
-    SkAutoTDelete<SkBBHFactory> fFactory;
+    std::unique_ptr<SkBBHFactory> fFactory;
 };
 
 class ViaSecondPicture : public Via {

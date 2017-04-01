@@ -38,13 +38,13 @@ class SchedulerClient {
   virtual void WillBeginImplFrame(const BeginFrameArgs& args) = 0;
   virtual void ScheduledActionSendBeginMainFrame(
       const BeginFrameArgs& args) = 0;
-  virtual DrawResult ScheduledActionDrawAndSwapIfPossible() = 0;
-  virtual DrawResult ScheduledActionDrawAndSwapForced() = 0;
+  virtual DrawResult ScheduledActionDrawIfPossible() = 0;
+  virtual DrawResult ScheduledActionDrawForced() = 0;
   virtual void ScheduledActionCommit() = 0;
   virtual void ScheduledActionActivateSyncTree() = 0;
-  virtual void ScheduledActionBeginOutputSurfaceCreation() = 0;
+  virtual void ScheduledActionBeginCompositorFrameSinkCreation() = 0;
   virtual void ScheduledActionPrepareTiles() = 0;
-  virtual void ScheduledActionInvalidateOutputSurface() = 0;
+  virtual void ScheduledActionInvalidateCompositorFrameSink() = 0;
   virtual void DidFinishImplFrame() = 0;
   virtual void SendBeginMainFrameNotExpectedSoon() = 0;
 
@@ -54,25 +54,24 @@ class SchedulerClient {
 
 class CC_EXPORT Scheduler : public BeginFrameObserverBase {
  public:
-  static std::unique_ptr<Scheduler> Create(
-      SchedulerClient* client,
-      const SchedulerSettings& scheduler_settings,
-      int layer_tree_host_id,
-      base::SingleThreadTaskRunner* task_runner,
-      BeginFrameSource* begin_frame_source,
-      std::unique_ptr<CompositorTimingHistory> compositor_timing_history);
-
+  Scheduler(SchedulerClient* client,
+            const SchedulerSettings& scheduler_settings,
+            int layer_tree_host_id,
+            base::SingleThreadTaskRunner* task_runner,
+            std::unique_ptr<CompositorTimingHistory> compositor_timing_history);
   ~Scheduler() override;
+
+  // This is needed so that the scheduler doesn't perform spurious actions while
+  // the compositor is being torn down.
+  void Stop();
 
   // BeginFrameObserverBase
   void OnBeginFrameSourcePausedChanged(bool paused) override;
   bool OnBeginFrameDerivedImpl(const BeginFrameArgs& args) override;
 
-  void OnDrawForOutputSurface(bool resourceless_software_draw);
+  void OnDrawForCompositorFrameSink(bool resourceless_software_draw);
 
   const SchedulerSettings& settings() const { return settings_; }
-
-  void SetEstimatedParentDrawTime(base::TimeDelta draw_time);
 
   void SetVisible(bool visible);
   bool visible() { return state_machine_.visible(); }
@@ -90,8 +89,12 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
 
   void SetNeedsPrepareTiles();
 
-  void DidSwapBuffers();
-  void DidSwapBuffersComplete();
+  // Drawing should result in submitting a CompositorFrame to the
+  // CompositorFrameSink and then calling this.
+  void DidSubmitCompositorFrame();
+  // The CompositorFrameSink acks when it is ready for a new frame which
+  // should result in this getting called to unblock the next draw.
+  void DidReceiveCompositorFrameAck();
 
   void SetTreePrioritiesAndScrollState(TreePriority tree_priority,
                                        ScrollHandlerState scroll_handler_state);
@@ -102,8 +105,8 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
 
   void WillPrepareTiles();
   void DidPrepareTiles();
-  void DidLoseOutputSurface();
-  void DidCreateAndInitializeOutputSurface();
+  void DidLoseCompositorFrameSink();
+  void DidCreateAndInitializeCompositorFrameSink();
 
   // Tests do not want to shut down until all possible BeginMainFrames have
   // occured to prevent flakiness.
@@ -140,13 +143,6 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
   }
 
  protected:
-  Scheduler(SchedulerClient* client,
-            const SchedulerSettings& scheduler_settings,
-            int layer_tree_host_id,
-            base::SingleThreadTaskRunner* task_runner,
-            BeginFrameSource* begin_frame_source,
-            std::unique_ptr<CompositorTimingHistory> compositor_timing_history);
-
   // Virtual for testing.
   virtual base::TimeTicks Now() const;
 
@@ -161,31 +157,29 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
   bool observing_begin_frame_source_;
 
   std::unique_ptr<CompositorTimingHistory> compositor_timing_history_;
-  base::TimeDelta estimated_parent_draw_time_;
 
-  std::deque<BeginFrameArgs> begin_retro_frame_args_;
   SchedulerStateMachine::BeginImplFrameDeadlineMode
       begin_impl_frame_deadline_mode_;
   BeginFrameTracker begin_impl_frame_tracker_;
   BeginFrameArgs begin_main_frame_args_;
 
-  base::Closure begin_retro_frame_closure_;
   base::Closure begin_impl_frame_deadline_closure_;
-  base::CancelableClosure begin_retro_frame_task_;
   base::CancelableClosure begin_impl_frame_deadline_task_;
+  base::CancelableClosure missed_begin_frame_task_;
 
   SchedulerStateMachine state_machine_;
   bool inside_process_scheduled_actions_;
   SchedulerStateMachine::Action inside_action_;
+
+  bool stopped_;
 
  private:
   void ScheduleBeginImplFrameDeadline();
   void ScheduleBeginImplFrameDeadlineIfNeeded();
   void BeginImplFrameNotExpectedSoon();
   void SetupNextBeginFrameIfNeeded();
-  void PostBeginRetroFrameIfNeeded();
-  void DrawAndSwapIfPossible();
-  void DrawAndSwapForced();
+  void DrawIfPossible();
+  void DrawForced();
   void ProcessScheduledActions();
   void UpdateCompositorTimingHistoryRecordingEnabled();
   bool ShouldRecoverMainLatency(const BeginFrameArgs& args,
@@ -194,20 +188,16 @@ class CC_EXPORT Scheduler : public BeginFrameObserverBase {
                                 bool can_activate_before_deadline) const;
   bool CanBeginMainFrameAndActivateBeforeDeadline(
       const BeginFrameArgs& args,
-      base::TimeDelta bmf_to_activate_estimate) const;
+      base::TimeDelta bmf_to_activate_estimate,
+      base::TimeTicks now) const;
   void AdvanceCommitStateIfPossible();
   bool IsBeginMainFrameSentOrStarted() const;
-  void BeginRetroFrame();
   void BeginImplFrameWithDeadline(const BeginFrameArgs& args);
   void BeginImplFrameSynchronous(const BeginFrameArgs& args);
   void BeginImplFrame(const BeginFrameArgs& args);
   void FinishImplFrame();
   void OnBeginImplFrameDeadline();
   void PollToAdvanceCommitState();
-
-  base::TimeDelta EstimatedParentDrawTime() {
-    return estimated_parent_draw_time_;
-  }
 
   bool IsInsideAction(SchedulerStateMachine::Action action) {
     return inside_action_ == action;

@@ -28,7 +28,6 @@ BRANDINGS = [
     'Chrome',
     'ChromeOS',
     'Chromium',
-    'ChromiumOS',
 ]
 
 
@@ -68,7 +67,7 @@ Platform specific build notes:
     src/third_party/llvm-build/Release+Asserts/bin
 
   win:
-    Script must be run on Windows with VS2013 or higher under Cygwin (or MinGW,
+    Script must be run on Windows with VS2015 or higher under Cygwin (or MinGW,
     but as of 1.0.11, it has serious performance issues with make which makes
     building take hours).
 
@@ -86,7 +85,6 @@ Resulting binaries will be placed in:
   build.TARGET_ARCH.TARGET_OS/Chrome/out/
   build.TARGET_ARCH.TARGET_OS/ChromeOS/out/
   build.TARGET_ARCH.TARGET_OS/Chromium/out/
-  build.TARGET_ARCH.TARGET_OS/ChromiumOS/out/
   """
 
 
@@ -166,7 +164,7 @@ def SetupAndroidToolchain(target_arch):
   sysroot_arch = target_arch
   toolchain_dir_prefix = target_arch
   toolchain_bin_prefix = target_arch
-  if target_arch in ('arm', 'arm-neon'):
+  if target_arch == 'arm-neon':
     toolchain_bin_prefix = toolchain_dir_prefix = 'arm-linux-androideabi'
     sysroot_arch = 'arm'
   elif target_arch == 'arm64':
@@ -210,6 +208,28 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   PrintAndCheckCall(
       [os.path.join(FFMPEG_DIR, 'configure')] + configure_flags, cwd=config_dir)
 
+  RewriteFile(
+      os.path.join(config_dir, 'config.h'),
+      r'(#define HAVE_VALGRIND_VALGRIND_H [01])',
+      (r'#define HAVE_VALGRIND_VALGRIND_H 0 /* \1 -- forced to 0. See https://crbug.com/590440 */'))
+
+  if target_os == 'android':
+      RewriteFile(
+          os.path.join(config_dir, 'config.h'),
+          r'(#define HAVE_POSIX_MEMALIGN [01])',
+          (r'#define HAVE_POSIX_MEMALIGN 0 /* \1 -- forced to 0. See https://crbug.com/604451 */'))
+
+  # Windows linking resolves external symbols. Since generate_gn.py does not
+  # need a functioning set of libraries, ignore unresolved symbols here.
+  # This is especially useful here to avoid having to build a local libopus for
+  # windows. We munge the output of configure here to avoid this LDFLAGS setting
+  # triggering mis-detection during configure execution.
+  if target_os == 'win':
+      RewriteFile(
+          os.path.join(config_dir, 'config.mak'),
+          r'(LDFLAGS=.*)',
+          (r'\1 -FORCE:UNRESOLVED'))
+
   if target_os in (host_os, host_os + '-noasm', 'android') and not config_only:
     libraries = [
         os.path.join('libavcodec', GetDsoName(target_os, 'avcodec', 57)),
@@ -232,11 +252,11 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
           'Host arch : %s\n'
           'Target arch : %s\n' % (host_os, target_os, host_arch, target_arch))
 
-  if target_arch in ('arm', 'arm-neon'):
+  if target_arch in ('arm', 'arm-neon', 'arm64'):
     RewriteFile(
         os.path.join(config_dir, 'config.h'),
         r'(#define HAVE_VFP_ARGS [01])',
-        r'/* \1 -- Disabled to allow softfp/hardfp selection at gyp time */')
+        (r'/* \1 -- softfp/hardfp selection is done by the chrome build */'))
 
 
 def main(argv):
@@ -246,7 +266,7 @@ def main(argv):
                     help='Branding to build; determines e.g. supported codecs')
   parser.add_option('--config-only', action='store_true',
                     help='Skip the build step. Useful when a given platform '
-                    'is not necessary for generate_gyp.py')
+                    'is not necessary for generate_gn.py')
   options, args = parser.parse_args(argv)
 
   if len(args) < 2:
@@ -300,6 +320,7 @@ def main(argv):
       '--enable-fft',
       '--enable-rdft',
       '--enable-static',
+      '--enable-libopus',
 
       # Disable features.
       '--disable-bzlib',
@@ -322,13 +343,20 @@ def main(argv):
       '--disable-vda',
       '--disable-vdpau',
       '--disable-videotoolbox',
+      '--disable-nvenc',
+      '--disable-cuda',
+      '--disable-cuvid',
 
       # Common codecs.
-      '--enable-decoder=vorbis',
+      '--enable-decoder=vorbis,libopus,flac',
       '--enable-decoder=pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le',
       '--enable-decoder=pcm_s16be,pcm_s24be,pcm_mulaw,pcm_alaw',
-      '--enable-demuxer=ogg,matroska,wav',
-      '--enable-parser=opus,vorbis',
+      '--enable-demuxer=ogg,matroska,wav,flac',
+      '--enable-parser=opus,vorbis,flac',
+
+      # Setup include path so Chromium's libopus can be used.
+      '--extra-cflags=-I' + os.path.join(CHROMIUM_ROOT_DIR,
+                                         'third_party/opus/src/include')
   ])
 
   if target_os == 'android':
@@ -401,7 +429,8 @@ def main(argv):
             # av_get_cpu_flags() is run outside of the sandbox when enabled.
             '--enable-neon',
             '--extra-cflags=-mtune=generic-armv7-a',
-            # NOTE: softfp/hardfp selected at gyp time.
+            # Enabling softfp lets us choose either softfp or hardfp when doing
+            # the chrome build.
             '--extra-cflags=-mfloat-abi=softfp',
         ])
         if target_arch == 'arm-neon':
@@ -420,7 +449,7 @@ def main(argv):
             '--target-os=linux',
             '--cross-prefix=armv7a-cros-linux-gnueabi-',
             '--extra-cflags=-mtune=cortex-a8',
-            # NOTE: softfp/hardfp selected at gyp time.
+            # NOTE: we don't need softfp for this hardware.
             '--extra-cflags=-mfloat-abi=hard',
         ])
 
@@ -518,6 +547,14 @@ def main(argv):
         '--cc=clang',
         '--cxx=clang++',
     ])
+
+    # Mac dylib building resolves external symbols. We need to explicitly
+    # include -lopus to point to the system libopus so we can build
+    # libavcodec.XX.dylib.
+    configure_flags['Common'].extend([
+        '--extra-libs=-lopus',
+    ])
+
     if target_arch == 'x64':
       configure_flags['Common'].extend([
           '--arch=x86_64',
@@ -556,15 +593,6 @@ def main(argv):
       '--enable-parser=aac,h264,mpegaudio',
   ])
 
-  # ChromiumOS specific configuration.
-  # Warning: do *NOT* add avi, aac, h264, mp3, mp4, amr*
-  # Flac support.
-  configure_flags['ChromiumOS'].extend([
-      '--enable-demuxer=flac',
-      '--enable-decoder=flac',
-      '--enable-parser=flac',
-  ])
-
   # Google ChromeOS specific configuration.
   # We want to make sure to play everything Android generates and plays.
   # http://developer.android.com/guide/appendix/media-formats.html
@@ -576,10 +604,6 @@ def main(argv):
       # Enable playing Android 3gp files.
       '--enable-demuxer=amr',
       '--enable-decoder=amrnb,amrwb',
-      # Flac support.
-      '--enable-demuxer=flac',
-      '--enable-decoder=flac',
-      '--enable-parser=flac',
       # Wav files for playing phone messages.
       '--enable-decoder=gsm_ms',
       '--enable-demuxer=gsm',
@@ -625,11 +649,6 @@ def main(argv):
                     configure_args)
 
   if target_os in ['linux', 'linux-noasm']:
-    do_build_ffmpeg('ChromiumOS',
-                    configure_flags['Common'] +
-                    configure_flags['Chromium'] +
-                    configure_flags['ChromiumOS'] +
-                    configure_args)
     # ChromeOS enables MPEG4 which requires error resilience :(
     chrome_os_flags = (configure_flags['Common'] +
                        configure_flags['Chrome'] +

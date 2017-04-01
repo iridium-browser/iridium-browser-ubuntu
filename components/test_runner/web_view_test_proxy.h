@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_TEST_RUNNER_WEB_TEST_PROXY_H_
-#define COMPONENTS_TEST_RUNNER_WEB_TEST_PROXY_H_
+#ifndef COMPONENTS_TEST_RUNNER_WEB_VIEW_TEST_PROXY_H_
+#define COMPONENTS_TEST_RUNNER_WEB_VIEW_TEST_PROXY_H_
 
 #include <memory>
 #include <string>
@@ -15,6 +15,7 @@
 #include "components/test_runner/test_runner_export.h"
 #include "components/test_runner/web_view_test_client.h"
 #include "components/test_runner/web_widget_test_client.h"
+#include "components/test_runner/web_widget_test_proxy.h"
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
@@ -29,13 +30,11 @@
 
 namespace blink {
 class WebDragData;
-class WebFileChooserCompletion;
 class WebImage;
 class WebLocalFrame;
 class WebString;
 class WebView;
 class WebWidget;
-struct WebFileChooserParams;
 struct WebPoint;
 struct WebWindowFeatures;
 }
@@ -43,7 +42,6 @@ struct WebWindowFeatures;
 namespace test_runner {
 
 class AccessibilityController;
-class EventSender;
 class TestInterfaces;
 class TestRunnerForSpecificView;
 class TextInputController;
@@ -55,15 +53,8 @@ class WebTestInterfaces;
 // WebViewTestProxyBase and when it requires a behavior to be different from the
 // usual, it will call WebViewTestProxyBase that implements the expected
 // behavior. See WebViewTestProxy class comments for more information.
-class TEST_RUNNER_EXPORT WebViewTestProxyBase {
+class TEST_RUNNER_EXPORT WebViewTestProxyBase : public WebWidgetTestProxyBase {
  public:
-  blink::WebWidget* web_widget() { return web_widget_; }
-  void set_web_widget(blink::WebWidget* widget) {
-    DCHECK(widget);
-    DCHECK(!web_widget_);
-    web_widget_ = widget;
-  }
-
   blink::WebView* web_view() { return web_view_; }
   void set_web_view(blink::WebView* view) {
     DCHECK(view);
@@ -78,13 +69,6 @@ class TEST_RUNNER_EXPORT WebViewTestProxyBase {
     view_test_client_ = std::move(view_test_client);
   }
 
-  void set_widget_test_client(
-      std::unique_ptr<WebWidgetTestClient> widget_test_client) {
-    DCHECK(widget_test_client);
-    DCHECK(!widget_test_client_);
-    widget_test_client_ = std::move(widget_test_client);
-  }
-
   WebTestDelegate* delegate() { return delegate_; }
   void set_delegate(WebTestDelegate* delegate) {
     DCHECK(delegate);
@@ -94,8 +78,6 @@ class TEST_RUNNER_EXPORT WebViewTestProxyBase {
 
   TestInterfaces* test_interfaces() { return test_interfaces_; }
   void SetInterfaces(WebTestInterfaces* web_test_interfaces);
-
-  EventSender* event_sender() { return event_sender_.get(); }
 
   AccessibilityController* accessibility_controller() {
     return accessibility_controller_.get();
@@ -115,9 +97,6 @@ class TEST_RUNNER_EXPORT WebViewTestProxyBase {
   ~WebViewTestProxyBase();
 
   blink::WebViewClient* view_test_client() { return view_test_client_.get(); }
-  blink::WebWidgetClient* widget_test_client() {
-    return widget_test_client_.get();
-  }
 
  private:
   TestInterfaces* test_interfaces_;
@@ -125,9 +104,7 @@ class TEST_RUNNER_EXPORT WebViewTestProxyBase {
   blink::WebView* web_view_;
   blink::WebWidget* web_widget_;
   std::unique_ptr<WebViewTestClient> view_test_client_;
-  std::unique_ptr<WebWidgetTestClient> widget_test_client_;
   std::unique_ptr<AccessibilityController> accessibility_controller_;
-  std::unique_ptr<EventSender> event_sender_;
   std::unique_ptr<TextInputController> text_input_controller_;
   std::unique_ptr<TestRunnerForSpecificView> view_test_runner_;
 
@@ -193,15 +170,14 @@ class WebViewTestProxy : public Base, public WebViewTestProxyBase {
     widget_test_client()->setToolTipText(text, hint);
     Base::setToolTipText(text, hint);
   }
-  void resetInputMethod() override { widget_test_client()->resetInputMethod(); }
 
   // WebViewClient implementation.
-  void startDragging(blink::WebLocalFrame* frame,
+  void startDragging(blink::WebReferrerPolicy policy,
                      const blink::WebDragData& data,
                      blink::WebDragOperationsMask mask,
                      const blink::WebImage& image,
                      const blink::WebPoint& point) override {
-    view_test_client()->startDragging(frame, data, mask, image, point);
+    widget_test_client()->startDragging(policy, data, mask, image, point);
     // Don't forward this call to Base because we don't want to do a real
     // drag-and-drop.
   }
@@ -253,4 +229,4 @@ class WebViewTestProxy : public Base, public WebViewTestProxyBase {
 
 }  // namespace test_runner
 
-#endif  // COMPONENTS_TEST_RUNNER_WEB_TEST_PROXY_H_
+#endif  // COMPONENTS_TEST_RUNNER_WEB_VIEW_TEST_PROXY_H_

@@ -11,6 +11,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -25,6 +26,7 @@
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebSettings.h"
+#include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/accessibility/ax_node.h"
 
@@ -39,6 +41,12 @@ using blink::WebRect;
 using blink::WebScopedAXContext;
 using blink::WebSettings;
 using blink::WebView;
+
+namespace {
+// The next token to use to distinguish between ack events sent to this
+// RenderAccessibilityImpl and a previous instance.
+static int g_next_ack_token = 1;
+}
 
 namespace content {
 
@@ -61,32 +69,27 @@ void RenderAccessibilityImpl::SnapshotAccessibilityTree(
   WebAXObject root = context.root();
   if (!root.updateLayoutAndCheckValidity())
     return;
-  BlinkAXTreeSource tree_source(render_frame);
+  BlinkAXTreeSource tree_source(render_frame, ACCESSIBILITY_MODE_COMPLETE);
   tree_source.SetRoot(root);
+  ScopedFreezeBlinkAXTreeSource freeze(&tree_source);
   BlinkAXTreeSerializer serializer(&tree_source);
   serializer.set_max_node_count(kMaxSnapshotNodeCount);
   serializer.SerializeChanges(context.root(), response);
 }
 
-RenderAccessibilityImpl::RenderAccessibilityImpl(RenderFrameImpl* render_frame)
+RenderAccessibilityImpl::RenderAccessibilityImpl(RenderFrameImpl* render_frame,
+                                                 AccessibilityMode mode)
     : RenderFrameObserver(render_frame),
       render_frame_(render_frame),
-      tree_source_(render_frame),
+      tree_source_(render_frame, mode),
       serializer_(&tree_source_),
-      pdf_tree_source_(nullptr),
+      plugin_tree_source_(nullptr),
       last_scroll_offset_(gfx::Size()),
       ack_pending_(false),
       reset_token_(0),
+      during_action_(false),
       weak_factory_(this) {
-  // There's only one AXObjectCache for the root of a local frame tree,
-  // so if this frame's parent is local we can safely do nothing.
-  if (render_frame_ &&
-      render_frame_->GetWebFrame() &&
-      render_frame_->GetWebFrame()->parent() &&
-      render_frame_->GetWebFrame()->parent()->isWebLocalFrame()) {
-    return;
-  }
-
+  ack_token_ = g_next_ack_token++;
   WebView* web_view = render_frame_->GetRenderView()->GetWebView();
   WebSettings* settings = web_view->settings();
   settings->setAccessibilityEnabled(true);
@@ -97,8 +100,10 @@ RenderAccessibilityImpl::RenderAccessibilityImpl(RenderFrameImpl* render_frame)
 #endif
 
 #if !defined(OS_ANDROID)
-  // Inline text boxes are enabled for all nodes on all except Android.
-  settings->setInlineTextBoxAccessibilityEnabled(true);
+  // Inline text boxes can be enabled globally on all except Android.
+  // On Android they can be requested for just a specific node.
+  if (mode & ACCESSIBILITY_MODE_FLAG_INLINE_TEXT_BOXES)
+    settings->setInlineTextBoxAccessibilityEnabled(true);
 #endif
 
   const WebDocument& document = GetMainDocument();
@@ -115,24 +120,16 @@ RenderAccessibilityImpl::~RenderAccessibilityImpl() {
 
 bool RenderAccessibilityImpl::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
+  during_action_ = true;
   IPC_BEGIN_MESSAGE_MAP(RenderAccessibilityImpl, message)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetFocus, OnSetFocus)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_DoDefaultAction, OnDoDefaultAction)
+    IPC_MESSAGE_HANDLER(AccessibilityMsg_PerformAction, OnPerformAction)
     IPC_MESSAGE_HANDLER(AccessibilityMsg_Events_ACK, OnEventsAck)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_ScrollToMakeVisible,
-                        OnScrollToMakeVisible)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_ScrollToPoint, OnScrollToPoint)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetScrollOffset, OnSetScrollOffset)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetSelection, OnSetSelection)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetValue, OnSetValue)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_ShowContextMenu, OnShowContextMenu)
     IPC_MESSAGE_HANDLER(AccessibilityMsg_HitTest, OnHitTest)
-    IPC_MESSAGE_HANDLER(AccessibilityMsg_SetAccessibilityFocus,
-                        OnSetAccessibilityFocus)
     IPC_MESSAGE_HANDLER(AccessibilityMsg_Reset, OnReset)
     IPC_MESSAGE_HANDLER(AccessibilityMsg_FatalError, OnFatalError)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
+  during_action_ = false;
   return handled;
 }
 
@@ -193,17 +190,19 @@ void RenderAccessibilityImpl::HandleAXEvent(
   if (document.isNull())
     return;
 
-  gfx::Size scroll_offset = document.frame()->scrollOffset();
-  if (scroll_offset != last_scroll_offset_) {
-    // Make sure the browser is always aware of the scroll position of
-    // the root document element by posting a generic notification that
-    // will update it.
-    // TODO(dmazzoni): remove this as soon as
-    // https://bugs.webkit.org/show_bug.cgi?id=73460 is fixed.
-    last_scroll_offset_ = scroll_offset;
-    if (!obj.equals(document.accessibilityObject())) {
-      HandleAXEvent(document.accessibilityObject(),
-                    ui::AX_EVENT_LAYOUT_COMPLETE);
+  if (document.frame()) {
+    gfx::Size scroll_offset = document.frame()->getScrollOffset();
+    if (scroll_offset != last_scroll_offset_) {
+      // Make sure the browser is always aware of the scroll position of
+      // the root document element by posting a generic notification that
+      // will update it.
+      // TODO(dmazzoni): remove this as soon as
+      // https://bugs.webkit.org/show_bug.cgi?id=73460 is fixed.
+      last_scroll_offset_ = scroll_offset;
+      if (!obj.equals(document.accessibilityObject())) {
+        HandleAXEvent(document.accessibilityObject(),
+                      ui::AX_EVENT_LAYOUT_COMPLETE);
+      }
     }
   }
 
@@ -218,6 +217,13 @@ void RenderAccessibilityImpl::HandleAXEvent(
   AccessibilityHostMsg_EventParams acc_event;
   acc_event.id = obj.axID();
   acc_event.event_type = event;
+
+  if (blink::WebUserGestureIndicator::isProcessingUserGesture())
+    acc_event.event_from = ui::AX_EVENT_FROM_USER;
+  else if (during_action_)
+    acc_event.event_from = ui::AX_EVENT_FROM_ACTION;
+  else
+    acc_event.event_from = ui::AX_EVENT_FROM_PAGE;
 
   // Discard duplicate accessibility events.
   for (uint32_t i = 0; i < pending_events_.size(); ++i) {
@@ -244,11 +250,20 @@ int RenderAccessibilityImpl::GenerateAXID() {
   return root.generateAXID();
 }
 
-void RenderAccessibilityImpl::SetPdfTreeSource(
-    RenderAccessibilityImpl::PdfAXTreeSource* pdf_tree_source) {
-  pdf_tree_source_ = pdf_tree_source;
-  pdf_serializer_.reset(new PdfAXTreeSerializer(pdf_tree_source_));
+void RenderAccessibilityImpl::SetPluginTreeSource(
+    RenderAccessibilityImpl::PluginAXTreeSource* plugin_tree_source) {
+  plugin_tree_source_ = plugin_tree_source;
+  plugin_serializer_.reset(new PluginAXTreeSerializer(plugin_tree_source_));
 
+  OnPluginRootNodeUpdated();
+}
+
+void RenderAccessibilityImpl::OnPluginRootNodeUpdated() {
+  // Search the accessibility tree for an EMBED element and post a
+  // children changed notification on it to force it to update the
+  // plugin accessibility tree.
+
+  ScopedFreezeBlinkAXTreeSource freeze(&tree_source_);
   WebAXObject root = tree_source_.GetRoot();
   if (!root.updateLayoutAndCheckValidity())
     return;
@@ -320,6 +335,8 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
     while (!obj.isDetached() && obj.accessibilityIsIgnored())
       obj = obj.parentObject();
 
+    ScopedFreezeBlinkAXTreeSource freeze(&tree_source_);
+
     // Make sure it's a descendant of our root node - exceptions include the
     // scroll area that's the parent of the main document (we ignore it), and
     // possibly nodes attached to a different document.
@@ -329,13 +346,14 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
     AccessibilityHostMsg_EventParams event_msg;
     event_msg.event_type = event.event_type;
     event_msg.id = event.id;
+    event_msg.event_from = event.event_from;
     if (!serializer_.SerializeChanges(obj, &event_msg.update)) {
       LOG(ERROR) << "Failed to serialize one accessibility event.";
       continue;
     }
 
-    if (pdf_tree_source_)
-      AddPdfTreeToUpdate(&event_msg.update);
+    if (plugin_tree_source_)
+      AddPluginTreeToUpdate(&event_msg.update);
 
     event_msgs.push_back(event_msg);
 
@@ -351,12 +369,13 @@ void RenderAccessibilityImpl::SendPendingAccessibilityEvents() {
         dst.transform.reset(new gfx::Transform(*src.transform));
     }
 
-    DVLOG(0) << "Accessibility event: " << ui::ToString(event.event_type)
-             << " on node id " << event_msg.id
-             << "\n" << event_msg.update.ToString();
+    VLOG(1) << "Accessibility event: " << ui::ToString(event.event_type)
+            << " on node id " << event_msg.id
+            << "\n" << event_msg.update.ToString();
   }
 
-  Send(new AccessibilityHostMsg_Events(routing_id(), event_msgs, reset_token_));
+  Send(new AccessibilityHostMsg_Events(routing_id(), event_msgs, reset_token_,
+                                       ack_token_));
   reset_token_ = 0;
 
   if (had_layout_complete_messages)
@@ -367,6 +386,7 @@ void RenderAccessibilityImpl::SendLocationChanges() {
   std::vector<AccessibilityHostMsg_LocationChangeParams> messages;
 
   // Update layout on the root of the tree.
+  ScopedFreezeBlinkAXTreeSource freeze(&tree_source_);
   WebAXObject root = tree_source_.GetRoot();
   if (!root.updateLayoutAndCheckValidity())
     return;
@@ -419,23 +439,89 @@ void RenderAccessibilityImpl::SendLocationChanges() {
   Send(new AccessibilityHostMsg_LocationChanges(routing_id(), messages));
 }
 
-void RenderAccessibilityImpl::OnDoDefaultAction(int acc_obj_id) {
+void RenderAccessibilityImpl::OnPerformAction(
+    const ui::AXActionData& data) {
   const WebDocument& document = GetMainDocument();
   if (document.isNull())
     return;
 
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "DoDefaultAction on invalid object id " << acc_obj_id;
-#endif
+  WebAXObject root = document.accessibilityObject();
+  if (!root.updateLayoutAndCheckValidity())
     return;
-  }
 
-  obj.performDefaultAction();
+  WebAXObject target = document.accessibilityObjectFromID(data.target_node_id);
+  WebAXObject anchor = document.accessibilityObjectFromID(data.anchor_node_id);
+  WebAXObject focus = document.accessibilityObjectFromID(data.focus_node_id);
+
+  switch (data.action) {
+    case ui::AX_ACTION_BLUR:
+      target.setFocused(false);
+      break;
+    case ui::AX_ACTION_DECREMENT:
+      target.decrement();
+      break;
+    case ui::AX_ACTION_DO_DEFAULT:
+      target.performDefaultAction();
+      break;
+    case ui::AX_ACTION_GET_IMAGE_DATA:
+      OnGetImageData(target, data.target_rect.size());
+      break;
+    case ui::AX_ACTION_HIT_TEST:
+      OnHitTest(data.target_point);
+      break;
+    case ui::AX_ACTION_INCREMENT:
+      target.increment();
+      break;
+    case ui::AX_ACTION_SCROLL_TO_MAKE_VISIBLE:
+      target.scrollToMakeVisibleWithSubFocus(
+          WebRect(data.target_rect.x(), data.target_rect.y(),
+                  data.target_rect.width(), data.target_rect.height()));
+      break;
+    case ui::AX_ACTION_SCROLL_TO_POINT:
+      target.scrollToGlobalPoint(
+          WebPoint(data.target_point.x(), data.target_point.y()));
+      break;
+    case ui::AX_ACTION_SET_ACCESSIBILITY_FOCUS:
+      OnSetAccessibilityFocus(target);
+      break;
+    case ui::AX_ACTION_FOCUS:
+      // By convention, calling SetFocus on the root of the tree should
+      // clear the current focus. Otherwise set the focus to the new node.
+      if (data.target_node_id == root.axID())
+        render_frame_->GetRenderView()->GetWebView()->clearFocusedElement();
+      else
+        target.setFocused(true);
+      break;
+    case ui::AX_ACTION_SET_SCROLL_OFFSET:
+      target.setScrollOffset(
+          WebPoint(data.target_point.x(), data.target_point.y()));
+      break;
+    case ui::AX_ACTION_SET_SELECTION:
+      anchor.setSelection(anchor, data.anchor_offset, focus, data.focus_offset);
+      HandleAXEvent(root, ui::AX_EVENT_LAYOUT_COMPLETE);
+      break;
+    case ui::AX_ACTION_SET_SEQUENTIAL_FOCUS_NAVIGATION_STARTING_POINT:
+      target.setSequentialFocusNavigationStartingPoint();
+      break;
+    case ui::AX_ACTION_SET_VALUE:
+      target.setValue(data.value);
+      HandleAXEvent(target, ui::AX_EVENT_VALUE_CHANGED);
+      break;
+    case ui::AX_ACTION_SHOW_CONTEXT_MENU:
+      target.showContextMenu();
+      break;
+    case ui::AX_ACTION_REPLACE_SELECTED_TEXT:
+    case ui::AX_ACTION_NONE:
+      NOTREACHED();
+      break;
+  }
 }
 
-void RenderAccessibilityImpl::OnEventsAck() {
+void RenderAccessibilityImpl::OnEventsAck(int ack_token) {
+  // Ignore acks intended for a different or previous instance.
+  if (ack_token_ != ack_token)
+    return;
+
   DCHECK(ack_pending_);
   ack_pending_ = false;
   SendPendingAccessibilityEvents();
@@ -445,7 +531,7 @@ void RenderAccessibilityImpl::OnFatalError() {
   CHECK(false) << "Invalid accessibility tree.";
 }
 
-void RenderAccessibilityImpl::OnHitTest(gfx::Point point) {
+void RenderAccessibilityImpl::OnHitTest(const gfx::Point& point) {
   const WebDocument& document = GetMainDocument();
   if (document.isNull())
     return;
@@ -461,6 +547,7 @@ void RenderAccessibilityImpl::OnHitTest(gfx::Point point) {
   // message back to the browser to do the hit test in the child frame,
   // recursively.
   AXContentNodeData data;
+  ScopedFreezeBlinkAXTreeSource freeze(&tree_source_);
   tree_source_.SerializeNode(obj, &data);
   if (data.HasContentIntAttribute(AX_CONTENT_ATTR_CHILD_ROUTING_ID) ||
       data.HasContentIntAttribute(
@@ -474,17 +561,17 @@ void RenderAccessibilityImpl::OnHitTest(gfx::Point point) {
   HandleAXEvent(obj, ui::AX_EVENT_HOVER);
 }
 
-void RenderAccessibilityImpl::OnSetAccessibilityFocus(int acc_obj_id) {
-  if (tree_source_.accessibility_focus_id() == acc_obj_id)
+void RenderAccessibilityImpl::OnSetAccessibilityFocus(
+    const blink::WebAXObject& obj) {
+  ScopedFreezeBlinkAXTreeSource freeze(&tree_source_);
+  if (tree_source_.accessibility_focus_id() == obj.axID())
     return;
 
-  tree_source_.set_accessibility_focus_id(acc_obj_id);
+  tree_source_.set_accessibility_focus_id(obj.axID());
 
   const WebDocument& document = GetMainDocument();
   if (document.isNull())
     return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
 
   // This object may not be a leaf node. Force the whole subtree to be
   // re-serialized.
@@ -492,6 +579,23 @@ void RenderAccessibilityImpl::OnSetAccessibilityFocus(int acc_obj_id) {
 
   // Explicitly send a tree change update event now.
   HandleAXEvent(obj, ui::AX_EVENT_TREE_CHANGED);
+}
+
+void RenderAccessibilityImpl::OnGetImageData(
+    const blink::WebAXObject& obj, const gfx::Size& max_size) {
+  ScopedFreezeBlinkAXTreeSource freeze(&tree_source_);
+  if (tree_source_.image_data_node_id() == obj.axID())
+    return;
+
+  tree_source_.set_image_data_node_id(obj.axID());
+  tree_source_.set_max_image_data_size(max_size);
+
+  const WebDocument& document = GetMainDocument();
+  if (document.isNull())
+    return;
+
+  serializer_.DeleteClientSubtree(obj);
+  HandleAXEvent(obj, ui::AX_EVENT_IMAGE_FRAME_UPDATED);
 }
 
 void RenderAccessibilityImpl::OnReset(int reset_token) {
@@ -509,193 +613,59 @@ void RenderAccessibilityImpl::OnReset(int reset_token) {
   }
 }
 
-void RenderAccessibilityImpl::OnScrollToMakeVisible(
-    int acc_obj_id, gfx::Rect subfocus) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "ScrollToMakeVisible on invalid object id " << acc_obj_id;
-#endif
-    return;
-  }
-
-  obj.scrollToMakeVisibleWithSubFocus(
-      WebRect(subfocus.x(), subfocus.y(), subfocus.width(), subfocus.height()));
-
-  // Make sure the browser gets an event when the scroll
-  // position actually changes.
-  // TODO(dmazzoni): remove this once this bug is fixed:
-  // https://bugs.webkit.org/show_bug.cgi?id=73460
-  HandleAXEvent(document.accessibilityObject(), ui::AX_EVENT_LAYOUT_COMPLETE);
-}
-
-void RenderAccessibilityImpl::OnScrollToPoint(
-    int acc_obj_id, gfx::Point point) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "ScrollToPoint on invalid object id " << acc_obj_id;
-#endif
-    return;
-  }
-
-  obj.scrollToGlobalPoint(WebPoint(point.x(), point.y()));
-
-  // Make sure the browser gets an event when the scroll
-  // position actually changes.
-  // TODO(dmazzoni): remove this once this bug is fixed:
-  // https://bugs.webkit.org/show_bug.cgi?id=73460
-  HandleAXEvent(document.accessibilityObject(), ui::AX_EVENT_LAYOUT_COMPLETE);
-}
-
-void RenderAccessibilityImpl::OnSetScrollOffset(int acc_obj_id,
-                                              gfx::Point offset) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached())
-    return;
-
-  obj.setScrollOffset(WebPoint(offset.x(), offset.y()));
-}
-
-void RenderAccessibilityImpl::OnSetFocus(int acc_obj_id) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "OnSetAccessibilityFocus on invalid object id "
-                 << acc_obj_id;
-#endif
-    return;
-  }
-
-  WebAXObject root = document.accessibilityObject();
-  if (root.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "OnSetAccessibilityFocus but root is invalid";
-#endif
-    return;
-  }
-
-  // By convention, calling SetFocus on the root of the tree should clear the
-  // current focus. Otherwise set the focus to the new node.
-  if (acc_obj_id == root.axID())
-    render_frame_->GetRenderView()->GetWebView()->clearFocusedElement();
-  else
-    obj.setFocused(true);
-}
-
-void RenderAccessibilityImpl::OnSetSelection(int anchor_acc_obj_id,
-                                           int anchor_offset,
-                                           int focus_acc_obj_id,
-                                           int focus_offset) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject anchor_obj =
-      document.accessibilityObjectFromID(anchor_acc_obj_id);
-  if (anchor_obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "SetTextSelection on invalid object id "
-                 << anchor_acc_obj_id;
-#endif
-    return;
-  }
-
-  WebAXObject focus_obj = document.accessibilityObjectFromID(focus_acc_obj_id);
-  if (focus_obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "SetTextSelection on invalid object id "
-                 << focus_acc_obj_id;
-#endif
-    return;
-  }
-
-  anchor_obj.setSelection(anchor_obj, anchor_offset, focus_obj, focus_offset);
-  WebAXObject root = document.accessibilityObject();
-  if (root.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "OnSetAccessibilityFocus but root is invalid";
-#endif
-    return;
-  }
-  HandleAXEvent(root, ui::AX_EVENT_LAYOUT_COMPLETE);
-}
-
-void RenderAccessibilityImpl::OnSetValue(
-    int acc_obj_id,
-    base::string16 value) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "SetTextSelection on invalid object id " << acc_obj_id;
-#endif
-    return;
-  }
-
-  obj.setValue(value);
-  HandleAXEvent(obj, ui::AX_EVENT_VALUE_CHANGED);
-}
-
-void RenderAccessibilityImpl::OnShowContextMenu(int acc_obj_id) {
-  const WebDocument& document = GetMainDocument();
-  if (document.isNull())
-    return;
-
-  WebAXObject obj = document.accessibilityObjectFromID(acc_obj_id);
-  if (obj.isDetached()) {
-#ifndef NDEBUG
-    LOG(WARNING) << "ShowContextMenu on invalid object id " << acc_obj_id;
-#endif
-    return;
-  }
-
-  obj.showContextMenu();
-}
-
 void RenderAccessibilityImpl::OnDestruct() {
   delete this;
 }
 
-void RenderAccessibilityImpl::AddPdfTreeToUpdate(AXContentTreeUpdate* update) {
+void RenderAccessibilityImpl::AddPluginTreeToUpdate(
+    AXContentTreeUpdate* update) {
   for (size_t i = 0; i < update->nodes.size(); ++i) {
     if (update->nodes[i].role == ui::AX_ROLE_EMBEDDED_OBJECT) {
-      const ui::AXNode* root = pdf_tree_source_->GetRoot();
+      const ui::AXNode* root = plugin_tree_source_->GetRoot();
       update->nodes[i].child_ids.push_back(root->id());
 
-      ui::AXTreeUpdate pdf_update;
-      pdf_serializer_->SerializeChanges(root, &pdf_update);
+      ui::AXTreeUpdate plugin_update;
+      plugin_serializer_->SerializeChanges(root, &plugin_update);
 
       // We have to copy the updated nodes using a loop because we're
       // converting from a generic ui::AXNodeData to a vector of its
       // content-specific subclass AXContentNodeData.
       size_t old_count = update->nodes.size();
-      size_t new_count = pdf_update.nodes.size();
+      size_t new_count = plugin_update.nodes.size();
       update->nodes.resize(old_count + new_count);
       for (size_t i = 0; i < new_count; ++i)
-        update->nodes[old_count + i] = pdf_update.nodes[i];
+        update->nodes[old_count + i] = plugin_update.nodes[i];
       break;
     }
   }
+}
+
+void RenderAccessibilityImpl::ScrollPlugin(int id_to_make_visible) {
+  // Plugin content doesn't scroll itself, so when we're requested to
+  // scroll to make a particular plugin node visible, get the
+  // coordinates of the target plugin node and then tell the document
+  // node to scroll to those coordinates.
+  //
+  // Note that calling scrollToMakeVisibleWithSubFocus() is preferable to
+  // telling the document to scroll to a specific coordinate because it will
+  // first compute whether that rectangle is visible and do nothing if it is.
+  // If it's not visible, it will automatically center it.
+
+  DCHECK(plugin_tree_source_);
+  ui::AXNodeData root_data = plugin_tree_source_->GetRoot()->data();
+  ui::AXNodeData target_data =
+      plugin_tree_source_->GetFromId(id_to_make_visible)->data();
+
+  gfx::RectF bounds = target_data.location;
+  if (root_data.transform)
+    root_data.transform->TransformRect(&bounds);
+
+  const WebDocument& document = GetMainDocument();
+  if (document.isNull())
+    return;
+
+  document.accessibilityObject().scrollToMakeVisibleWithSubFocus(
+      WebRect(bounds.x(), bounds.y(), bounds.width(), bounds.height()));
 }
 
 }  // namespace content

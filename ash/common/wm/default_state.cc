@@ -4,7 +4,7 @@
 
 #include "ash/common/wm/default_state.h"
 
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/ash_switches.h"
 #include "ash/common/wm/dock/docked_window_layout_manager.h"
 #include "ash/common/wm/window_animation_types.h"
 #include "ash/common/wm/window_parenting_utils.h"
@@ -14,9 +14,10 @@
 #include "ash/common/wm/window_state_util.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm/wm_screen_util.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 
@@ -105,7 +106,35 @@ class ScopedDockedLayoutEventSourceResetter {
   DISALLOW_COPY_AND_ASSIGN(ScopedDockedLayoutEventSourceResetter);
 };
 
+void CycleSnap(WindowState* window_state, WMEventType event) {
+  DCHECK(!ash::switches::DockedWindowsEnabled());
+
+  wm::WindowStateType desired_snap_state =
+      event == WM_EVENT_CYCLE_SNAP_DOCK_LEFT
+          ? wm::WINDOW_STATE_TYPE_LEFT_SNAPPED
+          : wm::WINDOW_STATE_TYPE_RIGHT_SNAPPED;
+
+  if (window_state->CanSnap() &&
+      window_state->GetStateType() != desired_snap_state &&
+      window_state->window()->GetType() != ui::wm::WINDOW_TYPE_PANEL) {
+    const wm::WMEvent event(desired_snap_state ==
+                                    wm::WINDOW_STATE_TYPE_LEFT_SNAPPED
+                                ? wm::WM_EVENT_SNAP_LEFT
+                                : wm::WM_EVENT_SNAP_RIGHT);
+    window_state->OnWMEvent(&event);
+    return;
+  }
+
+  if (window_state->IsSnapped()) {
+    window_state->Restore();
+    return;
+  }
+  window_state->window()->Animate(::wm::WINDOW_ANIMATION_TYPE_BOUNCE);
+}
+
 void CycleSnapDock(WindowState* window_state, WMEventType event) {
+  DCHECK(ash::switches::DockedWindowsEnabled());
+
   DockedWindowLayoutManager* dock_layout =
       GetDockedWindowLayoutManager(window_state->window()->GetShell());
   wm::WindowStateType desired_snap_state =
@@ -167,6 +196,10 @@ void DefaultState::OnWMEvent(WindowState* window_state, const WMEvent* event) {
   if (ProcessWorkspaceEvents(window_state, event))
     return;
 
+  // Do not change the PINNED window state if this is not unpin event.
+  if (window_state->IsTrustedPinned() && event->type() != WM_EVENT_NORMAL)
+    return;
+
   if (ProcessCompoundEvents(window_state, event))
     return;
 
@@ -205,16 +238,19 @@ void DefaultState::OnWMEvent(WindowState* window_state, const WMEvent* event) {
       next_state_type = WINDOW_STATE_TYPE_INACTIVE;
       break;
     case WM_EVENT_PIN:
+    case WM_EVENT_TRUSTED_PIN:
       // If there already is a pinned window, it is not allowed to set it
       // to this window.
       // TODO(hidehiko): If a system modal window is openening, the pinning
       // probably should fail.
       if (WmShell::Get()->IsPinned()) {
-        LOG(ERROR) << "An PIN event is triggered, while another window is "
+        LOG(ERROR) << "An PIN event will be failed since another window is "
                    << "already in pinned mode.";
         next_state_type = current_state_type;
       } else {
-        next_state_type = WINDOW_STATE_TYPE_PINNED;
+        next_state_type = event->type() == WM_EVENT_PIN
+                              ? WINDOW_STATE_TYPE_PINNED
+                              : WINDOW_STATE_TYPE_TRUSTED_PINNED;
       }
       break;
     case WM_EVENT_TOGGLE_MAXIMIZE_CAPTION:
@@ -372,7 +408,10 @@ bool DefaultState::ProcessCompoundEvents(WindowState* window_state,
       return true;
     case WM_EVENT_CYCLE_SNAP_DOCK_LEFT:
     case WM_EVENT_CYCLE_SNAP_DOCK_RIGHT:
-      CycleSnapDock(window_state, event->type());
+      if (ash::switches::DockedWindowsEnabled())
+        CycleSnapDock(window_state, event->type());
+      else
+        CycleSnap(window_state, event->type());
       return true;
     case WM_EVENT_CENTER:
       CenterWindow(window_state);
@@ -382,6 +421,7 @@ bool DefaultState::ProcessCompoundEvents(WindowState* window_state,
     case WM_EVENT_MINIMIZE:
     case WM_EVENT_FULLSCREEN:
     case WM_EVENT_PIN:
+    case WM_EVENT_TRUSTED_PIN:
     case WM_EVENT_SNAP_LEFT:
     case WM_EVENT_SNAP_RIGHT:
     case WM_EVENT_SET_BOUNDS:
@@ -447,12 +487,12 @@ bool DefaultState::ProcessWorkspaceEvents(WindowState* window_state,
       }
       gfx::Rect work_area_in_parent =
           GetDisplayWorkAreaBoundsInParent(window_state->window());
-      gfx::Rect bounds = window_state->window()->GetBounds();
+      gfx::Rect bounds = window_state->window()->GetTargetBounds();
       // When display bounds has changed, make sure the entire window is fully
       // visible.
       bounds.AdjustToFit(work_area_in_parent);
       window_state->AdjustSnappedBounds(&bounds);
-      if (window_state->window()->GetBounds() != bounds)
+      if (window_state->window()->GetTargetBounds() != bounds)
         window_state->SetBoundsDirectAnimated(bounds);
       return true;
     }
@@ -472,11 +512,13 @@ bool DefaultState::ProcessWorkspaceEvents(WindowState* window_state,
       }
       gfx::Rect work_area_in_parent =
           GetDisplayWorkAreaBoundsInParent(window_state->window());
-      gfx::Rect bounds = window_state->window()->GetBounds();
-      wm::AdjustBoundsToEnsureMinimumWindowVisibility(work_area_in_parent,
-                                                      &bounds);
+      gfx::Rect bounds = window_state->window()->GetTargetBounds();
+      if (!window_state->window()->GetTransientParent()) {
+        wm::AdjustBoundsToEnsureMinimumWindowVisibility(work_area_in_parent,
+                                                        &bounds);
+      }
       window_state->AdjustSnappedBounds(&bounds);
-      if (window_state->window()->GetBounds() != bounds)
+      if (window_state->window()->GetTargetBounds() != bounds)
         window_state->SetBoundsDirectAnimated(bounds);
       return true;
     }
@@ -493,6 +535,7 @@ bool DefaultState::ProcessWorkspaceEvents(WindowState* window_state,
     case WM_EVENT_MINIMIZE:
     case WM_EVENT_FULLSCREEN:
     case WM_EVENT_PIN:
+    case WM_EVENT_TRUSTED_PIN:
     case WM_EVENT_SNAP_LEFT:
     case WM_EVENT_SNAP_RIGHT:
     case WM_EVENT_SET_BOUNDS:
@@ -586,7 +629,9 @@ void DefaultState::EnterToNextState(WindowState* window_state,
   window_state->NotifyPostStateTypeChange(previous_state_type);
 
   if (next_state_type == WINDOW_STATE_TYPE_PINNED ||
-      previous_state_type == WINDOW_STATE_TYPE_PINNED) {
+      previous_state_type == WINDOW_STATE_TYPE_PINNED ||
+      next_state_type == WINDOW_STATE_TYPE_TRUSTED_PINNED ||
+      previous_state_type == WINDOW_STATE_TYPE_TRUSTED_PINNED) {
     WmShell::Get()->SetPinnedWindow(window_state->window());
   }
 }
@@ -600,10 +645,12 @@ void DefaultState::ReenterToCurrentState(
   // pinned since these are "special mode" the user wanted to be in and
   // should be respected as such.
   if (previous_state_type == wm::WINDOW_STATE_TYPE_FULLSCREEN ||
-      previous_state_type == wm::WINDOW_STATE_TYPE_PINNED) {
+      previous_state_type == wm::WINDOW_STATE_TYPE_PINNED ||
+      previous_state_type == wm::WINDOW_STATE_TYPE_TRUSTED_PINNED) {
     state_type_ = previous_state_type;
   } else if (state_type_ == wm::WINDOW_STATE_TYPE_FULLSCREEN ||
-             state_type_ == wm::WINDOW_STATE_TYPE_PINNED) {
+             state_type_ == wm::WINDOW_STATE_TYPE_PINNED ||
+             state_type_ == wm::WINDOW_STATE_TYPE_TRUSTED_PINNED) {
     state_type_ = previous_state_type;
   }
 
@@ -642,6 +689,8 @@ void DefaultState::UpdateBoundsFromState(WindowState* window_state,
               : GetDefaultRightSnappedWindowBoundsInParent(window);
       break;
     case WINDOW_STATE_TYPE_DOCKED: {
+      // TODO(afakhry): Remove in M58.
+      DCHECK(ash::switches::DockedWindowsEnabled());
       if (window->GetParent()->GetShellWindowId() !=
           kShellWindowId_DockedContainer) {
         WmWindow* docked_container =
@@ -673,8 +722,13 @@ void DefaultState::UpdateBoundsFromState(WindowState* window_state,
         bounds_in_parent = window->GetBounds();
       }
       // Make sure that part of the window is always visible.
-      wm::AdjustBoundsToEnsureMinimumWindowVisibility(work_area_in_parent,
-                                                      &bounds_in_parent);
+      if (!window_state->is_dragged()) {
+        // Avoid doing this while the window is being dragged as its root
+        // window hasn't been updated yet in the case of dragging to another
+        // display. crbug.com/666836.
+        wm::AdjustBoundsToEnsureMinimumWindowVisibility(work_area_in_parent,
+                                                        &bounds_in_parent);
+      }
       break;
     }
     case WINDOW_STATE_TYPE_MAXIMIZED:
@@ -683,6 +737,7 @@ void DefaultState::UpdateBoundsFromState(WindowState* window_state,
 
     case WINDOW_STATE_TYPE_FULLSCREEN:
     case WINDOW_STATE_TYPE_PINNED:
+    case WINDOW_STATE_TYPE_TRUSTED_PINNED:
       bounds_in_parent = GetDisplayBoundsInParent(window);
       break;
 
@@ -725,7 +780,7 @@ void DefaultState::UpdateBoundsFromState(WindowState* window_state,
       window_state->Deactivate();
   } else if ((window->GetTargetVisibility() ||
               IsMinimizedWindowState(previous_state_type)) &&
-             !window->GetLayer()->visible()) {
+             !window->GetLayerVisible()) {
     // The layer may be hidden if the window was previously minimized. Make
     // sure it's visible.
     window->Show();

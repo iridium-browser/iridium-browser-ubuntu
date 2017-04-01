@@ -5,10 +5,11 @@
 #include "content/browser/media/session/media_session_controller.h"
 
 #include "content/browser/media/media_web_contents_observer.h"
-#include "content/browser/media/session/media_session.h"
+#include "content/browser/media/session/media_session_impl.h"
 #include "content/common/media/media_player_delegate_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
+#include "media/base/media_content_type.h"
 
 namespace content {
 
@@ -18,7 +19,8 @@ MediaSessionController::MediaSessionController(
     : id_(id),
       media_web_contents_observer_(media_web_contents_observer),
       media_session_(
-          MediaSession::Get(media_web_contents_observer_->web_contents())) {}
+          MediaSessionImpl::Get(media_web_contents_observer_->web_contents())) {
+}
 
 MediaSessionController::~MediaSessionController() {
   if (!has_session_)
@@ -26,9 +28,10 @@ MediaSessionController::~MediaSessionController() {
   media_session_->RemovePlayer(this, player_id_);
 }
 
-bool MediaSessionController::Initialize(bool has_audio,
-                                        bool is_remote,
-                                        base::TimeDelta duration) {
+bool MediaSessionController::Initialize(
+    bool has_audio,
+    bool is_remote,
+    media::MediaContentType media_content_type) {
   // Don't generate a new id if one has already been set.
   if (!has_session_) {
     // These objects are only created on the UI thread, so this is safe.
@@ -60,16 +63,10 @@ bool MediaSessionController::Initialize(bool has_audio,
     return true;
   }
 
-  const MediaSession::Type media_session_type =
-      (duration.is_zero() ||
-       duration > base::TimeDelta::FromSeconds(kMinimumDurationForContentSecs))
-          ? MediaSession::Type::Content
-          : MediaSession::Type::Transient;
-
   // If a session can't be created, force a pause immediately.  Attempt to add a
   // session even if we already have one.  MediaSession expects AddPlayer() to
   // be called after OnPlaybackPaused() to reactivate the session.
-  if (!media_session_->AddPlayer(this, player_id_, media_session_type)) {
+  if (!media_session_->AddPlayer(this, player_id_, media_content_type)) {
     OnSuspend(player_id_);
     return false;
   }
@@ -96,6 +93,10 @@ void MediaSessionController::OnSetVolumeMultiplier(int player_id,
   media_web_contents_observer_->Send(
       new MediaPlayerDelegateMsg_UpdateVolumeMultiplier(
           id_.first->GetRoutingID(), id_.second, volume_multiplier));
+}
+
+RenderFrameHost* MediaSessionController::GetRenderFrameHost() const {
+  return id_.first;
 }
 
 void MediaSessionController::OnPlaybackPaused() {

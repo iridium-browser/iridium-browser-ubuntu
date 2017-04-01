@@ -11,6 +11,7 @@
 #include "base/android/jni_string.h"
 #include "base/containers/stack_container.h"
 #include "base/i18n/string_compare.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
@@ -18,10 +19,10 @@
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
-#include "components/bookmarks/browser/bookmark_match.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/browser/scoped_group_bookmark_actions.h"
+#include "components/bookmarks/browser/titled_url_match.h"
 #include "components/bookmarks/common/android/bookmark_type.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
@@ -31,9 +32,7 @@
 #include "components/undo/bookmark_undo_service.h"
 #include "components/undo/undo_manager.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/components_strings.h"
 #include "jni/BookmarkBridge_jni.h"
-#include "ui/base/l10n/l10n_util.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
@@ -52,13 +51,6 @@ using bookmarks::BookmarkType;
 using content::BrowserThread;
 
 namespace {
-
-class BookmarkNodeCreationTimeCompareFunctor {
- public:
-  bool operator()(const BookmarkNode* lhs, const BookmarkNode* rhs) {
-    return lhs->date_added().ToJavaTime() > rhs->date_added().ToJavaTime();
-  }
-};
 
 class BookmarkTitleComparer {
  public:
@@ -162,7 +154,7 @@ void BookmarkBridge::LoadEmptyPartnerBookmarkShimForTesting(
   if (partner_bookmarks_shim_->IsLoaded())
       return;
   partner_bookmarks_shim_->SetPartnerBookmarksRoot(
-      new BookmarkPermanentNode(0));
+      base::MakeUnique<BookmarkPermanentNode>(0));
   DCHECK(partner_bookmarks_shim_->IsLoaded());
 }
 
@@ -452,53 +444,6 @@ ScopedJavaLocalRef<jobject> BookmarkBridge::GetChildAt(
       env, child->id(), GetBookmarkType(child));
 }
 
-void BookmarkBridge::GetAllBookmarkIDsOrderedByCreationDate(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jobject>& j_result_obj) {
-  DCHECK(IsLoaded());
-  std::list<const BookmarkNode*> folders;
-  std::vector<const BookmarkNode*> result;
-  folders.push_back(bookmark_model_->root_node());
-
-  for (std::list<const BookmarkNode*>::iterator folder_iter = folders.begin();
-      folder_iter != folders.end(); ++folder_iter) {
-    if (*folder_iter == NULL)
-      continue;
-
-    std::list<const BookmarkNode*>::iterator insert_iter = folder_iter;
-    ++insert_iter;
-
-    for (int i = 0; i < (*folder_iter)->child_count(); ++i) {
-      const BookmarkNode* child = (*folder_iter)->GetChild(i);
-      if (!IsReachable(child) ||
-          bookmarks::IsDescendantOf(
-              child, managed_bookmark_service_->managed_node()) ||
-          bookmarks::IsDescendantOf(
-              child, managed_bookmark_service_->supervised_node())) {
-        continue;
-      }
-
-      if (child->is_folder()) {
-        insert_iter = folders.insert(insert_iter, child);
-      } else {
-        result.push_back(child);
-      }
-    }
-  }
-
-  std::sort(
-      result.begin(), result.end(), BookmarkNodeCreationTimeCompareFunctor());
-
-  for (std::vector<const BookmarkNode*>::const_iterator iter = result.begin();
-       iter != result.end();
-       ++iter) {
-    const BookmarkNode* bookmark = *iter;
-    Java_BookmarkBridge_addToBookmarkIdList(
-        env, j_result_obj, bookmark->id(), GetBookmarkType(bookmark));
-  }
-}
-
 void BookmarkBridge::SetBookmarkTitle(JNIEnv* env,
                                        const JavaParamRef<jobject>& obj,
                                        jlong id,
@@ -641,14 +586,14 @@ void BookmarkBridge::SearchBookmarks(JNIEnv* env,
                                       jint max_results) {
   DCHECK(bookmark_model_->loaded());
 
-  std::vector<bookmarks::BookmarkMatch> results;
+  std::vector<bookmarks::TitledUrlMatch> results;
   bookmark_model_->GetBookmarksMatching(
       base::android::ConvertJavaStringToUTF16(env, j_query),
       max_results,
       query_parser::MatchingAlgorithm::ALWAYS_PREFIX_SEARCH,
       &results);
-  for (const bookmarks::BookmarkMatch& match : results) {
-    const BookmarkNode* node = match.node;
+  for (const bookmarks::TitledUrlMatch& match : results) {
+    const BookmarkNode* node = static_cast<const BookmarkNode*>(match.node);
 
     std::vector<int> title_match_start_positions;
     std::vector<int> title_match_end_positions;

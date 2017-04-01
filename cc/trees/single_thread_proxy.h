@@ -19,18 +19,17 @@
 
 namespace cc {
 
-class AnimationEvents;
+class MutatorEvents;
 class BeginFrameSource;
-class ContextProvider;
-class LayerTreeHost;
+class LayerTreeHostInProcess;
 class LayerTreeHostSingleThreadClient;
 
 class CC_EXPORT SingleThreadProxy : public Proxy,
                                     NON_EXPORTED_BASE(LayerTreeHostImplClient),
-                                    SchedulerClient {
+                                    public SchedulerClient {
  public:
   static std::unique_ptr<Proxy> Create(
-      LayerTreeHost* layer_tree_host,
+      LayerTreeHostInProcess* layer_tree_host,
       LayerTreeHostSingleThreadClient* client,
       TaskRunnerProvider* task_runner_provider_);
   ~SingleThreadProxy() override;
@@ -38,8 +37,9 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   // Proxy implementation
   bool IsStarted() const override;
   bool CommitToActiveTree() const override;
-  void SetOutputSurface(OutputSurface* output_surface) override;
-  void ReleaseOutputSurface() override;
+  void SetCompositorFrameSink(
+      CompositorFrameSink* compositor_frame_sink) override;
+  void ReleaseCompositorFrameSink() override;
   void SetVisible(bool visible) override;
   void SetNeedsAnimate() override;
   void SetNeedsUpdateLayers() override;
@@ -51,47 +51,42 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   bool CommitRequested() const override;
   bool BeginMainFrameRequested() const override;
   void MainThreadHasStoppedFlinging() override {}
-  void Start(
-      std::unique_ptr<BeginFrameSource> external_begin_frame_source) override;
+  void Start() override;
   void Stop() override;
   void SetMutator(std::unique_ptr<LayerTreeMutator> mutator) override;
   bool SupportsImplScrolling() const override;
   bool MainFrameWillHappenForTesting() override;
-  void UpdateTopControlsState(TopControlsState constraints,
-                              TopControlsState current,
-                              bool animate) override;
+  void UpdateBrowserControlsState(BrowserControlsState constraints,
+                                  BrowserControlsState current,
+                                  bool animate) override;
 
   // SchedulerClient implementation
   void WillBeginImplFrame(const BeginFrameArgs& args) override;
   void DidFinishImplFrame() override;
   void ScheduledActionSendBeginMainFrame(const BeginFrameArgs& args) override;
-  DrawResult ScheduledActionDrawAndSwapIfPossible() override;
-  DrawResult ScheduledActionDrawAndSwapForced() override;
+  DrawResult ScheduledActionDrawIfPossible() override;
+  DrawResult ScheduledActionDrawForced() override;
   void ScheduledActionCommit() override;
   void ScheduledActionActivateSyncTree() override;
-  void ScheduledActionBeginOutputSurfaceCreation() override;
+  void ScheduledActionBeginCompositorFrameSinkCreation() override;
   void ScheduledActionPrepareTiles() override;
-  void ScheduledActionInvalidateOutputSurface() override;
+  void ScheduledActionInvalidateCompositorFrameSink() override;
   void SendBeginMainFrameNotExpectedSoon() override;
 
   // LayerTreeHostImplClient implementation
-  void DidLoseOutputSurfaceOnImplThread() override;
-  void CommitVSyncParameters(base::TimeTicks timebase,
-                             base::TimeDelta interval) override;
+  void DidLoseCompositorFrameSinkOnImplThread() override;
   void SetBeginFrameSource(BeginFrameSource* source) override;
-  void SetEstimatedParentDrawTime(base::TimeDelta draw_time) override;
-  void DidSwapBuffersCompleteOnImplThread() override;
+  void DidReceiveCompositorFrameAckOnImplThread() override;
   void OnCanDrawStateChanged(bool can_draw) override;
   void NotifyReadyToActivate() override;
   void NotifyReadyToDraw() override;
   void SetNeedsRedrawOnImplThread() override;
-  void SetNeedsRedrawRectOnImplThread(const gfx::Rect& dirty_rect) override;
   void SetNeedsOneBeginImplFrameOnImplThread() override;
   void SetNeedsPrepareTilesOnImplThread() override;
   void SetNeedsCommitOnImplThread() override;
   void SetVideoNeedsBeginFrames(bool needs_begin_frames) override;
   void PostAnimationEventsToMainThreadOnImplThread(
-      std::unique_ptr<AnimationEvents> events) override;
+      std::unique_ptr<MutatorEvents> events) override;
   bool IsInsideDraw() override;
   void RenewTreePriority() override {}
   void PostDelayedAnimationTaskOnImplThread(const base::Closure& task,
@@ -100,15 +95,15 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   void WillPrepareTiles() override;
   void DidPrepareTiles() override;
   void DidCompletePageScaleAnimationOnImplThread() override;
-  void OnDrawForOutputSurface(bool resourceless_software_draw) override;
+  void OnDrawForCompositorFrameSink(bool resourceless_software_draw) override;
 
-  void RequestNewOutputSurface();
+  void RequestNewCompositorFrameSink();
 
   // Called by the legacy path where RenderWidget does the scheduling.
   void CompositeImmediately(base::TimeTicks frame_begin_time);
 
  protected:
-  SingleThreadProxy(LayerTreeHost* layer_tree_host,
+  SingleThreadProxy(LayerTreeHostInProcess* layer_tree_host,
                     LayerTreeHostSingleThreadClient* client,
                     TaskRunnerProvider* task_runner_provider);
 
@@ -123,11 +118,11 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   void CommitComplete();
 
   bool ShouldComposite() const;
-  void ScheduleRequestNewOutputSurface();
+  void ScheduleRequestNewCompositorFrameSink();
 
   // Accessed on main thread only.
-  LayerTreeHost* layer_tree_host_;
-  LayerTreeHostSingleThreadClient* client_;
+  LayerTreeHostInProcess* layer_tree_host_;
+  LayerTreeHostSingleThreadClient* single_thread_client_;
 
   TaskRunnerProvider* task_runner_provider_;
 
@@ -136,9 +131,6 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   std::unique_ptr<LayerTreeHostImpl> layer_tree_host_impl_;
 
   // Accessed from both threads.
-  std::unique_ptr<BeginFrameSource> external_begin_frame_source_;
-  std::unique_ptr<BeginFrameSource> unthrottled_begin_frame_source_;
-  std::unique_ptr<SyntheticBeginFrameSource> synthetic_begin_frame_source_;
   std::unique_ptr<Scheduler> scheduler_on_impl_thread_;
 
   std::unique_ptr<BlockingTaskRunner::CapturePostTasks>
@@ -156,10 +148,13 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
 
   // True if a request to the LayerTreeHostClient to create an output surface
   // is still outstanding.
-  bool output_surface_creation_requested_;
+  bool compositor_frame_sink_creation_requested_;
+  // When output surface is lost, is set to true until a new output surface is
+  // initialized.
+  bool compositor_frame_sink_lost_;
 
-  // This is the callback for the scheduled RequestNewOutputSurface.
-  base::CancelableClosure output_surface_creation_callback_;
+  // This is the callback for the scheduled RequestNewCompositorFrameSink.
+  base::CancelableClosure compositor_frame_sink_creation_callback_;
 
   base::WeakPtrFactory<SingleThreadProxy> weak_factory_;
 

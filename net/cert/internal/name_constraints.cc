@@ -87,6 +87,11 @@ bool DNSNameMatches(base::StringPiece name,
   // Exact match.
   if (name.size() == dns_constraint.size())
     return true;
+  // If dNSName constraint starts with a dot, only subdomains should match.
+  // (e.g., "foo.bar.com" matches constraint ".bar.com", but "bar.com" doesn't.)
+  // RFC 5280 is ambiguous, but this matches the behavior of other platforms.
+  if (!dns_constraint.empty() && dns_constraint[0] == '.')
+    dns_constraint.remove_prefix(1);
   // Subtree match.
   if (name.size() > dns_constraint.size() &&
       name[name.size() - dns_constraint.size() - 1] == '.') {
@@ -300,7 +305,7 @@ GeneralNames::GeneralNames() {}
 GeneralNames::~GeneralNames() {}
 
 // static
-std::unique_ptr<GeneralNames> GeneralNames::CreateFromDer(
+std::unique_ptr<GeneralNames> GeneralNames::Create(
     const der::Input& general_names_tlv) {
   // RFC 5280 section 4.2.1.6:
   // GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
@@ -332,7 +337,7 @@ std::unique_ptr<GeneralNames> GeneralNames::CreateFromDer(
 NameConstraints::~NameConstraints() {}
 
 // static
-std::unique_ptr<NameConstraints> NameConstraints::CreateFromDer(
+std::unique_ptr<NameConstraints> NameConstraints::Create(
     const der::Input& extension_value,
     bool is_critical) {
   std::unique_ptr<NameConstraints> name_constraints(new NameConstraints());

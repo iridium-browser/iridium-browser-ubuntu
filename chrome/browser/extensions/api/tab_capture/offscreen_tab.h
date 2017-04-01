@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -75,7 +74,7 @@ class OffscreenTabsOwner
   explicit OffscreenTabsOwner(content::WebContents* extension_web_contents);
 
   content::WebContents* const extension_web_contents_;
-  ScopedVector<OffscreenTab> tabs_;
+  std::vector<std::unique_ptr<OffscreenTab>> tabs_;
 
   DISALLOW_COPY_AND_ASSIGN(OffscreenTabsOwner);
 };
@@ -141,11 +140,13 @@ class OffscreenTab : protected content::WebContentsDelegate,
                     const content::DropData& data,
                     blink::WebDragOperationsMask operations_allowed) final;
   bool ShouldCreateWebContents(
-      content::WebContents* contents,
+      content::WebContents* web_contents,
+      content::SiteInstance* source_site_instance,
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
       WindowContainerType window_container_type,
+      const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
       const std::string& partition_id,

@@ -33,6 +33,8 @@
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
 #include "chrome/test/chromedriver/net/timeout.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
+#include "ui/events/keycodes/keyboard_code_conversion.h"
 
 namespace {
 
@@ -123,11 +125,13 @@ const char* GetAsString(KeyEventType type) {
 }  // namespace
 
 WebViewImpl::WebViewImpl(const std::string& id,
+                         const bool w3c_compliant,
                          const BrowserInfo* browser_info,
                          std::unique_ptr<DevToolsClient> client,
                          const DeviceMetrics* device_metrics,
                          std::string page_load_strategy)
     : id_(id),
+      w3c_compliant_(w3c_compliant),
       browser_info_(browser_info),
       dom_tracker_(new DomTracker(client.get())),
       frame_tracker_(new FrameTracker(client.get())),
@@ -272,12 +276,14 @@ Status WebViewImpl::CallFunction(const std::string& frame,
                                  std::unique_ptr<base::Value>* result) {
   std::string json;
   base::JSONWriter::Write(args, &json);
+  std::string w3c = w3c_compliant_ ? "true" : "false";
   // TODO(zachconrad): Second null should be array of shadow host ids.
   std::string expression = base::StringPrintf(
-      "(%s).apply(null, [null, %s, %s])",
+      "(%s).apply(null, [null, %s, %s, %s])",
       kCallFunctionScript,
       function.c_str(),
-      json.c_str());
+      json.c_str(),
+      w3c.c_str());
   std::unique_ptr<base::Value> temp_result;
   Status status = EvaluateScript(frame, expression, &temp_result);
   if (status.IsError())
@@ -316,7 +322,8 @@ Status WebViewImpl::GetFrameByFunction(const std::string& frame,
   bool found_node;
   int node_id;
   status = internal::GetNodeIdFromFunction(
-      client_.get(), context_id, function, args, &found_node, &node_id);
+      client_.get(), context_id, function, args,
+      &found_node, &node_id, w3c_compliant_);
   if (status.IsError())
     return status;
   if (!found_node)
@@ -399,6 +406,12 @@ Status WebViewImpl::DispatchKeyEvents(const std::list<KeyEvent>& events) {
     params.SetString("unmodifiedText", it->unmodified_text);
     params.SetInteger("nativeVirtualKeyCode", it->key_code);
     params.SetInteger("windowsVirtualKeyCode", it->key_code);
+    ui::DomCode dom_code = ui::UsLayoutKeyboardCodeToDomCode(it->key_code);
+    std::string code = ui::KeycodeConverter::DomCodeToCodeString(dom_code);
+    if (!code.empty())
+      params.SetString("code", code);
+    if (!it->key.empty())
+      params.SetString("key", it->key);
     Status status = client_->SendCommand("Input.dispatchKeyEvent", params);
     if (status.IsError())
       return status;
@@ -513,12 +526,12 @@ Status WebViewImpl::SetFileInputFiles(
   if (status.IsError())
     return status;
   base::ListValue args;
-  args.Append(element.DeepCopy());
+  args.Append(element.CreateDeepCopy());
   bool found_node;
   int node_id;
   status = internal::GetNodeIdFromFunction(
       client_.get(), context_id, "function(element) { return element; }",
-      args, &found_node, &node_id);
+      args, &found_node, &node_id, w3c_compliant_);
   if (status.IsError())
     return status;
   if (!found_node)
@@ -675,7 +688,7 @@ Status WebViewImpl::CallAsyncFunctionInternal(
     std::unique_ptr<base::Value>* result) {
   base::ListValue async_args;
   async_args.AppendString("return (" + function + ").apply(null, arguments);");
-  async_args.Append(args.DeepCopy());
+  async_args.Append(args.CreateDeepCopy());
   async_args.AppendBoolean(is_user_supplied);
   async_args.AppendInteger(timeout.InMilliseconds());
   std::unique_ptr<base::Value> tmp;
@@ -860,15 +873,18 @@ Status GetNodeIdFromFunction(DevToolsClient* client,
                              const std::string& function,
                              const base::ListValue& args,
                              bool* found_node,
-                             int* node_id) {
+                             int* node_id,
+                             bool w3c_compliant) {
   std::string json;
   base::JSONWriter::Write(args, &json);
+  std::string w3c = w3c_compliant ? "true" : "false";
   // TODO(zachconrad): Second null should be array of shadow host ids.
   std::string expression = base::StringPrintf(
-      "(%s).apply(null, [null, %s, %s, true])",
+      "(%s).apply(null, [null, %s, %s, %s, true])",
       kCallFunctionScript,
       function.c_str(),
-      json.c_str());
+      json.c_str(),
+      w3c.c_str());
 
   bool got_object;
   std::string element_id;

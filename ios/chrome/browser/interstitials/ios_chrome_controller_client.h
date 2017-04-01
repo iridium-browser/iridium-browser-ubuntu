@@ -12,6 +12,10 @@
 
 class GURL;
 
+namespace security_interstitials {
+class MetricsHelper;
+}
+
 namespace web {
 class WebInterstitial;
 class WebState;
@@ -21,7 +25,9 @@ class WebState;
 class IOSChromeControllerClient
     : public security_interstitials::ControllerClient {
  public:
-  explicit IOSChromeControllerClient(web::WebState* web_state);
+  IOSChromeControllerClient(
+      web::WebState* web_state,
+      std::unique_ptr<security_interstitials::MetricsHelper> metrics_helper);
   ~IOSChromeControllerClient() override;
 
   void SetWebInterstitial(web::WebInterstitial* web_interstitial);
@@ -31,12 +37,13 @@ class IOSChromeControllerClient
   bool CanLaunchDateAndTimeSettings() override;
   void LaunchDateAndTimeSettings() override;
   void GoBack() override;
+  void GoBackAfterNavigationCommitted() override;
   void Proceed() override;
   void Reload() override;
   void OpenUrlInCurrentTab(const GURL& url) override;
-  const std::string& GetApplicationLocale() override;
+  const std::string& GetApplicationLocale() const override;
   PrefService* GetPrefService() override;
-  const std::string GetExtendedReportingPrefName() override;
+  const std::string GetExtendedReportingPrefName() const override;
 
   web::WebState* web_state_;
   web::WebInterstitial* web_interstitial_;

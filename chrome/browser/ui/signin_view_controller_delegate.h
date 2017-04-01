@@ -9,7 +9,6 @@
 #include "content/public/browser/web_contents_delegate.h"
 
 class Browser;
-class ModalSigninDelegate;
 class SigninViewController;
 
 namespace signin_metrics {
@@ -24,20 +23,37 @@ enum class AccessPoint;
 // managing closes.
 class SigninViewControllerDelegate : public content::WebContentsDelegate {
  public:
+  // Returns a platform-specific SigninViewControllerDelegate instance that
+  // displays the sign in flow. The returned object should delete itself when
+  // the window it's managing is closed.
   static SigninViewControllerDelegate* CreateModalSigninDelegate(
       SigninViewController* signin_view_controller,
       profiles::BubbleViewMode mode,
       Browser* browser,
       signin_metrics::AccessPoint access_point);
 
+  // Returns a platform-specific SigninViewControllerDelegate instance that
+  // displays the sync confirmation dialog. The returned object should delete
+  // itself when the window it's managing is closed.
   static SigninViewControllerDelegate* CreateSyncConfirmationDelegate(
       SigninViewController* signin_view_controller,
       Browser* browser);
 
+  // Returns a platform-specific SigninViewControllerDelegate instance that
+  // displays the modal sign in error dialog. The returned object should delete
+  // itself when the window it's managing is closed.
+  static SigninViewControllerDelegate* CreateSigninErrorDelegate(
+      SigninViewController* signin_view_controller,
+      Browser* browser);
+
+  // Closes the sign-in dialog. Note that this method may destroy this object,
+  // so the caller should no longer use this object after calling this method.
   void CloseModalSignin();
 
   // Either navigates back in the signin flow if the history state allows it or
-  // closes the flow otherwise.
+  // closes the flow otherwise. Note that if view is closed, this method may
+  // destroy this object, so the caller should no longer use this object after
+  // calling this method.
   void PerformNavigation();
 
   // This will be called by the base class to request a resize of the native
@@ -66,7 +82,9 @@ class SigninViewControllerDelegate : public content::WebContentsDelegate {
 
   // This will be called by this base class when the tab-modal window must be
   // closed. This should close the platform-specific window that is currently
-  // showing the sign in flow or the sync confirmation dialog.
+  // showing the sign in flow or the sync confirmation dialog. Note that this
+  // method may destroy this object, so the caller should no longer use this
+  // object after calling this method.
   virtual void PerformClose() = 0;
 
  private:

@@ -2,22 +2,20 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""This module allows adding and deleting of projects to the local manifest."""
+"""Manage projects in the local manifest."""
 
 from __future__ import print_function
 
 import platform
-import optparse  # pylint: disable=deprecated-module
 import os
-import sys
 import xml.etree.ElementTree as ElementTree
 
+from chromite.lib import commandline
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_logging as logging
 from chromite.lib import git
 
 
-class Manifest(object):
+class LocalManifest(object):
   """Class which provides an abstraction for manipulating the local manifest."""
 
   @classmethod
@@ -74,10 +72,10 @@ class Manifest(object):
     return list(self.nodes.findall('project'))
 
 
-def _AddProjectsToManifestGroups(options, *args):
+def _AddProjectsToManifestGroups(options, new_group):
   """Enable the given manifest groups for the configured repository."""
 
-  groups_to_enable = ['name:%s' % x for x in args]
+  groups_to_enable = ['name:%s' % x for x in new_group]
 
   git_config = options.git_config
 
@@ -107,136 +105,94 @@ def _AddProjectsToManifestGroups(options, *args):
   git.RunGit('.', cmd)
 
 
-def _UpgradeMinilayout(options):
-  """Convert a repo checkout away from minilayout.xml to default.xml."""
+def _AssertNotMiniLayout():
+  cros_build_lib.Die(
+      "Your repository checkout is using the old minilayout.xml workflow; "
+      "Autoupdate is no longer supported, reinstall your tree.")
 
-  full_tree = Manifest.FromPath(options.default_manifest_path)
-  local_manifest_exists = os.path.exists(options.local_manifest_path)
 
-  new_groups = []
-  if local_manifest_exists:
-    local_tree = Manifest.FromPath(options.local_manifest_path)
-    # Identify which projects need to be transferred across.
-    projects = local_tree.GetProjects()
-    new_groups = [x.attrib['name'] for x in projects]
-    allowed = set(x.attrib['name'] for x in full_tree.GetProjects())
-    transferred = [x for x in projects if x.attrib['name'] in allowed]
-    for project in transferred:
-      # Mangle local_manifest object, removing those projects;
-      # note we'll still be adding those projects to the default groups,
-      # including those that didn't intersect the main manifest.
-      local_tree.nodes.remove(project)
+def GetParser():
+  """Return a command line parser."""
+  parser = commandline.ArgumentParser(description=__doc__)
 
-  _AddProjectsToManifestGroups(options, *new_groups)
+  subparsers = parser.add_subparsers(dest='command')
 
-  if local_manifest_exists:
-    # Rewrite the local_manifest now; if there is no settings left in
-    # the local_manifest, wipe it.
-    if local_tree.nodes.getchildren():
-      with open(options.local_manifest_path, 'w') as f:
-        f.write(local_tree.ToString())
-    else:
-      os.unlink(options.local_manifest_path)
+  subparser = subparsers.add_parser(
+      'add',
+      help='Add projects to the manifest.')
+  subparser.add_argument('-w', '--workon', action='store_true',
+                         default=False, help='Is this a workon package?')
+  subparser.add_argument('-r', '--remote',
+                         help='Remote project name (for non-workon packages).')
+  subparser.add_argument('-v', '--revision',
+                         help='Use to override the manifest defined default '
+                              'revision used for a given project.')
+  subparser.add_argument('project', help='Name of project in the manifest.')
+  subparser.add_argument('path', nargs='?', help='Local path to the project.')
 
-  # Finally, move the symlink.
-  os.unlink(options.manifest_sym_path)
-  os.symlink('manifests/default.xml', options.manifest_sym_path)
-  logging.info("Converted the checkout to manifest groups based minilayout.")
+  return parser
 
 
 def main(argv):
-  parser = optparse.OptionParser(usage='usage: %prog add [options] <name> '
-                                       '<--workon | <path> --remote <remote> >')
-  parser.add_option('-w', '--workon', action='store_true', dest='workon',
-                    default=False, help='Is this a workon package?')
-  parser.add_option('-r', '--remote', dest='remote',
-                    default=None)
-  parser.add_option('-v', '--revision', dest='revision',
-                    default=None,
-                    help="Use to override the manifest defined default "
-                    "revision used for a given project.")
-  parser.add_option('--upgrade-minilayout', default=False, action='store_true',
-                    help="Upgrade a minilayout checkout into a full.xml "
-                    "checkout utilizing manifest groups.")
-  (options, args) = parser.parse_args(argv)
-
+  parser = GetParser()
+  options = parser.parse_args(argv)
   repo_dir = git.FindRepoDir(os.getcwd())
   if not repo_dir:
     parser.error("This script must be invoked from within a repository "
                  "checkout.")
 
   options.git_config = os.path.join(repo_dir, 'manifests.git', 'config')
-  options.repo_dir = repo_dir
   options.local_manifest_path = os.path.join(repo_dir, 'local_manifest.xml')
-  # This constant is used only when we're doing an upgrade away from
-  # minilayout.xml to default.xml.
-  options.default_manifest_path = os.path.join(repo_dir, 'manifests',
-                                               'default.xml')
-  options.manifest_sym_path = os.path.join(repo_dir, 'manifest.xml')
 
-  active_manifest = os.path.basename(os.readlink(options.manifest_sym_path))
-  upgrade_required = active_manifest == 'minilayout.xml'
+  manifest_sym_path = os.path.join(repo_dir, 'manifest.xml')
+  if os.path.basename(os.readlink(manifest_sym_path)) == 'minilayout.xml':
+    _AssertNotMiniLayout()
 
-  if options.upgrade_minilayout:
-    if args:
-      parser.error("--upgrade-minilayout takes no arguments.")
-    if not upgrade_required:
-      print("This repository checkout isn't using minilayout.xml; "
-            "nothing to do")
-    else:
-      _UpgradeMinilayout(options)
-    return 0
-  elif upgrade_required:
-    logging.warning(
-        "Your repository checkout is using the old minilayout.xml workflow; "
-        "auto-upgrading it.")
-    cros_build_lib.RunCommand(
-        [sys.argv[0], '--upgrade-minilayout'], cwd=os.getcwd(), print_cmd=False)
-
-  if not args:
-    parser.error("No command specified.")
-  elif args[0] != 'add':
-    parser.error("Only supported subcommand is add right now.")
-  elif options.workon:
-    if len(args) != 2:
-      parser.error(
-          "Argument count is wrong for --workon; must be add <project>")
-    name, path = args[1], None
+  # For now, we only support the add command.
+  assert options.command == 'add'
+  if options.workon:
+    if options.path is not None:
+      parser.error('Adding workon projects do not set project.')
   else:
     if options.remote is None:
       parser.error('Adding non-workon projects requires a remote.')
-    elif len(args) != 3:
-      parser.error(
-          "Argument count is wrong for non-workon mode; "
-          "must be add <project> <path> --remote <remote-arg>")
-    name, path = args[1:]
-
+    if options.path is None:
+      parser.error('Adding non-workon projects requires a path.')
+  name = options.project
+  path = options.path
   revision = options.revision
   if revision is not None:
     if (not git.IsRefsTags(revision) and
         not git.IsSHA1(revision)):
       revision = git.StripRefsHeads(revision, False)
 
-  main_manifest = Manifest.FromPath(options.manifest_sym_path,
-                                    empty_if_missing=False)
-  local_manifest = Manifest.FromPath(options.local_manifest_path)
+  main_manifest = git.ManifestCheckout(os.getcwd())
+  main_element = main_manifest.FindCheckouts(name)
+  if path is not None:
+    main_element_from_path = main_manifest.FindCheckoutFromPath(
+        path, strict=False)
+    if main_element_from_path is not None:
+      main_element.append(main_element_from_path)
 
-  main_element = main_manifest.GetProject(name, path=path)
+  local_manifest = LocalManifest.FromPath(options.local_manifest_path)
 
   if options.workon:
-    if main_element is None:
+    if not main_element:
       parser.error('No project named %r in the default manifest.' % name)
-    _AddProjectsToManifestGroups(options, main_element.attrib['name'])
+    _AddProjectsToManifestGroups(
+        options, [checkout['name'] for checkout in main_element])
 
-  elif main_element is not None:
+  elif main_element:
     if options.remote is not None:
       # Likely this project wasn't meant to be remote, so workon main element
       print("Project already exists in manifest. Using that as workon project.")
-      _AddProjectsToManifestGroups(options, main_element.attrib['name'])
+      _AddProjectsToManifestGroups(
+          options, [checkout['name'] for checkout in main_element])
     else:
       # Conflict will occur; complain.
       parser.error("Requested project name=%r path=%r will conflict with "
-                   "your current manifest %s" % (name, path, active_manifest))
+                   "your current manifest %s" % (
+                       name, path, main_manifest.manifest_path))
 
   elif local_manifest.GetProject(name, path=path) is not None:
     parser.error("Requested project name=%r path=%r conflicts with "
@@ -246,7 +202,7 @@ def main(argv):
     element = local_manifest.AddNonWorkonProject(name=name, path=path,
                                                  remote=options.remote,
                                                  revision=revision)
-    _AddProjectsToManifestGroups(options, element.attrib['name'])
+    _AddProjectsToManifestGroups(options, [element.attrib['name']])
 
     with open(options.local_manifest_path, 'w') as f:
       f.write(local_manifest.ToString())

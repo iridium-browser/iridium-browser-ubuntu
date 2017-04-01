@@ -22,6 +22,12 @@ import java.util.concurrent.Callable;
  */
 @VisibleForTesting
 public class AwContentsClientCallbackHelper {
+    /**
+     * Interface to tell CallbackHelper to cancel posted callbacks.
+     */
+    public static interface CancelCallbackPoller {
+        boolean cancelAllCallbacks();
+    }
 
     // TODO(boliu): Consider removing DownloadInfo and LoginRequestInfo by using native
     // MessageLoop to post directly to AwContents.
@@ -118,13 +124,15 @@ public class AwContentsClientCallbackHelper {
     // Minimum period allowed between consecutive onNewPicture calls, to rate-limit the callbacks.
     private static final long ON_NEW_PICTURE_MIN_PERIOD_MILLIS = 500;
     // Timestamp of the most recent onNewPicture callback.
-    private long mLastPictureTime = 0;
+    private long mLastPictureTime;
     // True when a onNewPicture callback is currenly in flight.
-    private boolean mHasPendingOnNewPicture = false;
+    private boolean mHasPendingOnNewPicture;
 
     private final AwContentsClient mContentsClient;
 
     private final Handler mHandler;
+
+    private CancelCallbackPoller mCancelCallbackPoller;
 
     private class MyHandler extends Handler {
         private MyHandler(Looper looper) {
@@ -133,6 +141,11 @@ public class AwContentsClientCallbackHelper {
 
         @Override
         public void handleMessage(Message msg) {
+            if (mCancelCallbackPoller != null && mCancelCallbackPoller.cancelAllCallbacks()) {
+                removeCallbacksAndMessages(null);
+                return;
+            }
+
             switch(msg.what) {
                 case MSG_ON_LOAD_RESOURCE: {
                     final String url = (String) msg.obj;
@@ -225,6 +238,11 @@ public class AwContentsClientCallbackHelper {
     public AwContentsClientCallbackHelper(Looper looper, AwContentsClient contentsClient) {
         mHandler = new MyHandler(looper);
         mContentsClient = contentsClient;
+    }
+
+    // Public for tests.
+    public void setCancelCallbackPoller(CancelCallbackPoller poller) {
+        mCancelCallbackPoller = poller;
     }
 
     public void postOnLoadResource(String url) {

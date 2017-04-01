@@ -33,6 +33,7 @@
 #include "core/inspector/ConsoleTypes.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
+#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -43,33 +44,48 @@ class ResourceError;
 class ResourceResponse;
 class SourceLocation;
 
-// FrameConsole takes per-frame console messages and routes them up through the FrameHost to the ChromeClient and Inspector.
-// It's meant as an abstraction around ChromeClient calls and the way that Blink core/ can add messages to the console.
-class CORE_EXPORT FrameConsole final : public GarbageCollected<FrameConsole> {
-public:
-    static FrameConsole* create(LocalFrame& frame)
-    {
-        return new FrameConsole(frame);
-    }
+// FrameConsole takes per-frame console messages and routes them up through the
+// FrameHost to the ChromeClient and Inspector.  It's meant as an abstraction
+// around ChromeClient calls and the way that Blink core/ can add messages to
+// the console.
+class CORE_EXPORT FrameConsole final
+    : public GarbageCollectedFinalized<FrameConsole> {
+ public:
+  static FrameConsole* create(LocalFrame& frame) {
+    return new FrameConsole(frame);
+  }
 
-    void addMessage(ConsoleMessage*);
-    void addMessageFromWorker(MessageLevel, const String& message, std::unique_ptr<SourceLocation>, const String& workerId);
+  void addMessage(ConsoleMessage*);
+  void addMessageFromWorker(MessageLevel,
+                            const String& message,
+                            std::unique_ptr<SourceLocation>,
+                            const String& workerId);
 
-    bool addMessageToStorage(ConsoleMessage*);
-    void reportMessageToClient(MessageSource, MessageLevel, const String& message, SourceLocation*);
+  // Show the specified ConsoleMessage only if the frame haven't shown a message
+  // same as ConsoleMessage::messsage().
+  void addSingletonMessage(ConsoleMessage*);
 
-    void reportResourceResponseReceived(DocumentLoader*, unsigned long requestIdentifier, const ResourceResponse&);
+  bool addMessageToStorage(ConsoleMessage*);
+  void reportMessageToClient(MessageSource,
+                             MessageLevel,
+                             const String& message,
+                             SourceLocation*);
 
-    void didFailLoading(unsigned long requestIdentifier, const ResourceError&);
+  void reportResourceResponseReceived(DocumentLoader*,
+                                      unsigned long requestIdentifier,
+                                      const ResourceResponse&);
 
-    DECLARE_TRACE();
+  void didFailLoading(unsigned long requestIdentifier, const ResourceError&);
 
-private:
-    explicit FrameConsole(LocalFrame&);
+  DECLARE_TRACE();
 
-    Member<LocalFrame> m_frame;
+ private:
+  explicit FrameConsole(LocalFrame&);
+
+  Member<LocalFrame> m_frame;
+  HashSet<String> m_singletonMessages;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // FrameConsole_h
+#endif  // FrameConsole_h

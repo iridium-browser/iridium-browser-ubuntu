@@ -15,10 +15,9 @@ namespace gles2 {
 
 error::Error GLES2DecoderPassthroughImpl::HandleActiveTexture(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ActiveTexture& c =
-      *static_cast<const gles2::cmds::ActiveTexture*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ActiveTexture& c =
+      *static_cast<const volatile gles2::cmds::ActiveTexture*>(cmd_data);
   GLenum texture = static_cast<GLenum>(c.texture);
   error::Error error = DoActiveTexture(texture);
   if (error != error::kNoError) {
@@ -29,10 +28,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleActiveTexture(
 
 error::Error GLES2DecoderPassthroughImpl::HandleAttachShader(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::AttachShader& c =
-      *static_cast<const gles2::cmds::AttachShader*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::AttachShader& c =
+      *static_cast<const volatile gles2::cmds::AttachShader*>(cmd_data);
   GLuint program = c.program;
   GLuint shader = c.shader;
   error::Error error = DoAttachShader(program, shader);
@@ -44,10 +42,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleAttachShader(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindBuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindBuffer& c =
-      *static_cast<const gles2::cmds::BindBuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindBuffer& c =
+      *static_cast<const volatile gles2::cmds::BindBuffer*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint buffer = c.buffer;
   error::Error error = DoBindBuffer(target, buffer);
@@ -59,10 +56,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindBuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindBufferBase(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindBufferBase& c =
-      *static_cast<const gles2::cmds::BindBufferBase*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindBufferBase& c =
+      *static_cast<const volatile gles2::cmds::BindBufferBase*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint index = static_cast<GLuint>(c.index);
   GLuint buffer = c.buffer;
@@ -75,10 +71,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindBufferBase(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindBufferRange(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindBufferRange& c =
-      *static_cast<const gles2::cmds::BindBufferRange*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindBufferRange& c =
+      *static_cast<const volatile gles2::cmds::BindBufferRange*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint index = static_cast<GLuint>(c.index);
   GLuint buffer = c.buffer;
@@ -93,10 +88,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindBufferRange(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindFramebuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindFramebuffer& c =
-      *static_cast<const gles2::cmds::BindFramebuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindFramebuffer& c =
+      *static_cast<const volatile gles2::cmds::BindFramebuffer*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint framebuffer = c.framebuffer;
   error::Error error = DoBindFramebuffer(target, framebuffer);
@@ -108,10 +102,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindFramebuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindRenderbuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindRenderbuffer& c =
-      *static_cast<const gles2::cmds::BindRenderbuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindRenderbuffer& c =
+      *static_cast<const volatile gles2::cmds::BindRenderbuffer*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint renderbuffer = c.renderbuffer;
   error::Error error = DoBindRenderbuffer(target, renderbuffer);
@@ -123,10 +116,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindRenderbuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindSampler(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindSampler& c =
-      *static_cast<const gles2::cmds::BindSampler*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindSampler& c =
+      *static_cast<const volatile gles2::cmds::BindSampler*>(cmd_data);
   GLuint unit = static_cast<GLuint>(c.unit);
   GLuint sampler = c.sampler;
   error::Error error = DoBindSampler(unit, sampler);
@@ -138,10 +130,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindSampler(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindTexture(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindTexture& c =
-      *static_cast<const gles2::cmds::BindTexture*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindTexture& c =
+      *static_cast<const volatile gles2::cmds::BindTexture*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint texture = c.texture;
   error::Error error = DoBindTexture(target, texture);
@@ -153,10 +144,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindTexture(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindTransformFeedback(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindTransformFeedback& c =
-      *static_cast<const gles2::cmds::BindTransformFeedback*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindTransformFeedback& c =
+      *static_cast<const volatile gles2::cmds::BindTransformFeedback*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint transformfeedback = c.transformfeedback;
   error::Error error = DoBindTransformFeedback(target, transformfeedback);
@@ -168,10 +159,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindTransformFeedback(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlendColor(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlendColor& c =
-      *static_cast<const gles2::cmds::BlendColor*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BlendColor& c =
+      *static_cast<const volatile gles2::cmds::BlendColor*>(cmd_data);
   GLclampf red = static_cast<GLclampf>(c.red);
   GLclampf green = static_cast<GLclampf>(c.green);
   GLclampf blue = static_cast<GLclampf>(c.blue);
@@ -185,10 +175,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlendColor(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlendEquation(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlendEquation& c =
-      *static_cast<const gles2::cmds::BlendEquation*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BlendEquation& c =
+      *static_cast<const volatile gles2::cmds::BlendEquation*>(cmd_data);
   GLenum mode = static_cast<GLenum>(c.mode);
   error::Error error = DoBlendEquation(mode);
   if (error != error::kNoError) {
@@ -199,10 +188,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlendEquation(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlendEquationSeparate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlendEquationSeparate& c =
-      *static_cast<const gles2::cmds::BlendEquationSeparate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BlendEquationSeparate& c =
+      *static_cast<const volatile gles2::cmds::BlendEquationSeparate*>(
+          cmd_data);
   GLenum modeRGB = static_cast<GLenum>(c.modeRGB);
   GLenum modeAlpha = static_cast<GLenum>(c.modeAlpha);
   error::Error error = DoBlendEquationSeparate(modeRGB, modeAlpha);
@@ -214,10 +203,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlendEquationSeparate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlendFunc(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlendFunc& c =
-      *static_cast<const gles2::cmds::BlendFunc*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BlendFunc& c =
+      *static_cast<const volatile gles2::cmds::BlendFunc*>(cmd_data);
   GLenum sfactor = static_cast<GLenum>(c.sfactor);
   GLenum dfactor = static_cast<GLenum>(c.dfactor);
   error::Error error = DoBlendFunc(sfactor, dfactor);
@@ -229,10 +217,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlendFunc(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlendFuncSeparate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlendFuncSeparate& c =
-      *static_cast<const gles2::cmds::BlendFuncSeparate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BlendFuncSeparate& c =
+      *static_cast<const volatile gles2::cmds::BlendFuncSeparate*>(cmd_data);
   GLenum srcRGB = static_cast<GLenum>(c.srcRGB);
   GLenum dstRGB = static_cast<GLenum>(c.dstRGB);
   GLenum srcAlpha = static_cast<GLenum>(c.srcAlpha);
@@ -246,10 +233,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlendFuncSeparate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBufferSubData(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BufferSubData& c =
-      *static_cast<const gles2::cmds::BufferSubData*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BufferSubData& c =
+      *static_cast<const volatile gles2::cmds::BufferSubData*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLintptr offset = static_cast<GLintptr>(c.offset);
   GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
@@ -265,10 +251,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleBufferSubData(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCheckFramebufferStatus(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CheckFramebufferStatus& c =
-      *static_cast<const gles2::cmds::CheckFramebufferStatus*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CheckFramebufferStatus& c =
+      *static_cast<const volatile gles2::cmds::CheckFramebufferStatus*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   typedef cmds::CheckFramebufferStatus::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -285,10 +271,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCheckFramebufferStatus(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClear(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Clear& c =
-      *static_cast<const gles2::cmds::Clear*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Clear& c =
+      *static_cast<const volatile gles2::cmds::Clear*>(cmd_data);
   GLbitfield mask = static_cast<GLbitfield>(c.mask);
   error::Error error = DoClear(mask);
   if (error != error::kNoError) {
@@ -299,10 +284,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleClear(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearBufferfi(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearBufferfi& c =
-      *static_cast<const gles2::cmds::ClearBufferfi*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearBufferfi& c =
+      *static_cast<const volatile gles2::cmds::ClearBufferfi*>(cmd_data);
   GLenum buffer = static_cast<GLenum>(c.buffer);
   GLint drawbuffers = static_cast<GLint>(c.drawbuffers);
   GLfloat depth = static_cast<GLfloat>(c.depth);
@@ -316,10 +300,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferfi(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearBufferfvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearBufferfvImmediate& c =
-      *static_cast<const gles2::cmds::ClearBufferfvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearBufferfvImmediate& c =
+      *static_cast<const volatile gles2::cmds::ClearBufferfvImmediate*>(
+          cmd_data);
   GLenum buffer = static_cast<GLenum>(c.buffer);
   GLint drawbuffers = static_cast<GLint>(c.drawbuffers);
   uint32_t data_size;
@@ -329,8 +313,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferfvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoClearBufferfv(buffer, drawbuffers, value);
   if (error != error::kNoError) {
     return error;
@@ -340,10 +324,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferfvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearBufferivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearBufferivImmediate& c =
-      *static_cast<const gles2::cmds::ClearBufferivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearBufferivImmediate& c =
+      *static_cast<const volatile gles2::cmds::ClearBufferivImmediate*>(
+          cmd_data);
   GLenum buffer = static_cast<GLenum>(c.buffer);
   GLint drawbuffers = static_cast<GLint>(c.drawbuffers);
   uint32_t data_size;
@@ -353,8 +337,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* value =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* value = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoClearBufferiv(buffer, drawbuffers, value);
   if (error != error::kNoError) {
     return error;
@@ -364,10 +348,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearBufferuivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearBufferuivImmediate& c =
-      *static_cast<const gles2::cmds::ClearBufferuivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearBufferuivImmediate& c =
+      *static_cast<const volatile gles2::cmds::ClearBufferuivImmediate*>(
+          cmd_data);
   GLenum buffer = static_cast<GLenum>(c.buffer);
   GLint drawbuffers = static_cast<GLint>(c.drawbuffers);
   uint32_t data_size;
@@ -377,8 +361,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferuivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* value =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* value = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoClearBufferuiv(buffer, drawbuffers, value);
   if (error != error::kNoError) {
     return error;
@@ -388,10 +372,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearBufferuivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearColor(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearColor& c =
-      *static_cast<const gles2::cmds::ClearColor*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearColor& c =
+      *static_cast<const volatile gles2::cmds::ClearColor*>(cmd_data);
   GLclampf red = static_cast<GLclampf>(c.red);
   GLclampf green = static_cast<GLclampf>(c.green);
   GLclampf blue = static_cast<GLclampf>(c.blue);
@@ -405,10 +388,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearColor(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearDepthf(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearDepthf& c =
-      *static_cast<const gles2::cmds::ClearDepthf*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearDepthf& c =
+      *static_cast<const volatile gles2::cmds::ClearDepthf*>(cmd_data);
   GLclampf depth = static_cast<GLclampf>(c.depth);
   error::Error error = DoClearDepthf(depth);
   if (error != error::kNoError) {
@@ -419,10 +401,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearDepthf(
 
 error::Error GLES2DecoderPassthroughImpl::HandleClearStencil(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ClearStencil& c =
-      *static_cast<const gles2::cmds::ClearStencil*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ClearStencil& c =
+      *static_cast<const volatile gles2::cmds::ClearStencil*>(cmd_data);
   GLint s = static_cast<GLint>(c.s);
   error::Error error = DoClearStencil(s);
   if (error != error::kNoError) {
@@ -433,10 +414,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleClearStencil(
 
 error::Error GLES2DecoderPassthroughImpl::HandleColorMask(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ColorMask& c =
-      *static_cast<const gles2::cmds::ColorMask*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ColorMask& c =
+      *static_cast<const volatile gles2::cmds::ColorMask*>(cmd_data);
   GLboolean red = static_cast<GLboolean>(c.red);
   GLboolean green = static_cast<GLboolean>(c.green);
   GLboolean blue = static_cast<GLboolean>(c.blue);
@@ -450,10 +430,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleColorMask(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCompileShader(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompileShader& c =
-      *static_cast<const gles2::cmds::CompileShader*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CompileShader& c =
+      *static_cast<const volatile gles2::cmds::CompileShader*>(cmd_data);
   GLuint shader = c.shader;
   error::Error error = DoCompileShader(shader);
   if (error != error::kNoError) {
@@ -462,234 +441,11 @@ error::Error GLES2DecoderPassthroughImpl::HandleCompileShader(
   return error::kNoError;
 }
 
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage2DBucket(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexImage2DBucket& c =
-      *static_cast<const gles2::cmds::CompressedTexImage2DBucket*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLenum internalformat = static_cast<GLenum>(c.internalformat);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLuint bucket_id = static_cast<GLuint>(c.bucket_id);
-  GLint border = static_cast<GLint>(c.border);
-  Bucket* bucket = GetBucket(bucket_id);
-  if (!bucket)
-    return error::kInvalidArguments;
-  uint32_t data_size = bucket->size();
-  GLsizei imageSize = data_size;
-  const void* data = bucket->GetData(0, data_size);
-  DCHECK(data || !imageSize);
-  error::Error error = DoCompressedTexImage2D(
-      target, level, internalformat, width, height, border, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage2D(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexImage2D& c =
-      *static_cast<const gles2::cmds::CompressedTexImage2D*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLenum internalformat = static_cast<GLenum>(c.internalformat);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLint border = static_cast<GLint>(c.border);
-  GLsizei imageSize = static_cast<GLsizei>(c.imageSize);
-  uint32_t data_size = imageSize;
-  const void* data = GetSharedMemoryAs<const void*>(
-      c.data_shm_id, c.data_shm_offset, data_size);
-  error::Error error = DoCompressedTexImage2D(
-      target, level, internalformat, width, height, border, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage2DBucket(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexSubImage2DBucket& c =
-      *static_cast<const gles2::cmds::CompressedTexSubImage2DBucket*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLint xoffset = static_cast<GLint>(c.xoffset);
-  GLint yoffset = static_cast<GLint>(c.yoffset);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLenum format = static_cast<GLenum>(c.format);
-  GLuint bucket_id = static_cast<GLuint>(c.bucket_id);
-  Bucket* bucket = GetBucket(bucket_id);
-  if (!bucket)
-    return error::kInvalidArguments;
-  uint32_t data_size = bucket->size();
-  GLsizei imageSize = data_size;
-  const void* data = bucket->GetData(0, data_size);
-  DCHECK(data || !imageSize);
-  error::Error error = DoCompressedTexSubImage2D(
-      target, level, xoffset, yoffset, width, height, format, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage2D(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexSubImage2D& c =
-      *static_cast<const gles2::cmds::CompressedTexSubImage2D*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLint xoffset = static_cast<GLint>(c.xoffset);
-  GLint yoffset = static_cast<GLint>(c.yoffset);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLenum format = static_cast<GLenum>(c.format);
-  GLsizei imageSize = static_cast<GLsizei>(c.imageSize);
-  uint32_t data_size = imageSize;
-  const void* data = GetSharedMemoryAs<const void*>(
-      c.data_shm_id, c.data_shm_offset, data_size);
-  error::Error error = DoCompressedTexSubImage2D(
-      target, level, xoffset, yoffset, width, height, format, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage3DBucket(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexImage3DBucket& c =
-      *static_cast<const gles2::cmds::CompressedTexImage3DBucket*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLenum internalformat = static_cast<GLenum>(c.internalformat);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLsizei depth = static_cast<GLsizei>(c.depth);
-  GLuint bucket_id = static_cast<GLuint>(c.bucket_id);
-  GLint border = static_cast<GLint>(c.border);
-  Bucket* bucket = GetBucket(bucket_id);
-  if (!bucket)
-    return error::kInvalidArguments;
-  uint32_t data_size = bucket->size();
-  GLsizei imageSize = data_size;
-  const void* data = bucket->GetData(0, data_size);
-  DCHECK(data || !imageSize);
-  error::Error error =
-      DoCompressedTexImage3D(target, level, internalformat, width, height,
-                             depth, border, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage3D(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexImage3D& c =
-      *static_cast<const gles2::cmds::CompressedTexImage3D*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLenum internalformat = static_cast<GLenum>(c.internalformat);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLsizei depth = static_cast<GLsizei>(c.depth);
-  GLint border = static_cast<GLint>(c.border);
-  GLsizei imageSize = static_cast<GLsizei>(c.imageSize);
-  uint32_t data_size = imageSize;
-  const void* data = GetSharedMemoryAs<const void*>(
-      c.data_shm_id, c.data_shm_offset, data_size);
-  error::Error error =
-      DoCompressedTexImage3D(target, level, internalformat, width, height,
-                             depth, border, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage3DBucket(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexSubImage3DBucket& c =
-      *static_cast<const gles2::cmds::CompressedTexSubImage3DBucket*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLint xoffset = static_cast<GLint>(c.xoffset);
-  GLint yoffset = static_cast<GLint>(c.yoffset);
-  GLint zoffset = static_cast<GLint>(c.zoffset);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLsizei depth = static_cast<GLsizei>(c.depth);
-  GLenum format = static_cast<GLenum>(c.format);
-  GLuint bucket_id = static_cast<GLuint>(c.bucket_id);
-  Bucket* bucket = GetBucket(bucket_id);
-  if (!bucket)
-    return error::kInvalidArguments;
-  uint32_t data_size = bucket->size();
-  GLsizei imageSize = data_size;
-  const void* data = bucket->GetData(0, data_size);
-  DCHECK(data || !imageSize);
-  error::Error error =
-      DoCompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width,
-                                height, depth, format, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
-error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage3D(
-    uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedTexSubImage3D& c =
-      *static_cast<const gles2::cmds::CompressedTexSubImage3D*>(cmd_data);
-  (void)c;
-  GLenum target = static_cast<GLenum>(c.target);
-  GLint level = static_cast<GLint>(c.level);
-  GLint xoffset = static_cast<GLint>(c.xoffset);
-  GLint yoffset = static_cast<GLint>(c.yoffset);
-  GLint zoffset = static_cast<GLint>(c.zoffset);
-  GLsizei width = static_cast<GLsizei>(c.width);
-  GLsizei height = static_cast<GLsizei>(c.height);
-  GLsizei depth = static_cast<GLsizei>(c.depth);
-  GLenum format = static_cast<GLenum>(c.format);
-  GLsizei imageSize = static_cast<GLsizei>(c.imageSize);
-  uint32_t data_size = imageSize;
-  const void* data = GetSharedMemoryAs<const void*>(
-      c.data_shm_id, c.data_shm_offset, data_size);
-  error::Error error =
-      DoCompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width,
-                                height, depth, format, imageSize, data);
-  if (error != error::kNoError) {
-    return error;
-  }
-  return error::kNoError;
-}
-
 error::Error GLES2DecoderPassthroughImpl::HandleCopyBufferSubData(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CopyBufferSubData& c =
-      *static_cast<const gles2::cmds::CopyBufferSubData*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CopyBufferSubData& c =
+      *static_cast<const volatile gles2::cmds::CopyBufferSubData*>(cmd_data);
   GLenum readtarget = static_cast<GLenum>(c.readtarget);
   GLenum writetarget = static_cast<GLenum>(c.writetarget);
   GLintptr readoffset = static_cast<GLintptr>(c.readoffset);
@@ -705,10 +461,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopyBufferSubData(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCopyTexImage2D(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CopyTexImage2D& c =
-      *static_cast<const gles2::cmds::CopyTexImage2D*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CopyTexImage2D& c =
+      *static_cast<const volatile gles2::cmds::CopyTexImage2D*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLenum internalformat = static_cast<GLenum>(c.internalformat);
@@ -727,10 +482,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopyTexImage2D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCopyTexSubImage2D(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CopyTexSubImage2D& c =
-      *static_cast<const gles2::cmds::CopyTexSubImage2D*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CopyTexSubImage2D& c =
+      *static_cast<const volatile gles2::cmds::CopyTexSubImage2D*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLint xoffset = static_cast<GLint>(c.xoffset);
@@ -749,10 +503,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopyTexSubImage2D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCopyTexSubImage3D(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CopyTexSubImage3D& c =
-      *static_cast<const gles2::cmds::CopyTexSubImage3D*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CopyTexSubImage3D& c =
+      *static_cast<const volatile gles2::cmds::CopyTexSubImage3D*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLint level = static_cast<GLint>(c.level);
   GLint xoffset = static_cast<GLint>(c.xoffset);
@@ -772,10 +525,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopyTexSubImage3D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCullFace(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CullFace& c =
-      *static_cast<const gles2::cmds::CullFace*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CullFace& c =
+      *static_cast<const volatile gles2::cmds::CullFace*>(cmd_data);
   GLenum mode = static_cast<GLenum>(c.mode);
   error::Error error = DoCullFace(mode);
   if (error != error::kNoError) {
@@ -786,17 +538,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleCullFace(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteBuffersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteBuffersImmediate& c =
-      *static_cast<const gles2::cmds::DeleteBuffersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteBuffersImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteBuffersImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* buffers =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* buffers = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDeleteBuffers(n, buffers);
   if (error != error::kNoError) {
     return error;
@@ -806,17 +558,18 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteBuffersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteFramebuffersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteFramebuffersImmediate& c =
-      *static_cast<const gles2::cmds::DeleteFramebuffersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteFramebuffersImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteFramebuffersImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* framebuffers =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* framebuffers =
+      GetImmediateDataAs<volatile const GLuint*>(c, data_size,
+                                                 immediate_data_size);
   error::Error error = DoDeleteFramebuffers(n, framebuffers);
   if (error != error::kNoError) {
     return error;
@@ -826,10 +579,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteFramebuffersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteProgram(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteProgram& c =
-      *static_cast<const gles2::cmds::DeleteProgram*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteProgram& c =
+      *static_cast<const volatile gles2::cmds::DeleteProgram*>(cmd_data);
   GLuint program = c.program;
   error::Error error = DoDeleteProgram(program);
   if (error != error::kNoError) {
@@ -840,17 +592,18 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteProgram(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteRenderbuffersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteRenderbuffersImmediate& c =
-      *static_cast<const gles2::cmds::DeleteRenderbuffersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteRenderbuffersImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteRenderbuffersImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* renderbuffers =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* renderbuffers =
+      GetImmediateDataAs<volatile const GLuint*>(c, data_size,
+                                                 immediate_data_size);
   error::Error error = DoDeleteRenderbuffers(n, renderbuffers);
   if (error != error::kNoError) {
     return error;
@@ -860,17 +613,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteRenderbuffersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteSamplersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteSamplersImmediate& c =
-      *static_cast<const gles2::cmds::DeleteSamplersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteSamplersImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteSamplersImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* samplers =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* samplers = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDeleteSamplers(n, samplers);
   if (error != error::kNoError) {
     return error;
@@ -880,10 +633,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteSamplersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteSync(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteSync& c =
-      *static_cast<const gles2::cmds::DeleteSync*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteSync& c =
+      *static_cast<const volatile gles2::cmds::DeleteSync*>(cmd_data);
   GLuint sync = c.sync;
   error::Error error = DoDeleteSync(sync);
   if (error != error::kNoError) {
@@ -894,10 +646,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteSync(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteShader(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteShader& c =
-      *static_cast<const gles2::cmds::DeleteShader*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteShader& c =
+      *static_cast<const volatile gles2::cmds::DeleteShader*>(cmd_data);
   GLuint shader = c.shader;
   error::Error error = DoDeleteShader(shader);
   if (error != error::kNoError) {
@@ -908,17 +659,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteShader(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteTexturesImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteTexturesImmediate& c =
-      *static_cast<const gles2::cmds::DeleteTexturesImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteTexturesImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteTexturesImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* textures =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* textures = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDeleteTextures(n, textures);
   if (error != error::kNoError) {
     return error;
@@ -929,18 +680,18 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteTexturesImmediate(
 error::Error
 GLES2DecoderPassthroughImpl::HandleDeleteTransformFeedbacksImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteTransformFeedbacksImmediate& c =
-      *static_cast<const gles2::cmds::DeleteTransformFeedbacksImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteTransformFeedbacksImmediate& c =
+      *static_cast<
+          const volatile gles2::cmds::DeleteTransformFeedbacksImmediate*>(
           cmd_data);
-  (void)c;
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* ids =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* ids = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDeleteTransformFeedbacks(n, ids);
   if (error != error::kNoError) {
     return error;
@@ -950,10 +701,9 @@ GLES2DecoderPassthroughImpl::HandleDeleteTransformFeedbacksImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDepthFunc(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DepthFunc& c =
-      *static_cast<const gles2::cmds::DepthFunc*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DepthFunc& c =
+      *static_cast<const volatile gles2::cmds::DepthFunc*>(cmd_data);
   GLenum func = static_cast<GLenum>(c.func);
   error::Error error = DoDepthFunc(func);
   if (error != error::kNoError) {
@@ -964,10 +714,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDepthFunc(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDepthMask(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DepthMask& c =
-      *static_cast<const gles2::cmds::DepthMask*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DepthMask& c =
+      *static_cast<const volatile gles2::cmds::DepthMask*>(cmd_data);
   GLboolean flag = static_cast<GLboolean>(c.flag);
   error::Error error = DoDepthMask(flag);
   if (error != error::kNoError) {
@@ -978,10 +727,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDepthMask(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDepthRangef(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DepthRangef& c =
-      *static_cast<const gles2::cmds::DepthRangef*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DepthRangef& c =
+      *static_cast<const volatile gles2::cmds::DepthRangef*>(cmd_data);
   GLclampf zNear = static_cast<GLclampf>(c.zNear);
   GLclampf zFar = static_cast<GLclampf>(c.zFar);
   error::Error error = DoDepthRangef(zNear, zFar);
@@ -993,10 +741,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDepthRangef(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDetachShader(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DetachShader& c =
-      *static_cast<const gles2::cmds::DetachShader*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DetachShader& c =
+      *static_cast<const volatile gles2::cmds::DetachShader*>(cmd_data);
   GLuint program = c.program;
   GLuint shader = c.shader;
   error::Error error = DoDetachShader(program, shader);
@@ -1008,10 +755,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDetachShader(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDisable(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Disable& c =
-      *static_cast<const gles2::cmds::Disable*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Disable& c =
+      *static_cast<const volatile gles2::cmds::Disable*>(cmd_data);
   GLenum cap = static_cast<GLenum>(c.cap);
   error::Error error = DoDisable(cap);
   if (error != error::kNoError) {
@@ -1022,10 +768,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleDisable(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDisableVertexAttribArray(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DisableVertexAttribArray& c =
-      *static_cast<const gles2::cmds::DisableVertexAttribArray*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DisableVertexAttribArray& c =
+      *static_cast<const volatile gles2::cmds::DisableVertexAttribArray*>(
+          cmd_data);
   GLuint index = static_cast<GLuint>(c.index);
   error::Error error = DoDisableVertexAttribArray(index);
   if (error != error::kNoError) {
@@ -1036,10 +782,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDisableVertexAttribArray(
 
 error::Error GLES2DecoderPassthroughImpl::HandleEnable(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Enable& c =
-      *static_cast<const gles2::cmds::Enable*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Enable& c =
+      *static_cast<const volatile gles2::cmds::Enable*>(cmd_data);
   GLenum cap = static_cast<GLenum>(c.cap);
   error::Error error = DoEnable(cap);
   if (error != error::kNoError) {
@@ -1050,10 +795,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleEnable(
 
 error::Error GLES2DecoderPassthroughImpl::HandleEnableVertexAttribArray(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::EnableVertexAttribArray& c =
-      *static_cast<const gles2::cmds::EnableVertexAttribArray*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::EnableVertexAttribArray& c =
+      *static_cast<const volatile gles2::cmds::EnableVertexAttribArray*>(
+          cmd_data);
   GLuint index = static_cast<GLuint>(c.index);
   error::Error error = DoEnableVertexAttribArray(index);
   if (error != error::kNoError) {
@@ -1064,10 +809,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleEnableVertexAttribArray(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFinish(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Finish& c =
-      *static_cast<const gles2::cmds::Finish*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoFinish();
   if (error != error::kNoError) {
     return error;
@@ -1077,10 +819,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleFinish(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFlush(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Flush& c =
-      *static_cast<const gles2::cmds::Flush*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoFlush();
   if (error != error::kNoError) {
     return error;
@@ -1090,10 +829,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleFlush(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFramebufferRenderbuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::FramebufferRenderbuffer& c =
-      *static_cast<const gles2::cmds::FramebufferRenderbuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::FramebufferRenderbuffer& c =
+      *static_cast<const volatile gles2::cmds::FramebufferRenderbuffer*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum attachment = static_cast<GLenum>(c.attachment);
   GLenum renderbuffertarget = static_cast<GLenum>(c.renderbuffertarget);
@@ -1108,10 +847,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleFramebufferRenderbuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFramebufferTexture2D(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::FramebufferTexture2D& c =
-      *static_cast<const gles2::cmds::FramebufferTexture2D*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::FramebufferTexture2D& c =
+      *static_cast<const volatile gles2::cmds::FramebufferTexture2D*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum attachment = static_cast<GLenum>(c.attachment);
   GLenum textarget = static_cast<GLenum>(c.textarget);
@@ -1127,10 +865,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleFramebufferTexture2D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFramebufferTextureLayer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::FramebufferTextureLayer& c =
-      *static_cast<const gles2::cmds::FramebufferTextureLayer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::FramebufferTextureLayer& c =
+      *static_cast<const volatile gles2::cmds::FramebufferTextureLayer*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum attachment = static_cast<GLenum>(c.attachment);
   GLuint texture = c.texture;
@@ -1146,10 +884,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleFramebufferTextureLayer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFrontFace(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::FrontFace& c =
-      *static_cast<const gles2::cmds::FrontFace*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::FrontFace& c =
+      *static_cast<const volatile gles2::cmds::FrontFace*>(cmd_data);
   GLenum mode = static_cast<GLenum>(c.mode);
   error::Error error = DoFrontFace(mode);
   if (error != error::kNoError) {
@@ -1160,17 +897,16 @@ error::Error GLES2DecoderPassthroughImpl::HandleFrontFace(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenBuffersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenBuffersImmediate& c =
-      *static_cast<const gles2::cmds::GenBuffersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenBuffersImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenBuffersImmediate*>(cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* buffers =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* buffers =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenBuffers(n, buffers);
   if (error != error::kNoError) {
     return error;
@@ -1180,10 +916,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenBuffersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenerateMipmap(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenerateMipmap& c =
-      *static_cast<const gles2::cmds::GenerateMipmap*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenerateMipmap& c =
+      *static_cast<const volatile gles2::cmds::GenerateMipmap*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   error::Error error = DoGenerateMipmap(target);
   if (error != error::kNoError) {
@@ -1194,17 +929,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenerateMipmap(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenFramebuffersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenFramebuffersImmediate& c =
-      *static_cast<const gles2::cmds::GenFramebuffersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenFramebuffersImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenFramebuffersImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* framebuffers =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* framebuffers =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenFramebuffers(n, framebuffers);
   if (error != error::kNoError) {
     return error;
@@ -1214,17 +949,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenFramebuffersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenRenderbuffersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenRenderbuffersImmediate& c =
-      *static_cast<const gles2::cmds::GenRenderbuffersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenRenderbuffersImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenRenderbuffersImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* renderbuffers =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* renderbuffers =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenRenderbuffers(n, renderbuffers);
   if (error != error::kNoError) {
     return error;
@@ -1234,17 +969,16 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenRenderbuffersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenSamplersImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenSamplersImmediate& c =
-      *static_cast<const gles2::cmds::GenSamplersImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenSamplersImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenSamplersImmediate*>(cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* samplers =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* samplers =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenSamplers(n, samplers);
   if (error != error::kNoError) {
     return error;
@@ -1254,17 +988,16 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenSamplersImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenTexturesImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenTexturesImmediate& c =
-      *static_cast<const gles2::cmds::GenTexturesImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenTexturesImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenTexturesImmediate*>(cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* textures =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* textures =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenTextures(n, textures);
   if (error != error::kNoError) {
     return error;
@@ -1274,17 +1007,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenTexturesImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenTransformFeedbacksImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenTransformFeedbacksImmediate& c =
-      *static_cast<const gles2::cmds::GenTransformFeedbacksImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenTransformFeedbacksImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenTransformFeedbacksImmediate*>(
           cmd_data);
-  (void)c;
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* ids = GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* ids =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenTransformFeedbacks(n, ids);
   if (error != error::kNoError) {
     return error;
@@ -1294,10 +1027,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenTransformFeedbacksImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetBooleanv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetBooleanv& c =
-      *static_cast<const gles2::cmds::GetBooleanv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetBooleanv& c =
+      *static_cast<const volatile gles2::cmds::GetBooleanv*>(cmd_data);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
   typedef cmds::GetBooleanv::Result Result;
@@ -1323,10 +1055,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetBooleanv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetBufferParameteri64v(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetBufferParameteri64v& c =
-      *static_cast<const gles2::cmds::GetBufferParameteri64v*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetBufferParameteri64v& c =
+      *static_cast<const volatile gles2::cmds::GetBufferParameteri64v*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1354,10 +1086,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetBufferParameteri64v(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetBufferParameteriv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetBufferParameteriv& c =
-      *static_cast<const gles2::cmds::GetBufferParameteriv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetBufferParameteriv& c =
+      *static_cast<const volatile gles2::cmds::GetBufferParameteriv*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1385,10 +1116,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetBufferParameteriv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetError(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetError& c =
-      *static_cast<const gles2::cmds::GetError*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetError& c =
+      *static_cast<const volatile gles2::cmds::GetError*>(cmd_data);
   typedef cmds::GetError::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
@@ -1404,10 +1134,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetError(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetFloatv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetFloatv& c =
-      *static_cast<const gles2::cmds::GetFloatv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetFloatv& c =
+      *static_cast<const volatile gles2::cmds::GetFloatv*>(cmd_data);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
   typedef cmds::GetFloatv::Result Result;
@@ -1434,11 +1163,11 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetFloatv(
 error::Error
 GLES2DecoderPassthroughImpl::HandleGetFramebufferAttachmentParameteriv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetFramebufferAttachmentParameteriv& c =
-      *static_cast<const gles2::cmds::GetFramebufferAttachmentParameteriv*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetFramebufferAttachmentParameteriv& c =
+      *static_cast<
+          const volatile gles2::cmds::GetFramebufferAttachmentParameteriv*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLenum attachment = static_cast<GLenum>(c.attachment);
   GLenum pname = static_cast<GLenum>(c.pname);
@@ -1467,10 +1196,9 @@ GLES2DecoderPassthroughImpl::HandleGetFramebufferAttachmentParameteriv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetInteger64v(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetInteger64v& c =
-      *static_cast<const gles2::cmds::GetInteger64v*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetInteger64v& c =
+      *static_cast<const volatile gles2::cmds::GetInteger64v*>(cmd_data);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
   typedef cmds::GetInteger64v::Result Result;
@@ -1496,10 +1224,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetInteger64v(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetIntegeri_v(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetIntegeri_v& c =
-      *static_cast<const gles2::cmds::GetIntegeri_v*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetIntegeri_v& c =
+      *static_cast<const volatile gles2::cmds::GetIntegeri_v*>(cmd_data);
   GLenum pname = static_cast<GLenum>(c.pname);
   GLuint index = static_cast<GLuint>(c.index);
   unsigned int buffer_size = 0;
@@ -1526,10 +1253,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetIntegeri_v(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetInteger64i_v(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetInteger64i_v& c =
-      *static_cast<const gles2::cmds::GetInteger64i_v*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetInteger64i_v& c =
+      *static_cast<const volatile gles2::cmds::GetInteger64i_v*>(cmd_data);
   GLenum pname = static_cast<GLenum>(c.pname);
   GLuint index = static_cast<GLuint>(c.index);
   unsigned int buffer_size = 0;
@@ -1556,10 +1282,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetInteger64i_v(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetIntegerv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetIntegerv& c =
-      *static_cast<const gles2::cmds::GetIntegerv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetIntegerv& c =
+      *static_cast<const volatile gles2::cmds::GetIntegerv*>(cmd_data);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
   typedef cmds::GetIntegerv::Result Result;
@@ -1585,10 +1310,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetIntegerv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetProgramiv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetProgramiv& c =
-      *static_cast<const gles2::cmds::GetProgramiv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetProgramiv& c =
+      *static_cast<const volatile gles2::cmds::GetProgramiv*>(cmd_data);
   GLuint program = c.program;
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1615,10 +1339,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetProgramiv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetRenderbufferParameteriv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetRenderbufferParameteriv& c =
-      *static_cast<const gles2::cmds::GetRenderbufferParameteriv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetRenderbufferParameteriv& c =
+      *static_cast<const volatile gles2::cmds::GetRenderbufferParameteriv*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1646,10 +1370,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetRenderbufferParameteriv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetSamplerParameterfv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetSamplerParameterfv& c =
-      *static_cast<const gles2::cmds::GetSamplerParameterfv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetSamplerParameterfv& c =
+      *static_cast<const volatile gles2::cmds::GetSamplerParameterfv*>(
+          cmd_data);
   GLuint sampler = c.sampler;
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1677,10 +1401,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetSamplerParameterfv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetSamplerParameteriv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetSamplerParameteriv& c =
-      *static_cast<const gles2::cmds::GetSamplerParameteriv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetSamplerParameteriv& c =
+      *static_cast<const volatile gles2::cmds::GetSamplerParameteriv*>(
+          cmd_data);
   GLuint sampler = c.sampler;
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1708,10 +1432,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetSamplerParameteriv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetShaderiv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetShaderiv& c =
-      *static_cast<const gles2::cmds::GetShaderiv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetShaderiv& c =
+      *static_cast<const volatile gles2::cmds::GetShaderiv*>(cmd_data);
   GLuint shader = c.shader;
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1738,10 +1461,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetShaderiv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetSynciv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetSynciv& c =
-      *static_cast<const gles2::cmds::GetSynciv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetSynciv& c =
+      *static_cast<const volatile gles2::cmds::GetSynciv*>(cmd_data);
   GLuint sync = static_cast<GLuint>(c.sync);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1768,10 +1490,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetSynciv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetTexParameterfv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetTexParameterfv& c =
-      *static_cast<const gles2::cmds::GetTexParameterfv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetTexParameterfv& c =
+      *static_cast<const volatile gles2::cmds::GetTexParameterfv*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1799,10 +1520,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetTexParameterfv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetTexParameteriv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetTexParameteriv& c =
-      *static_cast<const gles2::cmds::GetTexParameteriv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetTexParameteriv& c =
+      *static_cast<const volatile gles2::cmds::GetTexParameteriv*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1830,10 +1550,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetTexParameteriv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribfv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetVertexAttribfv& c =
-      *static_cast<const gles2::cmds::GetVertexAttribfv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetVertexAttribfv& c =
+      *static_cast<const volatile gles2::cmds::GetVertexAttribfv*>(cmd_data);
   GLuint index = static_cast<GLuint>(c.index);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1861,10 +1580,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribfv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribiv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetVertexAttribiv& c =
-      *static_cast<const gles2::cmds::GetVertexAttribiv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetVertexAttribiv& c =
+      *static_cast<const volatile gles2::cmds::GetVertexAttribiv*>(cmd_data);
   GLuint index = static_cast<GLuint>(c.index);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1892,10 +1610,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribiv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribIiv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetVertexAttribIiv& c =
-      *static_cast<const gles2::cmds::GetVertexAttribIiv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetVertexAttribIiv& c =
+      *static_cast<const volatile gles2::cmds::GetVertexAttribIiv*>(cmd_data);
   GLuint index = static_cast<GLuint>(c.index);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1923,10 +1640,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribIiv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribIuiv(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetVertexAttribIuiv& c =
-      *static_cast<const gles2::cmds::GetVertexAttribIuiv*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetVertexAttribIuiv& c =
+      *static_cast<const volatile gles2::cmds::GetVertexAttribIuiv*>(cmd_data);
   GLuint index = static_cast<GLuint>(c.index);
   GLenum pname = static_cast<GLenum>(c.pname);
   unsigned int buffer_size = 0;
@@ -1954,9 +1670,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetVertexAttribIuiv(
 
 error::Error GLES2DecoderPassthroughImpl::HandleHint(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Hint& c = *static_cast<const gles2::cmds::Hint*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Hint& c =
+      *static_cast<const volatile gles2::cmds::Hint*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum mode = static_cast<GLenum>(c.mode);
   error::Error error = DoHint(target, mode);
@@ -1968,11 +1684,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleHint(
 
 error::Error GLES2DecoderPassthroughImpl::HandleInvalidateFramebufferImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::InvalidateFramebufferImmediate& c =
-      *static_cast<const gles2::cmds::InvalidateFramebufferImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::InvalidateFramebufferImmediate& c =
+      *static_cast<const volatile gles2::cmds::InvalidateFramebufferImmediate*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -1983,8 +1698,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleInvalidateFramebufferImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLenum* attachments =
-      GetImmediateDataAs<const GLenum*>(c, data_size, immediate_data_size);
+  volatile const GLenum* attachments =
+      GetImmediateDataAs<volatile const GLenum*>(c, data_size,
+                                                 immediate_data_size);
   error::Error error = DoInvalidateFramebuffer(target, count, attachments);
   if (error != error::kNoError) {
     return error;
@@ -1995,11 +1711,11 @@ error::Error GLES2DecoderPassthroughImpl::HandleInvalidateFramebufferImmediate(
 error::Error
 GLES2DecoderPassthroughImpl::HandleInvalidateSubFramebufferImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::InvalidateSubFramebufferImmediate& c =
-      *static_cast<const gles2::cmds::InvalidateSubFramebufferImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::InvalidateSubFramebufferImmediate& c =
+      *static_cast<
+          const volatile gles2::cmds::InvalidateSubFramebufferImmediate*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2010,8 +1726,9 @@ GLES2DecoderPassthroughImpl::HandleInvalidateSubFramebufferImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLenum* attachments =
-      GetImmediateDataAs<const GLenum*>(c, data_size, immediate_data_size);
+  volatile const GLenum* attachments =
+      GetImmediateDataAs<volatile const GLenum*>(c, data_size,
+                                                 immediate_data_size);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
   GLsizei width = static_cast<GLsizei>(c.width);
@@ -2026,10 +1743,9 @@ GLES2DecoderPassthroughImpl::HandleInvalidateSubFramebufferImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsBuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsBuffer& c =
-      *static_cast<const gles2::cmds::IsBuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsBuffer& c =
+      *static_cast<const volatile gles2::cmds::IsBuffer*>(cmd_data);
   GLuint buffer = c.buffer;
   typedef cmds::IsBuffer::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2046,10 +1762,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsBuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsEnabled(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsEnabled& c =
-      *static_cast<const gles2::cmds::IsEnabled*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsEnabled& c =
+      *static_cast<const volatile gles2::cmds::IsEnabled*>(cmd_data);
   GLenum cap = static_cast<GLenum>(c.cap);
   typedef cmds::IsEnabled::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2066,10 +1781,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsEnabled(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsFramebuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsFramebuffer& c =
-      *static_cast<const gles2::cmds::IsFramebuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsFramebuffer& c =
+      *static_cast<const volatile gles2::cmds::IsFramebuffer*>(cmd_data);
   GLuint framebuffer = c.framebuffer;
   typedef cmds::IsFramebuffer::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2086,10 +1800,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsFramebuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsProgram(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsProgram& c =
-      *static_cast<const gles2::cmds::IsProgram*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsProgram& c =
+      *static_cast<const volatile gles2::cmds::IsProgram*>(cmd_data);
   GLuint program = c.program;
   typedef cmds::IsProgram::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2106,10 +1819,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsProgram(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsRenderbuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsRenderbuffer& c =
-      *static_cast<const gles2::cmds::IsRenderbuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsRenderbuffer& c =
+      *static_cast<const volatile gles2::cmds::IsRenderbuffer*>(cmd_data);
   GLuint renderbuffer = c.renderbuffer;
   typedef cmds::IsRenderbuffer::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2126,10 +1838,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsRenderbuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsSampler(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsSampler& c =
-      *static_cast<const gles2::cmds::IsSampler*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsSampler& c =
+      *static_cast<const volatile gles2::cmds::IsSampler*>(cmd_data);
   GLuint sampler = c.sampler;
   typedef cmds::IsSampler::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2146,10 +1857,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsSampler(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsShader(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsShader& c =
-      *static_cast<const gles2::cmds::IsShader*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsShader& c =
+      *static_cast<const volatile gles2::cmds::IsShader*>(cmd_data);
   GLuint shader = c.shader;
   typedef cmds::IsShader::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2166,10 +1876,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsShader(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsSync(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsSync& c =
-      *static_cast<const gles2::cmds::IsSync*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsSync& c =
+      *static_cast<const volatile gles2::cmds::IsSync*>(cmd_data);
   GLuint sync = c.sync;
   typedef cmds::IsSync::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2186,10 +1895,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsSync(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsTexture(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsTexture& c =
-      *static_cast<const gles2::cmds::IsTexture*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsTexture& c =
+      *static_cast<const volatile gles2::cmds::IsTexture*>(cmd_data);
   GLuint texture = c.texture;
   typedef cmds::IsTexture::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2206,10 +1914,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsTexture(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsTransformFeedback(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsTransformFeedback& c =
-      *static_cast<const gles2::cmds::IsTransformFeedback*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsTransformFeedback& c =
+      *static_cast<const volatile gles2::cmds::IsTransformFeedback*>(cmd_data);
   GLuint transformfeedback = c.transformfeedback;
   typedef cmds::IsTransformFeedback::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -2226,10 +1933,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsTransformFeedback(
 
 error::Error GLES2DecoderPassthroughImpl::HandleLineWidth(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::LineWidth& c =
-      *static_cast<const gles2::cmds::LineWidth*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::LineWidth& c =
+      *static_cast<const volatile gles2::cmds::LineWidth*>(cmd_data);
   GLfloat width = static_cast<GLfloat>(c.width);
   error::Error error = DoLineWidth(width);
   if (error != error::kNoError) {
@@ -2240,10 +1946,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleLineWidth(
 
 error::Error GLES2DecoderPassthroughImpl::HandleLinkProgram(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::LinkProgram& c =
-      *static_cast<const gles2::cmds::LinkProgram*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::LinkProgram& c =
+      *static_cast<const volatile gles2::cmds::LinkProgram*>(cmd_data);
   GLuint program = c.program;
   error::Error error = DoLinkProgram(program);
   if (error != error::kNoError) {
@@ -2254,10 +1959,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleLinkProgram(
 
 error::Error GLES2DecoderPassthroughImpl::HandlePauseTransformFeedback(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::PauseTransformFeedback& c =
-      *static_cast<const gles2::cmds::PauseTransformFeedback*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoPauseTransformFeedback();
   if (error != error::kNoError) {
     return error;
@@ -2267,10 +1969,9 @@ error::Error GLES2DecoderPassthroughImpl::HandlePauseTransformFeedback(
 
 error::Error GLES2DecoderPassthroughImpl::HandlePolygonOffset(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::PolygonOffset& c =
-      *static_cast<const gles2::cmds::PolygonOffset*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::PolygonOffset& c =
+      *static_cast<const volatile gles2::cmds::PolygonOffset*>(cmd_data);
   GLfloat factor = static_cast<GLfloat>(c.factor);
   GLfloat units = static_cast<GLfloat>(c.units);
   error::Error error = DoPolygonOffset(factor, units);
@@ -2282,10 +1983,9 @@ error::Error GLES2DecoderPassthroughImpl::HandlePolygonOffset(
 
 error::Error GLES2DecoderPassthroughImpl::HandleReadBuffer(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ReadBuffer& c =
-      *static_cast<const gles2::cmds::ReadBuffer*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ReadBuffer& c =
+      *static_cast<const volatile gles2::cmds::ReadBuffer*>(cmd_data);
   GLenum src = static_cast<GLenum>(c.src);
   error::Error error = DoReadBuffer(src);
   if (error != error::kNoError) {
@@ -2296,10 +1996,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleReadBuffer(
 
 error::Error GLES2DecoderPassthroughImpl::HandleReleaseShaderCompiler(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ReleaseShaderCompiler& c =
-      *static_cast<const gles2::cmds::ReleaseShaderCompiler*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoReleaseShaderCompiler();
   if (error != error::kNoError) {
     return error;
@@ -2309,10 +2006,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleReleaseShaderCompiler(
 
 error::Error GLES2DecoderPassthroughImpl::HandleRenderbufferStorage(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::RenderbufferStorage& c =
-      *static_cast<const gles2::cmds::RenderbufferStorage*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::RenderbufferStorage& c =
+      *static_cast<const volatile gles2::cmds::RenderbufferStorage*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum internalformat = static_cast<GLenum>(c.internalformat);
   GLsizei width = static_cast<GLsizei>(c.width);
@@ -2327,10 +2023,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleRenderbufferStorage(
 
 error::Error GLES2DecoderPassthroughImpl::HandleResumeTransformFeedback(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ResumeTransformFeedback& c =
-      *static_cast<const gles2::cmds::ResumeTransformFeedback*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoResumeTransformFeedback();
   if (error != error::kNoError) {
     return error;
@@ -2340,10 +2033,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleResumeTransformFeedback(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSampleCoverage(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SampleCoverage& c =
-      *static_cast<const gles2::cmds::SampleCoverage*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SampleCoverage& c =
+      *static_cast<const volatile gles2::cmds::SampleCoverage*>(cmd_data);
   GLclampf value = static_cast<GLclampf>(c.value);
   GLboolean invert = static_cast<GLboolean>(c.invert);
   error::Error error = DoSampleCoverage(value, invert);
@@ -2355,10 +2047,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleSampleCoverage(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterf(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SamplerParameterf& c =
-      *static_cast<const gles2::cmds::SamplerParameterf*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SamplerParameterf& c =
+      *static_cast<const volatile gles2::cmds::SamplerParameterf*>(cmd_data);
   GLuint sampler = c.sampler;
   GLenum pname = static_cast<GLenum>(c.pname);
   GLfloat param = static_cast<GLfloat>(c.param);
@@ -2371,10 +2062,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterf(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterfvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SamplerParameterfvImmediate& c =
-      *static_cast<const gles2::cmds::SamplerParameterfvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SamplerParameterfvImmediate& c =
+      *static_cast<const volatile gles2::cmds::SamplerParameterfvImmediate*>(
+          cmd_data);
   GLuint sampler = c.sampler;
   GLenum pname = static_cast<GLenum>(c.pname);
   uint32_t data_size;
@@ -2384,8 +2075,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterfvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* params =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* params = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoSamplerParameterfv(sampler, pname, params);
   if (error != error::kNoError) {
     return error;
@@ -2395,10 +2086,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterfvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameteri(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SamplerParameteri& c =
-      *static_cast<const gles2::cmds::SamplerParameteri*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SamplerParameteri& c =
+      *static_cast<const volatile gles2::cmds::SamplerParameteri*>(cmd_data);
   GLuint sampler = c.sampler;
   GLenum pname = static_cast<GLenum>(c.pname);
   GLint param = static_cast<GLint>(c.param);
@@ -2411,10 +2101,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameteri(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SamplerParameterivImmediate& c =
-      *static_cast<const gles2::cmds::SamplerParameterivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SamplerParameterivImmediate& c =
+      *static_cast<const volatile gles2::cmds::SamplerParameterivImmediate*>(
+          cmd_data);
   GLuint sampler = c.sampler;
   GLenum pname = static_cast<GLenum>(c.pname);
   uint32_t data_size;
@@ -2424,8 +2114,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* params =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* params = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoSamplerParameteriv(sampler, pname, params);
   if (error != error::kNoError) {
     return error;
@@ -2435,10 +2125,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleSamplerParameterivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleScissor(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Scissor& c =
-      *static_cast<const gles2::cmds::Scissor*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Scissor& c =
+      *static_cast<const volatile gles2::cmds::Scissor*>(cmd_data);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
   GLsizei width = static_cast<GLsizei>(c.width);
@@ -2452,10 +2141,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleScissor(
 
 error::Error GLES2DecoderPassthroughImpl::HandleShaderSourceBucket(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ShaderSourceBucket& c =
-      *static_cast<const gles2::cmds::ShaderSourceBucket*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ShaderSourceBucket& c =
+      *static_cast<const volatile gles2::cmds::ShaderSourceBucket*>(cmd_data);
   GLuint shader = static_cast<GLuint>(c.shader);
 
   Bucket* bucket = GetBucket(c.str_bucket_id);
@@ -2482,10 +2170,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleShaderSourceBucket(
 
 error::Error GLES2DecoderPassthroughImpl::HandleStencilFunc(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::StencilFunc& c =
-      *static_cast<const gles2::cmds::StencilFunc*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::StencilFunc& c =
+      *static_cast<const volatile gles2::cmds::StencilFunc*>(cmd_data);
   GLenum func = static_cast<GLenum>(c.func);
   GLint ref = static_cast<GLint>(c.ref);
   GLuint mask = static_cast<GLuint>(c.mask);
@@ -2498,10 +2185,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleStencilFunc(
 
 error::Error GLES2DecoderPassthroughImpl::HandleStencilFuncSeparate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::StencilFuncSeparate& c =
-      *static_cast<const gles2::cmds::StencilFuncSeparate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::StencilFuncSeparate& c =
+      *static_cast<const volatile gles2::cmds::StencilFuncSeparate*>(cmd_data);
   GLenum face = static_cast<GLenum>(c.face);
   GLenum func = static_cast<GLenum>(c.func);
   GLint ref = static_cast<GLint>(c.ref);
@@ -2515,10 +2201,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleStencilFuncSeparate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleStencilMask(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::StencilMask& c =
-      *static_cast<const gles2::cmds::StencilMask*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::StencilMask& c =
+      *static_cast<const volatile gles2::cmds::StencilMask*>(cmd_data);
   GLuint mask = static_cast<GLuint>(c.mask);
   error::Error error = DoStencilMask(mask);
   if (error != error::kNoError) {
@@ -2529,10 +2214,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleStencilMask(
 
 error::Error GLES2DecoderPassthroughImpl::HandleStencilMaskSeparate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::StencilMaskSeparate& c =
-      *static_cast<const gles2::cmds::StencilMaskSeparate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::StencilMaskSeparate& c =
+      *static_cast<const volatile gles2::cmds::StencilMaskSeparate*>(cmd_data);
   GLenum face = static_cast<GLenum>(c.face);
   GLuint mask = static_cast<GLuint>(c.mask);
   error::Error error = DoStencilMaskSeparate(face, mask);
@@ -2544,10 +2228,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleStencilMaskSeparate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleStencilOp(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::StencilOp& c =
-      *static_cast<const gles2::cmds::StencilOp*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::StencilOp& c =
+      *static_cast<const volatile gles2::cmds::StencilOp*>(cmd_data);
   GLenum fail = static_cast<GLenum>(c.fail);
   GLenum zfail = static_cast<GLenum>(c.zfail);
   GLenum zpass = static_cast<GLenum>(c.zpass);
@@ -2560,10 +2243,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleStencilOp(
 
 error::Error GLES2DecoderPassthroughImpl::HandleStencilOpSeparate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::StencilOpSeparate& c =
-      *static_cast<const gles2::cmds::StencilOpSeparate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::StencilOpSeparate& c =
+      *static_cast<const volatile gles2::cmds::StencilOpSeparate*>(cmd_data);
   GLenum face = static_cast<GLenum>(c.face);
   GLenum fail = static_cast<GLenum>(c.fail);
   GLenum zfail = static_cast<GLenum>(c.zfail);
@@ -2577,10 +2259,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleStencilOpSeparate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTexParameterf(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TexParameterf& c =
-      *static_cast<const gles2::cmds::TexParameterf*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TexParameterf& c =
+      *static_cast<const volatile gles2::cmds::TexParameterf*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   GLfloat param = static_cast<GLfloat>(c.param);
@@ -2593,10 +2274,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexParameterf(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTexParameterfvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TexParameterfvImmediate& c =
-      *static_cast<const gles2::cmds::TexParameterfvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TexParameterfvImmediate& c =
+      *static_cast<const volatile gles2::cmds::TexParameterfvImmediate*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   uint32_t data_size;
@@ -2606,8 +2287,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexParameterfvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* params =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* params = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoTexParameterfv(target, pname, params);
   if (error != error::kNoError) {
     return error;
@@ -2617,10 +2298,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexParameterfvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTexParameteri(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TexParameteri& c =
-      *static_cast<const gles2::cmds::TexParameteri*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TexParameteri& c =
+      *static_cast<const volatile gles2::cmds::TexParameteri*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   GLint param = static_cast<GLint>(c.param);
@@ -2633,10 +2313,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexParameteri(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTexParameterivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TexParameterivImmediate& c =
-      *static_cast<const gles2::cmds::TexParameterivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TexParameterivImmediate& c =
+      *static_cast<const volatile gles2::cmds::TexParameterivImmediate*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLenum pname = static_cast<GLenum>(c.pname);
   uint32_t data_size;
@@ -2646,8 +2326,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexParameterivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* params =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* params = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoTexParameteriv(target, pname, params);
   if (error != error::kNoError) {
     return error;
@@ -2657,10 +2337,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexParameterivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTexStorage3D(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TexStorage3D& c =
-      *static_cast<const gles2::cmds::TexStorage3D*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TexStorage3D& c =
+      *static_cast<const volatile gles2::cmds::TexStorage3D*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei levels = static_cast<GLsizei>(c.levels);
   GLenum internalFormat = static_cast<GLenum>(c.internalFormat);
@@ -2677,11 +2356,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexStorage3D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTransformFeedbackVaryingsBucket(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TransformFeedbackVaryingsBucket& c =
-      *static_cast<const gles2::cmds::TransformFeedbackVaryingsBucket*>(
-          cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TransformFeedbackVaryingsBucket& c = *static_cast<
+      const volatile gles2::cmds::TransformFeedbackVaryingsBucket*>(cmd_data);
   GLuint program = static_cast<GLuint>(c.program);
 
   Bucket* bucket = GetBucket(c.varyings_bucket_id);
@@ -2710,10 +2387,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleTransformFeedbackVaryingsBucket(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform1f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform1f& c =
-      *static_cast<const gles2::cmds::Uniform1f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform1f& c =
+      *static_cast<const volatile gles2::cmds::Uniform1f*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLfloat x = static_cast<GLfloat>(c.x);
   error::Error error = DoUniform1f(location, x);
@@ -2725,10 +2401,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform1fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform1fvImmediate& c =
-      *static_cast<const gles2::cmds::Uniform1fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform1fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform1fvImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2739,8 +2414,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* v =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* v = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform1fv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2750,10 +2425,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform1i(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform1i& c =
-      *static_cast<const gles2::cmds::Uniform1i*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform1i& c =
+      *static_cast<const volatile gles2::cmds::Uniform1i*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLint x = static_cast<GLint>(c.x);
   error::Error error = DoUniform1i(location, x);
@@ -2765,10 +2439,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1i(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform1ivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform1ivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform1ivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform1ivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform1ivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2779,8 +2452,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1ivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* v =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* v = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform1iv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2790,10 +2463,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1ivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform1ui(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform1ui& c =
-      *static_cast<const gles2::cmds::Uniform1ui*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform1ui& c =
+      *static_cast<const volatile gles2::cmds::Uniform1ui*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLuint x = static_cast<GLuint>(c.x);
   error::Error error = DoUniform1ui(location, x);
@@ -2805,10 +2477,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1ui(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform1uivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform1uivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform1uivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform1uivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform1uivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2819,8 +2490,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1uivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* v =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* v = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform1uiv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2830,10 +2501,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform1uivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform2f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform2f& c =
-      *static_cast<const gles2::cmds::Uniform2f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform2f& c =
+      *static_cast<const volatile gles2::cmds::Uniform2f*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLfloat x = static_cast<GLfloat>(c.x);
   GLfloat y = static_cast<GLfloat>(c.y);
@@ -2846,10 +2516,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform2fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform2fvImmediate& c =
-      *static_cast<const gles2::cmds::Uniform2fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform2fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform2fvImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2860,8 +2529,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* v =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* v = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform2fv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2871,10 +2540,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform2i(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform2i& c =
-      *static_cast<const gles2::cmds::Uniform2i*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform2i& c =
+      *static_cast<const volatile gles2::cmds::Uniform2i*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
@@ -2887,10 +2555,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2i(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform2ivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform2ivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform2ivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform2ivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform2ivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2901,8 +2568,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2ivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* v =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* v = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform2iv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2912,10 +2579,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2ivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform2ui(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform2ui& c =
-      *static_cast<const gles2::cmds::Uniform2ui*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform2ui& c =
+      *static_cast<const volatile gles2::cmds::Uniform2ui*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLuint x = static_cast<GLuint>(c.x);
   GLuint y = static_cast<GLuint>(c.y);
@@ -2928,10 +2594,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2ui(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform2uivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform2uivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform2uivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform2uivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform2uivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2942,8 +2607,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2uivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* v =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* v = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform2uiv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2953,10 +2618,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform2uivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform3f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform3f& c =
-      *static_cast<const gles2::cmds::Uniform3f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform3f& c =
+      *static_cast<const volatile gles2::cmds::Uniform3f*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLfloat x = static_cast<GLfloat>(c.x);
   GLfloat y = static_cast<GLfloat>(c.y);
@@ -2970,10 +2634,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform3fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform3fvImmediate& c =
-      *static_cast<const gles2::cmds::Uniform3fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform3fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform3fvImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -2984,8 +2647,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* v =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* v = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform3fv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -2995,10 +2658,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform3i(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform3i& c =
-      *static_cast<const gles2::cmds::Uniform3i*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform3i& c =
+      *static_cast<const volatile gles2::cmds::Uniform3i*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
@@ -3012,10 +2674,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3i(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform3ivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform3ivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform3ivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform3ivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform3ivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -3026,8 +2687,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3ivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* v =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* v = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform3iv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -3037,10 +2698,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3ivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform3ui(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform3ui& c =
-      *static_cast<const gles2::cmds::Uniform3ui*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform3ui& c =
+      *static_cast<const volatile gles2::cmds::Uniform3ui*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLuint x = static_cast<GLuint>(c.x);
   GLuint y = static_cast<GLuint>(c.y);
@@ -3054,10 +2714,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3ui(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform3uivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform3uivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform3uivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform3uivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform3uivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -3068,8 +2727,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3uivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* v =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* v = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform3uiv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -3079,10 +2738,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform3uivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform4f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform4f& c =
-      *static_cast<const gles2::cmds::Uniform4f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform4f& c =
+      *static_cast<const volatile gles2::cmds::Uniform4f*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLfloat x = static_cast<GLfloat>(c.x);
   GLfloat y = static_cast<GLfloat>(c.y);
@@ -3097,10 +2755,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform4fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform4fvImmediate& c =
-      *static_cast<const gles2::cmds::Uniform4fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform4fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform4fvImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -3111,8 +2768,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* v =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* v = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform4fv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -3122,10 +2779,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform4i(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform4i& c =
-      *static_cast<const gles2::cmds::Uniform4i*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform4i& c =
+      *static_cast<const volatile gles2::cmds::Uniform4i*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
@@ -3140,10 +2796,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4i(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform4ivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform4ivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform4ivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform4ivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform4ivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -3154,8 +2809,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4ivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* v =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* v = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform4iv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -3165,10 +2820,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4ivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform4ui(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform4ui& c =
-      *static_cast<const gles2::cmds::Uniform4ui*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform4ui& c =
+      *static_cast<const volatile gles2::cmds::Uniform4ui*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLuint x = static_cast<GLuint>(c.x);
   GLuint y = static_cast<GLuint>(c.y);
@@ -3183,10 +2837,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4ui(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniform4uivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Uniform4uivImmediate& c =
-      *static_cast<const gles2::cmds::Uniform4uivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Uniform4uivImmediate& c =
+      *static_cast<const volatile gles2::cmds::Uniform4uivImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -3197,8 +2850,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4uivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* v =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* v = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniform4uiv(location, count, v);
   if (error != error::kNoError) {
     return error;
@@ -3208,10 +2861,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniform4uivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix2fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix2fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix2fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix2fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3223,8 +2876,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix2fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3234,10 +2887,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2x3fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix2x3fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix2x3fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix2x3fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix2x3fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3249,8 +2902,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2x3fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix2x3fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3260,10 +2913,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2x3fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2x4fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix2x4fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix2x4fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix2x4fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix2x4fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3275,8 +2928,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2x4fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix2x4fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3286,10 +2939,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix2x4fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix3fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix3fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix3fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix3fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3301,8 +2954,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix3fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3312,10 +2965,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3x2fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix3x2fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix3x2fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix3x2fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix3x2fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3327,8 +2980,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3x2fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix3x2fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3338,10 +2991,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3x2fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3x4fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix3x4fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix3x4fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix3x4fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix3x4fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3353,8 +3006,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3x4fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix3x4fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3364,10 +3017,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix3x4fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix4fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix4fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix4fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix4fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3379,8 +3032,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix4fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3390,10 +3043,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4x2fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix4x2fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix4x2fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix4x2fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix4x2fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3405,8 +3058,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4x2fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix4x2fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3416,10 +3069,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4x2fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4x3fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UniformMatrix4x3fvImmediate& c =
-      *static_cast<const gles2::cmds::UniformMatrix4x3fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UniformMatrix4x3fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::UniformMatrix4x3fvImmediate*>(
+          cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLsizei count = static_cast<GLsizei>(c.count);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
@@ -3431,8 +3084,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4x3fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* value =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* value = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoUniformMatrix4x3fv(location, count, transpose, value);
   if (error != error::kNoError) {
     return error;
@@ -3442,10 +3095,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformMatrix4x3fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleUseProgram(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::UseProgram& c =
-      *static_cast<const gles2::cmds::UseProgram*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::UseProgram& c =
+      *static_cast<const volatile gles2::cmds::UseProgram*>(cmd_data);
   GLuint program = c.program;
   error::Error error = DoUseProgram(program);
   if (error != error::kNoError) {
@@ -3456,10 +3108,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleUseProgram(
 
 error::Error GLES2DecoderPassthroughImpl::HandleValidateProgram(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ValidateProgram& c =
-      *static_cast<const gles2::cmds::ValidateProgram*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ValidateProgram& c =
+      *static_cast<const volatile gles2::cmds::ValidateProgram*>(cmd_data);
   GLuint program = c.program;
   error::Error error = DoValidateProgram(program);
   if (error != error::kNoError) {
@@ -3470,10 +3121,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleValidateProgram(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib1f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib1f& c =
-      *static_cast<const gles2::cmds::VertexAttrib1f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib1f& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib1f*>(cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   GLfloat x = static_cast<GLfloat>(c.x);
   error::Error error = DoVertexAttrib1f(indx, x);
@@ -3485,10 +3135,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib1f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib1fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib1fvImmediate& c =
-      *static_cast<const gles2::cmds::VertexAttrib1fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib1fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib1fvImmediate*>(
+          cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLfloat), 1, &data_size)) {
@@ -3497,8 +3147,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib1fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* values =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* values = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoVertexAttrib1fv(indx, values);
   if (error != error::kNoError) {
     return error;
@@ -3508,10 +3158,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib1fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib2f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib2f& c =
-      *static_cast<const gles2::cmds::VertexAttrib2f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib2f& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib2f*>(cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   GLfloat x = static_cast<GLfloat>(c.x);
   GLfloat y = static_cast<GLfloat>(c.y);
@@ -3524,10 +3173,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib2f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib2fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib2fvImmediate& c =
-      *static_cast<const gles2::cmds::VertexAttrib2fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib2fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib2fvImmediate*>(
+          cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLfloat), 2, &data_size)) {
@@ -3536,8 +3185,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib2fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* values =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* values = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoVertexAttrib2fv(indx, values);
   if (error != error::kNoError) {
     return error;
@@ -3547,10 +3196,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib2fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib3f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib3f& c =
-      *static_cast<const gles2::cmds::VertexAttrib3f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib3f& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib3f*>(cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   GLfloat x = static_cast<GLfloat>(c.x);
   GLfloat y = static_cast<GLfloat>(c.y);
@@ -3564,10 +3212,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib3f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib3fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib3fvImmediate& c =
-      *static_cast<const gles2::cmds::VertexAttrib3fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib3fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib3fvImmediate*>(
+          cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLfloat), 3, &data_size)) {
@@ -3576,8 +3224,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib3fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* values =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* values = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoVertexAttrib3fv(indx, values);
   if (error != error::kNoError) {
     return error;
@@ -3587,10 +3235,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib3fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib4f(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib4f& c =
-      *static_cast<const gles2::cmds::VertexAttrib4f*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib4f& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib4f*>(cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   GLfloat x = static_cast<GLfloat>(c.x);
   GLfloat y = static_cast<GLfloat>(c.y);
@@ -3605,10 +3252,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib4f(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib4fvImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttrib4fvImmediate& c =
-      *static_cast<const gles2::cmds::VertexAttrib4fvImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttrib4fvImmediate& c =
+      *static_cast<const volatile gles2::cmds::VertexAttrib4fvImmediate*>(
+          cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLfloat), 4, &data_size)) {
@@ -3617,8 +3264,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib4fvImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* values =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* values = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoVertexAttrib4fv(indx, values);
   if (error != error::kNoError) {
     return error;
@@ -3628,10 +3275,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttrib4fvImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4i(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttribI4i& c =
-      *static_cast<const gles2::cmds::VertexAttribI4i*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttribI4i& c =
+      *static_cast<const volatile gles2::cmds::VertexAttribI4i*>(cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
@@ -3646,10 +3292,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4i(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4ivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttribI4ivImmediate& c =
-      *static_cast<const gles2::cmds::VertexAttribI4ivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttribI4ivImmediate& c =
+      *static_cast<const volatile gles2::cmds::VertexAttribI4ivImmediate*>(
+          cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLint), 4, &data_size)) {
@@ -3658,8 +3304,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4ivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLint* values =
-      GetImmediateDataAs<const GLint*>(c, data_size, immediate_data_size);
+  volatile const GLint* values = GetImmediateDataAs<volatile const GLint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoVertexAttribI4iv(indx, values);
   if (error != error::kNoError) {
     return error;
@@ -3669,10 +3315,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4ivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4ui(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttribI4ui& c =
-      *static_cast<const gles2::cmds::VertexAttribI4ui*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttribI4ui& c =
+      *static_cast<const volatile gles2::cmds::VertexAttribI4ui*>(cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   GLuint x = static_cast<GLuint>(c.x);
   GLuint y = static_cast<GLuint>(c.y);
@@ -3687,10 +3332,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4ui(
 
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4uivImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::VertexAttribI4uivImmediate& c =
-      *static_cast<const gles2::cmds::VertexAttribI4uivImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::VertexAttribI4uivImmediate& c =
+      *static_cast<const volatile gles2::cmds::VertexAttribI4uivImmediate*>(
+          cmd_data);
   GLuint indx = static_cast<GLuint>(c.indx);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLuint), 4, &data_size)) {
@@ -3699,8 +3344,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4uivImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* values =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* values = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoVertexAttribI4uiv(indx, values);
   if (error != error::kNoError) {
     return error;
@@ -3710,10 +3355,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribI4uivImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleViewport(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::Viewport& c =
-      *static_cast<const gles2::cmds::Viewport*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::Viewport& c =
+      *static_cast<const volatile gles2::cmds::Viewport*>(cmd_data);
   GLint x = static_cast<GLint>(c.x);
   GLint y = static_cast<GLint>(c.y);
   GLsizei width = static_cast<GLsizei>(c.width);
@@ -3727,10 +3371,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleViewport(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlitFramebufferCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlitFramebufferCHROMIUM& c =
-      *static_cast<const gles2::cmds::BlitFramebufferCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BlitFramebufferCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::BlitFramebufferCHROMIUM*>(
+          cmd_data);
   GLint srcX0 = static_cast<GLint>(c.srcX0);
   GLint srcY0 = static_cast<GLint>(c.srcY0);
   GLint srcX1 = static_cast<GLint>(c.srcX1);
@@ -3752,11 +3396,11 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlitFramebufferCHROMIUM(
 error::Error
 GLES2DecoderPassthroughImpl::HandleRenderbufferStorageMultisampleCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::RenderbufferStorageMultisampleCHROMIUM& c =
-      *static_cast<const gles2::cmds::RenderbufferStorageMultisampleCHROMIUM*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::RenderbufferStorageMultisampleCHROMIUM& c =
+      *static_cast<
+          const volatile gles2::cmds::RenderbufferStorageMultisampleCHROMIUM*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei samples = static_cast<GLsizei>(c.samples);
   GLenum internalformat = static_cast<GLenum>(c.internalformat);
@@ -3773,11 +3417,11 @@ GLES2DecoderPassthroughImpl::HandleRenderbufferStorageMultisampleCHROMIUM(
 error::Error
 GLES2DecoderPassthroughImpl::HandleRenderbufferStorageMultisampleEXT(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::RenderbufferStorageMultisampleEXT& c =
-      *static_cast<const gles2::cmds::RenderbufferStorageMultisampleEXT*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::RenderbufferStorageMultisampleEXT& c =
+      *static_cast<
+          const volatile gles2::cmds::RenderbufferStorageMultisampleEXT*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei samples = static_cast<GLsizei>(c.samples);
   GLenum internalformat = static_cast<GLenum>(c.internalformat);
@@ -3794,11 +3438,11 @@ GLES2DecoderPassthroughImpl::HandleRenderbufferStorageMultisampleEXT(
 error::Error
 GLES2DecoderPassthroughImpl::HandleFramebufferTexture2DMultisampleEXT(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::FramebufferTexture2DMultisampleEXT& c =
-      *static_cast<const gles2::cmds::FramebufferTexture2DMultisampleEXT*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::FramebufferTexture2DMultisampleEXT& c =
+      *static_cast<
+          const volatile gles2::cmds::FramebufferTexture2DMultisampleEXT*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLenum attachment = static_cast<GLenum>(c.attachment);
   GLenum textarget = static_cast<GLenum>(c.textarget);
@@ -3815,10 +3459,9 @@ GLES2DecoderPassthroughImpl::HandleFramebufferTexture2DMultisampleEXT(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTexStorage2DEXT(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TexStorage2DEXT& c =
-      *static_cast<const gles2::cmds::TexStorage2DEXT*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::TexStorage2DEXT& c =
+      *static_cast<const volatile gles2::cmds::TexStorage2DEXT*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei levels = static_cast<GLsizei>(c.levels);
   GLenum internalFormat = static_cast<GLenum>(c.internalFormat);
@@ -3834,17 +3477,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexStorage2DEXT(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenQueriesEXTImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenQueriesEXTImmediate& c =
-      *static_cast<const gles2::cmds::GenQueriesEXTImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenQueriesEXTImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenQueriesEXTImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* queries =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* queries =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenQueriesEXT(n, queries);
   if (error != error::kNoError) {
     return error;
@@ -3854,17 +3497,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenQueriesEXTImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteQueriesEXTImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteQueriesEXTImmediate& c =
-      *static_cast<const gles2::cmds::DeleteQueriesEXTImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteQueriesEXTImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteQueriesEXTImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* queries =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* queries = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDeleteQueriesEXT(n, queries);
   if (error != error::kNoError) {
     return error;
@@ -3874,10 +3517,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteQueriesEXTImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBeginTransformFeedback(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BeginTransformFeedback& c =
-      *static_cast<const gles2::cmds::BeginTransformFeedback*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BeginTransformFeedback& c =
+      *static_cast<const volatile gles2::cmds::BeginTransformFeedback*>(
+          cmd_data);
   GLenum primitivemode = static_cast<GLenum>(c.primitivemode);
   error::Error error = DoBeginTransformFeedback(primitivemode);
   if (error != error::kNoError) {
@@ -3888,10 +3531,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleBeginTransformFeedback(
 
 error::Error GLES2DecoderPassthroughImpl::HandleEndTransformFeedback(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::EndTransformFeedback& c =
-      *static_cast<const gles2::cmds::EndTransformFeedback*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoEndTransformFeedback();
   if (error != error::kNoError) {
     return error;
@@ -3901,10 +3541,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleEndTransformFeedback(
 
 error::Error GLES2DecoderPassthroughImpl::HandlePopGroupMarkerEXT(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::PopGroupMarkerEXT& c =
-      *static_cast<const gles2::cmds::PopGroupMarkerEXT*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoPopGroupMarkerEXT();
   if (error != error::kNoError) {
     return error;
@@ -3914,17 +3551,17 @@ error::Error GLES2DecoderPassthroughImpl::HandlePopGroupMarkerEXT(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGenVertexArraysOESImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GenVertexArraysOESImmediate& c =
-      *static_cast<const gles2::cmds::GenVertexArraysOESImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GenVertexArraysOESImmediate& c =
+      *static_cast<const volatile gles2::cmds::GenVertexArraysOESImmediate*>(
+          cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  GLuint* arrays =
-      GetImmediateDataAs<GLuint*>(c, data_size, immediate_data_size);
+  volatile GLuint* arrays =
+      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
   error::Error error = DoGenVertexArraysOES(n, arrays);
   if (error != error::kNoError) {
     return error;
@@ -3934,18 +3571,17 @@ error::Error GLES2DecoderPassthroughImpl::HandleGenVertexArraysOESImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDeleteVertexArraysOESImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DeleteVertexArraysOESImmediate& c =
-      *static_cast<const gles2::cmds::DeleteVertexArraysOESImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DeleteVertexArraysOESImmediate& c =
+      *static_cast<const volatile gles2::cmds::DeleteVertexArraysOESImmediate*>(
           cmd_data);
-  (void)c;
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
   if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  const GLuint* arrays =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* arrays = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDeleteVertexArraysOES(n, arrays);
   if (error != error::kNoError) {
     return error;
@@ -3955,10 +3591,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDeleteVertexArraysOESImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsVertexArrayOES(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsVertexArrayOES& c =
-      *static_cast<const gles2::cmds::IsVertexArrayOES*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsVertexArrayOES& c =
+      *static_cast<const volatile gles2::cmds::IsVertexArrayOES*>(cmd_data);
   GLuint array = c.array;
   typedef cmds::IsVertexArrayOES::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -3975,10 +3610,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsVertexArrayOES(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindVertexArrayOES(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindVertexArrayOES& c =
-      *static_cast<const gles2::cmds::BindVertexArrayOES*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindVertexArrayOES& c =
+      *static_cast<const volatile gles2::cmds::BindVertexArrayOES*>(cmd_data);
   GLuint array = c.array;
   error::Error error = DoBindVertexArrayOES(array);
   if (error != error::kNoError) {
@@ -3989,10 +3623,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindVertexArrayOES(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSwapBuffers(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SwapBuffers& c =
-      *static_cast<const gles2::cmds::SwapBuffers*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoSwapBuffers();
   if (error != error::kNoError) {
     return error;
@@ -4002,10 +3633,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleSwapBuffers(
 
 error::Error GLES2DecoderPassthroughImpl::HandleGetMaxValueInBufferCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::GetMaxValueInBufferCHROMIUM& c =
-      *static_cast<const gles2::cmds::GetMaxValueInBufferCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::GetMaxValueInBufferCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::GetMaxValueInBufferCHROMIUM*>(
+          cmd_data);
   GLuint buffer_id = c.buffer_id;
   GLsizei count = static_cast<GLsizei>(c.count);
   GLenum type = static_cast<GLenum>(c.type);
@@ -4024,14 +3655,31 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetMaxValueInBufferCHROMIUM(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderPassthroughImpl::HandleFlushMappedBufferRange(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::FlushMappedBufferRange& c =
+      *static_cast<const volatile gles2::cmds::FlushMappedBufferRange*>(
+          cmd_data);
+  GLenum target = static_cast<GLenum>(c.target);
+  GLintptr offset = static_cast<GLintptr>(c.offset);
+  GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
+  error::Error error = DoFlushMappedBufferRange(target, offset, size);
+  if (error != error::kNoError) {
+    return error;
+  }
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderPassthroughImpl::HandleCopyTextureCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CopyTextureCHROMIUM& c =
-      *static_cast<const gles2::cmds::CopyTextureCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CopyTextureCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::CopyTextureCHROMIUM*>(cmd_data);
   GLenum source_id = static_cast<GLenum>(c.source_id);
+  GLint source_level = static_cast<GLint>(c.source_level);
   GLenum dest_id = static_cast<GLenum>(c.dest_id);
+  GLint dest_level = static_cast<GLint>(c.dest_level);
   GLint internalformat = static_cast<GLint>(c.internalformat);
   GLenum dest_type = static_cast<GLenum>(c.dest_type);
   GLboolean unpack_flip_y = static_cast<GLboolean>(c.unpack_flip_y);
@@ -4040,8 +3688,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopyTextureCHROMIUM(
   GLboolean unpack_unmultiply_alpha =
       static_cast<GLboolean>(c.unpack_unmultiply_alpha);
   error::Error error = DoCopyTextureCHROMIUM(
-      source_id, dest_id, internalformat, dest_type, unpack_flip_y,
-      unpack_premultiply_alpha, unpack_unmultiply_alpha);
+      source_id, source_level, dest_id, dest_level, internalformat, dest_type,
+      unpack_flip_y, unpack_premultiply_alpha, unpack_unmultiply_alpha);
   if (error != error::kNoError) {
     return error;
   }
@@ -4050,12 +3698,14 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopyTextureCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCopySubTextureCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CopySubTextureCHROMIUM& c =
-      *static_cast<const gles2::cmds::CopySubTextureCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CopySubTextureCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::CopySubTextureCHROMIUM*>(
+          cmd_data);
   GLenum source_id = static_cast<GLenum>(c.source_id);
+  GLint source_level = static_cast<GLint>(c.source_level);
   GLenum dest_id = static_cast<GLenum>(c.dest_id);
+  GLint dest_level = static_cast<GLint>(c.dest_level);
   GLint xoffset = static_cast<GLint>(c.xoffset);
   GLint yoffset = static_cast<GLint>(c.yoffset);
   GLint x = static_cast<GLint>(c.x);
@@ -4068,8 +3718,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopySubTextureCHROMIUM(
   GLboolean unpack_unmultiply_alpha =
       static_cast<GLboolean>(c.unpack_unmultiply_alpha);
   error::Error error = DoCopySubTextureCHROMIUM(
-      source_id, dest_id, xoffset, yoffset, x, y, width, height, unpack_flip_y,
-      unpack_premultiply_alpha, unpack_unmultiply_alpha);
+      source_id, source_level, dest_id, dest_level, xoffset, yoffset, x, y,
+      width, height, unpack_flip_y, unpack_premultiply_alpha,
+      unpack_unmultiply_alpha);
   if (error != error::kNoError) {
     return error;
   }
@@ -4078,10 +3729,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleCopySubTextureCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCompressedCopyTextureCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CompressedCopyTextureCHROMIUM& c =
-      *static_cast<const gles2::cmds::CompressedCopyTextureCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CompressedCopyTextureCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::CompressedCopyTextureCHROMIUM*>(
+          cmd_data);
   GLenum source_id = static_cast<GLenum>(c.source_id);
   GLenum dest_id = static_cast<GLenum>(c.dest_id);
   error::Error error = DoCompressedCopyTextureCHROMIUM(source_id, dest_id);
@@ -4093,21 +3744,19 @@ error::Error GLES2DecoderPassthroughImpl::HandleCompressedCopyTextureCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleProduceTextureCHROMIUMImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ProduceTextureCHROMIUMImmediate& c =
-      *static_cast<const gles2::cmds::ProduceTextureCHROMIUMImmediate*>(
-          cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ProduceTextureCHROMIUMImmediate& c = *static_cast<
+      const volatile gles2::cmds::ProduceTextureCHROMIUMImmediate*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 64, &data_size)) {
+  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 16, &data_size)) {
     return error::kOutOfBounds;
   }
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLbyte* mailbox =
-      GetImmediateDataAs<const GLbyte*>(c, data_size, immediate_data_size);
+  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoProduceTextureCHROMIUM(target, mailbox);
   if (error != error::kNoError) {
     return error;
@@ -4118,22 +3767,22 @@ error::Error GLES2DecoderPassthroughImpl::HandleProduceTextureCHROMIUMImmediate(
 error::Error
 GLES2DecoderPassthroughImpl::HandleProduceTextureDirectCHROMIUMImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ProduceTextureDirectCHROMIUMImmediate& c =
-      *static_cast<const gles2::cmds::ProduceTextureDirectCHROMIUMImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ProduceTextureDirectCHROMIUMImmediate& c =
+      *static_cast<
+          const volatile gles2::cmds::ProduceTextureDirectCHROMIUMImmediate*>(
           cmd_data);
-  (void)c;
   GLuint texture = c.texture;
   GLenum target = static_cast<GLenum>(c.target);
   uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 64, &data_size)) {
+  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 16, &data_size)) {
     return error::kOutOfBounds;
   }
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLbyte* mailbox =
-      GetImmediateDataAs<const GLbyte*>(c, data_size, immediate_data_size);
+  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoProduceTextureDirectCHROMIUM(texture, target, mailbox);
   if (error != error::kNoError) {
     return error;
@@ -4143,21 +3792,19 @@ GLES2DecoderPassthroughImpl::HandleProduceTextureDirectCHROMIUMImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleConsumeTextureCHROMIUMImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ConsumeTextureCHROMIUMImmediate& c =
-      *static_cast<const gles2::cmds::ConsumeTextureCHROMIUMImmediate*>(
-          cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ConsumeTextureCHROMIUMImmediate& c = *static_cast<
+      const volatile gles2::cmds::ConsumeTextureCHROMIUMImmediate*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 64, &data_size)) {
+  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 16, &data_size)) {
     return error::kOutOfBounds;
   }
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLbyte* mailbox =
-      GetImmediateDataAs<const GLbyte*>(c, data_size, immediate_data_size);
+  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoConsumeTextureCHROMIUM(target, mailbox);
   if (error != error::kNoError) {
     return error;
@@ -4168,21 +3815,21 @@ error::Error GLES2DecoderPassthroughImpl::HandleConsumeTextureCHROMIUMImmediate(
 error::Error
 GLES2DecoderPassthroughImpl::HandleCreateAndConsumeTextureINTERNALImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CreateAndConsumeTextureINTERNALImmediate& c = *static_cast<
-      const gles2::cmds::CreateAndConsumeTextureINTERNALImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CreateAndConsumeTextureINTERNALImmediate& c =
+      *static_cast<const volatile gles2::cmds::
+                       CreateAndConsumeTextureINTERNALImmediate*>(cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLuint texture = static_cast<GLuint>(c.texture);
   uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 64, &data_size)) {
+  if (!GLES2Util::ComputeDataSize(1, sizeof(GLbyte), 16, &data_size)) {
     return error::kOutOfBounds;
   }
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLbyte* mailbox =
-      GetImmediateDataAs<const GLbyte*>(c, data_size, immediate_data_size);
+  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
+      c, data_size, immediate_data_size);
   error::Error error =
       DoCreateAndConsumeTextureINTERNAL(target, texture, mailbox);
   if (error != error::kNoError) {
@@ -4193,10 +3840,10 @@ GLES2DecoderPassthroughImpl::HandleCreateAndConsumeTextureINTERNALImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBindTexImage2DCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BindTexImage2DCHROMIUM& c =
-      *static_cast<const gles2::cmds::BindTexImage2DCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::BindTexImage2DCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::BindTexImage2DCHROMIUM*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLint imageId = static_cast<GLint>(c.imageId);
   error::Error error = DoBindTexImage2DCHROMIUM(target, imageId);
@@ -4208,10 +3855,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleBindTexImage2DCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleReleaseTexImage2DCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ReleaseTexImage2DCHROMIUM& c =
-      *static_cast<const gles2::cmds::ReleaseTexImage2DCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ReleaseTexImage2DCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::ReleaseTexImage2DCHROMIUM*>(
+          cmd_data);
   GLenum target = static_cast<GLenum>(c.target);
   GLint imageId = static_cast<GLint>(c.imageId);
   error::Error error = DoReleaseTexImage2DCHROMIUM(target, imageId);
@@ -4223,10 +3870,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleReleaseTexImage2DCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleTraceEndCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::TraceEndCHROMIUM& c =
-      *static_cast<const gles2::cmds::TraceEndCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoTraceEndCHROMIUM();
   if (error != error::kNoError) {
     return error;
@@ -4236,11 +3880,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleTraceEndCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDiscardFramebufferEXTImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DiscardFramebufferEXTImmediate& c =
-      *static_cast<const gles2::cmds::DiscardFramebufferEXTImmediate*>(
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DiscardFramebufferEXTImmediate& c =
+      *static_cast<const volatile gles2::cmds::DiscardFramebufferEXTImmediate*>(
           cmd_data);
-  (void)c;
   GLenum target = static_cast<GLenum>(c.target);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
@@ -4251,8 +3894,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDiscardFramebufferEXTImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLenum* attachments =
-      GetImmediateDataAs<const GLenum*>(c, data_size, immediate_data_size);
+  volatile const GLenum* attachments =
+      GetImmediateDataAs<volatile const GLenum*>(c, data_size,
+                                                 immediate_data_size);
   error::Error error = DoDiscardFramebufferEXT(target, count, attachments);
   if (error != error::kNoError) {
     return error;
@@ -4262,10 +3906,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleDiscardFramebufferEXTImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleLoseContextCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::LoseContextCHROMIUM& c =
-      *static_cast<const gles2::cmds::LoseContextCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::LoseContextCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::LoseContextCHROMIUM*>(cmd_data);
   GLenum current = static_cast<GLenum>(c.current);
   GLenum other = static_cast<GLenum>(c.other);
   error::Error error = DoLoseContextCHROMIUM(current, other);
@@ -4277,10 +3920,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleLoseContextCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleDrawBuffersEXTImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::DrawBuffersEXTImmediate& c =
-      *static_cast<const gles2::cmds::DrawBuffersEXTImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::DrawBuffersEXTImmediate& c =
+      *static_cast<const volatile gles2::cmds::DrawBuffersEXTImmediate*>(
+          cmd_data);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
   if (count >= 0 &&
@@ -4290,8 +3933,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleDrawBuffersEXTImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLenum* bufs =
-      GetImmediateDataAs<const GLenum*>(c, data_size, immediate_data_size);
+  volatile const GLenum* bufs = GetImmediateDataAs<volatile const GLenum*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoDrawBuffersEXT(count, bufs);
   if (error != error::kNoError) {
     return error;
@@ -4302,12 +3945,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleDrawBuffersEXTImmediate(
 error::Error
 GLES2DecoderPassthroughImpl::HandleScheduleCALayerInUseQueryCHROMIUMImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ScheduleCALayerInUseQueryCHROMIUMImmediate& c =
-      *static_cast<
-          const gles2::cmds::ScheduleCALayerInUseQueryCHROMIUMImmediate*>(
-          cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::ScheduleCALayerInUseQueryCHROMIUMImmediate& c =
+      *static_cast<const volatile gles2::cmds::
+                       ScheduleCALayerInUseQueryCHROMIUMImmediate*>(cmd_data);
   GLsizei count = static_cast<GLsizei>(c.count);
   uint32_t data_size = 0;
   if (count >= 0 &&
@@ -4317,8 +3958,8 @@ GLES2DecoderPassthroughImpl::HandleScheduleCALayerInUseQueryCHROMIUMImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLuint* textures =
-      GetImmediateDataAs<const GLuint*>(c, data_size, immediate_data_size);
+  volatile const GLuint* textures = GetImmediateDataAs<volatile const GLuint*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoScheduleCALayerInUseQueryCHROMIUM(count, textures);
   if (error != error::kNoError) {
     return error;
@@ -4328,10 +3969,7 @@ GLES2DecoderPassthroughImpl::HandleScheduleCALayerInUseQueryCHROMIUMImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCommitOverlayPlanesCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CommitOverlayPlanesCHROMIUM& c =
-      *static_cast<const gles2::cmds::CommitOverlayPlanesCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoCommitOverlayPlanesCHROMIUM();
   if (error != error::kNoError) {
     return error;
@@ -4341,10 +3979,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleCommitOverlayPlanesCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleSwapInterval(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::SwapInterval& c =
-      *static_cast<const gles2::cmds::SwapInterval*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::SwapInterval& c =
+      *static_cast<const volatile gles2::cmds::SwapInterval*>(cmd_data);
   GLint interval = static_cast<GLint>(c.interval);
   error::Error error = DoSwapInterval(interval);
   if (error != error::kNoError) {
@@ -4355,10 +3992,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleSwapInterval(
 
 error::Error GLES2DecoderPassthroughImpl::HandleFlushDriverCachesCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::FlushDriverCachesCHROMIUM& c =
-      *static_cast<const gles2::cmds::FlushDriverCachesCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoFlushDriverCachesCHROMIUM();
   if (error != error::kNoError) {
     return error;
@@ -4368,10 +4002,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleFlushDriverCachesCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleMatrixLoadfCHROMIUMImmediate(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::MatrixLoadfCHROMIUMImmediate& c =
-      *static_cast<const gles2::cmds::MatrixLoadfCHROMIUMImmediate*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::MatrixLoadfCHROMIUMImmediate& c =
+      *static_cast<const volatile gles2::cmds::MatrixLoadfCHROMIUMImmediate*>(
+          cmd_data);
   GLenum matrixMode = static_cast<GLenum>(c.matrixMode);
   uint32_t data_size;
   if (!GLES2Util::ComputeDataSize(1, sizeof(GLfloat), 16, &data_size)) {
@@ -4380,8 +4014,8 @@ error::Error GLES2DecoderPassthroughImpl::HandleMatrixLoadfCHROMIUMImmediate(
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* m =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* m = GetImmediateDataAs<volatile const GLfloat*>(
+      c, data_size, immediate_data_size);
   error::Error error = DoMatrixLoadfCHROMIUM(matrixMode, m);
   if (error != error::kNoError) {
     return error;
@@ -4391,10 +4025,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleMatrixLoadfCHROMIUMImmediate(
 
 error::Error GLES2DecoderPassthroughImpl::HandleMatrixLoadIdentityCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::MatrixLoadIdentityCHROMIUM& c =
-      *static_cast<const gles2::cmds::MatrixLoadIdentityCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::MatrixLoadIdentityCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::MatrixLoadIdentityCHROMIUM*>(
+          cmd_data);
   GLenum matrixMode = static_cast<GLenum>(c.matrixMode);
   error::Error error = DoMatrixLoadIdentityCHROMIUM(matrixMode);
   if (error != error::kNoError) {
@@ -4405,10 +4039,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleMatrixLoadIdentityCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleIsPathCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::IsPathCHROMIUM& c =
-      *static_cast<const gles2::cmds::IsPathCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::IsPathCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::IsPathCHROMIUM*>(cmd_data);
   GLuint path = c.path;
   typedef cmds::IsPathCHROMIUM::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
@@ -4425,10 +4058,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleIsPathCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandlePathStencilFuncCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::PathStencilFuncCHROMIUM& c =
-      *static_cast<const gles2::cmds::PathStencilFuncCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::PathStencilFuncCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::PathStencilFuncCHROMIUM*>(
+          cmd_data);
   GLenum func = static_cast<GLenum>(c.func);
   GLint ref = static_cast<GLint>(c.ref);
   GLuint mask = static_cast<GLuint>(c.mask);
@@ -4441,10 +4074,10 @@ error::Error GLES2DecoderPassthroughImpl::HandlePathStencilFuncCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCoverageModulationCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::CoverageModulationCHROMIUM& c =
-      *static_cast<const gles2::cmds::CoverageModulationCHROMIUM*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::CoverageModulationCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::CoverageModulationCHROMIUM*>(
+          cmd_data);
   GLenum components = static_cast<GLenum>(c.components);
   error::Error error = DoCoverageModulationCHROMIUM(components);
   if (error != error::kNoError) {
@@ -4455,10 +4088,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleCoverageModulationCHROMIUM(
 
 error::Error GLES2DecoderPassthroughImpl::HandleBlendBarrierKHR(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::BlendBarrierKHR& c =
-      *static_cast<const gles2::cmds::BlendBarrierKHR*>(cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoBlendBarrierKHR();
   if (error != error::kNoError) {
     return error;
@@ -4469,11 +4099,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleBlendBarrierKHR(
 error::Error
 GLES2DecoderPassthroughImpl::HandleApplyScreenSpaceAntialiasingCHROMIUM(
     uint32_t immediate_data_size,
-    const void* cmd_data) {
-  const gles2::cmds::ApplyScreenSpaceAntialiasingCHROMIUM& c =
-      *static_cast<const gles2::cmds::ApplyScreenSpaceAntialiasingCHROMIUM*>(
-          cmd_data);
-  (void)c;
+    const volatile void* cmd_data) {
   error::Error error = DoApplyScreenSpaceAntialiasingCHROMIUM();
   if (error != error::kNoError) {
     return error;
@@ -4484,12 +4110,11 @@ GLES2DecoderPassthroughImpl::HandleApplyScreenSpaceAntialiasingCHROMIUM(
 error::Error GLES2DecoderPassthroughImpl::
     HandleUniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate(
         uint32_t immediate_data_size,
-        const void* cmd_data) {
-  const gles2::cmds::UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate& c =
-      *static_cast<const gles2::cmds::
-                       UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate*>(
-          cmd_data);
-  (void)c;
+        const volatile void* cmd_data) {
+  const volatile gles2::cmds::
+      UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate& c = *static_cast<
+          const volatile gles2::cmds::
+              UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate*>(cmd_data);
   GLint location = static_cast<GLint>(c.location);
   GLboolean transpose = static_cast<GLboolean>(c.transpose);
   uint32_t data_size;
@@ -4499,10 +4124,29 @@ error::Error GLES2DecoderPassthroughImpl::
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  const GLfloat* transform =
-      GetImmediateDataAs<const GLfloat*>(c, data_size, immediate_data_size);
+  volatile const GLfloat* transform =
+      GetImmediateDataAs<volatile const GLfloat*>(c, data_size,
+                                                  immediate_data_size);
   error::Error error = DoUniformMatrix4fvStreamTextureMatrixCHROMIUM(
       location, transpose, transform);
+  if (error != error::kNoError) {
+    return error;
+  }
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderPassthroughImpl::HandleOverlayPromotionHintCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile gles2::cmds::OverlayPromotionHintCHROMIUM& c =
+      *static_cast<const volatile gles2::cmds::OverlayPromotionHintCHROMIUM*>(
+          cmd_data);
+  GLuint texture = c.texture;
+  GLboolean promotion_hint = static_cast<GLboolean>(c.promotion_hint);
+  GLint display_x = static_cast<GLint>(c.display_x);
+  GLint display_y = static_cast<GLint>(c.display_y);
+  error::Error error = DoOverlayPromotionHintCHROMIUM(texture, promotion_hint,
+                                                      display_x, display_y);
   if (error != error::kNoError) {
     return error;
   }

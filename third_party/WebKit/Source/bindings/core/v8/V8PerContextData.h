@@ -48,80 +48,98 @@
 
 namespace blink {
 
+class Modulator;
 class V8DOMActivityLogger;
 class V8PerContextData;
 
 enum V8ContextEmbedderDataField {
-    v8ContextPerContextDataIndex = static_cast<int>(gin::kPerContextDataStartIndex + gin::kEmbedderBlink),
+  v8ContextPerContextDataIndex =
+      static_cast<int>(gin::kPerContextDataStartIndex + gin::kEmbedderBlink),
 };
 
 class CORE_EXPORT V8PerContextData final {
-    USING_FAST_MALLOC(V8PerContextData);
-    WTF_MAKE_NONCOPYABLE(V8PerContextData);
-public:
-    static std::unique_ptr<V8PerContextData> create(v8::Local<v8::Context>);
+  USING_FAST_MALLOC(V8PerContextData);
+  WTF_MAKE_NONCOPYABLE(V8PerContextData);
 
-    static V8PerContextData* from(v8::Local<v8::Context>);
+ public:
+  static std::unique_ptr<V8PerContextData> create(v8::Local<v8::Context>);
 
-    ~V8PerContextData();
+  static V8PerContextData* from(v8::Local<v8::Context>);
 
-    v8::Local<v8::Context> context() { return m_context.newLocal(m_isolate); }
+  ~V8PerContextData();
 
-    // To create JS Wrapper objects, we create a cache of a 'boiler plate'
-    // object, and then simply Clone that object each time we need a new one.
-    // This is faster than going through the full object creation process.
-    v8::Local<v8::Object> createWrapperFromCache(const WrapperTypeInfo* type)
-    {
-        v8::Local<v8::Object> boilerplate = m_wrapperBoilerplates.Get(type);
-        return !boilerplate.IsEmpty() ? boilerplate->Clone() : createWrapperFromCacheSlowCase(type);
-    }
+  v8::Local<v8::Context> context() { return m_context.newLocal(m_isolate); }
 
-    v8::Local<v8::Function> constructorForType(const WrapperTypeInfo* type)
-    {
-        v8::Local<v8::Function> interfaceObject = m_constructorMap.Get(type);
-        return (!interfaceObject.IsEmpty()) ? interfaceObject : constructorForTypeSlowCase(type);
-    }
+  // To create JS Wrapper objects, we create a cache of a 'boiler plate'
+  // object, and then simply Clone that object each time we need a new one.
+  // This is faster than going through the full object creation process.
+  v8::Local<v8::Object> createWrapperFromCache(const WrapperTypeInfo* type) {
+    v8::Local<v8::Object> boilerplate = m_wrapperBoilerplates.Get(type);
+    return !boilerplate.IsEmpty() ? boilerplate->Clone()
+                                  : createWrapperFromCacheSlowCase(type);
+  }
 
-    v8::Local<v8::Object> prototypeForType(const WrapperTypeInfo*);
+  v8::Local<v8::Function> constructorForType(const WrapperTypeInfo* type) {
+    v8::Local<v8::Function> interfaceObject = m_constructorMap.Get(type);
+    return (!interfaceObject.IsEmpty()) ? interfaceObject
+                                        : constructorForTypeSlowCase(type);
+  }
 
-    void addCustomElementBinding(std::unique_ptr<V0CustomElementBinding>);
+  v8::Local<v8::Object> prototypeForType(const WrapperTypeInfo*);
 
-    V8DOMActivityLogger* activityLogger() const { return m_activityLogger; }
-    void setActivityLogger(V8DOMActivityLogger* activityLogger) { m_activityLogger = activityLogger; }
+  // Gets the constructor and prototype for a type, if they have already been
+  // created. Returns true if they exist, and sets the existing values in
+  // |prototypeObject| and |interfaceObject|. Otherwise, returns false, and the
+  // values are set to empty objects (non-null).
+  bool getExistingConstructorAndPrototypeForType(
+      const WrapperTypeInfo*,
+      v8::Local<v8::Object>* prototypeObject,
+      v8::Local<v8::Function>* interfaceObject);
 
-    v8::Local<v8::Value> compiledPrivateScript(String);
-    void setCompiledPrivateScript(String, v8::Local<v8::Value>);
+  void addCustomElementBinding(std::unique_ptr<V0CustomElementBinding>);
 
-private:
-    V8PerContextData(v8::Local<v8::Context>);
+  V8DOMActivityLogger* activityLogger() const { return m_activityLogger; }
+  void setActivityLogger(V8DOMActivityLogger* activityLogger) {
+    m_activityLogger = activityLogger;
+  }
 
-    v8::Local<v8::Object> createWrapperFromCacheSlowCase(const WrapperTypeInfo*);
-    v8::Local<v8::Function> constructorForTypeSlowCase(const WrapperTypeInfo*);
+  Modulator* modulator() const { return m_modulator.get(); }
+  void setModulator(Modulator*);
+  void clearModulator();
 
-    v8::Isolate* m_isolate;
+ private:
+  V8PerContextData(v8::Local<v8::Context>);
 
-    // For each possible type of wrapper, we keep a boilerplate object.
-    // The boilerplate is used to create additional wrappers of the same type.
-    typedef V8GlobalValueMap<const WrapperTypeInfo*, v8::Object, v8::kNotWeak> WrapperBoilerplateMap;
-    WrapperBoilerplateMap m_wrapperBoilerplates;
+  v8::Local<v8::Object> createWrapperFromCacheSlowCase(const WrapperTypeInfo*);
+  v8::Local<v8::Function> constructorForTypeSlowCase(const WrapperTypeInfo*);
 
-    typedef V8GlobalValueMap<const WrapperTypeInfo*, v8::Function, v8::kNotWeak> ConstructorMap;
-    ConstructorMap m_constructorMap;
+  v8::Isolate* m_isolate;
 
-    std::unique_ptr<gin::ContextHolder> m_contextHolder;
+  // For each possible type of wrapper, we keep a boilerplate object.
+  // The boilerplate is used to create additional wrappers of the same type.
+  typedef V8GlobalValueMap<const WrapperTypeInfo*, v8::Object, v8::kNotWeak>
+      WrapperBoilerplateMap;
+  WrapperBoilerplateMap m_wrapperBoilerplates;
 
-    ScopedPersistent<v8::Context> m_context;
-    ScopedPersistent<v8::Value> m_errorPrototype;
+  typedef V8GlobalValueMap<const WrapperTypeInfo*, v8::Function, v8::kNotWeak>
+      ConstructorMap;
+  ConstructorMap m_constructorMap;
 
-    typedef Vector<std::unique_ptr<V0CustomElementBinding>> V0CustomElementBindingList;
-    V0CustomElementBindingList m_customElementBindings;
+  std::unique_ptr<gin::ContextHolder> m_contextHolder;
 
-    // This is owned by a static hash map in V8DOMActivityLogger.
-    V8DOMActivityLogger* m_activityLogger;
+  ScopedPersistent<v8::Context> m_context;
+  ScopedPersistent<v8::Value> m_errorPrototype;
 
-    V8GlobalValueMap<String, v8::Value, v8::kNotWeak> m_compiledPrivateScript;
+  typedef Vector<std::unique_ptr<V0CustomElementBinding>>
+      V0CustomElementBindingList;
+  V0CustomElementBindingList m_customElementBindings;
+
+  // This is owned by a static hash map in V8DOMActivityLogger.
+  V8DOMActivityLogger* m_activityLogger;
+
+  Persistent<Modulator> m_modulator;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // V8PerContextData_h
+#endif  // V8PerContextData_h

@@ -32,44 +32,57 @@
 namespace blink {
 
 class CORE_EXPORT HTMLTableCellElement final : public HTMLTablePartElement {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    DECLARE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLTableCellElement);
+  DEFINE_WRAPPERTYPEINFO();
 
-    int cellIndex() const;
+ public:
+  DECLARE_ELEMENT_FACTORY_WITH_TAGNAME(HTMLTableCellElement);
 
-    unsigned colSpan() const;
-    unsigned rowSpan() const;
+  int cellIndex() const;
 
-    void setCellIndex(int);
+  unsigned colSpan() const;
+  unsigned rowSpan() const;
 
-    const AtomicString& abbr() const;
-    const AtomicString& axis() const;
-    void setColSpan(unsigned);
-    const AtomicString& headers() const;
-    void setRowSpan(unsigned);
-    const AtomicString& scope() const;
+  void setCellIndex(int);
 
-private:
-    HTMLTableCellElement(const QualifiedName&, Document&);
+  const AtomicString& abbr() const;
+  const AtomicString& axis() const;
+  void setColSpan(unsigned);
+  const AtomicString& headers() const;
+  void setRowSpan(unsigned);
 
-    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
-    bool isPresentationAttribute(const QualifiedName&) const override;
-    void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
-    const StylePropertySet* additionalPresentationAttributeStyle() override;
+  // Rowspan: match Firefox's limit of 65,534. Edge has a higher limit, at
+  // least 2^17.
+  // Colspan: Firefox uses a limit of 1,000 for colspan and resets the value to
+  // 1.
+  // TODO(dgrogan): Change these to HTML's new specified behavior when
+  // https://github.com/whatwg/html/issues/1198 is resolved.
+  // Public so that HTMLColElement can use maxColSpan. maxRowSpan is only used
+  // by this class but keeping them together seems desirable.
+  static unsigned maxColSpan() { return 8190u; }
+  static unsigned maxRowSpan() { return 65534u; }
 
-    bool isURLAttribute(const Attribute&) const override;
-    bool hasLegalLinkAttribute(const QualifiedName&) const override;
-    const QualifiedName& subResourceAttributeName() const override;
+ private:
+  HTMLTableCellElement(const QualifiedName&, Document&);
+
+  void parseAttribute(const AttributeModificationParams&) override;
+  bool isPresentationAttribute(const QualifiedName&) const override;
+  void collectStyleForPresentationAttribute(const QualifiedName&,
+                                            const AtomicString&,
+                                            MutableStylePropertySet*) override;
+  const StylePropertySet* additionalPresentationAttributeStyle() override;
+
+  bool isURLAttribute(const Attribute&) const override;
+  bool hasLegalLinkAttribute(const QualifiedName&) const override;
+  const QualifiedName& subResourceAttributeName() const override;
 };
 
-inline bool isHTMLTableCellElement(const HTMLElement& element)
-{
-    return element.hasTagName(HTMLNames::tdTag) || element.hasTagName(HTMLNames::thTag);
+inline bool isHTMLTableCellElement(const HTMLElement& element) {
+  return element.hasTagName(HTMLNames::tdTag) ||
+         element.hasTagName(HTMLNames::thTag);
 }
 
 DEFINE_HTMLELEMENT_TYPE_CASTS_WITH_FUNCTION(HTMLTableCellElement);
 
-} // namespace blink
+}  // namespace blink
 
-#endif // HTMLTableCellElement_h
+#endif  // HTMLTableCellElement_h

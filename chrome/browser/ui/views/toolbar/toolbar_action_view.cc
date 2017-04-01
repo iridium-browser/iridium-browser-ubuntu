@@ -14,11 +14,8 @@
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/notification_source.h"
-#include "grit/theme_resources.h"
-#include "ui/accessibility/ax_view_state.h"
-#include "ui/base/material_design/material_design_controller.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/compositor/paint_recorder.h"
@@ -26,13 +23,12 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/resources/grit/ui_resources.h"
+#include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/mouse_constants.h"
-#include "ui/views/resources/grit/views_resources.h"
 
 using views::LabelButtonBorder;
 
@@ -58,10 +54,8 @@ ToolbarActionView::ToolbarActionView(
       wants_to_run_(false),
       menu_(nullptr),
       weak_factory_(this) {
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    SetInkDropMode(InkDropMode::ON);
-    SetFocusPainter(nullptr);
-  }
+  SetInkDropMode(InkDropMode::ON);
+  SetFocusPainter(nullptr);
   set_has_ink_drop_action_on_click(true);
   set_id(VIEW_ID_BROWSER_ACTION);
   view_controller_->SetDelegate(this);
@@ -82,9 +76,9 @@ ToolbarActionView::~ToolbarActionView() {
   view_controller_->SetDelegate(nullptr);
 }
 
-void ToolbarActionView::GetAccessibleState(ui::AXViewState* state) {
-  views::MenuButton::GetAccessibleState(state);
-  state->role = ui::AX_ROLE_BUTTON;
+void ToolbarActionView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  views::MenuButton::GetAccessibleNodeData(node_data);
+  node_data->role = ui::AX_ROLE_BUTTON;
 }
 
 std::unique_ptr<LabelButtonBorder> ToolbarActionView::CreateDefaultBorder()
@@ -105,16 +99,19 @@ bool ToolbarActionView::IsTriggerableEvent(const ui::Event& event) {
 SkColor ToolbarActionView::GetInkDropBaseColor() const {
   if (delegate_->ShownInsideMenu()) {
     return GetNativeTheme()->GetSystemColor(
-        ui::NativeTheme::kColorId_HoverMenuItemBackgroundColor);
+        ui::NativeTheme::kColorId_FocusedMenuItemBackgroundColor);
   }
 
   return GetThemeProvider()->GetColor(
       ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON);
 }
 
-bool ToolbarActionView::ShouldShowInkDropHighlight() const {
-  return !delegate_->ShownInsideMenu() &&
-         views::MenuButton::ShouldShowInkDropHighlight();
+std::unique_ptr<views::InkDrop> ToolbarActionView::CreateInkDrop() {
+  std::unique_ptr<views::InkDropImpl> ink_drop =
+      CustomButton::CreateDefaultInkDropImpl();
+  ink_drop->SetShowHighlightOnHover(!delegate_->ShownInsideMenu());
+  ink_drop->SetShowHighlightOnFocus(true);
+  return std::move(ink_drop);
 }
 
 content::WebContents* ToolbarActionView::GetCurrentWebContents() const {

@@ -12,7 +12,7 @@ import android.content.pm.ResolveInfo;
 import android.text.TextUtils;
 
 import org.chromium.base.PackageUtils;
-import org.chromium.components.sync.signin.ChromeSigninController;
+import org.chromium.components.signin.ChromeSigninController;
 
 import java.util.List;
 
@@ -60,6 +60,13 @@ public class GSAState {
             sGSAState = new GSAState(context);
         }
         return sGSAState;
+    }
+
+    /**
+     * @return Whether the given package name is the package name for Google Search App.
+     */
+    public static boolean isGsaPackageName(String packageName) {
+        return SEARCH_INTENT_PACKAGE.equals(packageName);
     }
 
     /* Private constructor, since this is a singleton */

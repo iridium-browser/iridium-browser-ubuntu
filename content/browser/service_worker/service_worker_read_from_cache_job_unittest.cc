@@ -15,6 +15,7 @@
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_registration.h"
+#include "content/browser/service_worker/service_worker_test_utils.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/io_buffer.h"
@@ -34,6 +35,7 @@ const int64_t kRegistrationId = 1;
 const int64_t kVersionId = 2;
 const int64_t kMainScriptResourceId = 10;
 const int64_t kImportedScriptResourceId = 11;
+const int64_t kNonExistentResourceId = 12;
 const int64_t kResourceSize = 100;
 
 void DidStoreRegistration(ServiceWorkerStatusCode* status_out,
@@ -194,10 +196,10 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ReadMainScript) {
       url_request_context_->CreateRequest(main_script_.url,
                                           net::DEFAULT_PRIORITY, &delegate_);
   test_job_interceptor_->set_main_intercept_job(
-      base::WrapUnique(new ServiceWorkerReadFromCacheJob(
+      base::MakeUnique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */,
           RESOURCE_TYPE_SERVICE_WORKER, context()->AsWeakPtr(), version_,
-          main_script_.resource_id)));
+          main_script_.resource_id));
   StartAndWaitForRequest(request.get());
 
   EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
@@ -212,9 +214,9 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ReadImportedScript) {
       url_request_context_->CreateRequest(imported_script_.url,
                                           net::DEFAULT_PRIORITY, &delegate_);
   test_job_interceptor_->set_main_intercept_job(
-      base::WrapUnique(new ServiceWorkerReadFromCacheJob(
+      base::MakeUnique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */, RESOURCE_TYPE_SCRIPT,
-          context()->AsWeakPtr(), version_, imported_script_.resource_id)));
+          context()->AsWeakPtr(), version_, imported_script_.resource_id));
   StartAndWaitForRequest(request.get());
 
   EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
@@ -226,17 +228,26 @@ TEST_F(ServiceWorkerReadFromCacheJobTest, ReadImportedScript) {
 TEST_F(ServiceWorkerReadFromCacheJobTest, ResourceNotFound) {
   ASSERT_EQ(SERVICE_WORKER_OK, FindRegistration());
 
-  // Try to read a nonexistent resource from the diskcache.
+  // Populate the script cache map with a nonexistent resource.
+  ServiceWorkerScriptCacheMap* script_cache_map = version_->script_cache_map();
+  script_cache_map->resource_map_.clear();
+  using Record = ServiceWorkerDatabase::ResourceRecord;
+  std::vector<Record> resources = {
+      Record(kNonExistentResourceId, main_script_.url, main_script_.size_bytes),
+      Record(imported_script_.resource_id, imported_script_.url,
+             imported_script_.size_bytes)};
+  script_cache_map->SetResources(resources);
+
+  // Attempt to read it from the disk cache.
   std::unique_ptr<net::URLRequest> request =
-      url_request_context_->CreateRequest(
-          GURL("http://example.com/nonexistent"), net::DEFAULT_PRIORITY,
-          &delegate_);
+      url_request_context_->CreateRequest(main_script_.url,
+                                          net::DEFAULT_PRIORITY, &delegate_);
   const int64_t kNonexistentResourceId = 100;
   test_job_interceptor_->set_main_intercept_job(
-      base::WrapUnique(new ServiceWorkerReadFromCacheJob(
+      base::MakeUnique<ServiceWorkerReadFromCacheJob>(
           request.get(), nullptr /* NetworkDelegate */,
           RESOURCE_TYPE_SERVICE_WORKER, context()->AsWeakPtr(), version_,
-          kNonexistentResourceId)));
+          kNonexistentResourceId));
   StartAndWaitForRequest(request.get());
 
   EXPECT_EQ(net::URLRequestStatus::FAILED, request->status().status());

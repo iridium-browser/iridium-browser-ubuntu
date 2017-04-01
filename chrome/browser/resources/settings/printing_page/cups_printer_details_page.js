@@ -34,7 +34,7 @@ Polymer({
    * Event triggered when the input value changes.
    * @private
    */
-  onValueChanged_: function() {
+  onValueChange_: function() {
     this.browserProxy_.updateCupsPrinter(this.printer.printerId,
                                          this.printer.printerName);
   },
@@ -47,5 +47,30 @@ Polymer({
     if (event.target.id == 'expandButton')
       return;  // Already handled.
     this.advancedExpanded = !this.advancedExpanded;
+  },
+
+  /**
+   * @param {string} printerProtocol
+   * @return {string} The Printer's protocol that displays in UI
+   * @private
+   */
+  getPrinterProtocol_: function(printerProtocol) {
+    if (!printerProtocol)
+      return '';
+    if (printerProtocol == 'ipp')
+      return loadTimeData.getString('printerProtocolIpp');
+    if (printerProtocol == 'ipps')
+      return loadTimeData.getString('printerProtocolIpps');
+    if (printerProtocol == 'http')
+      return loadTimeData.getString('printerProtocolHttp');
+    if (printerProtocol == 'https')
+      return loadTimeData.getString('printerProtocolHttps');
+    if (printerProtocol == 'socket')
+      return loadTimeData.getString('printerProtocolAppSocket');
+    if (printerProtocol == 'lpd')
+      return loadTimeData.getString('printerProtocolLpd');
+    if (printerProtocol == 'usb')
+      return loadTimeData.getString('printerProtocolUsb');
+    assertNotReached('Illegal printer protocol!');
   },
 });

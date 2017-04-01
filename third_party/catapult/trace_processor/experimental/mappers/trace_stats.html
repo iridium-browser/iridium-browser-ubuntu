@@ -6,17 +6,15 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/unit.html">
 <link rel="import" href="/tracing/mre/function_handle.html">
 <link rel="import" href="/tracing/value/histogram.html">
-<link rel="import" href="/tracing/value/unit.html">
 
 <script>
 'use strict';
 
 tr.exportTo('pi.m', function() {
-  var COUNT_NUMERIC_BUILDER = tr.v.NumericBuilder.createLinear(
-      tr.v.Unit.byName.unitlessNumber, tr.b.Range.fromExplicitRange(0, 50000),
-      20);
+  var COUNT_BOUNDARIES = tr.v.HistogramBinBoundaries.createLinear(0, 5e4, 20);
 
   function traceStatsFunction(result, model) {
     var canonicalUrl = model.canonicalUrl;
@@ -47,7 +45,8 @@ tr.exportTo('pi.m', function() {
       seconds_counts[second]++;
     }
 
-    var histogram = COUNT_NUMERIC_BUILDER.build();
+    var histogram = new tr.v.Histogram(
+        tr.b.Unit.byName.count, COUNT_BOUNDARIES);
 
     for (var second in seconds_counts)
       histogram.add(seconds_counts[second]);

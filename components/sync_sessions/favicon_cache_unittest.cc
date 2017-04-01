@@ -4,10 +4,6 @@
 
 #include "components/sync_sessions/favicon_cache.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -15,17 +11,17 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "components/sync/api/attachments/attachment_id.h"
-#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
-#include "components/sync/api/sync_error_factory_mock.h"
-#include "components/sync/api/time.h"
-#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/model/attachments/attachment_id.h"
+#include "components/sync/model/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/model/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/model/sync_error_factory_mock.h"
+#include "components/sync/model/time.h"
 #include "components/sync/protocol/favicon_image_specifics.pb.h"
 #include "components/sync/protocol/favicon_tracking_specifics.pb.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace browser_sync {
+namespace sync_sessions {
 
 namespace {
 
@@ -403,8 +399,8 @@ testing::AssertionResult SyncFaviconCacheTest::VerifyLocalCustomIcons(
 
 std::unique_ptr<syncer::SyncChangeProcessor>
 SyncFaviconCacheTest::CreateAndPassProcessor() {
-  return base::WrapUnique(
-      new syncer::SyncChangeProcessorWrapperForTest(sync_processor_.get()));
+  return base::MakeUnique<syncer::SyncChangeProcessorWrapperForTest>(
+      sync_processor_.get());
 }
 
 std::unique_ptr<syncer::SyncErrorFactory>
@@ -1935,4 +1931,4 @@ TEST_F(SyncFaviconCacheTest, MixedThreshold) {
   EXPECT_EQ(0, GetFaviconId(changes[5]));
 }
 
-}  // namespace browser_sync
+}  // namespace sync_sessions

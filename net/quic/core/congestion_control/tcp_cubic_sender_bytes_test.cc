@@ -8,16 +8,15 @@
 #include <cstdint>
 #include <memory>
 
-#include "base/logging.h"
 #include "net/quic/core/congestion_control/rtt_stats.h"
+#include "net/quic/core/congestion_control/send_algorithm_interface.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/proto/cached_network_parameters.pb.h"
-#include "net/quic/core/quic_flags.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_logging.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/quic/test_tools/quic_config_peer.h"
-#include "net/quic/test_tools/quic_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -92,8 +91,8 @@ class TcpCubicSenderBytesTest : public ::testing::Test {
       acked_packets.push_back(
           std::make_pair(acked_packet_number_, kDefaultTCPMSS));
     }
-    sender_->OnCongestionEvent(true, bytes_in_flight_, acked_packets,
-                               lost_packets);
+    sender_->OnCongestionEvent(true, bytes_in_flight_, clock_.Now(),
+                               acked_packets, lost_packets);
     bytes_in_flight_ -= n * kDefaultTCPMSS;
     clock_.AdvanceTime(one_ms_);
   }
@@ -108,8 +107,8 @@ class TcpCubicSenderBytesTest : public ::testing::Test {
       lost_packets.push_back(
           std::make_pair(acked_packet_number_, packet_length));
     }
-    sender_->OnCongestionEvent(false, bytes_in_flight_, acked_packets,
-                               lost_packets);
+    sender_->OnCongestionEvent(false, bytes_in_flight_, clock_.Now(),
+                               acked_packets, lost_packets);
     bytes_in_flight_ -= n * packet_length;
   }
 
@@ -118,8 +117,8 @@ class TcpCubicSenderBytesTest : public ::testing::Test {
     SendAlgorithmInterface::CongestionVector acked_packets;
     SendAlgorithmInterface::CongestionVector lost_packets;
     lost_packets.push_back(std::make_pair(packet_number, kDefaultTCPMSS));
-    sender_->OnCongestionEvent(false, bytes_in_flight_, acked_packets,
-                               lost_packets);
+    sender_->OnCongestionEvent(false, bytes_in_flight_, clock_.Now(),
+                               acked_packets, lost_packets);
     bytes_in_flight_ -= kDefaultTCPMSS;
   }
 
@@ -210,7 +209,7 @@ TEST_F(TcpCubicSenderBytesTest, SlowStartPacketLoss) {
   // Recovery phase. We need to ack every packet in the recovery window before
   // we exit recovery.
   size_t number_of_packets_in_window = expected_send_window / kDefaultTCPMSS;
-  DVLOG(1) << "number_packets: " << number_of_packets_in_window;
+  QUIC_DLOG(INFO) << "number_packets: " << number_of_packets_in_window;
   AckNPackets(packets_in_recovery_window);
   SendAvailableSendWindow();
   EXPECT_EQ(expected_send_window, sender_->GetCongestionWindow());
@@ -272,7 +271,7 @@ TEST_F(TcpCubicSenderBytesTest, SlowStartPacketLossWithLargeReduction) {
   // Recovery phase. We need to ack every packet in the recovery window before
   // we exit recovery.
   size_t number_of_packets_in_window = expected_send_window / kDefaultTCPMSS;
-  DVLOG(1) << "number_packets: " << number_of_packets_in_window;
+  QUIC_DLOG(INFO) << "number_packets: " << number_of_packets_in_window;
   AckNPackets(packets_in_recovery_window);
   SendAvailableSendWindow();
   EXPECT_EQ(expected_send_window, sender_->GetCongestionWindow());
@@ -494,41 +493,6 @@ TEST_F(TcpCubicSenderBytesTest, RTOCongestionWindowNoRetransmission) {
   EXPECT_EQ(kDefaultWindowTCP, sender_->GetCongestionWindow());
 }
 
-TEST_F(TcpCubicSenderBytesTest, RetransmissionDelay) {
-  const int64_t kRttMs = 10;
-  const int64_t kDeviationMs = 3;
-  EXPECT_EQ(QuicTime::Delta::Zero(), sender_->RetransmissionDelay());
-
-  sender_->rtt_stats_.UpdateRtt(QuicTime::Delta::FromMilliseconds(kRttMs),
-                                QuicTime::Delta::Zero(), clock_.Now());
-
-  // Initial value is to set the median deviation to half of the initial rtt,
-  // the median in then multiplied by a factor of 4 and finally the smoothed rtt
-  // is added which is the initial rtt.
-  QuicTime::Delta expected_delay =
-      QuicTime::Delta::FromMilliseconds(kRttMs + kRttMs / 2 * 4);
-  EXPECT_EQ(expected_delay, sender_->RetransmissionDelay());
-
-  for (int i = 0; i < 100; ++i) {
-    // Run to make sure that we converge.
-    sender_->rtt_stats_.UpdateRtt(
-        QuicTime::Delta::FromMilliseconds(kRttMs + kDeviationMs),
-        QuicTime::Delta::Zero(), clock_.Now());
-    sender_->rtt_stats_.UpdateRtt(
-        QuicTime::Delta::FromMilliseconds(kRttMs - kDeviationMs),
-        QuicTime::Delta::Zero(), clock_.Now());
-  }
-  expected_delay = QuicTime::Delta::FromMilliseconds(kRttMs + kDeviationMs * 4);
-
-  EXPECT_NEAR(kRttMs, sender_->rtt_stats_.smoothed_rtt().ToMilliseconds(), 1);
-  EXPECT_NEAR(expected_delay.ToMilliseconds(),
-              sender_->RetransmissionDelay().ToMilliseconds(), 1);
-  EXPECT_EQ(static_cast<int64_t>(
-                sender_->GetCongestionWindow() * kNumMicrosPerSecond /
-                sender_->rtt_stats_.smoothed_rtt().ToMicroseconds()),
-            sender_->BandwidthEstimate().ToBytesPerSecond());
-}
-
 TEST_F(TcpCubicSenderBytesTest, TcpCubicResetEpochOnQuiescence) {
   const int kMaxCongestionWindow = 50;
   const QuicByteCount kMaxCongestionWindowBytes =
@@ -736,18 +700,10 @@ TEST_F(TcpCubicSenderBytesTest, BandwidthResumption) {
   EXPECT_EQ(kMaxCongestionWindowPackets * kDefaultTCPMSS,
             sender_->GetCongestionWindow());
 
-  if (FLAGS_quic_no_lower_bw_resumption_limit) {
-    // Resume with an illegal value of 0 and verify the server uses 1 instead.
-    cached_network_params.set_bandwidth_estimate_bytes_per_second(0);
-    sender_->ResumeConnectionState(cached_network_params, false);
-    EXPECT_EQ(sender_->min_congestion_window(), sender_->GetCongestionWindow());
-  } else {
-    cached_network_params.set_bandwidth_estimate_bytes_per_second(
-        (kMinCongestionWindowForBandwidthResumption - 1) * kDefaultTCPMSS);
-    sender_->ResumeConnectionState(cached_network_params, false);
-    EXPECT_EQ(kMinCongestionWindowForBandwidthResumption * kDefaultTCPMSS,
-              sender_->GetCongestionWindow());
-  }
+  // Resume with an illegal value of 0 and verify the server uses 1 instead.
+  cached_network_params.set_bandwidth_estimate_bytes_per_second(0);
+  sender_->ResumeConnectionState(cached_network_params, false);
+  EXPECT_EQ(sender_->min_congestion_window(), sender_->GetCongestionWindow());
 
   // Resume to the max value.
   cached_network_params.set_max_bandwidth_estimate_bytes_per_second(
@@ -809,7 +765,6 @@ TEST_F(TcpCubicSenderBytesTest, NoPRR) {
 }
 
 TEST_F(TcpCubicSenderBytesTest, PaceSlowerAboveCwnd) {
-  ValueRestore<bool> old_flag(&FLAGS_quic_rate_based_sending, true);
   QuicTime::Delta rtt(QuicTime::Delta::FromMilliseconds(60));
   sender_->rtt_stats_.UpdateRtt(rtt, QuicTime::Delta::Zero(), clock_.Now());
 
@@ -876,18 +831,55 @@ TEST_F(TcpCubicSenderBytesTest, DefaultMaxCwnd) {
   RttStats rtt_stats;
   QuicConnectionStats stats;
   std::unique_ptr<SendAlgorithmInterface> sender(SendAlgorithmInterface::Create(
-      &clock_, &rtt_stats, kCubicBytes, &stats, kInitialCongestionWindow));
+      &clock_, &rtt_stats, /*unacked_packets=*/nullptr, kCubicBytes,
+      QuicRandom::GetInstance(), &stats, kInitialCongestionWindow));
 
   SendAlgorithmInterface::CongestionVector acked_packets;
   SendAlgorithmInterface::CongestionVector missing_packets;
   for (uint64_t i = 1; i < kDefaultMaxCongestionWindowPackets; ++i) {
     acked_packets.clear();
     acked_packets.push_back(std::make_pair(i, 1350));
-    sender->OnCongestionEvent(true, sender->GetCongestionWindow(),
+    sender->OnCongestionEvent(true, sender->GetCongestionWindow(), clock_.Now(),
                               acked_packets, missing_packets);
   }
   EXPECT_EQ(kDefaultMaxCongestionWindowPackets,
             sender->GetCongestionWindow() / kDefaultTCPMSS);
+}
+
+TEST_F(TcpCubicSenderBytesTest, LimitCwndIncreaseInCongestionAvoidance) {
+  // Enable Cubic.
+  sender_.reset(new TcpCubicSenderBytesPeer(&clock_, false));
+
+  int num_sent = SendAvailableSendWindow();
+
+  // Make sure we fall out of slow start.
+  QuicByteCount saved_cwnd = sender_->GetCongestionWindow();
+  LoseNPackets(1);
+  EXPECT_GT(saved_cwnd, sender_->GetCongestionWindow());
+
+  // Ack the rest of the outstanding packets to get out of recovery.
+  for (int i = 1; i < num_sent; ++i) {
+    AckNPackets(1);
+  }
+  EXPECT_EQ(0u, bytes_in_flight_);
+  // Send a new window of data and ack all; cubic growth should occur.
+  saved_cwnd = sender_->GetCongestionWindow();
+  num_sent = SendAvailableSendWindow();
+
+  // Ack packets until the CWND increases.
+  while (sender_->GetCongestionWindow() == saved_cwnd) {
+    AckNPackets(1);
+    SendAvailableSendWindow();
+  }
+  EXPECT_EQ(bytes_in_flight_, sender_->GetCongestionWindow());
+  saved_cwnd = sender_->GetCongestionWindow();
+
+  // Advance time 2 seconds waiting for an ack.
+  clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(2000));
+
+  // Ack two packets.  The CWND should increase by only one packet.
+  AckNPackets(2);
+  EXPECT_EQ(saved_cwnd + kDefaultTCPMSS, sender_->GetCongestionWindow());
 }
 
 }  // namespace test

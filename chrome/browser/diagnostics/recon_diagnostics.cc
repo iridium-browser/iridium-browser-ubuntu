@@ -14,6 +14,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -51,62 +52,6 @@ const int64_t kOneMegabyte = 1024 * kOneKilobyte;
 
 class InstallTypeTest;
 InstallTypeTest* g_install_type = 0;
-
-// Check if any conflicting DLLs are loaded.
-class ConflictingDllsTest : public DiagnosticsTest {
- public:
-  ConflictingDllsTest()
-      : DiagnosticsTest(DIAGNOSTICS_CONFLICTING_DLLS_TEST) {}
-
-  bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
-#if defined(OS_WIN)
-    EnumerateModulesModel* model = EnumerateModulesModel::GetInstance();
-    model->set_limited_mode(true);
-    model->ScanNow();
-    std::unique_ptr<base::ListValue> list(model->GetModuleList());
-    if (!model->confirmed_bad_modules_detected() &&
-        !model->suspected_bad_modules_detected()) {
-      RecordSuccess("No conflicting modules found");
-      return true;
-    }
-
-    std::string failures = "Possibly conflicting modules:";
-    base::DictionaryValue* dictionary;
-    for (size_t i = 0; i < list->GetSize(); ++i) {
-      if (!list->GetDictionary(i, &dictionary))
-        RecordFailure(DIAG_RECON_DICTIONARY_LOOKUP_FAILED,
-                      "Dictionary lookup failed");
-      int status;
-      std::string location;
-      std::string name;
-      if (!dictionary->GetInteger("status", &status))
-        RecordFailure(DIAG_RECON_NO_STATUS_FIELD, "No 'status' field found");
-      if (status < ModuleEnumerator::SUSPECTED_BAD)
-        continue;
-
-      if (!dictionary->GetString("location", &location)) {
-        RecordFailure(DIAG_RECON_NO_LOCATION_FIELD,
-                      "No 'location' field found");
-        return true;
-      }
-      if (!dictionary->GetString("name", &name)) {
-        RecordFailure(DIAG_RECON_NO_NAME_FIELD, "No 'name' field found");
-        return true;
-      }
-
-      failures += "\n" + location + name;
-    }
-    RecordFailure(DIAG_RECON_CONFLICTING_MODULES, failures);
-    return true;
-#else
-    RecordFailure(DIAG_RECON_NOT_IMPLEMENTED, "Not implemented");
-    return true;
-#endif  // defined(OS_WIN)
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ConflictingDllsTest);
-};
 
 // Check that the disk space in the volume where the user data directory
 // normally lives is not dangerously low.
@@ -386,57 +331,58 @@ class VersionTest : public DiagnosticsTest {
 
 }  // namespace
 
-DiagnosticsTest* MakeConflictingDllsTest() { return new ConflictingDllsTest(); }
-
-DiagnosticsTest* MakeDiskSpaceTest() { return new DiskSpaceTest(); }
-
-DiagnosticsTest* MakeInstallTypeTest() { return new InstallTypeTest(); }
-
-DiagnosticsTest* MakeBookMarksTest() {
-  base::FilePath path = DiagnosticsTest::GetUserDefaultProfileDir();
-  path = path.Append(bookmarks::kBookmarksFileName);
-  return new JSONTest(path,
-                      DIAGNOSTICS_JSON_BOOKMARKS_TEST,
-                      2 * kOneMegabyte,
-                      JSONTest::NON_CRITICAL);
+std::unique_ptr<DiagnosticsTest> MakeDiskSpaceTest() {
+  return base::MakeUnique<DiskSpaceTest>();
 }
 
-DiagnosticsTest* MakeLocalStateTest() {
+std::unique_ptr<DiagnosticsTest> MakeInstallTypeTest() {
+  return base::MakeUnique<InstallTypeTest>();
+}
+
+std::unique_ptr<DiagnosticsTest> MakeBookMarksTest() {
+  base::FilePath path = DiagnosticsTest::GetUserDefaultProfileDir();
+  path = path.Append(bookmarks::kBookmarksFileName);
+  return base::MakeUnique<JSONTest>(path, DIAGNOSTICS_JSON_BOOKMARKS_TEST,
+                                    2 * kOneMegabyte, JSONTest::NON_CRITICAL);
+}
+
+std::unique_ptr<DiagnosticsTest> MakeLocalStateTest() {
   base::FilePath path;
   PathService::Get(chrome::DIR_USER_DATA, &path);
   path = path.Append(chrome::kLocalStateFilename);
-  return new JSONTest(path,
-                      DIAGNOSTICS_JSON_LOCAL_STATE_TEST,
-                      50 * kOneKilobyte,
-                      JSONTest::CRITICAL);
+  return base::MakeUnique<JSONTest>(path, DIAGNOSTICS_JSON_LOCAL_STATE_TEST,
+                                    50 * kOneKilobyte, JSONTest::CRITICAL);
 }
 
-DiagnosticsTest* MakePreferencesTest() {
+std::unique_ptr<DiagnosticsTest> MakePreferencesTest() {
   base::FilePath path = DiagnosticsTest::GetUserDefaultProfileDir();
   path = path.Append(chrome::kPreferencesFilename);
-  return new JSONTest(path,
-                      DIAGNOSTICS_JSON_PREFERENCES_TEST,
-                      100 * kOneKilobyte,
-                      JSONTest::CRITICAL);
+  return base::MakeUnique<JSONTest>(path, DIAGNOSTICS_JSON_PREFERENCES_TEST,
+                                    100 * kOneKilobyte, JSONTest::CRITICAL);
 }
 
-
-DiagnosticsTest* MakeOperatingSystemTest() { return new OperatingSystemTest(); }
-
-DiagnosticsTest* MakeDictonaryDirTest() {
-  return new PathTest(kPathsToTest[0]);
+std::unique_ptr<DiagnosticsTest> MakeOperatingSystemTest() {
+  return base::MakeUnique<OperatingSystemTest>();
 }
 
-DiagnosticsTest* MakeLocalStateFileTest() {
-  return new PathTest(kPathsToTest[1]);
+std::unique_ptr<DiagnosticsTest> MakeDictonaryDirTest() {
+  return base::MakeUnique<PathTest>(kPathsToTest[0]);
 }
 
-DiagnosticsTest* MakeResourcesFileTest() {
-  return new PathTest(kPathsToTest[2]);
+std::unique_ptr<DiagnosticsTest> MakeLocalStateFileTest() {
+  return base::MakeUnique<PathTest>(kPathsToTest[1]);
 }
 
-DiagnosticsTest* MakeUserDirTest() { return new PathTest(kPathsToTest[3]); }
+std::unique_ptr<DiagnosticsTest> MakeResourcesFileTest() {
+  return base::MakeUnique<PathTest>(kPathsToTest[2]);
+}
 
-DiagnosticsTest* MakeVersionTest() { return new VersionTest(); }
+std::unique_ptr<DiagnosticsTest> MakeUserDirTest() {
+  return base::MakeUnique<PathTest>(kPathsToTest[3]);
+}
+
+std::unique_ptr<DiagnosticsTest> MakeVersionTest() {
+  return base::MakeUnique<VersionTest>();
+}
 
 }  // namespace diagnostics

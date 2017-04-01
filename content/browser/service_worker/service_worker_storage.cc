@@ -81,6 +81,12 @@ ServiceWorkerStatusCode DatabaseStatusToStatusCode(
   }
 }
 
+void DidUpdateNavigationPreloadState(
+    const ServiceWorkerStorage::StatusCallback& callback,
+    ServiceWorkerDatabase::Status status) {
+  callback.Run(DatabaseStatusToStatusCode(status));
+}
+
 }  // namespace
 
 ServiceWorkerStorage::InitialData::InitialData()
@@ -351,7 +357,7 @@ void ServiceWorkerStorage::GetRegistrationsForOrigin(
       base::Bind(&ServiceWorkerDatabase::GetRegistrationsForOrigin,
                  base::Unretained(database_.get()), origin, registrations,
                  resource_lists),
-      base::Bind(&ServiceWorkerStorage::DidGetRegistrations,
+      base::Bind(&ServiceWorkerStorage::DidGetRegistrationsForOrigin,
                  weak_factory_.GetWeakPtr(), callback,
                  base::Owned(registrations), base::Owned(resource_lists),
                  origin));
@@ -376,9 +382,9 @@ void ServiceWorkerStorage::GetAllRegistrationsInfos(
       database_task_manager_->GetTaskRunner(), FROM_HERE,
       base::Bind(&ServiceWorkerDatabase::GetAllRegistrations,
                  base::Unretained(database_.get()), registrations),
-      base::Bind(&ServiceWorkerStorage::DidGetRegistrationsInfos,
+      base::Bind(&ServiceWorkerStorage::DidGetAllRegistrationsInfos,
                  weak_factory_.GetWeakPtr(), callback,
-                 base::Owned(registrations), GURL()));
+                 base::Owned(registrations)));
 }
 
 void ServiceWorkerStorage::StoreRegistration(
@@ -408,6 +414,9 @@ void ServiceWorkerStorage::StoreRegistration(
   data.is_active = (version == registration->active_version());
   data.foreign_fetch_scopes = version->foreign_fetch_scopes();
   data.foreign_fetch_origins = version->foreign_fetch_origins();
+  if (version->origin_trial_tokens())
+    data.origin_trial_tokens = *version->origin_trial_tokens();
+  data.navigation_preload_state = registration->navigation_preload_state();
 
   ResourceList resources;
   version->script_cache_map()->GetResources(&resources);
@@ -479,6 +488,44 @@ void ServiceWorkerStorage::UpdateLastUpdateCheckTime(
           registration->id(),
           registration->pattern().GetOrigin(),
           registration->last_update_check()));
+}
+
+void ServiceWorkerStorage::UpdateNavigationPreloadEnabled(
+    int64_t registration_id,
+    const GURL& origin,
+    bool enable,
+    const StatusCallback& callback) {
+  DCHECK(state_ == INITIALIZED || state_ == DISABLED) << state_;
+  if (IsDisabled()) {
+    callback.Run(SERVICE_WORKER_ERROR_ABORT);
+    return;
+  }
+
+  PostTaskAndReplyWithResult(
+      database_task_manager_->GetTaskRunner(), FROM_HERE,
+      base::Bind(&ServiceWorkerDatabase::UpdateNavigationPreloadEnabled,
+                 base::Unretained(database_.get()), registration_id, origin,
+                 enable),
+      base::Bind(&DidUpdateNavigationPreloadState, callback));
+}
+
+void ServiceWorkerStorage::UpdateNavigationPreloadHeader(
+    int64_t registration_id,
+    const GURL& origin,
+    const std::string& value,
+    const StatusCallback& callback) {
+  DCHECK(state_ == INITIALIZED || state_ == DISABLED) << state_;
+  if (IsDisabled()) {
+    callback.Run(SERVICE_WORKER_ERROR_ABORT);
+    return;
+  }
+
+  PostTaskAndReplyWithResult(
+      database_task_manager_->GetTaskRunner(), FROM_HERE,
+      base::Bind(&ServiceWorkerDatabase::UpdateNavigationPreloadHeader,
+                 base::Unretained(database_.get()), registration_id, origin,
+                 value),
+      base::Bind(&DidUpdateNavigationPreloadState, callback));
 }
 
 void ServiceWorkerStorage::DeleteRegistration(int64_t registration_id,
@@ -580,11 +627,14 @@ void ServiceWorkerStorage::StoreUserData(
     const GURL& origin,
     const std::vector<std::pair<std::string, std::string>>& key_value_pairs,
     const StatusCallback& callback) {
-  DCHECK(state_ == INITIALIZED || state_ == DISABLED) << state_;
-  if (IsDisabled()) {
-    RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_ABORT));
+  if (!LazyInitialize(base::Bind(&ServiceWorkerStorage::StoreUserData,
+                                 weak_factory_.GetWeakPtr(), registration_id,
+                                 origin, key_value_pairs, callback))) {
+    if (state_ != INITIALIZING)
+      RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_ABORT));
     return;
   }
+  DCHECK_EQ(INITIALIZED, state_);
 
   if (registration_id == kInvalidServiceWorkerRegistrationId ||
       key_value_pairs.empty()) {
@@ -610,12 +660,16 @@ void ServiceWorkerStorage::StoreUserData(
 void ServiceWorkerStorage::GetUserData(int64_t registration_id,
                                        const std::vector<std::string>& keys,
                                        const GetUserDataCallback& callback) {
-  DCHECK(state_ == INITIALIZED || state_ == DISABLED) << state_;
-  if (IsDisabled()) {
-    RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
-                                  SERVICE_WORKER_ERROR_ABORT));
+  if (!LazyInitialize(base::Bind(&ServiceWorkerStorage::GetUserData,
+                                 weak_factory_.GetWeakPtr(), registration_id,
+                                 keys, callback))) {
+    if (state_ != INITIALIZING) {
+      RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
+                                    SERVICE_WORKER_ERROR_ABORT));
+    }
     return;
   }
+  DCHECK_EQ(INITIALIZED, state_);
 
   if (registration_id == kInvalidServiceWorkerRegistrationId || keys.empty()) {
     RunSoon(FROM_HERE, base::Bind(callback, std::vector<std::string>(),
@@ -641,7 +695,15 @@ void ServiceWorkerStorage::GetUserData(int64_t registration_id,
 void ServiceWorkerStorage::ClearUserData(int64_t registration_id,
                                          const std::vector<std::string>& keys,
                                          const StatusCallback& callback) {
-  DCHECK(state_ == INITIALIZED || state_ == DISABLED) << state_;
+  if (!LazyInitialize(base::Bind(&ServiceWorkerStorage::ClearUserData,
+                                 weak_factory_.GetWeakPtr(), registration_id,
+                                 keys, callback))) {
+    if (state_ != INITIALIZING)
+      RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_ABORT));
+    return;
+  }
+  DCHECK_EQ(INITIALIZED, state_);
+
   if (IsDisabled()) {
     RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_ABORT));
     return;
@@ -980,7 +1042,7 @@ void ServiceWorkerStorage::ReturnFoundRegistration(
   CompleteFindNow(std::move(registration), SERVICE_WORKER_OK, callback);
 }
 
-void ServiceWorkerStorage::DidGetRegistrations(
+void ServiceWorkerStorage::DidGetRegistrationsForOrigin(
     const GetRegistrationsCallback& callback,
     RegistrationList* registration_data_list,
     std::vector<ResourceList>* resources_list,
@@ -988,6 +1050,7 @@ void ServiceWorkerStorage::DidGetRegistrations(
     ServiceWorkerDatabase::Status status) {
   DCHECK(registration_data_list);
   DCHECK(resources_list);
+  DCHECK(origin_filter.is_valid());
 
   if (status != ServiceWorkerDatabase::STATUS_OK &&
       status != ServiceWorkerDatabase::STATUS_ERROR_NOT_FOUND) {
@@ -1009,20 +1072,18 @@ void ServiceWorkerStorage::DidGetRegistrations(
 
   // Add unstored registrations that are being installed.
   for (const auto& registration : installing_registrations_) {
-    if ((!origin_filter.is_valid() ||
-         registration.second->pattern().GetOrigin() == origin_filter) &&
-        registration_ids.insert(registration.first).second) {
+    if (registration.second->pattern().GetOrigin() != origin_filter)
+      continue;
+    if (registration_ids.insert(registration.first).second)
       registrations.push_back(registration.second);
-    }
   }
 
   callback.Run(SERVICE_WORKER_OK, std::move(registrations));
 }
 
-void ServiceWorkerStorage::DidGetRegistrationsInfos(
+void ServiceWorkerStorage::DidGetAllRegistrationsInfos(
     const GetRegistrationsInfosCallback& callback,
     RegistrationList* registration_data_list,
-    const GURL& origin_filter,
     ServiceWorkerDatabase::Status status) {
   DCHECK(registration_data_list);
   if (status != ServiceWorkerDatabase::STATUS_OK &&
@@ -1068,22 +1129,27 @@ void ServiceWorkerStorage::DidGetRegistrationsInfos(
       info.active_version.script_url = registration_data.script;
       info.active_version.version_id = registration_data.version_id;
       info.active_version.registration_id = registration_data.registration_id;
+      info.active_version.fetch_handler_existence =
+          registration_data.has_fetch_handler
+              ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
+              : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST;
     } else {
       info.waiting_version.status = ServiceWorkerVersion::INSTALLED;
       info.waiting_version.script_url = registration_data.script;
       info.waiting_version.version_id = registration_data.version_id;
       info.waiting_version.registration_id = registration_data.registration_id;
+      info.waiting_version.fetch_handler_existence =
+          registration_data.has_fetch_handler
+              ? ServiceWorkerVersion::FetchHandlerExistence::EXISTS
+              : ServiceWorkerVersion::FetchHandlerExistence::DOES_NOT_EXIST;
     }
     infos.push_back(info);
   }
 
   // Add unstored registrations that are being installed.
   for (const auto& registration : installing_registrations_) {
-    if ((!origin_filter.is_valid() ||
-         registration.second->pattern().GetOrigin() == origin_filter) &&
-        pushed_registrations.insert(registration.first).second) {
+    if (pushed_registrations.insert(registration.first).second)
       infos.push_back(registration.second->GetInfo());
-    }
   }
 
   callback.Run(SERVICE_WORKER_OK, infos);
@@ -1256,6 +1322,8 @@ ServiceWorkerStorage::GetOrCreateRegistration(
     version->script_cache_map()->SetResources(resources);
     version->set_foreign_fetch_scopes(data.foreign_fetch_scopes);
     version->set_foreign_fetch_origins(data.foreign_fetch_origins);
+    if (data.origin_trial_tokens)
+      version->SetValidOriginTrialTokens(*data.origin_trial_tokens);
   }
 
   if (version->status() == ServiceWorkerVersion::ACTIVATED)
@@ -1265,6 +1333,9 @@ ServiceWorkerStorage::GetOrCreateRegistration(
   else
     NOTREACHED();
 
+  registration->EnableNavigationPreload(data.navigation_preload_state.enabled);
+  registration->SetNavigationPreloadHeader(
+      data.navigation_preload_state.header);
   return registration;
 }
 

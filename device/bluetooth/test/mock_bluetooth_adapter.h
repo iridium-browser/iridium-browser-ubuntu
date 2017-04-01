@@ -7,12 +7,11 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
-#include "base/memory/scoped_vector.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "device/bluetooth/test/mock_bluetooth_device.h"
@@ -94,10 +93,6 @@ class MockBluetoothAdapter : public BluetoothAdapter {
                     const ServiceOptions& options,
                     const CreateServiceCallback& callback,
                     const CreateServiceErrorCallback& error_callback));
-  MOCK_METHOD3(RegisterAudioSink,
-               void(const BluetoothAudioSink::Options& options,
-                    const AcquiredCallback& callback,
-                    const BluetoothAudioSink::ErrorCallback& error_callback));
   MOCK_CONST_METHOD1(GetGattService,
                      BluetoothLocalGattService*(const std::string& identifier));
 
@@ -111,6 +106,8 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   // convenience as far testing is concerned and it's possible to write test
   // cases without using these functions.
   void AddMockDevice(std::unique_ptr<MockBluetoothDevice> mock_device);
+  std::unique_ptr<MockBluetoothDevice> RemoveMockDevice(
+      const std::string& address);
   BluetoothAdapter::ConstDeviceList GetConstMockDevices();
   BluetoothAdapter::DeviceList GetMockDevices();
 
@@ -137,13 +134,20 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) override;
+      const AdvertisementErrorCallback& error_callback) override;
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+  void SetAdvertisingInterval(
+      const base::TimeDelta& min,
+      const base::TimeDelta& max,
+      const base::Closure& callback,
+      const AdvertisementErrorCallback& error_callback) override;
+#endif
   virtual ~MockBluetoothAdapter();
 
   MOCK_METHOD1(RemovePairingDelegateInternal,
                void(BluetoothDevice::PairingDelegate* pairing_delegate));
 
-  ScopedVector<MockBluetoothDevice> mock_devices_;
+  std::vector<std::unique_ptr<MockBluetoothDevice>> mock_devices_;
 };
 
 }  // namespace device

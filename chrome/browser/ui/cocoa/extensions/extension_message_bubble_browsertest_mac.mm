@@ -8,7 +8,7 @@
 #import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/toolbar_actions_bar_bubble_mac.h"
-#import "chrome/browser/ui/cocoa/run_loop_testing.h"
+#import "chrome/browser/ui/cocoa/test/run_loop_testing.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/extensions/extension_message_bubble_browsertest.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
@@ -161,7 +161,7 @@ void ExtensionMessageBubbleBrowserTestMac::CheckBubbleIsNotPresentNative(
 void ExtensionMessageBubbleBrowserTestMac::ClickLearnMoreButton(
     Browser* browser) {
   ToolbarActionsBarBubbleMac* bubble = GetBubbleForBrowser(browser);
-  ClickInView([bubble learnMoreButton]);
+  ClickInView([bubble link]);
 }
 
 void ExtensionMessageBubbleBrowserTestMac::ClickActionButton(Browser* browser) {
@@ -238,4 +238,24 @@ IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleBrowserTestMac,
 IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleBrowserTestMac,
                        TestControlledSearchMessageBubble) {
   TestControlledSearchBubbleShown();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleBrowserTestMac,
+                       PRE_TestControlledStartupMessageBubble) {
+  PreTestControlledStartupBubbleShown();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleBrowserTestMac,
+                       TestControlledStartupMessageBubble) {
+  TestControlledStartupBubbleShown();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleBrowserTestMac,
+                       PRE_TestControlledStartupNotShownOnRestart) {
+  PreTestControlledStartupNotShownOnRestart();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionMessageBubbleBrowserTestMac,
+                       TestControlledStartupNotShownOnRestart) {
+  TestControlledStartupNotShownOnRestart();
 }

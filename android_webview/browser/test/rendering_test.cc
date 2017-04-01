@@ -9,7 +9,10 @@
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/child_frame.h"
 #include "android_webview/browser/render_thread_manager.h"
+#include "android_webview/common/aw_switches.h"
+#include "base/command_line.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/output/compositor_frame.h"
 #include "content/public/browser/android/synchronous_compositor.h"
@@ -43,6 +46,9 @@ class TestBrowserViewRenderer : public BrowserViewRenderer {
 }
 
 RenderingTest::RenderingTest() : message_loop_(new base::MessageLoop) {
+  // TODO(boliu): Update unit tests to async code path.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kSyncOnDrawHardware);
   ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
 }
 
@@ -50,6 +56,10 @@ RenderingTest::~RenderingTest() {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
   if (window_.get())
     window_->Detach();
+}
+
+ui::TouchHandleDrawable* RenderingTest::CreateDrawable() {
+  return nullptr;
 }
 
 void RenderingTest::SetUpTestHarness() {
@@ -90,7 +100,7 @@ void RenderingTest::RunTest() {
 
   ui_task_runner_->PostTask(
       FROM_HERE, base::Bind(&RenderingTest::StartTest, base::Unretained(this)));
-  message_loop_->Run();
+  run_loop_.Run();
 }
 
 void RenderingTest::StartTest() {
@@ -98,14 +108,7 @@ void RenderingTest::StartTest() {
 }
 
 void RenderingTest::EndTest() {
-  ui_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&RenderingTest::QuitMessageLoop, base::Unretained(this)));
-}
-
-void RenderingTest::QuitMessageLoop() {
-  DCHECK_EQ(base::MessageLoop::current(), message_loop_.get());
-  message_loop_->QuitWhenIdle();
+  ui_task_runner_->PostTask(FROM_HERE, run_loop_.QuitWhenIdleClosure());
 }
 
 content::SynchronousCompositor* RenderingTest::ActiveCompositor() const {
@@ -115,13 +118,10 @@ content::SynchronousCompositor* RenderingTest::ActiveCompositor() const {
 std::unique_ptr<cc::CompositorFrame> RenderingTest::ConstructEmptyFrame() {
   std::unique_ptr<cc::CompositorFrame> compositor_frame(
       new cc::CompositorFrame);
-  std::unique_ptr<cc::DelegatedFrameData> frame(new cc::DelegatedFrameData);
   std::unique_ptr<cc::RenderPass> root_pass(cc::RenderPass::Create());
   gfx::Rect viewport(browser_view_renderer_->size());
-  root_pass->SetNew(cc::RenderPassId(1, 1), viewport, viewport,
-                    gfx::Transform());
-  frame->render_pass_list.push_back(std::move(root_pass));
-  compositor_frame->delegated_frame_data = std::move(frame);
+  root_pass->SetNew(1, viewport, viewport, gfx::Transform());
+  compositor_frame->render_pass_list.push_back(std::move(root_pass));
   return compositor_frame;
 }
 
@@ -130,7 +130,7 @@ std::unique_ptr<cc::CompositorFrame> RenderingTest::ConstructFrame(
   std::unique_ptr<cc::CompositorFrame> compositor_frame(ConstructEmptyFrame());
   cc::TransferableResource resource;
   resource.id = resource_id;
-  compositor_frame->delegated_frame_data->resource_list.push_back(resource);
+  compositor_frame->resource_list.push_back(resource);
   return compositor_frame;
 }
 

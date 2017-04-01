@@ -96,7 +96,9 @@ class GFX_EXPORT Transform {
 
   // Applies the current transformation on a translation and assigns the result
   // to |this|.
+  void Translate(const Vector2dF& offset);
   void Translate(SkMScalar x, SkMScalar y);
+  void Translate3d(const Vector3dF& offset);
   void Translate3d(SkMScalar x, SkMScalar y, SkMScalar z);
 
   // Applies the current transformation on a skew and assigns the result
@@ -138,8 +140,10 @@ class GFX_EXPORT Transform {
            matrix_.get(2, 2) > 0.0;
   }
 
-  // Returns true if the matrix is either identity or pure, non-fractional
-  // translation.
+  // Returns true if the matrix is identity or, if the matrix consists only
+  // of a translation whose components can be represented as integers. Returns
+  // false if the translation contains a fractional component or is too large to
+  // fit in an integer.
   bool IsIdentityOrIntegerTranslation() const;
 
   // Returns true if the matrix had only scaling components.

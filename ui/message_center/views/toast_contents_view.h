@@ -81,7 +81,7 @@ class ToastContentsView : public views::WidgetDelegateView,
   void OnMouseExited(const ui::MouseEvent& event) override;
   void Layout() override;
   gfx::Size GetPreferredSize() const override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
  private:
   friend class test::MessagePopupCollectionTest;
@@ -104,7 +104,6 @@ class ToastContentsView : public views::WidgetDelegateView,
   void AnimationCanceled(const gfx::Animation* animation) override;
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override;
   void WindowClosing() override;
   void OnDisplayChanged() override;
   void OnWorkAreaChanged() override;
@@ -118,9 +117,9 @@ class ToastContentsView : public views::WidgetDelegateView,
   // Immediately moves the toast without any sort of delay or animation.
   void SetBoundsInstantly(gfx::Rect new_bounds);
 
-  // Given the bounds of a toast on the screen, compute the bouds for that
-  // toast in 'closed' state. The 'closed' state is used as origin/destination
-  // in reveal/closing animations.
+  // Given the bounds of a toast on the screen, compute the bounds for that
+  // toast in 'closed' node_data. The 'closed' node_data is used as
+  // origin/destination in reveal/closing animations.
   gfx::Rect GetClosedToastBounds(gfx::Rect bounds);
 
   void StartFadeIn();

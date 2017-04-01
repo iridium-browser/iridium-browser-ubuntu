@@ -12,8 +12,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "content/browser/loader/resource_controller.h"
 #include "content/browser/loader/resource_handler.h"
-#include "content/public/browser/resource_controller.h"
 
 namespace net {
 class IOBuffer;
@@ -59,7 +59,6 @@ class DetachableResourceHandler : public ResourceHandler,
                   int min_size) override;
   bool OnReadCompleted(int bytes_read, bool* defer) override;
   void OnResponseCompleted(const net::URLRequestStatus& status,
-                           const std::string& security_info,
                            bool* defer) override;
   void OnDataDownloaded(int bytes_downloaded) override;
 

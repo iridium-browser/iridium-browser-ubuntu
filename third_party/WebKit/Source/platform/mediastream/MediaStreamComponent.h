@@ -48,78 +48,94 @@ class WebAudioSourceProvider;
 // A MediaStreamComponent is a MediaStreamTrack.
 // TODO(hta): Consider merging the two classes.
 
-class PLATFORM_EXPORT MediaStreamComponent final : public GarbageCollectedFinalized<MediaStreamComponent> {
-    USING_PRE_FINALIZER(MediaStreamComponent, dispose);
-public:
-    // This class represents whatever data the Web layer uses to represent
-    // a track. It needs to be able to answer the getSettings question.
-    class TrackData {
-        USING_FAST_MALLOC(TrackData);
-    public:
-        virtual void getSettings(WebMediaStreamTrack::Settings&) = 0;
-        virtual ~TrackData() {}
-    };
+class PLATFORM_EXPORT MediaStreamComponent final
+    : public GarbageCollectedFinalized<MediaStreamComponent> {
+  USING_PRE_FINALIZER(MediaStreamComponent, dispose);
 
-    static MediaStreamComponent* create(MediaStreamSource*);
-    static MediaStreamComponent* create(const String& id, MediaStreamSource*);
+ public:
+  // This class represents whatever data the Web layer uses to represent
+  // a track. It needs to be able to answer the getSettings question.
+  class TrackData {
+    USING_FAST_MALLOC(TrackData);
 
-    // |m_trackData| may hold pointers to GC objects indirectly, and it may touch
-    // eagerly finalized objects in destruction.
-    // So this class runs pre-finalizer to finalize |m_trackData| promptly.
-    void dispose();
+   public:
+    virtual void getSettings(WebMediaStreamTrack::Settings&) = 0;
+    virtual ~TrackData() {}
+  };
 
-    MediaStreamSource* source() const { return m_source.get(); }
+  static MediaStreamComponent* create(MediaStreamSource*);
+  static MediaStreamComponent* create(const String& id, MediaStreamSource*);
 
-    String id() const { return m_id; }
-    bool enabled() const { return m_enabled; }
-    void setEnabled(bool enabled) { m_enabled = enabled; }
-    bool muted() const { return m_muted; }
-    void setMuted(bool muted) { m_muted = muted; }
-    AudioSourceProvider* getAudioSourceProvider() { return &m_sourceProvider; }
-    void setSourceProvider(WebAudioSourceProvider* provider) { m_sourceProvider.wrap(provider); }
+  MediaStreamComponent* clone() const;
 
-    TrackData* getTrackData() const { return m_trackData.get(); }
-    void setTrackData(std::unique_ptr<TrackData> trackData) { m_trackData = std::move(trackData); }
-    void getSettings(WebMediaStreamTrack::Settings&);
+  // |m_trackData| may hold pointers to GC objects indirectly, and it may touch
+  // eagerly finalized objects in destruction.
+  // So this class runs pre-finalizer to finalize |m_trackData| promptly.
+  void dispose();
 
-    DECLARE_TRACE();
+  MediaStreamSource* source() const { return m_source.get(); }
 
-private:
-    MediaStreamComponent(const String& id, MediaStreamSource*);
+  String id() const { return m_id; }
+  bool enabled() const { return m_enabled; }
+  void setEnabled(bool enabled) { m_enabled = enabled; }
+  bool muted() const { return m_muted; }
+  void setMuted(bool muted) { m_muted = muted; }
+  WebMediaStreamTrack::ContentHintType contentHint() { return m_contentHint; }
+  void setContentHint(WebMediaStreamTrack::ContentHintType);
+  AudioSourceProvider* getAudioSourceProvider() { return &m_sourceProvider; }
+  void setSourceProvider(WebAudioSourceProvider* provider) {
+    m_sourceProvider.wrap(provider);
+  }
 
-    // AudioSourceProviderImpl wraps a WebAudioSourceProvider::provideInput()
-    // calls into chromium to get a rendered audio stream.
+  TrackData* getTrackData() const { return m_trackData.get(); }
+  void setTrackData(std::unique_ptr<TrackData> trackData) {
+    m_trackData = std::move(trackData);
+  }
+  void getSettings(WebMediaStreamTrack::Settings&);
 
-    class PLATFORM_EXPORT AudioSourceProviderImpl final: public AudioSourceProvider {
-    public:
-        AudioSourceProviderImpl()
-            : m_webAudioSourceProvider(0)
-        {
-        }
+  DECLARE_TRACE();
 
-        ~AudioSourceProviderImpl() override {}
+ private:
+  MediaStreamComponent(const String& id, MediaStreamSource*);
+  MediaStreamComponent(const String& id,
+                       MediaStreamSource*,
+                       bool enabled,
+                       bool muted,
+                       WebMediaStreamTrack::ContentHintType);
 
-        // Wraps the given blink::WebAudioSourceProvider to blink::AudioSourceProvider.
-        void wrap(WebAudioSourceProvider*);
+  // AudioSourceProviderImpl wraps a WebAudioSourceProvider::provideInput()
+  // calls into chromium to get a rendered audio stream.
 
-        // blink::AudioSourceProvider
-        void provideInput(AudioBus*, size_t framesToProcess) override;
+  class PLATFORM_EXPORT AudioSourceProviderImpl final
+      : public AudioSourceProvider {
+   public:
+    AudioSourceProviderImpl() : m_webAudioSourceProvider(0) {}
 
-    private:
-        WebAudioSourceProvider* m_webAudioSourceProvider;
-        Mutex m_provideInputLock;
-    };
+    ~AudioSourceProviderImpl() override {}
 
-    AudioSourceProviderImpl m_sourceProvider;
-    Member<MediaStreamSource> m_source;
-    String m_id;
-    bool m_enabled;
-    bool m_muted;
-    std::unique_ptr<TrackData> m_trackData;
+    // Wraps the given blink::WebAudioSourceProvider to
+    // blink::AudioSourceProvider.
+    void wrap(WebAudioSourceProvider*);
+
+    // blink::AudioSourceProvider
+    void provideInput(AudioBus*, size_t framesToProcess) override;
+
+   private:
+    WebAudioSourceProvider* m_webAudioSourceProvider;
+    Mutex m_provideInputLock;
+  };
+
+  AudioSourceProviderImpl m_sourceProvider;
+  Member<MediaStreamSource> m_source;
+  String m_id;
+  bool m_enabled;
+  bool m_muted;
+  WebMediaStreamTrack::ContentHintType m_contentHint;
+  std::unique_ptr<TrackData> m_trackData;
 };
 
 typedef HeapVector<Member<MediaStreamComponent>> MediaStreamComponentVector;
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MediaStreamComponent_h
+#endif  // MediaStreamComponent_h

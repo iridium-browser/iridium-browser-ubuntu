@@ -11,12 +11,11 @@
 #include <memory>
 
 #include "base/android/jni_weak_ref.h"
+#include "base/android/scoped_java_ref.h"
 #include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/search/instant_service_observer.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
-#include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "components/favicon/core/favicon_driver_observer.h"
 #include "components/infobars/core/infobar_manager.h"
@@ -27,13 +26,6 @@
 
 class GURL;
 class Profile;
-class SkBitmap;
-
-namespace blimp {
-namespace client {
-class BlimpContents;
-}
-}
 
 namespace cc {
 class Layer;
@@ -43,19 +35,13 @@ namespace chrome {
 struct NavigateParams;
 }
 
-namespace chrome {
 namespace android {
 class TabWebContentsDelegateAndroid;
 class TabContentManager;
 }
-}
 
 namespace content {
 class WebContents;
-}
-
-namespace infobars {
-class InfoBar;
 }
 
 namespace prerender {
@@ -63,8 +49,6 @@ class PrerenderManager;
 }
 
 class TabAndroid : public CoreTabHelperDelegate,
-                   public InstantServiceObserver,
-                   public SearchTabHelperDelegate,
                    public content::NotificationObserver,
                    public favicon::FaviconDriverObserver {
  public:
@@ -83,23 +67,19 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   // Returns the native TabAndroid stored in the Java Tab represented by
   // |obj|.
-  static TabAndroid* GetNativeTab(JNIEnv* env, jobject obj);
+  static TabAndroid* GetNativeTab(JNIEnv* env,
+                                  const base::android::JavaRef<jobject>& obj);
 
   // Function to attach helpers to the contentView.
   static void AttachTabHelpers(content::WebContents* web_contents);
 
-  TabAndroid(JNIEnv* env, jobject obj);
+  TabAndroid(JNIEnv* env, const base::android::JavaRef<jobject>& obj);
   ~TabAndroid() override;
 
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject();
 
   // Return the WebContents, if any, currently owned by this TabAndroid.
   content::WebContents* web_contents() const { return web_contents_.get(); }
-
-  // Return the BlimpContents, if any, currently owned by this TabAndroid.
-  blimp::client::BlimpContents* blimp_contents() const {
-    return blimp_contents_.get();
-  }
 
   // Return the cc::Layer that represents the content for this TabAndroid.
   scoped_refptr<cc::Layer> GetContentLayer() const;
@@ -123,7 +103,7 @@ class TabAndroid : public CoreTabHelperDelegate,
   // Helper methods to make it easier to access objects from the associated
   // WebContents.  Can return NULL.
   Profile* GetProfile() const;
-  browser_sync::SyncedTabDelegate* GetSyncedTabDelegate() const;
+  sync_sessions::SyncedTabDelegate* GetSyncedTabDelegate() const;
 
   void SetWindowSessionID(SessionID::id_type window_id);
   void SetSyncId(int sync_id);
@@ -134,25 +114,11 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   void ShowOfflinePages();
 
-  // Notifies this TabAndroid that a Lo-Fi response has been received. The
-  // TabAndroid then handles showing Lo-Fi UI if this is the first Lo-Fi
-  // response for a page load. |is_preview| indicates whether the response was a
-  // Lo-Fi preview response.
-  void OnLoFiResponseReceived(bool is_preview);
-
   // Overridden from CoreTabHelperDelegate:
   void SwapTabContents(content::WebContents* old_contents,
                        content::WebContents* new_contents,
                        bool did_start_load,
                        bool did_finish_load) override;
-
-  // Overridden from InstantServiceObserver:
-  void DefaultSearchProviderChanged(
-      bool google_base_url_domain_changed) override;
-
-  // Overridden from SearchTabHelperDelegate:
-  void OnWebContentsInstantSupportDisabled(
-      const content::WebContents* web_contents) override;
 
   // Overridden from NotificationObserver:
   void Observe(int type,
@@ -176,10 +142,6 @@ class TabAndroid : public CoreTabHelperDelegate,
       const base::android::JavaParamRef<jobject>& jweb_contents,
       const base::android::JavaParamRef<jobject>& jweb_contents_delegate,
       const base::android::JavaParamRef<jobject>& jcontext_menu_populator);
-  base::android::ScopedJavaLocalRef<jobject> InitBlimpContents(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobject>& j_profile);
   void UpdateDelegates(
         JNIEnv* env,
         const base::android::JavaParamRef<jobject>& obj,
@@ -226,11 +188,12 @@ class TabAndroid : public CoreTabHelperDelegate,
   static void CreateHistoricalTabFromContents(
       content::WebContents* web_contents);
 
-  void UpdateTopControlsState(JNIEnv* env,
-                              const base::android::JavaParamRef<jobject>& obj,
-                              jint constraints,
-                              jint current,
-                              jboolean animate);
+  void UpdateBrowserControlsState(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint constraints,
+      jint current,
+      jboolean animate);
 
   void LoadOriginalImage(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj);
@@ -260,17 +223,6 @@ class TabAndroid : public CoreTabHelperDelegate,
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jobject>& jtab_content_manager);
 
-  void AttachOverlayWebContents(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobject>& jweb_contents,
-      jboolean visible);
-
-  void DetachOverlayWebContents(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jobject>& jweb_contents);
-
   bool HasPrerenderedUrl(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj,
                          const base::android::JavaParamRef<jstring>& url);
@@ -292,13 +244,11 @@ class TabAndroid : public CoreTabHelperDelegate,
   content::NotificationRegistrar notification_registrar_;
 
   scoped_refptr<cc::Layer> content_layer_;
-  chrome::android::TabContentManager* tab_content_manager_;
+  android::TabContentManager* tab_content_manager_;
 
   std::unique_ptr<content::WebContents> web_contents_;
-  std::unique_ptr<chrome::android::TabWebContentsDelegateAndroid>
+  std::unique_ptr<android::TabWebContentsDelegateAndroid>
       web_contents_delegate_;
-
-  std::unique_ptr<blimp::client::BlimpContents> blimp_contents_;
 
   std::unique_ptr<browser_sync::SyncedTabDelegateAndroid> synced_tab_delegate_;
 

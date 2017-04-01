@@ -12,6 +12,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_latency.h"
 #include "media/base/audio_point.h"
 #include "media/base/channel_layout.h"
 #include "media/base/media_export.h"
@@ -40,6 +41,8 @@ struct MEDIA_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT) AudioInputBufferParameters {
 };
 struct MEDIA_EXPORT ALIGNAS(PARAMETERS_ALIGNMENT) AudioOutputBufferParameters {
   uint32_t frames_skipped;
+  int64_t delay;
+  int64_t delay_timestamp;
 };
 #undef PARAMETERS_ALIGNMENT
 #if defined(OS_WIN)
@@ -71,6 +74,8 @@ class MEDIA_EXPORT AudioParameters {
   enum Format {
     AUDIO_PCM_LINEAR = 0,            // PCM is 'raw' amplitude samples.
     AUDIO_PCM_LOW_LATENCY,           // Linear PCM, low latency requested.
+    AUDIO_BITSTREAM_AC3,             // Compressed AC3 bitstream.
+    AUDIO_BITSTREAM_EAC3,            // Compressed E-AC3 bitstream.
     AUDIO_FAKE,                      // Creates a fake AudioOutputStream object.
     AUDIO_FORMAT_LAST = AUDIO_FAKE,  // Only used for validation of format.
   };
@@ -138,6 +143,9 @@ class MEDIA_EXPORT AudioParameters {
   // Comparison with other AudioParams.
   bool Equals(const AudioParameters& other) const;
 
+  // Return true if |format_| is compressed bitstream.
+  bool IsBitstreamFormat() const;
+
   void set_format(Format format) { format_ = format; }
   Format format() const { return format_; }
 
@@ -174,6 +182,11 @@ class MEDIA_EXPORT AudioParameters {
   }
   const std::vector<Point>& mic_positions() const { return mic_positions_; }
 
+  void set_latency_tag(AudioLatency::LatencyType latency_tag) {
+    latency_tag_ = latency_tag;
+  }
+  AudioLatency::LatencyType latency_tag() const { return latency_tag_; }
+
   AudioParameters(const AudioParameters&);
   AudioParameters& operator=(const AudioParameters&);
 
@@ -202,6 +215,10 @@ class MEDIA_EXPORT AudioParameters {
   //
   // An empty vector indicates unknown positions.
   std::vector<Point> mic_positions_;
+
+  // Optional tag to pass latency info from renderer to browser. Set to
+  // AudioLatency::LATENCY_COUNT by default, which means "not specified".
+  AudioLatency::LatencyType latency_tag_;
 };
 
 // Comparison is useful when AudioParameters is used with std structures.

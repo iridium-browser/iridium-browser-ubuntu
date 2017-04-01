@@ -33,24 +33,6 @@
 
 namespace blink {
 
-enum ProcessingUserGestureState {
-    DefinitelyProcessingNewUserGesture,
-    DefinitelyProcessingUserGesture,
-    PossiblyProcessingUserGesture,
-    DefinitelyNotProcessingUserGesture
-};
-
-class PLATFORM_EXPORT UserGestureToken : public RefCounted<UserGestureToken> {
-    WTF_MAKE_NONCOPYABLE(UserGestureToken);
-public:
-    UserGestureToken() { }
-    virtual ~UserGestureToken() { }
-    virtual bool hasGestures() const = 0;
-    virtual void setOutOfProcess() = 0;
-    virtual void setJavascriptPrompt() = 0;
-    virtual void setPauseInDebugger() = 0;
-};
-
 // Callback to be invoked when the state of a UserGestureIndicator is
 // used (only during the scope of a UserGestureIndicator, does
 // not flow with the UserGestureToken).  It's the responsibility of the
@@ -62,53 +44,93 @@ public:
 // actually be used), but should include the primary use cases.  Therefore
 // this is suitable mainly for diagnostics and measurement purposes.
 class PLATFORM_EXPORT UserGestureUtilizedCallback {
-public:
-    virtual ~UserGestureUtilizedCallback() = default;
-    virtual void userGestureUtilized() = 0;
+ public:
+  virtual ~UserGestureUtilizedCallback() = default;
+  virtual void userGestureUtilized() = 0;
+};
+
+// A UserGestureToken represents a user gesture. It can be referenced and saved
+// for later (see, e.g., DOMTimer, which propagates user gestures to the timer
+// fire in certain situations). Passing it to a UserGestureIndicator will cause
+// it to be considered as currently being processed.
+class PLATFORM_EXPORT UserGestureToken : public RefCounted<UserGestureToken> {
+  WTF_MAKE_NONCOPYABLE(UserGestureToken);
+
+ public:
+  enum Status { NewGesture, PossiblyExistingGesture };
+  enum TimeoutPolicy { Default, OutOfProcess, HasPaused };
+
+  ~UserGestureToken() {}
+  bool hasGestures() const;
+  void transferGestureTo(UserGestureToken*);
+  bool consumeGesture();
+  void setTimeoutPolicy(TimeoutPolicy);
+  void resetTimestamp();
+
+  // If this UserGestureToken is wrapped in a UserGestureIndicator, and the
+  // UserGestureIndicator is the lowest on the callstack (and therefore this
+  // UserGestureToken is UserGestureIndicator::s_rootToken), then the callback
+  // provided here will be called when this UserGestureToken is utilized.
+  // Calling setUserGestureUtilizedCallback() on a UserGestureToken that is not
+  // UserGestureIndicator::s_rootToken would be unsafe and never result in a
+  // callback, so it will fail a CHECK() instead.
+  void setUserGestureUtilizedCallback(UserGestureUtilizedCallback*);
+  void userGestureUtilized();
+
+ protected:
+  UserGestureToken(Status);
+
+ private:
+  bool hasTimedOut() const;
+
+  size_t m_consumableGestures;
+  double m_timestamp;
+  TimeoutPolicy m_timeoutPolicy;
+  UserGestureUtilizedCallback* m_usageCallback;
 };
 
 class PLATFORM_EXPORT UserGestureIndicator final {
-    USING_FAST_MALLOC(UserGestureIndicator);
-    WTF_MAKE_NONCOPYABLE(UserGestureIndicator);
-public:
-    // Returns whether a user gesture is currently in progress.
-    // Does not invoke the UserGestureUtilizedCallback.  Consider calling
-    // utilizeUserGesture instead if you know for sure that the return value
-    // will have an effect.
-    static bool processingUserGesture();
+  USING_FAST_MALLOC(UserGestureIndicator);
+  WTF_MAKE_NONCOPYABLE(UserGestureIndicator);
 
-    // Indicates that a user gesture (if any) is being used, without preventing it
-    // from being used again.  Returns whether a user gesture is currently in progress.
-    // If true, invokes (and then clears) any UserGestureUtilizedCallback.
-    static bool utilizeUserGesture();
+ public:
+  // Note: All *ThreadSafe methods are safe to call from any thread. Their
+  // non-suffixed counterparts *must* be called on the main thread. Consider
+  // always using the non-suffixed one unless the code really
+  // needs to be thread-safe
 
-    // Mark the current user gesture (if any) as having been used, such that
-    // it cannot be used again.  This is done only for very security-sensitive
-    // operations like creating a new process.
-    // Like utilizeUserGesture, may invoke/clear any UserGestureUtilizedCallback.
-    static bool consumeUserGesture();
+  // Returns whether a user gesture is currently in progress.
+  // Does not invoke the UserGestureUtilizedCallback.  Consider calling
+  // utilizeUserGesture instead if you know for sure that the return value
+  // will have an effect.
+  static bool processingUserGesture();
+  static bool processingUserGestureThreadSafe();
 
-    static UserGestureToken* currentToken();
+  // Indicates that a user gesture (if any) is being used, without preventing it
+  // from being used again.  Returns whether a user gesture is currently in
+  // progress.  If true, invokes (and then clears) any
+  // UserGestureUtilizedCallback.
+  static bool utilizeUserGesture();
 
-    // Reset the notion of "since load".
-    static void clearProcessedUserGestureSinceLoad();
+  // Mark the current user gesture (if any) as having been used, such that
+  // it cannot be used again.  This is done only for very security-sensitive
+  // operations like creating a new process.
+  // Like utilizeUserGesture, may invoke/clear any UserGestureUtilizedCallback.
+  static bool consumeUserGesture();
+  static bool consumeUserGestureThreadSafe();
 
-    // Returns whether a user gesture has occurred since page load.
-    static bool processedUserGestureSinceLoad();
+  static UserGestureToken* currentToken();
+  static UserGestureToken* currentTokenThreadSafe();
 
-    explicit UserGestureIndicator(ProcessingUserGestureState, UserGestureUtilizedCallback* = 0);
-    explicit UserGestureIndicator(PassRefPtr<UserGestureToken>, UserGestureUtilizedCallback* = 0);
-    ~UserGestureIndicator();
+  explicit UserGestureIndicator(PassRefPtr<UserGestureToken>);
+  ~UserGestureIndicator();
 
-private:
-    static ProcessingUserGestureState s_state;
-    static UserGestureIndicator* s_topmostIndicator;
-    static bool s_processedUserGestureSinceLoad;
-    ProcessingUserGestureState m_previousState;
-    RefPtr<UserGestureToken> m_token;
-    UserGestureUtilizedCallback* m_usageCallback;
+ private:
+  static UserGestureToken* s_rootToken;
+
+  RefPtr<UserGestureToken> m_token;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

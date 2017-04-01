@@ -16,44 +16,34 @@
 #include "webrtc/base/logging.h"
 
 namespace {
-// Max number of saved clusters.
-constexpr size_t kMaxNumSavedClusters = 5;
-
 // The minumum number of probes we need for a valid cluster.
 constexpr int kMinNumProbesValidCluster = 4;
 
 // The maximum (receive rate)/(send rate) ratio for a valid estimate.
 constexpr float kValidRatio = 2.0f;
-}
+
+// The maximum time period over which the cluster history is retained.
+// This is also the maximum time period beyond which a probing burst is not
+// expected to last.
+constexpr int kMaxClusterHistoryMs = 1000;
+
+// The maximum time interval between first and the last probe on a cluster
+// on the sender side as well as the receive side.
+constexpr int kMaxProbeIntervalMs = 1000;
+}  // namespace
 
 namespace webrtc {
 
-ProbingResult::ProbingResult() : bps(kNoEstimate), timestamp(0) {}
+ProbeBitrateEstimator::ProbeBitrateEstimator() {}
 
-ProbingResult::ProbingResult(int bps, int64_t timestamp)
-    : bps(bps), timestamp(timestamp) {}
-
-bool ProbingResult::valid() const {
-  return bps != kNoEstimate;
-}
-
-ProbeBitrateEstimator::ProbeBitrateEstimator() : last_valid_cluster_id_(0) {}
-
-ProbingResult ProbeBitrateEstimator::PacketFeedback(
+int ProbeBitrateEstimator::HandleProbeAndEstimateBitrate(
     const PacketInfo& packet_info) {
-  // If this is not a probing packet or if this probing packet
-  // belongs to an old cluster, do nothing.
-  if (packet_info.probe_cluster_id == PacketInfo::kNotAProbe ||
-      packet_info.probe_cluster_id < last_valid_cluster_id_) {
-    return ProbingResult();
-  }
+  RTC_DCHECK_NE(packet_info.probe_cluster_id, PacketInfo::kNotAProbe);
+
+  EraseOldClusters(packet_info.arrival_time_ms - kMaxClusterHistoryMs);
 
   int payload_size_bits = packet_info.payload_size * 8;
   AggregatedCluster* cluster = &clusters_[packet_info.probe_cluster_id];
-
-  // Clean up old clusters.
-  while (clusters_.size() > kMaxNumSavedClusters)
-    clusters_.erase(clusters_.begin());
 
   if (packet_info.send_time_ms < cluster->first_send_ms) {
     cluster->first_send_ms = packet_info.send_time_ms;
@@ -73,19 +63,19 @@ ProbingResult ProbeBitrateEstimator::PacketFeedback(
   cluster->num_probes += 1;
 
   if (cluster->num_probes < kMinNumProbesValidCluster)
-    return ProbingResult();
+    return -1;
 
   float send_interval_ms = cluster->last_send_ms - cluster->first_send_ms;
   float receive_interval_ms =
       cluster->last_receive_ms - cluster->first_receive_ms;
 
-  if (send_interval_ms == 0 || receive_interval_ms == 0) {
+  if (send_interval_ms <= 0 || send_interval_ms > kMaxProbeIntervalMs ||
+      receive_interval_ms <= 0 || receive_interval_ms > kMaxProbeIntervalMs) {
     LOG(LS_INFO) << "Probing unsuccessful, invalid send/receive interval"
                  << " [cluster id: " << packet_info.probe_cluster_id
                  << "] [send interval: " << send_interval_ms << " ms]"
                  << " [receive interval: " << receive_interval_ms << " ms]";
-
-    return ProbingResult();
+    return -1;
   }
   // Since the |send_interval_ms| does not include the time it takes to actually
   // send the last packet the size of the last sent packet should not be
@@ -113,12 +103,8 @@ ProbingResult ProbeBitrateEstimator::PacketFeedback(
                  << " [ratio: " << receive_bps / 1000 << " / "
                  << send_bps / 1000 << " = " << ratio << " > kValidRatio ("
                  << kValidRatio << ")]";
-
-    return ProbingResult();
+    return -1;
   }
-  // We have a valid estimate.
-  int result_bps = std::min(send_bps, receive_bps);
-  last_valid_cluster_id_ = packet_info.probe_cluster_id;
   LOG(LS_INFO) << "Probing successful"
                << " [cluster id: " << packet_info.probe_cluster_id
                << "] [send: " << send_size << " bytes / " << send_interval_ms
@@ -126,7 +112,16 @@ ProbingResult ProbeBitrateEstimator::PacketFeedback(
                << " [receive: " << receive_size << " bytes / "
                << receive_interval_ms << " ms = " << receive_bps / 1000
                << " kb/s]";
+  return std::min(send_bps, receive_bps);
+}
 
-  return ProbingResult(result_bps, packet_info.arrival_time_ms);
+void ProbeBitrateEstimator::EraseOldClusters(int64_t timestamp_ms) {
+  for (auto it = clusters_.begin(); it != clusters_.end();) {
+    if (it->second.last_receive_ms < timestamp_ms) {
+      it = clusters_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 }  // namespace webrtc

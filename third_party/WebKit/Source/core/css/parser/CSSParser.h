@@ -7,64 +7,109 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CoreExport.h"
-#include "core/css/CSSValue.h"
-#include "core/css/parser/CSSParserMode.h"
-#include "platform/graphics/Color.h"
+#include "core/css/StylePropertySet.h"
+#include "core/css/parser/CSSParserContext.h"
 #include <memory>
 
 namespace blink {
 
+class Color;
 class CSSParserObserver;
 class CSSParserTokenRange;
 class CSSSelectorList;
 class Element;
 class ImmutableStylePropertySet;
-class MutableStylePropertySet;
-class StyleColor;
 class StyleRuleBase;
 class StyleRuleKeyframe;
 class StyleSheetContents;
+class CSSValue;
 
 // This class serves as the public API for the css/parser subsystem
 class CORE_EXPORT CSSParser {
-    STATIC_ONLY(CSSParser);
-public:
-    // As well as regular rules, allows @import and @namespace but not @charset
-    static StyleRuleBase* parseRule(const CSSParserContext&, StyleSheetContents*, const String&);
-    static void parseSheet(const CSSParserContext&, StyleSheetContents*, const String&);
-    static CSSSelectorList parseSelector(const CSSParserContext&, StyleSheetContents*, const String&);
-    static CSSSelectorList parsePageSelector(const CSSParserContext&, StyleSheetContents*, const String&);
-    static bool parseDeclarationList(const CSSParserContext&, MutableStylePropertySet*, const String&);
-    // Returns whether anything was changed.
-    static bool parseValue(MutableStylePropertySet*, CSSPropertyID unresolvedProperty, const String&, bool important, StyleSheetContents*);
+  STATIC_ONLY(CSSParser);
 
-    static bool parseValueForCustomProperty(MutableStylePropertySet*, const AtomicString& propertyName, const String& value, bool important, StyleSheetContents*);
-    static ImmutableStylePropertySet* parseCustomPropertySet(CSSParserTokenRange);
+ public:
+  // As well as regular rules, allows @import and @namespace but not @charset
+  static StyleRuleBase* parseRule(const CSSParserContext*,
+                                  StyleSheetContents*,
+                                  const String&);
+  static void parseSheet(const CSSParserContext*,
+                         StyleSheetContents*,
+                         const String&,
+                         bool deferPropertyParsing = false);
+  static CSSSelectorList parseSelector(const CSSParserContext*,
+                                       StyleSheetContents*,
+                                       const String&);
+  static CSSSelectorList parsePageSelector(const CSSParserContext*,
+                                           StyleSheetContents*,
+                                           const String&);
+  static bool parseDeclarationList(const CSSParserContext*,
+                                   MutableStylePropertySet*,
+                                   const String&);
 
-    // This is for non-shorthands only
-    static const CSSValue* parseSingleValue(CSSPropertyID, const String&, const CSSParserContext& = strictCSSParserContext());
+  static MutableStylePropertySet::SetResult parseValue(
+      MutableStylePropertySet*,
+      CSSPropertyID unresolvedProperty,
+      const String&,
+      bool important);
+  static MutableStylePropertySet::SetResult parseValue(
+      MutableStylePropertySet*,
+      CSSPropertyID unresolvedProperty,
+      const String&,
+      bool important,
+      StyleSheetContents*);
 
-    static const CSSValue* parseFontFaceDescriptor(CSSPropertyID, const String&, const CSSParserContext&);
+  static MutableStylePropertySet::SetResult parseValueForCustomProperty(
+      MutableStylePropertySet*,
+      const AtomicString& propertyName,
+      const PropertyRegistry*,
+      const String& value,
+      bool important,
+      StyleSheetContents*,
+      bool isAnimationTainted);
+  static ImmutableStylePropertySet* parseCustomPropertySet(CSSParserTokenRange);
 
-    static ImmutableStylePropertySet* parseInlineStyleDeclaration(const String&, Element*);
+  // This is for non-shorthands only
+  static const CSSValue* parseSingleValue(
+      CSSPropertyID,
+      const String&,
+      const CSSParserContext* = strictCSSParserContext());
 
-    static std::unique_ptr<Vector<double>> parseKeyframeKeyList(const String&);
-    static StyleRuleKeyframe* parseKeyframeRule(const CSSParserContext&, const String&);
+  static const CSSValue* parseFontFaceDescriptor(CSSPropertyID,
+                                                 const String&,
+                                                 const CSSParserContext*);
 
-    static bool parseSupportsCondition(const String&);
+  static ImmutableStylePropertySet* parseInlineStyleDeclaration(const String&,
+                                                                Element*);
 
-    // The color will only be changed when string contains a valid CSS color, so callers
-    // can set it to a default color and ignore the boolean result.
-    static bool parseColor(Color&, const String&, bool strict = false);
-    static bool parseSystemColor(Color&, const String&);
+  static std::unique_ptr<Vector<double>> parseKeyframeKeyList(const String&);
+  static StyleRuleKeyframe* parseKeyframeRule(const CSSParserContext*,
+                                              const String&);
 
-    static void parseSheetForInspector(const CSSParserContext&, StyleSheetContents*, const String&, CSSParserObserver&);
-    static void parseDeclarationListForInspector(const CSSParserContext&, const String&, CSSParserObserver&);
+  static bool parseSupportsCondition(const String&);
 
-private:
-    static bool parseValue(MutableStylePropertySet*, CSSPropertyID unresolvedProperty, const String&, bool important, const CSSParserContext&);
+  // The color will only be changed when string contains a valid CSS color, so
+  // callers can set it to a default color and ignore the boolean result.
+  static bool parseColor(Color&, const String&, bool strict = false);
+  static bool parseSystemColor(Color&, const String&);
+
+  static void parseSheetForInspector(const CSSParserContext*,
+                                     StyleSheetContents*,
+                                     const String&,
+                                     CSSParserObserver&);
+  static void parseDeclarationListForInspector(const CSSParserContext*,
+                                               const String&,
+                                               CSSParserObserver&);
+
+ private:
+  static MutableStylePropertySet::SetResult parseValue(
+      MutableStylePropertySet*,
+      CSSPropertyID unresolvedProperty,
+      const String&,
+      bool important,
+      const CSSParserContext*);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // CSSParser_h
+#endif  // CSSParser_h

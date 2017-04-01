@@ -144,8 +144,8 @@ void FindBarController::Observe(int type,
         const base::string16& last_search =
             find_tab_helper->previous_find_text();
         const base::string16& current_search = find_tab_helper->find_text();
-        if (base::StartsWith(last_search, current_search,
-                             base::CompareCase::SENSITIVE)) {
+        if (!base::StartsWith(last_search, current_search,
+                              base::CompareCase::SENSITIVE)) {
           find_bar_->AudibleAlert();
         }
       }
@@ -159,7 +159,7 @@ void FindBarController::Observe(int type,
       ui::PageTransition transition_type =
           commit_details->entry->GetTransitionType();
       // Hide the find bar on reload or navigation.
-      if (find_bar_->IsFindBarVisible() &&
+      if (find_bar_->IsFindBarVisible() && commit_details->is_main_frame &&
           (ui::PageTransitionCoreTypeIs(transition_type,
                                         ui::PAGE_TRANSITION_RELOAD) ||
            commit_details->is_navigation_to_different_page()))

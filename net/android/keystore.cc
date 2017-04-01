@@ -14,39 +14,14 @@
 using base::android::AttachCurrentThread;
 using base::android::HasException;
 using base::android::JavaByteArrayToByteVector;
+using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 using base::android::ToJavaByteArray;
-using base::android::JavaArrayOfByteArrayToStringVector;
 
 namespace net {
 namespace android {
 
-bool GetRSAKeyModulus(jobject private_key_ref, std::vector<uint8_t>* result) {
-  JNIEnv* env = AttachCurrentThread();
-
-  ScopedJavaLocalRef<jbyteArray> modulus_ref =
-      Java_AndroidKeyStore_getRSAKeyModulus(env, private_key_ref);
-  if (modulus_ref.is_null())
-    return false;
-
-  JavaByteArrayToByteVector(env, modulus_ref.obj(), result);
-  return true;
-}
-
-bool GetECKeyOrder(jobject private_key_ref, std::vector<uint8_t>* result) {
-  JNIEnv* env = AttachCurrentThread();
-
-  ScopedJavaLocalRef<jbyteArray> order_ref =
-      Java_AndroidKeyStore_getECKeyOrder(env, private_key_ref);
-
-  if (order_ref.is_null())
-    return false;
-
-  JavaByteArrayToByteVector(env, order_ref.obj(), result);
-  return true;
-}
-
-bool RawSignDigestWithPrivateKey(jobject private_key_ref,
+bool RawSignDigestWithPrivateKey(const JavaRef<jobject>& private_key_ref,
                                  const base::StringPiece& digest,
                                  std::vector<uint8_t>* signature) {
   JNIEnv* env = AttachCurrentThread();
@@ -68,13 +43,8 @@ bool RawSignDigestWithPrivateKey(jobject private_key_ref,
   return true;
 }
 
-PrivateKeyType GetPrivateKeyType(jobject private_key_ref) {
-  JNIEnv* env = AttachCurrentThread();
-  int type = Java_AndroidKeyStore_getPrivateKeyType(env, private_key_ref);
-  return static_cast<PrivateKeyType>(type);
-}
-
-AndroidEVP_PKEY* GetOpenSSLSystemHandleForPrivateKey(jobject private_key_ref) {
+AndroidEVP_PKEY* GetOpenSSLSystemHandleForPrivateKey(
+    const JavaRef<jobject>& private_key_ref) {
   JNIEnv* env = AttachCurrentThread();
   // Note: the pointer is passed as a jint here because that's how it
   // is stored in the Java object. Java doesn't have a primitive type
@@ -90,7 +60,7 @@ AndroidEVP_PKEY* GetOpenSSLSystemHandleForPrivateKey(jobject private_key_ref) {
 }
 
 ScopedJavaLocalRef<jobject> GetOpenSSLEngineForPrivateKey(
-    jobject private_key_ref) {
+    const JavaRef<jobject>& private_key_ref) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> engine =
       Java_AndroidKeyStore_getOpenSSLEngineForPrivateKey(env, private_key_ref);

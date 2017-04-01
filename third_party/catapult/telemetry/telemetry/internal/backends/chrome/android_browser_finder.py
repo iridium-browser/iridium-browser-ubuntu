@@ -6,9 +6,11 @@
 
 import logging
 import os
+import subprocess
 import sys
 
-from catapult_base import dependency_util
+from py_utils import dependency_util
+from devil import base_error
 from devil.android import apk_helper
 
 from telemetry.core import exceptions
@@ -255,5 +257,12 @@ def FindAllAvailableBrowsers(finder_options, device):
   """
   if not isinstance(device, android_device.AndroidDevice):
     return []
-  android_platform = platform.GetPlatformForDevice(device, finder_options)
-  return _FindAllPossibleBrowsers(finder_options, android_platform)
+
+  try:
+    android_platform = platform.GetPlatformForDevice(device, finder_options)
+    return _FindAllPossibleBrowsers(finder_options, android_platform)
+  except base_error.BaseError as e:
+    logging.error('Unable to find browsers on %s: %s', device.device_id, str(e))
+    ps_output = subprocess.check_output(['ps', '-ef'])
+    logging.error('Ongoing processes:\n%s', ps_output)
+  return []

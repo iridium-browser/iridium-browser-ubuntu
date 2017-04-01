@@ -4,24 +4,37 @@
 
 #include "chrome/browser/banners/app_banner_infobar_delegate_desktop.h"
 
+#include <memory>
+
 #include "base/bind.h"
-#include "build/build_config.h"
 #include "chrome/browser/banners/app_banner_manager.h"
 #include "chrome/browser/banners/app_banner_metrics.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/extensions/bookmark_app_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/common/render_messages.h"
 #include "chrome/common/web_application_info.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
-#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/vector_icons_public.h"
 
 namespace banners {
+
+// static
+infobars::InfoBar* AppBannerInfoBarDelegateDesktop::Create(
+    content::WebContents* web_contents,
+    base::WeakPtr<AppBannerManager> weak_manager,
+    extensions::BookmarkAppHelper* bookmark_app_helper,
+    const content::Manifest& manifest,
+    int event_request_id) {
+  InfoBarService* infobar_service =
+      InfoBarService::FromWebContents(web_contents);
+  return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
+      std::unique_ptr<ConfirmInfoBarDelegate>(
+          new AppBannerInfoBarDelegateDesktop(weak_manager, bookmark_app_helper,
+                                              manifest, event_request_id))));
+}
 
 AppBannerInfoBarDelegateDesktop::AppBannerInfoBarDelegateDesktop(
     base::WeakPtr<AppBannerManager> weak_manager,
@@ -41,36 +54,33 @@ AppBannerInfoBarDelegateDesktop::~AppBannerInfoBarDelegateDesktop() {
     TrackUserResponse(USER_RESPONSE_WEB_APP_IGNORED);
 }
 
-// static
-infobars::InfoBar* AppBannerInfoBarDelegateDesktop::Create(
-    content::WebContents* web_contents,
-    base::WeakPtr<AppBannerManager> weak_manager,
-    extensions::BookmarkAppHelper* bookmark_app_helper,
-    const content::Manifest& manifest,
-    int event_request_id) {
-  InfoBarService* infobar_service =
-      InfoBarService::FromWebContents(web_contents);
-  return infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
-      std::unique_ptr<ConfirmInfoBarDelegate>(
-          new AppBannerInfoBarDelegateDesktop(weak_manager, bookmark_app_helper,
-                                              manifest, event_request_id))));
-}
-
 infobars::InfoBarDelegate::Type
 AppBannerInfoBarDelegateDesktop::GetInfoBarType() const {
   return PAGE_ACTION_TYPE;
 }
 
-int AppBannerInfoBarDelegateDesktop::GetIconId() const {
-  return IDR_INFOBAR_APP_BANNER;
+infobars::InfoBarDelegate::InfoBarIdentifier
+AppBannerInfoBarDelegateDesktop::GetIdentifier() const {
+  return APP_BANNER_INFOBAR_DELEGATE_DESKTOP;
 }
 
 gfx::VectorIconId AppBannerInfoBarDelegateDesktop::GetVectorIconId() const {
-#if defined(OS_MACOSX)
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
-#else
   return gfx::VectorIconId::APPS;
-#endif
+}
+
+void AppBannerInfoBarDelegateDesktop::InfoBarDismissed() {
+  TrackUserResponse(USER_RESPONSE_WEB_APP_DISMISSED);
+  has_user_interaction_ = true;
+
+  content::WebContents* web_contents =
+      InfoBarService::WebContentsFromInfoBar(infobar());
+  if (web_contents) {
+    if (weak_manager_)
+      weak_manager_->SendBannerDismissed(event_request_id_);
+
+    AppBannerSettingsHelper::RecordBannerDismissEvent(
+        web_contents, manifest_.start_url.spec(), AppBannerSettingsHelper::WEB);
+  }
 }
 
 base::string16 AppBannerInfoBarDelegateDesktop::GetMessageText() const {
@@ -95,28 +105,6 @@ bool AppBannerInfoBarDelegateDesktop::Accept() {
                  weak_manager_),
       manifest_);
   return true;
-}
-
-infobars::InfoBarDelegate::InfoBarIdentifier
-AppBannerInfoBarDelegateDesktop::GetIdentifier() const {
-  return APP_BANNER_INFOBAR_DELEGATE_DESKTOP;
-}
-
-void AppBannerInfoBarDelegateDesktop::InfoBarDismissed() {
-  TrackUserResponse(USER_RESPONSE_WEB_APP_DISMISSED);
-  has_user_interaction_ = true;
-
-  content::WebContents* web_contents =
-      InfoBarService::WebContentsFromInfoBar(infobar());
-  if (web_contents) {
-    web_contents->GetMainFrame()->Send(
-        new ChromeViewMsg_AppBannerDismissed(
-            web_contents->GetMainFrame()->GetRoutingID(),
-            event_request_id_));
-
-    AppBannerSettingsHelper::RecordBannerDismissEvent(
-        web_contents, manifest_.start_url.spec(), AppBannerSettingsHelper::WEB);
-  }
 }
 
 }  // namespace banners

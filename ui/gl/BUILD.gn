@@ -6,6 +6,7 @@ import("//build/buildflag_header.gni")
 import("//build/config/chrome_build.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/ui.gni")
+import("//ui/ozone/ozone.gni")
 import("//testing/test.gni")
 
 declare_args() {
@@ -13,7 +14,7 @@ declare_args() {
 }
 
 use_egl = is_win || is_android || is_linux
-use_glx = use_x11
+use_glx = use_x11 || ozone_platform_x11
 
 if (is_android) {
   import("//build/config/android/config.gni")
@@ -105,6 +106,8 @@ component("gl") {
     "gl_stub_autogen_gl.h",
     "gl_surface.cc",
     "gl_surface.h",
+    "gl_surface_format.cc",
+    "gl_surface_format.h",
     "gl_surface_osmesa.cc",
     "gl_surface_osmesa.h",
     "gl_surface_overlay.cc",
@@ -153,6 +156,8 @@ component("gl") {
 
   if (use_egl) {
     sources += [
+      "angle_platform_impl.cc",
+      "angle_platform_impl.h",
       "egl_util.cc",
       "egl_util.h",
       "gl_bindings_autogen_egl.cc",
@@ -179,9 +184,13 @@ component("gl") {
     sources += [
       "gl_surface_egl_x11.cc",
       "gl_surface_egl_x11.h",
+      "gl_surface_glx_x11.cc",
+      "gl_surface_glx_x11.h",
       "gl_surface_osmesa_x11.cc",
       "gl_surface_osmesa_x11.h",
     ]
+
+    deps += [ "//ui/base/x" ]
 
     data_deps = [
       "//third_party/angle:libEGL",
@@ -200,6 +209,8 @@ component("gl") {
       "gl_image_glx.h",
       "gl_surface_glx.cc",
       "gl_surface_glx.h",
+      "gl_visual_picker_glx.cc",
+      "gl_visual_picker_glx.h",
     ]
 
     configs += [
@@ -212,8 +223,8 @@ component("gl") {
   }
   if (is_win) {
     sources += [
-      "angle_platform_impl.cc",
-      "angle_platform_impl.h",
+      "gl_angle_util_win.cc",
+      "gl_angle_util_win.h",
       "gl_bindings_autogen_wgl.cc",
       "gl_bindings_autogen_wgl.h",
       "gl_context_wgl.cc",
@@ -236,6 +247,8 @@ component("gl") {
       "//third_party/angle:libGLESv2",
       "//third_party/mesa:osmesa",
     ]
+
+    deps += [ "//third_party/angle:includes" ]
   }
   if (is_mac) {
     sources += [
@@ -322,6 +335,10 @@ static_library("test_support") {
     configs += [ "//build/config/linux:x11" ]
     deps += [ "//ui/platform_window/x11" ]
   }
+
+  if (use_ozone) {
+    deps += [ "//ui/ozone" ]
+  }
 }
 
 source_set("run_all_unittests") {
@@ -349,6 +366,7 @@ test("gl_unittests") {
     "gl_api_unittest.cc",
     "gl_image_ref_counted_memory_unittest.cc",
     "gl_image_shared_memory_unittest.cc",
+    "gl_surface_format_unittest.cc",
     "gl_version_info_unittest.cc",
     "gpu_timing_unittest.cc",
   ]
@@ -390,6 +408,23 @@ test("gl_unittests") {
 
   data_deps = [
     "//third_party/mesa:osmesa",
+  ]
+}
+
+# We can't run this test on real Chrome OS hardware for Ozone, so new target.
+group("gl_unittests_ozone") {
+  testonly = true
+  data_deps = [
+    ":gl_unittests",
+  ]
+}
+
+# TODO(GYP_GONE): Delete this after we've converted everything to GN.
+# The _run targets exist only for compatibility w/ GYP.
+group("gl_unittests_ozone_run") {
+  testonly = true
+  deps = [
+    ":gl_unittests_ozone",
   ]
 }
 

@@ -6,13 +6,11 @@
 
 #include <memory>
 
-#include "ash/common/ash_switches.h"
 #include "ash/common/system/status_area_widget.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/common/wm_shell.h"
-#include "ash/display/display_manager.h"
 #include "ash/display/screen_orientation_controller_chromeos.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
@@ -20,6 +18,9 @@
 #include "ash/test/status_area_widget_test_helper.h"
 #include "base/command_line.h"
 #include "base/time/time.h"
+#include "ui/display/display_switches.h"
+#include "ui/display/manager/display_manager.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/views/view.h"
@@ -98,7 +99,7 @@ void TrayRotationLockTest::SetUp() {
   // allows for DisplayManager to treat it as one. TrayRotationLock is only
   // visible on internal primary displays.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kAshUseFirstDisplayAsInternal);
+      ::switches::kUseFirstDisplayAsInternal);
   test::AshTestBase::SetUp();
   SetUpForStatusAreaWidget(StatusAreaWidgetTestHelper::GetStatusAreaWidget());
 }
@@ -240,7 +241,7 @@ TEST_F(TrayRotationLockTest, PerformActionOnDefaultView) {
 TEST_F(TrayRotationLockTest, InternalDisplayNotAvailableAtCreation) {
   int64_t internal_display_id = display::Display::InternalDisplayId();
   TearDownViews();
-  display::Display::SetInternalDisplayId(display::Display::kInvalidDisplayID);
+  display::Display::SetInternalDisplayId(display::kInvalidDisplayId);
 
   std::unique_ptr<TrayRotationLock> tray(new TrayRotationLock(
       StatusAreaWidgetTestHelper::GetStatusAreaWidget()->system_tray()));

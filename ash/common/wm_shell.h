@@ -11,15 +11,28 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/common/media_delegate.h"
 #include "ash/common/metrics/gesture_action_type.h"
 #include "ash/common/metrics/user_metrics_action.h"
+#include "ash/common/session/session_state_observer.h"
 #include "ash/common/wm/lock_state_observer.h"
 #include "base/observer_list.h"
+#include "components/ui_devtools/devtools_server.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/compositor/layer_type.h"
+#include "ui/wm/public/activation_change_observer.h"
+#include "ui/wm/public/window_types.h"
+
+namespace app_list {
+class AppList;
+}
+
+namespace base {
+class SequencedWorkerPool;
+}
 
 namespace display {
 class Display;
+class ManagedDisplayInfo;
 }
 
 namespace gfx {
@@ -27,36 +40,51 @@ class Insets;
 class Point;
 }
 
+namespace preferences {
+class PrefObserverStore;
+}
+
 namespace views {
 class PointerWatcher;
+enum class PointerWatcherEventTypes;
 }
 
 namespace ash {
-
 class AcceleratorController;
 class AccessibilityDelegate;
 class BrightnessControlDelegate;
-class DisplayInfo;
+class CastConfigController;
 class FocusCycler;
 class ImmersiveContextAsh;
 class ImmersiveFullscreenController;
 class KeyEventWatcher;
 class KeyboardBrightnessControlDelegate;
 class KeyboardUI;
+class LocaleNotificationController;
+class LogoutConfirmationController;
 class MaximizeModeController;
+class MediaController;
 class MruWindowTracker;
-class NewWindowDelegate;
+class NewWindowController;
 class PaletteDelegate;
+class RootWindowController;
 class ScopedDisableInternalMouseAndKeyboard;
+class SessionController;
 class SessionStateDelegate;
+class ShelfController;
 class ShelfDelegate;
 class ShelfModel;
 class ShelfWindowWatcher;
 class ShellDelegate;
+struct ShellInitParams;
 class ShellObserver;
+class ShutdownController;
 class SystemTrayDelegate;
+class SystemTrayController;
 class SystemTrayNotifier;
 class ToastManager;
+class VpnList;
+class WallpaperController;
 class WallpaperDelegate;
 class WindowCycleController;
 class WindowCycleEventFilter;
@@ -65,7 +93,9 @@ class WindowSelectorController;
 class WmActivationObserver;
 class WmDisplayObserver;
 class WmWindow;
+class WorkspaceEventHandler;
 
+enum class LoginStatus;
 enum class TaskSwitchSource;
 
 namespace wm {
@@ -73,20 +103,19 @@ class MaximizeModeEventHandler;
 class WindowState;
 }
 
-#if defined(OS_CHROMEOS)
-class LogoutConfirmationController;
-#endif
-
 // Similar to ash::Shell. Eventually the two will be merged.
-class ASH_EXPORT WmShell {
+class ASH_EXPORT WmShell : public SessionStateObserver,
+                           public aura::client::ActivationChangeObserver {
  public:
+  ~WmShell() override;
+
   // This is necessary for a handful of places that is difficult to plumb
   // through context.
   static void Set(WmShell* instance);
   static WmShell* Get();
   static bool HasInstance() { return instance_ != nullptr; }
 
-  void Initialize();
+  virtual void Initialize(const scoped_refptr<base::SequencedWorkerPool>& pool);
   virtual void Shutdown();
 
   ShellDelegate* delegate() { return delegate_.get(); }
@@ -99,9 +128,13 @@ class ASH_EXPORT WmShell {
     return accessibility_delegate_.get();
   }
 
+  app_list::AppList* app_list() { return app_list_.get(); }
+
   BrightnessControlDelegate* brightness_control_delegate() {
     return brightness_control_delegate_.get();
   }
+
+  CastConfigController* cast_config() { return cast_config_.get(); }
 
   FocusCycler* focus_cycler() { return focus_cycler_.get(); }
 
@@ -111,16 +144,24 @@ class ASH_EXPORT WmShell {
 
   KeyboardUI* keyboard_ui() { return keyboard_ui_.get(); }
 
+  LocaleNotificationController* locale_notification_controller() {
+    return locale_notification_controller_.get();
+  }
+
+  LogoutConfirmationController* logout_confirmation_controller() {
+    return logout_confirmation_controller_.get();
+  }
+
   MaximizeModeController* maximize_mode_controller() {
     return maximize_mode_controller_.get();
   }
 
   MruWindowTracker* mru_window_tracker() { return mru_window_tracker_.get(); }
 
-  MediaDelegate* media_delegate() { return media_delegate_.get(); }
+  MediaController* media_controller() { return media_controller_.get(); }
 
-  NewWindowDelegate* new_window_delegate() {
-    return new_window_delegate_.get();
+  NewWindowController* new_window_controller() {
+    return new_window_controller_.get();
   }
 
   // NOTE: Prefer ScopedRootWindowForNewWindows when setting temporarily.
@@ -130,9 +171,23 @@ class ASH_EXPORT WmShell {
 
   PaletteDelegate* palette_delegate() { return palette_delegate_.get(); }
 
+  preferences::PrefObserverStore* pref_store() { return pref_store_.get(); }
+
+  SessionController* session_controller() { return session_controller_.get(); }
+
+  ShelfController* shelf_controller() { return shelf_controller_.get(); }
+
   ShelfDelegate* shelf_delegate() { return shelf_delegate_.get(); }
 
-  ShelfModel* shelf_model() { return shelf_model_.get(); }
+  ShelfModel* shelf_model();
+
+  ShutdownController* shutdown_controller() {
+    return shutdown_controller_.get();
+  }
+
+  SystemTrayController* system_tray_controller() {
+    return system_tray_controller_.get();
+  }
 
   SystemTrayNotifier* system_tray_notifier() {
     return system_tray_notifier_.get();
@@ -144,6 +199,12 @@ class ASH_EXPORT WmShell {
 
   ToastManager* toast_manager() { return toast_manager_.get(); }
 
+  VpnList* vpn_list() { return vpn_list_.get(); }
+
+  WallpaperController* wallpaper_controller() {
+    return wallpaper_controller_.get();
+  }
+
   WallpaperDelegate* wallpaper_delegate() { return wallpaper_delegate_.get(); }
 
   WindowCycleController* window_cycle_controller() {
@@ -154,14 +215,23 @@ class ASH_EXPORT WmShell {
     return window_selector_controller_.get();
   }
 
-  // Creates a new window used as a container of other windows. No painting is
-  // done to the created window.
-  virtual WmWindow* NewContainerWindow() = 0;
+  const scoped_refptr<base::SequencedWorkerPool>& blocking_pool() {
+    return blocking_pool_;
+  }
+
+  // Returns true when ash is running as a service_manager::Service.
+  virtual bool IsRunningInMash() const = 0;
+
+  virtual WmWindow* NewWindow(ui::wm::WindowType window_type,
+                              ui::LayerType layer_type) = 0;
 
   virtual WmWindow* GetFocusedWindow() = 0;
   virtual WmWindow* GetActiveWindow() = 0;
 
   virtual WmWindow* GetCaptureWindow() = 0;
+
+  // Convenience for GetPrimaryRootWindow()->GetRootWindowController().
+  RootWindowController* GetPrimaryRootWindowController();
 
   virtual WmWindow* GetPrimaryRootWindow() = 0;
 
@@ -176,15 +246,21 @@ class ASH_EXPORT WmShell {
 
   // Retuns the display info associated with |display_id|.
   // TODO(mash): Remove when DisplayManager has been moved. crbug.com/622480
-  virtual const DisplayInfo& GetDisplayInfo(int64_t display_id) const = 0;
+  virtual const display::ManagedDisplayInfo& GetDisplayInfo(
+      int64_t display_id) const = 0;
 
   // Matches that of DisplayManager::IsActiveDisplayId().
   // TODO(mash): Remove when DisplayManager has been moved. crbug.com/622480
   virtual bool IsActiveDisplayId(int64_t display_id) const = 0;
 
-  // Returns true if the desktop is in unified mode.
+  // Returns true if the desktop is in unified mode and there are no mirroring
+  // displays.
   // TODO(mash): Remove when DisplayManager has been moved. crbug.com/622480
   virtual bool IsInUnifiedMode() const = 0;
+
+  // Returns true if the desktop is in unified mode.
+  // TODO(mash): Remove when DisplayManager has been moved. crbug.com/622480
+  virtual bool IsInUnifiedModeIgnoreMirroring() const = 0;
 
   // Returns the first display; this is the first display listed by hardware,
   // which corresponds to internal displays on devices with integrated displays.
@@ -202,6 +278,14 @@ class ASH_EXPORT WmShell {
 
   // Returns true if a system-modal dialog window is currently open.
   bool IsSystemModalWindowOpen();
+
+  // Creates a modal background (a partially-opaque fullscreen window) on all
+  // displays for |window|.
+  void CreateModalBackground(WmWindow* window);
+
+  // Called when a modal window is removed. It will activate another modal
+  // window if any, or remove modal screens on all displays.
+  void OnModalWindowRemoved(WmWindow* removed);
 
   // For testing only: set simulation that a modal window is open
   void SimulateModalWindowOpenForTesting(bool modal_window_open) {
@@ -236,12 +320,6 @@ class ASH_EXPORT WmShell {
   // this function invocation.
   virtual void SetPinnedWindow(WmWindow* window) = 0;
 
-  // Returns true if |window| can be shown for the current user. This is
-  // intended to check if the current user matches the user associated with
-  // |window|.
-  // TODO(jamescook): Remove this when ShellDelegate has been moved.
-  virtual bool CanShowWindowForUser(WmWindow* window) = 0;
-
   // See aura::client::CursorClient for details on these.
   virtual void LockCursor() = 0;
   virtual void UnlockCursor() = 0;
@@ -253,10 +331,9 @@ class ASH_EXPORT WmShell {
   virtual void RecordUserMetricsAction(UserMetricsAction action) = 0;
   virtual void RecordTaskSwitchMetric(TaskSwitchSource source) = 0;
 
-  // Shows the context menu for the background and the shelf at
-  // |location_in_screen|.
-  virtual void ShowContextMenu(const gfx::Point& location_in_screen,
-                               ui::MenuSourceType source_type) = 0;
+  // Shows the context menu for the wallpaper or shelf at |location_in_screen|.
+  void ShowContextMenu(const gfx::Point& location_in_screen,
+                       ui::MenuSourceType source_type);
 
   // Returns a WindowResizer to handle dragging. |next_window_resizer| is
   // the next WindowResizer in the WindowResizer chain. This may return
@@ -271,6 +348,9 @@ class ASH_EXPORT WmShell {
   virtual std::unique_ptr<wm::MaximizeModeEventHandler>
   CreateMaximizeModeEventHandler() = 0;
 
+  virtual std::unique_ptr<WorkspaceEventHandler> CreateWorkspaceEventHandler(
+      WmWindow* workspace_window) = 0;
+
   virtual std::unique_ptr<ScopedDisableInternalMouseAndKeyboard>
   CreateScopedDisableInternalMouseAndKeyboard() = 0;
 
@@ -278,6 +358,10 @@ class ASH_EXPORT WmShell {
   CreateImmersiveFullscreenController() = 0;
 
   virtual std::unique_ptr<KeyEventWatcher> CreateKeyEventWatcher() = 0;
+
+  // Creates the ShelfView for each display and populates it with items.
+  // Called after the user session is active and profile is available.
+  void CreateShelfView();
 
   void CreateShelfDelegate();
 
@@ -294,6 +378,10 @@ class ASH_EXPORT WmShell {
 
   // Called after overview mode has ended.
   virtual void OnOverviewModeEnded() = 0;
+
+  // Called when the login status changes.
+  // TODO(oshima): Investigate if we can merge this and |OnLoginStateChanged|.
+  void UpdateAfterLoginStatusChange(LoginStatus status);
 
   // Notify observers that fullscreen mode has changed for |root_window|.
   void NotifyFullscreenStateChanged(bool is_fullscreen, WmWindow* root_window);
@@ -318,8 +406,8 @@ class ASH_EXPORT WmShell {
 
   virtual SessionStateDelegate* GetSessionStateDelegate() = 0;
 
-  virtual void AddActivationObserver(WmActivationObserver* observer) = 0;
-  virtual void RemoveActivationObserver(WmActivationObserver* observer) = 0;
+  void AddActivationObserver(WmActivationObserver* observer);
+  void RemoveActivationObserver(WmActivationObserver* observer);
 
   virtual void AddDisplayObserver(WmDisplayObserver* observer) = 0;
   virtual void RemoveDisplayObserver(WmDisplayObserver* observer) = 0;
@@ -327,17 +415,26 @@ class ASH_EXPORT WmShell {
   void AddShellObserver(ShellObserver* observer);
   void RemoveShellObserver(ShellObserver* observer);
 
-  // If |wants_moves| is true PointerWatcher::OnPointerEventObserved() is
-  // called for pointer move events. Enabling pointer moves may incur a
-  // performance hit and should be avoided if possible.
+  // If |events| is PointerWatcherEventTypes::MOVES,
+  // PointerWatcher::OnPointerEventObserved() is called for pointer move events.
+  // If |events| is PointerWatcherEventTypes::DRAGS,
+  // PointerWatcher::OnPointerEventObserved() is called for pointer drag events.
+  // Requesting pointer moves or drags may incur a performance hit and should be
+  // avoided if possible.
   virtual void AddPointerWatcher(views::PointerWatcher* watcher,
-                                 bool wants_moves) = 0;
+                                 views::PointerWatcherEventTypes events) = 0;
   virtual void RemovePointerWatcher(views::PointerWatcher* watcher) = 0;
 
   // TODO: Move these back to LockStateController when that has been moved.
   void OnLockStateEvent(LockStateObserver::EventType event);
   void AddLockStateObserver(LockStateObserver* observer);
   void RemoveLockStateObserver(LockStateObserver* observer);
+
+  // Displays the shutdown animation and requests a system shutdown or system
+  // restart depending on the the state of the |RebootOnShutdown| device policy.
+  // TODO(mash): Remove this method and call LockStateController directly when
+  // it is available to code in ash/common.
+  virtual void RequestShutdown() = 0;
 
   void SetShelfDelegateForTesting(std::unique_ptr<ShelfDelegate> test_delegate);
   void SetPaletteDelegateForTesting(
@@ -346,21 +443,21 @@ class ASH_EXPORT WmShell {
   // True if any touch points are down.
   virtual bool IsTouchDown() = 0;
 
-#if defined(OS_CHROMEOS)
-  LogoutConfirmationController* logout_confirmation_controller() {
-    return logout_confirmation_controller_.get();
-  }
-
   // TODO(jamescook): Remove this when VirtualKeyboardController has been moved.
   virtual void ToggleIgnoreExternalKeyboard() = 0;
 
   // Enable or disable the laser pointer.
   virtual void SetLaserPointerEnabled(bool enabled) = 0;
-#endif
+
+  virtual void CreatePointerWatcherAdapter() = 0;
 
  protected:
   explicit WmShell(std::unique_ptr<ShellDelegate> shell_delegate);
-  virtual ~WmShell();
+
+  // Called during startup to create the primary WindowTreeHost and
+  // the corresponding RootWindowController.
+  virtual void CreatePrimaryHost() = 0;
+  virtual void InitHosts(const ShellInitParams& init_params) = 0;
 
   base::ObserverList<ShellObserver>* shell_observers() {
     return &shell_observers_;
@@ -388,38 +485,61 @@ class ASH_EXPORT WmShell {
   void SetAcceleratorController(
       std::unique_ptr<AcceleratorController> accelerator_controller);
 
+  // SessionStateObserver:
+  void SessionStateChanged(session_manager::SessionState state) override;
+
  private:
   friend class AcceleratorControllerTest;
   friend class ScopedRootWindowForNewWindows;
   friend class Shell;
+  friend class WmShellTestApi;
+
+  // aura::client::ActivationChangeObserver:
+  void OnWindowActivated(ActivationReason reason,
+                         aura::Window* gained_active,
+                         aura::Window* lost_active) override;
+  void OnAttemptToReactivateWindow(aura::Window* request_active,
+                                   aura::Window* actual_active) override;
 
   static WmShell* instance_;
 
   base::ObserverList<ShellObserver> shell_observers_;
   std::unique_ptr<ShellDelegate> delegate_;
 
+  scoped_refptr<preferences::PrefObserverStore> pref_store_;
+
   std::unique_ptr<AcceleratorController> accelerator_controller_;
   std::unique_ptr<AccessibilityDelegate> accessibility_delegate_;
+  std::unique_ptr<app_list::AppList> app_list_;
   std::unique_ptr<BrightnessControlDelegate> brightness_control_delegate_;
+  std::unique_ptr<CastConfigController> cast_config_;
   std::unique_ptr<FocusCycler> focus_cycler_;
   std::unique_ptr<ImmersiveContextAsh> immersive_context_;
   std::unique_ptr<KeyboardBrightnessControlDelegate>
       keyboard_brightness_control_delegate_;
   std::unique_ptr<KeyboardUI> keyboard_ui_;
+  std::unique_ptr<LocaleNotificationController> locale_notification_controller_;
+  std::unique_ptr<LogoutConfirmationController> logout_confirmation_controller_;
   std::unique_ptr<MaximizeModeController> maximize_mode_controller_;
-  std::unique_ptr<MediaDelegate> media_delegate_;
+  std::unique_ptr<MediaController> media_controller_;
   std::unique_ptr<MruWindowTracker> mru_window_tracker_;
-  std::unique_ptr<NewWindowDelegate> new_window_delegate_;
+  std::unique_ptr<NewWindowController> new_window_controller_;
   std::unique_ptr<PaletteDelegate> palette_delegate_;
+  std::unique_ptr<SessionController> session_controller_;
+  std::unique_ptr<ShelfController> shelf_controller_;
   std::unique_ptr<ShelfDelegate> shelf_delegate_;
-  std::unique_ptr<ShelfModel> shelf_model_;
   std::unique_ptr<ShelfWindowWatcher> shelf_window_watcher_;
+  std::unique_ptr<ShutdownController> shutdown_controller_;
+  std::unique_ptr<SystemTrayController> system_tray_controller_;
   std::unique_ptr<SystemTrayNotifier> system_tray_notifier_;
   std::unique_ptr<SystemTrayDelegate> system_tray_delegate_;
   std::unique_ptr<ToastManager> toast_manager_;
+  std::unique_ptr<VpnList> vpn_list_;
+  std::unique_ptr<WallpaperController> wallpaper_controller_;
   std::unique_ptr<WallpaperDelegate> wallpaper_delegate_;
   std::unique_ptr<WindowCycleController> window_cycle_controller_;
   std::unique_ptr<WindowSelectorController> window_selector_controller_;
+  std::unique_ptr<ui::devtools::UiDevToolsServer> devtools_server_;
 
   base::ObserverList<LockStateObserver> lock_state_observers_;
 
@@ -429,9 +549,10 @@ class ASH_EXPORT WmShell {
 
   bool simulate_modal_window_open_for_testing_ = false;
 
-#if defined(OS_CHROMEOS)
-  std::unique_ptr<LogoutConfirmationController> logout_confirmation_controller_;
-#endif
+  bool added_activation_observer_ = false;
+  base::ObserverList<WmActivationObserver> activation_observers_;
+
+  scoped_refptr<base::SequencedWorkerPool> blocking_pool_;
 };
 
 }  // namespace ash

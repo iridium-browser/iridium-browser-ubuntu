@@ -32,4 +32,20 @@ bool BrowserPluginGuestDelegate::HandleStopFindingForEmbedder(
   return false;
 }
 
+bool BrowserPluginGuestDelegate::CanUseCrossProcessFrames() {
+  return true;
+}
+
+bool BrowserPluginGuestDelegate::CanBeEmbeddedInsideCrossProcessFrames() {
+  return false;
+}
+
+RenderWidgetHost* BrowserPluginGuestDelegate::GetOwnerRenderWidgetHost() {
+  return nullptr;
+}
+
+SiteInstance* BrowserPluginGuestDelegate::GetOwnerSiteInstance() {
+  return nullptr;
+}
+
 }  // namespace content

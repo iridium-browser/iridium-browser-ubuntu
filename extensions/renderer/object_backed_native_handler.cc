@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/logging.h"
-#include "base/memory/linked_ptr.h"
 #include "content/public/child/worker_thread.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/renderer/console.h"
@@ -22,8 +21,8 @@ namespace extensions {
 
 namespace {
 // Key for the base::Bound routed function.
-const char* kHandlerFunction = "handler_function";
-const char* kFeatureName = "feature_name";
+const char kHandlerFunction[] = "handler_function";
+const char kFeatureName[] = "feature_name";
 }  // namespace
 
 ObjectBackedNativeHandler::ObjectBackedNativeHandler(ScriptContext* context)

@@ -6,9 +6,10 @@
 
 #include <vector>
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/wm_window_animations.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "base/memory/ptr_util.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/layer_animation_observer.h"
@@ -30,10 +31,9 @@ const float kPartialFadeRatio = 0.3f;
 const float kMinimumScale = 1e-4f;
 
 // Returns the primary root window's container.
-aura::Window* GetBackground() {
+aura::Window* GetWallpaper() {
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
-  return Shell::GetContainer(root_window,
-                             kShellWindowId_DesktopBackgroundContainer);
+  return Shell::GetContainer(root_window, kShellWindowId_WallpaperContainer);
 }
 
 // Returns the transform that should be applied to containers for the slow-close
@@ -255,20 +255,20 @@ void StartGrayscaleBrightnessAnimationForWindow(
     ui::LayerAnimationObserver* observer) {
   ui::LayerAnimator* animator = window->layer()->GetAnimator();
 
-  std::unique_ptr<ui::LayerAnimationSequence> brightness_sequence(
-      new ui::LayerAnimationSequence());
-  std::unique_ptr<ui::LayerAnimationSequence> grayscale_sequence(
-      new ui::LayerAnimationSequence());
+  std::unique_ptr<ui::LayerAnimationSequence> brightness_sequence =
+      base::MakeUnique<ui::LayerAnimationSequence>();
+  std::unique_ptr<ui::LayerAnimationSequence> grayscale_sequence =
+      base::MakeUnique<ui::LayerAnimationSequence>();
 
-  std::unique_ptr<ui::LayerAnimationElement> brightness_element(
-      ui::LayerAnimationElement::CreateBrightnessElement(target, duration));
+  std::unique_ptr<ui::LayerAnimationElement> brightness_element =
+      ui::LayerAnimationElement::CreateBrightnessElement(target, duration);
   brightness_element->set_tween_type(tween_type);
-  brightness_sequence->AddElement(brightness_element.release());
+  brightness_sequence->AddElement(std::move(brightness_element));
 
-  std::unique_ptr<ui::LayerAnimationElement> grayscale_element(
-      ui::LayerAnimationElement::CreateGrayscaleElement(target, duration));
+  std::unique_ptr<ui::LayerAnimationElement> grayscale_element =
+      ui::LayerAnimationElement::CreateGrayscaleElement(target, duration);
   grayscale_element->set_tween_type(tween_type);
-  grayscale_sequence->AddElement(grayscale_element.release());
+  grayscale_sequence->AddElement(std::move(grayscale_element));
 
   std::vector<ui::LayerAnimationSequence*> animations;
   animations.push_back(brightness_sequence.release());
@@ -389,9 +389,9 @@ void GetContainersInRootWindow(int container_mask,
     containers->push_back(root_window);
   }
 
-  if (container_mask & SessionStateAnimator::DESKTOP_BACKGROUND) {
-    containers->push_back(Shell::GetContainer(
-        root_window, kShellWindowId_DesktopBackgroundContainer));
+  if (container_mask & SessionStateAnimator::WALLPAPER) {
+    containers->push_back(
+        Shell::GetContainer(root_window, kShellWindowId_WallpaperContainer));
   }
   if (container_mask & SessionStateAnimator::LAUNCHER) {
     containers->push_back(
@@ -411,9 +411,9 @@ void GetContainersInRootWindow(int container_mask,
       }
     }
   }
-  if (container_mask & SessionStateAnimator::LOCK_SCREEN_BACKGROUND) {
+  if (container_mask & SessionStateAnimator::LOCK_SCREEN_WALLPAPER) {
     containers->push_back(Shell::GetContainer(
-        root_window, kShellWindowId_LockScreenBackgroundContainer));
+        root_window, kShellWindowId_LockScreenWallpaperContainer));
   }
   if (container_mask & SessionStateAnimator::LOCK_SCREEN_CONTAINERS) {
     containers->push_back(Shell::GetContainer(
@@ -561,22 +561,22 @@ SessionStateAnimatorImpl::BeginAnimationSequence(base::Closure callback) {
   return new AnimationSequence(this, callback);
 }
 
-bool SessionStateAnimatorImpl::IsBackgroundHidden() const {
-  return !GetBackground()->IsVisible();
+bool SessionStateAnimatorImpl::IsWallpaperHidden() const {
+  return !GetWallpaper()->IsVisible();
 }
 
-void SessionStateAnimatorImpl::ShowBackground() {
+void SessionStateAnimatorImpl::ShowWallpaper() {
   ui::ScopedLayerAnimationSettings settings(
-      GetBackground()->layer()->GetAnimator());
+      GetWallpaper()->layer()->GetAnimator());
   settings.SetTransitionDuration(base::TimeDelta());
-  GetBackground()->Show();
+  GetWallpaper()->Show();
 }
 
-void SessionStateAnimatorImpl::HideBackground() {
+void SessionStateAnimatorImpl::HideWallpaper() {
   ui::ScopedLayerAnimationSettings settings(
-      GetBackground()->layer()->GetAnimator());
+      GetWallpaper()->layer()->GetAnimator());
   settings.SetTransitionDuration(base::TimeDelta());
-  GetBackground()->Hide();
+  GetWallpaper()->Hide();
 }
 
 void SessionStateAnimatorImpl::StartAnimationInSequence(

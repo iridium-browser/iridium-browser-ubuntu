@@ -5,13 +5,14 @@
 package org.chromium.chrome.browser.omaha;
 
 import android.content.Context;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 import android.view.View;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
@@ -161,12 +162,14 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
 
     @MediumTest
     @Feature({"Omaha"})
+    @RetryOnFailure
     public void testCurrentVersionIsOlder() throws Exception {
         checkUpdateMenuItemIsShowing("0.0.0.0", "1.2.3.4");
     }
 
     @MediumTest
     @Feature({"Omaha"})
+    @RetryOnFailure
     public void testCurrentVersionIsSame() throws Exception {
         checkUpdateMenuItemIsNotShowing("1.2.3.4", "1.2.3.4");
     }
@@ -179,6 +182,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
 
     @MediumTest
     @Feature({"Omaha"})
+    @RetryOnFailure
     public void testNoVersionKnown() throws Exception {
         checkUpdateMenuItemIsNotShowing("1.2.3.4", "0");
     }
@@ -186,6 +190,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
     @MediumTest
     @Feature({"Omaha"})
     @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
+    @RetryOnFailure
     public void testMenuItemNotShownInOverview() throws Exception {
         checkUpdateMenuItemIsShowing("0.0.0.0", "1.2.3.4");
 
@@ -205,7 +210,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
                         R.id.update_menu_id).isVisible());
     }
 
-    private void showAppMenuAndAssertMenuShown() throws InterruptedException {
+    private void showAppMenuAndAssertMenuShown() {
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -220,7 +225,7 @@ public class UpdateMenuItemHelperTest extends ChromeTabbedActivityTestBase {
         });
     }
 
-    private void hideAppMenuAndAssertMenuShown() throws InterruptedException {
+    private void hideAppMenuAndAssertMenuShown() {
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {

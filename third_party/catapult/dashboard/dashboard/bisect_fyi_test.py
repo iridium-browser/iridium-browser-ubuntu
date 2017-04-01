@@ -9,10 +9,10 @@ import webapp2
 import webtest
 
 from dashboard import bisect_fyi
-from dashboard import issue_tracker_service
-from dashboard import stored_object
-from dashboard import testing_common
-from dashboard import utils
+from dashboard.common import testing_common
+from dashboard.common import utils
+from dashboard.common import stored_object
+from dashboard.services import issue_tracker_service
 
 TEST_FYI_CONFIGS = {
     'positive_culprit': {
@@ -60,7 +60,7 @@ TEST_FYI_CONFIGS = {
 
 
 @mock.patch('apiclient.discovery.build', mock.MagicMock())
-@mock.patch.object(utils, 'ServiceAccountCredentials', mock.MagicMock())
+@mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
 class BisectFYITest(testing_common.TestCase):
 
   def setUp(self):

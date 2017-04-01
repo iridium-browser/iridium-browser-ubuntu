@@ -10,7 +10,6 @@
 
 #include "GrResourceKey.h"
 #include "GrTypesPriv.h"
-#include "SkData.h"
 
 class GrContext;
 class GrGpu;
@@ -24,7 +23,7 @@ class SkTraceMemoryDump;
  *
  * Gpu resources can have three types of refs:
  *   1) Normal ref (+ by ref(), - by unref()): These are used by code that is issuing draw calls
- *      that read and write the resource via GrDrawTarget and by any object that must own a
+ *      that read and write the resource via GrOpList and by any object that must own a
  *      GrGpuResource and is itself owned (directly or indirectly) by Skia-client code.
  *   2) Pending read (+ by addPendingRead(), - by completedRead()): GrContext has scheduled a read
  *      of the resource by the GPU as a result of a skia API call but hasn't executed it yet.
@@ -47,7 +46,7 @@ class SkTraceMemoryDump;
 template <typename DERIVED> class GrIORef : public SkNoncopyable {
 public:
     // Some of the signatures are written to mirror SkRefCnt so that GrGpuResource can work with
-    // templated helper classes (e.g. SkAutoTUnref). However, we have different categories of
+    // templated helper classes (e.g. sk_sp). However, we have different categories of
     // refs (e.g. pending reads). We also don't require thread safety as GrCacheable objects are
     // not intended to cross thread boundaries.
     void ref() const {
@@ -94,6 +93,11 @@ protected:
     bool internalHasRef() const { return SkToBool(fRefCnt); }
 
 private:
+    friend class GrIORefProxy; // needs to forward on wrapped IO calls
+    // This is for a unit test.
+    template <typename T>
+    friend void testingOnly_getIORefCnts(const T*, int* refCnt, int* readCnt, int* writeCnt);
+
     void addPendingRead() const {
         this->validate();
         ++fPendingReads;
@@ -176,30 +180,42 @@ public:
         return fGpuMemorySize;
     }
 
+    class UniqueID {
+    public:
+        static UniqueID InvalidID() {
+            return UniqueID(uint32_t(SK_InvalidUniqueID));
+        }
+
+        UniqueID() {}
+
+        explicit UniqueID(uint32_t id) : fID(id) {}
+
+        uint32_t asUInt() const { return fID; }
+
+        bool operator==(const UniqueID& other) const {
+            return fID == other.fID;
+        }
+        bool operator!=(const UniqueID& other) const {
+            return !(*this == other);
+        }
+
+        void makeInvalid() { fID = SK_InvalidUniqueID; }
+        bool isInvalid() const { return SK_InvalidUniqueID == fID; }
+
+    protected:
+        uint32_t fID;
+    };
+
     /**
      * Gets an id that is unique for this GrGpuResource object. It is static in that it does
      * not change when the content of the GrGpuResource object changes. This will never return
      * 0.
      */
-    uint32_t getUniqueID() const { return fUniqueID; }
+    UniqueID uniqueID() const { return fUniqueID; }
 
     /** Returns the current unique key for the resource. It will be invalid if the resource has no
         associated unique key. */
     const GrUniqueKey& getUniqueKey() const { return fUniqueKey; }
-
-    /**
-     * Attach a custom data object to this resource. The data will remain attached
-     * for the lifetime of this resource (until it is abandoned or released).
-     * Takes a ref on data. Previously attached data, if any, is unrefed.
-     * Returns the data argument, for convenience.
-     */
-    const SkData* setCustomData(const SkData* data);
-
-    /**
-     * Returns the custom data object that was attached to this resource by
-     * calling setCustomData.
-     */
-    const SkData* getCustomData() const { return fData.get(); }
 
     /**
      * Internal-only helper class used for manipulations of the resource by the cache.
@@ -231,6 +247,8 @@ public:
      * need to override setMemoryBacking.
      **/
     virtual void dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const;
+
+    static uint32_t CreateUniqueID();
 
 protected:
     // This must be called by every non-wrapped GrGpuObject. It should be called once the object is
@@ -273,7 +291,7 @@ private:
      * resources and populate the scratchKey with the key.
      * By default resources are not recycled as scratch.
      **/
-    virtual void computeScratchKey(GrScratchKey*) const { };
+    virtual void computeScratchKey(GrScratchKey*) const { }
 
     /**
      * Frees the object in the underlying 3D API. Called by CacheAccess.
@@ -294,15 +312,13 @@ private:
 #ifdef SK_DEBUG
     friend class GrGpu; // for assert in GrGpu to access getGpu
 #endif
-
-    static uint32_t CreateUniqueID();
-
     // An index into a heap when this resource is purgeable or an array when not. This is maintained
     // by the cache.
     int                         fCacheArrayIndex;
     // This value reflects how recently this resource was accessed in the cache. This is maintained
     // by the cache.
     uint32_t                    fTimestamp;
+    uint32_t                    fExternalFlushCntWhenBecamePurgeable;
 
     static const size_t kInvalidGpuMemorySize = ~static_cast<size_t>(0);
     GrScratchKey                fScratchKey;
@@ -315,9 +331,7 @@ private:
 
     SkBudgeted                  fBudgeted;
     bool                        fRefsWrappedObjects;
-    const uint32_t              fUniqueID;
-
-    SkAutoTUnref<const SkData>  fData;
+    const UniqueID              fUniqueID;
 
     typedef GrIORef<GrGpuResource> INHERITED;
     friend class GrIORef<GrGpuResource>; // to access notifyAllCntsAreZero and notifyRefCntIsZero.

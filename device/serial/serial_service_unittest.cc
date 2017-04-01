@@ -7,22 +7,25 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "device/serial/serial.mojom.h"
 #include "device/serial/serial_service_impl.h"
 #include "device/serial/test_serial_io_handler.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace device {
 namespace {
 
 class FakeSerialDeviceEnumerator : public SerialDeviceEnumerator {
-  mojo::Array<serial::DeviceInfoPtr> GetDevices() override {
-    mojo::Array<serial::DeviceInfoPtr> devices(1);
+  std::vector<serial::DeviceInfoPtr> GetDevices() override {
+    std::vector<serial::DeviceInfoPtr> devices(1);
     devices[0] = serial::DeviceInfo::New();
     devices[0]->path = "device";
     return devices;
@@ -47,7 +50,7 @@ class SerialServiceTest : public testing::Test {
  public:
   SerialServiceTest() : connected_(false), expecting_error_(false) {}
 
-  void StoreDevices(mojo::Array<serial::DeviceInfoPtr> devices) {
+  void StoreDevices(std::vector<serial::DeviceInfoPtr> devices) {
     devices_ = std::move(devices);
     StopMessageLoop();
   }
@@ -78,21 +81,22 @@ class SerialServiceTest : public testing::Test {
     if (!io_handler_.get())
       io_handler_ = new TestSerialIoHandler;
     mojo::InterfacePtr<serial::SerialService> service;
-    new SerialServiceImpl(
-        new SerialConnectionFactory(
-            base::Bind(&SerialServiceTest::ReturnIoHandler,
-                       base::Unretained(this)),
-            base::ThreadTaskRunnerHandle::Get()),
-        std::unique_ptr<SerialDeviceEnumerator>(new FakeSerialDeviceEnumerator),
-        mojo::GetProxy(&service));
+    mojo::MakeStrongBinding(
+        base::MakeUnique<SerialServiceImpl>(
+            new SerialConnectionFactory(
+                base::Bind(&SerialServiceTest::ReturnIoHandler,
+                           base::Unretained(this)),
+                base::ThreadTaskRunnerHandle::Get()),
+            base::MakeUnique<FakeSerialDeviceEnumerator>()),
+        mojo::MakeRequest(&service));
     mojo::InterfacePtr<serial::Connection> connection;
     mojo::InterfacePtr<serial::DataSink> sink;
     mojo::InterfacePtr<serial::DataSource> source;
     mojo::InterfacePtr<serial::DataSourceClient> source_client;
-    mojo::GetProxy(&source_client);
+    mojo::MakeRequest(&source_client);
     service->Connect(path, serial::ConnectionOptions::New(),
-                     mojo::GetProxy(&connection), mojo::GetProxy(&sink),
-                     mojo::GetProxy(&source), std::move(source_client));
+                     mojo::MakeRequest(&connection), mojo::MakeRequest(&sink),
+                     mojo::MakeRequest(&source), std::move(source_client));
     connection.set_connection_error_handler(base::Bind(
         &SerialServiceTest::OnConnectionError, base::Unretained(this)));
     expecting_error_ = !expecting_success;
@@ -106,7 +110,7 @@ class SerialServiceTest : public testing::Test {
 
   base::MessageLoop message_loop_;
   std::unique_ptr<base::RunLoop> run_loop_;
-  mojo::Array<serial::DeviceInfoPtr> devices_;
+  std::vector<serial::DeviceInfoPtr> devices_;
   scoped_refptr<TestSerialIoHandler> io_handler_;
   bool connected_;
   bool expecting_error_;
@@ -118,10 +122,10 @@ class SerialServiceTest : public testing::Test {
 
 TEST_F(SerialServiceTest, GetDevices) {
   mojo::InterfacePtr<serial::SerialService> service;
-  SerialServiceImpl::Create(NULL, NULL, mojo::GetProxy(&service));
+  SerialServiceImpl::Create(NULL, NULL, mojo::MakeRequest(&service));
   service.set_connection_error_handler(base::Bind(
       &SerialServiceTest::OnConnectionError, base::Unretained(this)));
-  mojo::Array<serial::DeviceInfoPtr> result;
+  std::vector<serial::DeviceInfoPtr> result;
   service->GetDevices(
       base::Bind(&SerialServiceTest::StoreDevices, base::Unretained(this)));
   RunMessageLoop();

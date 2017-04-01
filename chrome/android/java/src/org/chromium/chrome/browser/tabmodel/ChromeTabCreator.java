@@ -5,12 +5,10 @@
 package org.chromium.chrome.browser.tabmodel;
 
 import android.content.Intent;
-import android.os.Handler;
 import android.text.TextUtils;
 
 import org.chromium.base.SysUtils;
 import org.chromium.base.TraceEvent;
-import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.ServiceTabLauncher;
@@ -27,13 +25,11 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
-import org.chromium.ui.widget.Toast;
 
 /**
  * This class creates various kinds of new tabs and adds them to the right {@link TabModel}.
  */
 public class ChromeTabCreator extends TabCreatorManager.TabCreator {
-    private static final int VISIBLE_DURATION_MS = 600;
 
     private final ChromeActivity mActivity;
     private final WindowAndroid mNativeWindow;
@@ -162,20 +158,6 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
             }
 
             mTabModel.addTab(tab, position, type);
-
-            if (type == TabLaunchType.FROM_REPARENTING) {
-                TabReparentingParams params = (TabReparentingParams) asyncParams;
-                if (!params.shouldStayInChrome()) {
-                    new Handler().postDelayed(new Runnable() {
-                        @Override
-                        public void run() {
-                            mActivity.moveTaskToBack(true);
-                            Toast.makeText(mActivity, R.string.tab_sent_to_background,
-                                    Toast.LENGTH_LONG).show();
-                        }
-                    }, VISIBLE_DURATION_MS);
-                }
-            }
             return tab;
         } finally {
             TraceEvent.end("ChromeTabCreator.createNewTab");
@@ -248,7 +230,7 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
         // If an external app sends an intent for a Weblite URL and the Data Reduction Proxy is
         // using Weblite mode, then use the URL in the lite_url parameter if its scheme is HTTP.
         // This is used by ChromeTabbedActvity intents so that the user does not receive Weblite
-        // pages when he or she could be served a Data Reduction Proxy preview page.
+        // pages when they could be served a Data Reduction Proxy preview page.
         if (url != null) url = DataReductionProxySettings.getInstance().maybeRewriteWebliteUrl(url);
 
         if (forceNewTab && !isLaunchedFromChrome) {
@@ -328,8 +310,7 @@ public class ChromeTabCreator extends TabCreatorManager.TabCreator {
                 break;
         }
 
-        return IntentHandler.getTransitionTypeFromIntent(mActivity.getApplicationContext(),
-                intent, transition);
+        return IntentHandler.getTransitionTypeFromIntent(intent, transition);
     }
 
     /**

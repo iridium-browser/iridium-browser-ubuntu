@@ -10,25 +10,22 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/loader/navigation_url_loader_impl.h"
-#include "content/common/service_worker/service_worker_status_code.h"
 
 namespace net {
-class URLRequest;
 struct RedirectInfo;
 }
 
 namespace content {
 
-class FrameTreeNode;
+class AppCacheNavigationHandleCore;
 class NavigationResourceHandler;
 class NavigationData;
 class ResourceContext;
-class ResourceHandler;
-class ResourceRequestBody;
-class ServiceWorkerContextWrapper;
-class ServiceWorkerRegistration;
+class ServiceWorkerNavigationHandleCore;
 class StreamHandle;
+struct GlobalRequestID;
 struct ResourceResponse;
+struct SSLStatus;
 
 // The IO-thread counterpart to the NavigationURLLoaderImpl. It lives on the IO
 // thread and is owned by the UI-thread NavigationURLLoaderImpl.
@@ -44,8 +41,10 @@ class NavigationURLLoaderImplCore {
 
   // Starts the request.
   void Start(ResourceContext* resource_context,
-             ServiceWorkerContextWrapper* service_worker_context_wrapper,
-             std::unique_ptr<NavigationRequestInfo> request_info);
+             ServiceWorkerNavigationHandleCore* service_worker_handle_core,
+             AppCacheNavigationHandleCore* appcache_handle_core,
+             std::unique_ptr<NavigationRequestInfo> request_info,
+             std::unique_ptr<NavigationUIData> navigation_ui_data);
 
   // Follows the current pending redirect.
   void FollowRedirect();
@@ -64,24 +63,18 @@ class NavigationURLLoaderImplCore {
   // Notifies |loader_| on the UI thread that the response started.
   void NotifyResponseStarted(ResourceResponse* response,
                              std::unique_ptr<StreamHandle> body,
-                             std::unique_ptr<NavigationData> navigation_data);
+                             const SSLStatus& ssl_status,
+                             std::unique_ptr<NavigationData> navigation_data,
+                             const GlobalRequestID& request_id,
+                             bool is_download,
+                             bool is_stream);
 
   // Notifies |loader_| on the UI thread that the request failed.
   void NotifyRequestFailed(bool in_cache, int net_error);
 
  private:
-  // Called when done checking whether the navigation has a ServiceWorker
-  // registered for it.
-  void OnServiceWorkerChecksPerformed(
-      ServiceWorkerStatusCode status,
-      scoped_refptr<ServiceWorkerRegistration> registration);
-
   base::WeakPtr<NavigationURLLoaderImpl> loader_;
   NavigationResourceHandler* resource_handler_;
-  std::unique_ptr<NavigationRequestInfo> request_info_;
-  ResourceContext* resource_context_;
-
-  base::WeakPtrFactory<NavigationURLLoaderImplCore> factory_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationURLLoaderImplCore);
 };

@@ -9,13 +9,32 @@
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "ui/native_theme/native_theme.h"
+#include "ui/native_theme/overlay_scrollbar_constants_aura.h"
 
 using blink::WebCanvas;
 using blink::WebColor;
 using blink::WebRect;
 using blink::WebThemeEngine;
+using blink::WebScrollbarOverlayColorTheme;
 
 namespace content {
+namespace {
+
+#if defined(OS_WIN)
+// The width of a vertical scroll bar in dips.
+int32_t g_vertical_scroll_bar_width;
+
+// The height of a horizontal scroll bar in dips.
+int32_t g_horizontal_scroll_bar_height;
+
+// The height of the arrow bitmap on a vertical scroll bar in dips.
+int32_t g_vertical_arrow_bitmap_height;
+
+// The width of the arrow bitmap on a horizontal scroll bar in dips.
+int32_t g_horizontal_arrow_bitmap_width;
+#endif
+
+}  // namespace
 
 static ui::NativeTheme::Part NativeThemePart(
     WebThemeEngine::Part part) {
@@ -61,6 +80,18 @@ static ui::NativeTheme::Part NativeThemePart(
   }
 }
 
+static ui::NativeTheme::ScrollbarOverlayColorTheme
+NativeThemeScrollbarOverlayColorTheme(WebScrollbarOverlayColorTheme theme) {
+  switch (theme) {
+    case WebScrollbarOverlayColorTheme::WebScrollbarOverlayColorThemeLight:
+      return ui::NativeTheme::ScrollbarOverlayColorThemeLight;
+    case WebScrollbarOverlayColorTheme::WebScrollbarOverlayColorThemeDark:
+      return ui::NativeTheme::ScrollbarOverlayColorThemeDark;
+    default:
+      return ui::NativeTheme::ScrollbarOverlayColorThemeDark;
+  }
+}
+
 static ui::NativeTheme::State NativeThemeState(
     WebThemeEngine::State state) {
   switch (state) {
@@ -82,6 +113,9 @@ static void GetNativeThemeExtraParams(
     WebThemeEngine::State state,
     const WebThemeEngine::ExtraParams* extra_params,
     ui::NativeTheme::ExtraParams* native_theme_extra_params) {
+  if (!extra_params)
+    return;
+
   switch (part) {
     case WebThemeEngine::PartScrollbarHorizontalTrack:
     case WebThemeEngine::PartScrollbarVerticalTrack:
@@ -160,6 +194,12 @@ static void GetNativeThemeExtraParams(
       native_theme_extra_params->progress_bar.value_rect_height =
           extra_params->progressBar.valueRectHeight;
       break;
+    case WebThemeEngine::PartScrollbarHorizontalThumb:
+    case WebThemeEngine::PartScrollbarVerticalThumb:
+      native_theme_extra_params->scrollbar_thumb.scrollbar_theme =
+          NativeThemeScrollbarOverlayColorTheme(
+              extra_params->scrollbarThumb.scrollbarTheme);
+      break;
     default:
       break;  // Parts that have no extra params get here.
   }
@@ -167,8 +207,27 @@ static void GetNativeThemeExtraParams(
 
 blink::WebSize WebThemeEngineImpl::getSize(WebThemeEngine::Part part) {
   ui::NativeTheme::ExtraParams extra;
+  ui::NativeTheme::Part native_theme_part = NativeThemePart(part);
+#if defined(OS_WIN)
+  switch (native_theme_part) {
+    case ui::NativeTheme::kScrollbarDownArrow:
+    case ui::NativeTheme::kScrollbarLeftArrow:
+    case ui::NativeTheme::kScrollbarRightArrow:
+    case ui::NativeTheme::kScrollbarUpArrow:
+    case ui::NativeTheme::kScrollbarHorizontalThumb:
+    case ui::NativeTheme::kScrollbarVerticalThumb:
+    case ui::NativeTheme::kScrollbarHorizontalTrack:
+    case ui::NativeTheme::kScrollbarVerticalTrack: {
+      return gfx::Size(g_vertical_scroll_bar_width,
+                       g_vertical_scroll_bar_width);
+    }
+
+    default:
+      break;
+  }
+#endif
   return ui::NativeTheme::GetInstanceForWeb()->GetPartSize(
-      NativeThemePart(part), ui::NativeTheme::kNormal, extra);
+      native_theme_part, ui::NativeTheme::kNormal, extra);
 }
 
 void WebThemeEngineImpl::paint(
@@ -185,15 +244,27 @@ void WebThemeEngineImpl::paint(
       native_theme_extra_params);
 }
 
-void WebThemeEngineImpl::paintStateTransition(blink::WebCanvas* canvas,
-                                              WebThemeEngine::Part part,
-                                              WebThemeEngine::State startState,
-                                              WebThemeEngine::State endState,
-                                              double progress,
-                                              const blink::WebRect& rect) {
-  ui::NativeTheme::GetInstanceForWeb()->PaintStateTransition(
-      canvas, NativeThemePart(part), NativeThemeState(startState),
-      NativeThemeState(endState), progress, gfx::Rect(rect));
+void WebThemeEngineImpl::getOverlayScrollbarStyle(ScrollbarStyle* style) {
+  style->fadeOutDelaySeconds = ui::kOverlayScrollbarFadeOutDelay.InSecondsF();
+  style->fadeOutDurationSeconds =
+      ui::kOverlayScrollbarFadeOutDuration.InSecondsF();
+  // The other fields in this struct are used only on Android to draw solid
+  // color scrollbars. On other platforms the scrollbars are painted in
+  // NativeTheme so these fields are unused.
 }
+
+#if defined(OS_WIN)
+// static
+void WebThemeEngineImpl::cacheScrollBarMetrics(
+    int32_t vertical_scroll_bar_width,
+    int32_t horizontal_scroll_bar_height,
+    int32_t vertical_arrow_bitmap_height,
+    int32_t horizontal_arrow_bitmap_width) {
+  g_vertical_scroll_bar_width = vertical_scroll_bar_width;
+  g_horizontal_scroll_bar_height = horizontal_scroll_bar_height;
+  g_vertical_arrow_bitmap_height = vertical_arrow_bitmap_height;
+  g_horizontal_arrow_bitmap_width = horizontal_arrow_bitmap_width;
+}
+#endif
 
 }  // namespace content

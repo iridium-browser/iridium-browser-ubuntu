@@ -27,32 +27,34 @@
 #ifndef XPathFunctions_h
 #define XPathFunctions_h
 
+#include "core/CoreExport.h"
 #include "core/xml/XPathExpressionNode.h"
 
 namespace blink {
 
 namespace XPath {
 
-class Function : public Expression {
-public:
-    void setArguments(HeapVector<Member<Expression>>&);
-    void setName(const String& name) { m_name = name; }
+class CORE_EXPORT Function : public Expression {
+ public:
+  void setArguments(HeapVector<Member<Expression>>&);
+  void setName(const String& name) { m_name = name; }
 
-protected:
-    Expression* arg(int pos) { return subExpr(pos); }
-    const Expression* arg(int pos) const { return subExpr(pos); }
-    unsigned argCount() const { return subExprCount(); }
-    String name() const { return m_name; }
+ protected:
+  Expression* arg(int pos) { return subExpr(pos); }
+  const Expression* arg(int pos) const { return subExpr(pos); }
+  unsigned argCount() const { return subExprCount(); }
+  String name() const { return m_name; }
 
-private:
-    String m_name;
+ private:
+  String m_name;
 };
 
 Function* createFunction(const String& name);
-Function* createFunction(const String& name, HeapVector<Member<Expression>>&);
+CORE_EXPORT Function* createFunction(const String& name,
+                                     HeapVector<Member<Expression>>&);
 
-} // namespace XPath
+}  // namespace XPath
 
-} // namespace blink
+}  // namespace blink
 
-#endif // XPathFunctions_h
+#endif  // XPathFunctions_h

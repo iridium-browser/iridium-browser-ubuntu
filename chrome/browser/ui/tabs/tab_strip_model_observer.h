@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_OBSERVER_H_
 #define CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_OBSERVER_H_
 
+#include "base/macros.h"
+
 class TabStripModel;
 
 namespace content {
@@ -57,7 +59,8 @@ class TabStripModelObserver {
   // A new WebContents was inserted into the TabStripModel at the
   // specified index. |foreground| is whether or not it was opened in the
   // foreground (selected).
-  virtual void TabInsertedAt(content::WebContents* contents,
+  virtual void TabInsertedAt(TabStripModel* tab_strip_model,
+                             content::WebContents* contents,
                              int index,
                              bool foreground);
 
@@ -126,7 +129,9 @@ class TabStripModelObserver {
                              int index);
 
   // Invoked when the pinned state of a tab changes.
-  virtual void TabPinnedStateChanged(content::WebContents* contents, int index);
+  virtual void TabPinnedStateChanged(TabStripModel* tab_strip_model,
+                                     content::WebContents* contents,
+                                     int index);
 
   // Invoked when the blocked state of a tab changes.
   // NOTE: This is invoked when a tab becomes blocked/unblocked by a tab modal
@@ -149,7 +154,11 @@ class TabStripModelObserver {
   virtual void CloseAllTabsCanceled();
 
  protected:
+  TabStripModelObserver();
   virtual ~TabStripModelObserver() {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TabStripModelObserver);
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_TAB_STRIP_MODEL_OBSERVER_H_

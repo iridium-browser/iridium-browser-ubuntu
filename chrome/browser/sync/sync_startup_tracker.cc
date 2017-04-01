@@ -6,13 +6,13 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 
 SyncStartupTracker::SyncStartupTracker(Profile* profile, Observer* observer)
     : profile_(profile),
       observer_(observer) {
-  ProfileSyncService* service = ProfileSyncServiceFactory::GetForProfile(
-      profile_);
+  browser_sync::ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetForProfile(profile_);
   if (service)
     service->AddObserver(this);
 
@@ -20,8 +20,8 @@ SyncStartupTracker::SyncStartupTracker(Profile* profile, Observer* observer)
 }
 
 SyncStartupTracker::~SyncStartupTracker() {
-  ProfileSyncService* service = ProfileSyncServiceFactory::GetForProfile(
-      profile_);
+  browser_sync::ProfileSyncService* service =
+      ProfileSyncServiceFactory::GetForProfile(profile_);
   if (service)
     service->RemoveObserver(this);
 }
@@ -53,7 +53,7 @@ SyncStartupTracker::SyncServiceState SyncStartupTracker::GetSyncServiceState(
   if (!profile->IsSyncAllowed())
     return SYNC_STARTUP_ERROR;
 
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile);
 
   // If no service exists or it can't be started, treat as a startup error.
@@ -61,8 +61,8 @@ SyncStartupTracker::SyncServiceState SyncStartupTracker::GetSyncServiceState(
     return SYNC_STARTUP_ERROR;
   }
 
-  // If the sync backend has started up, notify the callback.
-  if (service->IsBackendInitialized())
+  // If the sync engine has started up, notify the callback.
+  if (service->IsEngineInitialized())
     return SYNC_STARTUP_COMPLETE;
 
   // If the sync service has some kind of error, report to the user.
@@ -76,7 +76,7 @@ SyncStartupTracker::SyncServiceState SyncStartupTracker::GetSyncServiceState(
     return SYNC_STARTUP_ERROR;
   }
 
-  // No error detected yet, but the sync backend hasn't started up yet, so
+  // No error detected yet, but the sync engine hasn't started up yet, so
   // we're in the pending state.
   return SYNC_STARTUP_PENDING;
 }

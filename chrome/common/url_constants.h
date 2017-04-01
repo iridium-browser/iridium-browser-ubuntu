@@ -15,6 +15,8 @@
 #include "build/build_config.h"
 #include "chrome/common/features.h"
 #include "content/public/common/url_constants.h"
+#include "media/media_features.h"
+#include "printing/features/features.h"
 
 namespace chrome {
 
@@ -34,6 +36,7 @@ extern const char kChromeUIConstrainedHTMLTestURL[];
 extern const char kChromeUICrashesURL[];
 extern const char kChromeUICreditsURL[];
 extern const char kChromeUIDevicesURL[];
+extern const char kChromeUIDevToolsCustomURL[];
 extern const char kChromeUIDevToolsURL[];
 extern const char kChromeUIDomainReliabilityInternalsURL[];
 extern const char kChromeUIDownloadsURL[];
@@ -61,11 +64,10 @@ extern const char kChromeUINaClURL[];
 extern const char kChromeUINetInternalsURL[];
 extern const char kChromeUINewProfileURL[];
 extern const char kChromeUINewTabURL[];
+extern const char kChromeUINTPTilesInternalsURL[];
 extern const char kChromeUIOmniboxURL[];
 extern const char kChromeUIPasswordManagerInternalsHost[];
-extern const char kChromeUIPluginsURL[];
 extern const char kChromeUIPolicyURL[];
-extern const char kChromeUIProfileSigninConfirmationURL[];
 extern const char kChromeUIMdUserManagerUrl[];
 extern const char kChromeUIPrintURL[];
 extern const char kChromeUIQuitURL[];
@@ -74,6 +76,8 @@ extern const char kChromeUIMdSettingsURL[];
 extern const char kChromeUISettingsURL[];
 extern const char kChromeUIContentSettingsURL[];
 extern const char kChromeUISettingsFrameURL[];
+extern const char kChromeUISigninEmailConfirmationURL[];
+extern const char kChromeUISigninErrorURL[];
 extern const char kChromeUISiteEngagementHost[];
 extern const char kChromeUISuggestionsURL[];
 extern const char kChromeUISupervisedUserPassphrasePageURL[];
@@ -84,17 +88,20 @@ extern const char kChromeUIThumbnailURL[];
 extern const char kChromeUIThumbnailListURL[];
 extern const char kChromeUIUberFrameURL[];
 extern const char kChromeUIUserActionsURL[];
-extern const char kChromeUIUserManagerURL[];
 extern const char kChromeUIVersionURL[];
+extern const char kChromeUIWelcomeURL[];
+extern const char kChromeUIWelcomeWin10URL[];
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 extern const char kChromeUIContextualSearchPromoURL[];
+extern const char kChromeUIJavaCrashURL[];
 extern const char kChromeUINativeScheme[];
 extern const char kChromeUINativeNewTabURL[];
 extern const char kChromeUINativeBookmarksURL[];
-extern const char kChromeUINativePhysicalWebURL[];
+extern const char kChromeUINativeHistoryURL[];
+extern const char kChromeUINativePhysicalWebDiagnosticsURL[];
 extern const char kChromeUINativeRecentTabsURL[];
-#endif
+#endif  // defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
 extern const char kChromeUIBluetoothPairingURL[];
@@ -104,7 +111,6 @@ extern const char kChromeUIDeviceEmulatorURL[];
 extern const char kChromeUIFirstRunURL[];
 extern const char kChromeUIKeyboardOverlayURL[];
 extern const char kChromeUIMobileSetupURL[];
-extern const char kChromeUINfcDebugURL[];
 extern const char kChromeUIOobeURL[];
 extern const char kChromeUIOSCreditsURL[];
 extern const char kChromeUIProxySettingsURL[];
@@ -115,6 +121,7 @@ extern const char kChromeUISlowURL[];
 extern const char kChromeUISystemInfoURL[];
 extern const char kChromeUITermsOemURL[];
 extern const char kChromeUIUserImageURL[];
+extern const char kChromeUIMdCupsSettingsURL[];
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
@@ -125,7 +132,7 @@ extern const char kChromeUIMetroFlowURL[];
 extern const char kChromeUITabModalConfirmDialogURL[];
 #endif
 
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
 extern const char kChromeUIWebRtcLogsURL[];
 #endif
 
@@ -136,7 +143,7 @@ extern const char kChromeUICastURL[];
 #endif
 #endif
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
 extern const char kChromeUIDiscardsHost[];
 extern const char kChromeUIDiscardsURL[];
 #endif
@@ -147,6 +154,7 @@ extern const char kChromeUIAboutPageFrameHost[];
 extern const char kChromeUIBlankHost[];
 extern const char kChromeUIAppLauncherPageHost[];
 extern const char kChromeUIAppListStartPageHost[];
+extern const char kChromeUIBluetoothInternalsHost[];
 extern const char kChromeUIBookmarksHost[];
 extern const char kChromeUICacheHost[];
 extern const char kChromeUICertificateViewerHost[];
@@ -165,6 +173,7 @@ extern const char kChromeUIDevicesHost[];
 extern const char kChromeUIDevToolsHost[];
 extern const char kChromeUIDevToolsBundledPath[];
 extern const char kChromeUIDevToolsRemotePath[];
+extern const char kChromeUIDevToolsCustomPath[];
 extern const char kChromeUIDNSHost[];
 extern const char kChromeUIDomainReliabilityInternalsHost[];
 extern const char kChromeUIDownloadsHost[];
@@ -198,13 +207,12 @@ extern const char kChromeUINaClHost[];
 extern const char kChromeUINetExportHost[];
 extern const char kChromeUINetInternalsHost[];
 extern const char kChromeUINewTabHost[];
+extern const char kChromeUINTPTilesInternalsHost[];
 extern const char kChromeUIOfflineInternalsHost[];
 extern const char kChromeUIOmniboxHost[];
-extern const char kChromeUIPluginsHost[];
+extern const char kChromeUIPhysicalWebHost[];
 extern const char kChromeUIComponentsHost[];
 extern const char kChromeUIPolicyHost[];
-extern const char kChromeUIProfileSigninConfirmationHost[];
-extern const char kChromeUIUserManagerHost[];
 extern const char kChromeUIMdUserManagerHost[];
 extern const char kChromeUIPredictorsHost[];
 extern const char kChromeUIProfilerHost[];
@@ -214,6 +222,8 @@ extern const char kChromeUIRestartHost[];
 extern const char kChromeUISettingsHost[];
 extern const char kChromeUISettingsFrameHost[];
 extern const char kChromeUIShorthangHost[];
+extern const char kChromeUISigninEmailConfirmationHost[];
+extern const char kChromeUISigninErrorHost[];
 extern const char kChromeUISignInInternalsHost[];
 extern const char kChromeUISuggestionsHost[];
 extern const char kChromeUISupervisedUserInternalsHost[];
@@ -224,6 +234,7 @@ extern const char kChromeUISyncFileSystemInternalsHost[];
 extern const char kChromeUISyncInternalsHost[];
 extern const char kChromeUISyncResourcesHost[];
 extern const char kChromeUISystemInfoHost[];
+extern const char kChromeUITaskSchedulerInternalsHost[];
 extern const char kChromeUITermsHost[];
 extern const char kChromeUIThemeHost[];
 extern const char kChromeUIThumbnailHost[];
@@ -236,9 +247,11 @@ extern const char kChromeUIUberHost[];
 extern const char kChromeUIUsbInternalsHost[];
 extern const char kChromeUIUserActionsHost[];
 extern const char kChromeUIVersionHost[];
+extern const char kChromeUIWelcomeHost[];
+extern const char kChromeUIWelcomeWin10Host[];
 extern const char kChromeUIWorkersHost[];
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 extern const char kChromeUIPrintHost[];
 #endif  // ENABLE_PRINT_PREVIEW
 
@@ -250,9 +263,13 @@ extern const char kChromeUISandboxHost[];
 #if defined(OS_ANDROID)
 extern const char kChromeUIContextualSearchPromoHost[];
 extern const char kChromeUIOfflineInternalsURL[];
-extern const char kChromeUIPhysicalWebHost[];
+extern const char kChromeUIPhysicalWebDiagnosticsHost[];
 extern const char kChromeUIPopularSitesInternalsHost[];
 extern const char kChromeUISnippetsInternalsHost[];
+#endif
+
+#if defined(ENABLE_VR_SHELL) || defined(ENABLE_WEBVR)
+extern const char kChromeUIVrShellUIHost[];
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -269,7 +286,6 @@ extern const char kChromeUILoginContainerHost[];
 extern const char kChromeUILoginHost[];
 extern const char kChromeUIMobileSetupHost[];
 extern const char kChromeUINetworkHost[];
-extern const char kChromeUINfcDebugHost[];
 extern const char kChromeUIOobeHost[];
 extern const char kChromeUIOSCreditsHost[];
 extern const char kChromeUIPowerHost[];
@@ -301,7 +317,7 @@ extern const char kChromeUIMetroFlowHost[];
 extern const char kChromeUITabModalConfirmDialogHost[];
 #endif
 
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
 extern const char kChromeUIWebRtcLogsHost[];
 #endif
 
@@ -315,35 +331,34 @@ extern const char kChromeUICastHost[];
 // Options sub-pages.
 extern const char kAutofillSubPage[];
 extern const char kClearBrowserDataSubPage[];
-extern const char kContentSettingsExceptionsSubPage[];
 extern const char kContentSettingsSubPage[];
 extern const char kCreateProfileSubPage[];
+extern const char kDeprecatedOptionsContentSettingsExceptionsSubPage[];
 extern const char kExtensionsSubPage[];
 extern const char kHandlerSettingsSubPage[];
 extern const char kImportDataSubPage[];
 extern const char kLanguageOptionsSubPage[];
 extern const char kManageProfileSubPage[];
 extern const char kPasswordManagerSubPage[];
-extern const char kPowerOptionsSubPage[];
 extern const char kResetProfileSettingsSubPage[];
 extern const char kSearchEnginesSubPage[];
-extern const char kSearchSubPage[];
-extern const char kSearchUsersSubPage[];
 extern const char kSignOutSubPage[];
 extern const char kSyncSetupSubPage[];
 extern const char kTriggeredResetProfileSettingsSubPage[];
 #if defined(OS_CHROMEOS)
+extern const char kAccessibilitySubPage[];
+extern const char kBluetoothSubPage[];
+extern const char kDateTimeSubPage[];
+extern const char kDeprecatedOptionsSearchSubPage[];
 extern const char kInternetOptionsSubPage[];
-extern const char kChangeProfilePictureSubPage[];
+extern const char kPowerOptionsSubPage[];
 #endif
 
 // Extensions sub pages.
 extern const char kExtensionConfigureCommandsSubPage[];
 
-// URLs used to indicate that an extension resource load request
-// was invalid.
+// URL used to indicate that an extension resource load request was invalid.
 extern const char kExtensionInvalidRequestURL[];
-extern const char kExtensionResourceInvalidRequestURL[];
 
 extern const char kSyncGoogleDashboardURL[];
 
@@ -440,7 +455,7 @@ extern const char kChromiumProjectURL[];
 // first run dialog.
 extern const char kLearnMoreReportingURL[];
 
-#if defined(ENABLE_PLUGIN_INSTALLATION)
+#if BUILDFLAG(ENABLE_PLUGIN_INSTALLATION)
 // The URL for the "Learn more" page for the outdated plugin infobar.
 extern const char kOutdatedPluginLearnMoreURL[];
 #endif
@@ -485,6 +500,9 @@ extern const char kNaturalScrollHelpURL[];
 
 // The URL for the Learn More page about enterprise enrolled devices.
 extern const char kLearnMoreEnterpriseURL[];
+
+// The URL fo the "learn more" link for Google Play Store (Arc++) settings.
+extern const char kAndroidAppsLearnMoreURL[];
 #endif
 
 // The URL for the Learn More link of the non-CWS bubble.
@@ -566,6 +584,7 @@ extern const char kSafeSearchSsuiParameter[];
 extern const char kMediaAccessLearnMoreUrl[];
 
 // The URL for the "Learn more" link in the language settings.
+// TODO(michaelpg): Compile on Chrome OS only when Options is removed.
 extern const char kLanguageSettingsLearnMoreUrl[];
 
 #if defined(GOOGLE_CHROME_BUILD) && defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -585,6 +604,9 @@ extern const char kWindowsXPVistaDeprecationURL[];
 // The URL for the Bluetooth Overview help center article in the Web Bluetooth
 // Chooser.
 extern const char kChooserBluetoothOverviewURL[];
+
+// The URL for providing help when the Bluetooth adapter is off.
+extern const char kBluetoothAdapterOffHelpURL[];
 
 // The URL for the WebUsb help center article.
 extern const char kChooserUsbOverviewURL[];

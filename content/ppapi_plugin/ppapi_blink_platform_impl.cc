@@ -143,11 +143,6 @@ blink::WebClipboard* PpapiBlinkPlatformImpl::clipboard() {
   return NULL;
 }
 
-blink::WebMimeRegistry* PpapiBlinkPlatformImpl::mimeRegistry() {
-  NOTREACHED();
-  return NULL;
-}
-
 blink::WebFileUtilities* PpapiBlinkPlatformImpl::fileUtilities() {
   NOTREACHED();
   return NULL;
@@ -215,6 +210,7 @@ blink::WebURLLoader* PpapiBlinkPlatformImpl::createURLLoader() {
 
 void PpapiBlinkPlatformImpl::getPluginList(
     bool refresh,
+    const blink::WebSecurityOrigin& mainFrameOrigin,
     blink::WebPluginListBuilder* builder) {
   NOTREACHED();
 }

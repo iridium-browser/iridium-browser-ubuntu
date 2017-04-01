@@ -7,16 +7,22 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/stl_util.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/cert/cert_database.h"
 #include "net/http/http_network_session.h"
 #include "net/socket/client_socket_pool_manager.h"
+
+namespace base {
+namespace trace_event {
+class ProcessMemoryDump;
+}
+}
 
 namespace net {
 
@@ -33,21 +39,6 @@ class SSLClientSocketPool;
 class SSLConfigService;
 class TransportClientSocketPool;
 class TransportSecurityState;
-
-namespace internal {
-
-// A helper class for auto-deleting Values in the destructor.
-template <typename Key, typename Value>
-class OwnedPoolMap : public std::map<Key, Value> {
- public:
-  OwnedPoolMap() {
-    static_assert(std::is_pointer<Value>::value, "value must be a pointer");
-  }
-
-  ~OwnedPoolMap() { base::STLDeleteValues(this); }
-};
-
-}  // namespace internal
 
 class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
                                     public ClientSocketPoolManager,
@@ -88,18 +79,21 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
   std::unique_ptr<base::Value> SocketPoolInfoToValue() const override;
 
   // CertDatabase::Observer methods:
-  void OnCertAdded(const X509Certificate* cert) override;
-  void OnCACertChanged(const X509Certificate* cert) override;
+  void OnCertDBChanged(const X509Certificate* cert) override;
+
+  void DumpMemoryStats(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const std::string& parent_dump_absolute_name) const override;
 
  private:
-  typedef internal::OwnedPoolMap<HostPortPair, TransportClientSocketPool*>
-      TransportSocketPoolMap;
-  typedef internal::OwnedPoolMap<HostPortPair, SOCKSClientSocketPool*>
-      SOCKSSocketPoolMap;
-  typedef internal::OwnedPoolMap<HostPortPair, HttpProxyClientSocketPool*>
-      HTTPProxySocketPoolMap;
-  typedef internal::OwnedPoolMap<HostPortPair, SSLClientSocketPool*>
-      SSLSocketPoolMap;
+  using TransportSocketPoolMap =
+      std::map<HostPortPair, std::unique_ptr<TransportClientSocketPool>>;
+  using SOCKSSocketPoolMap =
+      std::map<HostPortPair, std::unique_ptr<SOCKSClientSocketPool>>;
+  using HTTPProxySocketPoolMap =
+      std::map<HostPortPair, std::unique_ptr<HttpProxyClientSocketPool>>;
+  using SSLSocketPoolMap =
+      std::map<HostPortPair, std::unique_ptr<SSLClientSocketPool>>;
 
   NetLog* const net_log_;
   ClientSocketFactory* const socket_factory_;

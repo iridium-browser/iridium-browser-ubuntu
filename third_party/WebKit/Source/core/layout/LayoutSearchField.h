@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2006, 2007, 2009 Apple Inc. All rights reserved.
- * Copyright (C) 2008 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2008 Torch Mobile Inc. All rights reserved.
+ *               (http://www.torchmobile.com/)
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  *
  * This library is free software; you can redistribute it and/or
@@ -30,19 +31,21 @@ namespace blink {
 class HTMLInputElement;
 
 class LayoutSearchField final : public LayoutTextControlSingleLine {
-public:
-    LayoutSearchField(HTMLInputElement*);
-    ~LayoutSearchField() override;
+ public:
+  LayoutSearchField(HTMLInputElement*);
+  ~LayoutSearchField() override;
 
-private:
-    LayoutUnit computeControlLogicalHeight(LayoutUnit lineHeight, LayoutUnit nonContentHeight) const override;
+ private:
+  LayoutUnit computeControlLogicalHeight(
+      LayoutUnit lineHeight,
+      LayoutUnit nonContentHeight) const override;
 
-    Element* searchDecorationElement() const;
-    Element* cancelButtonElement() const;
+  Element* searchDecorationElement() const;
+  Element* cancelButtonElement() const;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSearchField, isTextField());
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutSearchField_h
+#endif  // LayoutSearchField_h

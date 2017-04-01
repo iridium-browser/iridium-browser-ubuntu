@@ -143,7 +143,7 @@ int FakeSocket::GetLocalAddress(net::IPEndPoint* address) const {
   return net::OK;
 }
 
-const net::BoundNetLog& FakeSocket::NetLog() const {
+const net::NetLogWithSource& FakeSocket::NetLog() const {
   NOTREACHED();
   return net_log_;
 }
@@ -160,7 +160,7 @@ bool FakeSocket::WasEverUsed() const {
   return true;
 }
 
-bool FakeSocket::WasNpnNegotiated() const {
+bool FakeSocket::WasAlpnNegotiated() const {
   return false;
 }
 

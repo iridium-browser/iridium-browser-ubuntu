@@ -310,6 +310,9 @@ Enroller.prototype.approveOrigin_ = function() {
         if (!result) {
           // Origin not approved: rather than give an explicit indication to
           // the web page, let a timeout occur.
+          // NOTE: if you are looking at this in a debugger, this line will
+          // always be false since the origin of the debugger is different
+          // than origin of requesting page
           if (self.timer_.expired()) {
             self.notifyTimeout_();
             return;

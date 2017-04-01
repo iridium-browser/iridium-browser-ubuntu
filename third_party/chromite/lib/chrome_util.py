@@ -13,7 +13,7 @@ import re
 import shlex
 import shutil
 
-from chromite.cbuildbot import failures_lib
+from chromite.lib import failures_lib
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
@@ -44,54 +44,45 @@ def _NameValueListToDict(name_value_list):
   return result
 
 
-def ProcessGypDefines(defines):
-  """Validate and convert a string containing GYP_DEFINES to dictionary."""
+def ProcessShellFlags(defines):
+  """Validate and convert a string of shell style flags to a dictionary."""
   assert defines is not None
   return _NameValueListToDict(shlex.split(defines))
-
-
-def DictToGypDefines(def_dict):
-  """Convert a dict to GYP_DEFINES format."""
-  def_list = []
-  for k, v in def_dict.iteritems():
-    def_list.append('%s="%s"' % (k, v))
-  return ' '.join(def_list)
 
 
 class Conditions(object):
   """Functions that return conditions used to construct Path objects.
 
   Condition functions returned by the public methods have signature
-  f(gyp_defines, staging_flags).  For description of gyp_defines and
+  f(gn_args, staging_flags). For descriptions of gn_args and
   staging_flags see docstring for StageChromeFromBuildDir().
   """
 
   @classmethod
-  def _GypSet(cls, flag, value, gyp_defines, _staging_flags):
-    val = gyp_defines.get(flag)
-    return val == value if value is not None else bool(val)
+  def _GnSetTo(cls, flag, value, gn_args, _staging_flags):
+    val = gn_args.get(flag)
+    return val == value
 
   @classmethod
-  def _GypNotSet(cls, flag, gyp_defines, staging_flags):
-    return not cls._GypSet(flag, None, gyp_defines, staging_flags)
+  def _GnAnySetTo(cls, flags_values, gn_args, _staging_flags):
+    return any(gn_args.get(flag) == value for flag, value in flags_values)
 
   @classmethod
-  def _StagingFlagSet(cls, flag, _gyp_defines, staging_flags):
+  def _StagingFlagSet(cls, flag, _gn_args, staging_flags):
     return flag in staging_flags
 
   @classmethod
-  def _StagingFlagNotSet(cls, flag, gyp_defines, staging_flags):
-    return not cls._StagingFlagSet(flag, gyp_defines, staging_flags)
+  def _StagingFlagNotSet(cls, flag, gn_args, staging_flags):
+    return not cls._StagingFlagSet(flag, gn_args, staging_flags)
 
   @classmethod
-  def GypSet(cls, flag, value=None):
-    """Returns condition that tests a gyp flag is set (possibly to a value)."""
-    return functools.partial(cls._GypSet, flag, value)
+  def GnSetTo(cls, flag, value):
+    """Returns condition that tests a gn flag is set to a value."""
+    return functools.partial(cls._GnSetTo, flag, value)
 
   @classmethod
-  def GypNotSet(cls, flag):
-    """Returns condition that tests a gyp flag is not set."""
-    return functools.partial(cls._GypNotSet, flag)
+  def GnAnySetTo(cls, flags_values):
+    return functools.partial(cls._GnAnySetTo, flags_values)
 
   @classmethod
   def StagingFlagSet(cls, flag):
@@ -122,10 +113,8 @@ class Copier(object):
   Provides destination stripping and permission setting functionality.
   """
 
-  DEFAULT_BLACKLIST = (r'(^|.*/)\.svn($|/.*)',)
-
   def __init__(self, strip_bin=None, strip_flags=None, default_mode=0o644,
-               dir_mode=0o755, exe_mode=0o755, blacklist=None):
+               dir_mode=0o755, exe_mode=0o755):
     """Initialization.
 
     Args:
@@ -135,27 +124,17 @@ class Copier(object):
       default_mode: Default permissions to set on files.
       dir_mode: Mode to set for directories.
       exe_mode: Permissions to set on executables.
-      blacklist: A list of path patterns to ignore during the copy.
     """
     self.strip_bin = strip_bin
     self.strip_flags = strip_flags
     self.default_mode = default_mode
     self.dir_mode = dir_mode
     self.exe_mode = exe_mode
-    self.blacklist = blacklist
-    if self.blacklist is None:
-      self.blacklist = self.DEFAULT_BLACKLIST
 
   @staticmethod
   def Log(src, dest, directory):
     sep = ' [d] -> ' if directory else ' -> '
     logging.debug('%s %s %s', src, sep, dest)
-
-  def _PathIsBlacklisted(self, path):
-    for pattern in self.blacklist:
-      if re.match(pattern, path):
-        return True
-    return False
 
   def _CopyFile(self, src, dest, path):
     """Perform the copy.
@@ -174,8 +153,7 @@ class Copier(object):
       return
 
     osutils.SafeMakedirs(os.path.dirname(dest), mode=self.dir_mode)
-    is_bin = path.exe or src.endswith('.mojo')
-    if is_bin and self.strip_bin and path.strip and os.path.getsize(src) > 0:
+    if path.exe and self.strip_bin and path.strip and os.path.getsize(src) > 0:
       strip_flags = (['--strip-unneeded'] if self.strip_flags is None else
                      self.strip_flags)
       cros_build_lib.DebugRunCommand(
@@ -189,20 +167,18 @@ class Copier(object):
       mode = self.exe_mode if path.exe else self.default_mode
     os.chmod(dest, mode)
 
-  def Copy(self, src_base, dest_base, path, strict=False, sloppy=False):
+  def Copy(self, src_base, dest_base, path, sloppy=False):
     """Copy artifact(s) from source directory to destination.
 
     Args:
       src_base: The directory to apply the src glob pattern match in.
       dest_base: The directory to copy matched files to.  |Path.dest|.
       path: A Path instance that specifies what is to be copied.
-      strict: If set, enforce that all optional files are copied.
       sloppy: If set, ignore when mandatory artifacts are missing.
 
     Returns:
       A list of the artifacts copied.
     """
-    assert not (strict and sloppy), 'strict and sloppy are not compatible.'
     copied_paths = []
     src = os.path.join(src_base, path.src)
     if not src.endswith('/') and os.path.isdir(src):
@@ -210,17 +186,16 @@ class Copier(object):
                               'Aborting copy...' % (src,))
     paths = glob.glob(src)
     if not paths:
-      if ((strict and not path.optional) or
-          (not strict and not (path.optional or path.cond) and not sloppy)):
+      if path.optional:
+        logging.debug('%s does not exist and is optional.  Skipping.', src)
+      elif sloppy:
+        logging.warning('%s does not exist and is required.  Skipping anyway.',
+                        src)
+      else:
         msg = ('%s does not exist and is required.\n'
                'You can bypass this error with --sloppy.\n'
                'Aborting copy...' % src)
         raise MissingPathError(msg)
-      elif path.optional or (not strict and path.cond):
-        logging.debug('%s does not exist and is optional.  Skipping.', src)
-      else:
-        logging.warning('%s does not exist and is required.  Skipping anyway.',
-                        src)
     elif len(paths) > 1 and path.dest and not path.dest.endswith('/'):
       raise MultipleMatchError(
           'Glob pattern %r has multiple matches, but dest %s '
@@ -229,6 +204,8 @@ class Copier(object):
     else:
       for p in paths:
         rel_src = os.path.relpath(p, src_base)
+        if path.IsBlacklisted(rel_src):
+          continue
         if path.dest is None:
           rel_dest = rel_src
         elif path.dest.endswith('/'):
@@ -244,7 +221,7 @@ class Copier(object):
           for sub_path in osutils.DirectoryIterator(p):
             rel_path = os.path.relpath(sub_path, p)
             sub_dest = os.path.join(dest, rel_path)
-            if self._PathIsBlacklisted(rel_path):
+            if path.IsBlacklisted(rel_path):
               continue
             if sub_path.endswith('/'):
               osutils.SafeMakedirs(sub_dest, mode=self.dir_mode)
@@ -259,8 +236,10 @@ class Copier(object):
 class Path(object):
   """Represents an artifact to be copied from build dir to staging dir."""
 
+  DEFAULT_BLACKLIST = (r'(^|.*/)\.svn($|/.*)',)
+
   def __init__(self, src, exe=False, cond=None, dest=None, mode=None,
-               optional=False, strip=True):
+               optional=False, strip=True, blacklist=None):
     """Initializes the object.
 
     Args:
@@ -273,8 +252,7 @@ class Path(object):
            directory or contains directories, the content of the directory will
            not be stripped.
       cond: A condition (see Conditions class) to test for in deciding whether
-            to process this artifact. If supplied, the artifact will be treated
-            as optional unless --strict is supplied.
+            to process this artifact.
       dest: Name to give to the target file/directory.  Defaults to keeping the
             same name as the source.
       mode: The mode to set for the matched files, and the contents of matched
@@ -283,6 +261,8 @@ class Path(object):
                 script errors out if the artifact does not exist.  In 'sloppy'
                 mode, the Copier class treats all artifacts as optional.
       strip: If |exe| is set, whether to strip the executable.
+      blacklist: A list of path patterns to ignore during the copy. This gets
+                 added to a default blacklist pattern.
     """
     self.src = src
     self.exe = exe
@@ -291,26 +271,42 @@ class Path(object):
     self.mode = mode
     self.optional = optional
     self.strip = strip
+    self.blacklist = self.DEFAULT_BLACKLIST
+    if blacklist is not None:
+      self.blacklist += tuple(blacklist)
 
-  def ShouldProcess(self, gyp_defines, staging_flags):
+  def IsBlacklisted(self, path):
+    """Returns whether |path| is in the blacklist.
+
+    A file in the blacklist is not copied over to the staging directory.
+
+    Args:
+      path: The path of a file, relative to the path of this Path object.
+    """
+    for pattern in self.blacklist:
+      if re.match(pattern, path):
+        return True
+    return False
+
+  def ShouldProcess(self, gn_args, staging_flags):
     """Tests whether this artifact should be copied."""
+    if not gn_args and not staging_flags:
+      return True
     if self.cond and isinstance(self.cond, list):
       for c in self.cond:
-        if not c(gyp_defines, staging_flags):
+        if not c(gn_args, staging_flags):
           return False
     elif self.cond:
-      return self.cond(gyp_defines, staging_flags)
+      return self.cond(gn_args, staging_flags)
     return True
 
+_ENABLE_NACL = 'enable_nacl'
+_ENABLE_WIDEVINE = 'enable_widevine'
+_IS_CHROME_BRANDED = 'is_chrome_branded'
+_IS_COMPONENT_BUILD = 'is_component_build'
 
-_DISABLE_NACL = 'disable_nacl'
-
-_CHROME_INTERNAL_FLAG = 'chrome_internal'
-_GN_FLAG = 'gn'
 _HIGHDPI_FLAG = 'highdpi'
 STAGING_FLAGS = (
-    _CHROME_INTERNAL_FLAG,
-    _GN_FLAG,
     _HIGHDPI_FLAG,
 )
 
@@ -329,7 +325,7 @@ _COPY_PATHS_COMMON = (
     Path('libpdf.so', exe=True, optional=True),
     Path('libppGoogleNaClPluginChrome.so',
          exe=True,
-         cond=C.GypNotSet(_DISABLE_NACL),
+         cond=C.GnSetTo(_ENABLE_NACL, True),
          optional=True),
     Path('mojo_shell', exe=True, optional=True),
     # Do not strip the nacl_helper_bootstrap binary because the binutils
@@ -337,18 +333,18 @@ _COPY_PATHS_COMMON = (
     Path('nacl_helper_bootstrap',
          exe=True,
          strip=False,
-         cond=C.GypNotSet(_DISABLE_NACL)),
-    Path('nacl_irt_*.nexe', cond=C.GypNotSet(_DISABLE_NACL)),
+         cond=C.GnSetTo(_ENABLE_NACL, True)),
+    Path('nacl_irt_*.nexe', cond=C.GnSetTo(_ENABLE_NACL, True)),
     Path('nacl_helper',
          exe=True,
          optional=True,
-         cond=C.GypNotSet(_DISABLE_NACL)),
+         cond=C.GnSetTo(_ENABLE_NACL, True)),
     Path('nacl_helper_nonsfi',
          exe=True,
          optional=True,
-         cond=C.GypNotSet(_DISABLE_NACL)),
+         cond=C.GnSetTo(_ENABLE_NACL, True)),
     Path('natives_blob.bin', optional=True),
-    Path('pnacl/', cond=C.GypNotSet(_DISABLE_NACL)),
+    Path('pnacl/', cond=C.GnSetTo(_ENABLE_NACL, True)),
     Path('snapshot_blob.bin', optional=True),
 )
 
@@ -362,54 +358,41 @@ _COPY_PATHS_CHROME = (
     Path('chrome-wrapper'),
     Path('chrome_100_percent.pak'),
     Path('chrome_200_percent.pak', cond=C.StagingFlagSet(_HIGHDPI_FLAG)),
-    Path('chrome_material_100_percent.pak', optional=True),
-    Path('chrome_material_200_percent.pak',
-         optional=True,
-         cond=C.StagingFlagSet(_HIGHDPI_FLAG)),
     Path('keyboard_resources.pak'),
-    # Set as optional for backwards compatibility.
-    Path('libexif.so', exe=True, optional=True),
     # Widevine binaries are already pre-stripped.  In addition, they don't
     # play well with the binutils stripping tools, so skip stripping.
     Path('libwidevinecdmadapter.so',
          exe=True,
-         strip=False,
-         cond=C.StagingFlagSet(_CHROME_INTERNAL_FLAG)),
+         strip=True,
+         cond=C.GnAnySetTo(((_IS_CHROME_BRANDED, True),
+                            (_ENABLE_WIDEVINE, True)))),
     Path('libwidevinecdm.so',
          exe=True,
          strip=False,
-         cond=C.StagingFlagSet(_CHROME_INTERNAL_FLAG)),
-    Path('lib/*.so',
-         exe=True,
-         cond=[C.StagingFlagNotSet('gn'),
-               C.GypSet('component', value='shared_library')]),
+         cond=C.GnAnySetTo(((_IS_CHROME_BRANDED, True),
+                            (_ENABLE_WIDEVINE, True)))),
     Path('*.so',
+         blacklist=(r'libwidevine.*\.so$',),
          exe=True,
-         cond=[C.StagingFlagSet('gn'),
-               C.GypSet('component', value='shared_library')]),
+         cond=C.GnSetTo(_IS_COMPONENT_BUILD, True)),
     Path('locales/'),
+    Path('Packages/chrome_content_browser/manifest.json', optional=True),
+    Path('Packages/chrome_content_gpu/manifest.json', optional=True),
+    Path('Packages/chrome_content_plugin/manifest.json', optional=True),
+    Path('Packages/chrome_content_renderer/manifest.json', optional=True),
+    Path('Packages/chrome_content_utility/manifest.json', optional=True),
+    Path('Packages/chrome_mash/manifest.json', optional=True),
+    Path('Packages/chrome_mash_content_browser/manifest.json', optional=True),
+    Path('Packages/content_browser/manifest.json', optional=True),
     Path('resources/'),
     Path('resources.pak'),
     Path('xdg-settings'),
     Path('*.png'),
 ) + _COPY_PATHS_COMMON
 
-_COPY_PATHS_ENVOY = (
-    Path('envoy_shell', exe=True),
-    Path('envoy_shell.pak'),
-) + _COPY_PATHS_COMMON
-
-_COPY_PATHS_MASH = (
-    Path('mojo_runner', exe=True),
-    Path('Packages/'),
-    Path('*_manifest.json'),
-) + _COPY_PATHS_CHROME
-
 _COPY_PATHS_MAP = {
     'app_shell': _COPY_PATHS_APP_SHELL,
     'chrome': _COPY_PATHS_CHROME,
-    'envoy': _COPY_PATHS_ENVOY,
-    'mash': _COPY_PATHS_MASH,
 }
 
 
@@ -424,8 +407,8 @@ def GetCopyPaths(deployment_type='chrome'):
   """Returns the list of copy paths used as a filter for staging files.
 
   Args:
-    deployment_type: String describing the deployment type. Either "app_shell",
-                     "chrome", "envoy" or "mash".
+    deployment_type: String describing the deployment type. Either "app_shell"
+                     or "chrome".
 
   Returns:
     The list of paths to use as a filter for staging files.
@@ -435,26 +418,21 @@ def GetCopyPaths(deployment_type='chrome'):
     raise RuntimeError('Invalid deployment type "%s"' % deployment_type)
   return paths
 
-def StageChromeFromBuildDir(staging_dir, build_dir, strip_bin, strict=False,
-                            sloppy=False, gyp_defines=None, staging_flags=None,
+def StageChromeFromBuildDir(staging_dir, build_dir, strip_bin, sloppy=False,
+                            gn_args=None, staging_flags=None,
                             strip_flags=None, copy_paths=_COPY_PATHS_CHROME):
   """Populates a staging directory with necessary build artifacts.
 
-  If |strict| is set, then we decide what to stage based on the |gyp_defines|
-  and |staging_flags| passed in.  Otherwise, we stage everything that we know
-  about, that we can find.
+  If |gn_args| or |staging_flags| are set, then we decide what to stage
+  based on the flag values. Otherwise, we stage everything that we know
+  about that we can find.
 
   Args:
     staging_dir: Path to an empty staging directory.
     build_dir: Path to location of Chrome build artifacts.
     strip_bin: Path to executable used for stripping binaries.
-    strict: If set, decide what to stage based on the |gyp_defines| and
-            |staging_flags| passed in, and enforce that all optional files
-            are copied.  Otherwise, we stage optional files if they are
-            there, but we don't complain if they're not.
     sloppy: Ignore when mandatory artifacts are missing.
-    gyp_defines: A dictionary (i.e., one returned by ProcessGypDefines)
-      containing GYP_DEFINES Chrome was built with.
+    gn_args: A dictionary of args.gn valuses that Chrome was built with.
     staging_flags: A list of extra staging flags.  Valid flags are specified in
       STAGING_FLAGS.
     strip_flags: A list of flags to pass to the tool used to strip binaries.
@@ -462,17 +440,16 @@ def StageChromeFromBuildDir(staging_dir, build_dir, strip_bin, strict=False,
   """
   os.mkdir(os.path.join(staging_dir, 'plugins'), 0o755)
 
-  if gyp_defines is None:
-    gyp_defines = {}
+  if gn_args is None:
+    gn_args = {}
   if staging_flags is None:
     staging_flags = []
 
   copier = Copier(strip_bin=strip_bin, strip_flags=strip_flags)
   copied_paths = []
   for p in copy_paths:
-    if not strict or p.ShouldProcess(gyp_defines, staging_flags):
-      copied_paths += copier.Copy(build_dir, staging_dir, p, strict=strict,
-                                  sloppy=sloppy)
+    if p.ShouldProcess(gn_args, staging_flags):
+      copied_paths += copier.Copy(build_dir, staging_dir, p, sloppy=sloppy)
 
   if not copied_paths:
     raise MissingPathError('Couldn\'t find anything to copy!\n'

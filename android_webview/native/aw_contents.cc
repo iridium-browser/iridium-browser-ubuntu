@@ -21,12 +21,10 @@
 #include "android_webview/common/aw_switches.h"
 #include "android_webview/common/devtools_instrumentation.h"
 #include "android_webview/native/aw_autofill_client.h"
-#include "android_webview/native/aw_browser_dependency_factory.h"
 #include "android_webview/native/aw_contents_client_bridge.h"
 #include "android_webview/native/aw_contents_io_thread_client_impl.h"
 #include "android_webview/native/aw_contents_lifecycle_notifier.h"
 #include "android_webview/native/aw_gl_functor.h"
-#include "android_webview/native/aw_message_port_service_impl.h"
 #include "android_webview/native/aw_pdf_exporter.h"
 #include "android_webview/native/aw_picture.h"
 #include "android_webview/native/aw_web_contents_delegate.h"
@@ -57,21 +55,22 @@
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
+#include "content/public/browser/android/app_web_message_port_service.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/cert_store.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/favicon_status.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/message_port_provider.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/mhtml_generation_params.h"
 #include "content/public/common/renderer_preferences.h"
-#include "content/public/common/ssl_status.h"
 #include "jni/AwContents_jni.h"
 #include "net/base/auth.h"
 #include "net/cert/x509_certificate.h"
@@ -97,6 +96,7 @@ using base::android::ScopedJavaLocalRef;
 using navigation_interception::InterceptNavigationDelegate;
 using content::BrowserThread;
 using content::ContentViewCore;
+using content::RenderFrameHost;
 using content::WebContents;
 
 namespace android_webview {
@@ -108,6 +108,8 @@ bool g_should_download_favicons = false;
 bool g_force_auxiliary_bitmap_rendering = false;
 
 std::string g_locale;
+
+std::string g_locale_list;
 
 const void* kAwContentsUserDataKey = &kAwContentsUserDataKey;
 
@@ -149,15 +151,22 @@ AwContents* AwContents::FromID(int render_process_id, int render_view_id) {
 }
 
 // static
-void SetLocale(JNIEnv* env,
-               const JavaParamRef<jclass>&,
-               const JavaParamRef<jstring>& locale) {
+void UpdateDefaultLocale(JNIEnv* env,
+                         const JavaParamRef<jclass>&,
+                         const JavaParamRef<jstring>& locale,
+                         const JavaParamRef<jstring>& locale_list) {
   g_locale = ConvertJavaStringToUTF8(env, locale);
+  g_locale_list = ConvertJavaStringToUTF8(env, locale_list);
 }
 
 // static
 std::string AwContents::GetLocale() {
   return g_locale;
+}
+
+// static
+std::string AwContents::GetLocaleList() {
+  return g_locale_list;
 }
 
 // static
@@ -168,6 +177,19 @@ AwBrowserPermissionRequestDelegate* AwBrowserPermissionRequestDelegate::FromID(
           content::RenderFrameHost::FromID(render_process_id,
                                            render_frame_id)));
   return aw_contents;
+}
+
+// static
+AwSafeBrowsingUIManager::UIManagerClient*
+AwSafeBrowsingUIManager::UIManagerClient::FromWebContents(
+    WebContents* web_contents) {
+  return AwContents::FromWebContents(web_contents);
+}
+
+// static
+AwRenderProcessGoneDelegate* AwRenderProcessGoneDelegate::FromWebContents(
+    content::WebContents* web_contents) {
+  return AwContents::FromWebContents(web_contents);
 }
 
 AwContents::AwContents(std::unique_ptr<WebContents> web_contents)
@@ -189,7 +211,8 @@ AwContents::AwContents(std::unique_ptr<WebContents> web_contents)
   if (web_contents_->GetRenderProcessHost() &&
       web_contents_->GetRenderViewHost()) {
     compositor_id.process_id = web_contents_->GetRenderProcessHost()->GetID();
-    compositor_id.routing_id = web_contents_->GetRoutingID();
+    compositor_id.routing_id =
+        web_contents_->GetRenderViewHost()->GetRoutingID();
   }
 
   browser_view_renderer_.SetActiveCompositorID(compositor_id);
@@ -269,11 +292,11 @@ void AwContents::InitAutofillIfNecessary(bool enabled) {
   AwAutofillClient::CreateForWebContents(web_contents);
   ContentAutofillDriverFactory::CreateForWebContentsAndDelegate(
       web_contents, AwAutofillClient::FromWebContents(web_contents),
-      base::android::GetDefaultLocale(),
+      base::android::GetDefaultLocaleString(),
       AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
 }
 
-void AwContents::SetAwAutofillClient(jobject client) {
+void AwContents::SetAwAutofillClient(const JavaRef<jobject>& client) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
@@ -393,14 +416,13 @@ void AwContents::DocumentHasImages(JNIEnv* env,
 }
 
 namespace {
-void GenerateMHTMLCallback(ScopedJavaGlobalRef<jobject>* callback,
+void GenerateMHTMLCallback(const JavaRef<jobject>& callback,
                            const base::FilePath& path,
                            int64_t size) {
   JNIEnv* env = AttachCurrentThread();
   // Android files are UTF8, so the path conversion below is safe.
   Java_AwContents_generateMHTMLCallback(
-      env, ConvertUTF8ToJavaString(env, path.AsUTF8Unsafe()), size,
-      callback->obj());
+      env, ConvertUTF8ToJavaString(env, path.AsUTF8Unsafe()), size, callback);
 }
 }  // namespace
 
@@ -409,12 +431,11 @@ void AwContents::GenerateMHTML(JNIEnv* env,
                                const JavaParamRef<jstring>& jpath,
                                const JavaParamRef<jobject>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  ScopedJavaGlobalRef<jobject>* j_callback = new ScopedJavaGlobalRef<jobject>();
-  j_callback->Reset(env, callback);
   base::FilePath target_path(ConvertJavaStringToUTF8(env, jpath));
   web_contents_->GenerateMHTML(
       content::MHTMLGenerationParams(target_path),
-      base::Bind(&GenerateMHTMLCallback, base::Owned(j_callback), target_path));
+      base::Bind(&GenerateMHTMLCallback,
+                 ScopedJavaGlobalRef<jobject>(env, callback), target_path));
 }
 
 void AwContents::CreatePdfExporter(JNIEnv* env,
@@ -770,18 +791,13 @@ base::android::ScopedJavaLocalRef<jbyteArray> AwContents::GetCertificate(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::NavigationEntry* entry =
       web_contents_->GetController().GetLastCommittedEntry();
-  if (!entry)
-    return ScopedJavaLocalRef<jbyteArray>();
-  // Get the certificate
-  int cert_id = entry->GetSSL().cert_id;
-  scoped_refptr<net::X509Certificate> cert;
-  bool ok = content::CertStore::GetInstance()->RetrieveCert(cert_id, &cert);
-  if (!ok)
+  if (!entry || !entry->GetSSL().certificate)
     return ScopedJavaLocalRef<jbyteArray>();
 
   // Convert the certificate and return it
   std::string der_string;
-  net::X509Certificate::GetDEREncoded(cert->os_cert_handle(), &der_string);
+  net::X509Certificate::GetDEREncoded(
+      entry->GetSSL().certificate->os_cert_handle(), &der_string);
   return base::android::ToJavaByteArray(
       env, reinterpret_cast<const uint8_t*>(der_string.data()),
       der_string.length());
@@ -857,11 +873,6 @@ void AwContents::SetIsPaused(JNIEnv* env,
                              bool paused) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   browser_view_renderer_.SetIsPaused(paused);
-  ContentViewCore* cvc =
-      ContentViewCore::FromWebContents(web_contents_.get());
-  if (cvc) {
-    cvc->PauseOrResumeGeolocation(paused);
-  }
 }
 
 void AwContents::OnAttachedToWindow(JNIEnv* env,
@@ -1060,6 +1071,15 @@ void AwContents::DidOverscroll(const gfx::Vector2d& overscroll_delta,
                                 overscroll_velocity.y());
 }
 
+ui::TouchHandleDrawable* AwContents::CreateDrawable() {
+  JNIEnv* env = AttachCurrentThread();
+  const ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return nullptr;
+  return reinterpret_cast<ui::TouchHandleDrawable*>(
+      Java_AwContents_onCreateTouchHandle(env, obj));
+}
+
 void AwContents::SetDipScale(JNIEnv* env,
                              const JavaParamRef<jobject>& obj,
                              jfloat dip_scale) {
@@ -1132,14 +1152,13 @@ void AwContents::EnableOnNewPicture(JNIEnv* env,
 namespace {
 void InvokeVisualStateCallback(const JavaObjectWeakGlobalRef& java_ref,
                                jlong request_id,
-                               ScopedJavaGlobalRef<jobject>* callback,
+                               const JavaRef<jobject>& callback,
                                bool result) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref.get(env);
   if (obj.is_null())
      return;
-  Java_AwContents_invokeVisualStateCallback(env, obj, callback->obj(),
-                                            request_id);
+  Java_AwContents_invokeVisualStateCallback(env, obj, callback, request_id);
 }
 }  // namespace
 
@@ -1149,11 +1168,9 @@ void AwContents::InsertVisualStateCallback(
     jlong request_id,
     const JavaParamRef<jobject>& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  ScopedJavaGlobalRef<jobject>* j_callback = new ScopedJavaGlobalRef<jobject>();
-  j_callback->Reset(env, callback);
   web_contents_->GetMainFrame()->InsertVisualStateCallback(
       base::Bind(&InvokeVisualStateCallback, java_ref_, request_id,
-                 base::Owned(j_callback)));
+                 ScopedJavaGlobalRef<jobject>(env, callback)));
 }
 
 void AwContents::ClearView(JNIEnv* env, const JavaParamRef<jobject>& obj) {
@@ -1223,15 +1240,9 @@ void AwContents::PostMessageToFrame(JNIEnv* env,
   base::string16 j_message(ConvertJavaStringToUTF16(env, message));
   std::vector<int> j_ports;
 
-  if (sent_ports != nullptr) {
+  if (sent_ports != nullptr)
     base::android::JavaIntArrayToIntVector(env, sent_ports, &j_ports);
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&AwMessagePortServiceImpl::RemoveSentPorts,
-                   base::Unretained(AwMessagePortServiceImpl::GetInstance()),
-                   j_ports));
-  }
+
   content::MessagePortProvider::PostMessageToFrame(web_contents_.get(),
                                                    source_origin,
                                                    j_target_origin,
@@ -1239,24 +1250,11 @@ void AwContents::PostMessageToFrame(JNIEnv* env,
                                                    j_ports);
 }
 
-scoped_refptr<AwMessagePortMessageFilter>
-AwContents::GetMessagePortMessageFilter() {
-  // Create a message port message filter if necessary
-  if (message_port_message_filter_.get() == nullptr) {
-    message_port_message_filter_ =
-        new AwMessagePortMessageFilter(
-            web_contents_->GetMainFrame()->GetRoutingID());
-    web_contents_->GetRenderProcessHost()->AddFilter(
-        message_port_message_filter_.get());
-  }
-  return message_port_message_filter_;
-}
-
 void AwContents::CreateMessageChannel(JNIEnv* env,
                                       const JavaParamRef<jobject>& obj,
                                       const JavaParamRef<jobjectArray>& ports) {
-  AwMessagePortServiceImpl::GetInstance()->CreateMessageChannel(env, ports,
-      GetMessagePortMessageFilter());
+  content::MessagePortProvider::GetAppWebMessagePortService()
+      ->CreateMessageChannel(env, ports, web_contents_.get());
 }
 
 void AwContents::GrantFileSchemeAccesstoChildProcess(
@@ -1283,12 +1281,66 @@ void AwContents::RenderViewHostChanged(content::RenderViewHost* old_host,
 
   int process_id = new_host->GetProcess()->GetID();
   int routing_id = new_host->GetRoutingID();
+
   // At this point, the current RVH may or may not contain a compositor. So
   // compositor_ may be nullptr, in which case
   // BrowserViewRenderer::DidInitializeCompositor() callback is time when the
   // new compositor is constructed.
   browser_view_renderer_.SetActiveCompositorID(
       CompositorID(process_id, routing_id));
+}
+
+void AwContents::DidAttachInterstitialPage() {
+  CompositorID compositor_id;
+  RenderFrameHost* rfh = web_contents_->GetInterstitialPage()->GetMainFrame();
+  compositor_id.process_id = rfh->GetProcess()->GetID();
+  compositor_id.routing_id = rfh->GetRenderViewHost()->GetRoutingID();
+  browser_view_renderer_.SetActiveCompositorID(compositor_id);
+}
+
+void AwContents::DidDetachInterstitialPage() {
+  CompositorID compositor_id;
+  if (!web_contents_)
+    return;
+  if (web_contents_->GetRenderProcessHost() &&
+      web_contents_->GetRenderViewHost()) {
+    compositor_id.process_id = web_contents_->GetRenderProcessHost()->GetID();
+    compositor_id.routing_id =
+        web_contents_->GetRenderViewHost()->GetRoutingID();
+  } else {
+    LOG(WARNING) << "failed setting the compositor on detaching interstitital";
+  }
+  browser_view_renderer_.SetActiveCompositorID(compositor_id);
+}
+
+bool AwContents::CanShowInterstitial() {
+  JNIEnv* env = AttachCurrentThread();
+  const ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return false;
+  return Java_AwContents_canShowInterstitial(env, obj);
+}
+
+void AwContents::OnRenderProcessGone(int child_process_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return;
+
+  Java_AwContents_onRenderProcessGone(env, obj, child_process_id);
+}
+
+bool AwContents::OnRenderProcessGoneDetail(int child_process_id,
+                                           bool crashed) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
+  if (obj.is_null())
+    return false;
+
+  return Java_AwContents_onRenderProcessGoneDetail(env, obj,
+      child_process_id, crashed);
 }
 
 }  // namespace android_webview

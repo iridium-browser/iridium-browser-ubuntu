@@ -8,10 +8,6 @@
 
 PermissionRequest::PermissionRequest() : persist_(true) {}
 
-gfx::VectorIconId PermissionRequest::GetVectorIconId() const {
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
-}
-
 bool PermissionRequest::ShouldShowPersistenceToggle() const {
   return false;
 }
@@ -22,4 +18,8 @@ PermissionRequestType PermissionRequest::GetPermissionRequestType() const {
 
 PermissionRequestGestureType PermissionRequest::GetGestureType() const {
   return PermissionRequestGestureType::UNKNOWN;
+}
+
+ContentSettingsType PermissionRequest::GetContentSettingsType() const {
+  return CONTENT_SETTINGS_TYPE_DEFAULT;
 }

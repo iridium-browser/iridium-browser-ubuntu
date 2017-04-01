@@ -62,6 +62,7 @@ interface InspectorInstrumentation {
 #include "core/animation/Animation.h"
 #include "core/dom/CharacterData.h"
 #include "core/dom/PseudoElement.h"
+#include "core/html/HTMLSlotElement.h"
 
 class ConsoleMessage;
 class ThreadableLoaderClient;
@@ -99,6 +100,9 @@ class XMLHttpRequest;
 
     [DOM]
     void didPerformElementShadowDistribution([Keep] Element*);
+
+    [DOM]
+    void didPerformSlotDistribution([Keep] HTMLSlotElement*);
 
     [CSS]
     void documentDetached([Keep] Document*);
@@ -161,7 +165,10 @@ class XMLHttpRequest;
     void didReceiveResourceResponse([Keep] LocalFrame*, unsigned long identifier, DocumentLoader*, const ResourceResponse&, Resource*);
 
     [Network]
-    void didReceiveData([Keep] LocalFrame*, unsigned long identifier, const char* data, int dataLength, int encodedDataLength);
+    void didReceiveData([Keep] LocalFrame*, unsigned long identifier, const char* data, int dataLength);
+
+    [Network]
+    void didReceiveEncodedDataLength([Keep] LocalFrame*, unsigned long identifier, int encodedDataLength);
 
     [Network]
     void didFinishLoading(LocalFrame* frame, unsigned long identifier, double finishTime, int64_t encodedDataLength);
@@ -309,12 +316,6 @@ class XMLHttpRequest;
 
     [Page]
     void didRunJavaScriptDialog(LocalFrame* frame, bool result);
-
-    [WebPerf]
-    void willExecuteScript([Keep] ExecutionContext*);
-
-    [WebPerf]
-    void didExecuteScript(ExecutionContext*);
 }
 
 interface InspectorOverrides {

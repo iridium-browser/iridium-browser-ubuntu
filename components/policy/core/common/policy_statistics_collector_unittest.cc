@@ -10,6 +10,7 @@
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ptr_util.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/values.h"
 #include "components/policy/core/common/external_data_fetcher.h"
@@ -107,17 +108,17 @@ class PolicyStatisticsCollectorTest : public testing::Test {
   }
 
   void SetPolicy(const std::string& name) {
-    policy_map_.Set(
-        name, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
-        base::WrapUnique(new base::FundamentalValue(true)), nullptr);
+    policy_map_.Set(name, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+                    POLICY_SOURCE_CLOUD,
+                    base::MakeUnique<base::FundamentalValue>(true), nullptr);
   }
 
   base::TimeDelta GetFirstDelay() const {
-    if (task_runner_->GetPendingTasks().empty()) {
+    if (!task_runner_->HasPendingTask()) {
       ADD_FAILURE();
       return base::TimeDelta();
     }
-    return task_runner_->GetPendingTasks().front().delay;
+    return task_runner_->NextPendingTaskDelay();
   }
 
   const base::TimeDelta update_delay_;
@@ -144,7 +145,7 @@ TEST_F(PolicyStatisticsCollectorTest, CollectPending) {
               RecordPolicyUse(kTestPolicy1Id));
 
   policy_statistics_collector_->Initialize();
-  EXPECT_EQ(1u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(1u, task_runner_->NumPendingTasks());
   EXPECT_EQ(update_delay_, GetFirstDelay());
 }
 
@@ -159,7 +160,7 @@ TEST_F(PolicyStatisticsCollectorTest, CollectPendingVeryOld) {
               RecordPolicyUse(kTestPolicy1Id));
 
   policy_statistics_collector_->Initialize();
-  EXPECT_EQ(1u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(1u, task_runner_->NumPendingTasks());
   EXPECT_EQ(update_delay_, GetFirstDelay());
 }
 
@@ -170,7 +171,7 @@ TEST_F(PolicyStatisticsCollectorTest, CollectLater) {
                   (base::Time::Now() - update_delay_ / 2).ToInternalValue());
 
   policy_statistics_collector_->Initialize();
-  EXPECT_EQ(1u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(1u, task_runner_->NumPendingTasks());
   EXPECT_LT(GetFirstDelay(), update_delay_);
 }
 
@@ -187,7 +188,7 @@ TEST_F(PolicyStatisticsCollectorTest, MultiplePolicies) {
               RecordPolicyUse(kTestPolicy2Id));
 
   policy_statistics_collector_->Initialize();
-  EXPECT_EQ(1u, task_runner_->GetPendingTasks().size());
+  EXPECT_EQ(1u, task_runner_->NumPendingTasks());
 }
 
 }  // namespace policy

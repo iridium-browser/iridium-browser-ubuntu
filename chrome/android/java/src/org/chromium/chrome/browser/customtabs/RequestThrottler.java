@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.customtabs;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.AsyncTask;
@@ -45,14 +46,14 @@ class RequestThrottler {
     private static final String LAST_REQUEST = "last_request_";
     private static final String BANNED_UNTIL = "banned_until_";
 
-    private static SparseArray<RequestThrottler> sUidToThrottler = null;
+    private static SparseArray<RequestThrottler> sUidToThrottler;
 
     private final SharedPreferences mSharedPreferences;
     private final int mUid;
     private float mScore;
     private long mLastPrerenderRequestMs;
     private long mBannedUntilMs;
-    private String mUrl = null;
+    private String mUrl;
 
     /**
      * Updates the prediction stats and returns whether prediction is allowed.
@@ -196,6 +197,8 @@ class RequestThrottler {
      *
      * @param context The application context.
      */
+    // TODO(crbug.com/635567): Fix this properly.
+    @SuppressLint("CommitPrefEdits")
     static void loadInBackground(final Context context) {
         new AsyncTask<Void, Void, Void>() {
             @Override

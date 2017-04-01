@@ -10,13 +10,13 @@
 #include "SkFixed.h"
 #include "SkFontMgr.h"
 #include "SkFontMgr_android_parser.h"
+#include "SkOSFile.h"
 #include "SkStream.h"
 #include "SkTDArray.h"
 #include "SkTSearch.h"
 #include "SkTemplates.h"
 #include "SkTLogic.h"
 
-#include <dirent.h>
 #include <expat.h>
 
 #include <stdlib.h>
@@ -98,20 +98,20 @@ struct FamilyData {
         , fDepth(1)
         , fSkip(0)
         , fHandler(&topLevelHandler, 1)
-    { };
+    { }
 
-    XML_Parser fParser;                       // The expat parser doing the work, owned by caller
-    SkTDArray<FontFamily*>& fFamilies;        // The array to append families, owned by caller
-    SkAutoTDelete<FontFamily> fCurrentFamily; // The family being created, owned by this
-    FontFileInfo* fCurrentFontInfo;           // The fontInfo being created, owned by fCurrentFamily
-    int fVersion;                             // The version of the file parsed.
-    const SkString& fBasePath;                // The current base path.
-    const bool fIsFallback;                   // Indicates the file being parsed is a fallback file
-    const char* fFilename;                    // The name of the file currently being parsed.
+    XML_Parser fParser;                         // The expat parser doing the work, owned by caller
+    SkTDArray<FontFamily*>& fFamilies;          // The array to append families, owned by caller
+    std::unique_ptr<FontFamily> fCurrentFamily; // The family being created, owned by this
+    FontFileInfo* fCurrentFontInfo;             // The info being created, owned by fCurrentFamily
+    int fVersion;                               // The version of the file parsed.
+    const SkString& fBasePath;                  // The current base path.
+    const bool fIsFallback;                     // The file being parsed is a fallback file
+    const char* fFilename;                      // The name of the file currently being parsed.
 
-    int fDepth;                               // The current element depth of the parse.
-    int fSkip;                                // The depth to stop skipping, 0 if not skipping.
-    SkTDArray<const TagHandler*> fHandler;    // The stack of current tag handlers.
+    int fDepth;                                 // The current element depth of the parse.
+    int fSkip;                                  // The depth to stop skipping, 0 if not skipping.
+    SkTDArray<const TagHandler*> fHandler;      // The stack of current tag handlers.
 };
 
 static bool memeq(const char* s1, const char* s2, size_t n1, size_t n2) {
@@ -676,12 +676,9 @@ static void append_fallback_font_families_for_locale(SkTDArray<FontFamily*>& fal
                                                      const char* dir,
                                                      const SkString& basePath)
 {
-    SkAutoTCallIProc<DIR, closedir> fontDirectory(opendir(dir));
-    if (nullptr == fontDirectory) {
-        return;
-    }
-
-    for (struct dirent* dirEntry; (dirEntry = readdir(fontDirectory));) {
+    SkOSFile::Iter iter(dir, nullptr);
+    SkString fileName;
+    while (iter.next(&fileName, false)) {
         // The size of the prefix and suffix.
         static const size_t fixedLen = sizeof(LOCALE_FALLBACK_FONTS_PREFIX) - 1
                                      + sizeof(LOCALE_FALLBACK_FONTS_SUFFIX) - 1;
@@ -689,7 +686,6 @@ static void append_fallback_font_families_for_locale(SkTDArray<FontFamily*>& fal
         // The size of the prefix, suffix, and a minimum valid language code
         static const size_t minSize = fixedLen + 2;
 
-        SkString fileName(dirEntry->d_name);
         if (fileName.size() < minSize ||
             !fileName.startsWith(LOCALE_FALLBACK_FONTS_PREFIX) ||
             !fileName.endsWith(LOCALE_FALLBACK_FONTS_SUFFIX))

@@ -19,6 +19,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_split.h"
 #include "base/task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -82,12 +83,6 @@ class LoggingFixedReceivedData final : public RequestPeer::ReceivedData {
     return data_.empty() ? nullptr : &data_[0];
   }
   int length() const override { return static_cast<int>(data_.size()); }
-  int encoded_data_length() const override {
-    return static_cast<int>(data_.size());
-  }
-  int encoded_body_length() const override {
-    return static_cast<int>(data_.size());
-  }
 
  private:
   const std::string name_;
@@ -202,8 +197,7 @@ class SharedMemoryDataConsumerHandleTest
     handle_.reset(new SharedMemoryDataConsumerHandle(GetParam(), &writer_));
   }
   std::unique_ptr<FixedReceivedData> NewFixedData(const char* s) {
-    auto size = strlen(s);
-    return base::MakeUnique<FixedReceivedData>(s, size, size, size);
+    return base::MakeUnique<FixedReceivedData>(s, strlen(s));
   }
 
   StrictMock<MockClient> client_;
@@ -974,15 +968,22 @@ TEST(SharedMemoryDataConsumerHandleBackpressureTest, CloseAndReset) {
   reader.reset();
   logger->Add("4");
 
-  EXPECT_EQ(
-      "1\n"
-      "2\n"
-      "3\n"
-      "data1 is destructed.\n"
-      "data2 is destructed.\n"
-      "data3 is destructed.\n"
-      "4\n",
-      logger->log());
+  std::vector<std::string> log = base::SplitString(
+      logger->log(), "\n", base::KEEP_WHITESPACE, base::SPLIT_WANT_ALL);
+
+  ASSERT_EQ(8u, log.size());
+  EXPECT_EQ("1", log[0]);
+  EXPECT_EQ("2", log[1]);
+  EXPECT_EQ("3", log[2]);
+  EXPECT_EQ("4", log[6]);
+  EXPECT_EQ("", log[7]);
+
+  // The destruction order doesn't matter in this case.
+  std::vector<std::string> destruction_entries = {log[3], log[4], log[5]};
+  std::sort(destruction_entries.begin(), destruction_entries.end());
+  EXPECT_EQ(destruction_entries[0], "data1 is destructed.");
+  EXPECT_EQ(destruction_entries[1], "data2 is destructed.");
+  EXPECT_EQ(destruction_entries[2], "data3 is destructed.");
 }
 
 TEST(SharedMemoryDataConsumerHandleWithoutBackpressureTest, AddData) {

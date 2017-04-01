@@ -11,7 +11,7 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 
 namespace policy {
 
@@ -27,14 +27,14 @@ bool JavascriptPolicyHandler::CheckPolicySettings(const PolicyMap& policies,
       policies.GetValue(key::kDefaultJavaScriptSetting);
 
   if (javascript_enabled &&
-      !javascript_enabled->IsType(base::Value::TYPE_BOOLEAN)) {
+      !javascript_enabled->IsType(base::Value::Type::BOOLEAN)) {
     errors->AddError(key::kJavascriptEnabled, IDS_POLICY_TYPE_ERROR,
-                     base::Value::GetTypeName(base::Value::TYPE_BOOLEAN));
+                     base::Value::GetTypeName(base::Value::Type::BOOLEAN));
   }
 
-  if (default_setting && !default_setting->IsType(base::Value::TYPE_INTEGER)) {
+  if (default_setting && !default_setting->IsType(base::Value::Type::INTEGER)) {
     errors->AddError(key::kDefaultJavaScriptSetting, IDS_POLICY_TYPE_ERROR,
-                     base::Value::GetTypeName(base::Value::TYPE_INTEGER));
+                     base::Value::GetTypeName(base::Value::Type::INTEGER));
   }
 
   if (javascript_enabled && default_setting) {

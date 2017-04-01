@@ -9,7 +9,7 @@
 #include "ui/base/accelerators/accelerator.h"
 
 #if defined(USE_ASH)
-#include "ash/common/accelerators/accelerator_table.h"
+#include "ash/common/accelerators/accelerator_table.h"  // nogncheck
 #endif  // USE_ASH
 
 namespace chrome {
@@ -25,12 +25,10 @@ bool IsChromeAccelerator(const ui::Accelerator& accelerator, Profile* profile) {
   }
 #endif
 
-  std::vector<chrome::AcceleratorMapping> accelerators =
-      chrome::GetAcceleratorList();
-  for (std::vector<chrome::AcceleratorMapping>::const_iterator it =
-       accelerators.begin(); it != accelerators.end(); ++it) {
-    if (it->keycode == accelerator.key_code() &&
-        it->modifiers == accelerator.modifiers())
+  const std::vector<AcceleratorMapping> accelerators = GetAcceleratorList();
+  for (const auto& entry : accelerators) {
+    if (entry.keycode == accelerator.key_code() &&
+        entry.modifiers == accelerator.modifiers())
       return true;
   }
 
@@ -47,8 +45,7 @@ ui::Accelerator GetPrimaryChromeAcceleratorForCommandId(int command_id) {
     return accelerator;
   }
 
-  std::vector<chrome::AcceleratorMapping> accelerators =
-      chrome::GetAcceleratorList();
+  std::vector<AcceleratorMapping> accelerators = GetAcceleratorList();
   for (size_t i = 0; i < accelerators.size(); ++i) {
     if (accelerators[i].command_id == command_id) {
       return ui::Accelerator(accelerators[i].keycode,

@@ -10,43 +10,43 @@
 
 namespace extensions {
 
-class FileSystemProviderMountFunction : public ChromeSyncExtensionFunction {
+class FileSystemProviderMountFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystemProvider.mount",
                              FILESYSTEMPROVIDER_MOUNT)
 
  protected:
   ~FileSystemProviderMountFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
-class FileSystemProviderUnmountFunction : public ChromeSyncExtensionFunction {
+class FileSystemProviderUnmountFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystemProvider.unmount",
                              FILESYSTEMPROVIDER_UNMOUNT)
 
  protected:
   ~FileSystemProviderUnmountFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
-class FileSystemProviderGetAllFunction : public ChromeSyncExtensionFunction {
+class FileSystemProviderGetAllFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystemProvider.getAll",
                              FILESYSTEMPROVIDER_GETALL)
 
  protected:
   ~FileSystemProviderGetAllFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
-class FileSystemProviderGetFunction : public ChromeSyncExtensionFunction {
+class FileSystemProviderGetFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("fileSystemProvider.get", FILESYSTEMPROVIDER_GET)
 
  protected:
   ~FileSystemProviderGetFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderNotifyFunction : public ChromeAsyncExtensionFunction {
@@ -72,7 +72,7 @@ class FileSystemProviderInternalUnmountRequestedSuccessFunction
 
  protected:
   ~FileSystemProviderInternalUnmountRequestedSuccessFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderInternalGetMetadataRequestedSuccessFunction
@@ -84,7 +84,7 @@ class FileSystemProviderInternalGetMetadataRequestedSuccessFunction
 
  protected:
   ~FileSystemProviderInternalGetMetadataRequestedSuccessFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderInternalGetActionsRequestedSuccessFunction
@@ -96,7 +96,7 @@ class FileSystemProviderInternalGetActionsRequestedSuccessFunction
 
  protected:
   ~FileSystemProviderInternalGetActionsRequestedSuccessFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderInternalReadDirectoryRequestedSuccessFunction
@@ -108,7 +108,7 @@ class FileSystemProviderInternalReadDirectoryRequestedSuccessFunction
 
  protected:
   ~FileSystemProviderInternalReadDirectoryRequestedSuccessFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderInternalReadFileRequestedSuccessFunction
@@ -120,7 +120,7 @@ class FileSystemProviderInternalReadFileRequestedSuccessFunction
 
  protected:
   ~FileSystemProviderInternalReadFileRequestedSuccessFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderInternalOperationRequestedSuccessFunction
@@ -132,7 +132,7 @@ class FileSystemProviderInternalOperationRequestedSuccessFunction
 
  protected:
   ~FileSystemProviderInternalOperationRequestedSuccessFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 class FileSystemProviderInternalOperationRequestedErrorFunction
@@ -144,7 +144,7 @@ class FileSystemProviderInternalOperationRequestedErrorFunction
 
  protected:
   ~FileSystemProviderInternalOperationRequestedErrorFunction() override {}
-  bool RunWhenValid() override;
+  ResponseAction Run() override;
 };
 
 }  // namespace extensions

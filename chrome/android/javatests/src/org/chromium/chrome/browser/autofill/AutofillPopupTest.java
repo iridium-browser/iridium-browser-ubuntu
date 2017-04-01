@@ -4,16 +4,18 @@
 
 package org.chromium.chrome.browser.autofill;
 
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.components.autofill.AutofillPopup;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.input.ChromiumBaseInputConnection;
 import org.chromium.content.browser.test.util.Criteria;
@@ -23,7 +25,6 @@ import org.chromium.content.browser.test.util.TestInputMethodManagerWrapper;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.R;
-import org.chromium.ui.autofill.AutofillPopup;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +35,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * Integration tests for the AutofillPopup.
  */
+@RetryOnFailure
 public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private static final String FIRST_NAME = "John";
@@ -304,7 +306,7 @@ public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity
     // Wait and assert helper methods -------------------------------------------------------------
 
     private void waitForKeyboardShowRequest(final TestInputMethodManagerWrapper immw,
-            final int count) throws InterruptedException {
+            final int count) {
         CriteriaHelper.pollUiThread(
                 Criteria.equals(count, new Callable<Integer>() {
                     @Override
@@ -314,7 +316,7 @@ public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity
                 }));
     }
 
-    private void waitForAnchorViewAdd(final ViewGroup view) throws InterruptedException {
+    private void waitForAnchorViewAdd(final ViewGroup view) {
         CriteriaHelper.pollUiThread(new Criteria(
                 "Autofill Popup anchor view was never added.") {
             @Override
@@ -324,7 +326,7 @@ public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity
         });
     }
 
-    private void waitForAutofillPopopShow(final AutofillPopup popup) throws InterruptedException {
+    private void waitForAutofillPopopShow(final AutofillPopup popup) {
         CriteriaHelper.pollUiThread(
                 new Criteria("Autofill Popup anchor view was never added.") {
                     @Override
@@ -336,7 +338,7 @@ public class AutofillPopupTest extends ChromeActivityTestCaseBase<ChromeActivity
                 });
     }
 
-    private void waitForInputFieldFill(final WebContents webContents) throws InterruptedException {
+    private void waitForInputFieldFill(final WebContents webContents) {
         CriteriaHelper.pollInstrumentationThread(
                 new Criteria("First name field was never filled.") {
                     @Override

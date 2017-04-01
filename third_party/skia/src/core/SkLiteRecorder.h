@@ -8,16 +8,20 @@
 #ifndef SkLiteRecorder_DEFINED
 #define SkLiteRecorder_DEFINED
 
-#include "SkCanvas.h"
+#include "SkNoDrawCanvas.h"
 
 class SkLiteDL;
 
-class SkLiteRecorder final : public SkCanvas {
+class SkLiteRecorder final : public SkNoDrawCanvas {
 public:
     SkLiteRecorder();
     void reset(SkLiteDL*);
 
     sk_sp<SkSurface> onNewSurface(const SkImageInfo&, const SkSurfaceProps&) override;
+
+#ifdef SK_SUPPORT_LEGACY_DRAWFILTER
+    SkDrawFilter* setDrawFilter(SkDrawFilter*) override;
+#endif
 
     void willSave() override;
     SaveLayerStrategy getSaveLayerStrategy(const SaveLayerRec&) override;
@@ -27,15 +31,16 @@ public:
     void didSetMatrix(const SkMatrix&) override;
     void didTranslate(SkScalar, SkScalar) override;
 
-    void onClipRect  (const   SkRect&, SkRegion::Op, ClipEdgeStyle) override;
-    void onClipRRect (const  SkRRect&, SkRegion::Op, ClipEdgeStyle) override;
-    void onClipPath  (const   SkPath&, SkRegion::Op, ClipEdgeStyle) override;
-    void onClipRegion(const SkRegion&, SkRegion::Op) override;
+    void onClipRect  (const   SkRect&, SkClipOp, ClipEdgeStyle) override;
+    void onClipRRect (const  SkRRect&, SkClipOp, ClipEdgeStyle) override;
+    void onClipPath  (const   SkPath&, SkClipOp, ClipEdgeStyle) override;
+    void onClipRegion(const SkRegion&, SkClipOp) override;
 
     void onDrawPaint (const SkPaint&) override;
-    void onDrawPath  (const SkPath&,  const SkPaint&) override;
-    void onDrawRect  (const SkRect&,  const SkPaint&) override;
-    void onDrawOval  (const SkRect&,  const SkPaint&) override;
+    void onDrawPath  (const SkPath&, const SkPaint&) override;
+    void onDrawRect  (const SkRect&, const SkPaint&) override;
+    void onDrawRegion(const SkRegion&, const SkPaint&) override;
+    void onDrawOval  (const SkRect&, const SkPaint&) override;
     void onDrawArc(const SkRect&, SkScalar, SkScalar, bool, const SkPaint&) override;
     void onDrawRRect (const SkRRect&, const SkPaint&) override;
     void onDrawDRRect(const SkRRect&, const SkRRect&, const SkPaint&) override;
@@ -67,22 +72,26 @@ public:
                          SrcRectConstraint) override;
 
     void onDrawPatch(const SkPoint[12], const SkColor[4],
-                     const SkPoint[4], SkXfermode*, const SkPaint&) override;
+                     const SkPoint[4], SkBlendMode, const SkPaint&) override;
     void onDrawPoints(PointMode, size_t count, const SkPoint pts[], const SkPaint&) override;
     void onDrawVertices(VertexMode, int, const SkPoint[], const SkPoint[], const SkColor[],
-                        SkXfermode*, const uint16_t[], int, const SkPaint&) override;
+                        SkBlendMode, const uint16_t[], int, const SkPaint&) override;
     void onDrawAtlas(const SkImage*, const SkRSXform[], const SkRect[], const SkColor[],
-                     int, SkXfermode::Mode, const SkRect*, const SkPaint*) override;
+                     int, SkBlendMode, const SkRect*, const SkPaint*) override;
 
 #ifdef SK_EXPERIMENTAL_SHADOWING
     void didTranslateZ(SkScalar) override;
-    void onDrawShadowedPicture(const SkPicture*, const SkMatrix*, const SkPaint*) override;
+    void onDrawShadowedPicture(const SkPicture*, const SkMatrix*,
+                               const SkPaint*, const SkShadowParams& params) override;
 #else
     void didTranslateZ(SkScalar);
-    void onDrawShadowedPicture(const SkPicture*, const SkMatrix*, const SkPaint*);
+    void onDrawShadowedPicture(const SkPicture*, const SkMatrix*,
+                               const SkPaint*, const SkShadowParams& params);
 #endif
 
 private:
+    typedef SkNoDrawCanvas INHERITED;
+
     SkLiteDL* fDL;
 };
 

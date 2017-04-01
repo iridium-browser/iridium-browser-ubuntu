@@ -9,13 +9,9 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
-#include "blimp/client/public/blimp_client_context.h"
-#include "blimp/client/public/contents/blimp_contents.h"
-#include "blimp/client/public/contents/blimp_navigation_controller.h"
 #include "cc/layers/layer.h"
-#include "chrome/browser/android/blimp/blimp_client_context_factory.h"
 #include "chrome/browser/android/compositor/tab_content_manager.h"
 #include "chrome/browser/android/metrics/uma_utils.h"
 #include "chrome/browser/android/offline_pages/offline_page_bridge.h"
@@ -32,12 +28,10 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/printing/print_view_manager_basic.h"
+#include "chrome/browser/printing/print_view_manager_common.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/search/instant_service.h"
-#include "chrome/browser/search/instant_service_factory.h"
-#include "chrome/browser/search/search.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/sync/glue/synced_tab_delegate_android.h"
@@ -49,12 +43,9 @@
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "chrome/browser/ui/android/view_android_helper.h"
 #include "chrome/browser/ui/blocked_content/popup_blocker_tab_helper.h"
-#include "chrome/browser/ui/search/instant_search_prerenderer.h"
-#include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/common/search/instant_types.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
@@ -64,9 +55,9 @@
 #include "components/favicon/content/content_favicon_driver.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/navigation_interception/navigation_params.h"
-#include "components/offline_pages/offline_page_feature.h"
-#include "components/offline_pages/offline_page_item.h"
-#include "components/offline_pages/offline_page_model.h"
+#include "components/offline_pages/core/offline_page_feature.h"
+#include "components/offline_pages/core/offline_page_item.h"
+#include "components/offline_pages/core/offline_page_model.h"
 #include "components/sessions/content/content_live_tab.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/url_formatter/url_fixer.h"
@@ -80,13 +71,14 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/browser_controls_state.h"
 #include "content/public/common/resource_request_body.h"
-#include "content/public/common/top_controls_state.h"
 #include "jni/Tab_jni.h"
 #include "net/base/escape.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
 #include "ui/android/view_android.h"
+#include "ui/android/window_android.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/display/display.h"
@@ -98,6 +90,7 @@
 using base::android::AttachCurrentThread;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 using content::BrowserThread;
 using content::GlobalRequestID;
 using content::NavigationController;
@@ -119,7 +112,7 @@ TabAndroid* TabAndroid::FromWebContents(
   return static_cast<TabAndroid*>(core_delegate);
 }
 
-TabAndroid* TabAndroid::GetNativeTab(JNIEnv* env, jobject obj) {
+TabAndroid* TabAndroid::GetNativeTab(JNIEnv* env, const JavaRef<jobject>& obj) {
   return reinterpret_cast<TabAndroid*>(Java_Tab_getNativePtr(env, obj));
 }
 
@@ -129,7 +122,7 @@ void TabAndroid::AttachTabHelpers(content::WebContents* web_contents) {
   TabHelpers::AttachTabHelpers(web_contents);
 }
 
-TabAndroid::TabAndroid(JNIEnv* env, jobject obj)
+TabAndroid::TabAndroid(JNIEnv* env, const JavaRef<jobject>& obj)
     : weak_java_tab_(env, obj),
       content_layer_(cc::Layer::Create()),
       tab_content_manager_(NULL),
@@ -186,7 +179,7 @@ Profile* TabAndroid::GetProfile() const {
   return Profile::FromBrowserContext(web_contents()->GetBrowserContext());
 }
 
-browser_sync::SyncedTabDelegate* TabAndroid::GetSyncedTabDelegate() const {
+sync_sessions::SyncedTabDelegate* TabAndroid::GetSyncedTabDelegate() const {
   return synced_tab_delegate_.get();
 }
 
@@ -214,11 +207,11 @@ void TabAndroid::HandlePopupNavigation(chrome::NavigateParams* params) {
   WindowOpenDisposition disposition = params->disposition;
   const GURL& url = params->url;
 
-  if (disposition == NEW_POPUP ||
-      disposition == NEW_FOREGROUND_TAB ||
-      disposition == NEW_BACKGROUND_TAB ||
-      disposition == NEW_WINDOW ||
-      disposition == OFF_THE_RECORD) {
+  if (disposition == WindowOpenDisposition::NEW_POPUP ||
+      disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
+      disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB ||
+      disposition == WindowOpenDisposition::NEW_WINDOW ||
+      disposition == WindowOpenDisposition::OFF_THE_RECORD) {
     JNIEnv* env = AttachCurrentThread();
     ScopedJavaLocalRef<jobject> jobj = weak_java_tab_.get(env);
     ScopedJavaLocalRef<jstring> jurl(ConvertUTF8ToJavaString(env, url.spec()));
@@ -227,9 +220,9 @@ void TabAndroid::HandlePopupNavigation(chrome::NavigateParams* params) {
     ScopedJavaLocalRef<jobject> jpost_data;
     if (params->uses_post && params->post_data)
       jpost_data = params->post_data->ToJavaObject(env);
-    Java_Tab_openNewTab(env, jobj, jurl, jheaders, jpost_data, disposition,
-                        params->created_with_opener,
-                        params->is_renderer_initiated);
+    Java_Tab_openNewTab(
+        env, jobj, jurl, jheaders, jpost_data, static_cast<int>(disposition),
+        params->created_with_opener, params->is_renderer_initiated);
   } else {
     NOTIMPLEMENTED();
   }
@@ -262,45 +255,6 @@ void TabAndroid::SwapTabContents(content::WebContents* old_contents,
   Java_Tab_swapWebContents(env, weak_java_tab_.get(env),
                            new_contents->GetJavaWebContents(), did_start_load,
                            did_finish_load);
-}
-
-void TabAndroid::DefaultSearchProviderChanged(
-    bool google_base_url_domain_changed) {
-  // TODO(kmadhusu): Move this function definition to a common place and update
-  // BrowserInstantController::DefaultSearchProviderChanged to use the same.
-  if (!web_contents())
-    return;
-
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(GetProfile());
-  if (!instant_service)
-    return;
-
-  // Send new search URLs to the renderer.
-  content::RenderProcessHost* rph = web_contents()->GetRenderProcessHost();
-  instant_service->SendSearchURLsToRenderer(rph);
-
-  // Reload the contents to ensure that it gets assigned to a non-previledged
-  // renderer.
-  if (!instant_service->IsInstantProcess(rph->GetID()))
-    return;
-  web_contents()->GetController().Reload(false);
-
-  // As the reload was not triggered by the user we don't want to close any
-  // infobars. We have to tell the InfoBarService after the reload, otherwise it
-  // would ignore this call when
-  // WebContentsObserver::DidStartNavigationToPendingEntry is invoked.
-  InfoBarService::FromWebContents(web_contents())->set_ignore_next_reload();
-}
-
-void TabAndroid::OnWebContentsInstantSupportDisabled(
-    const content::WebContents* contents) {
-  DCHECK(contents);
-  if (web_contents() != contents)
-    return;
-
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_Tab_onWebContentsInstantSupportDisabled(env, weak_java_tab_.get(env));
 }
 
 void TabAndroid::Observe(int type,
@@ -367,8 +321,7 @@ void TabAndroid::InitWebContents(
     const JavaParamRef<jobject>& jweb_contents,
     const JavaParamRef<jobject>& jweb_contents_delegate,
     const JavaParamRef<jobject>& jcontext_menu_populator) {
-  web_contents_.reset(
-      content::WebContents::FromJavaWebContents(jweb_contents.obj()));
+  web_contents_.reset(content::WebContents::FromJavaWebContents(jweb_contents));
   DCHECK(web_contents_.get());
 
   AttachTabHelpers(web_contents_.get());
@@ -382,10 +335,9 @@ void TabAndroid::InitWebContents(
   ViewAndroidHelper::FromWebContents(web_contents())->
       SetViewAndroid(web_contents()->GetNativeView());
   CoreTabHelper::FromWebContents(web_contents())->set_delegate(this);
-  SearchTabHelper::FromWebContents(web_contents())->set_delegate(this);
-  web_contents_delegate_.reset(
-      new chrome::android::TabWebContentsDelegateAndroid(
-          env, jweb_contents_delegate));
+  web_contents_delegate_ =
+      base::MakeUnique<android::TabWebContentsDelegateAndroid>(
+          env, jweb_contents_delegate);
   web_contents_delegate_->LoadProgressChanged(web_contents(), 0);
   web_contents()->SetDelegate(web_contents_delegate_.get());
 
@@ -411,26 +363,7 @@ void TabAndroid::InitWebContents(
   // off the record state.
   CHECK_EQ(GetProfile()->IsOffTheRecord(), incognito);
 
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(GetProfile());
-  if (instant_service)
-    instant_service->AddObserver(this);
-
   content_layer_->InsertChild(web_contents_->GetNativeView()->GetLayer(), 0);
-}
-
-base::android::ScopedJavaLocalRef<jobject> TabAndroid::InitBlimpContents(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jobject>& j_profile) {
-  Profile* profile = ProfileAndroid::FromProfileAndroid(j_profile.obj());
-  DCHECK(!profile->IsOffTheRecord());
-  blimp::client::BlimpClientContext* context =
-      BlimpClientContextFactory::GetForBrowserContext(profile);
-  DCHECK(context);
-  blimp_contents_ = context->CreateBlimpContents();
-  DCHECK(blimp_contents_);
-  return blimp_contents_->GetJavaObject();
 }
 
 void TabAndroid::UpdateDelegates(
@@ -440,9 +373,9 @@ void TabAndroid::UpdateDelegates(
     const JavaParamRef<jobject>& jcontext_menu_populator) {
   ContextMenuHelper::FromWebContents(web_contents())->SetPopulator(
       jcontext_menu_populator);
-  web_contents_delegate_.reset(
-      new chrome::android::TabWebContentsDelegateAndroid(
-          env, jweb_contents_delegate));
+  web_contents_delegate_ =
+      base::MakeUnique<android::TabWebContentsDelegateAndroid>(
+          env, jweb_contents_delegate);
   web_contents()->SetDelegate(web_contents_delegate_.get());
 }
 
@@ -469,11 +402,6 @@ void TabAndroid::DestroyWebContents(JNIEnv* env,
 
   if (favicon_driver)
     favicon_driver->RemoveObserver(this);
-
-  InstantService* instant_service =
-      InstantServiceFactory::GetForProfile(GetProfile());
-  if (instant_service)
-    instant_service->RemoveObserver(this);
 
   web_contents()->SetDelegate(NULL);
 
@@ -538,26 +466,11 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(
   // Note in incognito mode, we don't have a PrerenderManager.
 
   prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(GetProfile());
+      prerender::PrerenderManagerFactory::GetForBrowserContext(GetProfile());
   if (prerender_manager) {
     bool prefetched_page_loaded = HasPrerenderedUrl(gurl);
     // Getting the load status before MaybeUsePrerenderedPage() b/c it resets.
     chrome::NavigateParams params(web_contents());
-    InstantSearchPrerenderer* prerenderer =
-        InstantSearchPrerenderer::GetForProfile(GetProfile());
-    if (prerenderer) {
-      const base::string16& search_terms =
-          search::ExtractSearchTermsFromURL(GetProfile(), gurl);
-      if (!search_terms.empty() &&
-          prerenderer->CanCommitQuery(web_contents_.get(), search_terms)) {
-        EmbeddedSearchRequestParams request_params(gurl);
-        prerenderer->Commit(search_terms, request_params);
-
-        if (prerenderer->UsePrerenderedPage(gurl, &params))
-          return FULL_PRERENDERED_PAGE_LOAD;
-      }
-      prerenderer->Cancel();
-    }
     if (prerender_manager->MaybeUsePrerenderedPage(gurl, &params)) {
       return prefetched_page_loaded ?
           FULL_PRERENDERED_PAGE_LOAD : PARTIAL_PRERENDERED_PAGE_LOAD;
@@ -574,11 +487,6 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(
     // typing chrome://history as well as selecting from the drop down menu.
     if (fixed_url.spec() == chrome::kChromeUIHistoryURL) {
       content::RecordAction(base::UserMetricsAction("ShowHistory"));
-    }
-
-    if (blimp_contents()) {
-      blimp_contents()->GetNavigationController().LoadURL(fixed_url);
-      return DEFAULT_PAGE_LOAD;
     }
 
     content::NavigationController::LoadURLParams load_params(fixed_url);
@@ -599,16 +507,6 @@ TabAndroid::TabLoadStatus TabAndroid::LoadUrl(
       load_params.referrer = content::Referrer(
           GURL(base::android::ConvertJavaStringToUTF8(env, j_referrer_url)),
           static_cast<blink::WebReferrerPolicy>(referrer_policy));
-    }
-    const base::string16 search_terms =
-        search::ExtractSearchTermsFromURL(GetProfile(), gurl);
-    SearchTabHelper* search_tab_helper =
-        SearchTabHelper::FromWebContents(web_contents_.get());
-    if (!search_terms.empty() && search_tab_helper &&
-        search_tab_helper->SupportsInstant()) {
-      EmbeddedSearchRequestParams request_params(gurl);
-      search_tab_helper->Submit(search_terms, request_params);
-      return DEFAULT_PAGE_LOAD;
     }
     load_params.is_renderer_initiated = is_renderer_initiated;
     load_params.should_replace_current_entry = should_replace_current_entry;
@@ -647,10 +545,10 @@ bool TabAndroid::Print(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents());
   printing::PrintViewManagerBasic* print_view_manager =
       printing::PrintViewManagerBasic::FromWebContents(web_contents());
-  if (print_view_manager == NULL)
+  if (!print_view_manager)
     return false;
 
-  print_view_manager->PrintNow();
+  print_view_manager->PrintNow(printing::GetFrameToPrint(web_contents()));
   return true;
 }
 
@@ -693,7 +591,7 @@ prerender::PrerenderManager* TabAndroid::GetPrerenderManager() const {
   Profile* profile = GetProfile();
   if (!profile)
     return NULL;
-  return prerender::PrerenderManagerFactory::GetForProfile(profile);
+  return prerender::PrerenderManagerFactory::GetForBrowserContext(profile);
 }
 
 // static
@@ -724,23 +622,24 @@ void TabAndroid::CreateHistoricalTab(JNIEnv* env,
   TabAndroid::CreateHistoricalTabFromContents(web_contents());
 }
 
-void TabAndroid::UpdateTopControlsState(JNIEnv* env,
-                                        const JavaParamRef<jobject>& obj,
-                                        jint constraints,
-                                        jint current,
-                                        jboolean animate) {
-  content::TopControlsState constraints_state =
-      static_cast<content::TopControlsState>(constraints);
-  content::TopControlsState current_state =
-      static_cast<content::TopControlsState>(current);
+void TabAndroid::UpdateBrowserControlsState(JNIEnv* env,
+                                            const JavaParamRef<jobject>& obj,
+                                            jint constraints,
+                                            jint current,
+                                            jboolean animate) {
+  content::BrowserControlsState constraints_state =
+      static_cast<content::BrowserControlsState>(constraints);
+  content::BrowserControlsState current_state =
+      static_cast<content::BrowserControlsState>(current);
   WebContents* sender = web_contents();
-  sender->Send(new ChromeViewMsg_UpdateTopControlsState(
-      sender->GetRoutingID(), constraints_state, current_state, animate));
+  sender->Send(new ChromeViewMsg_UpdateBrowserControlsState(
+      sender->GetRenderViewHost()->GetRoutingID(), constraints_state,
+      current_state, animate));
 
   if (sender->ShowingInterstitialPage()) {
     content::RenderViewHost* interstitial_view_host =
         sender->GetInterstitialPage()->GetMainFrame()->GetRenderViewHost();
-    interstitial_view_host->Send(new ChromeViewMsg_UpdateTopControlsState(
+    interstitial_view_host->Send(new ChromeViewMsg_UpdateBrowserControlsState(
         interstitial_view_host->GetRoutingID(), constraints_state,
         current_state, animate));
   }
@@ -760,12 +659,6 @@ jlong TabAndroid::GetBookmarkId(JNIEnv* env,
   GURL url = dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
       web_contents()->GetURL());
   Profile* profile = GetProfile();
-
-  // If the url points to an offline page, then we need to get its original URL.
-  if (offline_pages::OfflinePageUtils::IsOfflinePage(profile, url)) {
-    url = offline_pages::OfflinePageUtils::MaybeGetOnlineURLForOfflineURL(
-        profile, url);
-  }
 
   // Get all the nodes for |url| and sort them by date added.
   std::vector<const bookmarks::BookmarkNode*> nodes;
@@ -790,11 +683,6 @@ jlong TabAndroid::GetBookmarkId(JNIEnv* env,
 void TabAndroid::ShowOfflinePages() {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_Tab_showOfflinePages(env, weak_java_tab_.get(env));
-}
-
-void TabAndroid::OnLoFiResponseReceived(bool is_preview) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  Java_Tab_onLoFiResponseReceived(env, weak_java_tab_.get(env), is_preview);
 }
 
 jboolean TabAndroid::IsOfflinePage(JNIEnv* env,
@@ -849,15 +737,15 @@ void TabAndroid::SetInterceptNavigationDelegate(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   InterceptNavigationDelegate::Associate(
       web_contents(),
-      base::WrapUnique(new ChromeInterceptNavigationDelegate(env, delegate)));
+      base::MakeUnique<ChromeInterceptNavigationDelegate>(env, delegate));
 }
 
 void TabAndroid::AttachToTabContentManager(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
     const JavaParamRef<jobject>& jtab_content_manager) {
-  chrome::android::TabContentManager* tab_content_manager =
-      chrome::android::TabContentManager::FromJavaObject(jtab_content_manager);
+  android::TabContentManager* tab_content_manager =
+      android::TabContentManager::FromJavaObject(jtab_content_manager);
   if (tab_content_manager == tab_content_manager_)
     return;
 
@@ -866,33 +754,6 @@ void TabAndroid::AttachToTabContentManager(
   tab_content_manager_ = tab_content_manager;
   if (tab_content_manager_)
     tab_content_manager_->AttachLiveLayer(GetAndroidId(), GetContentLayer());
-}
-
-void TabAndroid::AttachOverlayWebContents(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jobject>& jweb_contents,
-    jboolean visible) {
-  WebContents* web_contents =
-      content::WebContents::FromJavaWebContents(jweb_contents.obj());
-  DCHECK(web_contents);
-  DCHECK(web_contents->GetNativeView());
-
-  web_contents->GetNativeView()->GetLayer()->SetHideLayerAndSubtree(!visible);
-  content_layer_->AddChild(web_contents->GetNativeView()->GetLayer());
-}
-
-void TabAndroid::DetachOverlayWebContents(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jobject>& jweb_contents) {
-  WebContents* web_contents =
-      content::WebContents::FromJavaWebContents(jweb_contents.obj());
-  DCHECK(web_contents);
-  DCHECK(web_contents->GetNativeView());
-
-  if (web_contents->GetNativeView()->GetLayer()->parent() == content_layer_)
-    web_contents->GetNativeView()->GetLayer()->RemoveFromParent();
 }
 
 static void Init(JNIEnv* env, const JavaParamRef<jobject>& obj) {

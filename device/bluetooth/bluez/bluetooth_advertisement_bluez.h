@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "dbus/object_path.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
 #include "device/bluetooth/bluetooth_export.h"
@@ -38,10 +39,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdvertisementBlueZ
   // bluez::BluetoothLEAdvertisementServiceProvider::Delegate overrides:
   void Released() override;
 
-  void Register(
-      const base::Closure& success_callback,
-      const device::BluetoothAdapter::CreateAdvertisementErrorCallback&
-          error_callback);
+  void Register(const base::Closure& success_callback,
+                const device::BluetoothAdapter::AdvertisementErrorCallback&
+                    error_callback);
 
   // Used from tests to be able to trigger events on the fake advertisement
   // provider.
@@ -53,7 +53,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdvertisementBlueZ
   ~BluetoothAdvertisementBlueZ() override;
 
   // Adapter this advertisement is advertising on.
-  scoped_refptr<BluetoothAdapterBlueZ> adapter_;
+  dbus::ObjectPath adapter_path_;
   std::unique_ptr<bluez::BluetoothLEAdvertisementServiceProvider> provider_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothAdvertisementBlueZ);

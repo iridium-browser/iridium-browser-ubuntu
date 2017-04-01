@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -17,10 +18,6 @@
 #include "extensions/renderer/script_injector.h"
 
 struct HostID;
-
-namespace blink {
-template<typename T> class WebVector;
-}
 
 namespace content {
 class RenderFrame;
@@ -98,14 +95,15 @@ class ScriptInjection {
   InjectionResult Inject(ScriptsRunInfo* scripts_run_info);
 
   // Inject any JS scripts into the frame for the injection.
-  void InjectJs();
+  void InjectJs(std::set<std::string>* executing_scripts,
+                size_t* num_injected_js_scripts);
 
   // Called when JS injection for the given frame has been completed.
-  void OnJsInjectionCompleted(
-      const blink::WebVector<v8::Local<v8::Value> >& results);
+  void OnJsInjectionCompleted(const std::vector<v8::Local<v8::Value>>& results);
 
   // Inject any CSS source into the frame for the injection.
-  void InjectCss();
+  void InjectCss(std::set<std::string>* injected_stylesheets,
+                 size_t* num_injected_stylesheets);
 
   // Notify that we will not inject, and mark it as acknowledged.
   void NotifyWillNotInject(ScriptInjector::InjectFailureReason reason);

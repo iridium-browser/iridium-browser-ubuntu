@@ -39,8 +39,6 @@ class GURL;
 
 namespace base {
 class DictionaryValue;
-class ListValue;
-class StringValue;
 }
 
 namespace content {
@@ -56,7 +54,7 @@ class URLRequest;
 }
 
 namespace extensions {
-
+class ExtensionNavigationUIData;
 class InfoMap;
 class WebRequestEventDetails;
 class WebRequestRulesRegistry;
@@ -234,14 +232,33 @@ class ExtensionWebRequestEventRouter
   // the response have arrived.
   void OnResponseStarted(void* browser_context,
                          const extensions::InfoMap* extension_info_map,
+                         net::URLRequest* request,
+                         int net_error);
+  // Deprecated.
+  // TODO(maksims): Remove this.
+  void OnResponseStarted(void* browser_context,
+                         const extensions::InfoMap* extension_info_map,
                          net::URLRequest* request);
 
   // Dispatches the onComplete event.
   void OnCompleted(void* browser_context,
                    const extensions::InfoMap* extension_info_map,
+                   net::URLRequest* request,
+                   int net_error);
+  // Deprecated.
+  // TODO(maksims): Remove this.
+  void OnCompleted(void* browser_context,
+                   const extensions::InfoMap* extension_info_map,
                    net::URLRequest* request);
 
   // Dispatches an onErrorOccurred event.
+  void OnErrorOccurred(void* browser_context,
+                       const extensions::InfoMap* extension_info_map,
+                       net::URLRequest* request,
+                       bool started,
+                       int net_error);
+  // Deprecated.
+  // TODO(maksims): Remove this.
   void OnErrorOccurred(void* browser_context,
                        const extensions::InfoMap* extension_info_map,
                        net::URLRequest* request,
@@ -390,6 +407,7 @@ class ExtensionWebRequestEventRouter
   bool DispatchEvent(void* browser_context,
                      net::URLRequest* request,
                      const RawListeners& listener_ids,
+                     ExtensionNavigationUIData* navigation_ui_data,
                      std::unique_ptr<WebRequestEventDetails> event_details);
 
   void DispatchEventToListeners(
@@ -403,6 +421,7 @@ class ExtensionWebRequestEventRouter
   RawListeners GetMatchingListeners(
       void* browser_context,
       const extensions::InfoMap* extension_info_map,
+      ExtensionNavigationUIData* navigation_ui_data,
       const std::string& event_name,
       const net::URLRequest* request,
       int* extra_info_spec);
@@ -414,6 +433,7 @@ class ExtensionWebRequestEventRouter
   void GetMatchingListenersImpl(void* browser_context,
                                 const net::URLRequest* request,
                                 const extensions::InfoMap* extension_info_map,
+                                ExtensionNavigationUIData* navigation_ui_data,
                                 bool crosses_incognito,
                                 const std::string& event_name,
                                 const GURL& url,
@@ -444,6 +464,7 @@ class ExtensionWebRequestEventRouter
   // and wants to return the correct network error code himself.
   int ExecuteDeltas(void* browser_context,
                     uint64_t request_id,
+                    ExtensionNavigationUIData* navigation_ui_data,
                     bool call_callback);
 
   // Evaluates the rules of the declarative webrequest API and stores
@@ -456,14 +477,16 @@ class ExtensionWebRequestEventRouter
       const extensions::InfoMap* extension_info_map,
       const std::string& event_name,
       net::URLRequest* request,
+      ExtensionNavigationUIData* navigation_ui_data,
       extensions::RequestStage request_stage,
       const net::HttpResponseHeaders* original_response_headers);
 
   // If the BlockedRequest contains messages_to_extension entries in the event
   // deltas, we send them to subscribers of
   // chrome.declarativeWebRequest.onMessage.
-  void SendMessages(
-      void* browser_context, const BlockedRequest& blocked_request);
+  void SendMessages(void* browser_context,
+                    const BlockedRequest& blocked_request,
+                    ExtensionNavigationUIData* navigation_ui_data);
 
   // Called when the RulesRegistry is ready to unblock a request that was
   // waiting for said event.

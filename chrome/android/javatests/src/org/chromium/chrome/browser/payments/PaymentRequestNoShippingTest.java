@@ -5,11 +5,13 @@
 package org.chromium.chrome.browser.payments;
 
 import android.content.DialogInterface;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.os.Build;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
@@ -22,10 +24,6 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for a merchant that does not require shipping address.
  */
 public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
-    private static final int DECEMBER = 11;
-    private static final int NEXT_YEAR = 1;
-    private static final int FIRST_BILLING_ADDRESS = 1;
-
     public PaymentRequestNoShippingTest() {
         super("payment_request_no_shipping_test.html");
     }
@@ -44,6 +42,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Click [X] to cancel payment. */
     @MediumTest
+    @Feature({"Payments"})
     public void testCloseDialog() throws InterruptedException, ExecutionException,
             TimeoutException {
         triggerUIAndWait(mReadyForInput);
@@ -53,6 +52,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Click [EDIT] to expand the dialog, then click [X] to cancel payment. */
     @MediumTest
+    @Feature({"Payments"})
     public void testEditAndCloseDialog() throws InterruptedException, ExecutionException,
             TimeoutException {
         triggerUIAndWait(mReadyForInput);
@@ -63,6 +63,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Click [EDIT] to expand the dialog, then click [CANCEL] to cancel payment. */
     @MediumTest
+    @Feature({"Payments"})
     public void testEditAndCancelDialog() throws InterruptedException, ExecutionException,
             TimeoutException {
         triggerUIAndWait(mReadyForInput);
@@ -73,6 +74,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Click [PAY] and dismiss the card unmask dialog. */
     @MediumTest
+    @Feature({"Payments"})
     public void testPay() throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
         clickAndWait(R.id.button_primary, mReadyForUnmaskInput);
@@ -84,6 +86,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Click [PAY], type in "123" into the CVC dialog, then submit the payment. */
     @MediumTest
+    @Feature({"Payments"})
     public void testCancelUnmaskAndRetry()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -96,35 +99,24 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
                 "123"});
     }
 
-    /**
-     * Attempt to add an invalid credit card number and cancel payment.
-     * @MediumTest
-     */
-    @FlakyTest(message = "crbug.com/626289")
+    /** Attempt to add an invalid credit card number and cancel payment. */
+    @MediumTest
+    @Feature({"Payments"})
     public void testAddInvalidCardNumberAndCancel()
             throws InterruptedException, ExecutionException, TimeoutException {
+        // Attempting to add an invalid card and cancelling out of the flow will result in the user
+        // still being ready to pay with the previously selected credit card.
         fillNewCardForm("123", "Bob", DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS);
         clickInCardEditorAndWait(R.id.payments_edit_done_button, mEditorValidationError);
-        clickInCardEditorAndWait(R.id.payments_edit_cancel_button, mReadyForInput);
+        clickInCardEditorAndWait(R.id.payments_edit_cancel_button, mReadyToPay);
         clickAndWait(R.id.close_button, mDismissed);
         expectResultContains(new String[] {"Request cancelled"});
     }
 
-    private void fillNewCardForm(String cardNumber, String nameOnCard, int month, int year,
-            int billingAddress) throws InterruptedException, ExecutionException, TimeoutException {
-        triggerUIAndWait(mReadyToPay);
-        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
-        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
-        setTextInCardEditorAndWait(new String[] {cardNumber, nameOnCard}, mEditorTextUpdate);
-        setSpinnerSelectionsInCardEditorAndWait(
-                new int[] {month, year, billingAddress}, mBillingAddressChangeProcessed);
-    }
-
-    /**
-     * Attempt to add a credit card with an empty name on card and cancel payment.
-     * @MediumTest
-     */
-    @FlakyTest(message = "crbug.com/626289")
+    /** Attempt to add a credit card with an empty name on card and cancel payment. */
+    @MediumTest
+    @MinAndroidSdkLevel(Build.VERSION_CODES.LOLLIPOP) // crbug.com/678983
+    @Feature({"Payments"})
     public void testAddEmptyNameOnCardAndCancel()
             throws InterruptedException, ExecutionException, TimeoutException {
         fillNewCardForm("5454-5454-5454-5454", "", DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS);
@@ -136,6 +128,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Save a new card on disk and pay. */
     @MediumTest
+    @Feature({"Payments"})
     public void testSaveNewCardAndPay()
             throws InterruptedException, ExecutionException, TimeoutException {
         fillNewCardForm("5454-5454-5454-5454", "Bob", DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS);
@@ -148,6 +141,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Use a temporary credit card to complete payment. */
     @MediumTest
+    @Feature({"Payments"})
     public void testAddTemporaryCardAndPay()
             throws InterruptedException, ExecutionException, TimeoutException {
         fillNewCardForm("5454-5454-5454-5454", "Bob", DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS);
@@ -162,8 +156,19 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
         expectResultContains(new String[] {"5454545454545454", "12", "Bob"});
     }
 
+    private void fillNewCardForm(String cardNumber, String nameOnCard, int month, int year,
+            int billingAddress) throws InterruptedException, ExecutionException, TimeoutException {
+        triggerUIAndWait(mReadyToPay);
+        clickInPaymentMethodAndWait(R.id.payments_section, mReadyForInput);
+        clickInPaymentMethodAndWait(R.id.payments_add_option_button, mReadyToEdit);
+        setTextInCardEditorAndWait(new String[] {cardNumber, nameOnCard}, mEditorTextUpdate);
+        setSpinnerSelectionsInCardEditorAndWait(
+                new int[] {month, year, billingAddress}, mBillingAddressChangeProcessed);
+    }
+
     /** Add a new card together with a new billing address and pay. */
     @MediumTest
+    @Feature({"Payments"})
     public void testSaveNewCardAndNewBillingAddressAndPay()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -173,10 +178,8 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
         // Select December of next year for expiration and [Add address] in the billing address
         // dropdown.
-        int december = 11;
-        int nextYear = 1;
-        int addBillingAddress = 2;
-        setSpinnerSelectionsInCardEditorAndWait(new int[] {december, nextYear, addBillingAddress},
+        int addBillingAddress = 1;
+        setSpinnerSelectionsInCardEditorAndWait(new int[] {DECEMBER, NEXT_YEAR, addBillingAddress},
                 mReadyToEdit);
 
         setTextInEditorAndWait(new String[] {"Bob", "Google", "1600 Amphitheatre Pkwy",
@@ -193,6 +196,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Quickly pressing on "add card" and then [X] should not crash. */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickAddCardAndCloseShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -210,13 +214,14 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
         });
         mReadyToEdit.waitForCallback(callCount);
 
-        clickInCardEditorAndWait(R.id.payments_edit_cancel_button, mReadyForInput);
+        clickInCardEditorAndWait(R.id.payments_edit_cancel_button, mReadyToPay);
         clickAndWait(R.id.close_button, mDismissed);
         expectResultContains(new String[] {"Request cancelled"});
     }
 
     /** Quickly pressing on [X] and then "add card" should not crash. */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickCloseAndAddCardShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -239,6 +244,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
 
     /** Quickly pressing on "add card" and then "cancel" should not crash. */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickAddCardAndCancelShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -256,13 +262,14 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
         });
         mReadyToEdit.waitForCallback(callCount);
 
-        clickInCardEditorAndWait(R.id.payments_edit_cancel_button, mReadyForInput);
+        clickInCardEditorAndWait(R.id.payments_edit_cancel_button, mReadyToPay);
         clickAndWait(R.id.close_button, mDismissed);
         expectResultContains(new String[] {"Request cancelled"});
     }
 
     /** Quickly pressing on "cancel" and then "add card" should not crash. */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickCancelAndAddCardShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -288,6 +295,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
      * "pay" should not crash.
      */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickDismissAndPayShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -311,6 +319,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
      * [X] should not crash.
      */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickDismissAndCloseShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -334,6 +343,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
      * example) should not crash.
      */
     @MediumTest
+    @Feature({"Payments"})
     public void testQuickCloseAndDismissShouldNotCrash()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyToPay);
@@ -358,6 +368,7 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
      * histogram.
      */
     @MediumTest
+    @Feature({"Payments"})
     public void testRequestedInformationMetric() throws InterruptedException, ExecutionException,
             TimeoutException {
         // Start the Payment Request.
@@ -369,14 +380,5 @@ public class PaymentRequestNoShippingTest extends PaymentRequestTestBase {
                     RecordHistogram.getHistogramValueCountForTesting(
                             "PaymentRequest.RequestedInformation", i));
         }
-    }
-
-    /** Verifies the format of the billing address suggestions when adding a new credit card. */
-    @MediumTest
-    public void testNewCardBillingAddressFormat()
-            throws InterruptedException, ExecutionException, TimeoutException {
-        fillNewCardForm("5454-5454-5454-5454", "Bob", DECEMBER, NEXT_YEAR, FIRST_BILLING_ADDRESS);
-        assertTrue(getSpinnerSelectionTextInCardEditor(2).equals(
-                "Jon Doe, Google, 340 Main St, Los Angeles, CA 90291, United States"));
     }
 }

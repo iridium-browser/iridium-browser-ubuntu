@@ -21,15 +21,16 @@ namespace breakpad {
 class CrashHandlerHostLinux;
 }
 
-namespace media {
-class BrowserCdmFactory;
-}
-
 namespace metrics {
 class MetricsService;
 }
 
-namespace shell {
+namespace net {
+class URLRequestContextGetter;
+class X509Certificate;
+}
+
+namespace service_manager {
 class InterfaceRegistry;
 }
 
@@ -43,6 +44,7 @@ class MediaPipelineBackendManager;
 struct MediaPipelineDeviceParams;
 class MediaResourceTracker;
 class VideoPlaneController;
+class VideoResolutionPolicy;
 }
 
 namespace shell {
@@ -74,6 +76,9 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       media::VideoPlaneController* video_plane_controller);
 
 #if !defined(OS_ANDROID)
+  // Gets object for enforcing video resolution policy restrictions.
+  virtual media::VideoResolutionPolicy* GetVideoResolutionPolicy();
+
   // Returns the task runner that must be used for media IO.
   scoped_refptr<base::SingleThreadTaskRunner> GetMediaTaskRunner();
 
@@ -86,6 +91,10 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   media::MediaResourceTracker* media_resource_tracker();
 
   media::MediaPipelineBackendManager* media_pipeline_backend_manager();
+
+  ::media::ScopedAudioManagerPtr CreateAudioManager(
+      ::media::AudioLogFactory* audio_log_factory) override;
+  std::unique_ptr<::media::CdmFactory> CreateCdmFactory() override;
 #endif
   media::MediaCapsImpl* media_caps();
 
@@ -127,50 +136,34 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
       std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
-  bool CanCreateWindow(
-      const GURL& opener_url,
-      const GURL& opener_top_level_frame_url,
-      const GURL& source_origin,
-      WindowContainerType container_type,
-      const GURL& target_url,
-      const content::Referrer& referrer,
-      const std::string& frame_name,
-      WindowOpenDisposition disposition,
-      const blink::WebWindowFeatures& features,
-      bool user_gesture,
-      bool opener_suppressed,
-      content::ResourceContext* context,
-      int render_process_id,
-      int opener_render_view_id,
-      int opener_render_frame_id,
-      bool* no_javascript_access) override;
+  bool CanCreateWindow(int opener_render_process_id,
+                       int opener_render_frame_id,
+                       const GURL& opener_url,
+                       const GURL& opener_top_level_frame_url,
+                       const GURL& source_origin,
+                       WindowContainerType container_type,
+                       const GURL& target_url,
+                       const content::Referrer& referrer,
+                       const std::string& frame_name,
+                       WindowOpenDisposition disposition,
+                       const blink::WebWindowFeatures& features,
+                       bool user_gesture,
+                       bool opener_suppressed,
+                       content::ResourceContext* context,
+                       bool* no_javascript_access) override;
   void ExposeInterfacesToRenderer(
-      ::shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       content::RenderProcessHost* render_process_host) override;
-  void RegisterInProcessMojoApplications(
-      StaticMojoApplicationMap* apps) override;
-#if defined(OS_ANDROID)
-  void GetAdditionalMappedFilesForChildProcess(
-      const base::CommandLine& command_line,
-      int child_process_id,
-      content::FileDescriptorInfo* mappings,
-      std::map<int, base::MemoryMappedFile::Region>* regions) override;
-#else
-  ::media::ScopedAudioManagerPtr CreateAudioManager(
-      ::media::AudioLogFactory* audio_log_factory) override;
-  std::unique_ptr<::media::CdmFactory> CreateCdmFactory() override;
+  void RegisterInProcessServices(StaticServiceMap* services) override;
+  std::unique_ptr<base::Value> GetServiceManifestOverlay(
+      base::StringPiece service_name) override;
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
       content::FileDescriptorInfo* mappings) override;
-#endif  // defined(OS_ANDROID)
   void GetAdditionalWebUISchemes(
       std::vector<std::string>* additional_schemes) override;
-#if defined(OS_ANDROID) && defined(VIDEO_HOLE)
-  content::ExternalVideoSurfaceContainer*
-  OverrideCreateExternalVideoSurfaceContainer(
-      content::WebContents* web_contents) override;
-#endif  // defined(OS_ANDROID) && defined(VIDEO_HOLE)
+  content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
 
  protected:
   CastContentBrowserClient();

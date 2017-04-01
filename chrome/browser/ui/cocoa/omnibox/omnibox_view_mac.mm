@@ -8,7 +8,7 @@
 
 #include "base/mac/foundation_util.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -17,23 +17,23 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
-#include "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
+#import "chrome/browser/ui/cocoa/l10n_util.h"
+#import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_popup_view_mac.h"
 #include "chrome/browser/ui/omnibox/chrome_omnibox_client.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/grit/components_scaled_resources.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
-#include "components/security_state/security_state_model.h"
 #include "components/toolbar/toolbar_model.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/common/constants.h"
-#include "grit/components_scaled_resources.h"
-#include "grit/theme_resources.h"
 #import "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -80,32 +80,12 @@ using content::WebContents;
 namespace {
 const int kOmniboxLargeFontSizeDelta = 9;
 const int kOmniboxNormalFontSizeDelta = 1;
-const int kOmniboxSmallFontSizeDelta = 0;
 const int kOmniboxSmallMaterialFontSizeDelta = -1;
 
-// TODO(shess): This is ugly, find a better way.  Using it right now
-// so that I can crib from gtk and still be able to see that I'm using
-// the same values easily.
-NSColor* ColorWithRGBBytes(int rr, int gg, int bb) {
-  DCHECK_LE(rr, 255);
-  DCHECK_LE(bb, 255);
-  DCHECK_LE(gg, 255);
-  return [NSColor colorWithCalibratedRed:static_cast<float>(rr)/255.0
-                                   green:static_cast<float>(gg)/255.0
-                                    blue:static_cast<float>(bb)/255.0
-                                   alpha:1.0];
-}
-
 NSColor* HostTextColor(bool in_dark_mode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return [NSColor blackColor];
-  }
   return in_dark_mode ? [NSColor whiteColor] : [NSColor blackColor];
 }
 NSColor* SecureSchemeColor(bool in_dark_mode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return ColorWithRGBBytes(0x07, 0x95, 0x00);
-  }
   return in_dark_mode ? skia::SkColorToSRGBNSColor(SK_ColorWHITE)
                       : skia::SkColorToSRGBNSColor(gfx::kGoogleGreen700);
 }
@@ -115,9 +95,6 @@ NSColor* SecurityWarningSchemeColor(bool in_dark_mode) {
       : skia::SkColorToSRGBNSColor(gfx::kGoogleYellow700);
 }
 NSColor* SecurityErrorSchemeColor(bool in_dark_mode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return ColorWithRGBBytes(0xa2, 0x00, 0x00);
-  }
   return in_dark_mode
       ? skia::SkColorToSRGBNSColor(SkColorSetA(SK_ColorWHITE, 0x7F))
       : skia::SkColorToSRGBNSColor(gfx::kGoogleRed700);
@@ -180,26 +157,22 @@ SkColor OmniboxViewMac::BaseTextColorSkia(bool in_dark_mode) {
 
 // static
 NSColor* OmniboxViewMac::BaseTextColor(bool in_dark_mode) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return [NSColor darkGrayColor];
-  }
   return skia::SkColorToSRGBNSColor(BaseTextColorSkia(in_dark_mode));
 }
 
 // static
 NSColor* OmniboxViewMac::GetSecureTextColor(
-    security_state::SecurityStateModel::SecurityLevel security_level,
+    security_state::SecurityLevel security_level,
     bool in_dark_mode) {
-  if (security_level == security_state::SecurityStateModel::EV_SECURE ||
-      security_level == security_state::SecurityStateModel::SECURE) {
+  if (security_level == security_state::EV_SECURE ||
+      security_level == security_state::SECURE) {
     return SecureSchemeColor(in_dark_mode);
   }
 
-  if (security_level == security_state::SecurityStateModel::SECURITY_ERROR)
+  if (security_level == security_state::DANGEROUS)
     return SecurityErrorSchemeColor(in_dark_mode);
 
-  DCHECK_EQ(security_state::SecurityStateModel::SECURITY_WARNING,
-            security_level);
+  DCHECK_EQ(security_state::SECURITY_WARNING, security_level);
   return SecurityWarningSchemeColor(in_dark_mode);
 }
 
@@ -283,10 +256,6 @@ void OmniboxViewMac::ResetTabState(WebContents* web_contents) {
 
 void OmniboxViewMac::Update() {
   if (model()->UpdatePermanentText()) {
-    // Something visibly changed.  Re-enable URL replacement.
-    controller()->GetToolbarModel()->set_url_replacement_enabled(true);
-    model()->UpdatePermanentText();
-
     const bool was_select_all = IsSelectAll();
     NSTextView* text_view =
         base::mac::ObjCCastStrict<NSTextView>([field_ currentEditor]);
@@ -328,8 +297,11 @@ void OmniboxViewMac::OpenMatch(const AutocompleteMatch& match,
   OmniboxView::OpenMatch(
       match, disposition, alternate_nav_url, pasted_text, selected_line);
   in_coalesced_update_block_ = false;
-  if (do_coalesced_text_update_)
+  if (do_coalesced_text_update_) {
     SetText(coalesced_text_update_);
+    // Ensure location bar icon is updated to reflect text.
+    controller()->OnChanged();
+  }
   do_coalesced_text_update_ = false;
   if (do_coalesced_range_update_)
     SetSelectedRange(coalesced_range_update_);
@@ -392,10 +364,8 @@ void OmniboxViewMac::EnterKeywordModeForDefaultSearchProvider() {
   FocusLocation(true);
 
   // Transition the user into keyword mode using their default search provider.
-  // Select their query if they typed one.
   model()->EnterKeywordModeForDefaultSearchProvider(
       KeywordModeEntryMethod::KEYBOARD_SHORTCUT);
-  SelectAll(false);
 }
 
 bool OmniboxViewMac::IsSelectAll() const {
@@ -459,7 +429,7 @@ void OmniboxViewMac::UpdatePopup() {
   }
 
   model()->StartAutocomplete([editor selectedRange].length != 0,
-                            prevent_inline_autocomplete, false);
+                            prevent_inline_autocomplete);
 }
 
 void OmniboxViewMac::CloseOmniboxPopup() {
@@ -561,6 +531,10 @@ void OmniboxViewMac::ApplyTextStyle(
   [paragraph_style setMaximumLineHeight:line_height];
   [paragraph_style setMinimumLineHeight:line_height];
   [paragraph_style setLineBreakMode:NSLineBreakByTruncatingTail];
+  // Set an explicit alignment so it isn't implied from writing direction.
+  [paragraph_style setAlignment:cocoa_l10n_util::ShouldDoExperimentalRTLLayout()
+                                    ? NSRightTextAlignment
+                                    : NSLeftTextAlignment];
   // If this is a URL, set the top-level paragraph direction to LTR (avoids RTL
   // characters from making the URL render from right to left, as per RFC 3987
   // Section 4.1).
@@ -589,11 +563,9 @@ void OmniboxViewMac::ApplyTextAttributes(
                            value:@"en_US_POSIX"
                            range:as_entire_string];
 
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    [attributedString addAttribute:NSForegroundColorAttributeName
-                             value:HostTextColor(in_dark_mode)
-                             range:as_entire_string];
-  }
+  [attributedString addAttribute:NSForegroundColorAttributeName
+                           value:HostTextColor(in_dark_mode)
+                           range:as_entire_string];
 
   url::Component scheme, host;
   AutocompleteInput::ParseForEmphasizeComponents(
@@ -617,14 +589,15 @@ void OmniboxViewMac::ApplyTextAttributes(
   // TODO(shess): GTK has this as a member var, figure out why.
   // [Could it be to not change if no change?  If so, I'm guessing
   // AppKit may already handle that.]
-  const security_state::SecurityStateModel::SecurityLevel security_level =
+  const security_state::SecurityLevel security_level =
       controller()->GetToolbarModel()->GetSecurityLevel(false);
 
   // Emphasize the scheme for security UI display purposes (if necessary).
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
       scheme.is_nonempty() &&
-      (security_level != security_state::SecurityStateModel::NONE)) {
-    if (security_level == security_state::SecurityStateModel::SECURITY_ERROR) {
+      (security_level != security_state::NONE) &&
+      (security_level != security_state::HTTP_SHOW_WARNING)) {
+    if (security_level == security_state::DANGEROUS) {
       // Add a strikethrough through the scheme.
       [attributedString addAttribute:NSStrikethroughStyleAttributeName
                  value:[NSNumber numberWithInt:NSUnderlineStyleSingle]
@@ -735,19 +708,6 @@ gfx::NativeView OmniboxViewMac::GetRelativeWindowForPopup() const {
   return NULL;
 }
 
-void OmniboxViewMac::SetGrayTextAutocompletion(
-    const base::string16& suggest_text) {
-  if (suggest_text == suggest_text_)
-    return;
-  suggest_text_ = suggest_text;
-  [field_ setGrayTextAutocompletion:base::SysUTF16ToNSString(suggest_text)
-                          textColor:SuggestTextColor()];
-}
-
-base::string16 OmniboxViewMac::GetGrayTextAutocompletion() const {
-  return suggest_text_;
-}
-
 int OmniboxViewMac::GetTextWidth() const {
   // Not used on mac.
   NOTREACHED();
@@ -788,10 +748,16 @@ void OmniboxViewMac::OnInsertText() {
     insert_char_time_ = base::TimeTicks::Now();
 }
 
+void OmniboxViewMac::OnBeforeDrawRect() {
+  draw_rect_start_time_ = base::TimeTicks::Now();
+}
+
 void OmniboxViewMac::OnDidDrawRect() {
+  base::TimeTicks now = base::TimeTicks::Now();
+  UMA_HISTOGRAM_TIMES("Omnibox.PaintTime", now - draw_rect_start_time_);
   if (!insert_char_time_.is_null()) {
     UMA_HISTOGRAM_TIMES("Omnibox.CharTypedToRepaintLatency",
-                        base::TimeTicks::Now() - insert_char_time_);
+                        now - insert_char_time_);
     insert_char_time_ = base::TimeTicks();
   }
 }
@@ -826,15 +792,6 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
         cmd == @selector(insertTabIgnoringFieldEditor:)) &&
         !model()->is_keyword_hint()) {
       model()->OnUpOrDownKeyPressed(1);
-      return true;
-    }
-  }
-
-  if (cmd == @selector(moveRight:)) {
-    // Only commit suggested text if the cursor is all the way to the right and
-    // there is no selection.
-    if (suggest_text_.length() > 0 && IsCaretAtEnd()) {
-      model()->CommitSuggestedText();
       return true;
     }
   }
@@ -879,7 +836,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
 
   // Option-Return
   if (cmd == @selector(insertNewlineIgnoringFieldEditor:)) {
-    model()->AcceptInput(NEW_FOREGROUND_TAB, false);
+    model()->AcceptInput(WindowOpenDisposition::NEW_FOREGROUND_TAB, false);
     return true;
   }
 
@@ -1104,15 +1061,7 @@ NSFont* OmniboxViewMac::GetLargeFont() {
 }
 
 NSFont* OmniboxViewMac::GetSmallFont() {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return rb
-        .GetFontWithDelta(kOmniboxSmallFontSizeDelta, gfx::Font::NORMAL,
-                          gfx::Font::Weight::NORMAL)
-        .GetNativeFont();
-  }
-
-  return rb
+  return ui::ResourceBundle::GetSharedInstance()
       .GetFontWithDelta(kOmniboxSmallMaterialFontSizeDelta, gfx::Font::NORMAL,
                         gfx::Font::Weight::NORMAL)
       .GetNativeFont();

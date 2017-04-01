@@ -20,14 +20,7 @@ namespace chromeos {
 FORWARD_DECLARE_TEST(DisplayPreferencesTest, PreventStore);
 }  // namespace chromeos
 
-namespace views {
-class Label;
-class Widget;
-}  // namespace views
-
 namespace ash {
-
-class DisplayMode;
 
 // A class which manages the notification of display resolution change and
 // also manages the timeout in case the new resolution is unusable.
@@ -52,8 +45,8 @@ class ASH_EXPORT ResolutionNotificationController
   // DisplayManager::SetDisplayMode().
   void PrepareNotification(
       int64_t display_id,
-      const scoped_refptr<ManagedDisplayMode>& old_resolution,
-      const scoped_refptr<ManagedDisplayMode>& new_resolution,
+      const scoped_refptr<display::ManagedDisplayMode>& old_resolution,
+      const scoped_refptr<display::ManagedDisplayMode>& new_resolution,
       const base::Closure& accept_callback);
 
   // Returns true if the notification is visible or scheduled to be visible and

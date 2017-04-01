@@ -34,7 +34,8 @@ public class UsageAndCrashReportsPreferenceFragment extends PreferenceFragment {
     private void initUsageAndCrashReportsSwitch() {
         ChromeSwitchPreference usageAndCrashReportsSwitch =
                 (ChromeSwitchPreference) findPreference(PREF_USAGE_AND_CRASH_REPORTS_SWITCH);
-        boolean enabled = PrivacyPreferencesManager.getInstance().isUsageAndCrashReportingEnabled();
+        boolean enabled =
+                PrivacyPreferencesManager.getInstance().isUsageAndCrashReportingPermittedByUser();
         usageAndCrashReportsSwitch.setChecked(enabled);
 
         usageAndCrashReportsSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
@@ -48,7 +49,7 @@ public class UsageAndCrashReportsPreferenceFragment extends PreferenceFragment {
         usageAndCrashReportsSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
             @Override
             public boolean isPreferenceControlledByPolicy(Preference preference) {
-                return PrefServiceBridge.getInstance().isCrashReportManaged();
+                return PrefServiceBridge.getInstance().isMetricsReportingManaged();
             }
         });
     }

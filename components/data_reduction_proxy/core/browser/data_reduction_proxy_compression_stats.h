@@ -11,8 +11,8 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <unordered_map>
 
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -43,9 +43,9 @@ class PerSiteDataUsage;
 // |delay| amount of time. If |delay| is zero, the delayed pref service writes
 // directly to the PrefService and does not store the prefs in memory. All
 // prefs must be stored and read on the UI thread.
-class DataReductionProxyCompressionStats : public DataSavingsRecorder {
+class DataReductionProxyCompressionStats {
  public:
-  typedef base::ScopedPtrHashMap<std::string, std::unique_ptr<PerSiteDataUsage>>
+  typedef std::unordered_map<std::string, std::unique_ptr<PerSiteDataUsage>>
       SiteUsageMap;
 
   // Collects and store data usage and compression statistics. Basic data usage
@@ -62,10 +62,12 @@ class DataReductionProxyCompressionStats : public DataSavingsRecorder {
                                      const base::TimeDelta& delay);
   ~DataReductionProxyCompressionStats();
 
-  // DataSavingsRecorder implementation:
+  // Records detailed data usage broken down by connection type and domain.
+  // Assumes that the |data_used| has been recoreded by previous calls to
+  // UpdateContentLengths.
   void UpdateDataSavings(const std::string& data_usage_host,
                          int64_t data_used,
-                         int64_t original_size) override;
+                         int64_t original_size);
 
   // Records detailed data usage broken down by connection type and domain. Also
   // records daily data savings statistics to prefs and reports data savings
@@ -77,9 +79,14 @@ class DataReductionProxyCompressionStats : public DataSavingsRecorder {
                             const scoped_refptr<DataUseGroup>& data_use_group,
                             const std::string& mime_type);
 
-  // Creates a |Value| summary of the persistent state of the network session.
+  // Creates a |Value| summary of the persistent state of the network
+  // statistics.
   // Must be called on the UI thread.
   std::unique_ptr<base::Value> HistoricNetworkStatsInfoToValue();
+
+  // Creates a |Value| summary of the the session network statistics.
+  // Must be called on the UI thread.
+  std::unique_ptr<base::Value> SessionNetworkStatsInfoToValue() const;
 
   // Returns the time in milliseconds since epoch that the last update was made
   // to the daily original and received content lengths.
@@ -90,6 +97,13 @@ class DataReductionProxyCompressionStats : public DataSavingsRecorder {
 
   // Clears all data saving statistics.
   void ClearDataSavingStatistics();
+
+  // Returns the total size of all HTTP content received from the network.
+  int64_t GetHttpReceivedContentLength();
+
+  // Returns the value the total original size of all HTTP content received from
+  // the network.
+  int64_t GetHttpOriginalContentLength();
 
   // Returns a list of all the daily content lengths.
   ContentLengthList GetDailyContentLengths(const char* pref_name);
@@ -126,7 +140,7 @@ class DataReductionProxyCompressionStats : public DataSavingsRecorder {
   friend class DataReductionProxyCompressionStatsTest;
 
   typedef std::map<const char*, int64_t> DataReductionProxyPrefMap;
-  typedef base::ScopedPtrHashMap<const char*, std::unique_ptr<base::ListValue>>
+  typedef std::unordered_map<const char*, std::unique_ptr<base::ListValue>>
       DataReductionProxyListPrefMap;
 
   class DailyContentLengthUpdate;
@@ -192,11 +206,6 @@ class DataReductionProxyCompressionStats : public DataSavingsRecorder {
                               const char* original_size_via_proxy_pref,
                               const char* received_size_via_proxy_pref);
 
-  // Record UMA with data savings bytes and percent over the past
-  // |DataReductionProxy::kNumDaysInHistorySummary| days. These numbers
-  // are displayed to users as their data savings.
-  void RecordUserVisibleDataSavings();
-
   // Record data usage and original size of request broken down by host. |time|
   // is the time at which the data usage occurred. This method should be called
   // in real time, so |time| is expected to be |Time::Now()|.
@@ -259,6 +268,12 @@ class DataReductionProxyCompressionStats : public DataSavingsRecorder {
   // Tracks whether |data_usage_map_| has changes that have not yet been
   // persisted to storage.
   bool data_usage_map_is_dirty_;
+
+  // Total size of all content that has been received over the network.
+  int64_t session_total_received_;
+
+  // Total original size of all content before it was proxied.
+  int64_t session_total_original_;
 
   // Tracks state of loading data usage from storage.
   CurrentDataUsageLoadStatus current_data_usage_load_status_;

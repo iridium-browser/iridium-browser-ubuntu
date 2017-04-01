@@ -7,8 +7,8 @@
 #include "ash/common/system/chromeos/devicetype_utils.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chromeos/arc/arc_auth_service.h"
 #include "chrome/browser/chromeos/arc/arc_optin_uma.h"
+#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/grit/generated_resources.h"
@@ -26,7 +26,7 @@ namespace {
 
 // Ids of the notification shown on first run.
 const char kNotifierId[] = "arc_auth";
-const char kDisplaySoruce[] = "arc_auth_source";
+const char kDisplaySource[] = "arc_auth_source";
 const char kFirstRunNotificationId[] = "arc_auth/first_run";
 
 class ArcAuthNotificationDelegate
@@ -60,10 +60,10 @@ class ArcAuthNotificationDelegate
     StopObserving();
     if (button_index == 0) {
       UpdateOptInActionUMA(arc::OptInActionType::NOTIFICATION_ACCEPTED);
-      arc::ArcAuthService::Get()->EnableArc();
+      arc::ArcSessionManager::Get()->EnableArc();
     } else {
       UpdateOptInActionUMA(arc::OptInActionType::NOTIFICATION_DECLINED);
-      arc::ArcAuthService::Get()->DisableArc();
+      arc::ArcSessionManager::Get()->DisableArc();
     }
   }
 
@@ -107,7 +107,7 @@ void ArcAuthNotification::Show(Profile* profile) {
           l10n_util::GetStringFUTF16(IDS_ARC_NOTIFICATION_MESSAGE,
                                      ash::GetChromeOSDeviceName()),
           resource_bundle.GetImageNamed(IDR_ARC_PLAY_STORE_NOTIFICATION),
-          base::UTF8ToUTF16(kDisplaySoruce), GURL(), notifier_id, data,
+          base::UTF8ToUTF16(kDisplaySource), GURL(), notifier_id, data,
           new ArcAuthNotificationDelegate()));
   message_center::MessageCenter::Get()->AddNotification(
       std::move(notification));

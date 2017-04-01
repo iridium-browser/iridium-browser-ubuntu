@@ -231,6 +231,10 @@ class UI_BASE_EXPORT ResourceBundle {
   // string if the message_id is not found.
   base::string16 GetLocalizedString(int message_id);
 
+  // Get a localized resource (for example, localized image logo) given a
+  // resource id.
+  base::RefCountedMemory* LoadLocalizedResourceBytes(int resource_id);
+
   // Returns a font list derived from the platform-specific "Base" font list.
   // The result is always cached and exists for the lifetime of the process.
   const gfx::FontList& GetFontListWithDelta(
@@ -351,7 +355,7 @@ class UI_BASE_EXPORT ResourceBundle {
   // Fills the |bitmap| given the |resource_id| and |scale_factor|.
   // Returns false if the resource does not exist. This may fall back to
   // the data pack with SCALE_FACTOR_NONE, and when this happens,
-  // |scale_factor| will be set to SCALE_FACTOR_100P.
+  // |scale_factor| will be set to SCALE_FACTOR_NONE.
   bool LoadBitmap(int resource_id,
                   ScaleFactor* scale_factor,
                   SkBitmap* bitmap,

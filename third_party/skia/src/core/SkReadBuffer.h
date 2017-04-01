@@ -23,10 +23,11 @@
 #include "SkShader.h"
 #include "SkTHash.h"
 #include "SkWriteBuffer.h"
-#include "SkXfermode.h"
+#include "SkXfermodePriv.h"
 
 class SkBitmap;
 class SkImage;
+class SkInflator;
 
 #if defined(SK_DEBUG) && defined(SK_BUILD_FOR_MAC)
     #define DEBUG_NON_DETERMINISTIC_ASSERT
@@ -67,6 +68,9 @@ public:
         kAnnotationsMovedToCanvas_Version  = 44,
         kLightingShaderWritesInvNormRotation = 45,
         kBlurMaskFilterWritesOccluder      = 47,
+        kGradientShaderFloatColor_Version  = 49,
+        kXfermodeToBlendMode_Version       = 50,
+        kXfermodeToBlendMode2_Version      = 51,
     };
 
     /**
@@ -76,6 +80,8 @@ public:
         SkASSERT(targetVersion > 0);
         return fVersion > 0 && fVersion < targetVersion;
     }
+
+    uint32_t getVersion() const { return fVersion; }
 
     /** This may be called at most once; most clients of SkReadBuffer should not mess with it. */
     void setVersion(int version) {
@@ -100,8 +106,6 @@ public:
     bool isPtr64Bit() const { return SkToBool(fFlags & kPtrIs64Bit_Flag); }
     bool isValidating() const { return SkToBool(fFlags & kValidation_Flag); }
 
-    SkReader32* getReader32() { return &fReader; }
-
     size_t size() { return fReader.size(); }
     size_t offset() { return fReader.offset(); }
     bool eof() { return fReader.eof(); }
@@ -122,6 +126,7 @@ public:
     virtual void readString(SkString* string);
 
     // common data structures
+    virtual void readColor4f(SkColor4f* color);
     virtual void readPoint(SkPoint* point);
     SkPoint readPoint() { SkPoint p; this->readPoint(&p); return p; }
     virtual void readMatrix(SkMatrix* matrix);
@@ -131,7 +136,7 @@ public:
     virtual void readRegion(SkRegion* region);
 
     virtual void readPath(SkPath* path);
-    void readPaint(SkPaint* paint) { paint->unflatten(*this); }
+    virtual void readPaint(SkPaint* paint) { paint->unflatten(*this); }
 
     virtual SkFlattenable* readFlattenable(SkFlattenable::Type);
     template <typename T> sk_sp<T> readFlattenable() {
@@ -149,6 +154,7 @@ public:
     // binary data and arrays
     virtual bool readByteArray(void* value, size_t size);
     virtual bool readColorArray(SkColor* colors, size_t size);
+    virtual bool readColor4fArray(SkColor4f* colors, size_t size);
     virtual bool readIntArray(int32_t* values, size_t size);
     virtual bool readPointArray(SkPoint* points, size_t size);
     virtual bool readScalarArray(SkScalar* values, size_t size);
@@ -166,14 +172,9 @@ public:
     // helpers to get info about arrays and binary data
     virtual uint32_t getArrayCount();
 
-    /**
-     *  Returns false if the image could not be completely read. In that case, it will be set
-     *  to have width/height, but no pixels.
-     */
     sk_sp<SkImage> readBitmapAsImage();
     sk_sp<SkImage> readImage();
-
-    virtual SkTypeface* readTypeface();
+    virtual sk_sp<SkTypeface> readTypeface();
 
     void setTypefaceArray(SkTypeface* array[], int count) {
         fTFArray = array;
@@ -215,6 +216,11 @@ public:
         return this->validate(index >= 0 && index < count);
     }
 
+    SkInflator* getInflator() const { return fInflator; }
+    void setInflator(SkInflator* inf) { fInflator = inf; }
+
+//    sk_sp<SkImage> inflateImage();
+    
 protected:
     /**
      *  Allows subclass to check if we are using factories for expansion
@@ -261,6 +267,8 @@ private:
     // have decoded.
     int fDecodedBitmapIndex;
 #endif // DEBUG_NON_DETERMINISTIC_ASSERT
+
+    SkInflator* fInflator = nullptr;
 };
 
 #endif // SkReadBuffer_DEFINED

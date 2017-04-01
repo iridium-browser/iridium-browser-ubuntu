@@ -43,6 +43,8 @@
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/webui/profile_helper.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -52,6 +54,7 @@
 #include "components/proximity_auth/screenlock_bridge.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/common/profile_management_switches.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
@@ -59,7 +62,6 @@
 #include "content/public/browser/web_ui.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "grit/components_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -69,7 +71,7 @@
 #include "ui/gfx/image/image_util.h"
 
 #if defined(USE_ASH)
-#include "ash/shell.h"
+#include "ash/shell.h"  // nogncheck
 #endif
 
 namespace {
@@ -92,7 +94,6 @@ const char kKeyIsProfileLoaded[] = "isProfileLoaded";
 
 // JS API callback names.
 const char kJsApiUserManagerInitialize[] = "userManagerInitialize";
-const char kJsApiUserManagerAddUser[] = "addUser";
 const char kJsApiUserManagerAuthLaunchUser[] = "authenticatedLaunchUser";
 const char kJsApiUserManagerLaunchGuest[] = "launchGuest";
 const char kJsApiUserManagerLaunchUser[] = "launchUser";
@@ -405,18 +406,6 @@ void UserManagerScreenHandler::HandleInitialize(const base::ListValue* args) {
   proximity_auth::ScreenlockBridge::Get()->SetLockHandler(this);
 }
 
-void UserManagerScreenHandler::HandleAddUser(const base::ListValue* args) {
-  if (!IsAddPersonEnabled()) {
-    // The 'Add User' UI should not be showing.
-    NOTREACHED();
-    return;
-  }
-  profiles::CreateAndSwitchToNewProfile(
-      base::Bind(&UserManagerScreenHandler::OnSwitchToProfileComplete,
-                 weak_ptr_factory_.GetWeakPtr()),
-      ProfileMetrics::ADD_NEW_USER_MANAGER);
-}
-
 void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
     const base::ListValue* args) {
   const base::Value* profile_path_value;
@@ -469,11 +458,29 @@ void UserManagerScreenHandler::HandleAuthenticatedLaunchUser(
     }
   }
 
-  // In order to support the upgrade case where we have a local hash but no
-  // password token, the user perform a full online reauth.
-  UserManager::ShowReauthDialog(web_ui()->GetWebContents()->GetBrowserContext(),
-                                email_address_,
-                                signin_metrics::Reason::REASON_UNLOCK);
+  content::BrowserContext* browser_context =
+      web_ui()->GetWebContents()->GetBrowserContext();
+
+  if (!email_address_.empty()) {
+    // In order to support the upgrade case where we have a local hash but no
+    // password token, the user must perform a full online reauth.
+    UserManagerProfileDialog::ShowReauthDialog(
+        browser_context, email_address_, signin_metrics::Reason::REASON_UNLOCK);
+  } else if (entry->IsSigninRequired() && entry->IsSupervised()) {
+    // Supervised profile will only be locked when force-sign-in is enabled
+    // and it shouldn't be unlocked. Display the error message directly via
+    // the system profile to avoid profile creation.
+    LoginUIServiceFactory::GetForProfile(
+        Profile::FromWebUI(web_ui())->GetOriginalProfile())
+        ->DisplayLoginResult(nullptr,
+                             l10n_util::GetStringUTF16(
+                                 IDS_SUPERVISED_USER_NOT_ALLOWED_BY_POLICY),
+                             base::string16());
+    UserManagerProfileDialog::ShowDialogAndDisplayErrorMessage(browser_context);
+  } else {
+    // Fresh sign in via user manager without existing email address.
+    UserManagerProfileDialog::ShowSigninDialog(browser_context, profile_path);
+  }
 }
 
 void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
@@ -492,8 +499,7 @@ void UserManagerScreenHandler::HandleRemoveUser(const base::ListValue* args) {
 
   DCHECK(profiles::IsMultipleProfilesEnabled());
 
-  if (switches::IsMaterialDesignUserManager() &&
-      profiles::AreAllNonChildNonSupervisedProfilesLocked()) {
+  if (profiles::AreAllNonChildNonSupervisedProfilesLocked()) {
     web_ui()->CallJavascriptFunctionUnsafe(
         "cr.webUIListenerCallback",
         base::StringValue("show-error-dialog"),
@@ -698,9 +704,9 @@ void UserManagerScreenHandler::OnOAuthError() {
   // Password has changed.  Go through online signin flow.
   DCHECK(!email_address_.empty());
   oauth_client_.reset();
-  UserManager::ShowReauthDialog(web_ui()->GetWebContents()->GetBrowserContext(),
-                                email_address_,
-                                signin_metrics::Reason::REASON_UNLOCK);
+  UserManagerProfileDialog::ShowReauthDialog(
+      web_ui()->GetWebContents()->GetBrowserContext(), email_address_,
+      signin_metrics::Reason::REASON_UNLOCK);
 }
 
 void UserManagerScreenHandler::OnNetworkError(int response_code) {
@@ -712,9 +718,6 @@ void UserManagerScreenHandler::OnNetworkError(int response_code) {
 void UserManagerScreenHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback(kJsApiUserManagerInitialize,
       base::Bind(&UserManagerScreenHandler::HandleInitialize,
-                 base::Unretained(this)));
-  web_ui()->RegisterMessageCallback(kJsApiUserManagerAddUser,
-      base::Bind(&UserManagerScreenHandler::HandleAddUser,
                  base::Unretained(this)));
   web_ui()->RegisterMessageCallback(kJsApiUserManagerAuthLaunchUser,
       base::Bind(&UserManagerScreenHandler::HandleAuthenticatedLaunchUser,
@@ -871,6 +874,18 @@ void UserManagerScreenHandler::GetLocalizedValues(
                                base::string16());
   localized_strings->SetString("publicAccountEnter", base::string16());
   localized_strings->SetString("publicAccountEnterAccessibleName",
+                               base::string16());
+  localized_strings->SetString("publicAccountMonitoringWarning",
+                               base::string16());
+  localized_strings->SetString("publicAccountLearnMore", base::string16());
+  localized_strings->SetString("publicAccountMonitoringInfo", base::string16());
+  localized_strings->SetString("publicAccountMonitoringInfoItem1",
+                               base::string16());
+  localized_strings->SetString("publicAccountMonitoringInfoItem2",
+                               base::string16());
+  localized_strings->SetString("publicAccountMonitoringInfoItem3",
+                               base::string16());
+  localized_strings->SetString("publicAccountMonitoringInfoItem4",
                                base::string16());
   localized_strings->SetString("publicSessionSelectLanguage", base::string16());
   localized_strings->SetString("publicSessionSelectKeyboard", base::string16());

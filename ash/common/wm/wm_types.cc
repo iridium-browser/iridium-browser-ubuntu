@@ -27,6 +27,8 @@ ui::WindowShowState ToWindowShowState(WindowStateType type) {
     case WINDOW_STATE_TYPE_LEFT_SNAPPED:
     case WINDOW_STATE_TYPE_AUTO_POSITIONED:
       return ui::SHOW_STATE_NORMAL;
+
+    // TODO(afakhry): Remove Docked Windows in M58.
     case WINDOW_STATE_TYPE_DOCKED:
       return ui::SHOW_STATE_DOCKED;
     case WINDOW_STATE_TYPE_MINIMIZED:
@@ -38,6 +40,7 @@ ui::WindowShowState ToWindowShowState(WindowStateType type) {
       return ui::SHOW_STATE_INACTIVE;
     case WINDOW_STATE_TYPE_FULLSCREEN:
     case WINDOW_STATE_TYPE_PINNED:
+    case WINDOW_STATE_TYPE_TRUSTED_PINNED:
       return ui::SHOW_STATE_FULLSCREEN;
     case WINDOW_STATE_TYPE_END:
       NOTREACHED();
@@ -49,7 +52,8 @@ ui::WindowShowState ToWindowShowState(WindowStateType type) {
 bool IsMaximizedOrFullscreenOrPinnedWindowStateType(WindowStateType type) {
   return type == WINDOW_STATE_TYPE_MAXIMIZED ||
          type == WINDOW_STATE_TYPE_FULLSCREEN ||
-         type == WINDOW_STATE_TYPE_PINNED;
+         type == WINDOW_STATE_TYPE_PINNED ||
+         type == WINDOW_STATE_TYPE_TRUSTED_PINNED;
 }
 
 }  // namespace wm

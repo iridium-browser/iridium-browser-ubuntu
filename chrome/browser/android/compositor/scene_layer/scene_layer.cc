@@ -11,12 +11,11 @@
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 
-namespace chrome {
 namespace android {
 
 // static
 SceneLayer* SceneLayer::FromJavaObject(JNIEnv* env, jobject jobj) {
-  if (jobj == nullptr)
+  if (!jobj)
     return nullptr;
   return reinterpret_cast<SceneLayer*>(Java_SceneLayer_getNativePtr(env, jobj));
 }
@@ -68,4 +67,3 @@ bool RegisterSceneLayer(JNIEnv* env) {
 }
 
 }  // namespace android
-}  // namespace chrome

@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <list>
+#include <map>
 #include <set>
 
 #include "base/callback.h"
@@ -47,8 +48,8 @@ class BrowsingDataLocalStorageHelper
   // callback. This must be called only in the UI thread.
   virtual void StartFetching(const FetchCallback& callback);
 
-  // Deletes the local storage for the |origin|.
-  virtual void DeleteOrigin(const GURL& origin);
+  // Deletes the local storage for the |origin_url|.
+  virtual void DeleteOrigin(const GURL& origin_url);
 
  protected:
   friend class base::RefCounted<BrowsingDataLocalStorageHelper>;
@@ -70,7 +71,7 @@ class CannedBrowsingDataLocalStorageHelper
 
   // Add a local storage to the set of canned local storages that is returned
   // by this helper.
-  void AddLocalStorage(const GURL& origin);
+  void AddLocalStorage(const GURL& origin_url);
 
   // Clear the list of canned local storages.
   void Reset();
@@ -86,12 +87,13 @@ class CannedBrowsingDataLocalStorageHelper
 
   // BrowsingDataLocalStorageHelper implementation.
   void StartFetching(const FetchCallback& callback) override;
-  void DeleteOrigin(const GURL& origin) override;
+  void DeleteOrigin(const GURL& origin_url) override;
 
  private:
   ~CannedBrowsingDataLocalStorageHelper() override;
 
   std::set<GURL> pending_local_storage_info_;
+  std::multimap<GURL, GURL> pending_origins_to_pending_suborigins_;
 
   DISALLOW_COPY_AND_ASSIGN(CannedBrowsingDataLocalStorageHelper);
 };

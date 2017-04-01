@@ -13,10 +13,10 @@ import sys
 
 from chromite.cbuildbot import cbuildbot_unittest
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import failures_lib
+from chromite.lib import constants
+from chromite.lib import failures_lib
 from chromite.cbuildbot import prebuilts
-from chromite.cbuildbot import results_lib
+from chromite.lib import results_lib
 from chromite.cbuildbot.stages import artifact_stages
 from chromite.cbuildbot.stages import build_stages_unittest
 from chromite.cbuildbot.stages import generic_stages_unittest
@@ -295,23 +295,17 @@ class DebugSymbolsStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def testPerformStageWithSymbols(self):
     """Smoke test for an PerformStage when debugging is enabled"""
-    # Disable parallelism, so we can see mock call counts afterwards.
-    self.StartPatcher(parallel_unittest.ParallelMock())
-
     self._TestPerformStage()
 
     self.assertEqual(self.gen_mock.call_count, 1)
     self.assertEqual(self.upload_mock.call_count, 1)
-    self.assertEqual(self.tar_mock.call_count, 1)
+    self.assertEqual(self.tar_mock.call_count, 2)
 
     self.assertBoardAttrEqual('breakpad_symbols_generated', True)
     self.assertBoardAttrEqual('debug_tarball_generated', True)
 
   def testPerformStageNoSymbols(self):
     """Smoke test for an PerformStage when debugging is disabled"""
-    # Disable parallelism, so we can see mock call counts afterwards.
-    self.StartPatcher(parallel_unittest.ParallelMock())
-
     extra_config = {
         'archive_build_debug': False,
         'vm_tests': False,
@@ -322,18 +316,13 @@ class DebugSymbolsStageTest(generic_stages_unittest.AbstractStageTestCase,
 
     self.assertEqual(self.gen_mock.call_count, 1)
     self.assertEqual(self.upload_mock.call_count, 0)
-    self.assertEqual(self.tar_mock.call_count, 1)
+    self.assertEqual(self.tar_mock.call_count, 2)
 
     self.assertBoardAttrEqual('breakpad_symbols_generated', True)
     self.assertBoardAttrEqual('debug_tarball_generated', True)
 
   def testGenerateCrashStillNotifies(self):
     """Crashes in symbol generation should still notify external events."""
-    # self.skipTest('Test skipped due to crbug.com/363339')
-
-    # Disable parallelism, so we can see mock call counts afterwards.
-    self.StartPatcher(parallel_unittest.ParallelMock())
-
     class TestError(Exception):
       """Unique test exception"""
 

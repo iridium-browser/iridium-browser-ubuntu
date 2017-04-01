@@ -43,76 +43,108 @@ class GLES2Interface;
 
 namespace blink {
 class ExceptionState;
-class GraphicsContext;
 class ImageBitmapOptions;
 
-class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement, public CanvasImageSource, public ImageBitmapSource {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static HTMLVideoElement* create(Document&);
-    DECLARE_VIRTUAL_TRACE();
+class CORE_EXPORT HTMLVideoElement final : public HTMLMediaElement,
+                                           public CanvasImageSource,
+                                           public ImageBitmapSource {
+  DEFINE_WRAPPERTYPEINFO();
 
-    unsigned videoWidth() const;
-    unsigned videoHeight() const;
+ public:
+  static HTMLVideoElement* create(Document&);
+  DECLARE_VIRTUAL_TRACE();
 
-    // Fullscreen
-    void webkitEnterFullscreen();
-    void webkitExitFullscreen();
-    bool webkitSupportsFullscreen();
-    bool webkitDisplayingFullscreen();
-    bool usesOverlayFullscreenVideo() const override;
+  unsigned videoWidth() const;
+  unsigned videoHeight() const;
 
-    // Statistics
-    unsigned webkitDecodedFrameCount() const;
-    unsigned webkitDroppedFrameCount() const;
+  // Fullscreen
+  void webkitEnterFullscreen();
+  void webkitExitFullscreen();
+  bool webkitSupportsFullscreen();
+  bool webkitDisplayingFullscreen();
+  bool usesOverlayFullscreenVideo() const override;
 
-    // Used by canvas to gain raw pixel access
-    void paintCurrentFrame(SkCanvas*, const IntRect&, const SkPaint*) const;
+  // Statistics
+  unsigned webkitDecodedFrameCount() const;
+  unsigned webkitDroppedFrameCount() const;
 
-    // Used by WebGL to do GPU-GPU textures copy if possible.
-    bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface*, GLuint texture, GLenum internalFormat, GLenum type, bool premultiplyAlpha, bool flipY);
+  // Used by canvas to gain raw pixel access
+  void paintCurrentFrame(SkCanvas*, const IntRect&, const SkPaint*) const;
 
-    bool shouldDisplayPosterImage() const { return getDisplayMode() == Poster; }
+  // Used by WebGL to do GPU-GPU textures copy if possible.
+  // The caller is responsible for allocating the destination texture.
+  bool copyVideoTextureToPlatformTexture(gpu::gles2::GLES2Interface*,
+                                         GLuint texture,
+                                         bool premultiplyAlpha,
+                                         bool flipY);
 
-    bool hasAvailableVideoFrame() const;
+  // Used by WebGL to do CPU-GPU texture upload if possible.
+  bool texImageImpl(WebMediaPlayer::TexImageFunctionID,
+                    GLenum target,
+                    gpu::gles2::GLES2Interface*,
+                    GLint level,
+                    GLint internalformat,
+                    GLenum format,
+                    GLenum type,
+                    GLint xoffset,
+                    GLint yoffset,
+                    GLint zoffset,
+                    bool flipY,
+                    bool premultiplyAlpha);
 
-    KURL posterImageURL() const override;
+  bool shouldDisplayPosterImage() const { return getDisplayMode() == Poster; }
 
-    // CanvasImageSource implementation
-    PassRefPtr<Image> getSourceImageForCanvas(SourceImageStatus*, AccelerationHint, SnapshotReason, const FloatSize&) const override;
-    bool isVideoElement() const override { return true; }
-    bool wouldTaintOrigin(SecurityOrigin*) const override;
-    FloatSize elementSize(const FloatSize&) const override;
-    const KURL& sourceURL() const override { return currentSrc(); }
-    bool isHTMLVideoElement() const override { return true; }
-    int sourceWidth() override { return videoWidth(); }
-    int sourceHeight() override { return videoHeight(); }
+  bool hasAvailableVideoFrame() const;
 
-    // ImageBitmapSource implementation
-    IntSize bitmapSourceSize() const override;
-    ScriptPromise createImageBitmap(ScriptState*, EventTarget&, Optional<IntRect> cropRect, const ImageBitmapOptions&, ExceptionState&) override;
+  KURL posterImageURL() const override;
 
-private:
-    HTMLVideoElement(Document&);
+  // CanvasImageSource implementation
+  PassRefPtr<Image> getSourceImageForCanvas(SourceImageStatus*,
+                                            AccelerationHint,
+                                            SnapshotReason,
+                                            const FloatSize&) const override;
+  bool isVideoElement() const override { return true; }
+  bool wouldTaintOrigin(SecurityOrigin*) const override;
+  FloatSize elementSize(const FloatSize&) const override;
+  const KURL& sourceURL() const override { return currentSrc(); }
+  bool isHTMLVideoElement() const override { return true; }
+  int sourceWidth() override { return videoWidth(); }
+  int sourceHeight() override { return videoHeight(); }
+  // Video elements currently always go through RAM when used as a canvas image
+  // source.
+  bool isAccelerated() const override { return false; }
 
-    bool layoutObjectIsNeeded(const ComputedStyle&) override;
-    LayoutObject* createLayoutObject(const ComputedStyle&) override;
-    void attachLayoutTree(const AttachContext& = AttachContext()) override;
-    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
-    bool isPresentationAttribute(const QualifiedName&) const override;
-    void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
-    bool isURLAttribute(const Attribute&) const override;
-    const AtomicString imageSourceURL() const override;
+  // ImageBitmapSource implementation
+  IntSize bitmapSourceSize() const override;
+  ScriptPromise createImageBitmap(ScriptState*,
+                                  EventTarget&,
+                                  Optional<IntRect> cropRect,
+                                  const ImageBitmapOptions&,
+                                  ExceptionState&) override;
 
-    void updateDisplayState() override;
-    void didMoveToNewDocument(Document& oldDocument) override;
-    void setDisplayMode(DisplayMode) override;
+ private:
+  HTMLVideoElement(Document&);
 
-    Member<HTMLImageLoader> m_imageLoader;
+  bool layoutObjectIsNeeded(const ComputedStyle&) override;
+  LayoutObject* createLayoutObject(const ComputedStyle&) override;
+  void attachLayoutTree(const AttachContext& = AttachContext()) override;
+  void parseAttribute(const AttributeModificationParams&) override;
+  bool isPresentationAttribute(const QualifiedName&) const override;
+  void collectStyleForPresentationAttribute(const QualifiedName&,
+                                            const AtomicString&,
+                                            MutableStylePropertySet*) override;
+  bool isURLAttribute(const Attribute&) const override;
+  const AtomicString imageSourceURL() const override;
 
-    AtomicString m_defaultPosterURL;
+  void updateDisplayState() override;
+  void didMoveToNewDocument(Document& oldDocument) override;
+  void setDisplayMode(DisplayMode) override;
+
+  Member<HTMLImageLoader> m_imageLoader;
+
+  AtomicString m_defaultPosterURL;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // HTMLVideoElement_h
+#endif  // HTMLVideoElement_h

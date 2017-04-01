@@ -2495,7 +2495,8 @@ _hasMixinRules: function (rules) {
 return rules[0].selector.indexOf(this.VAR_START) === 0;
 },
 removeCustomProps: function (cssText) {
-return cssText;
+cssText = this.removeCustomPropAssignment(cssText);
+return this.removeCustomPropApply(cssText);
 },
 removeCustomPropAssignment: function (cssText) {
 return cssText.replace(this._rx.customProp, '').replace(this._rx.mixinProp, '');
@@ -2529,7 +2530,7 @@ AT_START: '@'
 var settings = Polymer.Settings;
 return {
 NATIVE_VARIABLES: Polymer.Settings.useNativeCSSProperties,
-MODULE_STYLES_SELECTOR: 'style:not([no-process]), link[rel=import][type~=css], template',
+MODULE_STYLES_SELECTOR: 'style, link[rel=import][type~=css], template',
 INCLUDE_ATTR: 'include',
 toCssText: function (rules, callback) {
 if (typeof rules === 'string') {

@@ -26,6 +26,19 @@ GUID kMediaSubTypeHDYC = {0x43594448,
                           0x0010,
                           {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
 
+GUID kMediaSubTypeZ16 = {0x2036315a,
+                         0x0000,
+                         0x0010,
+                         {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+GUID kMediaSubTypeINVZ = {0x5a564e49,
+                          0x2d90,
+                          0x4a58,
+                          {0x92, 0x0b, 0x77, 0x3f, 0x1f, 0x2c, 0x55, 0x6b}};
+GUID kMediaSubTypeY16 = {0x20363159,
+                         0x0000,
+                         0x0010,
+                         {0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71}};
+
 SinkFilterObserver::~SinkFilterObserver() {
 }
 
@@ -37,10 +50,6 @@ void SinkFilter::SetRequestedMediaFormat(VideoPixelFormat pixel_format,
                                          float frame_rate,
                                          const BITMAPINFOHEADER& info_header) {
   input_pin_->SetRequestedMediaFormat(pixel_format, frame_rate, info_header);
-}
-
-const VideoCaptureFormat& SinkFilter::ResultingFormat() const {
-  return input_pin_->resulting_format();
 }
 
 size_t SinkFilter::NoOfPins() {

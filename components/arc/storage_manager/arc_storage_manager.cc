@@ -14,8 +14,6 @@ namespace arc {
 
 namespace {
 
-const int kMinInstanceVersion = 1;  // See storage_manager.mojom.
-
 // This class is owned by ArcServiceManager so that it is safe to use this raw
 // pointer as the singleton reference.
 ArcStorageManager* g_arc_storage_manager = nullptr;
@@ -40,49 +38,32 @@ ArcStorageManager* ArcStorageManager::Get() {
 }
 
 bool ArcStorageManager::OpenPrivateVolumeSettings() {
-  auto* storage_manager_instance = GetStorageManagerInstance();
-  if (!storage_manager_instance) {
+  auto* storage_manager_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->storage_manager(), OpenPrivateVolumeSettings);
+  if (!storage_manager_instance)
     return false;
-  }
   storage_manager_instance->OpenPrivateVolumeSettings();
   return true;
 }
 
 bool ArcStorageManager::GetApplicationsSize(
     const GetApplicationsSizeCallback& callback) {
-  auto* storage_manager_instance = GetStorageManagerInstance();
-  if (!storage_manager_instance) {
+  auto* storage_manager_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->storage_manager(), GetApplicationsSize);
+  if (!storage_manager_instance)
     return false;
-  }
   storage_manager_instance->GetApplicationsSize(callback);
   return true;
 }
 
 bool ArcStorageManager::DeleteApplicationsCache(
     const base::Callback<void()>& callback) {
-  auto* storage_manager_instance = GetStorageManagerInstance();
-  if (!storage_manager_instance) {
+  auto* storage_manager_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->storage_manager(), DeleteApplicationsCache);
+  if (!storage_manager_instance)
     return false;
-  }
   storage_manager_instance->DeleteApplicationsCache(callback);
   return true;
-}
-
-mojom::StorageManagerInstance* ArcStorageManager::GetStorageManagerInstance() {
-  auto* bridge_service = arc_bridge_service();
-  auto* storage_manager_instance =
-      bridge_service->storage_manager()->instance();
-  if (!storage_manager_instance) {
-    DLOG(WARNING) << "ARC storage manager instance is not ready.";
-    return nullptr;
-  }
-  auto storage_manager_version = bridge_service->storage_manager()->version();
-  if (storage_manager_version < kMinInstanceVersion) {
-    DLOG(ERROR) << "ARC storage manager instance (version "
-                << storage_manager_version << ") is too old.";
-    return nullptr;
-  }
-  return storage_manager_instance;
 }
 
 }  // namespace arc

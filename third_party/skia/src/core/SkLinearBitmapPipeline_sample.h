@@ -10,6 +10,7 @@
 
 #include <tuple>
 
+#include "SkAutoMalloc.h"
 #include "SkColor.h"
 #include "SkColorPriv.h"
 #include "SkFixed.h"
@@ -65,15 +66,17 @@ template <>
 class PixelConverter<kAlpha_8_SkColorType, kLinear_SkGammaType> {
 public:
     using Element = uint8_t;
-    PixelConverter(const SkPixmap& srcPixmap, SkColor tintColor)
-        : fTintColor{set_alpha(Sk4f_from_SkColor(tintColor), 1.0f)} { }
+    PixelConverter(const SkPixmap& srcPixmap, SkColor tintColor) {
+        fTintColor = SkColor4f::FromColor(tintColor);
+        fTintColor.fA = 1.0f;
+    }
 
     Sk4f toSk4f(const Element pixel) const {
-        return fTintColor * (pixel * (1.0f/255.0f));
+        return Sk4f::Load(&fTintColor) * (pixel * (1.0f/255.0f));
     }
 
 private:
-    const Sk4f fTintColor;
+    SkColor4f fTintColor;
 };
 
 template <SkGammaType gammaType>
@@ -207,7 +210,7 @@ public:
     void get4Pixels(
         const void* src, int index, Sk4f* px0, Sk4f* px1, Sk4f* px2, Sk4f* px3) const {
         fPixelAccessor->get4Pixels(src, index, px0, px1, px2, px3);
-    };
+    }
 
     Sk4f getPixelFromRow(const void* row, int index) const {
         return fPixelAccessor->getPixelFromRow(row, index);

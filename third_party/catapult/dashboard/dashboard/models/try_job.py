@@ -12,13 +12,14 @@ They are also used in /auto_bisect to restart unsuccessful bisect jobs.
 
 import datetime
 import json
+import logging
 
 from google.appengine.ext import ndb
 
 from dashboard import bisect_stats
 from dashboard.models import bug_data
-from dashboard import buildbucket_service
 from dashboard.models import internal_only_model
+from dashboard.services import buildbucket_service
 
 
 class TryJob(internal_only_model.InternalOnlyModel):
@@ -85,12 +86,16 @@ class TryJob(internal_only_model.InternalOnlyModel):
   def SetStaled(self):
     self.status = 'staled'
     self.put()
+    logging.info('Updated status to staled')
+    # TODO(sullivan, dtu): what is the purpose of 'staled' status? Doesn't it
+    # just prevent updating jobs older than 24 hours???
     # TODO(chrisphan): Add 'staled' state to bug_data and bisect_stats.
     if self.bug_id:
       bug_data.SetBisectStatus(self.bug_id, 'failed')
     bisect_stats.UpdateBisectStats(self.bot, 'failed')
 
   def SetCompleted(self):
+    logging.info('Updated status to completed')
     self.status = 'completed'
     self.put()
     if self.bug_id:
@@ -106,14 +111,23 @@ class TryJob(internal_only_model.InternalOnlyModel):
       return
     job_info = buildbucket_service.GetJobStatus(self.buildbucket_job_id)
     data = job_info.get('build', {})
-    # Proceed if the job failed and the job status has
-    # not been updated
-    if data.get('result') != 'FAILURE' or self.status == 'failed':
+
+    # Since the job is completed successfully, results_data must
+    # have been set appropriately by the bisector.
+    # The buildbucket job's 'status' and 'result' fields are documented here:
+    # https://goto.google.com/bb_status
+    if data.get('status') == 'COMPLETED' and data.get('result') == 'SUCCESS':
       return
+
+    # Proceed if the job failed or cancelled
+    logging.info('Job failed. Buildbucket id %s', self.buildbucket_job_id)
     data['result_details'] = json.loads(data['result_details_json'])
+    # There are various failure and cancellation reasons for a buildbucket
+    # job to fail as listed in https://goto.google.com/bb_status.
     job_updates = {
         'status': 'failed',
-        'failure_reason': data.get('failure_reason'),
+        'failure_reason': (data.get('cancelation_reason') or
+                           data.get('failure_reason')),
         'buildbot_log_url': data.get('url')
     }
     details = data.get('result_details')
@@ -139,3 +153,5 @@ class TryJob(internal_only_model.InternalOnlyModel):
     self.last_ran_timestamp = datetime.datetime.fromtimestamp(
         float(data['updated_ts'])/1000000)
     self.put()
+    logging.info('updated status to failed.')
+

@@ -79,52 +79,28 @@ class TemplateURLRef {
 
     struct ContextualSearchParams {
       ContextualSearchParams();
-      // Used when the content is sent in the HTTP header instead of as CGI
-      // parameters.
-      // TODO(donnd): Remove base_page_url and selection parameters once
-      // they are logged from the HTTP header.
-      ContextualSearchParams(const int version,
-                             const std::string& selection,
-                             const std::string& base_page_url,
-                             const bool resolve);
-      // TODO(donnd): Delete constructor once Clank, iOS, and tests no
-      // longer depend on it.
-      ContextualSearchParams(const int version,
-                             const size_t start,
-                             const size_t end,
-                             const std::string& selection,
-                             const std::string& content,
-                             const std::string& base_page_url,
-                             const std::string& encoding,
-                             const bool resolve);
+      // Modern constructor, used when the content is sent in the HTTP header
+      // instead of as CGI parameters.
+      // The |home_country| is an ISO country code for the country that the user
+      // considers their permanent home (which may be different from the country
+      // they are currently visiting).  Pass an empty string if none available.
+      ContextualSearchParams(int version,
+                             int contextual_cards_version,
+                             const std::string& home_country);
       ContextualSearchParams(const ContextualSearchParams& other);
       ~ContextualSearchParams();
 
       // The version of contextual search.
       int version;
 
-      // Offset into the page content of the start of the user selection.
-      size_t start;
+      // The version of Contextual Cards data to request.
+      // A value of 0 indicates no data needed.
+      int contextual_cards_version;
 
-      // Offset into the page content of the end of the user selection.
-      size_t end;
-
-      // The user selection.
-      std::string selection;
-
-      // The text including and surrounding the user selection.
-      std::string content;
-
-      // The URL of the page containing the user selection.
-      std::string base_page_url;
-
-      // The encoding of content.
-      std::string encoding;
-
-      // If true, the server will generate a search term based on the user
-      // selection and context.  Otherwise the user selection will be used as-is
-      // as the search term.
-      bool resolve;
+      // The locale of the user's home country in an ISO country code format,
+      // or an empty string if not available.  This indicates where the user
+      // resides, not where they currently are.
+      std::string home_country;
     };
 
     // The search terms (query).
@@ -499,15 +475,15 @@ class TemplateURL {
     NORMAL_CONTROLLED_BY_EXTENSION,
     // The keyword associated with an extension that uses the Omnibox API.
     OMNIBOX_API_EXTENSION,
+    // Installed only on this device. Should not be synced.
+    LOCAL,
   };
 
   // An AssociatedExtensionInfo represents information about the extension that
   // added the search engine.
   struct AssociatedExtensionInfo {
-    AssociatedExtensionInfo(Type type, const std::string& extension_id);
+    explicit AssociatedExtensionInfo(const std::string& extension_id);
     ~AssociatedExtensionInfo();
-
-    Type type;
 
     std::string extension_id;
 
@@ -519,7 +495,7 @@ class TemplateURL {
     base::Time install_time;
   };
 
-  explicit TemplateURL(const TemplateURLData& data);
+  explicit TemplateURL(const TemplateURLData& data, Type type = NORMAL);
   ~TemplateURL();
 
   // Generates a suitable keyword for the specified url, which must be valid.
@@ -572,11 +548,6 @@ class TemplateURL {
 
   const GURL& originating_url() const { return data_.originating_url; }
 
-  bool show_in_default_list() const { return data_.show_in_default_list; }
-  // Returns true if show_in_default_list() is true and this TemplateURL has a
-  // TemplateURLRef that supports replacement.
-  bool ShowInDefaultList(const SearchTermsData& search_terms_data) const;
-
   bool safe_for_autoreplace() const { return data_.safe_for_autoreplace; }
 
   const std::vector<std::string>& input_encodings() const {
@@ -587,6 +558,7 @@ class TemplateURL {
 
   base::Time date_created() const { return data_.date_created; }
   base::Time last_modified() const { return data_.last_modified; }
+  base::Time last_visited() const { return data_.last_visited; }
 
   bool created_by_policy() const { return data_.created_by_policy; }
 
@@ -613,6 +585,8 @@ class TemplateURL {
     return contextual_search_url_ref_;
   }
 
+  Type type() const { return type_; }
+
   // This setter shouldn't be used except by TemplateURLService and
   // TemplateURLServiceClient implementations.
   void set_extension_info(
@@ -637,8 +611,6 @@ class TemplateURL {
   // |other|.
   bool HasSameKeywordAs(const TemplateURLData& other,
                         const SearchTermsData& search_terms_data) const;
-
-  Type GetType() const;
 
   // Returns the id of the extension that added this search engine. Only call
   // this for TemplateURLs of type NORMAL_CONTROLLED_BY_EXTENSION or
@@ -754,6 +726,8 @@ class TemplateURL {
   TemplateURLRef new_tab_url_ref_;
   TemplateURLRef contextual_search_url_ref_;
   std::unique_ptr<AssociatedExtensionInfo> extension_info_;
+
+  const Type type_;
 
   // Caches the computed engine type across successive calls to GetEngineType().
   mutable SearchEngineType engine_type_;

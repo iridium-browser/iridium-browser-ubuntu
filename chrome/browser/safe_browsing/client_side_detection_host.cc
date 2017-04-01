@@ -5,12 +5,13 @@
 #include "chrome/browser/safe_browsing/client_side_detection_host.h"
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -20,9 +21,10 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
-#include "chrome/common/safe_browsing/safebrowsing_messages.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/common/safebrowsing_messages.h"
 #include "components/safe_browsing_db/database_manager.h"
+#include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_details.h"
@@ -407,7 +409,7 @@ void ClientSideDetectionHost::DidNavigateMainFrame(
 }
 
 void ClientSideDetectionHost::OnSafeBrowsingHit(
-    const SafeBrowsingUIManager::UnsafeResource& resource) {
+    const security_interstitials::UnsafeResource& resource) {
   if (!web_contents())
     return;
 
@@ -420,7 +422,7 @@ void ClientSideDetectionHost::OnSafeBrowsingHit(
   if (web_contents() != resource.web_contents_getter.Run())
     return;
 
-  NavigationEntry *entry = resource.GetNavigationEntryForResource();
+  NavigationEntry* entry = resource.GetNavigationEntryForResource();
   if (!entry)
     return;
 
@@ -429,7 +431,7 @@ void ClientSideDetectionHost::OnSafeBrowsingHit(
 
   // We also keep the resource around in order to be able to send the
   // malicious URL to the server.
-  unsafe_resource_.reset(new SafeBrowsingUIManager::UnsafeResource(resource));
+  unsafe_resource_.reset(new security_interstitials::UnsafeResource(resource));
   unsafe_resource_->callback.Reset();  // Don't do anything stupid.
 }
 
@@ -529,7 +531,7 @@ void ClientSideDetectionHost::OnPhishingDetectionDone(
     // through.
     if (verdict->is_phishing() || DidShowSBInterstitial()) {
       if (DidShowSBInterstitial()) {
-        browse_info_->unsafe_resource.reset(unsafe_resource_.release());
+        browse_info_->unsafe_resource = std::move(unsafe_resource_);
       }
       // Start browser-side feature extraction.  Once we're done it will send
       // the client verdict request.
@@ -553,7 +555,7 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(GURL phishing_url,
   if (is_phishing) {
     DCHECK(web_contents());
     if (ui_manager_.get()) {
-      SafeBrowsingUIManager::UnsafeResource resource;
+      security_interstitials::UnsafeResource resource;
       resource.url = phishing_url;
       resource.original_url = phishing_url;
       resource.is_subresource = false;
@@ -589,7 +591,7 @@ void ClientSideDetectionHost::MaybeShowMalwareWarning(GURL original_url,
   if (is_malware && malware_url.is_valid() && original_url.is_valid()) {
     DCHECK(web_contents());
     if (ui_manager_.get()) {
-      SafeBrowsingUIManager::UnsafeResource resource;
+      security_interstitials::UnsafeResource resource;
       resource.url = malware_url;
       resource.original_url = original_url;
       resource.is_subresource = (malware_url.host() != original_url.host());
@@ -632,9 +634,7 @@ void ClientSideDetectionHost::FeatureExtractionDone(
   // Send ping even if the browser feature extraction failed.
   csd_service_->SendClientReportPhishingRequest(
       request.release(),  // The service takes ownership of the request object.
-      profile->GetPrefs()->GetBoolean(
-          prefs::kSafeBrowsingExtendedReportingEnabled),
-      callback);
+      IsExtendedReportingEnabled(*profile->GetPrefs()), callback);
 }
 
 void ClientSideDetectionHost::MalwareFeatureExtractionDone(
@@ -644,7 +644,7 @@ void ClientSideDetectionHost::MalwareFeatureExtractionDone(
   DVLOG(2) << "Malware Feature extraction done for URL: " << request->url()
            << ", with badip url count:" << request->bad_ip_url_info_size();
   UMA_HISTOGRAM_BOOLEAN(
-      "SBClientMalware.ResourceUrlMatchesBadIp",
+      "SBClientMalware.ResourceUrlMatchedBadIp",
       request->bad_ip_url_info_size() > 0);
   // Send ping if there is matching features.
   if (feature_extraction_success && request->bad_ip_url_info_size() > 0) {

@@ -21,6 +21,9 @@ class PRINTING_EXPORT PrintingContextWin : public PrintingContext {
   explicit PrintingContextWin(Delegate* delegate);
   ~PrintingContextWin() override;
 
+  // Initializes with predefined settings.
+  Result InitWithSettingsForTest(const PrintSettings& settings);
+
   // PrintingContext implementation.
   void AskUserForSettings(
       int max_pages,
@@ -32,14 +35,13 @@ class PRINTING_EXPORT PrintingContextWin : public PrintingContext {
   Result UpdatePrinterSettings(bool external_preview,
                                bool show_system_dialog,
                                int page_count) override;
-  Result InitWithSettings(const PrintSettings& settings) override;
   Result NewDocument(const base::string16& document_name) override;
   Result NewPage() override;
   Result PageDone() override;
   Result DocumentDone() override;
   void Cancel() override;
   void ReleaseContext() override;
-  gfx::NativeDrawingContext context() const override;
+  skia::NativeDrawingContext context() const override;
 
  protected:
   static HWND GetRootWindow(gfx::NativeView view);
@@ -48,8 +50,6 @@ class PRINTING_EXPORT PrintingContextWin : public PrintingContext {
   // its margins.
   virtual Result InitializeSettings(const base::string16& device_name,
                                     DEVMODE* dev_mode);
-
-  HDC contest() const { return context_; }
 
   void set_context(HDC context) { context_ = context; }
 

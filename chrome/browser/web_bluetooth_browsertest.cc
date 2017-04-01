@@ -31,9 +31,12 @@ namespace {
 class WebBluetoothTest : public InProcessBrowserTest {
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    // This is needed while Web Bluetooth is an Origin Trial, but can go away
-    // once it ships globally.
-    command_line->AppendSwitch(switches::kEnableWebBluetooth);
+    // TODO(juncai): Remove this switch once Web Bluetooth is supported on Linux
+    // and Windows.
+    // https://crbug.com/570344
+    // https://crbug.com/507419
+    command_line->AppendSwitch(
+        switches::kEnableExperimentalWebPlatformFeatures);
     InProcessBrowserTest::SetUpCommandLine(command_line);
   }
 
@@ -78,7 +81,7 @@ IN_PROC_BROWSER_TEST_F(WebBluetoothTest, WebBluetoothAfterCrash) {
   crash_observer.Wait();
 
   // Reload tab.
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   content::WaitForLoadStop(
       browser()->tab_strip_model()->GetActiveWebContents());
 
@@ -123,32 +126,47 @@ IN_PROC_BROWSER_TEST_F(WebBluetoothTest, KillSwitchShouldBlock) {
               testing::MatchesRegex("NotFoundError: .*globally disabled.*"));
 }
 
-// Tests that using Finch field trial parameters for blacklist additions has
+// Tests that using Finch field trial parameters for blocklist additions has
 // the effect of rejecting requestDevice calls.
-IN_PROC_BROWSER_TEST_F(WebBluetoothTest, BlacklistShouldBlock) {
+IN_PROC_BROWSER_TEST_F(WebBluetoothTest, BlocklistShouldBlock) {
   // Fake the BluetoothAdapter to say it's present.
   scoped_refptr<device::MockBluetoothAdapter> adapter =
       new testing::NiceMock<device::MockBluetoothAdapter>;
   EXPECT_CALL(*adapter, IsPresent()).WillRepeatedly(Return(true));
   device::BluetoothAdapterFactory::SetAdapterForTesting(adapter);
 
-  std::map<std::string, std::string> params;
-  params["blacklist_additions"] = "ee01:e";
-  variations::AssociateVariationParams("WebBluetoothBlacklist", "TestGroup",
-                                       params);
-  base::FieldTrialList::CreateFieldTrial("WebBluetoothBlacklist", "TestGroup");
+  if (base::FieldTrialList::TrialExists("WebBluetoothBlocklist")) {
+    LOG(INFO) << "WebBluetoothBlocklist field trial already configured.";
+    ASSERT_NE(variations::GetVariationParamValue("WebBluetoothBlocklist",
+                                                 "blocklist_additions")
+                  .find("ed5f25a4"),
+              std::string::npos)
+        << "ERROR: WebBluetoothBlocklist field trial being tested in\n"
+           "testing/variations/fieldtrial_testing_config_*.json must\n"
+           "include this test's random UUID 'ed5f25a4' in\n"
+           "blocklist_additions.\n";
+  } else {
+    LOG(INFO) << "Creating WebBluetoothBlocklist field trial for test.";
+    // Create a field trial with test parameter.
+    std::map<std::string, std::string> params;
+    params["blocklist_additions"] = "ed5f25a4:e";
+    variations::AssociateVariationParams("WebBluetoothBlocklist", "TestGroup",
+                                         params);
+    base::FieldTrialList::CreateFieldTrial("WebBluetoothBlocklist",
+                                           "TestGroup");
+  }
 
   std::string rejection;
   EXPECT_TRUE(content::ExecuteScriptAndExtractString(
       web_contents_,
-      "navigator.bluetooth.requestDevice({filters: [{services: [0xee01]}]})"
+      "navigator.bluetooth.requestDevice({filters: [{services: [0xed5f25a4]}]})"
       "  .then(() => { domAutomationController.send('Success'); },"
       "        reason => {"
       "      domAutomationController.send(reason.name + ': ' + reason.message);"
       "  });",
       &rejection));
   EXPECT_THAT(rejection,
-              testing::MatchesRegex("SecurityError: .*blacklisted UUID.*"));
+              testing::MatchesRegex("SecurityError: .*blocklisted UUID.*"));
 }
 
 }  // namespace

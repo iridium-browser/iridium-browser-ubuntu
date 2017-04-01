@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/simple_message_box_internal.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/startup_metric_utils/browser/startup_metric_utils.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 namespace chrome {
@@ -82,6 +82,11 @@ MessageBoxResult ShowQuestionMessageBox(gfx::NativeWindow parent,
                                         const base::string16& message) {
   return ShowMessageBox(parent, title, message, base::string16(),
                         MESSAGE_BOX_TYPE_QUESTION);
+}
+
+bool CloseMessageBoxForTest(bool accept) {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 }  // namespace chrome

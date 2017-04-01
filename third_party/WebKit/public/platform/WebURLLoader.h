@@ -35,6 +35,10 @@
 #include "WebURLRequest.h"
 #include <stdint.h>
 
+namespace base {
+class SingleThreadTaskRunner;
+}  // namespace base
+
 namespace blink {
 
 class WebData;
@@ -44,41 +48,49 @@ class WebURLResponse;
 struct WebURLError;
 
 class WebURLLoader {
-public:
-    // The WebURLLoader may be deleted in a call to its client.
-    virtual ~WebURLLoader() {}
+ public:
+  // The WebURLLoader may be deleted in a call to its client.
+  virtual ~WebURLLoader() {}
 
-    // Load the request synchronously, returning results directly to the
-    // caller upon completion.  There is no mechanism to interrupt a
-    // synchronous load!!
-    virtual void loadSynchronously(const WebURLRequest&,
-        WebURLResponse&, WebURLError&, WebData&,
-        int64_t& encodedDataLength) = 0;
+  // Load the request synchronously, returning results directly to the
+  // caller upon completion.  There is no mechanism to interrupt a
+  // synchronous load!!
+  virtual void loadSynchronously(const WebURLRequest&,
+                                 WebURLResponse&,
+                                 WebURLError&,
+                                 WebData&,
+                                 int64_t& encodedDataLength,
+                                 int64_t& encodedBodyLength) = 0;
 
-    // Load the request asynchronously, sending notifications to the given
-    // client.  The client will receive no further notifications if the
-    // loader is disposed before it completes its work.
-    virtual void loadAsynchronously(const WebURLRequest&,
-        WebURLLoaderClient*) = 0;
+  // Load the request asynchronously, sending notifications to the given
+  // client.  The client will receive no further notifications if the
+  // loader is disposed before it completes its work.
+  virtual void loadAsynchronously(const WebURLRequest&,
+                                  WebURLLoaderClient*) = 0;
 
-    // Cancels an asynchronous load.  This will appear as a load error to
-    // the client.
-    virtual void cancel() = 0;
+  // Cancels an asynchronous load.  This will appear as a load error to
+  // the client.
+  virtual void cancel() = 0;
 
-    // Suspends/resumes an asynchronous load.
-    virtual void setDefersLoading(bool) = 0;
+  // Suspends/resumes an asynchronous load.
+  virtual void setDefersLoading(bool) = 0;
 
-    // Notifies the loader that the priority of a WebURLRequest has changed from
-    // its previous value. For example, a preload request starts with low
-    // priority, but may increase when the resource is needed for rendering.
-    virtual void didChangePriority(WebURLRequest::Priority newPriority) { }
-    virtual void didChangePriority(WebURLRequest::Priority newPriority, int intraPriorityValue) { didChangePriority(newPriority); }
+  // Notifies the loader that the priority of a WebURLRequest has changed from
+  // its previous value. For example, a preload request starts with low
+  // priority, but may increase when the resource is needed for rendering.
+  virtual void didChangePriority(WebURLRequest::Priority newPriority) {}
+  virtual void didChangePriority(WebURLRequest::Priority newPriority,
+                                 int intraPriorityValue) {
+    didChangePriority(newPriority);
+  }
 
-    // Sets the task runner for which any loading tasks should be posted on.
-    // Takes ownership of the WebTaskRunner.
-    virtual void setLoadingTaskRunner(WebTaskRunner*) = 0;
+  // Sets the task runner for which any loading tasks should be posted on.
+  // Use WebTaskRunner version when it's called from core or module directory,
+  // since we don't directly expose base to them.
+  BLINK_PLATFORM_EXPORT void setLoadingTaskRunner(WebTaskRunner*);
+  virtual void setLoadingTaskRunner(base::SingleThreadTaskRunner*) = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

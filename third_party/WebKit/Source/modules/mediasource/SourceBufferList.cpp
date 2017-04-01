@@ -30,76 +30,59 @@
 
 #include "modules/mediasource/SourceBufferList.h"
 
-#include "core/dom/ExecutionContext.h"
 #include "core/events/GenericEventQueue.h"
 #include "modules/EventModules.h"
 #include "modules/mediasource/SourceBuffer.h"
 
 namespace blink {
 
-SourceBufferList::SourceBufferList(ExecutionContext* context, GenericEventQueue* asyncEventQueue)
-    : m_executionContext(context)
-    , m_asyncEventQueue(asyncEventQueue)
-{
+SourceBufferList::SourceBufferList(ExecutionContext* context,
+                                   GenericEventQueue* asyncEventQueue)
+    : ContextClient(context), m_asyncEventQueue(asyncEventQueue) {}
+
+SourceBufferList::~SourceBufferList() {}
+
+void SourceBufferList::add(SourceBuffer* buffer) {
+  m_list.push_back(buffer);
+  scheduleEvent(EventTypeNames::addsourcebuffer);
 }
 
-SourceBufferList::~SourceBufferList()
-{
+void SourceBufferList::insert(size_t position, SourceBuffer* buffer) {
+  m_list.insert(position, buffer);
+  scheduleEvent(EventTypeNames::addsourcebuffer);
 }
 
-void SourceBufferList::add(SourceBuffer* buffer)
-{
-    m_list.append(buffer);
-    scheduleEvent(EventTypeNames::addsourcebuffer);
+void SourceBufferList::remove(SourceBuffer* buffer) {
+  size_t index = m_list.find(buffer);
+  if (index == kNotFound)
+    return;
+  m_list.remove(index);
+  scheduleEvent(EventTypeNames::removesourcebuffer);
 }
 
-void SourceBufferList::insert(size_t position, SourceBuffer* buffer)
-{
-    m_list.insert(position, buffer);
-    scheduleEvent(EventTypeNames::addsourcebuffer);
+void SourceBufferList::clear() {
+  m_list.clear();
+  scheduleEvent(EventTypeNames::removesourcebuffer);
 }
 
-void SourceBufferList::remove(SourceBuffer* buffer)
-{
-    size_t index = m_list.find(buffer);
-    if (index == kNotFound)
-        return;
-    m_list.remove(index);
-    scheduleEvent(EventTypeNames::removesourcebuffer);
+void SourceBufferList::scheduleEvent(const AtomicString& eventName) {
+  DCHECK(m_asyncEventQueue);
+
+  Event* event = Event::create(eventName);
+  event->setTarget(this);
+
+  m_asyncEventQueue->enqueueEvent(event);
 }
 
-void SourceBufferList::clear()
-{
-    m_list.clear();
-    scheduleEvent(EventTypeNames::removesourcebuffer);
+const AtomicString& SourceBufferList::interfaceName() const {
+  return EventTargetNames::SourceBufferList;
 }
 
-void SourceBufferList::scheduleEvent(const AtomicString& eventName)
-{
-    DCHECK(m_asyncEventQueue);
-
-    Event* event = Event::create(eventName);
-    event->setTarget(this);
-
-    m_asyncEventQueue->enqueueEvent(event);
+DEFINE_TRACE(SourceBufferList) {
+  visitor->trace(m_asyncEventQueue);
+  visitor->trace(m_list);
+  EventTargetWithInlineData::trace(visitor);
+  ContextClient::trace(visitor);
 }
 
-const AtomicString& SourceBufferList::interfaceName() const
-{
-    return EventTargetNames::SourceBufferList;
-}
-
-ExecutionContext* SourceBufferList::getExecutionContext() const
-{
-    return m_executionContext;
-}
-
-DEFINE_TRACE(SourceBufferList)
-{
-    visitor->trace(m_executionContext);
-    visitor->trace(m_asyncEventQueue);
-    visitor->trace(m_list);
-    EventTargetWithInlineData::trace(visitor);
-}
-
-} // namespace blink
+}  // namespace blink

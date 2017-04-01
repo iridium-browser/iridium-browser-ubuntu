@@ -17,11 +17,14 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "cc/blink/web_layer_impl.h"
+#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/trees/layer_tree_settings.h"
+#include "content/app/mojo/mojo_init.h"
 #include "content/child/web_url_loader_impl.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "content/test/web_gesture_curve_mock.h"
 #include "media/base/media.h"
+#include "media/media_features.h"
 #include "net/cookies/cookie_monster.h"
 #include "storage/browser/database/vfs_backend.h"
 #include "third_party/WebKit/public/platform/WebConnectionType.h"
@@ -43,7 +46,13 @@
 #endif
 
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
-#include "gin/v8_initializer.h"
+#include "gin/v8_initializer.h"  // nogncheck
+#endif
+
+#if BUILDFLAG(ENABLE_WEBRTC)
+#include "content/renderer/media/rtc_certificate.h"
+#include "third_party/WebKit/public/platform/WebRTCCertificateGenerator.h"
+#include "third_party/webrtc/base/rtccertificate.h"  // nogncheck
 #endif
 
 namespace {
@@ -111,16 +120,20 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
   }
   renderer_scheduler_ = blink::scheduler::CreateRendererSchedulerForTests();
   web_thread_ = renderer_scheduler_->CreateMainThread();
+  shared_bitmap_manager_.reset(new cc::TestSharedBitmapManager);
 
   // Set up a FeatureList instance, so that code using that API will not hit a
   // an error that it's not set. Cleared by ClearInstanceForTesting() below.
   base::FeatureList::SetInstance(base::WrapUnique(new base::FeatureList));
 
+  // Initialize mojo firstly to enable Blink initialization to use it.
+  InitializeMojo();
+
   blink::initialize(this);
   blink::setLayoutTestMode(true);
   blink::WebRuntimeFeatures::enableDatabase(true);
   blink::WebRuntimeFeatures::enableNotifications(true);
-  blink::WebRuntimeFeatures::enableTouch(true);
+  blink::WebRuntimeFeatures::enableTouchEventFeatureDetection(true);
 
   // Initialize NetworkStateNotifier.
   blink::WebNetworkStateNotifier::setWebConnection(
@@ -135,7 +148,7 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
   if (!file_system_root_.CreateUniqueTempDir()) {
     LOG(WARNING) << "Failed to create a temp dir for the filesystem."
                     "FileSystem feature will be disabled.";
-    DCHECK(file_system_root_.path().empty());
+    DCHECK(file_system_root_.GetPath().empty());
   }
 
 #if defined(OS_WIN)
@@ -158,7 +171,7 @@ TestBlinkWebUnitTestSupport::~TestBlinkWebUnitTestSupport() {
   base::FeatureList::ClearInstanceForTesting();
 }
 
-blink::WebBlobRegistry* TestBlinkWebUnitTestSupport::blobRegistry() {
+blink::WebBlobRegistry* TestBlinkWebUnitTestSupport::getBlobRegistry() {
   return &blob_registry_;
 }
 
@@ -178,19 +191,23 @@ blink::WebIDBFactory* TestBlinkWebUnitTestSupport::idbFactory() {
   return NULL;
 }
 
-blink::WebMimeRegistry* TestBlinkWebUnitTestSupport::mimeRegistry() {
-  return &mime_registry_;
-}
-
 blink::WebURLLoader* TestBlinkWebUnitTestSupport::createURLLoader() {
   // This loader should be used only for process-local resources such as
   // data URLs.
-  blink::WebURLLoader* default_loader = new WebURLLoaderImpl(nullptr, nullptr);
+  blink::WebURLLoader* default_loader =
+      new WebURLLoaderImpl(nullptr, nullptr, nullptr);
   return url_loader_factory_->createURLLoader(default_loader);
 }
 
 blink::WebString TestBlinkWebUnitTestSupport::userAgent() {
   return blink::WebString::fromUTF8("test_runner/0.0.0.0");
+}
+
+std::unique_ptr<cc::SharedBitmap>
+TestBlinkWebUnitTestSupport::allocateSharedBitmap(
+    const blink::WebSize& size) {
+  return shared_bitmap_manager_
+      ->AllocateSharedBitmap(gfx::Size(size.width, size.height));
 }
 
 blink::WebString TestBlinkWebUnitTestSupport::queryLocalizedString(
@@ -286,9 +303,54 @@ blink::WebThread* TestBlinkWebUnitTestSupport::currentThread() {
 }
 
 void TestBlinkWebUnitTestSupport::getPluginList(
-    bool refresh, blink::WebPluginListBuilder* builder) {
+    bool refresh,
+    const blink::WebSecurityOrigin& mainFrameOrigin,
+    blink::WebPluginListBuilder* builder) {
   builder->addPlugin("pdf", "pdf", "pdf-files");
   builder->addMediaTypeToLastPlugin("application/pdf", "pdf");
+}
+
+#if BUILDFLAG(ENABLE_WEBRTC)
+namespace {
+
+class TestWebRTCCertificateGenerator
+    : public blink::WebRTCCertificateGenerator {
+  void generateCertificate(
+      const blink::WebRTCKeyParams& key_params,
+      std::unique_ptr<blink::WebRTCCertificateCallback> callback) override {
+    NOTIMPLEMENTED();
+  }
+  void generateCertificateWithExpiration(
+      const blink::WebRTCKeyParams& key_params,
+      uint64_t expires_ms,
+      std::unique_ptr<blink::WebRTCCertificateCallback> callback) override {
+    NOTIMPLEMENTED();
+  }
+  bool isSupportedKeyParams(const blink::WebRTCKeyParams& key_params) override {
+    return false;
+  }
+  std::unique_ptr<blink::WebRTCCertificate> fromPEM(
+      blink::WebString pem_private_key,
+      blink::WebString pem_certificate) override {
+    rtc::scoped_refptr<rtc::RTCCertificate> certificate =
+        rtc::RTCCertificate::FromPEM(rtc::RTCCertificatePEM(
+            pem_private_key.utf8(), pem_certificate.utf8()));
+    if (!certificate)
+      return nullptr;
+    return base::MakeUnique<RTCCertificate>(certificate);
+  }
+};
+
+}  // namespace
+#endif  // BUILDFLAG(ENABLE_WEBRTC)
+
+blink::WebRTCCertificateGenerator*
+TestBlinkWebUnitTestSupport::createRTCCertificateGenerator() {
+#if BUILDFLAG(ENABLE_WEBRTC)
+  return new TestWebRTCCertificateGenerator();
+#else
+  return nullptr;
+#endif
 }
 
 }  // namespace content

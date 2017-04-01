@@ -190,14 +190,26 @@ namespace sw
 		delete swiftConfig;
 	}
 
+	// This object has to be mem aligned
+	void* Renderer::operator new(size_t size)
+	{
+		ASSERT(size == sizeof(Renderer)); // This operator can't be called from a derived class
+		return sw::allocate(sizeof(Renderer), 16);
+	}
+
+	void Renderer::operator delete(void * mem)
+	{
+		sw::deallocate(mem);
+	}
+
 	void Renderer::clear(void *pixel, Format format, Surface *dest, const SliceRect &dRect, unsigned int rgbaMask)
 	{
 		blitter.clear(pixel, format, dest, dRect, rgbaMask);
 	}
 
-	void Renderer::blit(Surface *source, const SliceRect &sRect, Surface *dest, const SliceRect &dRect, bool filter)
+	void Renderer::blit(Surface *source, const SliceRect &sRect, Surface *dest, const SliceRect &dRect, bool filter, bool isStencil)
 	{
-		blitter.blit(source, sRect, dest, dRect, filter);
+		blitter.blit(source, sRect, dest, dRect, filter, isStencil);
 	}
 
 	void Renderer::blit3D(Surface *source, Surface *dest)
@@ -445,7 +457,7 @@ namespace sw
 					draw->vsDirtyConstB = 0;
 				}
 
-				if(context->vertexShader->instanceIdDeclared)
+				if(context->vertexShader->isInstanceIdDeclared())
 				{
 					data->instanceID = context->instanceID;
 				}
@@ -622,7 +634,7 @@ namespace sw
 
 				if(draw->stencilBuffer)
 				{
-					data->stencilBuffer = (unsigned char*)context->stencilBuffer->lockStencil(q * ms, MANAGED);
+					data->stencilBuffer = (unsigned char*)context->stencilBuffer->lockStencil(0, 0, q * ms, MANAGED);
 					data->stencilPitchB = context->stencilBuffer->getStencilPitchB();
 					data->stencilSliceB = context->stencilBuffer->getStencilSliceB();
 				}

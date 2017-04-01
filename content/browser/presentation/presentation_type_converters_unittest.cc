@@ -10,7 +10,7 @@
 namespace content {
 
 TEST(PresentationTypeConvertersTest, PresentationSessionInfo) {
-  std::string presentation_url("http://fooUrl");
+  GURL presentation_url("http://www.example.com/");
   std::string presentation_id("presentationId");
   PresentationSessionInfo session(presentation_url, presentation_id);
   blink::mojom::PresentationSessionInfoPtr session_mojo(

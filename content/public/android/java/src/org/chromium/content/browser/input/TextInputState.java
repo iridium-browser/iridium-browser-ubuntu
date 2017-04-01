@@ -17,11 +17,10 @@ public class TextInputState {
     private final Range mSelection;
     private final Range mComposition;
     private final boolean mSingleLine;
-    private final boolean mFromIme;
-    private final boolean mInBatchEditMode;
+    private final boolean mReplyToRequest;
 
     public TextInputState(CharSequence text, Range selection, Range composition, boolean singleLine,
-            boolean fromIme, boolean inBatchEditMode) {
+            boolean replyToRequest) {
         selection.clamp(0, text.length());
         if (composition.start() != -1 || composition.end() != -1) {
             composition.clamp(0, text.length());
@@ -30,8 +29,7 @@ public class TextInputState {
         mSelection = selection;
         mComposition = composition;
         mSingleLine = singleLine;
-        mFromIme = fromIme;
-        mInBatchEditMode = inBatchEditMode;
+        mReplyToRequest = replyToRequest;
     }
 
     public CharSequence text() {
@@ -50,12 +48,8 @@ public class TextInputState {
         return mSingleLine;
     }
 
-    public boolean fromIme() {
-        return mFromIme;
-    }
-
-    public boolean inBatchEditMode() {
-        return mInBatchEditMode;
+    public boolean replyToRequest() {
+        return mReplyToRequest;
     }
 
     public CharSequence getSelectedText() {
@@ -80,13 +74,13 @@ public class TextInputState {
         if (t == this) return true;
         return TextUtils.equals(mText, t.mText) && mSelection.equals(t.mSelection)
                 && mComposition.equals(t.mComposition) && mSingleLine == t.mSingleLine
-                && mFromIme == t.mFromIme;
+                && mReplyToRequest == t.mReplyToRequest;
     }
 
     @Override
     public int hashCode() {
         return mText.hashCode() * 7 + mSelection.hashCode() * 11 + mComposition.hashCode() * 13
-                + (mSingleLine ? 19 : 0) + (mFromIme ? 23 : 0);
+                + (mSingleLine ? 19 : 0) + (mReplyToRequest ? 23 : 0);
     }
 
     @SuppressWarnings("unused")
@@ -96,8 +90,8 @@ public class TextInputState {
 
     @Override
     public String toString() {
-        return String.format(Locale.US, "TextInputState {[%s] SEL%s COM%s %s %s%s}", mText,
-                mSelection, mComposition, mSingleLine ? "SIN" : "MUL",
-                mFromIme ? "fromIME" : "NOTfromIME", mInBatchEditMode ? " BatchEdit" : "");
+        return String.format(Locale.US, "TextInputState {[%s] SEL%s COM%s %s%s}", mText, mSelection,
+                mComposition, mSingleLine ? "SIN" : "MUL",
+                mReplyToRequest ? " ReplyToRequest" : "");
     }
 }

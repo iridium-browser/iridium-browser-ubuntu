@@ -37,6 +37,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/md5.h"
+#include "base/memory/ptr_util.h"
 #include "base/process/process_handle.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -48,11 +49,15 @@
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/launcher/unit_test_launcher.h"
+#include "base/test/scoped_task_scheduler.h"
+#include "base/test/test_suite.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
+#include "media/base/test_data_util.h"
 #include "media/filters/h264_parser.h"
 #include "media/gpu/fake_video_decode_accelerator.h"
 #include "media/gpu/gpu_video_decode_accelerator_factory.h"
@@ -134,6 +139,10 @@ int g_fake_decoder = 0;
 // requesting the VDA itself to allocate buffers.
 bool g_test_import = false;
 
+// This is the location of the test files. If empty, they're in the current
+// working directory.
+base::FilePath g_test_file_path;
+
 // Environment to store rendering thread.
 class VideoDecodeAcceleratorTestEnvironment;
 VideoDecodeAcceleratorTestEnvironment* g_env;
@@ -185,13 +194,19 @@ const gfx::Size kThumbnailsPageSize(1600, 1200);
 const gfx::Size kThumbnailSize(160, 120);
 const int kMD5StringLength = 32;
 
+base::FilePath GetTestDataFile(const base::FilePath& input_file) {
+  if (input_file.IsAbsolute())
+    return input_file;
+  return base::MakeAbsoluteFilePath(g_test_file_path.Append(input_file));
+}
+
 // Read in golden MD5s for the thumbnailed rendering of this video
 void ReadGoldenThumbnailMD5s(const TestVideoFile* video_file,
                              std::vector<std::string>* md5_strings) {
   base::FilePath filepath(video_file->file_name);
   filepath = filepath.AddExtension(FILE_PATH_LITERAL(".md5"));
   std::string all_md5s;
-  base::ReadFileToString(filepath, &all_md5s);
+  base::ReadFileToString(GetTestDataFile(filepath), &all_md5s);
   *md5_strings = base::SplitString(all_md5s, "\n", base::TRIM_WHITESPACE,
                                    base::SPLIT_WANT_ALL);
   // Check these are legitimate MD5s.
@@ -203,15 +218,15 @@ void ReadGoldenThumbnailMD5s(const TestVideoFile* video_file,
     if (md5_string.at(0) == '#')
       continue;
 
-    LOG_ASSERT(static_cast<int>(md5_string.length()) == kMD5StringLength)
-        << md5_string;
+    LOG_IF(ERROR, static_cast<int>(md5_string.length()) != kMD5StringLength)
+        << "MD5 length error: " << md5_string;
     bool hex_only = std::count_if(md5_string.begin(), md5_string.end(),
                                   isxdigit) == kMD5StringLength;
-    LOG_ASSERT(hex_only) << md5_string;
+    LOG_IF(ERROR, !hex_only) << "MD5 includes non-hex char: " << md5_string;
   }
-  LOG_ASSERT(md5_strings->size() >= 1U) << "  MD5 checksum file ("
-                                        << filepath.MaybeAsASCII()
-                                        << ") missing or empty.";
+  LOG_IF(ERROR, md5_strings->empty()) << "  MD5 checksum file ("
+                                      << filepath.MaybeAsASCII()
+                                      << ") missing or empty.";
 }
 
 // State of the GLRenderingVDAClient below.  Order matters here as the test
@@ -237,7 +252,11 @@ class VideoDecodeAcceleratorTestEnvironment : public ::testing::Environment {
       : rendering_thread_("GLRenderingVDAClientThread") {}
 
   void SetUp() override {
-    rendering_thread_.Start();
+    base::Thread::Options options;
+#if defined(OS_WIN)
+    options.message_loop_type = base::MessageLoop::TYPE_UI;
+#endif
+    rendering_thread_.StartWithOptions(options);
 
     base::WaitableEvent done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                              base::WaitableEvent::InitialState::NOT_SIGNALED);
@@ -372,7 +391,7 @@ gfx::GpuMemoryBufferHandle TextureRef::ExportGpuMemoryBufferHandle() const {
   handle.native_pixmap_handle.fds.emplace_back(
       base::FileDescriptor(duped_fd, true));
   handle.native_pixmap_handle.planes.emplace_back(
-      pixmap_->GetDmaBufPitch(0), pixmap_->GetDmaBufOffset(0),
+      pixmap_->GetDmaBufPitch(0), pixmap_->GetDmaBufOffset(0), 0,
       pixmap_->GetDmaBufModifier(0));
 #endif
   return handle;
@@ -691,9 +710,9 @@ void GLRenderingVDAClient::ProvidePictureBuffers(
         active_textures_.insert(std::make_pair(picture_buffer_id, texture_ref))
             .second);
 
-    PictureBuffer::TextureIds ids;
-    ids.push_back(texture_id);
-    buffers.push_back(PictureBuffer(picture_buffer_id, dimensions, ids));
+    PictureBuffer::TextureIds texture_ids(1, texture_id);
+    buffers.push_back(PictureBuffer(picture_buffer_id, dimensions,
+                                    PictureBuffer::TextureIds(), texture_ids));
   }
   decoder_->AssignPictureBuffers(buffers);
 
@@ -720,6 +739,9 @@ void GLRenderingVDAClient::PictureReady(const Picture& picture) {
 
   if (decoder_deleted())
     return;
+
+  gfx::Rect visible_rect = picture.visible_rect();
+  EXPECT_TRUE(visible_rect.IsEmpty() || visible_rect == gfx::Rect(frame_size_));
 
   base::TimeTicks now = base::TimeTicks::Now();
 
@@ -787,6 +809,9 @@ void GLRenderingVDAClient::ReturnPicture(int32_t picture_buffer_id) {
 
 void GLRenderingVDAClient::NotifyEndOfBitstreamBuffer(
     int32_t bitstream_buffer_id) {
+  if (decoder_deleted())
+    return;
+
   // TODO(fischman): this test currently relies on this notification to make
   // forward progress during a Reset().  But the VDA::Reset() API doesn't
   // guarantee this, so stop relying on it (and remove the notifications from
@@ -904,9 +929,8 @@ void GLRenderingVDAClient::DeleteDecoder() {
   base::STLClearObject(&encoded_data_);
   active_textures_.clear();
 
-  // Cascade through the rest of the states to simplify test code below.
-  for (int i = state_ + 1; i < CS_MAX; ++i)
-    SetState(static_cast<ClientState>(i));
+  // Set state to CS_DESTROYED after decoder is deleted.
+  SetState(CS_DESTROYED);
 }
 
 std::string GLRenderingVDAClient::GetBytesForFirstFragment(size_t start_pos,
@@ -988,7 +1012,7 @@ static bool FragmentHasConfigInfo(const uint8_t* data,
     return (size > 0 && !(data[0] & 0x01));
   }
   // Shouldn't happen at this point.
-  LOG(FATAL) << "Invalid profile: " << profile;
+  LOG(FATAL) << "Invalid profile: " << GetProfileName(profile);
   return false;
 }
 
@@ -1075,6 +1099,8 @@ base::TimeDelta GLRenderingVDAClient::decode_time_median() {
 
 class VideoDecodeAcceleratorTest : public ::testing::Test {
  protected:
+  using TestFilesVector = std::vector<std::unique_ptr<TestVideoFile>>;
+
   VideoDecodeAcceleratorTest();
   void SetUp() override;
   void TearDown() override;
@@ -1083,14 +1109,14 @@ class VideoDecodeAcceleratorTest : public ::testing::Test {
   // accordingly, and read in video stream. CHECK-fails on unexpected or
   // missing required data. Unspecified optional fields are set to -1.
   void ParseAndReadTestVideoData(base::FilePath::StringType data,
-                                 std::vector<TestVideoFile*>* test_video_files);
+                                 TestFilesVector* test_video_files);
 
   // Update the parameters of |test_video_files| according to
   // |num_concurrent_decoders| and |reset_point|. Ex: the expected number of
   // frames should be adjusted if decoder is reset in the middle of the stream.
   void UpdateTestVideoFileParams(size_t num_concurrent_decoders,
                                  int reset_point,
-                                 std::vector<TestVideoFile*>* test_video_files);
+                                 TestFilesVector* test_video_files);
 
   void InitializeRenderingHelper(const RenderingHelperParams& helper_params);
   void CreateAndStartDecoder(GLRenderingVDAClient* client,
@@ -1100,8 +1126,15 @@ class VideoDecodeAcceleratorTest : public ::testing::Test {
   void OutputLogFile(const base::FilePath::CharType* log_path,
                      const std::string& content);
 
-  std::vector<TestVideoFile*> test_video_files_;
+  TestFilesVector test_video_files_;
   RenderingHelper rendering_helper_;
+
+ protected:
+  // Must be static because this method may run after the destructor.
+  template <typename T>
+  static void Delete(T item) {
+    // |item| is cleared when the scope of this function is left.
+  }
 
  private:
   // Required for Thread to work.  Not used otherwise.
@@ -1119,8 +1152,7 @@ void VideoDecodeAcceleratorTest::SetUp() {
 void VideoDecodeAcceleratorTest::TearDown() {
   g_env->GetRenderingTaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(&base::STLDeleteElements<std::vector<TestVideoFile*>>,
-                 &test_video_files_));
+      base::Bind(&Delete<TestFilesVector>, base::Passed(&test_video_files_)));
 
   base::WaitableEvent done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                            base::WaitableEvent::InitialState::NOT_SIGNALED);
@@ -1134,7 +1166,7 @@ void VideoDecodeAcceleratorTest::TearDown() {
 
 void VideoDecodeAcceleratorTest::ParseAndReadTestVideoData(
     base::FilePath::StringType data,
-    std::vector<TestVideoFile*>* test_video_files) {
+    TestFilesVector* test_video_files) {
   std::vector<base::FilePath::StringType> entries =
       base::SplitString(data, base::FilePath::StringType(1, ';'),
                         base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
@@ -1145,7 +1177,8 @@ void VideoDecodeAcceleratorTest::ParseAndReadTestVideoData(
                           base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
     LOG_ASSERT(fields.size() >= 1U) << entries[index];
     LOG_ASSERT(fields.size() <= 8U) << entries[index];
-    TestVideoFile* video_file = new TestVideoFile(fields[0]);
+    std::unique_ptr<TestVideoFile> video_file =
+        base::MakeUnique<TestVideoFile>(fields[0]);
     if (!fields[1].empty())
       LOG_ASSERT(base::StringToInt(fields[1], &video_file->width));
     if (!fields[2].empty())
@@ -1165,19 +1198,20 @@ void VideoDecodeAcceleratorTest::ParseAndReadTestVideoData(
 
     // Read in the video data.
     base::FilePath filepath(video_file->file_name);
-    LOG_ASSERT(base::ReadFileToString(filepath, &video_file->data_str))
+    LOG_ASSERT(base::ReadFileToString(GetTestDataFile(filepath),
+                                      &video_file->data_str))
         << "test_video_file: " << filepath.MaybeAsASCII();
 
-    test_video_files->push_back(video_file);
+    test_video_files->push_back(std::move(video_file));
   }
 }
 
 void VideoDecodeAcceleratorTest::UpdateTestVideoFileParams(
     size_t num_concurrent_decoders,
     int reset_point,
-    std::vector<TestVideoFile*>* test_video_files) {
+    TestFilesVector* test_video_files) {
   for (size_t i = 0; i < test_video_files->size(); i++) {
-    TestVideoFile* video_file = (*test_video_files)[i];
+    TestVideoFile* video_file = (*test_video_files)[i].get();
     if (reset_point == MID_STREAM_RESET) {
       // Reset should not go beyond the last frame;
       // reset in the middle of the stream for short videos.
@@ -1257,7 +1291,31 @@ void VideoDecodeAcceleratorTest::OutputLogFile(
 class VideoDecodeAcceleratorParamTest
     : public VideoDecodeAcceleratorTest,
       public ::testing::WithParamInterface<
-          std::tuple<int, int, int, ResetPoint, ClientState, bool, bool>> {};
+          std::tuple<int, int, int, ResetPoint, ClientState, bool, bool>> {
+ protected:
+  using NotesVector =
+      std::vector<std::unique_ptr<ClientStateNotification<ClientState>>>;
+  using ClientsVector = std::vector<std::unique_ptr<GLRenderingVDAClient>>;
+
+  void TearDown() override;
+
+  NotesVector notes_;
+  ClientsVector clients_;
+};
+
+void VideoDecodeAcceleratorParamTest::TearDown() {
+  // |clients_| must be deleted first because |clients_| use |notes_|.
+  g_env->GetRenderingTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&Delete<ClientsVector>, base::Passed(&clients_)));
+
+  g_env->GetRenderingTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&Delete<NotesVector>, base::Passed(&notes_)));
+
+  WaitUntilIdle();
+
+  // Do VideoDecodeAcceleratorTest clean-up after deleting clients and notes.
+  VideoDecodeAcceleratorTest::TearDown();
+}
 
 // Wait for |note| to report a state and if it's not |expected_state| then
 // assert |client| has deleted its decoder.
@@ -1265,6 +1323,9 @@ static void AssertWaitForStateOrDeleted(
     ClientStateNotification<ClientState>* note,
     GLRenderingVDAClient* client,
     ClientState expected_state) {
+  // Skip waiting state if decoder of |client| is already deleted.
+  if (client->decoder_deleted())
+    return;
   ClientState state = note->Wait();
   if (state == expected_state)
     return;
@@ -1301,9 +1362,8 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
   // Suppress GL rendering for all tests when the "--rendering_fps" is 0.
   const bool suppress_rendering = g_rendering_fps == 0;
 
-  std::vector<ClientStateNotification<ClientState>*> notes(
-      num_concurrent_decoders, NULL);
-  std::vector<GLRenderingVDAClient*> clients(num_concurrent_decoders, NULL);
+  notes_.resize(num_concurrent_decoders);
+  clients_.resize(num_concurrent_decoders);
 
   RenderingHelperParams helper_params;
   helper_params.rendering_fps = g_rendering_fps;
@@ -1319,10 +1379,10 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
   // First kick off all the decoders.
   for (size_t index = 0; index < num_concurrent_decoders; ++index) {
     TestVideoFile* video_file =
-        test_video_files_[index % test_video_files_.size()];
-    ClientStateNotification<ClientState>* note =
-        new ClientStateNotification<ClientState>();
-    notes[index] = note;
+        test_video_files_[index % test_video_files_.size()].get();
+    std::unique_ptr<ClientStateNotification<ClientState>> note =
+        base::MakeUnique<ClientStateNotification<ClientState>>();
+    notes_[index] = std::move(note);
 
     int delay_after_frame_num = std::numeric_limits<int>::max();
     if (test_reuse_delay &&
@@ -1330,25 +1390,16 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
       delay_after_frame_num = video_file->num_frames - kMaxFramesToDelayReuse;
     }
 
-    GLRenderingVDAClient* client =
-        new GLRenderingVDAClient(index,
-                                 &rendering_helper_,
-                                 note,
-                                 video_file->data_str,
-                                 num_in_flight_decodes,
-                                 num_play_throughs,
-                                 video_file->reset_after_frame_num,
-                                 delete_decoder_state,
-                                 video_file->width,
-                                 video_file->height,
-                                 video_file->profile,
-                                 g_fake_decoder,
-                                 suppress_rendering,
-                                 delay_after_frame_num,
-                                 0,
-                                 render_as_thumbnails);
+    std::unique_ptr<GLRenderingVDAClient> client =
+        base::MakeUnique<GLRenderingVDAClient>(
+            index, &rendering_helper_, notes_[index].get(),
+            video_file->data_str, num_in_flight_decodes, num_play_throughs,
+            video_file->reset_after_frame_num, delete_decoder_state,
+            video_file->width, video_file->height, video_file->profile,
+            g_fake_decoder, suppress_rendering, delay_after_frame_num, 0,
+            render_as_thumbnails);
 
-    clients[index] = client;
+    clients_[index] = std::move(client);
     helper_params.window_sizes.push_back(
         render_as_thumbnails
             ? kThumbnailsPageSize
@@ -1358,14 +1409,14 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
   InitializeRenderingHelper(helper_params);
 
   for (size_t index = 0; index < num_concurrent_decoders; ++index) {
-    CreateAndStartDecoder(clients[index], notes[index]);
+    CreateAndStartDecoder(clients_[index].get(), notes_[index].get());
   }
 
   // Then wait for all the decodes to finish.
   // Only check performance & correctness later if we play through only once.
   bool skip_performance_and_correctness_checks = num_play_throughs > 1;
   for (size_t i = 0; i < num_concurrent_decoders; ++i) {
-    ClientStateNotification<ClientState>* note = notes[i];
+    ClientStateNotification<ClientState>* note = notes_[i].get();
     ClientState state = note->Wait();
     if (state != CS_INITIALIZED) {
       skip_performance_and_correctness_checks = true;
@@ -1376,29 +1427,28 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
                 static_cast<size_t>(kMinSupportedNumConcurrentDecoders));
       continue;
     }
-    ASSERT_EQ(state, CS_INITIALIZED);
     for (int n = 0; n < num_play_throughs; ++n) {
       // For play-throughs other than the first, we expect initialization to
       // succeed unconditionally.
       if (n > 0) {
-        ASSERT_NO_FATAL_FAILURE(
-            AssertWaitForStateOrDeleted(note, clients[i], CS_INITIALIZED));
+        ASSERT_NO_FATAL_FAILURE(AssertWaitForStateOrDeleted(
+            note, clients_[i].get(), CS_INITIALIZED));
       }
       // InitializeDone kicks off decoding inside the client, so we just need to
       // wait for Flush.
       ASSERT_NO_FATAL_FAILURE(
-          AssertWaitForStateOrDeleted(note, clients[i], CS_FLUSHING));
+          AssertWaitForStateOrDeleted(note, clients_[i].get(), CS_FLUSHING));
       ASSERT_NO_FATAL_FAILURE(
-          AssertWaitForStateOrDeleted(note, clients[i], CS_FLUSHED));
+          AssertWaitForStateOrDeleted(note, clients_[i].get(), CS_FLUSHED));
       // FlushDone requests Reset().
       ASSERT_NO_FATAL_FAILURE(
-          AssertWaitForStateOrDeleted(note, clients[i], CS_RESETTING));
+          AssertWaitForStateOrDeleted(note, clients_[i].get(), CS_RESETTING));
     }
     ASSERT_NO_FATAL_FAILURE(
-        AssertWaitForStateOrDeleted(note, clients[i], CS_RESET));
+        AssertWaitForStateOrDeleted(note, clients_[i].get(), CS_RESET));
     // ResetDone requests Destroy().
     ASSERT_NO_FATAL_FAILURE(
-        AssertWaitForStateOrDeleted(note, clients[i], CS_DESTROYED));
+        AssertWaitForStateOrDeleted(note, clients_[i].get(), CS_DESTROYED));
   }
   // Finally assert that decoding went as expected.
   for (size_t i = 0;
@@ -1408,8 +1458,9 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
     // allowed to finish.
     if (delete_decoder_state < CS_FLUSHED)
       continue;
-    GLRenderingVDAClient* client = clients[i];
-    TestVideoFile* video_file = test_video_files_[i % test_video_files_.size()];
+    GLRenderingVDAClient* client = clients_[i].get();
+    TestVideoFile* video_file =
+        test_video_files_[i % test_video_files_.size()].get();
     if (video_file->num_frames > 0) {
       // Expect the decoded frames may be more than the video frames as frames
       // could still be returned until resetting done.
@@ -1447,7 +1498,7 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
     std::vector<std::string> golden_md5s;
     std::string md5_string = base::MD5String(
         base::StringPiece(reinterpret_cast<char*>(&rgb[0]), rgb.size()));
-    ReadGoldenThumbnailMD5s(test_video_files_[0], &golden_md5s);
+    ReadGoldenThumbnailMD5s(test_video_files_[0].get(), &golden_md5s);
     std::vector<std::string>::iterator match =
         find(golden_md5s.begin(), golden_md5s.end(), md5_string);
     if (match == golden_md5s.end()) {
@@ -1466,11 +1517,12 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
       base::FilePath filepath(test_video_files_[0]->file_name);
       filepath = filepath.AddExtension(FILE_PATH_LITERAL(".bad_thumbnails"));
       filepath = filepath.AddExtension(FILE_PATH_LITERAL(".png"));
-      int num_bytes = base::WriteFile(
-          filepath, reinterpret_cast<char*>(&png[0]), png.size());
-      ASSERT_EQ(num_bytes, static_cast<int>(png.size()));
+      int num_bytes =
+          base::WriteFile(GetTestDataFile(filepath),
+                          reinterpret_cast<char*>(&png[0]), png.size());
+      EXPECT_EQ(num_bytes, static_cast<int>(png.size()));
     }
-    ASSERT_NE(match, golden_md5s.end());
+    EXPECT_NE(match, golden_md5s.end());
     EXPECT_EQ(alpha_solid, true) << "RGBA frame had incorrect alpha";
   }
 
@@ -1482,20 +1534,9 @@ TEST_P(VideoDecodeAcceleratorParamTest, TestSimpleDecode) {
         base::FilePath(g_output_log),
         base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
     for (size_t i = 0; i < num_concurrent_decoders; ++i) {
-      clients[i]->OutputFrameDeliveryTimes(&output_file);
+      clients_[i]->OutputFrameDeliveryTimes(&output_file);
     }
   }
-
-  g_env->GetRenderingTaskRunner()->PostTask(
-      FROM_HERE,
-      base::Bind(&base::STLDeleteElements<std::vector<GLRenderingVDAClient*>>,
-                 &clients));
-  g_env->GetRenderingTaskRunner()->PostTask(
-      FROM_HERE,
-      base::Bind(&base::STLDeleteElements<
-                     std::vector<ClientStateNotification<ClientState>*>>,
-                 &notes));
-  WaitUntilIdle();
 };
 
 // Test that replay after EOS works fine.
@@ -1638,9 +1679,19 @@ INSTANTIATE_TEST_CASE_P(
                         false,
                         false)));
 
+// Allow MAYBE macro substitution.
+#define WRAPPED_INSTANTIATE_TEST_CASE_P(a, b, c) \
+  INSTANTIATE_TEST_CASE_P(a, b, c)
+
+#if defined(OS_WIN)
+// There are no reference images for windows.
+#define MAYBE_Thumbnail DISABLED_Thumbnail
+#else
+#define MAYBE_Thumbnail Thumbnail
+#endif
 // Thumbnailing test
-INSTANTIATE_TEST_CASE_P(
-    Thumbnail,
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_Thumbnail,
     VideoDecodeAcceleratorParamTest,
     ::testing::Values(
         std::make_tuple(1, 1, 1, END_OF_STREAM_RESET, CS_RESET, false, true)));
@@ -1700,12 +1751,46 @@ TEST_F(VideoDecodeAcceleratorTest, TestDecodeTimeMedian) {
 // - Test failure conditions.
 // - Test frame size changes mid-stream
 
+class VDATestSuite : public base::TestSuite {
+ public:
+  VDATestSuite(int argc, char** argv) : base::TestSuite(argc, argv) {}
+
+  int Run() {
+#if defined(OS_WIN) || defined(USE_OZONE)
+    // For windows the decoding thread initializes the media foundation decoder
+    // which uses COM. We need the thread to be a UI thread.
+    // On Ozone, the backend initializes the event system using a UI
+    // thread.
+    base::MessageLoopForUI main_loop;
+#else
+    base::MessageLoop main_loop;
+#endif  // OS_WIN || USE_OZONE
+
+    base::test::ScopedTaskScheduler scoped_task_scheduler(&main_loop);
+
+    media::g_env =
+        reinterpret_cast<media::VideoDecodeAcceleratorTestEnvironment*>(
+            testing::AddGlobalTestEnvironment(
+                new media::VideoDecodeAcceleratorTestEnvironment()));
+
+#if defined(USE_OZONE)
+    ui::OzonePlatform::InitializeForUI();
+#endif
+
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+    media::VaapiWrapper::PreSandboxInitialization();
+#elif defined(OS_WIN)
+    media::DXVAVideoDecodeAccelerator::PreSandboxInitialization();
+#endif
+    return base::TestSuite::Run();
+  }
+};
+
 }  // namespace
 }  // namespace media
 
 int main(int argc, char** argv) {
-  testing::InitGoogleTest(&argc, argv);  // Removes gtest-specific args.
-  base::CommandLine::Init(argc, argv);
+  media::VDATestSuite test_suite(argc, argv);
 
   // Needed to enable DVLOG through --vmodule.
   logging::LoggingSettings settings;
@@ -1762,32 +1847,15 @@ int main(int argc, char** argv) {
       media::g_test_import = true;
       continue;
     }
-    LOG(FATAL) << "Unexpected switch: " << it->first << ":" << it->second;
+    if (it->first == "use-test-data-path") {
+      media::g_test_file_path = media::GetTestDataFilePath("");
+      continue;
+    }
   }
 
   base::ShadowingAtExitManager at_exit_manager;
-#if defined(OS_WIN) || defined(USE_OZONE)
-  // For windows the decoding thread initializes the media foundation decoder
-  // which uses COM. We need the thread to be a UI thread.
-  // On Ozone, the backend initializes the event system using a UI
-  // thread.
-  base::MessageLoopForUI main_loop;
-#else
-  base::MessageLoop main_loop;
-#endif  // OS_WIN || USE_OZONE
 
-#if defined(USE_OZONE)
-  ui::OzonePlatform::InitializeForUI();
-#endif
-
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
-  media::VaapiWrapper::PreSandboxInitialization();
-#endif
-
-  media::g_env =
-      reinterpret_cast<media::VideoDecodeAcceleratorTestEnvironment*>(
-          testing::AddGlobalTestEnvironment(
-              new media::VideoDecodeAcceleratorTestEnvironment()));
-
-  return RUN_ALL_TESTS();
+  return base::LaunchUnitTestsSerially(
+      argc, argv,
+      base::Bind(&media::VDATestSuite::Run, base::Unretained(&test_suite)));
 }

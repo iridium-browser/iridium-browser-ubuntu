@@ -16,12 +16,10 @@
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_test_sink.h"
 #include "ipc/message_filter.h"
-#include "services/shell/public/interfaces/interface_provider.mojom.h"
+#include "services/service_manager/public/interfaces/interface_provider.mojom.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 
 struct FrameHostMsg_CreateChildFrame_Params;
-struct ViewHostMsg_CreateWindow_Params;
-struct ViewHostMsg_CreateWindow_Reply;
 
 namespace IPC {
 class MessageFilter;
@@ -35,10 +33,15 @@ enum class WebTreeScopeType;
 
 namespace content {
 
+namespace mojom {
+class CreateNewWindowParams;
+class CreateNewWindowReply;
+class RenderMessageFilter;
+}
+
 // This class is a very simple mock of RenderThread. It simulates an IPC channel
 // which supports only three messages:
 // ViewHostMsg_CreateWidget : sync message sent by the Widget.
-// ViewHostMsg_CreateWindow : sync message sent by the Widget.
 // ViewMsg_Close : async, send to the Widget.
 class MockRenderThread : public RenderThread {
  public:
@@ -74,17 +77,19 @@ class MockRenderThread : public RenderThread {
   int64_t GetIdleNotificationDelayInMs() const override;
   void SetIdleNotificationDelayInMs(
       int64_t idle_notification_delay_in_ms) override;
-  void UpdateHistograms(int sequence_number) override;
   int PostTaskToAllWebWorkers(const base::Closure& closure) override;
   bool ResolveProxy(const GURL& url, std::string* proxy_list) override;
   base::WaitableEvent* GetShutdownEvent() override;
+  int32_t GetClientId() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override;
 #if defined(OS_WIN)
   void PreCacheFont(const LOGFONT& log_font) override;
   void ReleaseCachedFonts() override;
 #endif
-  MojoShellConnection* GetMojoShellConnection() override;
-  shell::InterfaceRegistry* GetInterfaceRegistry() override;
-  shell::InterfaceProvider* GetRemoteInterfaces() override;
+  ServiceManagerConnection* GetServiceManagerConnection() override;
+  service_manager::InterfaceRegistry* GetInterfaceRegistry() override;
+  service_manager::InterfaceProvider* GetRemoteInterfaces() override;
 
   //////////////////////////////////////////////////////////////////////////
   // The following functions are called by the test itself.
@@ -111,21 +116,20 @@ class MockRenderThread : public RenderThread {
 
   base::ObserverList<RenderThreadObserver>& observers() { return observers_; }
 
+  // The View expects to be returned a valid |reply.route_id| different from its
+  // own. We do not keep track of the newly created widget in MockRenderThread,
+  // so it must be cleaned up on its own.
+  void OnCreateWindow(const mojom::CreateNewWindowParams& params,
+                      mojom::CreateNewWindowReply* reply);
+
+  // The Widget expects to be returned a valid route_id.
+  void OnCreateWidget(int opener_id,
+                      blink::WebPopupType popup_type,
+                      int* route_id);
  protected:
   // This function operates as a regular IPC listener. Subclasses
   // overriding this should first delegate to this implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
-
-  // The Widget expects to be returned valid route_id.
-  void OnCreateWidget(int opener_id,
-                      blink::WebPopupType popup_type,
-                      int* route_id);
-
-  // The View expects to be returned a valid |reply.route_id| different from its
-  // own. We do not keep track of the newly created widget in MockRenderThread,
-  // so it must be cleaned up on its own.
-  void OnCreateWindow(const ViewHostMsg_CreateWindow_Params& params,
-                      ViewHostMsg_CreateWindow_Reply* reply);
 
   // The Frame expects to be returned a valid route_id different from its own.
   void OnCreateChildFrame(const FrameHostMsg_CreateChildFrame_Params& params,
@@ -160,10 +164,12 @@ class MockRenderThread : public RenderThread {
   base::ObserverList<RenderThreadObserver> observers_;
 
   cc::TestSharedBitmapManager shared_bitmap_manager_;
-  std::unique_ptr<shell::InterfaceRegistry> interface_registry_;
-  std::unique_ptr<shell::InterfaceProvider> remote_interfaces_;
-  shell::mojom::InterfaceProviderRequest
+  std::unique_ptr<service_manager::InterfaceRegistry> interface_registry_;
+  std::unique_ptr<service_manager::InterfaceProvider> remote_interfaces_;
+  service_manager::mojom::InterfaceProviderRequest
       pending_remote_interface_provider_request_;
+
+  std::unique_ptr<mojom::RenderMessageFilter> mock_render_message_filter_;
 };
 
 }  // namespace content

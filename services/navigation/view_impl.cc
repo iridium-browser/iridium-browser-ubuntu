@@ -4,6 +4,7 @@
 
 #include "services/navigation/view_impl.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/interstitial_page.h"
@@ -15,10 +16,10 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/web_contents.h"
-#include "services/shell/public/cpp/connector.h"
-#include "services/ui/public/cpp/window_tree_client.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "ui/aura/mus/window_tree_client.h"
+#include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/views/controls/webview/webview.h"
-#include "ui/views/mus/native_widget_mus.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
@@ -57,17 +58,15 @@ mojom::NavigationEntryPtr EntryPtrFromNavEntry(
 
 }  // namespace
 
-ViewImpl::ViewImpl(std::unique_ptr<shell::Connector> connector,
+ViewImpl::ViewImpl(std::unique_ptr<service_manager::Connector> connector,
                    const std::string& client_user_id,
                    mojom::ViewClientPtr client,
-                   mojom::ViewRequest request,
-                   std::unique_ptr<shell::ServiceContextRef> ref)
+                   std::unique_ptr<service_manager::ServiceContextRef> ref)
     : connector_(std::move(connector)),
-      binding_(this, std::move(request)),
       client_(std::move(client)),
       ref_(std::move(ref)),
       web_view_(new views::WebView(
-          content::BrowserContext::GetBrowserContextForShellUserId(
+          content::BrowserContext::GetBrowserContextForServiceUserId(
               client_user_id))) {
   web_view_->GetWebContents()->SetDelegate(this);
   const content::NavigationController* controller =
@@ -81,7 +80,16 @@ ViewImpl::ViewImpl(std::unique_ptr<shell::Connector> connector,
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_CHANGED,
                  content::Source<content::NavigationController>(controller));
 }
-ViewImpl::~ViewImpl() {}
+
+ViewImpl::~ViewImpl() {
+  DeleteTreeAndWidget();
+}
+
+void ViewImpl::DeleteTreeAndWidget() {
+  widget_.reset();
+  window_tree_host_.reset();
+  window_tree_client_.reset();
+}
 
 void ViewImpl::NavigateTo(const GURL& url) {
   web_view_->GetWebContents()->GetController().LoadURL(
@@ -100,11 +108,11 @@ void ViewImpl::NavigateToOffset(int offset) {
   web_view_->GetWebContents()->GetController().GoToOffset(offset);
 }
 
-void ViewImpl::Reload(bool skip_cache) {
-  if (skip_cache)
-    web_view_->GetWebContents()->GetController().Reload(true);
-  else
-    web_view_->GetWebContents()->GetController().ReloadBypassingCache(true);
+void ViewImpl::Reload(bool bypass_cache) {
+  web_view_->GetWebContents()->GetController().Reload(
+      bypass_cache ? content::ReloadType::BYPASSING_CACHE
+                   : content::ReloadType::NORMAL,
+      true);
 }
 
 void ViewImpl::Stop() {
@@ -112,10 +120,11 @@ void ViewImpl::Stop() {
 }
 
 void ViewImpl::GetWindowTreeClient(ui::mojom::WindowTreeClientRequest request) {
-  new ui::WindowTreeClient(this, nullptr, std::move(request));
+  window_tree_client_ = base::MakeUnique<aura::WindowTreeClient>(
+      connector_.get(), this, nullptr, std::move(request));
 }
 
-void ViewImpl::ShowInterstitial(const mojo::String& html) {
+void ViewImpl::ShowInterstitial(const std::string& html) {
   content::InterstitialPage* interstitial =
       content::InterstitialPage::Create(web_view_->GetWebContents(),
                                         false,
@@ -130,10 +139,6 @@ void ViewImpl::HideInterstitial() {
     web_view_->GetWebContents()->GetInterstitialPage()->Proceed();
 }
 
-void ViewImpl::SetResizerSize(const gfx::Size& size) {
-  resizer_size_ = size;
-}
-
 void ViewImpl::AddNewContents(content::WebContents* source,
                               content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
@@ -142,24 +147,27 @@ void ViewImpl::AddNewContents(content::WebContents* source,
                               bool* was_blocked) {
   mojom::ViewClientPtr client;
   mojom::ViewPtr view;
-  mojom::ViewRequest view_request = GetProxy(&view);
-  client_->ViewCreated(std::move(view), GetProxy(&client),
-                       disposition == NEW_POPUP, initial_rect, user_gesture);
+  mojom::ViewRequest view_request(&view);
+  client_->ViewCreated(std::move(view), MakeRequest(&client),
+                       disposition == WindowOpenDisposition::NEW_POPUP,
+                       initial_rect, user_gesture);
 
   const std::string new_user_id =
-      content::BrowserContext::GetShellUserIdFor(
+      content::BrowserContext::GetServiceUserIdFor(
           new_contents->GetBrowserContext());
-  ViewImpl* impl = new ViewImpl(
-      connector_->Clone(), new_user_id, std::move(client),
-      std::move(view_request), ref_->Clone());
+  auto impl = base::MakeUnique<ViewImpl>(connector_->Clone(), new_user_id,
+                                         std::move(client), ref_->Clone());
+
   // TODO(beng): This is a bit crappy. should be able to create the ViewImpl
   //             with |new_contents| instead.
   impl->web_view_->SetWebContents(new_contents);
-  impl->web_view_->GetWebContents()->SetDelegate(impl);
+  impl->web_view_->GetWebContents()->SetDelegate(impl.get());
 
   // TODO(beng): this reply is currently synchronous, figure out a fix.
   if (was_blocked)
     *was_blocked = false;
+
+  mojo::MakeStrongBinding(std::move(impl), std::move(view_request));
 }
 
 void ViewImpl::CloseContents(content::WebContents* source) {
@@ -206,13 +214,6 @@ void ViewImpl::LoadProgressChanged(content::WebContents* source,
 
 void ViewImpl::UpdateTargetURL(content::WebContents* source, const GURL& url) {
   client_->UpdateHoverURL(url);
-}
-
-gfx::Rect ViewImpl::GetRootWindowResizerRect() const {
-  gfx::Rect bounds = web_view_->GetLocalBounds();
-  return gfx::Rect(bounds.right() - resizer_size_.width(),
-                   bounds.bottom() - resizer_size_.height(),
-                   resizer_size_.width(), resizer_size_.height());
 }
 
 void ViewImpl::Observe(int type,
@@ -266,22 +267,48 @@ void ViewImpl::Observe(int type,
   }
 }
 
-void ViewImpl::OnEmbed(ui::Window* root) {
+void ViewImpl::OnEmbed(
+    std::unique_ptr<aura::WindowTreeHostMus> window_tree_host) {
+  // TODO: Supplying a WindowTreeHostMus isn't particularly ideal in this case.
+  // In particular it would be nice if the WindowTreeClientDelegate could create
+  // its own WindowTreeHostMus, that way this code could directly create a
+  // DesktopWindowTreeTreeHostMus.
+  window_tree_host_ = std::move(window_tree_host);
   DCHECK(!widget_.get());
+  // TODO: fix this. The following won't work if multiple WindowTreeClients
+  // are used at the same time. The best fix is to have the ability to specify
+  // a WindowTreeClient when DesktopNativeWidgetAura is created so that it can
+  // create WindowPortMus with the correct client.
   widget_.reset(new views::Widget);
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.delegate = this;
-  params.native_widget = new views::NativeWidgetMus(
-      widget_.get(), root, ui::mojom::SurfaceType::DEFAULT);
   widget_->Init(params);
   widget_->Show();
 }
 
-void ViewImpl::OnDidDestroyClient(ui::WindowTreeClient* client) {}
+void ViewImpl::OnEmbedRootDestroyed(aura::WindowTreeHostMus* window_tree_host) {
+  DCHECK_EQ(window_tree_host, window_tree_host_.get());
+  DeleteTreeAndWidget();
+}
+
+void ViewImpl::OnLostConnection(aura::WindowTreeClient* client) {
+  DeleteTreeAndWidget();
+}
+
 void ViewImpl::OnPointerEventObserved(const ui::PointerEvent& event,
-                                      ui::Window* target) {}
+                                      aura::Window* target) {}
+
+aura::client::CaptureClient* ViewImpl::GetCaptureClient() {
+  // TODO: wire this up. This typically comes from WMState.
+  return nullptr;
+}
+
+aura::PropertyConverter* ViewImpl::GetPropertyConverter() {
+  // TODO: wire this up.
+  return nullptr;
+}
 
 views::View* ViewImpl::GetContentsView() {
   return web_view_;

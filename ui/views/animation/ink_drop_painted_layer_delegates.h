@@ -5,7 +5,6 @@
 #ifndef UI_VIEWS_ANIMATION_INK_DROP_PAINTED_LAYER_DELEGATES_H_
 #define UI_VIEWS_ANIMATION_INK_DROP_PAINTED_LAYER_DELEGATES_H_
 
-#include "base/callback.h"
 #include "base/macros.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/compositor/layer_delegate.h"
@@ -33,7 +32,6 @@ class VIEWS_EXPORT BasePaintedLayerDelegate : public ui::LayerDelegate {
   // ui::LayerDelegate:
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override;
   void OnDeviceScaleFactorChanged(float device_scale_factor) override;
-  base::Closure PrepareForLayerBoundsChange() override;
 
  protected:
   explicit BasePaintedLayerDelegate(SkColor color);
@@ -114,11 +112,12 @@ class VIEWS_EXPORT RoundedRectangleLayerDelegate
 };
 
 // A BasePaintedLayerDelegate that paints a shadow around the outside of a
-// specified roundrect.
+// specified roundrect, and also fills the round rect.
 class VIEWS_EXPORT BorderShadowLayerDelegate : public BasePaintedLayerDelegate {
  public:
   BorderShadowLayerDelegate(const std::vector<gfx::ShadowValue>& shadows,
                             const gfx::Rect& shadowed_area_bounds,
+                            SkColor fill_color,
                             int corner_radius);
   ~BorderShadowLayerDelegate() override;
 
@@ -133,9 +132,11 @@ class VIEWS_EXPORT BorderShadowLayerDelegate : public BasePaintedLayerDelegate {
   const std::vector<gfx::ShadowValue> shadows_;
 
   // The bounds of the shadowed area.
-  gfx::Rect bounds_;
+  const gfx::Rect bounds_;
 
-  int corner_radius_;
+  const SkColor fill_color_;
+
+  const int corner_radius_;
 
   DISALLOW_COPY_AND_ASSIGN(BorderShadowLayerDelegate);
 };

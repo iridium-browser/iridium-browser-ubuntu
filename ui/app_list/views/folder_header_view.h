@@ -14,14 +14,9 @@
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view.h"
 
-namespace views {
-class ImageButton;
-}  // namespace views
-
 namespace app_list {
 
 class AppListFolderItem;
-class AppListFolderView;
 class FolderHeaderViewDelegate;
 
 namespace test {
@@ -80,7 +75,6 @@ class APP_LIST_EXPORT FolderHeaderView : public views::View,
 
   AppListFolderItem* folder_item_;  // Not owned.
 
-  views::ImageButton* back_button_;  // Owned by views hierarchy.
   FolderNameView* folder_name_view_;  // Owned by views hierarchy.
 
   const base::string16 folder_name_placeholder_text_;

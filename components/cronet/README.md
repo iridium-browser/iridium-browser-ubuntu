@@ -17,10 +17,10 @@ events during the lifetime of a request. For example:
                 UrlResponseInfo responseInfo, String newLocationUrl) {
             if (followRedirect) {
                 // Let's tell Cronet to follow the redirect!
-                mRequest.followRedirect();
+                request.followRedirect();
             } else {
                 // Not worth following the redirect? Abandon the request.
-                mRequest.cancel();
+                request.cancel();
             }
         }
 
@@ -37,7 +37,7 @@ events during the lifetime of a request. For example:
                  // errors from Cronet's perspective since the response is
                  // successfully read.
              }
-             responseHeaders = responseInfo.getAllHeaders();
+             mResponseHeaders = responseInfo.getAllHeaders();
         }
 
         @Override
@@ -47,7 +47,7 @@ events during the lifetime of a request. For example:
              doSomethingWithResponseData(byteBuffer);
              // Let's tell Cronet to continue reading the response body or
              // inform us that the response is complete!
-             request.read(myBuffer);
+             request.read(mBuffer);
         }
 
         @Override
@@ -58,7 +58,7 @@ events during the lifetime of a request. For example:
 
         @Override
         public void onFailed(UrlRequest request,
-                UrlResponseInfo responseInfo, UrlRequestException error) {
+                UrlResponseInfo responseInfo, CronetException error) {
              // Request has failed. responseInfo might be null.
              Log.e("MyCallback", "Request failed. " + error.getMessage());
              // Maybe handle error here. Typical errors include hostname
@@ -72,8 +72,8 @@ Make a request like this:
     CronetEngine engine = engineBuilder.build();
     Executor executor = Executors.newSingleThreadExecutor();
     MyCallback callback = new MyCallback();
-    UrlRequest.Builder requestBuilder = new UrlRequest.Builder(
-            "https://www.example.com", callback, executor, engine);
+    UrlRequest.Builder requestBuilder = engine.newUrlRequestBuilder(
+            "https://www.example.com", callback, executor);
     UrlRequest request = requestBuilder.build();
     request.start();
 

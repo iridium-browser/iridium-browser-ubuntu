@@ -5,15 +5,15 @@
 #include "chrome/browser/gpu/three_d_api_observer.h"
 
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/gpu_data_manager.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 
@@ -47,8 +47,6 @@ class ThreeDAPIInfoBarDelegate : public ConfirmInfoBarDelegate {
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool Accept() override;
   bool Cancel() override;
-  base::string16 GetLinkText() const override;
-  GURL GetLinkURL() const override;
 
   GURL url_;
   content::ThreeDAPIType requester_;
@@ -148,18 +146,9 @@ bool ThreeDAPIInfoBarDelegate::Cancel() {
                             DISMISSAL_MAX);
   content::GpuDataManager::GetInstance()->UnblockDomainFrom3DAPIs(url_);
   InfoBarService::WebContentsFromInfoBar(infobar())->GetController().Reload(
-      true);
+      content::ReloadType::NORMAL, true);
   return true;
 }
-
-base::string16 ThreeDAPIInfoBarDelegate::GetLinkText() const {
-  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
-}
-
-GURL ThreeDAPIInfoBarDelegate::GetLinkURL() const {
-  return GURL("trk:137:https://support.google.com/chrome/?p=ib_webgl");
-}
-
 
 // ThreeDAPIObserver ----------------------------------------------------------
 

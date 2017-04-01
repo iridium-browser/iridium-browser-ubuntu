@@ -14,6 +14,10 @@
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/init/gl_factory.h"
 
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
+
 #if defined(USE_X11)
 #include <X11/Xlib.h>
 #include "ui/platform_window/x11/x11_window.h"
@@ -72,7 +76,7 @@ void GLSurfaceTestSupport::InitializeOneOffImplementation(
 
   // This method may be called multiple times in the same process to set up
   // bindings in different ways.
-  init::ClearGLBindings();
+  init::ShutdownGL();
 
   bool gpu_service_logging = false;
   bool disable_gl_drawing = false;
@@ -83,6 +87,10 @@ void GLSurfaceTestSupport::InitializeOneOffImplementation(
 
 // static
 void GLSurfaceTestSupport::InitializeOneOffWithMockBindings() {
+#if defined(USE_OZONE)
+  // This function skips where Ozone is otherwise initialized.
+  ui::OzonePlatform::InitializeForGPU();
+#endif
   InitializeOneOffImplementation(kGLImplementationMockGL, false);
 }
 

@@ -16,6 +16,7 @@ from telemetry.internal.platform import system_info
 from telemetry.page import shared_page_state
 from telemetry.util import image_util
 from telemetry.testing.internal import fake_gpu_info
+from types import ModuleType
 
 
 # Classes and functions which are intended to be part of the public
@@ -42,6 +43,9 @@ class FakePlatform(object):
       self._tracing_controller = _FakeTracingController()
     return  self._tracing_controller
 
+  def Initialize(self):
+    pass
+
   def CanMonitorThermalThrottling(self):
     return False
 
@@ -64,6 +68,9 @@ class FakePlatform(object):
     raise NotImplementedError
 
   def StopAllLocalServers(self):
+    pass
+
+  def WaitForTemperature(self, _):
     pass
 
 
@@ -290,8 +297,16 @@ class _FakeNetworkController(object):
   def __init__(self):
     self.wpr_mode = None
     self.extra_wpr_args = None
-    self.is_replay_active = False
+    self.is_initialized = False
     self.is_open = False
+    self.use_live_traffic = None
+
+  def InitializeIfNeeded(self, use_live_traffic=False):
+    self.use_live_traffic = use_live_traffic
+
+  def UpdateTrafficSettings(self, round_trip_latency_ms=None,
+      download_bandwidth_kbps=None, upload_bandwidth_kbps=None):
+    pass
 
   def Open(self, wpr_mode, extra_wpr_args):
     self.wpr_mode = wpr_mode
@@ -301,16 +316,16 @@ class _FakeNetworkController(object):
   def Close(self):
     self.wpr_mode = None
     self.extra_wpr_args = None
-    self.is_replay_active = False
+    self.is_initialized = False
     self.is_open = False
 
   def StartReplay(self, archive_path, make_javascript_deterministic=False):
     del make_javascript_deterministic  # Unused.
     assert self.is_open
-    self.is_replay_active = archive_path is not None
+    self.is_initialized = archive_path is not None
 
   def StopReplay(self):
-    self.is_replay_active = False
+    self.is_initialized = False
 
 
 class _FakeTab(object):
@@ -343,6 +358,9 @@ class _FakeTab(object):
       raise Exception
 
   def WaitForDocumentReadyStateToBeInteractiveOrBetter(self, timeout=0):
+    pass
+
+  def WaitForFrameToBeDisplayed(self, timeout=0):
     pass
 
   def IsAlive(self):
@@ -472,3 +490,37 @@ class FakeInspectorWebsocket(object):
       callback(response)
     else:
       raise Exception('Unexpected response type')
+
+
+class FakeTimer(object):
+  """ A fake timer to fake out the timing for a module.
+    Args:
+      module: module to fake out the time
+  """
+  def __init__(self, module=None):
+    self._elapsed_time = 0
+    self._module = module
+    self._actual_time = None
+    if module:
+      assert isinstance(module, ModuleType)
+      self._actual_time = module.time
+      self._module.time = self
+
+  def sleep(self, time):
+    self._elapsed_time += time
+
+  def time(self):
+    return self._elapsed_time
+
+  def SetTime(self, time):
+    self._elapsed_time = time
+
+  def __del__(self):
+    self.Restore()
+
+  def Restore(self):
+    if self._module:
+      self._module.time = self._actual_time
+      self._module = None
+      self._actual_time = None
+

@@ -33,7 +33,7 @@ void StartFilePathWatchOnFileThread(
   DCHECK_CURRENTLY_ON(content::BrowserThread::FILE);
   // The watcher is created on the FILE thread because it is very difficult
   // to safely pass an already-created file watcher to a different thread.
-  std::unique_ptr<base::FilePathWatcher> watcher(new base::FilePathWatcher);
+  MediaFilePathWatcherUniquePtr watcher(new base::FilePathWatcher);
   bool success = watcher->Watch(
       path,
       false /* recursive */,
@@ -50,7 +50,7 @@ void StartFilePathWatchOnMediaTaskRunner(
     const base::FilePath& path,
     const FileWatchStartedCallback& watch_started_callback,
     const base::FilePathWatcher::Callback& path_changed_callback) {
-  DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
+  MediaFileSystemBackend::AssertCurrentlyOnMediaSequence();
   content::BrowserThread::PostTask(content::BrowserThread::FILE,
                                    FROM_HERE,
                                    base::Bind(&StartFilePathWatchOnFileThread,

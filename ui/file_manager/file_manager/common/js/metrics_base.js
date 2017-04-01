@@ -8,6 +8,7 @@
  * To be included as a first script in main.html
  */
 
+var metrics;  // Needs to be defined in each window which uses metrics.
 var metricsBase = {};
 
 /**
@@ -161,7 +162,7 @@ metricsBase.recordEnum = function(name, value, opt_validValues) {
   // (Source: UMA_HISTOGRAM_ENUMERATION definition in base/metrics/histogram.h)
   var metricDescr = {
     'metricName': metrics.convertName_(name),
-    'type': 'histogram-linear',
+    'type': chrome.metricsPrivate.MetricTypeType.HISTOGRAM_LINEAR,
     'min': 1,
     'max': boundaryValue,
     'buckets': boundaryValue

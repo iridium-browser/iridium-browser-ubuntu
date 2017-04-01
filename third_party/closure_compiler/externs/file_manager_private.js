@@ -69,6 +69,7 @@ var ProfileInfo;
  *   devicePath: (string|undefined),
  *   isParentDevice: (boolean|undefined),
  *   isReadOnly: boolean,
+ *   isReadOnlyRemovableDevice: boolean,
  *   hasMedia: boolean,
  *   configurable: boolean,
  *   watchable: boolean,
@@ -650,6 +651,14 @@ chrome.fileManagerPrivate.configureVolume = function(volumeId, callback) {};
 chrome.fileManagerPrivate.getCustomActions = function(entries, callback) {};
 
 /**
+ * Get the total size of a directory. |entry| Entry of the target directory.
+ * |callback|
+ * @param {!DirectoryEntry} entry
+ * @param {function(number)} callback
+ */
+chrome.fileManagerPrivate.getDirectorySize = function(entry, callback) {};
+
+/**
  * Executes the action on the specified set of entries. If not possible, then
  * returns an error via chrome.runtime.lastError.
  * @param {!Array<!Entry>} entries
@@ -682,6 +691,9 @@ chrome.fileManagerPrivate.onDeviceChanged;
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onDriveSyncError;
+
+/** @type {!ChromeEvent} */
+chrome.fileManagerPrivate.onAppsUpdated;
 
 /** @enum {string} */
 chrome.fileManagerPrivate.Verb = {

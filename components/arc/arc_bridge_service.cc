@@ -21,30 +21,9 @@ const base::Feature kArcEnabledFeature{"EnableARC",
 
 }  // namespace
 
-// Weak pointer.  This class is owned by ArcServiceManager.
-ArcBridgeService* g_arc_bridge_service = nullptr;
+ArcBridgeService::ArcBridgeService() = default;
 
-ArcBridgeService::ArcBridgeService()
-    : state_(State::STOPPED),
-      stop_reason_(StopReason::SHUTDOWN),
-      weak_factory_(this) {}
-
-ArcBridgeService::~ArcBridgeService() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(state() == State::STOPPING || state() == State::STOPPED);
-}
-
-// static
-ArcBridgeService* ArcBridgeService::Get() {
-  if (!g_arc_bridge_service) {
-    // ArcBridgeService may be indirectly referenced in unit tests where
-    // ArcBridgeService is optional.
-    LOG(ERROR) << "ArcBridgeService is not ready.";
-    return nullptr;
-  }
-  DCHECK(g_arc_bridge_service->CalledOnValidThread());
-  return g_arc_bridge_service;
-}
+ArcBridgeService::~ArcBridgeService() = default;
 
 // static
 bool ArcBridgeService::GetEnabled(const base::CommandLine* command_line) {
@@ -56,36 +35,6 @@ bool ArcBridgeService::GetEnabled(const base::CommandLine* command_line) {
 // static
 bool ArcBridgeService::GetAvailable(const base::CommandLine* command_line) {
   return command_line->HasSwitch(chromeos::switches::kArcAvailable);
-}
-
-void ArcBridgeService::AddObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
-  observer_list_.AddObserver(observer);
-}
-
-void ArcBridgeService::RemoveObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
-  observer_list_.RemoveObserver(observer);
-}
-
-void ArcBridgeService::SetState(State state) {
-  DCHECK(CalledOnValidThread());
-  DCHECK_NE(state_, state);
-  state_ = state;
-  VLOG(2) << "State: " << static_cast<uint32_t>(state_);
-  if (state_ == State::READY)
-    FOR_EACH_OBSERVER(Observer, observer_list(), OnBridgeReady());
-  else if (state == State::STOPPED)
-    FOR_EACH_OBSERVER(Observer, observer_list(), OnBridgeStopped(stop_reason_));
-}
-
-void ArcBridgeService::SetStopReason(StopReason stop_reason) {
-  DCHECK(CalledOnValidThread());
-  stop_reason_ = stop_reason;
-}
-
-bool ArcBridgeService::CalledOnValidThread() {
-  return thread_checker_.CalledOnValidThread();
 }
 
 }  // namespace arc

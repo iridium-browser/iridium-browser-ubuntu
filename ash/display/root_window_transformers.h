@@ -13,15 +13,14 @@ class Window;
 
 namespace display {
 class Display;
+class ManagedDisplayInfo;
 }
 
 namespace gfx {
 class Rect;
-class Transform;
 }
 
 namespace ash {
-class DisplayInfo;
 class RootWindowTransformer;
 
 ASH_EXPORT RootWindowTransformer* CreateRootWindowTransformerForDisplay(
@@ -33,8 +32,8 @@ ASH_EXPORT RootWindowTransformer* CreateRootWindowTransformerForDisplay(
 // and |mirror_display_info| specifies the display used to
 // mirror the content.
 ASH_EXPORT RootWindowTransformer* CreateRootWindowTransformerForMirroredDisplay(
-    const DisplayInfo& source_display_info,
-    const DisplayInfo& mirror_display_info);
+    const display::ManagedDisplayInfo& source_display_info,
+    const display::ManagedDisplayInfo& mirror_display_info);
 
 // Creates a RootWindowTransformers for unified desktop mode.
 // |screen_bounds| specifies the unified desktop's bounds and

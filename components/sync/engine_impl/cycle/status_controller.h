@@ -2,6 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef COMPONENTS_SYNC_ENGINE_IMPL_CYCLE_STATUS_CONTROLLER_H_
+#define COMPONENTS_SYNC_ENGINE_IMPL_CYCLE_STATUS_CONTROLLER_H_
+
+#include <map>
+#include <vector>
+
+#include "base/logging.h"
+#include "base/macros.h"
+#include "base/time/time.h"
+#include "components/sync/engine/cycle/model_neutral_state.h"
+#include "components/sync/engine/model_safe_worker.h"
+
+namespace syncer {
+
 // StatusController handles all counter and status related number crunching and
 // state tracking on behalf of a SyncCycle.
 //
@@ -13,22 +27,6 @@
 //
 // This object contains only global state.  None of its members are per model
 // type counters.
-
-#ifndef COMPONENTS_SYNC_ENGINE_IMPL_CYCLE_STATUS_CONTROLLER_H_
-#define COMPONENTS_SYNC_ENGINE_IMPL_CYCLE_STATUS_CONTROLLER_H_
-
-#include <map>
-#include <vector>
-
-#include "base/logging.h"
-#include "base/macros.h"
-#include "base/stl_util.h"
-#include "base/time/time.h"
-#include "components/sync/engine/cycle/model_neutral_state.h"
-#include "components/sync/engine/model_safe_worker.h"
-
-namespace syncer {
-
 class StatusController {
  public:
   StatusController();

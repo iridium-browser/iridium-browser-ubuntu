@@ -13,16 +13,15 @@
 #include <utility>
 #include <vector>
 
-#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "content/child/request_extra_data.h"
-#include "content/child/request_info.h"
+#include "content/child/test_request_peer.h"
 #include "content/common/appcache_interfaces.h"
 #include "content/common/resource_messages.h"
 #include "content/common/resource_request.h"
@@ -32,10 +31,14 @@
 #include "content/public/child/request_peer.h"
 #include "content/public/child/resource_dispatcher_delegate.h"
 #include "content/public/common/content_features.h"
+#include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
+#include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
+#include "url/gurl.h"
 
 namespace content {
 
@@ -49,96 +52,6 @@ static const char kTestPageContents[] =
 static const char kTestRedirectHeaders[] =
   "HTTP/1.1 302 Found\nLocation:http://www.google.com/\n\n";
 
-// Listens for request response data and stores it so that it can be compared
-// to the reference data.
-class TestRequestPeer : public RequestPeer {
- public:
-  struct Context;
-  TestRequestPeer(ResourceDispatcher* dispatcher, Context* context)
-      : dispatcher_(dispatcher), context_(context) {}
-
-  void OnUploadProgress(uint64_t position, uint64_t size) override {}
-
-  bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                          const ResourceResponseInfo& info) override {
-    EXPECT_FALSE(context_->cancelled);
-    ++context_->seen_redirects;
-    if (context_->defer_on_redirect)
-      dispatcher_->SetDefersLoading(context_->request_id, true);
-    return context_->follow_redirects;
-  }
-
-  void OnReceivedResponse(const ResourceResponseInfo& info) override {
-    EXPECT_FALSE(context_->cancelled);
-    EXPECT_FALSE(context_->received_response);
-    context_->received_response = true;
-    if (context_->cancel_on_receive_response) {
-      dispatcher_->Cancel(context_->request_id);
-      context_->cancelled = true;
-    }
-  }
-
-  void OnDownloadedData(int len, int encoded_data_length) override {
-    EXPECT_FALSE(context_->cancelled);
-    context_->total_downloaded_data_length += len;
-    context_->total_encoded_data_length += encoded_data_length;
-  }
-
-  void OnReceivedData(std::unique_ptr<ReceivedData> data) override {
-    if (context_->cancelled)
-      return;
-    EXPECT_TRUE(context_->received_response);
-    EXPECT_FALSE(context_->complete);
-    context_->data.append(data->payload(), data->length());
-    context_->total_encoded_data_length += data->encoded_data_length();
-  }
-
-  void OnCompletedRequest(int error_code,
-                          bool was_ignored_by_handler,
-                          bool stale_copy_in_cache,
-                          const std::string& security_info,
-                          const base::TimeTicks& completion_time,
-                          int64_t total_transfer_size) override {
-    if (context_->cancelled)
-      return;
-    EXPECT_TRUE(context_->received_response);
-    EXPECT_FALSE(context_->complete);
-    context_->complete = true;
-  }
-
-  struct Context {
-    // True if should follow redirects, false if should cancel them.
-    bool follow_redirects = true;
-    // True if the request should be deferred on redirects.
-    bool defer_on_redirect = false;
-
-    // Number of total redirects seen.
-    int seen_redirects = 0;
-
-    bool cancel_on_receive_response = false;
-    bool received_response = false;
-
-    // Data received. If downloading to file, remains empty.
-    std::string data;
-
-    // Total encoded data length, regardless of whether downloading to a file or
-    // not.
-    int total_encoded_data_length = 0;
-    // Total length when downloading to a file.
-    int total_downloaded_data_length = 0;
-
-    bool complete = false;
-    bool cancelled = false;
-    int request_id = -1;
-  };
-
- private:
-  ResourceDispatcher* dispatcher_;
-  Context* context_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestRequestPeer);
-};
-
 // Sets up the message sender override for the unit test.
 class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
  public:
@@ -147,8 +60,7 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
   }
 
   ~ResourceDispatcherTest() override {
-    base::STLDeleteContainerPairSecondPointers(shared_memory_map_.begin(),
-                                               shared_memory_map_.end());
+    shared_memory_map_.clear();
     dispatcher_.reset();
     base::RunLoop().RunUntilIdle();
   }
@@ -203,16 +115,6 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
     message_queue_.erase(message_queue_.begin());
   }
 
-  void ConsumeDataDownloaded_ACK(int expected_request_id) {
-    ASSERT_FALSE(message_queue_.empty());
-    std::tuple<int> args;
-    ASSERT_EQ(ResourceHostMsg_DataDownloaded_ACK::ID, message_queue_[0].type());
-    ASSERT_TRUE(ResourceHostMsg_DataDownloaded_ACK::Read(
-        &message_queue_[0], &args));
-    EXPECT_EQ(expected_request_id, std::get<0>(args));
-    message_queue_.erase(message_queue_.begin());
-  }
-
   void ConsumeReleaseDownloadedFile(int expected_request_id) {
     ASSERT_FALSE(message_queue_.empty());
     std::tuple<int> args;
@@ -262,7 +164,7 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
   void NotifySetDataBuffer(int request_id, size_t buffer_size) {
     base::SharedMemory* shared_memory = new base::SharedMemory();
     ASSERT_FALSE(shared_memory_map_[request_id]);
-    shared_memory_map_[request_id] = shared_memory;
+    shared_memory_map_[request_id] = base::WrapUnique(shared_memory);
     EXPECT_TRUE(shared_memory->CreateAndMapAnonymous(buffer_size));
 
     base::SharedMemoryHandle duplicate_handle;
@@ -278,14 +180,14 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
            data.length());
 
     EXPECT_TRUE(dispatcher_->OnMessageReceived(ResourceMsg_DataReceived(
-        request_id, 0, data.length(), data.length(), data.length())));
+        request_id, 0, data.length(), data.length())));
   }
 
   void NotifyInlinedDataChunkReceived(int request_id,
                                       const std::vector<char>& data) {
     auto size = data.size();
     EXPECT_TRUE(dispatcher_->OnMessageReceived(
-        ResourceMsg_InlinedDataChunkReceived(request_id, data, size, size)));
+        ResourceMsg_InlinedDataChunkReceived(request_id, data, size)));
   }
 
   void NotifyDataDownloaded(int request_id,
@@ -305,42 +207,43 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
         ResourceMsg_RequestComplete(request_id, request_complete_data)));
   }
 
-  RequestInfo* CreateRequestInfo(bool download_to_file) {
-    RequestInfo* request_info = new RequestInfo();
-    request_info->method = "GET";
-    request_info->url = GURL(kTestPageUrl);
-    request_info->first_party_for_cookies = GURL(kTestPageUrl);
-    request_info->referrer = Referrer();
-    request_info->headers = std::string();
-    request_info->load_flags = 0;
-    request_info->requestor_pid = 0;
-    request_info->request_type = RESOURCE_TYPE_SUB_RESOURCE;
-    request_info->appcache_host_id = kAppCacheNoHostId;
-    request_info->should_reset_appcache = false;
-    request_info->routing_id = 0;
-    request_info->download_to_file = download_to_file;
-    RequestExtraData extra_data;
+  std::unique_ptr<ResourceRequest> CreateResourceRequest(
+      bool download_to_file) {
+    std::unique_ptr<ResourceRequest> request(new ResourceRequest());
 
-    return request_info;
+    request->method = "GET";
+    request->url = GURL(kTestPageUrl);
+    request->first_party_for_cookies = GURL(kTestPageUrl);
+    request->referrer_policy = blink::WebReferrerPolicyDefault;
+    request->resource_type = RESOURCE_TYPE_SUB_RESOURCE;
+    request->priority = net::LOW;
+    request->fetch_request_mode = FETCH_REQUEST_MODE_NO_CORS;
+    request->fetch_frame_type = REQUEST_CONTEXT_FRAME_TYPE_NONE;
+    request->download_to_file = download_to_file;
+
+    const RequestExtraData extra_data;
+    extra_data.CopyToResourceRequest(request.get());
+
+    return request;
   }
 
   ResourceDispatcher* dispatcher() { return dispatcher_.get(); }
 
-  int StartAsync(const RequestInfo& request_info,
+  int StartAsync(std::unique_ptr<ResourceRequest> request,
                  ResourceRequestBodyImpl* request_body,
                  TestRequestPeer::Context* peer_context) {
     std::unique_ptr<TestRequestPeer> peer(
         new TestRequestPeer(dispatcher(), peer_context));
     int request_id = dispatcher()->StartAsync(
-        request_info, request_body, std::move(peer),
-        blink::WebURLRequest::LoadingIPCType::ChromeIPC, nullptr);
+        std::move(request), 0, nullptr, url::Origin(), std::move(peer),
+        blink::WebURLRequest::LoadingIPCType::ChromeIPC, nullptr, nullptr);
     peer_context->request_id = request_id;
     return request_id;
   }
 
  private:
   // Map of request IDs to shared memory.
-  std::map<int, base::SharedMemory*> shared_memory_map_;
+  std::map<int, std::unique_ptr<base::SharedMemory>> shared_memory_map_;
 
   std::vector<IPC::Message> message_queue_;
   base::MessageLoop message_loop_;
@@ -354,9 +257,9 @@ TEST_F(ResourceDispatcherTest, RoundTrip) {
   const size_t kFirstReceiveSize = 2;
   ASSERT_LT(kFirstReceiveSize, strlen(kTestPageContents));
 
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), NULL, &peer_context);
+  StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
   EXPECT_EQ(0u, queued_messages());
@@ -382,14 +285,13 @@ TEST_F(ResourceDispatcherTest, RoundTrip) {
 
 // A simple request with an inline data response.
 TEST_F(ResourceDispatcherTest, ResponseWithInlinedData) {
-  auto feature_list = base::MakeUnique<base::FeatureList>();
-  feature_list->InitializeFromCommandLine(
-      features::kOptimizeLoadingIPCForSmallResources.name, std::string());
-  base::FeatureList::ClearInstanceForTesting();
-  base::FeatureList::SetInstance(std::move(feature_list));
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kOptimizeLoadingIPCForSmallResources);
+
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), NULL, &peer_context);
+  StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
   EXPECT_EQ(0u, queued_messages());
@@ -414,13 +316,13 @@ TEST_F(ResourceDispatcherTest, ResponseWithInlinedData) {
 TEST_F(ResourceDispatcherTest, MultipleRequests) {
   const char kTestPageContents2[] = "Not kTestPageContents";
 
-  std::unique_ptr<RequestInfo> request_info1(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request1(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context1;
-  StartAsync(*request_info1.get(), NULL, &peer_context1);
+  StartAsync(std::move(request1), NULL, &peer_context1);
 
-  std::unique_ptr<RequestInfo> request_info2(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request2(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context2;
-  StartAsync(*request_info2.get(), NULL, &peer_context2);
+  StartAsync(std::move(request2), NULL, &peer_context2);
 
   int id1 = ConsumeRequestResource();
   int id2 = ConsumeRequestResource();
@@ -455,9 +357,9 @@ TEST_F(ResourceDispatcherTest, MultipleRequests) {
 
 // Tests that the cancel method prevents other messages from being received.
 TEST_F(ResourceDispatcherTest, Cancel) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  int request_id = StartAsync(*request_info.get(), NULL, &peer_context);
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
   EXPECT_EQ(0u, queued_messages());
@@ -480,9 +382,9 @@ TEST_F(ResourceDispatcherTest, Cancel) {
 
 // Tests that calling cancel during a callback works as expected.
 TEST_F(ResourceDispatcherTest, CancelDuringCallback) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), NULL, &peer_context);
+  StartAsync(std::move(request), NULL, &peer_context);
   peer_context.cancel_on_receive_response = true;
 
   int id = ConsumeRequestResource();
@@ -543,21 +445,22 @@ class TestResourceDispatcherDelegate : public ResourceDispatcherDelegate {
     void OnReceivedData(std::unique_ptr<ReceivedData> data) override {
       data_.append(data->payload(), data->length());
     }
+    void OnTransferSizeUpdated(int transfer_size_diff) override {}
 
     void OnCompletedRequest(int error_code,
                             bool was_ignored_by_handler,
                             bool stale_copy_in_cache,
-                            const std::string& security_info,
                             const base::TimeTicks& completion_time,
-                            int64_t total_transfer_size) override {
+                            int64_t total_transfer_size,
+                            int64_t encoded_body_size) override {
       original_peer_->OnReceivedResponse(response_info_);
       if (!data_.empty()) {
-        original_peer_->OnReceivedData(base::MakeUnique<FixedReceivedData>(
-            data_.data(), data_.size(), -1, data_.size()));
+        original_peer_->OnReceivedData(
+            base::MakeUnique<FixedReceivedData>(data_.data(), data_.size()));
       }
-      original_peer_->OnCompletedRequest(error_code, was_ignored_by_handler,
-                                         stale_copy_in_cache, security_info,
-                                         completion_time, total_transfer_size);
+      original_peer_->OnCompletedRequest(
+          error_code, was_ignored_by_handler, stale_copy_in_cache,
+          completion_time, total_transfer_size, encoded_body_size);
     }
 
    private:
@@ -573,9 +476,9 @@ class TestResourceDispatcherDelegate : public ResourceDispatcherDelegate {
 };
 
 TEST_F(ResourceDispatcherTest, DelegateTest) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), nullptr, &peer_context);
+  StartAsync(std::move(request), nullptr, &peer_context);
 
   // Set the delegate that inserts a new peer in OnReceivedResponse.
   TestResourceDispatcherDelegate delegate;
@@ -610,9 +513,9 @@ TEST_F(ResourceDispatcherTest, DelegateTest) {
 }
 
 TEST_F(ResourceDispatcherTest, CancelDuringCallbackWithWrapperPeer) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), nullptr, &peer_context);
+  StartAsync(std::move(request), nullptr, &peer_context);
   peer_context.cancel_on_receive_response = true;
 
   // Set the delegate that inserts a new peer in OnReceivedResponse.
@@ -639,8 +542,8 @@ TEST_F(ResourceDispatcherTest, CancelDuringCallbackWithWrapperPeer) {
   NotifyRequestComplete(id, strlen(kTestPageContents));
 
   EXPECT_TRUE(peer_context.received_response);
-  // Request should have been cancelled.
-  ConsumeCancelRequest(id);
+  // Request should have been cancelled with no additional messages.
+  EXPECT_EQ(0u, queued_messages());
   EXPECT_TRUE(peer_context.cancelled);
 
   // Any future messages related to the request should be ignored.
@@ -654,9 +557,9 @@ TEST_F(ResourceDispatcherTest, CancelDuringCallbackWithWrapperPeer) {
 
 // Checks that redirects work as expected.
 TEST_F(ResourceDispatcherTest, Redirect) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), NULL, &peer_context);
+  StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
 
@@ -685,9 +588,9 @@ TEST_F(ResourceDispatcherTest, Redirect) {
 // Tests that that cancelling during a redirect method prevents other messages
 // from being received.
 TEST_F(ResourceDispatcherTest, CancelDuringRedirect) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  StartAsync(*request_info.get(), NULL, &peer_context);
+  StartAsync(std::move(request), NULL, &peer_context);
   peer_context.follow_redirects = false;
 
   int id = ConsumeRequestResource();
@@ -715,9 +618,9 @@ TEST_F(ResourceDispatcherTest, CancelDuringRedirect) {
 
 // Checks that deferring a request delays messages until it's resumed.
 TEST_F(ResourceDispatcherTest, Defer) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  int request_id = StartAsync(*request_info.get(), NULL, &peer_context);
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
   EXPECT_EQ(0u, queued_messages());
@@ -749,9 +652,9 @@ TEST_F(ResourceDispatcherTest, Defer) {
 // Checks that deferring a request during a redirect delays messages until it's
 // resumed.
 TEST_F(ResourceDispatcherTest, DeferOnRedirect) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  int request_id = StartAsync(*request_info.get(), NULL, &peer_context);
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
   peer_context.defer_on_redirect = true;
 
   int id = ConsumeRequestResource();
@@ -788,9 +691,9 @@ TEST_F(ResourceDispatcherTest, DeferOnRedirect) {
 
 // Checks that a deferred request that's cancelled doesn't receive any messages.
 TEST_F(ResourceDispatcherTest, CancelDeferredRequest) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  int request_id = StartAsync(*request_info.get(), NULL, &peer_context);
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
   EXPECT_EQ(0u, queued_messages());
@@ -810,10 +713,117 @@ TEST_F(ResourceDispatcherTest, CancelDeferredRequest) {
   EXPECT_EQ(0, peer_context.seen_redirects);
 }
 
-TEST_F(ResourceDispatcherTest, DownloadToFile) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(true));
+// Checks cancelling a request while flushing deferred requests from
+// the FlushDeferredMessages() task.
+TEST_F(ResourceDispatcherTest, CancelWhileFlushingDeferredRequests) {
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
   TestRequestPeer::Context peer_context;
-  int request_id = StartAsync(*request_info.get(), NULL, &peer_context);
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
+
+  // Cancel the request when the data message is handled.
+  peer_context.cancel_on_receive_data = true;
+
+  int id = ConsumeRequestResource();
+  EXPECT_EQ(0u, queued_messages());
+
+  dispatcher()->SetDefersLoading(request_id, true);
+  NotifyReceivedResponse(id);
+  NotifySetDataBuffer(id, strlen(kTestPageContents));
+  NotifyDataReceived(id, kTestPageContents);
+
+  // None of the messages should have been processed yet.
+  EXPECT_EQ("", peer_context.data);
+  EXPECT_FALSE(peer_context.complete);
+  EXPECT_EQ(0u, queued_messages());
+
+  dispatcher()->SetDefersLoading(request_id, false);
+
+  // Make sure that the FlushDeferredMessages() task posted from
+  // SetDefersLoading() is run. It should dispatch all the deferred
+  // messages.
+  base::RunLoop().RunUntilIdle();
+
+  // When the deferred DataReceived is dispatched, the handler will
+  // cancel the request, but the ACK is sent after the handler
+  // returns, so the cancel request ends up before the ACK in the
+  // message queue.
+  ConsumeCancelRequest(id);
+  ConsumeDataReceived_ACK(id);
+
+  // The data was consumed before the handler canceled
+  // the request, so the data should have been received.
+  EXPECT_EQ(kTestPageContents, peer_context.data);
+  EXPECT_FALSE(peer_context.complete);
+  EXPECT_EQ(0u, queued_messages());
+}
+
+// Checks cancelling a request while flushing deferred requests from
+// OnMessageReceived().
+TEST_F(ResourceDispatcherTest,
+       CancelWhileFlushingDeferredRequestsFromOnMessageReceived) {
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
+  TestRequestPeer::Context peer_context;
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
+
+  // Cancel the request when the data message is handled.
+  peer_context.cancel_on_receive_data = true;
+
+  int id = ConsumeRequestResource();
+  EXPECT_EQ(0u, queued_messages());
+
+  dispatcher()->SetDefersLoading(request_id, true);
+  NotifyReceivedResponse(id);
+  NotifySetDataBuffer(id, strlen(kTestPageContents));
+  NotifyDataReceived(id, kTestPageContents);
+
+  // None of the messages should have been processed yet.
+  EXPECT_EQ("", peer_context.data);
+  EXPECT_FALSE(peer_context.complete);
+  EXPECT_EQ(0u, queued_messages());
+
+  dispatcher()->SetDefersLoading(request_id, false);
+
+  // SetDefersLoading() posts a task to run FlushDeferredMessages() to dispatch
+  // the deferred messages. Since the message loop hasn't been run yet the
+  // task hasn't been run either and no IPC-messages should have been
+  // dispatched.
+  EXPECT_EQ("", peer_context.data);
+  EXPECT_FALSE(peer_context.complete);
+  EXPECT_EQ(0u, queued_messages());
+
+  // Calling NotifyRequestComplete() here, before the task from
+  // SetDefersLoading() has been run, triggers the flush in
+  // OnMessageReceived().
+  NotifyRequestComplete(id, strlen(kTestPageContents));
+
+  // When the deferred DataReceived is dispatched, the handler will
+  // cancel the request, but the ACK is sent after the handler
+  // returns, so the cancel request ends up before the ACK in the
+  // message queue.
+  ConsumeCancelRequest(id);
+  ConsumeDataReceived_ACK(id);
+
+  // The data was consumed before the handler canceled
+  // the request, so the data should have been received.
+  EXPECT_EQ(kTestPageContents, peer_context.data);
+  EXPECT_FALSE(peer_context.complete);
+  EXPECT_EQ(0u, queued_messages());
+
+  // Make sure that the FlushDeferredMessages() task posted from
+  // SetDefersLoading() is run. The messages should already have been
+  // flushed above, so it should be a NOOP.
+  base::RunLoop().RunUntilIdle();
+
+  // Check that the task didn't change anything.
+  EXPECT_EQ(kTestPageContents, peer_context.data);
+  EXPECT_FALSE(peer_context.complete);
+  EXPECT_EQ(0u, queued_messages());
+}
+
+TEST_F(ResourceDispatcherTest, DownloadToFile) {
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(true));
+  TestRequestPeer::Context peer_context;
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
   const int kDownloadedIncrement = 100;
   const int kEncodedIncrement = 50;
 
@@ -828,7 +838,6 @@ TEST_F(ResourceDispatcherTest, DownloadToFile) {
   int expected_total_encoded_data_length = 0;
   for (int i = 0; i < 10; ++i) {
     NotifyDataDownloaded(id, kDownloadedIncrement, kEncodedIncrement);
-    ConsumeDataDownloaded_ACK(id);
     expected_total_downloaded_length += kDownloadedIncrement;
     expected_total_encoded_data_length += kEncodedIncrement;
     EXPECT_EQ(expected_total_downloaded_length,
@@ -853,9 +862,9 @@ TEST_F(ResourceDispatcherTest, DownloadToFile) {
 
 // Make sure that when a download to file is cancelled, the file is destroyed.
 TEST_F(ResourceDispatcherTest, CancelDownloadToFile) {
-  std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(true));
+  std::unique_ptr<ResourceRequest> request(CreateResourceRequest(true));
   TestRequestPeer::Context peer_context;
-  int request_id = StartAsync(*request_info.get(), NULL, &peer_context);
+  int request_id = StartAsync(std::move(request), NULL, &peer_context);
 
   int id = ConsumeRequestResource();
   EXPECT_EQ(0u, queued_messages());
@@ -886,9 +895,9 @@ class TimeConversionTest : public ResourceDispatcherTest {
   }
 
   void PerformTest(const ResourceResponseHead& response_head) {
-    std::unique_ptr<RequestInfo> request_info(CreateRequestInfo(false));
+    std::unique_ptr<ResourceRequest> request(CreateResourceRequest(false));
     TestRequestPeer::Context peer_context;
-    StartAsync(*request_info.get(), NULL, &peer_context);
+    StartAsync(std::move(request), NULL, &peer_context);
 
     dispatcher()->OnMessageReceived(
         ResourceMsg_ReceivedResponse(0, response_head));

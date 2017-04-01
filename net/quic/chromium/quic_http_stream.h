@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_HTTP_STREAM_H_
-#define NET_QUIC_QUIC_HTTP_STREAM_H_
+#ifndef NET_QUIC_CHROMIUM_QUIC_HTTP_STREAM_H_
+#define NET_QUIC_CHROMIUM_QUIC_HTTP_STREAM_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,10 +15,15 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/io_buffer.h"
-#include "net/http/http_stream.h"
+#include "net/base/load_timing_info.h"
+#include "net/base/net_export.h"
+#include "net/http/http_response_info.h"
+#include "net/log/net_log_with_source.h"
 #include "net/quic/chromium/quic_chromium_client_session.h"
 #include "net/quic/chromium/quic_chromium_client_stream.h"
 #include "net/quic/core/quic_client_push_promise_index.h"
+#include "net/quic/core/quic_packets.h"
+#include "net/spdy/multiplexed_http_stream.h"
 
 namespace net {
 
@@ -33,7 +38,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream
     : public QuicChromiumClientSession::Observer,
       public QuicChromiumClientStream::Delegate,
       public QuicClientPushPromiseIndex::Delegate,
-      public HttpStream {
+      public MultiplexedHttpStream {
  public:
   explicit QuicHttpStream(
       const base::WeakPtr<QuicChromiumClientSession>& session);
@@ -43,31 +48,21 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   // HttpStream implementation.
   int InitializeStream(const HttpRequestInfo* request_info,
                        RequestPriority priority,
-                       const BoundNetLog& net_log,
+                       const NetLogWithSource& net_log,
                        const CompletionCallback& callback) override;
   int SendRequest(const HttpRequestHeaders& request_headers,
                   HttpResponseInfo* response,
                   const CompletionCallback& callback) override;
-  UploadProgress GetUploadProgress() const override;
   int ReadResponseHeaders(const CompletionCallback& callback) override;
   int ReadResponseBody(IOBuffer* buf,
                        int buf_len,
                        const CompletionCallback& callback) override;
   void Close(bool not_reusable) override;
-  HttpStream* RenewStreamForAuth() override;
   bool IsResponseBodyComplete() const override;
   bool IsConnectionReused() const override;
-  void SetConnectionReused() override;
-  bool CanReuseConnection() const override;
   int64_t GetTotalReceivedBytes() const override;
   int64_t GetTotalSentBytes() const override;
   bool GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
-  void GetSSLInfo(SSLInfo* ssl_info) override;
-  void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
-  bool GetRemoteEndpoint(IPEndPoint* endpoint) override;
-  Error GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
-                                    std::vector<uint8_t>* out) override;
-  void Drain(HttpNetworkSession* session) override;
   void PopulateNetErrorDetails(NetErrorDetails* details) override;
   void SetPriority(RequestPriority priority) override;
 
@@ -81,6 +76,7 @@ class NET_EXPORT_PRIVATE QuicHttpStream
 
   // QuicChromiumClientSession::Observer implementation
   void OnCryptoHandshakeConfirmed() override;
+  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
   void OnSessionClosed(int error, bool port_migration_detected) override;
 
   // QuicClientPushPromiseIndex::Delegate implementation
@@ -89,12 +85,18 @@ class NET_EXPORT_PRIVATE QuicHttpStream
                  const SpdyHeaderBlock& promise_response) override;
   void OnRendezvousResult(QuicSpdyStream* stream) override;
 
+  static HttpResponseInfo::ConnectionInfo ConnectionInfoFromQuicVersion(
+      QuicVersion quic_version);
+
  private:
   friend class test::QuicHttpStreamPeer;
 
   enum State {
     STATE_NONE,
+    STATE_HANDLE_PROMISE,
+    STATE_HANDLE_PROMISE_COMPLETE,
     STATE_REQUEST_STREAM,
+    STATE_REQUEST_STREAM_COMPLETE,
     STATE_SET_REQUEST_PRIORITY,
     STATE_WAIT_FOR_CONFIRMATION,
     STATE_WAIT_FOR_CONFIRMATION_COMPLETE,
@@ -107,12 +109,14 @@ class NET_EXPORT_PRIVATE QuicHttpStream
     STATE_OPEN,
   };
 
-  void OnStreamReady(int rv);
   void OnIOComplete(int rv);
   void DoCallback(int rv);
 
   int DoLoop(int rv);
-  int DoStreamRequest();
+  int DoHandlePromise();
+  int DoHandlePromiseComplete(int rv);
+  int DoRequestStream();
+  int DoRequestStreamComplete(int rv);
   int DoSetRequestPriority();
   int DoWaitForConfirmation();
   int DoWaitForConfirmationComplete(int rv);
@@ -127,14 +131,13 @@ class NET_EXPORT_PRIVATE QuicHttpStream
 
   int ReadAvailableData(IOBuffer* buf, int buf_len);
   void EnterStateSendHeaders();
-  int HandlePromise();
 
   void ResetStream();
-  bool CancelPromiseIfHasBody();
 
   State next_state_;
 
   base::WeakPtr<QuicChromiumClientSession> session_;
+  QuicVersion quic_version_;
   int session_error_;             // Error code from the connection shutdown.
   bool was_handshake_confirmed_;  // True if the crypto handshake succeeded.
   QuicChromiumClientSession::StreamRequest stream_request_;
@@ -144,7 +147,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   // outlive this object, according to the HttpStream contract.
 
   // The request to send.
+  // Only valid before the response body is read.
   const HttpRequestInfo* request_info_;
+
   // The request body to send, if any, owned by the caller.
   UploadDataStream* request_body_stream_;
   // Time the request was issued.
@@ -177,6 +182,10 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   int64_t closed_stream_received_bytes_;
   // Number of bytes sent when the stream was closed.
   int64_t closed_stream_sent_bytes_;
+  // True if the stream is the first stream negotiated on the session. Set when
+  // the stream was closed. If |stream_| is failed to be created, this takes on
+  // the default value of false.
+  bool closed_is_first_stream_;
 
   // The caller's callback to be used for asynchronous operations.
   CompletionCallback callback_;
@@ -190,12 +199,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   // Wraps raw_request_body_buf_ to read the remaining data progressively.
   scoped_refptr<DrainableIOBuffer> request_body_buf_;
 
-  BoundNetLog stream_net_log_;
+  NetLogWithSource stream_net_log_;
 
   QuicErrorCode quic_connection_error_;
-
-  // SSLInfo from the underlying QuicSession.
-  SSLInfo ssl_info_;
 
   // True when this stream receives a go away from server due to port migration.
   bool port_migration_detected_;
@@ -210,6 +216,9 @@ class NET_EXPORT_PRIVATE QuicHttpStream
   // Set to true when DoLoop() is being executed, false otherwise.
   bool in_loop_;
 
+  // Session connect timing info.
+  LoadTimingInfo::ConnectTiming connect_timing_;
+
   base::WeakPtrFactory<QuicHttpStream> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicHttpStream);
@@ -217,4 +226,4 @@ class NET_EXPORT_PRIVATE QuicHttpStream
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_HTTP_STREAM_H_
+#endif  // NET_QUIC_CHROMIUM_QUIC_HTTP_STREAM_H_

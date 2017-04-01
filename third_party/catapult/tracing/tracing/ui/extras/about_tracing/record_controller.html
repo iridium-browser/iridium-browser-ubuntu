@@ -141,13 +141,13 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
           updateBufferPercentFull);
     }
 
-    function updateBufferPercentFull(percent_full) {
+    function updateBufferPercentFull(percentFull) {
       if (!bufferPercentFullDiv)
         return;
 
-      percent_full = Math.round(100 * parseFloat(percent_full));
-      var newText = 'Buffer usage: ' + percent_full + '%';
-      if (Polymer.dom(bufferPercentFullDiv).textContent != newText)
+      percentFull = Math.round(100 * parseFloat(percentFull));
+      var newText = 'Buffer usage: ' + percentFull + '%';
+      if (Polymer.dom(bufferPercentFullDiv).textContent !== newText)
         Polymer.dom(bufferPercentFullDiv).textContent = newText;
 
       window.setTimeout(getBufferPercentFull, 500);
@@ -155,7 +155,7 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
 
     // Thats it! We're done.
     return finalPromise;
-  };
+  }
 
   function endRecording(tracingControllerClient) {
     return tracingControllerClient.endRecording();
@@ -173,9 +173,9 @@ tr.exportTo('tr.ui.e.about_tracing', function() {
   };
 
   return {
-    beginRecording: beginRecording,
-    UserCancelledError: UserCancelledError,
-    defaultTraceName: defaultTraceName
+    beginRecording,
+    UserCancelledError,
+    defaultTraceName,
   };
 });
 </script>

@@ -21,19 +21,20 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/common/extensions/api/feedback_private.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/event_router.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/url_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
@@ -72,6 +73,9 @@ namespace feedback_private = api::feedback_private;
 using feedback_private::SystemInformation;
 using feedback_private::FeedbackInfo;
 using feedback_private::FeedbackFlow;
+
+using SystemInformationList =
+    std::vector<api::feedback_private::SystemInformation>;
 
 static base::LazyInstance<BrowserContextKeyedAPIFactory<FeedbackPrivateAPI> >
     g_factory = LAZY_INSTANCE_INITIALIZER;
@@ -122,14 +126,19 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
   if (browser_context_ && EventRouter::Get(browser_context_)) {
     FeedbackInfo info;
     info.description = description_template;
-    info.category_tag = base::WrapUnique(new std::string(category_tag));
-    info.page_url = base::WrapUnique(new std::string(page_url.spec()));
+    info.category_tag = base::MakeUnique<std::string>(category_tag);
+    info.page_url = base::MakeUnique<std::string>(page_url.spec());
     info.system_information.reset(new SystemInformationList);
     // The manager is only available if tracing is enabled.
     if (TracingManager* manager = TracingManager::Get()) {
       info.trace_id.reset(new int(manager->RequestTrace()));
     }
     info.flow = flow;
+#if defined(OS_MACOSX)
+    info.use_system_window_frame = true;
+#else
+    info.use_system_window_frame = false;
+#endif
 
     std::unique_ptr<base::ListValue> args =
         feedback_private::OnFeedbackRequested::Create(info);
@@ -148,18 +157,20 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
 // static
 base::Closure* FeedbackPrivateGetStringsFunction::test_callback_ = NULL;
 
-bool FeedbackPrivateGetStringsFunction::RunSync() {
+ExtensionFunction::ResponseAction FeedbackPrivateGetStringsFunction::Run() {
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
 #define SET_STRING(id, idr) \
   dict->SetString(id, l10n_util::GetStringUTF16(idr))
   SET_STRING("page-title", IDS_FEEDBACK_REPORT_PAGE_TITLE);
+  SET_STRING("additionalInfo", IDS_FEEDBACK_ADDITIONAL_INFO_LABEL);
   SET_STRING("page-url", IDS_FEEDBACK_REPORT_URL_LABEL);
   SET_STRING("screenshot", IDS_FEEDBACK_SCREENSHOT_LABEL);
   SET_STRING("user-email", IDS_FEEDBACK_USER_EMAIL_LABEL);
 #if defined(OS_CHROMEOS)
-  const arc::ArcAuthService* auth_service = arc::ArcAuthService::Get();
-  if (auth_service && auth_service->IsArcEnabled()) {
+  const arc::ArcSessionManager* arc_session_manager =
+      arc::ArcSessionManager::Get();
+  if (arc_session_manager && arc_session_manager->IsArcEnabled()) {
     SET_STRING("sys-info",
                IDS_FEEDBACK_INCLUDE_SYSTEM_INFORMATION_AND_METRICS_CHKBOX_ARC);
   } else {
@@ -198,38 +209,48 @@ bool FeedbackPrivateGetStringsFunction::RunSync() {
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
   webui::SetLoadTimeDataDefaults(app_locale, dict.get());
 
-  SetResult(std::move(dict));
 
   if (test_callback_ && !test_callback_->is_null())
     test_callback_->Run();
 
-  return true;
+  return RespondNow(OneArgument(std::move(dict)));
 }
 
-bool FeedbackPrivateGetUserEmailFunction::RunSync() {
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfile(GetProfile());
-  SetResult(base::MakeUnique<base::StringValue>(
+ExtensionFunction::ResponseAction FeedbackPrivateGetUserEmailFunction::Run() {
+  SigninManagerBase* signin_manager = SigninManagerFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  return RespondNow(OneArgument(base::MakeUnique<base::StringValue>(
       signin_manager ? signin_manager->GetAuthenticatedAccountInfo().email
-                     : std::string()));
-  return true;
+                     : std::string())));
 }
 
-bool FeedbackPrivateGetSystemInformationFunction::RunAsync() {
-  FeedbackService* service =
-      FeedbackPrivateAPI::GetFactoryInstance()->Get(GetProfile())->GetService();
+ExtensionFunction::ResponseAction
+FeedbackPrivateGetSystemInformationFunction::Run() {
+  FeedbackService* service = FeedbackPrivateAPI::GetFactoryInstance()
+                                 ->Get(browser_context())
+                                 ->GetService();
   DCHECK(service);
   service->GetSystemInformation(
       base::Bind(
           &FeedbackPrivateGetSystemInformationFunction::OnCompleted, this));
-  return true;
+  return RespondLater();
 }
 
 void FeedbackPrivateGetSystemInformationFunction::OnCompleted(
-    const SystemInformationList& sys_info) {
-  results_ = feedback_private::GetSystemInformation::Results::Create(
-      sys_info);
-  SendResponse(true);
+    std::unique_ptr<system_logs::SystemLogsResponse> sys_info) {
+  SystemInformationList sys_info_list;
+  if (sys_info) {
+    sys_info_list.reserve(sys_info->size());
+    for (auto& itr : *sys_info) {
+      SystemInformation sys_info_entry;
+      sys_info_entry.key = std::move(itr.first);
+      sys_info_entry.value = std::move(itr.second);
+      sys_info_list.emplace_back(std::move(sys_info_entry));
+    }
+  }
+
+  Respond(ArgumentList(
+      feedback_private::GetSystemInformation::Results::Create(sys_info_list)));
 }
 
 bool FeedbackPrivateSendFeedbackFunction::RunAsync() {

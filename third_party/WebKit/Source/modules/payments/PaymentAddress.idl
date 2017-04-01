@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://w3c.github.io/browser-payment-api/specs/paymentrequest.html#paymentaddress-interface
+// https://w3c.github.io/browser-payment-api/#paymentaddress-interface
 
 [
     RuntimeEnabled=PaymentRequest,
 ] interface PaymentAddress {
+    serializer = {attribute};
     readonly attribute DOMString country;
     readonly attribute FrozenArray<DOMString> addressLine;
     readonly attribute DOMString region;
@@ -17,6 +18,5 @@
     readonly attribute DOMString languageCode;
     readonly attribute DOMString organization;
     readonly attribute DOMString recipient;
-    readonly attribute DOMString careOf;
     readonly attribute DOMString phone;
 };

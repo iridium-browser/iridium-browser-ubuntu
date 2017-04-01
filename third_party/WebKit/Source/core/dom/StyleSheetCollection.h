@@ -3,8 +3,10 @@
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
  *           (C) 2001 Dirk Mueller (mueller@kde.org)
  *           (C) 2006 Alexey Proskuryakov (ap@webkit.org)
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All rights reserved.
- * Copyright (C) 2008, 2009 Torch Mobile Inc. All rights reserved. (http://www.torchmobile.com/)
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2012 Apple Inc. All
+ * rights reserved.
+ * Copyright (C) 2008, 2009 Torch Mobile Inc. All rights reserved.
+ * (http://www.torchmobile.com/)
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies)
  * Copyright (C) 2011 Google Inc. All rights reserved.
  *
@@ -28,46 +30,54 @@
 #ifndef StyleSheetCollection_h
 #define StyleSheetCollection_h
 
+#include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "core/CoreExport.h"
+#include "core/css/ActiveStyleSheets.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Allocator.h"
 #include "wtf/Vector.h"
 
 namespace blink {
 
-class CSSStyleSheet;
 class StyleSheet;
 
-class CORE_EXPORT StyleSheetCollection : public GarbageCollected<StyleSheetCollection> {
-    WTF_MAKE_NONCOPYABLE(StyleSheetCollection);
-public:
-    friend class ActiveDocumentStyleSheetCollector;
-    friend class ImportedDocumentStyleSheetCollector;
+class CORE_EXPORT StyleSheetCollection
+    : public GarbageCollected<StyleSheetCollection>,
+      public TraceWrapperBase {
+  WTF_MAKE_NONCOPYABLE(StyleSheetCollection);
 
-    static StyleSheetCollection* create()
-    {
-        return new StyleSheetCollection;
-    }
+ public:
+  friend class ActiveDocumentStyleSheetCollector;
+  friend class ImportedDocumentStyleSheetCollector;
 
-    const HeapVector<Member<CSSStyleSheet>>& activeAuthorStyleSheets() const { return m_activeAuthorStyleSheets; }
-    const HeapVector<Member<StyleSheet>>& styleSheetsForStyleSheetList() const { return m_styleSheetsForStyleSheetList; }
+  static StyleSheetCollection* create() { return new StyleSheetCollection; }
 
-    void swap(StyleSheetCollection&);
-    void swapSheetsForSheetList(HeapVector<Member<StyleSheet>>&);
-    void appendActiveStyleSheet(CSSStyleSheet*);
-    void appendSheetForList(StyleSheet*);
+  const ActiveStyleSheetVector& activeAuthorStyleSheets() const {
+    return m_activeAuthorStyleSheets;
+  }
+  const HeapVector<TraceWrapperMember<StyleSheet>>&
+  styleSheetsForStyleSheetList() const {
+    return m_styleSheetsForStyleSheetList;
+  }
 
-    DECLARE_VIRTUAL_TRACE();
+  void swap(StyleSheetCollection&);
+  void swapSheetsForSheetList(HeapVector<Member<StyleSheet>>&);
+  void appendActiveStyleSheet(const ActiveStyleSheet&);
+  void appendSheetForList(StyleSheet*);
 
-    void dispose();
+  DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
-protected:
-    StyleSheetCollection();
+  void dispose();
 
-    HeapVector<Member<StyleSheet>> m_styleSheetsForStyleSheetList;
-    HeapVector<Member<CSSStyleSheet>> m_activeAuthorStyleSheets;
+ protected:
+  StyleSheetCollection();
+
+  HeapVector<TraceWrapperMember<StyleSheet>> m_styleSheetsForStyleSheetList;
+  ActiveStyleSheetVector m_activeAuthorStyleSheets;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // StyleSheetCollection_h
+#endif  // StyleSheetCollection_h

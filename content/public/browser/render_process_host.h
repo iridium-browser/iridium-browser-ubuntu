@@ -18,6 +18,7 @@
 #include "content/common/content_export.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sender.h"
+#include "media/media_features.h"
 #include "ui/gfx/native_widget_types.h"
 
 class GURL;
@@ -29,11 +30,9 @@ class TimeDelta;
 
 namespace media {
 class AudioOutputController;
-class MediaKeys;
 }
 
-namespace shell {
-class Connection;
+namespace service_manager {
 class InterfaceProvider;
 }
 
@@ -41,9 +40,12 @@ namespace content {
 class BrowserContext;
 class BrowserMessageFilter;
 class RenderProcessHostObserver;
-class RenderWidgetHost;
 class StoragePartition;
 struct GlobalRequestID;
+
+namespace mojom {
+class Renderer;
+}
 
 // Interface that represents the browser side of the browser <-> renderer
 // communication channel. There will generally be one RenderProcessHost per
@@ -52,7 +54,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
                                          public IPC::Listener,
                                          public base::SupportsUserData {
  public:
-  typedef IDMap<RenderProcessHost>::iterator iterator;
+  using iterator = IDMap<RenderProcessHost*>::iterator;
 
   // Details for RENDERER_PROCESS_CLOSED notifications.
   struct RendererClosedDetails {
@@ -65,6 +67,12 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
     int exit_code;
   };
 
+  // Crash reporting mode for ShutdownForBadMessage.
+  enum class CrashReportMode {
+    NO_CRASH_DUMP,
+    GENERATE_CRASH_DUMP,
+  };
+
   // General functions ---------------------------------------------------------
 
   ~RenderProcessHost() override {}
@@ -74,6 +82,12 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // that with no effect. Therefore, if the caller isn't sure about whether
   // the process has been created, it should just call Init().
   virtual bool Init() = 0;
+
+  // Ensures that a Channel exists and is at least queueing outgoing messages
+  // if there isn't a render process connected to it yet. This may be used to
+  // ensure that in the event of a renderer crash and restart, subsequent
+  // messages sent via Send() will eventually reach the new process.
+  virtual void EnableSendQueue() = 0;
 
   // Gets the next available routing id.
   virtual int GetNextRoutingID() = 0;
@@ -95,7 +109,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Most callers should not call this directly, but instead should call
   // bad_message::BadMessageReceived() or an equivalent method outside of the
   // content module.
-  virtual void ShutdownForBadMessage() = 0;
+  //
+  // If |crash_report_mode| is GENERATE_CRASH_DUMP, then a browser crash dump
+  // will be reported as well.
+  virtual void ShutdownForBadMessage(CrashReportMode crash_report_mode) = 0;
 
   // Track the count of visible widgets. Called by listeners to register and
   // unregister visibility.
@@ -172,10 +189,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // checking if there is connection or not. Virtual for mocking out for tests.
   virtual bool HasConnection() const = 0;
 
-  // Call this to allow queueing of IPC messages that are sent before the
-  // process is launched.
-  virtual void EnableSendQueue() = 0;
-
   // Returns the renderer channel.
   virtual IPC::ChannelProxy* GetChannel() = 0;
 
@@ -216,7 +229,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // |empty_allowed| must be set to false for navigations for security reasons.
   virtual void FilterURL(bool empty_allowed, GURL* url) = 0;
 
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   virtual void EnableAudioDebugRecordings(const base::FilePath& file) = 0;
   virtual void DisableAudioDebugRecordings() = 0;
 
@@ -258,13 +271,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // transferring it to a new renderer process.
   virtual void ResumeDeferredNavigation(const GlobalRequestID& request_id) = 0;
 
-  // Notifies the renderer that the timezone configuration of the system might
-  // have changed.
-  virtual void NotifyTimezoneChange(const std::string& zone_id) = 0;
-
-  // Returns the shell::InterfaceProvider the browser process can use to bind
+  // Returns the service_manager::InterfaceProvider the browser process can use
+  // to bind
   // interfaces exposed to it from the renderer.
-  virtual shell::InterfaceProvider* GetRemoteInterfaces() = 0;
+  virtual service_manager::InterfaceProvider* GetRemoteInterfaces() = 0;
 
   // Extracts any persistent-memory-allocator used for renderer metrics.
   // Ownership is passed to the caller. To support sharing of histogram data
@@ -291,23 +301,57 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void GetAudioOutputControllers(
       const GetAudioOutputControllersCallback& callback) const = 0;
 
-#if defined(ENABLE_BROWSER_CDMS)
-  // Returns the CDM instance associated with |render_frame_id| and |cdm_id|,
-  // or nullptr if not found.
-  virtual scoped_refptr<media::MediaKeys> GetCdm(int render_frame_id,
-                                                 int cdm_id) const = 0;
-#endif
-
   // Returns true if this process currently has backgrounded priority.
   virtual bool IsProcessBackgrounded() const = 0;
 
-  // Called when the existence of the other renderer process which is connected
-  // to the Worker in this renderer process has changed.
-  virtual void IncrementWorkerRefCount() = 0;
-  virtual void DecrementWorkerRefCount() = 0;
+  // Returns the sum of the shared worker and service worker ref counts.
+  virtual size_t GetWorkerRefCount() const = 0;
+
+  // Counts the number of service workers who live on this process. The service
+  // worker ref count is incremented when this process is allocated to the
+  // worker, and decremented when worker's shutdown sequence is completed.
+  virtual void IncrementServiceWorkerRefCount() = 0;
+  virtual void DecrementServiceWorkerRefCount() = 0;
+
+  // The shared worker ref count is non-zero if any other process is connected
+  // to a shared worker in this process, or a new shared worker is being created
+  // in this process.
+  // IncrementSharedWorkerRefCount is called in two cases:
+  // - there was no external renderer connected to a shared worker in this
+  //   process, and now there is at least one
+  // - a new worker is being created in this process.
+  // DecrementSharedWorkerRefCount is called in two cases:
+  // - there was an external renderer connected to a shared worker in this
+  //    process, and now there is none
+  // - a new worker finished being created in this process.
+  virtual void IncrementSharedWorkerRefCount() = 0;
+  virtual void DecrementSharedWorkerRefCount() = 0;
+
+  // Sets worker ref counts to zero. Called when the browser context will be
+  // destroyed so this RenderProcessHost can immediately die.
+  //
+  // After this is called, the Increment/DecrementWorkerRefCount functions must
+  // not be called.
+  virtual void ForceReleaseWorkerRefCounts() = 0;
+
+  // Returns true if ForceReleaseWorkerRefCounts was called.
+  virtual bool IsWorkerRefCountDisabled() = 0;
 
   // Purges and suspends the renderer process.
   virtual void PurgeAndSuspend() = 0;
+
+  // Resumes the renderer process.
+  virtual void Resume() = 0;
+
+  // Acquires the |mojom::Renderer| interface to the render process. This is for
+  // internal use only, and is only exposed here to support
+  // MockRenderProcessHost usage in tests.
+  virtual mojom::Renderer* GetRendererInterface() = 0;
+
+  // Whether this process is locked out from ever being reused for sites other
+  // than the ones it currently has.
+  virtual void SetIsNeverSuitableForReuse() = 0;
+  virtual bool MayReuseHost() = 0;
 
   // Returns the current number of active views in this process.  Excludes
   // any RenderViewHosts that are swapped out.

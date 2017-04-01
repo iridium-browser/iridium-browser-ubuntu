@@ -1,7 +1,8 @@
 include_rules = [
   # Allow inclusion of specific components that we depend on.
   # See comment in content/DEPS for which components are allowed.
-  "+components/memory_coordinator/child",
+  "+components/discardable_memory/client",
+  "+components/payments",
   "+components/scheduler",
   "+components/url_formatter",
 
@@ -10,6 +11,9 @@ include_rules = [
   "+content/public/renderer",
   "+content/child",
   "+device/battery",  # For battery status service.
+  "+device/base/synchronization",
+  "+device/gamepad/public/interfaces",
+  "+device/screen_orientation/public/interfaces",
   "+device/sensors/public",
   "+device/usb/public",
   "+device/vibration",
@@ -31,5 +35,9 @@ specific_include_rules = {
   ],
   "render_thread_impl_browsertest\.cc": [
     "+content/app/mojo/mojo_init.h",
+  ],
+  "render_thread_impl_discardable_memory_browsertest\.cc": [
+    "+components/discardable_memory/service",
+    "+content/browser/browser_main_loop.h",
   ],
 }

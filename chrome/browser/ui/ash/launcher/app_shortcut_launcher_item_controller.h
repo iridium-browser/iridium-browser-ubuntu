@@ -16,6 +16,10 @@
 class Browser;
 class URLPattern;
 
+namespace content {
+class WebContents;
+}
+
 namespace extensions {
 class Extension;
 }
@@ -31,24 +35,19 @@ class AppShortcutLauncherItemController : public LauncherItemController {
 
   static AppShortcutLauncherItemController* Create(
       const std::string& app_id,
+      const std::string& launch_id,
       ChromeLauncherController* controller);
 
   std::vector<content::WebContents*> GetRunningApplications();
 
   // LauncherItemController overrides:
-  bool IsOpen() const override;
-  bool IsVisible() const override;
   void Launch(ash::LaunchSource source, int event_flags) override;
   ash::ShelfItemDelegate::PerformedAction Activate(
       ash::LaunchSource source) override;
   ChromeLauncherAppMenuItems GetApplicationList(int event_flags) override;
   ash::ShelfItemDelegate::PerformedAction ItemSelected(
       const ui::Event& event) override;
-  base::string16 GetTitle() override;
   ash::ShelfMenuModel* CreateApplicationMenu(int event_flags) override;
-  bool IsDraggable() override;
-  bool CanPin() const override;
-  bool ShouldShowTooltip() override;
   void Close() override;
 
   // Get the refocus url pattern, which can be used to identify this application
@@ -61,6 +60,7 @@ class AppShortcutLauncherItemController : public LauncherItemController {
 
  protected:
   AppShortcutLauncherItemController(const std::string& app_id,
+                                    const std::string& launch_id,
                                     ChromeLauncherController* controller);
 
  private:

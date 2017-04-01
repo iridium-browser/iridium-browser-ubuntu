@@ -9,8 +9,8 @@
 
 #include <memory>
 
-#include "base/mac/scoped_nsobject.h"
-#include "ios/web/interstitials/web_interstitial_impl.h"
+#import "base/mac/scoped_nsobject.h"
+#import "ios/web/interstitials/web_interstitial_impl.h"
 
 namespace web {
 
@@ -39,8 +39,6 @@ class HtmlWebInterstitialImpl : public WebInterstitialImpl {
   // WebInterstitialImpl implementation:
   void PrepareForDisplay() override;
   WebInterstitialDelegate* GetDelegate() const override;
-  void EvaluateJavaScript(NSString* script,
-                          JavaScriptCompletion completionHandler) override;
   void ExecuteJavaScript(NSString* script,
                          JavaScriptResultBlock completion_handler) override;
 
@@ -52,7 +50,7 @@ class HtmlWebInterstitialImpl : public WebInterstitialImpl {
   base::scoped_nsprotocol<id<WKNavigationDelegate>> web_view_delegate_;
   // The web view used to show the content. View needs to be resized by the
   // caller.
-  base::scoped_nsobject<WKWebView> web_view_;
+  WKWebView* web_view_;  // strong
   // The CRWContentView used to display |web_view_controller_|'s view.
   base::scoped_nsobject<CRWContentView> content_view_;
 };

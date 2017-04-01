@@ -26,8 +26,7 @@ font_size.in mac * *
 #
 # Corpus tests
 #
-050_extra_m.pdf * * xfa
-050_extra_m.pdf mac,win * noxfa
+050_extra_m.pdf mac,win * *
 12.pdf mac * *
 1_10_watermark.pdf * * *
 1_1_textbox.pdf * * *
@@ -42,8 +41,7 @@ font_size.in mac * *
 2_color_indexed.pdf mac * *
 3_4_textbox.pdf * * *
 3_interpolate_image.pdf mac * *
-3bigpreview.pdf * * xfa
-3bigpreview.pdf mac,win * noxfa
+3bigpreview.pdf mac,win * *
 4_35.pdf mac * *
 4_39.pdf mac * *
 5.1.pdf mac * *
@@ -281,6 +279,9 @@ all_trigger_newdoc.pdf * * *
 all_trigger_print.pdf * * *
 all_trigger_run_js_lunchurl.pdf mac * *
 all_trigger_run_js_maildoc.pdf mac * *
+annotation_highlight_author_content.pdf mac * *
+annotation_highlight_long_content.pdf mac * *
+annotation_highlight_no_author.pdf mac * *
 app_launchurl.pdf mac * *
 appstoredescription3.1_en_updated.pdf mac * *
 bookmark.pdf * * *
@@ -289,6 +290,7 @@ bug_0_length_line.pdf mac * *
 bug_0_width_line.pdf mac * *
 bug_434.pdf * * noxfa
 bug_434.pdf win * xfa
+bug_440132.pdf mac * *
 bug_white_space.pdf mac * *
 calcorderindex_test.pdf * * *
 calculate_average.pdf mac * *
@@ -351,8 +353,7 @@ example_029.pdf mac * *
 example_030.pdf mac * *
 example_031.pdf mac * *
 example_032.pdf mac * *
-example_033.pdf * * xfa
-example_033.pdf mac,win * noxfa
+example_033.pdf mac,win * *
 example_034.pdf mac * *
 example_035.pdf mac,win * *
 example_036.pdf mac,win * *
@@ -424,9 +425,9 @@ format_special.pdf * nov8 *
 format_text_color.pdf mac * *
 formfeild.pdf * * *
 getarray.pdf mac * *
-group_xobject.pdf mac * *
 javascriptaction.pdf * * *
 jetman_std.pdf mac * *
+jetman_std_fixed.pdf mac * *
 js_calculate.pdf * * *
 list_box.pdf * * *
 negative.pdf mac * *
@@ -469,8 +470,7 @@ special.pdf mac * *
 submit_form.pdf mac * *
 test_app_beep.pdf * * *
 test_control.pdf * * *
-test_m.pdf * * xfa
-test_m.pdf mac,win * noxfa
+test_m.pdf mac,win * *
 text_field.pdf * * *
 text_field_font_input_decimal_point.pdf mac * *
 text_field_multiline_line_spacing.pdf mac * *
@@ -491,7 +491,7 @@ Choose.pdf * * *
 data_binding.pdf * * *
 Date_FormCale.pdf * * *
 Sum.pdf * * *
-TimeField.pdf * * *
+TimeField.pdf win,linux * *
 Test_CheckBox.pdf * * *
-Test_DateField_locale_zh_HK.pdf * * *
+Test_DateField_locale_zh_HK.pdf mac,win * *
 

@@ -6,8 +6,8 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "components/browser_sync/browser/profile_sync_service_mock.h"
-#include "components/browser_sync/browser/profile_sync_test_util.h"
+#include "components/browser_sync/profile_sync_service_mock.h"
+#include "components/browser_sync/profile_sync_test_util.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync/driver/signin_manager_wrapper.h"
@@ -18,16 +18,17 @@
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
 
-ProfileSyncService::InitParams CreateProfileSyncServiceParamsForTest(
-    std::unique_ptr<sync_driver::SyncClient> sync_client,
+browser_sync::ProfileSyncService::InitParams
+CreateProfileSyncServiceParamsForTest(
+    std::unique_ptr<syncer::SyncClient> sync_client,
     ios::ChromeBrowserState* browser_state) {
-  ProfileSyncService::InitParams init_params;
+  browser_sync::ProfileSyncService::InitParams init_params;
 
   init_params.signin_wrapper = base::MakeUnique<SigninManagerWrapper>(
       ios::SigninManagerFactory::GetForBrowserState(browser_state));
   init_params.oauth2_token_service =
       OAuth2TokenServiceFactory::GetForBrowserState(browser_state);
-  init_params.start_behavior = ProfileSyncService::MANUAL_START;
+  init_params.start_behavior = browser_sync::ProfileSyncService::MANUAL_START;
   init_params.sync_client =
       sync_client ? std::move(sync_client)
                   : base::MakeUnique<IOSChromeSyncClient>(browser_state);
@@ -37,18 +38,18 @@ ProfileSyncService::InitParams CreateProfileSyncServiceParamsForTest(
   init_params.url_request_context = browser_state->GetRequestContext();
   init_params.debug_identifier = browser_state->GetDebugName();
   init_params.channel = ::GetChannel();
-  init_params.db_thread =
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::DB);
-  init_params.file_thread =
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE);
-  init_params.blocking_pool = web::WebThread::GetBlockingPool();
+  base::SequencedWorkerPool* blocking_pool = web::WebThread::GetBlockingPool();
+  init_params.blocking_task_runner =
+      blocking_pool->GetSequencedTaskRunnerWithShutdownBehavior(
+          blocking_pool->GetSequenceToken(),
+          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 
   return init_params;
 }
 
 std::unique_ptr<KeyedService> BuildMockProfileSyncService(
     web::BrowserState* context) {
-  return base::MakeUnique<ProfileSyncServiceMock>(
+  return base::MakeUnique<browser_sync::ProfileSyncServiceMock>(
       CreateProfileSyncServiceParamsForTest(
           nullptr, ios::ChromeBrowserState::FromBrowserState(context)));
 }

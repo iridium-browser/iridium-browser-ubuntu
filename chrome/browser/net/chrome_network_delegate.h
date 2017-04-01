@@ -16,8 +16,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "build/build_config.h"
-#include "components/data_use_measurement/content/data_use_measurement.h"
-#include "components/metrics/data_use_tracker.h"
+#include "chrome/browser/net/safe_search_util.h"
+#include "components/domain_reliability/monitor.h"
 #include "components/prefs/pref_member.h"
 #include "net/base/network_delegate_impl.h"
 
@@ -27,10 +27,6 @@ class PrefService;
 template<class T> class PrefMember;
 
 typedef PrefMember<bool> BooleanPrefMember;
-
-namespace base {
-class Value;
-}
 
 namespace content_settings {
 class CookieSettings;
@@ -64,10 +60,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   // |enable_referrers| (and all of the other optional PrefMembers) should be
   // initialized on the UI thread (see below) beforehand. This object's owner is
   // responsible for cleaning them up at shutdown.
-  ChromeNetworkDelegate(
-      extensions::EventRouterForwarder* event_router,
-      BooleanPrefMember* enable_referrers,
-      const metrics::UpdateUsagePrefCallbackType& metrics_data_use_forwarder);
+  ChromeNetworkDelegate(extensions::EventRouterForwarder* event_router,
+                        BooleanPrefMember* enable_referrers);
   ~ChromeNetworkDelegate() override;
 
   // Pass through to ChromeExtensionsNetworkDelegate::set_extension_info_map().
@@ -78,8 +72,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
     url_blacklist_manager_ = url_blacklist_manager;
   }
 
-  // If |profile| is NULL or not set, events will be broadcast to all profiles,
-  // otherwise they will only be sent to the specified profile.
+  // If |profile| is nullptr or not set, events will be broadcast to all
+  // profiles, otherwise they will only be sent to the specified profile.
   // Also pass through to ChromeExtensionsNetworkDelegate::set_profile().
   void set_profile(void* profile);
 
@@ -90,7 +84,7 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
     profile_path_ = profile_path;
   }
 
-  // If |cookie_settings| is NULL or not set, all cookies are enabled,
+  // If |cookie_settings| is nullptr or not set, all cookies are enabled,
   // otherwise the settings are enforced on all observed network requests.
   // Not inlined because we assign a scoped_refptr, which requires us to include
   // the header file. Here we just forward-declare it.
@@ -105,9 +99,9 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
     force_google_safe_search_ = force_google_safe_search;
   }
 
-  void set_force_youtube_safety_mode(
-      BooleanPrefMember* force_youtube_safety_mode) {
-    force_youtube_safety_mode_ = force_youtube_safety_mode;
+  void set_force_youtube_restrict(
+      IntegerPrefMember* force_youtube_restrict) {
+    force_youtube_restrict_ = force_youtube_restrict;
   }
 
   void set_allowed_domains_for_apps(
@@ -116,8 +110,8 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   }
 
   void set_domain_reliability_monitor(
-      domain_reliability::DomainReliabilityMonitor* monitor) {
-    domain_reliability_monitor_ = monitor;
+      std::unique_ptr<domain_reliability::DomainReliabilityMonitor> monitor) {
+    domain_reliability_monitor_ = std::move(monitor);
   }
 
   void set_data_use_aggregator(
@@ -125,13 +119,13 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
       bool is_data_usage_off_the_record);
 
   // Binds the pref members to |pref_service| and moves them to the IO thread.
-  // |enable_referrers| cannot be NULL, the others can.
+  // |enable_referrers| cannot be nullptr, the others can.
   // This method should be called on the UI thread.
   static void InitializePrefsOnUIThread(
       BooleanPrefMember* enable_referrers,
       BooleanPrefMember* enable_do_not_track,
       BooleanPrefMember* force_google_safe_search,
-      BooleanPrefMember* force_youtube_safety_mode,
+      IntegerPrefMember* force_youtube_restrict,
       StringPrefMember* allowed_domains_for_apps,
       PrefService* pref_service);
 
@@ -157,12 +151,14 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
       GURL* allowed_unsafe_redirect_url) override;
   void OnBeforeRedirect(net::URLRequest* request,
                         const GURL& new_location) override;
-  void OnResponseStarted(net::URLRequest* request) override;
+  void OnResponseStarted(net::URLRequest* request, int net_error) override;
   void OnNetworkBytesReceived(net::URLRequest* request,
                               int64_t bytes_received) override;
   void OnNetworkBytesSent(net::URLRequest* request,
                           int64_t bytes_sent) override;
-  void OnCompleted(net::URLRequest* request, bool started) override;
+  void OnCompleted(net::URLRequest* request,
+                   bool started,
+                   int net_error) override;
   void OnURLRequestDestroyed(net::URLRequest* request) override;
   void OnPACScriptError(int line_number, const base::string16& error) override;
   net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
@@ -203,18 +199,16 @@ class ChromeNetworkDelegate : public net::NetworkDelegateImpl {
   BooleanPrefMember* enable_referrers_;
   BooleanPrefMember* enable_do_not_track_;
   BooleanPrefMember* force_google_safe_search_;
-  BooleanPrefMember* force_youtube_safety_mode_;
+  IntegerPrefMember* force_youtube_restrict_;
   StringPrefMember* allowed_domains_for_apps_;
 
   // Weak, owned by our owner.
   const policy::URLBlacklistManager* url_blacklist_manager_;
-  domain_reliability::DomainReliabilityMonitor* domain_reliability_monitor_;
+  std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
+      domain_reliability_monitor_;
 
   // When true, allow access to all file:// URLs.
   static bool g_allow_file_access_;
-
-  // Component to measure data use.
-  data_use_measurement::DataUseMeasurement data_use_measurement_;
 
   bool experimental_web_platform_features_enabled_;
 

@@ -69,7 +69,7 @@ HistoryTabHelper::CreateHistoryAddPageArgs(
   // Clicks on content suggestions on the NTP should not contribute to the
   // Most Visited tiles in the NTP.
   const bool consider_for_ntp_most_visited =
-      params.referrer.url != GURL(kChromeContentSuggestionsReferrer);
+      params.referrer.url != kChromeContentSuggestionsReferrer;
 
   history::HistoryAddPageArgs add_page_args(
       params.url, timestamp, history::ContextIDForWebContents(web_contents()),
@@ -119,8 +119,8 @@ void HistoryTabHelper::DidNavigateAnyFrame(
           details.did_replace_entry, last_committed->GetUniqueID(), params);
 
   prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(
-          Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
+      prerender::PrerenderManagerFactory::GetForBrowserContext(
+          web_contents()->GetBrowserContext());
   if (prerender_manager) {
     prerender::PrerenderContents* prerender_contents =
         prerender_manager->GetPrerenderContents(web_contents());

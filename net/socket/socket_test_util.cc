@@ -26,6 +26,8 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
+#include "net/log/net_log_source.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/socket.h"
 #include "net/socket/websocket_endpoint_lock_manager.h"
 #include "net/ssl/ssl_cert_request_info.h"
@@ -199,10 +201,16 @@ const MockWrite& StaticSocketDataHelper::AdvanceWrite() {
   return writes_[write_index_++];
 }
 
+void StaticSocketDataHelper::Reset() {
+  read_index_ = 0;
+  write_index_ = 0;
+}
+
 bool StaticSocketDataHelper::VerifyWriteData(const std::string& data) {
   CHECK(!AllWriteDataConsumed());
-  // Check that what the actual data matches the expectations.
-  const MockWrite& next_write = PeekWrite();
+  // Check that the actual data matches the expectations, skipping over any
+  // pause events.
+  const MockWrite& next_write = PeekRealWrite();
   if (!next_write.data)
     return true;
 
@@ -219,9 +227,14 @@ bool StaticSocketDataHelper::VerifyWriteData(const std::string& data) {
   return expected_data == actual_data;
 }
 
-void StaticSocketDataHelper::Reset() {
-  read_index_ = 0;
-  write_index_ = 0;
+const MockWrite& StaticSocketDataHelper::PeekRealWrite() const {
+  for (size_t i = write_index_; i < write_count_; i++) {
+    if (writes_[i].mode != ASYNC || writes_[i].result != ERR_IO_PENDING)
+      return writes_[i];
+  }
+
+  CHECK(false) << "No write data available.";
+  return writes_[0];  // Avoid warning about unreachable missing return.
 }
 
 StaticSocketDataProvider::StaticSocketDataProvider()
@@ -710,7 +723,7 @@ MockClientSocketFactory::CreateDatagramClientSocket(
     DatagramSocket::BindType bind_type,
     const RandIntCallback& rand_int_cb,
     NetLog* net_log,
-    const NetLog::Source& source) {
+    const NetLogSource& source) {
   SocketDataProvider* data_provider = mock_data_.GetNext();
   std::unique_ptr<MockUDPClientSocket> socket(
       new MockUDPClientSocket(data_provider, net_log));
@@ -726,7 +739,7 @@ MockClientSocketFactory::CreateTransportClientSocket(
     const AddressList& addresses,
     std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
     NetLog* net_log,
-    const NetLog::Source& source) {
+    const NetLogSource& source) {
   SocketDataProvider* data_provider = mock_data_.GetNext();
   std::unique_ptr<MockTCPClientSocket> socket(
       new MockTCPClientSocket(addresses, net_log, data_provider));
@@ -754,10 +767,8 @@ std::unique_ptr<SSLClientSocket> MockClientSocketFactory::CreateSSLClientSocket(
 void MockClientSocketFactory::ClearSSLSessionCache() {
 }
 
-MockClientSocket::MockClientSocket(const BoundNetLog& net_log)
-    : connected_(false),
-      net_log_(net_log),
-      weak_factory_(this) {
+MockClientSocket::MockClientSocket(const NetLogWithSource& net_log)
+    : connected_(false), net_log_(net_log), weak_factory_(this) {
   peer_addr_ = IPEndPoint(IPAddress(192, 0, 2, 33), 0);
 }
 
@@ -793,11 +804,11 @@ int MockClientSocket::GetLocalAddress(IPEndPoint* address) const {
   return OK;
 }
 
-const BoundNetLog& MockClientSocket::NetLog() const {
+const NetLogWithSource& MockClientSocket::NetLog() const {
   return net_log_;
 }
 
-bool MockClientSocket::WasNpnNegotiated() const {
+bool MockClientSocket::WasAlpnNegotiated() const {
   return false;
 }
 
@@ -832,8 +843,9 @@ ChannelIDService* MockClientSocket::GetChannelIDService() const {
   return NULL;
 }
 
-Error MockClientSocket::GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
-                                                    std::vector<uint8_t>* out) {
+Error MockClientSocket::GetTokenBindingSignature(crypto::ECPrivateKey* key,
+                                                 TokenBindingType tb_type,
+                                                 std::vector<uint8_t>* out) {
   NOTREACHED();
   return ERR_NOT_IMPLEMENTED;
 }
@@ -861,7 +873,7 @@ void MockClientSocket::RunCallback(const CompletionCallback& callback,
 MockTCPClientSocket::MockTCPClientSocket(const AddressList& addresses,
                                          net::NetLog* net_log,
                                          SocketDataProvider* data)
-    : MockClientSocket(BoundNetLog::Make(net_log, NetLog::SOURCE_NONE)),
+    : MockClientSocket(NetLogWithSource::Make(net_log, NetLogSourceType::NONE)),
       addresses_(addresses),
       data_(data),
       read_offset_(0),
@@ -1133,7 +1145,8 @@ MockSSLClientSocket::MockSSLClientSocket(
     const SSLConfig& ssl_config,
     SSLSocketDataProvider* data)
     : MockClientSocket(
-          // Have to use the right BoundNetLog for LoadTimingInfo regression
+          // Have to use the right NetLogWithSource for LoadTimingInfo
+          // regression
           // tests.
           transport_socket->socket()->NetLog()),
       transport_(std::move(transport_socket)),
@@ -1193,7 +1206,7 @@ int MockSSLClientSocket::GetPeerAddress(IPEndPoint* address) const {
   return transport_->socket()->GetPeerAddress(address);
 }
 
-bool MockSSLClientSocket::WasNpnNegotiated() const {
+bool MockSSLClientSocket::WasAlpnNegotiated() const {
   return data_->next_proto != kProtoUnknown;
 }
 
@@ -1228,9 +1241,9 @@ ChannelIDService* MockSSLClientSocket::GetChannelIDService() const {
   return data_->channel_id_service;
 }
 
-Error MockSSLClientSocket::GetSignedEKMForTokenBinding(
-    crypto::ECPrivateKey* key,
-    std::vector<uint8_t>* out) {
+Error MockSSLClientSocket::GetTokenBindingSignature(crypto::ECPrivateKey* key,
+                                                    TokenBindingType tb_type,
+                                                    std::vector<uint8_t>* out) {
   out->push_back('A');
   return OK;
 }
@@ -1258,7 +1271,7 @@ MockUDPClientSocket::MockUDPClientSocket(SocketDataProvider* data,
       network_(NetworkChangeNotifier::kInvalidNetworkHandle),
       pending_read_buf_(NULL),
       pending_read_buf_len_(0),
-      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_NONE)),
+      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::NONE)),
       weak_factory_(this) {
   DCHECK(data_);
   data_->Initialize(this);
@@ -1351,7 +1364,7 @@ int MockUDPClientSocket::GetLocalAddress(IPEndPoint* address) const {
 
 void MockUDPClientSocket::UseNonBlockingIO() {}
 
-const BoundNetLog& MockUDPClientSocket::NetLog() const {
+const NetLogWithSource& MockUDPClientSocket::NetLog() const {
   return net_log_;
 }
 
@@ -1626,11 +1639,11 @@ int MockTransportClientSocketPool::RequestSocket(
     RespectLimits respect_limits,
     ClientSocketHandle* handle,
     const CompletionCallback& callback,
-    const BoundNetLog& net_log) {
+    const NetLogWithSource& net_log) {
   last_request_priority_ = priority;
   std::unique_ptr<StreamSocket> socket =
       client_socket_factory_->CreateTransportClientSocket(
-          AddressList(), NULL, net_log.net_log(), NetLog::Source());
+          AddressList(), NULL, net_log.net_log(), NetLogSource());
   MockConnectJob* job = new MockConnectJob(std::move(socket), handle, callback);
   job_list_.push_back(base::WrapUnique(job));
   handle->set_pool_id(1);
@@ -1675,7 +1688,7 @@ int MockSOCKSClientSocketPool::RequestSocket(const std::string& group_name,
                                              RespectLimits respect_limits,
                                              ClientSocketHandle* handle,
                                              const CompletionCallback& callback,
-                                             const BoundNetLog& net_log) {
+                                             const NetLogWithSource& net_log) {
   return transport_pool_->RequestSocket(group_name, socket_params, priority,
                                         respect_limits, handle, callback,
                                         net_log);

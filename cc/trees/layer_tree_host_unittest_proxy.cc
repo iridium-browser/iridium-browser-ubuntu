@@ -25,7 +25,7 @@ class LayerTreeHostProxyTest : public LayerTreeTest {
     return update_check_layer_.get();
   }
 
-  ProxyMain* GetProxyMain() const {
+  ProxyMain* GetProxyMain() {
     DCHECK(HasImplThread());
     return static_cast<ProxyMain*>(proxy());
   }
@@ -275,7 +275,7 @@ class LayerTreeHostProxyTestCommitWaitsForActivation
   }
 
   void DidCommit() override {
-    switch (layer_tree_host()->source_frame_number()) {
+    switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
         // Request a new commit, but DidCommit will be delayed until activation
         // completes.
@@ -382,7 +382,7 @@ class LayerTreeHostProxyTestCommitWaitsForActivationMFBA
   }
 
   void DidCommit() override {
-    switch (layer_tree_host()->source_frame_number()) {
+    switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
         // Request a new commit, but DidCommit will be delayed until activation
         // completes.

@@ -14,11 +14,15 @@ found in the LICENSE file.
 
 tr.exportTo('tr.v.d', function() {
   /**
+   * @typedef {!(tr.v.d.EventRef|tr.model.Event)} EventLike
+   */
+
+  /**
    * A RelatedEventSet diagnostic contains references to Events
    */
   class RelatedEventSet extends tr.v.d.Diagnostic {
     /**
-     * @param {(!tr.model.EventSet|Array.<!(tr.v.d.EventRef|tr.model.Event)>|!tr.v.d.EventRef|!tr.model.Event)=} opt_events
+     * @param {!(tr.model.EventSet|Array.<EventLike>|EventLike)=} opt_events
      */
     constructor(opt_events) {
       super();
@@ -53,7 +57,7 @@ tr.exportTo('tr.v.d', function() {
       return this.eventsByStableId_.size;
     }
 
-    *[Symbol.iterator]() {
+    * [Symbol.iterator]() {
       for (var [stableId, event] of this.eventsByStableId_)
         yield event;
     }
@@ -77,7 +81,7 @@ tr.exportTo('tr.v.d', function() {
         if (event instanceof tr.model.Event)
           this.eventsByStableId_.set(stableId, event);
         else if (opt_required)
-          throw new Error('Unable to find Event ' + ref.stableId);
+          throw new Error('Unable to find Event ' + stableId);
       }
     }
 
@@ -92,19 +96,19 @@ tr.exportTo('tr.v.d', function() {
         });
       }
     }
-  };
 
-  RelatedEventSet.fromDict = function(d) {
-    return new RelatedEventSet(d.events.map(
-        event => new tr.v.d.EventRef(event)));
-  };
+    static fromDict(d) {
+      return new RelatedEventSet(d.events.map(
+          event => new tr.v.d.EventRef(event)));
+    }
+  }
 
   tr.v.d.Diagnostic.register(RelatedEventSet, {
     elementName: 'tr-v-ui-related-event-set-span'
   });
 
   return {
-    RelatedEventSet: RelatedEventSet
+    RelatedEventSet,
   };
 });
 </script>

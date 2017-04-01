@@ -14,7 +14,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -41,20 +41,20 @@
 #include "chrome/grit/locale_settings.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_header_helper.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/strings/grit/components_strings.h"
+#include "components/sync/base/sync_prefs.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "grit/components_strings.h"
 #include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -64,6 +64,7 @@
 #include "components/signin/core/browser/signin_manager.h"
 #endif
 
+using browser_sync::ProfileSyncService;
 using content::WebContents;
 using l10n_util::GetStringFUTF16;
 using l10n_util::GetStringUTF16;
@@ -331,8 +332,8 @@ void SyncSetupHandler::RegisterMessages() {
                  base::Unretained(this)));
 #if defined(OS_CHROMEOS)
   web_ui()->RegisterMessageCallback(
-      "SyncSetupDoSignOutOnAuthError",
-      base::Bind(&SyncSetupHandler::HandleDoSignOutOnAuthError,
+      "AttemptUserExit",
+      base::Bind(&SyncSetupHandler::HandleAttemptUserExit,
                  base::Unretained(this)));
 #else
   web_ui()->RegisterMessageCallback("SyncSetupStopSyncing",
@@ -430,11 +431,11 @@ void SyncSetupHandler::DisplaySpinner() {
   base::DictionaryValue args;
 
   const int kTimeoutSec = 30;
-  DCHECK(!backend_start_timer_);
-  backend_start_timer_.reset(new base::OneShotTimer());
-  backend_start_timer_->Start(FROM_HERE,
-                              base::TimeDelta::FromSeconds(kTimeoutSec),
-                              this, &SyncSetupHandler::DisplayTimeout);
+  DCHECK(!engine_start_timer_);
+  engine_start_timer_.reset(new base::OneShotTimer());
+  engine_start_timer_->Start(FROM_HERE,
+                             base::TimeDelta::FromSeconds(kTimeoutSec), this,
+                             &SyncSetupHandler::DisplayTimeout);
 
   web_ui()->CallJavascriptFunctionUnsafe("SyncSetupOverlay.showSyncSetupPage",
                                          page, args);
@@ -444,7 +445,7 @@ void SyncSetupHandler::DisplaySpinner() {
 // http://crbug.com/128692
 void SyncSetupHandler::DisplayTimeout() {
   // Stop a timer to handle timeout in waiting for checking network connection.
-  backend_start_timer_.reset();
+  engine_start_timer_.reset();
 
   // Do not listen to sync startup events.
   sync_startup_tracker_.reset();
@@ -461,7 +462,7 @@ void SyncSetupHandler::OnDidClosePage(const base::ListValue* args) {
 
 void SyncSetupHandler::SyncStartupFailed() {
   // Stop a timer to handle timeout in waiting for checking network connection.
-  backend_start_timer_.reset();
+  engine_start_timer_.reset();
 
   // Just close the sync overlay (the idea is that the base settings page will
   // display the current error.)
@@ -470,10 +471,10 @@ void SyncSetupHandler::SyncStartupFailed() {
 
 void SyncSetupHandler::SyncStartupCompleted() {
   ProfileSyncService* service = GetSyncService();
-  DCHECK(service->IsBackendInitialized());
+  DCHECK(service->IsEngineInitialized());
 
   // Stop a timer to handle timeout in waiting for checking network connection.
-  backend_start_timer_.reset();
+  engine_start_timer_.reset();
 
   DisplayConfigureSync(false);
 }
@@ -514,7 +515,7 @@ void SyncSetupHandler::HandleConfigure(const base::ListValue* args) {
 
   // If the sync engine has shutdown for some reason, just close the sync
   // dialog.
-  if (!service || !service->IsBackendInitialized()) {
+  if (!service || !service->IsEngineInitialized()) {
     CloseUI();
     return;
   }
@@ -527,7 +528,7 @@ void SyncSetupHandler::HandleConfigure(const base::ListValue* args) {
 
   // Note: Data encryption will not occur until configuration is complete
   // (when the PSS receives its CONFIGURE_DONE notification from the sync
-  // backend), so the user still has a chance to cancel out of the operation
+  // engine), so the user still has a chance to cancel out of the operation
   // if (for example) some kind of passphrase error is encountered.
   if (configuration.encrypt_all)
     service->EnableEncryptEverything();
@@ -639,16 +640,18 @@ void SyncSetupHandler::HandleShowSetupUI(const base::ListValue* args) {
 #if defined(OS_CHROMEOS)
 // On ChromeOS, we need to sign out the user session to fix an auth error, so
 // the user goes through the real signin flow to generate a new auth token.
-void SyncSetupHandler::HandleDoSignOutOnAuthError(const base::ListValue* args) {
-  DVLOG(1) << "Signing out the user to fix a sync error.";
+void SyncSetupHandler::HandleAttemptUserExit(const base::ListValue* args) {
   chrome::AttemptUserExit();
 }
 #endif
 
 #if !defined(OS_CHROMEOS)
 void SyncSetupHandler::HandleStartSignin(const base::ListValue* args) {
-  // Should only be called if the user is not already signed in.
-  DCHECK(!SigninManagerFactory::GetForProfile(GetProfile())->IsAuthenticated());
+  // Should only be called if the user is not already signed in or has an auth
+  // error.
+  DCHECK(
+      !SigninManagerFactory::GetForProfile(GetProfile())->IsAuthenticated() ||
+      SigninErrorControllerFactory::GetForProfile(GetProfile())->HasError());
   bool creating_supervised_user = false;
   args->GetBoolean(0, &creating_supervised_user);
   OpenSyncSetup(creating_supervised_user);
@@ -681,7 +684,7 @@ void SyncSetupHandler::HandleCloseTimeout(const base::ListValue* args) {
 
 void SyncSetupHandler::CloseSyncSetup() {
   // Stop a timer to handle timeout in waiting for checking network connection.
-  backend_start_timer_.reset();
+  engine_start_timer_.reset();
 
   // Clear the sync startup tracker, since the setup wizard is being closed.
   sync_startup_tracker_.reset();
@@ -698,7 +701,7 @@ void SyncSetupHandler::CloseSyncSetup() {
             ProfileSyncService::CANCEL_DURING_CONFIGURE);
 
         // If the user clicked "Cancel" while setting up sync, disable sync
-        // because we don't want the sync backend to remain in the
+        // because we don't want the sync engine to remain in the
         // first-setup-incomplete state.
         // Note: In order to disable sync across restarts on Chrome OS,
         // we must call RequestStop(CLEAR_DATA), which suppresses sync startup
@@ -821,10 +824,10 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
       GetProfile())->IsAuthenticated());
   ProfileSyncService* service = GetSyncService();
   DCHECK(service);
-  if (!service->IsBackendInitialized()) {
+  if (!service->IsEngineInitialized()) {
     service->RequestStart();
 
-    // See if it's even possible to bring up the sync backend - if not
+    // See if it's even possible to bring up the sync engine - if not
     // (unrecoverable error?), don't bother displaying a spinner that will be
     // immediately closed because this leads to some ugly infinite UI loop (see
     // http://crbug.com/244769).
@@ -843,8 +846,8 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
   // longer need a SyncStartupTracker.
   sync_startup_tracker_.reset();
   configuring_sync_ = true;
-  DCHECK(service->IsBackendInitialized())
-      << "Cannot configure sync until the sync backend is initialized";
+  DCHECK(service->IsEngineInitialized())
+      << "Cannot configure sync until the sync engine is initialized";
 
   // Setup args for the sync configure screen:
   //   syncAllDataTypes: true if the user wants to sync everything
@@ -876,7 +879,7 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
     // the sync types behind a checkbox are force-enabled? crbug.com/403326
   }
   PrefService* pref_service = GetProfile()->GetPrefs();
-  sync_driver::SyncPrefs sync_prefs(pref_service);
+  syncer::SyncPrefs sync_prefs(pref_service);
   args.SetBoolean("passphraseFailed", passphrase_failed);
   args.SetBoolean("syncAllDataTypes", sync_prefs.HasKeepEverythingSynced());
   args.SetBoolean("syncNothing", false);  // Always false during initial setup.
@@ -893,9 +896,10 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
   args.SetBoolean("showPassphrase", service->IsPassphraseRequired());
 
   // To distinguish between FROZEN_IMPLICIT_PASSPHRASE and CUSTOM_PASSPHRASE
-  // we only set usePassphrase for CUSTOM_PASSPHRASE.
+  // we only set usePassphrase for PassphraseType::CUSTOM_PASSPHRASE.
   args.SetBoolean("usePassphrase",
-                  service->GetPassphraseType() == syncer::CUSTOM_PASSPHRASE);
+                  service->GetPassphraseType() ==
+                      syncer::PassphraseType::CUSTOM_PASSPHRASE);
   base::Time passphrase_time = service->GetExplicitPassphraseTime();
   syncer::PassphraseType passphrase_type = service->GetPassphraseType();
   if (!passphrase_time.is_null()) {
@@ -910,13 +914,13 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
         GetStringFUTF16(IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_BODY_WITH_DATE,
                         passphrase_time_str));
     switch (passphrase_type) {
-      case syncer::FROZEN_IMPLICIT_PASSPHRASE:
+      case syncer::PassphraseType::FROZEN_IMPLICIT_PASSPHRASE:
         args.SetString(
             "fullEncryptionBody",
             GetStringFUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_GOOGLE_WITH_DATE,
                             passphrase_time_str));
         break;
-      case syncer::CUSTOM_PASSPHRASE:
+      case syncer::PassphraseType::CUSTOM_PASSPHRASE:
         args.SetString(
             "fullEncryptionBody",
             GetStringFUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM_WITH_DATE,
@@ -928,7 +932,7 @@ void SyncSetupHandler::DisplayConfigureSync(bool passphrase_failed) {
             GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));
         break;
     }
-  } else if (passphrase_type == syncer::CUSTOM_PASSPHRASE) {
+  } else if (passphrase_type == syncer::PassphraseType::CUSTOM_PASSPHRASE) {
     args.SetString(
         "fullEncryptionBody",
         GetStringUTF16(IDS_SYNC_FULL_ENCRYPTION_BODY_CUSTOM));

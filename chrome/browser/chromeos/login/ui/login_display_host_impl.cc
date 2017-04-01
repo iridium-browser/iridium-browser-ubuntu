@@ -7,11 +7,10 @@
 #include <utility>
 #include <vector>
 
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
 #include "ash/common/wallpaper/wallpaper_delegate.h"
 #include "ash/common/wm_shell.h"
-#include "ash/desktop_background/desktop_background_controller.h"
-#include "ash/public/interfaces/container.mojom.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
@@ -89,6 +88,7 @@
 #include "content/public/browser/web_ui.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "services/ui/public/cpp/property_type_converters.h"
+#include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
@@ -172,12 +172,12 @@ class AnimationObserver : public ui::ImplicitAnimationObserver {
 // from ShowLoginWizard(), and sometimes from OnLanguageSwitchedCallback()
 // (if locale was updated).
 void ShowLoginWizardFinish(
-    const std::string& first_screen_name,
+    chromeos::OobeScreen first_screen,
     const chromeos::StartupCustomizationDocument* startup_manifest,
     chromeos::LoginDisplayHost* display_host) {
   TRACE_EVENT0("chromeos", "ShowLoginWizard::ShowLoginWizardFinish");
 
-  display_host->StartWizard(first_screen_name);
+  display_host->StartWizard(first_screen);
 
   // Set initial timezone if specified by customization.
   const std::string timezone_name = startup_manifest->initial_timezone();
@@ -192,14 +192,14 @@ void ShowLoginWizardFinish(
 
 struct ShowLoginWizardSwitchLanguageCallbackData {
   explicit ShowLoginWizardSwitchLanguageCallbackData(
-      const std::string& first_screen_name,
+      chromeos::OobeScreen first_screen,
       const chromeos::StartupCustomizationDocument* startup_manifest,
       chromeos::LoginDisplayHost* display_host)
-      : first_screen_name(first_screen_name),
+      : first_screen(first_screen),
         startup_manifest(startup_manifest),
         display_host(display_host) {}
 
-  const std::string first_screen_name;
+  const chromeos::OobeScreen first_screen;
   const chromeos::StartupCustomizationDocument* const startup_manifest;
   chromeos::LoginDisplayHost* const display_host;
 
@@ -214,8 +214,8 @@ void OnLanguageSwitchedCallback(
     LOG(WARNING) << "Locale could not be found for '" << result.requested_locale
                  << "'";
 
-  ShowLoginWizardFinish(
-      self->first_screen_name, self->startup_manifest, self->display_host);
+  ShowLoginWizardFinish(self->first_screen, self->startup_manifest,
+                        self->display_host);
 }
 
 void EnableSystemSoundsForAccessibility() {
@@ -264,8 +264,8 @@ const int LoginDisplayHostImpl::kShowLoginWebUIid = 0x1111;
 ////////////////////////////////////////////////////////////////////////////////
 // LoginDisplayHostImpl, public
 
-LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& background_bounds)
-    : background_bounds_(background_bounds),
+LoginDisplayHostImpl::LoginDisplayHostImpl(const gfx::Rect& wallpaper_bounds)
+    : wallpaper_bounds_(wallpaper_bounds),
       shutting_down_(false),
       oobe_progress_bar_visible_(false),
       session_starting_(false),
@@ -453,7 +453,7 @@ LoginDisplayHostImpl::~LoginDisplayHostImpl() {
 LoginDisplay* LoginDisplayHostImpl::CreateLoginDisplay(
     LoginDisplay::Delegate* delegate) {
   webui_login_display_ = new WebUILoginDisplay(delegate);
-  webui_login_display_->set_background_bounds(background_bounds());
+  webui_login_display_->set_background_bounds(wallpaper_bounds());
   return webui_login_display_;
 }
 
@@ -471,14 +471,12 @@ void LoginDisplayHostImpl::BeforeSessionStart() {
 
 void LoginDisplayHostImpl::Finalize() {
   DVLOG(1) << "Session starting";
-  // When adding another user into the session, we defer the background
-  // wallpaper's animation in order to prevent the flashing of the previous
-  // user's windows. See crbug.com/541864.
-  if (ash::Shell::HasInstance() &&
+  // When adding another user into the session, we defer the wallpaper's
+  // animation in order to prevent the flashing of the previous user's windows.
+  // See crbug.com/541864.
+  if (ash::WmShell::HasInstance() &&
       finalize_animation_type_ != ANIMATION_ADD_USER) {
-    ash::Shell::GetInstance()
-        ->desktop_background_controller()
-        ->MoveDesktopToUnlockedContainer();
+    ash::WmShell::Get()->wallpaper_controller()->MoveToUnlockedContainer();
   }
   if (wizard_controller_.get())
     wizard_controller_->OnSessionStart();
@@ -532,7 +530,7 @@ AutoEnrollmentController* LoginDisplayHostImpl::GetAutoEnrollmentController() {
   return auto_enrollment_controller_.get();
 }
 
-void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
+void LoginDisplayHostImpl::StartWizard(OobeScreen first_screen) {
   DisableKeyboardOverscroll();
 
   startup_sound_honors_spoken_feedback_ = false;
@@ -540,7 +538,7 @@ void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
 
   // Keep parameters to restore if renderer crashes.
   restore_path_ = RESTORE_WIZARD;
-  first_screen_name_ = first_screen_name;
+  first_screen_ = first_screen;
   is_showing_login_ = false;
 
   if (waiting_for_wallpaper_load_ && !initialize_webui_hidden_) {
@@ -552,7 +550,8 @@ void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
   if (!login_window_)
     LoadURL(GURL(kOobeURL));
 
-  DVLOG(1) << "Starting wizard, first_screen_name: " << first_screen_name;
+  DVLOG(1) << "Starting wizard, first_screen: "
+           << GetOobeScreenName(first_screen);
   // Create and show the wizard.
   // Note, dtor of the old WizardController should be called before ctor of the
   // new one, because "default_controller()" is updated there. So pure "reset()"
@@ -562,7 +561,7 @@ void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
 
   oobe_progress_bar_visible_ = !StartupUtils::IsDeviceRegistered();
   SetOobeProgressBarVisible(oobe_progress_bar_visible_);
-  wizard_controller_->Init(first_screen_name);
+  wizard_controller_->Init(first_screen);
 }
 
 WizardController* LoginDisplayHostImpl::GetWizardController() {
@@ -603,9 +602,7 @@ void LoginDisplayHostImpl::StartUserAdding(
         ash::kShellWindowId_LockScreenContainersContainer);
     lock_container->layer()->SetOpacity(1.0);
 
-    ash::Shell::GetInstance()
-        ->desktop_background_controller()
-        ->MoveDesktopToLockedContainer();
+    ash::WmShell::Get()->wallpaper_controller()->MoveToLockedContainer();
   } else {
     NOTIMPLEMENTED();
   }
@@ -803,8 +800,8 @@ void LoginDisplayHostImpl::OnBrowserCreated() {
 
 OobeUI* LoginDisplayHostImpl::GetOobeUI() const {
   if (!login_view_)
-    return NULL;
-  return static_cast<OobeUI*>(login_view_->GetWebUI()->GetController());
+    return nullptr;
+  return login_view_->GetOobeUI();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -846,11 +843,9 @@ void LoginDisplayHostImpl::Observe(
   } else if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED &&
              user_manager::UserManager::Get()->IsCurrentUserNew()) {
     if (!chrome::IsRunningInMash()) {
-      // For new user, move desktop to locker container so that windows created
+      // For new user, move wallpaper to lock container so that windows created
       // during the user image picker step are below it.
-      ash::Shell::GetInstance()
-          ->desktop_background_controller()
-          ->MoveDesktopToLockedContainer();
+      ash::WmShell::Get()->wallpaper_controller()->MoveToLockedContainer();
     } else {
       NOTIMPLEMENTED();
     }
@@ -951,6 +946,8 @@ void LoginDisplayHostImpl::OnKeyboardBoundsChanging(
   }
 }
 
+void LoginDisplayHostImpl::OnKeyboardClosed() {}
+
 ////////////////////////////////////////////////////////////////////////////////
 // LoginDisplayHostImpl, display::DisplayObserver:
 
@@ -1013,9 +1010,7 @@ void LoginDisplayHostImpl::ShutdownDisplayHost(bool post_quit_task) {
   if (ash::Shell::HasInstance() &&
       finalize_animation_type_ == ANIMATION_ADD_USER) {
     if (!chrome::IsRunningInMash()) {
-      ash::Shell::GetInstance()
-          ->desktop_background_controller()
-          ->MoveDesktopToUnlockedContainer();
+      ash::WmShell::Get()->wallpaper_controller()->MoveToUnlockedContainer();
     } else {
       NOTIMPLEMENTED();
     }
@@ -1028,11 +1023,11 @@ void LoginDisplayHostImpl::ScheduleWorkspaceAnimation() {
     return;
   }
   if (ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
-                               ash::kShellWindowId_DesktopBackgroundContainer)
+                               ash::kShellWindowId_WallpaperContainer)
           ->children()
           .empty()) {
-    // If there is no background window, don't perform any animation on the
-    // default and background layer because there is nothing behind it.
+    // If there is no wallpaper window, don't perform any animation on the
+    // default and wallpaper layer because there is nothing behind it.
     return;
   }
 
@@ -1100,7 +1095,7 @@ void LoginDisplayHostImpl::StartPostponedWebUI() {
 
   switch (restore_path_) {
     case RESTORE_WIZARD:
-      StartWizard(first_screen_name_);
+      StartWizard(first_screen_);
       break;
     case RESTORE_SIGN_IN:
       StartSignInScreen(LoginScreenContext());
@@ -1129,7 +1124,7 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
 
   views::Widget::InitParams params(
       views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
-  params.bounds = background_bounds();
+  params.bounds = wallpaper_bounds();
   params.show_state = ui::SHOW_STATE_FULLSCREEN;
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   // The ash::Shell containers are not available in Mash
@@ -1138,15 +1133,16 @@ void LoginDisplayHostImpl::InitLoginWindowAndView() {
         ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
                                  ash::kShellWindowId_LockScreenContainer);
   } else {
-    params.mus_properties[ash::mojom::kWindowContainer_Property] =
+    using ui::mojom::WindowManager;
+    params.mus_properties[WindowManager::kContainerId_InitProperty] =
         mojo::ConvertTo<std::vector<uint8_t>>(
-            static_cast<int32_t>(ash::mojom::Container::LOGIN_WINDOWS));
+            ash::kShellWindowId_LockScreenContainer);
   }
   login_window_ = new views::Widget;
   params.delegate = new LoginWidgetDelegate(login_window_);
   login_window_->Init(params);
 
-  login_view_ = new WebUILoginView();
+  login_view_ = new WebUILoginView(WebUILoginView::WebViewSettings());
   login_view_->Init();
   if (login_view_->webui_visible())
     OnLoginPromptVisible();
@@ -1251,11 +1247,11 @@ void LoginDisplayHostImpl::DisableRestrictiveProxyCheckForTest() {
 
 // Declared in login_wizard.h so that others don't need to depend on our .h.
 // TODO(nkostylev): Split this into a smaller functions.
-void ShowLoginWizard(const std::string& first_screen_name) {
+void ShowLoginWizard(OobeScreen first_screen) {
   if (browser_shutdown::IsTryingToQuit())
     return;
 
-  VLOG(1) << "Showing OOBE screen: " << first_screen_name;
+  VLOG(1) << "Showing OOBE screen: " << GetOobeScreenName(first_screen);
 
   chromeos::input_method::InputMethodManager* manager =
       chromeos::input_method::InputMethodManager::Get();
@@ -1279,15 +1275,15 @@ void ShowLoginWizard(const std::string& first_screen_name) {
 
   gfx::Rect screen_bounds(chromeos::CalculateScreenBounds(gfx::Size()));
 
-  g_browser_process->platform_part()->SessionManager()->SetSessionState(
+  session_manager::SessionManager::Get()->SetSessionState(
       StartupUtils::IsOobeCompleted()
-          ? session_manager::SESSION_STATE_LOGIN_PRIMARY
-          : session_manager::SESSION_STATE_OOBE);
+          ? session_manager::SessionState::LOGIN_PRIMARY
+          : session_manager::SessionState::OOBE);
 
   LoginDisplayHostImpl* display_host = new LoginDisplayHostImpl(screen_bounds);
 
   bool show_app_launch_splash_screen =
-      (first_screen_name == WizardController::kAppLaunchSplashScreenName);
+      (first_screen == OobeScreen::SCREEN_APP_LAUNCH_SPLASH);
   if (show_app_launch_splash_screen) {
     const std::string& auto_launch_app_id =
         KioskAppManager::Get()->GetAutoLaunchApp();
@@ -1304,11 +1300,12 @@ void ShowLoginWizard(const std::string& first_screen_name) {
       g_browser_process->platform_part()
           ->browser_policy_connector_chromeos()
           ->GetPrescribedEnrollmentConfig();
-  if (enrollment_config.should_enroll() && first_screen_name.empty()) {
+  if (enrollment_config.should_enroll() &&
+      first_screen == OobeScreen::SCREEN_UNKNOWN) {
     // Shows networks screen instead of enrollment screen to resume the
     // interrupted auto start enrollment flow because enrollment screen does
     // not handle flaky network. See http://crbug.com/332572
-    display_host->StartWizard(WizardController::kNetworkScreenName);
+    display_host->StartWizard(OobeScreen::SCREEN_OOBE_NETWORK);
     return;
   }
 
@@ -1323,9 +1320,9 @@ void ShowLoginWizard(const std::string& first_screen_name) {
         ->UpdateTimezoneResolver();
   }
 
-  bool show_login_screen =
-      (first_screen_name.empty() && StartupUtils::IsOobeCompleted()) ||
-      first_screen_name == WizardController::kLoginScreenName;
+  bool show_login_screen = (first_screen == OobeScreen::SCREEN_UNKNOWN &&
+                            StartupUtils::IsOobeCompleted()) ||
+                           first_screen == OobeScreen::SCREEN_SPECIAL_LOGIN;
 
   if (show_login_screen) {
     display_host->StartSignInScreen(LoginScreenContext());
@@ -1355,7 +1352,7 @@ void ShowLoginWizard(const std::string& first_screen_name) {
                                                                   layout);
 
   if (!current_locale.empty() || locale.empty()) {
-    ShowLoginWizardFinish(first_screen_name, startup_manifest, display_host);
+    ShowLoginWizardFinish(first_screen, startup_manifest, display_host);
     return;
   }
 
@@ -1368,7 +1365,7 @@ void ShowLoginWizard(const std::string& first_screen_name) {
 
   std::unique_ptr<ShowLoginWizardSwitchLanguageCallbackData> data(
       new ShowLoginWizardSwitchLanguageCallbackData(
-          first_screen_name, startup_manifest, display_host));
+          first_screen, startup_manifest, display_host));
 
   locale_util::SwitchLanguageCallback callback(
       base::Bind(&OnLanguageSwitchedCallback, base::Passed(std::move(data))));

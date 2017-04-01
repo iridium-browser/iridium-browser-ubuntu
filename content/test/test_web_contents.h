@@ -17,7 +17,6 @@
 
 class GURL;
 class Referrer;
-class SiteInstanceImpl;
 
 namespace content {
 
@@ -54,13 +53,11 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   void TestSetIsLoading(bool value) override;
   void ProceedWithCrossSiteNavigation() override;
   void TestDidNavigate(RenderFrameHost* render_frame_host,
-                       int page_id,
                        int nav_entry_id,
                        bool did_create_new_entry,
                        const GURL& url,
                        ui::PageTransition transition) override;
   void TestDidNavigateWithReferrer(RenderFrameHost* render_frame_host,
-                                   int page_id,
                                    int nav_entry_id,
                                    bool did_create_new_entry,
                                    const GURL& url,
@@ -128,7 +125,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
       int32_t route_id,
       int32_t main_frame_route_id,
       int32_t main_frame_widget_route_id,
-      const ViewHostMsg_CreateWindow_Params& params,
+      const mojom::CreateNewWindowParams& params,
       SessionStorageNamespace* session_storage_namespace) override;
   void CreateNewWidget(int32_t render_process_id,
                        int32_t route_id,

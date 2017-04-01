@@ -206,11 +206,21 @@ uint32_t word64_popcnt_wrapper(uint64_t* input) {
 void float64_pow_wrapper(double* param0, double* param1) {
   double x = ReadDoubleValue(param0);
   double y = ReadDoubleValue(param1);
-  if (std::isnan(y) || ((x == 1 || x == -1) && std::isinf(y))) {
-    WriteDoubleValue(param0, std::numeric_limits<double>::quiet_NaN());
-  }
   WriteDoubleValue(param0, Pow(x, y));
 }
+
+static WasmTrapCallbackForTesting wasm_trap_callback_for_testing = nullptr;
+
+void set_trap_callback_for_testing(WasmTrapCallbackForTesting callback) {
+  wasm_trap_callback_for_testing = callback;
+}
+
+void call_trap_callback_for_testing() {
+  if (wasm_trap_callback_for_testing) {
+    wasm_trap_callback_for_testing();
+  }
+}
+
 }  // namespace wasm
 }  // namespace internal
 }  // namespace v8

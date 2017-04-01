@@ -18,7 +18,9 @@ class ForwardingAgentHost
     : public DevToolsAgentHostImpl,
       public DevToolsExternalAgentProxy {
  public:
-  ForwardingAgentHost(DevToolsExternalAgentProxyDelegate* delegate);
+  ForwardingAgentHost(
+      const std::string& id,
+      std::unique_ptr<DevToolsExternalAgentProxyDelegate> delegate);
 
  private:
   ~ForwardingAgentHost() override;
@@ -28,18 +30,26 @@ class ForwardingAgentHost
   void ConnectionClosed() override;
 
   // DevToolsAgentHostImpl implementation.
-  void Attach() override;
-  void Detach() override;
-  bool DispatchProtocolMessage(const std::string& message) override;
+  void AttachSession(DevToolsSession* session) override;
+  void DetachSession(int session_id) override;
+  bool DispatchProtocolMessage(
+      DevToolsSession* session,
+      const std::string& message) override;
 
   // DevToolsAgentHost implementation
-  Type GetType() override;
+  std::string GetType() override;
   std::string GetTitle() override;
   GURL GetURL() override;
+  GURL GetFaviconURL() override;
+  std::string GetFrontendURL() override;
   bool Activate() override;
+  void Reload() override;
   bool Close() override;
 
   std::unique_ptr<DevToolsExternalAgentProxyDelegate> delegate_;
+  std::string type_;
+  std::string title_;
+  GURL url_;
 };
 
 }  // namespace content

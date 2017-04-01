@@ -5,6 +5,7 @@
 #include "components/network_session_configurator/network_session_configurator.h"
 
 #include <map>
+#include <unordered_set>
 
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
@@ -15,8 +16,9 @@
 #include "components/variations/variations_associated_data.h"
 #include "components/version_info/version_info.h"
 #include "net/http/http_stream_factory.h"
-#include "net/quic/core/quic_protocol.h"
-#include "net/quic/core/quic_utils.h"
+#include "net/quic/chromium/quic_utils_chromium.h"
+#include "net/quic/core/quic_packets.h"
+#include "net/spdy/spdy_protocol.h"
 #include "net/url_request/url_fetcher.h"
 
 namespace {
@@ -53,11 +55,40 @@ void ConfigureTCPFastOpenParams(base::StringPiece tfo_trial_group,
     params->enable_tcp_fast_open_for_ssl = true;
 }
 
+net::SettingsMap GetHttp2Settings(
+    const VariationParameters& http2_trial_params) {
+  net::SettingsMap http2_settings;
+
+  const std::string settings_string =
+      GetVariationParam(http2_trial_params, "http2_settings");
+
+  base::StringPairs key_value_pairs;
+  if (!base::SplitStringIntoKeyValuePairs(settings_string, ':', ',',
+                                          &key_value_pairs)) {
+    return http2_settings;
+  }
+
+  for (auto key_value : key_value_pairs) {
+    uint32_t key;
+    if (!base::StringToUint(key_value.first, &key))
+      continue;
+    uint32_t value;
+    if (!base::StringToUint(key_value.second, &value))
+      continue;
+    http2_settings[static_cast<net::SpdySettingsIds>(key)] = value;
+  }
+
+  return http2_settings;
+}
+
 void ConfigureHttp2Params(base::StringPiece http2_trial_group,
+                          const VariationParameters& http2_trial_params,
                           net::HttpNetworkSession::Params* params) {
   if (http2_trial_group.starts_with(kHttp2FieldTrialDisablePrefix)) {
     params->enable_http2 = false;
+    return;
   }
+  params->http2_settings = GetHttp2Settings(http2_trial_params);
 }
 
 bool ShouldEnableQuic(base::StringPiece quic_trial_group,
@@ -103,7 +134,7 @@ net::QuicTagVector GetQuicConnectionOptions(
     return net::QuicTagVector();
   }
 
-  return net::QuicUtils::ParseQuicConnectionOptions(it->second);
+  return net::ParseQuicConnectionOptions(it->second);
 }
 
 bool ShouldQuicAlwaysRequireHandshakeConfirmation(
@@ -152,27 +183,6 @@ bool ShouldForceHolBlocking(const VariationParameters& quic_trial_params) {
       GetVariationParam(quic_trial_params, "force_hol_blocking"), "true");
 }
 
-int GetQuicMaxNumberOfLossyConnections(
-    const VariationParameters& quic_trial_params) {
-  int value;
-  if (base::StringToInt(GetVariationParam(quic_trial_params,
-                                          "max_number_of_lossy_connections"),
-                        &value)) {
-    return value;
-  }
-  return 0;
-}
-
-float GetQuicPacketLossThreshold(const VariationParameters& quic_trial_params) {
-  double value;
-  if (base::StringToDouble(
-          GetVariationParam(quic_trial_params, "packet_loss_threshold"),
-          &value)) {
-    return static_cast<float>(value);
-  }
-  return 0.0f;
-}
-
 int GetQuicSocketReceiveBufferSize(
     const VariationParameters& quic_trial_params) {
   int value;
@@ -207,6 +217,17 @@ int GetQuicIdleConnectionTimeoutSeconds(
   return 0;
 }
 
+int GetQuicReducedPingTimeoutSeconds(
+    const VariationParameters& quic_trial_params) {
+  int value;
+  if (base::StringToInt(
+          GetVariationParam(quic_trial_params, "reduced_ping_timeout_seconds"),
+          &value)) {
+    return value;
+  }
+  return 0;
+}
+
 int GetQuicPacketReaderYieldAfterDurationMilliseconds(
     const VariationParameters& quic_trial_params) {
   int value;
@@ -221,16 +242,13 @@ int GetQuicPacketReaderYieldAfterDurationMilliseconds(
 
 bool ShouldQuicRaceCertVerification(
     const VariationParameters& quic_trial_params) {
-   return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "race_cert_verification"),
-      "true");
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "race_cert_verification"), "true");
 }
 
-bool ShouldQuicDoNotFragment(
-    const VariationParameters& quic_trial_params) {
-   return base::LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "do_not_fragment"),
-      "true");
+bool ShouldQuicDoNotFragment(const VariationParameters& quic_trial_params) {
+  return base::LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "do_not_fragment"), "true");
 }
 
 bool ShouldQuicDisablePreConnectIfZeroRtt(
@@ -326,17 +344,6 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
         ShouldQuicDisableDiskCache(quic_trial_params);
     params->quic_prefer_aes = ShouldQuicPreferAes(quic_trial_params);
     params->quic_force_hol_blocking = ShouldForceHolBlocking(quic_trial_params);
-    int max_number_of_lossy_connections =
-        GetQuicMaxNumberOfLossyConnections(quic_trial_params);
-    if (max_number_of_lossy_connections != 0) {
-      params->quic_max_number_of_lossy_connections =
-          max_number_of_lossy_connections;
-    }
-    float packet_loss_threshold = GetQuicPacketLossThreshold(quic_trial_params);
-    if (packet_loss_threshold != 0)
-      params->quic_packet_loss_threshold = packet_loss_threshold;
-    // Default to disabling port selection on all channels.
-    params->enable_quic_port_selection = false;
     params->quic_connection_options =
         GetQuicConnectionOptions(quic_trial_params);
     params->quic_close_sessions_on_ip_change =
@@ -346,6 +353,12 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
     if (idle_connection_timeout_seconds != 0) {
       params->quic_idle_connection_timeout_seconds =
           idle_connection_timeout_seconds;
+    }
+    int reduced_ping_timeout_seconds =
+        GetQuicReducedPingTimeoutSeconds(quic_trial_params);
+    if (reduced_ping_timeout_seconds > 0 &&
+        reduced_ping_timeout_seconds < net::kPingTimeoutSecs) {
+      params->quic_reduced_ping_timeout_seconds = reduced_ping_timeout_seconds;
     }
     int packet_reader_yield_after_duration_milliseconds =
         GetQuicPacketReaderYieldAfterDurationMilliseconds(quic_trial_params);
@@ -383,6 +396,14 @@ void ConfigureQuicParams(base::StringPiece quic_trial_group,
   }
 }
 
+void ConfigureOptimizePreconnectsToProxiesParams(
+    const std::map<std::string, std::string>& proxy_preconnects_trial_params,
+    net::HttpNetworkSession::Params* params) {
+  params->restrict_to_one_preconnect_for_proxies =
+      GetVariationParam(proxy_preconnects_trial_params,
+                        "restrict_to_one_preconnect_for_proxies") == "true";
+}
+
 }  // anonymous namespace
 
 namespace network_session_configurator {
@@ -414,11 +435,21 @@ void ParseFieldTrials(bool is_quic_force_disabled,
 
   std::string http2_trial_group =
       base::FieldTrialList::FindFullName(kHttp2FieldTrialName);
-  ConfigureHttp2Params(http2_trial_group, params);
+  VariationParameters http2_trial_params;
+  if (!variations::GetVariationParams(kHttp2FieldTrialName,
+                                      &http2_trial_params))
+    http2_trial_params.clear();
+  ConfigureHttp2Params(http2_trial_group, http2_trial_params, params);
 
   const std::string tfo_trial_group =
       base::FieldTrialList::FindFullName(kTCPFastOpenFieldTrialName);
   ConfigureTCPFastOpenParams(tfo_trial_group, params);
+
+  std::map<std::string, std::string> proxy_preconnects_trial_params;
+  variations::GetVariationParams("NetProxyPreconnects",
+                                 &proxy_preconnects_trial_params);
+  ConfigureOptimizePreconnectsToProxiesParams(proxy_preconnects_trial_params,
+                                              params);
 }
 
 }  // namespace network_session_configurator

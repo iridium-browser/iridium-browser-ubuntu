@@ -5,12 +5,12 @@
 #ifndef CompositorMutableProperties_h
 #define CompositorMutableProperties_h
 
-#include "cc/animation/mutable_properties.h"
+#include "cc/trees/mutable_properties.h"
 
 namespace blink {
 
 using CompositorMutableProperty = cc::MutableProperty;
 
-} // namespace blink
+}  // namespace blink
 
-#endif // CompositorMutableProperties_h
+#endif  // CompositorMutableProperties_h

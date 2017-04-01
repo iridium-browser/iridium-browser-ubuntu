@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_DNS_FUZZED_HOST_RESOLVER_
-#define NET_DNS_FUZZED_HOST_RESOLVER_
+#ifndef NET_DNS_FUZZED_HOST_RESOLVER_H_
+#define NET_DNS_FUZZED_HOST_RESOLVER_H_
 
 #include <stdint.h>
 
@@ -23,10 +23,8 @@ class FuzzedDataProvider;
 namespace net {
 
 class AddressList;
-class ClientSocketFactory;
 class DnsClient;
 class NetLog;
-class ScopedDefaultHostResolverProc;
 
 // HostResolver that uses a fuzzer to determine what results to return. It
 // inherits from HostResolverImpl, unlike MockHostResolver, so more closely
@@ -60,7 +58,7 @@ class FuzzedHostResolver : public HostResolverImpl {
 
  private:
   // HostResolverImpl implementation:
-  bool IsIPv6Reachable(const BoundNetLog& net_log) override;
+  bool IsIPv6Reachable(const NetLogWithSource& net_log) override;
   void RunLoopbackProbeJob() override;
 
   base::FuzzedDataProvider* data_provider_;
@@ -80,4 +78,4 @@ class FuzzedHostResolver : public HostResolverImpl {
 
 }  // namespace net
 
-#endif  // NET_DNS_FUZZED_HOST_RESOLVER_
+#endif  // NET_DNS_FUZZED_HOST_RESOLVER_H_

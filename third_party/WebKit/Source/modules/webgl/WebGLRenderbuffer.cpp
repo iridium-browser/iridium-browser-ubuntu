@@ -30,38 +30,32 @@
 
 namespace blink {
 
-WebGLRenderbuffer* WebGLRenderbuffer::create(WebGLRenderingContextBase* ctx)
-{
-    return new WebGLRenderbuffer(ctx);
-}
-
-WebGLRenderbuffer::~WebGLRenderbuffer()
-{
-    // See the comment in WebGLObject::detachAndDeleteObject().
-    detachAndDeleteObject();
+WebGLRenderbuffer* WebGLRenderbuffer::create(WebGLRenderingContextBase* ctx) {
+  return new WebGLRenderbuffer(ctx);
 }
 
 WebGLRenderbuffer::WebGLRenderbuffer(WebGLRenderingContextBase* ctx)
-    : WebGLSharedPlatform3DObject(ctx)
-    , m_internalFormat(GL_RGBA4)
-    , m_width(0)
-    , m_height(0)
-    , m_hasEverBeenBound(false)
-{
-    GLuint rbo;
-    ctx->contextGL()->GenRenderbuffers(1, &rbo);
-    setObject(rbo);
+    : WebGLSharedPlatform3DObject(ctx),
+      m_internalFormat(GL_RGBA4),
+      m_width(0),
+      m_height(0),
+      m_hasEverBeenBound(false) {
+  GLuint rbo;
+  ctx->contextGL()->GenRenderbuffers(1, &rbo);
+  setObject(rbo);
 }
 
-void WebGLRenderbuffer::deleteObjectImpl(gpu::gles2::GLES2Interface* gl)
-{
-    gl->DeleteRenderbuffers(1, &m_object);
-    m_object = 0;
+WebGLRenderbuffer::~WebGLRenderbuffer() {
+  runDestructor();
 }
 
-DEFINE_TRACE(WebGLRenderbuffer)
-{
-    WebGLSharedPlatform3DObject::trace(visitor);
+void WebGLRenderbuffer::deleteObjectImpl(gpu::gles2::GLES2Interface* gl) {
+  gl->DeleteRenderbuffers(1, &m_object);
+  m_object = 0;
 }
 
-} // namespace blink
+DEFINE_TRACE(WebGLRenderbuffer) {
+  WebGLSharedPlatform3DObject::trace(visitor);
+}
+
+}  // namespace blink

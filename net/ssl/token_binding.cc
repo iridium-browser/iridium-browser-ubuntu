@@ -4,16 +4,17 @@
 
 #include "net/ssl/token_binding.h"
 
-#include <openssl/bytestring.h>
-#include <openssl/ec.h>
-#include <openssl/ec_key.h>
-#include <openssl/evp.h>
-#include <openssl/mem.h>
-
 #include "base/stl_util.h"
-#include "crypto/scoped_openssl_types.h"
+#include "crypto/ec_private_key.h"
 #include "net/base/net_errors.h"
 #include "net/ssl/ssl_config.h"
+#include "third_party/boringssl/src/include/openssl/bn.h"
+#include "third_party/boringssl/src/include/openssl/bytestring.h"
+#include "third_party/boringssl/src/include/openssl/ec.h"
+#include "third_party/boringssl/src/include/openssl/ec_key.h"
+#include "third_party/boringssl/src/include/openssl/ecdsa.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/boringssl/src/include/openssl/mem.h"
 
 namespace net {
 
@@ -32,9 +33,10 @@ bool BuildTokenBindingID(crypto::ECPrivateKey* key, CBB* out) {
           NULL) != kUncompressedPointLen) {
     return false;
   }
-  CBB ec_point;
+  CBB public_key, ec_point;
   return CBB_add_u8(out, TB_PARAM_ECDSAP256) &&
-         CBB_add_u8_length_prefixed(out, &ec_point) &&
+         CBB_add_u16_length_prefixed(out, &public_key) &&
+         CBB_add_u8_length_prefixed(&public_key, &ec_point) &&
          CBB_add_bytes(&ec_point, point_buf + 1, kUncompressedPointLen - 1) &&
          CBB_flush(out);
 }
@@ -52,7 +54,7 @@ bool ECDSA_SIGToRaw(ECDSA_SIG* ec_sig, EC_KEY* ec, std::vector<uint8_t>* out) {
 }
 
 ECDSA_SIG* RawToECDSA_SIG(EC_KEY* ec, base::StringPiece sig) {
-  crypto::ScopedECDSA_SIG raw_sig(ECDSA_SIG_new());
+  bssl::UniquePtr<ECDSA_SIG> raw_sig(ECDSA_SIG_new());
   const EC_GROUP* group = EC_KEY_get0_group(ec);
   const BIGNUM* order = EC_GROUP_get0_order(group);
   size_t group_size = BN_num_bytes(order);
@@ -68,14 +70,26 @@ ECDSA_SIG* RawToECDSA_SIG(EC_KEY* ec, base::StringPiece sig) {
 
 }  // namespace
 
-bool SignTokenBindingEkm(base::StringPiece ekm,
-                         crypto::ECPrivateKey* key,
-                         std::vector<uint8_t>* out) {
-  const uint8_t* ekm_data = reinterpret_cast<const uint8_t*>(ekm.data());
+bool CreateTokenBindingSignature(base::StringPiece ekm,
+                                 TokenBindingType type,
+                                 crypto::ECPrivateKey* key,
+                                 std::vector<uint8_t>* out) {
+  bssl::ScopedEVP_MD_CTX digest_ctx;
+  uint8_t tb_type = static_cast<uint8_t>(type);
+  uint8_t key_type = static_cast<uint8_t>(TB_PARAM_ECDSAP256);
+  uint8_t digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len;
+  if (!EVP_DigestInit(digest_ctx.get(), EVP_sha256()) ||
+      !EVP_DigestUpdate(digest_ctx.get(), &tb_type, 1) ||
+      !EVP_DigestUpdate(digest_ctx.get(), &key_type, 1) ||
+      !EVP_DigestUpdate(digest_ctx.get(), ekm.data(), ekm.size()) ||
+      !EVP_DigestFinal_ex(digest_ctx.get(), digest, &digest_len)) {
+    return false;
+  }
   EC_KEY* ec_key = EVP_PKEY_get0_EC_KEY(key->key());
   if (!ec_key)
     return false;
-  crypto::ScopedECDSA_SIG sig(ECDSA_do_sign(ekm_data, ekm.size(), ec_key));
+  bssl::UniquePtr<ECDSA_SIG> sig(ECDSA_do_sign(digest, digest_len, ec_key));
   if (!sig)
     return false;
   return ECDSA_SIGToRaw(sig.get(), ec_key, out);
@@ -137,7 +151,7 @@ TokenBinding::TokenBinding() {}
 
 bool ParseTokenBindingMessage(base::StringPiece token_binding_message,
                               std::vector<TokenBinding>* token_bindings) {
-  CBS tb_message, tb, ec_point, signature, extensions;
+  CBS tb_message, tb, public_key, ec_point, signature, extensions;
   uint8_t tb_type, tb_param;
   CBS_init(&tb_message,
            reinterpret_cast<const uint8_t*>(token_binding_message.data()),
@@ -146,7 +160,9 @@ bool ParseTokenBindingMessage(base::StringPiece token_binding_message,
     return false;
   while (CBS_len(&tb)) {
     if (!CBS_get_u8(&tb, &tb_type) || !CBS_get_u8(&tb, &tb_param) ||
-        !CBS_get_u8_length_prefixed(&tb, &ec_point) ||
+        !CBS_get_u16_length_prefixed(&tb, &public_key) ||
+        !CBS_get_u8_length_prefixed(&public_key, &ec_point) ||
+        CBS_len(&public_key) != 0 ||
         !CBS_get_u16_length_prefixed(&tb, &signature) ||
         !CBS_get_u16_length_prefixed(&tb, &extensions) ||
         tb_param != TB_PARAM_ECDSAP256 ||
@@ -167,28 +183,41 @@ bool ParseTokenBindingMessage(base::StringPiece token_binding_message,
   return true;
 }
 
-bool VerifyEKMSignature(base::StringPiece ec_point,
-                        base::StringPiece signature,
-                        base::StringPiece ekm) {
+bool VerifyTokenBindingSignature(base::StringPiece ec_point,
+                                 base::StringPiece signature,
+                                 TokenBindingType type,
+                                 base::StringPiece ekm) {
   if (ec_point.size() != kUncompressedPointLen - 1)
     return false;
   uint8_t x9_62_ec_point[kUncompressedPointLen];
   x9_62_ec_point[0] = 4;
   memcpy(x9_62_ec_point + 1, ec_point.data(), kUncompressedPointLen - 1);
-  crypto::ScopedEC_Key key(EC_KEY_new_by_curve_name(NID_X9_62_prime256v1));
+  bssl::UniquePtr<EC_KEY> key(EC_KEY_new_by_curve_name(NID_X9_62_prime256v1));
   EC_KEY* keyp = key.get();
-  crypto::ScopedEC_POINT pub_key(EC_POINT_new(EC_KEY_get0_group(keyp)));
+  bssl::UniquePtr<EC_POINT> pub_key(EC_POINT_new(EC_KEY_get0_group(keyp)));
   if (!EC_POINT_oct2point(EC_KEY_get0_group(keyp), pub_key.get(),
                           x9_62_ec_point, kUncompressedPointLen, nullptr) ||
       !EC_KEY_set_public_key(keyp, pub_key.get())) {
     return false;
   }
 
-  crypto::ScopedECDSA_SIG sig(RawToECDSA_SIG(keyp, signature));
+  bssl::ScopedEVP_MD_CTX digest_ctx;
+  uint8_t tb_type = static_cast<uint8_t>(type);
+  uint8_t key_type = static_cast<uint8_t>(TB_PARAM_ECDSAP256);
+  uint8_t digest[EVP_MAX_MD_SIZE];
+  unsigned int digest_len;
+  if (!EVP_DigestInit(digest_ctx.get(), EVP_sha256()) ||
+      !EVP_DigestUpdate(digest_ctx.get(), &tb_type, 1) ||
+      !EVP_DigestUpdate(digest_ctx.get(), &key_type, 1) ||
+      !EVP_DigestUpdate(digest_ctx.get(), ekm.data(), ekm.size()) ||
+      !EVP_DigestFinal_ex(digest_ctx.get(), digest, &digest_len)) {
+    return false;
+  }
+
+  bssl::UniquePtr<ECDSA_SIG> sig(RawToECDSA_SIG(keyp, signature));
   if (!sig)
     return false;
-  return !!ECDSA_do_verify(reinterpret_cast<const uint8_t*>(ekm.data()),
-                           ekm.size(), sig.get(), keyp);
+  return !!ECDSA_do_verify(digest, digest_len, sig.get(), keyp);
 }
 
 }  // namespace net

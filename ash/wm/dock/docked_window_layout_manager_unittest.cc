@@ -4,31 +4,33 @@
 
 #include "ash/common/wm/dock/docked_window_layout_manager.h"
 
-#include "ash/aura/wm_window_aura.h"
-#include "ash/common/shelf/shelf.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/ash_switches.h"
+#include "ash/common/shelf/wm_shelf.h"
+#include "ash/common/test/test_shelf_delegate.h"
 #include "ash/common/wm/panels/panel_layout_manager.h"
 #include "ash/common/wm/window_resizer.h"
 #include "ash/common/wm/window_state.h"
-#include "ash/display/display_manager.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/test/display_manager_test_api.h"
-#include "ash/test/shelf_test_api.h"
 #include "ash/test/shelf_view_test_api.h"
 #include "ash/test/shell_test_api.h"
-#include "ash/test/test_shelf_delegate.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
+#include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
+#include "services/ui/public/interfaces/window_manager_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/hit_test.h"
-#include "ui/display/manager/display_layout.h"
+#include "ui/display/display_layout.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
+#include "ui/display/test/display_manager_test_api.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
@@ -42,12 +44,13 @@ class DockedWindowLayoutManagerTest
   virtual ~DockedWindowLayoutManagerTest() {}
 
   void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        ash::switches::kAshEnableDockedWindows);
     AshTestBase::SetUp();
     UpdateDisplay("600x600");
-    ASSERT_TRUE(test::TestShelfDelegate::instance());
 
     shelf_view_test_.reset(new test::ShelfViewTestAPI(
-        test::ShelfTestAPI(Shelf::ForPrimaryDisplay()).shelf_view()));
+        GetPrimaryShelf()->GetShelfViewForTesting()));
     shelf_view_test_->SetAnimationDuration(1);
   }
 
@@ -65,17 +68,7 @@ class DockedWindowLayoutManagerTest
   }
 
   aura::Window* CreateTestWindow(const gfx::Rect& bounds) {
-    aura::Window* window = CreateTestWindowInShellWithDelegateAndType(
-        nullptr, window_type_, 0, bounds);
-    if (window_type_ == ui::wm::WINDOW_TYPE_PANEL) {
-      test::TestShelfDelegate* shelf_delegate =
-          test::TestShelfDelegate::instance();
-      shelf_delegate->AddShelfItem(window);
-      PanelLayoutManager* manager =
-          PanelLayoutManager::Get(WmWindowAura::Get(window));
-      manager->Relayout();
-    }
-    return window;
+    return CreateTestWindowWithDelegate(bounds, nullptr);
   }
 
   aura::Window* CreateTestWindowWithDelegate(
@@ -84,12 +77,9 @@ class DockedWindowLayoutManagerTest
     aura::Window* window = CreateTestWindowInShellWithDelegateAndType(
         delegate, window_type_, 0, bounds);
     if (window_type_ == ui::wm::WINDOW_TYPE_PANEL) {
-      test::TestShelfDelegate* shelf_delegate =
-          test::TestShelfDelegate::instance();
-      shelf_delegate->AddShelfItem(window);
-      PanelLayoutManager* manager =
-          PanelLayoutManager::Get(WmWindowAura::Get(window));
-      manager->Relayout();
+      WmWindow* wm_window = WmWindow::Get(window);
+      test::TestShelfDelegate::instance()->AddShelfItem(wm_window);
+      PanelLayoutManager::Get(wm_window)->Relayout();
     }
     return window;
   }
@@ -98,7 +88,7 @@ class DockedWindowLayoutManagerTest
       aura::Window* window,
       const gfx::Point& point_in_parent,
       int window_component) {
-    return CreateWindowResizer(WmWindowAura::Get(window), point_in_parent,
+    return CreateWindowResizer(WmWindow::Get(window), point_in_parent,
                                window_component,
                                aura::client::WINDOW_MOVE_SOURCE_MOUSE)
         .release();
@@ -209,9 +199,6 @@ class DockedWindowLayoutManagerTest
 // Tests that a created window is successfully added to the dock
 // layout manager.
 TEST_P(DockedWindowLayoutManagerTest, AddOneWindow) {
-  if (!SupportsHostWindowResize())
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> window(CreateTestWindow(bounds));
   DragRelativeToEdge(DOCKED_EDGE_RIGHT, window.get(), 0);
@@ -226,9 +213,6 @@ TEST_P(DockedWindowLayoutManagerTest, AddOneWindow) {
 
 // Tests that a docked window's bounds cannot be changed programmatically.
 TEST_P(DockedWindowLayoutManagerTest, DockedWindowBoundsDontChange) {
-  if (!SupportsHostWindowResize())
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> window(CreateTestWindow(bounds));
   DragRelativeToEdge(DOCKED_EDGE_RIGHT, window.get(), 0);
@@ -244,9 +228,6 @@ TEST_P(DockedWindowLayoutManagerTest, DockedWindowBoundsDontChange) {
 // Tests that with a window docked on the left the auto-placing logic in
 // RearrangeVisibleWindowOnShow places windows flush with work area edges.
 TEST_P(DockedWindowLayoutManagerTest, AutoPlacingLeft) {
-  if (!SupportsHostWindowResize())
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> window(CreateTestWindow(bounds));
   DragRelativeToEdge(DOCKED_EDGE_LEFT, window.get(), 0);
@@ -257,7 +238,7 @@ TEST_P(DockedWindowLayoutManagerTest, AutoPlacingLeft) {
   EXPECT_EQ(kShellWindowId_DockedContainer, window->parent()->id());
 
   DockedWindowLayoutManager* manager =
-      DockedWindowLayoutManager::Get(WmWindowAura::Get(window.get()));
+      DockedWindowLayoutManager::Get(WmWindow::Get(window.get()));
 
   // Create two additional windows and test their auto-placement
   std::unique_ptr<aura::Window> window1(CreateTestWindowInShellWithId(1));
@@ -295,9 +276,6 @@ TEST_P(DockedWindowLayoutManagerTest, AutoPlacingLeft) {
 // Tests that with a window docked on the right the auto-placing logic in
 // RearrangeVisibleWindowOnShow places windows flush with work area edges.
 TEST_P(DockedWindowLayoutManagerTest, AutoPlacingRight) {
-  if (!SupportsHostWindowResize())
-    return;
-
   gfx::Rect bounds(0, 0, 201, 201);
   std::unique_ptr<aura::Window> window(CreateTestWindow(bounds));
   DragRelativeToEdge(DOCKED_EDGE_RIGHT, window.get(), 0);
@@ -308,7 +286,7 @@ TEST_P(DockedWindowLayoutManagerTest, AutoPlacingRight) {
   EXPECT_EQ(kShellWindowId_DockedContainer, window->parent()->id());
 
   DockedWindowLayoutManager* manager =
-      DockedWindowLayoutManager::Get(WmWindowAura::Get(window.get()));
+      DockedWindowLayoutManager::Get(WmWindow::Get(window.get()));
 
   // Create two additional windows and test their auto-placement
   std::unique_ptr<aura::Window> window1(CreateTestWindowInShellWithId(1));
@@ -345,7 +323,7 @@ TEST_P(DockedWindowLayoutManagerTest, AutoPlacingRight) {
 // RearrangeVisibleWindowOnShow places windows flush with work area edges.
 // Test case for the secondary screen.
 TEST_P(DockedWindowLayoutManagerTest, AutoPlacingRightSecondScreen) {
-  if (!SupportsMultipleDisplays() || !SupportsHostWindowResize())
+  if (!SupportsMultipleDisplays())
     return;
 
   // Create a dual screen layout.
@@ -362,7 +340,7 @@ TEST_P(DockedWindowLayoutManagerTest, AutoPlacingRightSecondScreen) {
   EXPECT_EQ(kShellWindowId_DockedContainer, window->parent()->id());
 
   DockedWindowLayoutManager* manager =
-      DockedWindowLayoutManager::Get(WmWindowAura::Get(window.get()));
+      DockedWindowLayoutManager::Get(WmWindow::Get(window.get()));
 
   // Create two additional windows and test their auto-placement
   bounds = gfx::Rect(616, 32, 231, 320);
@@ -401,9 +379,6 @@ TEST_P(DockedWindowLayoutManagerTest, AutoPlacingRightSecondScreen) {
 
 // Adds two windows and tests that the gaps are evenly distributed.
 TEST_P(DockedWindowLayoutManagerTest, AddTwoWindows) {
-  if (!SupportsHostWindowResize())
-    return;
-
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
   std::unique_ptr<aura::Window> w2(CreateTestWindow(gfx::Rect(0, 0, 210, 202)));
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
@@ -431,9 +406,6 @@ TEST_P(DockedWindowLayoutManagerTest, AddTwoWindows) {
 
 // Adds two non-overlapping windows and tests layout after a drag.
 TEST_P(DockedWindowLayoutManagerTest, TwoWindowsDragging) {
-  if (!SupportsHostWindowResize())
-    return;
-
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
   std::unique_ptr<aura::Window> w2(CreateTestWindow(gfx::Rect(0, 0, 210, 202)));
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
@@ -466,8 +438,6 @@ TEST_P(DockedWindowLayoutManagerTest, TwoWindowsDragging) {
 
 // Adds three overlapping windows and tests layout after a drag.
 TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsDragging) {
-  if (!SupportsHostWindowResize())
-    return;
   UpdateDisplay("600x1000");
 
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 310)));
@@ -529,7 +499,7 @@ TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsDragging) {
 
 // Adds three windows in bottom display and tests layout after a drag.
 TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsDraggingSecondScreen) {
-  if (!SupportsMultipleDisplays() || !SupportsHostWindowResize())
+  if (!SupportsMultipleDisplays())
     return;
 
   // Create two screen vertical layout.
@@ -537,7 +507,8 @@ TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsDraggingSecondScreen) {
   // Layout the secondary display to the bottom of the primary.
   ASSERT_GT(display::Screen::GetScreen()->GetNumDisplays(), 1);
   Shell::GetInstance()->display_manager()->SetLayoutForCurrentDisplays(
-      test::CreateDisplayLayout(display::DisplayPlacement::BOTTOM, 0));
+      display::test::CreateDisplayLayout(display_manager(),
+                                         display::DisplayPlacement::BOTTOM, 0));
 
   std::unique_ptr<aura::Window> w1(
       CreateTestWindow(gfx::Rect(0, 1000, 201, 310)));
@@ -601,9 +572,6 @@ TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsDraggingSecondScreen) {
 
 // Tests that a second window added to the dock is resized to match.
 TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthNew) {
-  if (!SupportsHostWindowResize())
-    return;
-
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
   std::unique_ptr<aura::Window> w2(CreateTestWindow(gfx::Rect(0, 0, 280, 202)));
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
@@ -617,11 +585,9 @@ TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthNew) {
 
 // Tests that a first non-resizable window added to the dock is not resized.
 TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthNonResizableFirst) {
-  if (!SupportsHostWindowResize())
-    return;
-
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
-  w1->SetProperty(aura::client::kCanResizeKey, false);
+  w1->SetProperty(aura::client::kResizeBehaviorKey,
+                  ui::mojom::kResizeBehaviorNone);
   std::unique_ptr<aura::Window> w2(CreateTestWindow(gfx::Rect(0, 0, 280, 202)));
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
   // The first window should not get resized.
@@ -634,12 +600,10 @@ TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthNonResizableFirst) {
 
 // Tests that a second non-resizable window added to the dock is not resized.
 TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthNonResizableSecond) {
-  if (!SupportsHostWindowResize())
-    return;
-
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
   std::unique_ptr<aura::Window> w2(CreateTestWindow(gfx::Rect(0, 0, 280, 202)));
-  w2->SetProperty(aura::client::kCanResizeKey, false);
+  w2->SetProperty(aura::client::kResizeBehaviorKey,
+                  ui::mojom::kResizeBehaviorNone);
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
   // The first window should get resized to ideal width.
   EXPECT_EQ(ideal_width(), w1->bounds().width());
@@ -654,9 +618,6 @@ TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthNonResizableSecond) {
 
 // Test that restrictions on minimum and maximum width of windows are honored.
 TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthRestrictions) {
-  if (!SupportsHostWindowResize())
-    return;
-
   aura::test::TestWindowDelegate delegate1;
   delegate1.set_maximum_size(gfx::Size(240, 0));
   std::unique_ptr<aura::Window> w1(
@@ -679,9 +640,6 @@ TEST_P(DockedWindowLayoutManagerTest, TwoWindowsWidthRestrictions) {
 
 // Test that restrictions on minimum width of windows are honored.
 TEST_P(DockedWindowLayoutManagerTest, WidthMoreThanMax) {
-  if (!SupportsHostWindowResize())
-    return;
-
   aura::test::TestWindowDelegate delegate;
   delegate.set_minimum_size(gfx::Size(400, 0));
   std::unique_ptr<aura::Window> window(
@@ -703,9 +661,6 @@ TEST_P(DockedWindowLayoutManagerTest, WidthMoreThanMax) {
 
 // Docks three windows and tests that the very first window gets minimized.
 TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsMinimize) {
-  if (!SupportsHostWindowResize())
-    return;
-
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
   std::unique_ptr<aura::Window> w2(CreateTestWindow(gfx::Rect(0, 0, 210, 202)));
@@ -739,9 +694,6 @@ TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsMinimize) {
 
 // Docks up to three windows and tests that they split vertical space.
 TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsSplitHeightEvenly) {
-  if (!SupportsHostWindowResize())
-    return;
-
   UpdateDisplay("600x1000");
   std::unique_ptr<aura::Window> w1(CreateTestWindow(gfx::Rect(0, 0, 201, 201)));
   DragToVerticalPositionAndToEdge(DOCKED_EDGE_RIGHT, w1.get(), 20);
@@ -785,9 +737,6 @@ TEST_P(DockedWindowLayoutManagerTest, ThreeWindowsSplitHeightEvenly) {
 
 // Docks two windows and tests that restrictions on vertical size are honored.
 TEST_P(DockedWindowLayoutManagerTest, TwoWindowsHeightRestrictions) {
-  if (!SupportsHostWindowResize())
-    return;
-
   // The first window is fixed height.
   aura::test::TestWindowDelegate delegate1;
   delegate1.set_minimum_size(gfx::Size(0, 300));
@@ -827,7 +776,7 @@ TEST_P(DockedWindowLayoutManagerTest, TwoWindowsHeightRestrictions) {
 // Tests that a docked window is moved to primary display when secondary display
 // is disconnected and that it stays docked and properly positioned.
 TEST_P(DockedWindowLayoutManagerTest, DisplayDisconnectionMovesDocked) {
-  if (!SupportsMultipleDisplays() || !SupportsHostWindowResize())
+  if (!SupportsMultipleDisplays())
     return;
 
   // Create a dual screen layout.

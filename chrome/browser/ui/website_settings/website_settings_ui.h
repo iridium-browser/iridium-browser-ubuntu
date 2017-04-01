@@ -16,16 +16,15 @@
 #include "content/public/browser/permission_type.h"
 #include "ui/gfx/native_widget_types.h"
 
-class GURL;
 class Profile;
 class WebsiteSettings;
 
-namespace base {
-class Value;
-};
-
 namespace gfx {
 class Image;
+}
+
+namespace net {
+class X509Certificate;
 }
 
 // The class |WebsiteSettingsUI| specifies the platform independent
@@ -42,6 +41,19 @@ class WebsiteSettingsUI {
     TAB_ID_PERMISSIONS = 0,
     TAB_ID_CONNECTION,
     NUM_TAB_IDS,
+  };
+
+  // The security summary is styled depending on the security state. At the
+  // moment, the only styling we apply is color, but it could also include e.g.
+  // bolding.
+  enum SecuritySummaryStyle { STYLE_UNSTYLED = 0, STYLE_COLOR = 1 << 1 };
+
+  struct SecurityDescription {
+    // A one-line summary of the security state.
+    base::string16 summary;
+    // A short paragraph with more details about the state, and how
+    // the user should treat it.
+    base::string16 details;
   };
 
   // |CookieInfo| contains information about the cookies from a specific source.
@@ -99,13 +111,13 @@ class WebsiteSettingsUI {
     std::string site_identity;
     // Status of the site's identity.
     WebsiteSettings::SiteIdentityStatus identity_status;
-    // Helper to get the status text to display to the user.
-    base::string16 GetSecuritySummary() const;
+    // Helper to get security description info to display to the user.
+    std::unique_ptr<SecurityDescription> GetSecurityDescription() const;
     // Textual description of the site's identity status that is displayed to
     // the user.
     std::string identity_status_description;
-    // The ID is the server certificate of a secure connection or 0.
-    int cert_id;
+    // The server certificate if a secure connection.
+    scoped_refptr<net::X509Certificate> certificate;
     // Status of the site's connection.
     WebsiteSettings::SiteConnectionStatus connection_status;
     // Textual description of the site's connection status that is displayed to
@@ -121,7 +133,7 @@ class WebsiteSettingsUI {
 
   using CookieInfoList = std::vector<CookieInfo>;
   using PermissionInfoList = std::vector<PermissionInfo>;
-  using ChosenObjectInfoList = std::vector<ChosenObjectInfo*>;
+  using ChosenObjectInfoList = std::vector<std::unique_ptr<ChosenObjectInfo>>;
 
   virtual ~WebsiteSettingsUI();
 
@@ -137,6 +149,7 @@ class WebsiteSettingsUI {
   // including why that action was taken. E.g. "Allowed by you",
   // "Blocked by default".
   static base::string16 PermissionActionToUIString(
+      Profile* profile,
       ContentSettingsType type,
       ContentSetting setting,
       ContentSetting default_setting,
@@ -176,17 +189,13 @@ class WebsiteSettingsUI {
   // Sets cookie information.
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) = 0;
 
-  // Sets permission information. The callee is expected to take ownership of
-  // the objects in |chosen_object_info_list|.
+  // Sets permission information.
   virtual void SetPermissionInfo(
       const PermissionInfoList& permission_info_list,
-      const ChosenObjectInfoList& chosen_object_info_list) = 0;
+      ChosenObjectInfoList chosen_object_info_list) = 0;
 
   // Sets site identity information.
   virtual void SetIdentityInfo(const IdentityInfo& identity_info) = 0;
-
-  // Selects the tab with the given |tab_id|.
-  virtual void SetSelectedTab(TabId tab_id) = 0;
 };
 
 typedef WebsiteSettingsUI::CookieInfoList CookieInfoList;

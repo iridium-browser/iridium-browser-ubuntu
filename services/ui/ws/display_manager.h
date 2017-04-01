@@ -10,6 +10,7 @@
 #include <set>
 
 #include "base/macros.h"
+#include "services/ui/display/screen_manager_delegate.h"
 #include "services/ui/ws/ids.h"
 #include "services/ui/ws/user_id.h"
 #include "services/ui/ws/user_id_tracker_observer.h"
@@ -18,19 +19,19 @@ namespace ui {
 namespace ws {
 
 class Display;
-class DisplayManagerDelegate;
 class ServerWindow;
 class UserDisplayManager;
 class UserIdTracker;
 class WindowManagerDisplayRoot;
+class WindowServer;
 
 // DisplayManager manages the set of Displays. DisplayManager distinguishes
 // between displays that do yet have an accelerated widget (pending), vs
 // those that do.
-class DisplayManager : public UserIdTrackerObserver {
+class DisplayManager : public UserIdTrackerObserver,
+                       public display::ScreenManagerDelegate {
  public:
-  DisplayManager(DisplayManagerDelegate* delegate,
-                 UserIdTracker* user_id_tracker);
+  DisplayManager(WindowServer* window_server, UserIdTracker* user_id_tracker);
   ~DisplayManager() override;
 
   // Returns the UserDisplayManager for |user_id|. DisplayManager owns the
@@ -50,8 +51,12 @@ class DisplayManager : public UserIdTrackerObserver {
 
   // Returns the Display that contains |window|, or null if |window| is not
   // attached to a display.
-  Display* GetDisplayContaining(ServerWindow* window);
+  Display* GetDisplayContaining(const ServerWindow* window);
   const Display* GetDisplayContaining(const ServerWindow* window) const;
+
+  // Returns the display with the specified display id, or null if there is no
+  // display with that id.
+  Display* GetDisplayById(int64_t display_id);
 
   const WindowManagerDisplayRoot* GetWindowManagerDisplayRoot(
       const ServerWindow* window) const;
@@ -76,7 +81,15 @@ class DisplayManager : public UserIdTrackerObserver {
   void OnActiveUserIdChanged(const UserId& previously_active_id,
                              const UserId& active_id) override;
 
-  DisplayManagerDelegate* delegate_;
+  // display::ScreenManagerDelegate:
+  void OnDisplayAdded(int64_t id,
+                      const display::ViewportMetrics& metrics) override;
+  void OnDisplayRemoved(int64_t id) override;
+  void OnDisplayModified(int64_t id,
+                         const display::ViewportMetrics& metrics) override;
+  void OnPrimaryDisplayChanged(int64_t primary_display_id) override;
+
+  WindowServer* window_server_;
   UserIdTracker* user_id_tracker_;
 
   // Displays are initially added to |pending_displays_|. When the display is

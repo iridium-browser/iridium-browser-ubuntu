@@ -12,19 +12,21 @@
 #include <string>
 
 #include "base/containers/hash_tables.h"
+#include "base/trace_event/memory_usage_estimator.h"
 
 namespace base {
 class StringValue;
-}
+}  // namespace base
 
 namespace sql {
 class Statement;
-}
+}  // namespace sql
 
 namespace syncer {
 namespace syncable {
-struct EntryKernel;
+
 class Id;
+struct EntryKernel;
 
 std::ostream& operator<<(std::ostream& out, const Id& id);
 
@@ -95,6 +97,10 @@ class Id {
 
   std::string s_;
 };
+
+inline size_t EstimateMemoryUsage(const Id& id) {
+  return base::trace_event::EstimateMemoryUsage(id.value());
+}
 
 }  // namespace syncable
 }  // namespace syncer

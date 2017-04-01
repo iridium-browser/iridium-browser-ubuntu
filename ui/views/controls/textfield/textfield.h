@@ -29,12 +29,14 @@
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/textfield/textfield_model.h"
 #include "ui/views/drag_controller.h"
+#include "ui/views/selection_controller.h"
+#include "ui/views/selection_controller_delegate.h"
 #include "ui/views/view.h"
+#include "ui/views/word_lookup_client.h"
 
 namespace views {
 
 class MenuRunner;
-class Painter;
 class TextfieldController;
 
 // A views/skia textfield implementation. No platform-specific code is used.
@@ -42,6 +44,8 @@ class VIEWS_EXPORT Textfield : public View,
                                public TextfieldModel::Delegate,
                                public ContextMenuController,
                                public DragController,
+                               public WordLookupClient,
+                               public SelectionControllerDelegate,
                                public ui::TouchEditable,
                                public ui::TextInputClient {
  public:
@@ -73,7 +77,8 @@ class VIEWS_EXPORT Textfield : public View,
   // features. The flags is the bit map of ui::TextInputFlags.
   void SetTextInputFlags(int flags);
 
-  // Gets the text currently displayed in the Textfield.
+  // Gets the text for the Textfield. Call sites should take care to not reveal
+  // the text for a password textfield.
   const base::string16& text() const { return model_->text(); }
 
   // Sets the text currently displayed in the Textfield.  This doesn't
@@ -86,9 +91,13 @@ class VIEWS_EXPORT Textfield : public View,
   void AppendText(const base::string16& new_text);
 
   // Inserts |new_text| at the cursor position, replacing any selected text.
+  // This method is used to handle user input via paths Textfield doesn't
+  // normally handle, so it calls UpdateAfterChange() and notifies observers of
+  // changes.
   void InsertOrReplaceText(const base::string16& new_text);
 
-  // Returns the text that is currently selected.
+  // Returns the text that is currently selected. Call sites should take care to
+  // not reveal the text for a password textfield.
   base::string16 GetSelectedText() const;
 
   // Select the entire text range. If |reversed| is true, the range will end at
@@ -130,9 +139,6 @@ class VIEWS_EXPORT Textfield : public View,
   void SetSelectionBackgroundColor(SkColor color);
   void UseDefaultSelectionBackgroundColor();
 
-  // Set drop shadows underneath the text.
-  void SetShadows(const gfx::ShadowValues& shadows);
-
   // Gets/Sets whether or not the cursor is enabled.
   bool GetCursorEnabled() const;
   void SetCursorEnabled(bool enabled);
@@ -150,12 +156,15 @@ class VIEWS_EXPORT Textfield : public View,
   void set_placeholder_text(const base::string16& text) {
     placeholder_text_ = text;
   }
-  virtual base::string16 GetPlaceholderText() const;
+  base::string16 GetPlaceholderText() const;
 
-  SkColor placeholder_text_color() const { return placeholder_text_color_; }
   void set_placeholder_text_color(SkColor color) {
     placeholder_text_color_ = color;
   }
+
+  // Sets whether to indicate the textfield has invalid content.
+  void SetInvalid(bool invalid);
+  bool invalid() const { return invalid_; }
 
   // Get or set the horizontal alignment used for the button from the underlying
   // RenderText object.
@@ -200,20 +209,18 @@ class VIEWS_EXPORT Textfield : public View,
   // Set the accessible name of the text field.
   void SetAccessibleName(const base::string16& name);
 
-  // Returns whether there is a drag operation originating from the textfield.
-  bool HasTextBeingDragged();
-
   // View overrides:
   gfx::Insets GetInsets() const override;
   int GetBaseline() const override;
   gfx::Size GetPreferredSize() const override;
   const char* GetClassName() const override;
+  void SetBorder(std::unique_ptr<Border> b) override;
   gfx::NativeCursor GetCursor(const ui::MouseEvent& event) override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
-  bool OnKeyPressed(const ui::KeyEvent& event) override;
-  bool OnKeyReleased(const ui::KeyEvent& event) override;
+  void OnMouseCaptureLost() override;
+  WordLookupClient* GetWordLookupClient() override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
   bool CanHandleAccelerators() const override;
@@ -227,7 +234,8 @@ class VIEWS_EXPORT Textfield : public View,
   void OnDragExited() override;
   int OnPerformDrop(const ui::DropTargetEvent& event) override;
   void OnDragDone() override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
+  bool HandleAccessibleAction(const ui::AXActionData& action_data) override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   bool GetNeedsNotificationWhenVisibleBoundsChange() const override;
   void OnVisibleBoundsChanged() override;
@@ -254,6 +262,14 @@ class VIEWS_EXPORT Textfield : public View,
   bool CanStartDragForView(View* sender,
                            const gfx::Point& press_pt,
                            const gfx::Point& p) override;
+
+  // WordLookupClient overrides:
+  bool GetDecoratedWordAtPoint(const gfx::Point& point,
+                               gfx::DecoratedText* decorated_word,
+                               gfx::Point* baseline_point) override;
+
+  // SelectionControllerDelegate overrides:
+  bool HasTextBeingDragged() const override;
 
   // ui::TouchEditable overrides:
   void SelectRect(const gfx::Point& start, const gfx::Point& end) override;
@@ -301,7 +317,7 @@ class VIEWS_EXPORT Textfield : public View,
   bool ChangeTextDirectionAndLayoutAlignment(
       base::i18n::TextDirection direction) override;
   void ExtendSelectionAndDelete(size_t before, size_t after) override;
-  void EnsureCaretInRect(const gfx::Rect& rect) override;
+  void EnsureCaretNotInRect(const gfx::Rect& rect) override;
   bool IsTextEditCommandEnabled(ui::TextEditCommand command) const override;
   void SetTextEditCommandForNextKeyEvent(ui::TextEditCommand command) override;
 
@@ -312,7 +328,7 @@ class VIEWS_EXPORT Textfield : public View,
   // Returns the TextfieldModel's text/cursor/selection rendering model.
   gfx::RenderText* GetRenderText() const;
 
-  gfx::Point last_click_location() const { return last_click_location_; }
+  gfx::Point GetLastClickLocation() const;
 
   // Get the text from the selection clipboard.
   virtual base::string16 GetSelectionClipboardText() const;
@@ -323,18 +339,38 @@ class VIEWS_EXPORT Textfield : public View,
  private:
   friend class TextfieldTestApi;
 
-  // Handles a request to change the value of this text field from software
-  // using an accessibility API (typically automation software, screen readers
-  // don't normally use this). Sets the value and clears the selection.
-  void AccessibilitySetValue(const base::string16& new_value);
+  // View overrides:
+  // Declared final since overriding by subclasses would interfere with the
+  // accounting related to the scheduled text edit command. Subclasses should
+  // use TextfieldController::HandleKeyEvent, to intercept the key event.
+  bool OnKeyPressed(const ui::KeyEvent& event) final;
+  bool OnKeyReleased(const ui::KeyEvent& event) final;
+
+  // SelectionControllerDelegate overrides:
+  gfx::RenderText* GetRenderTextForSelectionController() override;
+  bool IsReadOnly() const override;
+  bool SupportsDrag() const override;
+  void SetTextBeingDragged(bool value) override;
+  int GetViewHeight() const override;
+  int GetViewWidth() const override;
+  int GetDragSelectionDelay() const override;
+  void OnBeforePointerAction() override;
+  void OnAfterPointerAction(bool text_changed, bool selection_changed) override;
+  // Callers within Textfield should call UpdateAfterChange depending on the
+  // return value.
+  bool PasteSelectionClipboard() override;
+  void UpdateSelectionClipboard() override;
 
   // Updates the painted background color.
   void UpdateBackgroundColor();
 
+  // Updates the border per the state of |invalid_|.
+  void UpdateBorder();
+
   // Does necessary updates when the text and/or cursor position changes.
   void UpdateAfterChange(bool text_changed, bool cursor_changed);
 
-  // A callback function to periodically update the cursor state.
+  // A callback function to periodically update the cursor node_data.
   void UpdateCursor();
 
   // Repaint the cursor.
@@ -344,9 +380,6 @@ class VIEWS_EXPORT Textfield : public View,
 
   // Helper function to call MoveCursorTo on the TextfieldModel.
   void MoveCursorTo(const gfx::Point& point, bool select);
-
-  // Helper function to update the selection on a mouse drag.
-  void SelectThroughLastDragLocation();
 
   // Convenience method to notify the InputMethod and TouchSelectionController.
   void OnCaretBoundsChanged();
@@ -370,9 +403,6 @@ class VIEWS_EXPORT Textfield : public View,
   // Utility function to prepare the context menu.
   void UpdateContextMenu();
 
-  // Tracks the mouse clicks for single/double/triple clicks.
-  void TrackMouseClicks(const ui::MouseEvent& event);
-
   // Returns true if the current text input type allows access by the IME.
   bool ImeEditingAllowed() const;
 
@@ -382,11 +412,24 @@ class VIEWS_EXPORT Textfield : public View,
 
   void CreateTouchSelectionControllerAndNotifyIt();
 
-  // Updates the selection clipboard to any non-empty text selection.
-  void UpdateSelectionClipboard() const;
+  // Called when editing a textfield fails because the textfield is readonly.
+  void OnEditFailed();
 
-  // Pastes the selection clipboard for the specified mouse event.
-  void PasteSelectionClipboard(const ui::MouseEvent& event);
+  // Returns true if an insertion cursor should be visible (a vertical bar,
+  // placed at the point new text will be inserted).
+  bool ShouldShowCursor() const;
+
+  // Returns true if an insertion cursor should be visible and blinking.
+  bool ShouldBlinkCursor() const;
+
+  // Starts and stops blinking the cursor, respectively. These are both
+  // idempotent if the cursor is already blinking/not blinking.
+  void StartBlinkingCursor();
+  void StopBlinkingCursor();
+
+  // Callback for the cursor blink timer. Called every
+  // Textfield::GetCaretBlinkMs().
+  void OnCursorBlinkTimerFired();
 
   // The text model.
   std::unique_ptr<TextfieldModel> model_;
@@ -423,7 +466,12 @@ class VIEWS_EXPORT Textfield : public View,
   base::string16 placeholder_text_;
 
   // Placeholder text color.
+  // TODO(estade): remove this when Harmony/MD is default.
   SkColor placeholder_text_color_;
+
+  // True when the contents are deemed unacceptable and should be indicated as
+  // such.
+  bool invalid_;
 
   // The accessible name of the text field.
   base::string16 accessible_name_;
@@ -434,20 +482,19 @@ class VIEWS_EXPORT Textfield : public View,
   // The input flags of this text field.
   int text_input_flags_;
 
-  // The duration and timer to reveal the last typed password character.
-  base::TimeDelta password_reveal_duration_;
+  // The timer to reveal the last typed password character.
   base::OneShotTimer password_reveal_timer_;
 
-  // Tracks whether a user action is being performed; i.e. OnBeforeUserAction()
-  // has been called, but OnAfterUserAction() has not yet been called.
+  // Tracks whether a user action is being performed which may change the
+  // textfield; i.e. OnBeforeUserAction() has been called, but
+  // OnAfterUserAction() has not yet been called.
   bool performing_user_action_;
 
   // True if InputMethod::CancelComposition() should not be called.
   bool skip_input_method_cancel_composition_;
 
-  // The text editing cursor repaint timer and visibility.
-  base::RepeatingTimer cursor_repaint_timer_;
-  bool cursor_visible_;
+  // Insertion cursor repaint timer and visibility.
+  base::RepeatingTimer cursor_blink_timer_;
 
   // The drop cursor is a visual cue for where dragged text will be dropped.
   bool drop_cursor_visible_;
@@ -456,18 +503,10 @@ class VIEWS_EXPORT Textfield : public View,
   // Is the user potentially dragging and dropping from this view?
   bool initiating_drag_;
 
-  // A timer and point used to modify the selection when dragging.
-  base::RepeatingTimer drag_selection_timer_;
-  gfx::Point last_drag_location_;
-
-  // State variables used to track double and triple clicks.
-  size_t aggregated_clicks_;
-  base::TimeTicks last_click_time_;
-  gfx::Point last_click_location_;
-  gfx::Range double_click_word_;
-
   std::unique_ptr<ui::TouchEditingControllerDeprecated>
       touch_selection_controller_;
+
+  SelectionController selection_controller_;
 
   // Used to track touch drag starting location and offset to enable touch
   // scrolling.
@@ -477,6 +516,9 @@ class VIEWS_EXPORT Textfield : public View,
   // Tracks if touch editing handles are hidden because user has started
   // scrolling. If |true|, handles are shown after scrolling ends.
   bool touch_handles_hidden_due_to_scroll_;
+
+  // True if this textfield should use a focus ring to indicate focus.
+  bool use_focus_ring_;
 
   // Context menu related members.
   std::unique_ptr<ui::SimpleMenuModel> context_menu_contents_;

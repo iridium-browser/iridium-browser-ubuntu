@@ -6,8 +6,10 @@
 
 #if V8_TARGET_ARCH_S390
 
-#include "src/codegen.h"
 #include "src/debug/debug.h"
+
+#include "src/codegen.h"
+#include "src/debug/liveedit.h"
 
 namespace v8 {
 namespace internal {
@@ -139,7 +141,7 @@ void DebugCodegen::GenerateFrameDropperLiveEdit(MacroAssembler* masm) {
   __ LeaveFrame(StackFrame::INTERNAL);
 
   ParameterCount dummy(0);
-  __ FloodFunctionIfStepping(r3, no_reg, dummy, dummy);
+  __ CheckDebugHook(r3, no_reg, dummy, dummy);
 
   // Load context from the function.
   __ LoadP(cp, FieldMemOperand(r3, JSFunction::kContextOffset));

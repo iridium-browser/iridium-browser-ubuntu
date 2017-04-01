@@ -3,11 +3,7 @@
 # found in the LICENSE file.
 
 import("//third_party/openh264/openh264_args.gni")
-
-# Import source and include variables from openh264.gypi.
-openh264_gypi_values = exec_script("//build/gypi_to_gn.py",
-                                   [ rebase_path("openh264.gypi") ],
-                                   "scope")
+import("//third_party/openh264/openh264_sources.gni")
 
 # Config shared by all openh264 targets.
 config("config") {
@@ -33,8 +29,9 @@ config("config") {
 }
 
 source_set("common") {
-  sources = openh264_gypi_values.openh264_common_sources
-  include_dirs = openh264_gypi_values.openh264_common_includes
+  sources = openh264_common_sources
+  include_dirs = openh264_common_include_dirs
+
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
   configs += [ ":config" ]
@@ -51,8 +48,9 @@ source_set("common") {
 }
 
 source_set("processing") {
-  sources = openh264_gypi_values.openh264_processing_sources
-  include_dirs = openh264_gypi_values.openh264_processing_includes
+  sources = openh264_processing_sources
+  include_dirs = openh264_processing_include_dirs
+
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
   configs += [ ":config" ]
@@ -62,11 +60,18 @@ source_set("processing") {
 }
 
 source_set("encoder") {
-  sources = openh264_gypi_values.openh264_encoder_sources
-  include_dirs = openh264_gypi_values.openh264_encoder_includes
+  sources = openh264_encoder_sources
+  include_dirs = openh264_encoder_include_dirs
+
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ "//build/config/compiler:no_chromium_code" ]
   configs += [ ":config" ]
+
+  # TODO: Remove after fixing always-true condition
+  # third_party/openh264/src/codec/encoder/core/src/encoder_ext.cpp:142.
+  if (is_clang) {
+    configs -= [ "//build/config/clang:extra_warnings" ]
+  }
   deps = [
     ":common",
     ":processing",

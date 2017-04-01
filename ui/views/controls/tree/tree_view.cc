@@ -7,9 +7,11 @@
 #include <algorithm>
 
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "ui/accessibility/ax_view_state.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -20,6 +22,7 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
+#include "ui/views/controls/focus_ring.h"
 #include "ui/views/controls/prefix_selector.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/textfield/textfield.h"
@@ -136,7 +139,7 @@ void TreeView::SetModel(TreeModel* model) {
     model_->AddObserver(this);
     model_->GetIcons(&icons_);
 
-    root_.RemoveAll();
+    root_.DeleteAll();
     ConfigureInternalNode(model_->GetRoot(), &root_);
     LoadChildren(&root_);
     root_.set_is_expanded(true);
@@ -405,15 +408,15 @@ void TreeView::ShowContextMenu(const gfx::Point& p,
   View::ShowContextMenu(p, source_type);
 }
 
-void TreeView::GetAccessibleState(ui::AXViewState* state) {
-  state->role = ui::AX_ROLE_TREE;
-  state->AddStateFlag(ui::AX_STATE_READ_ONLY);
+void TreeView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  node_data->role = ui::AX_ROLE_TREE;
+  node_data->AddStateFlag(ui::AX_STATE_READ_ONLY);
   if (!selected_node_)
     return;
 
   // Get selected item info.
-  state->role = ui::AX_ROLE_TREE_ITEM;
-  state->name = selected_node_->model_node()->GetTitle();
+  node_data->role = ui::AX_ROLE_TREE_ITEM;
+  node_data->SetName(selected_node_->model_node()->GetTitle());
 }
 
 const char* TreeView::GetClassName() const {
@@ -429,9 +432,9 @@ void TreeView::TreeNodesAdded(TreeModel* model,
   if (!parent_node || !parent_node->loaded_children())
     return;
   for (int i = 0; i < count; ++i) {
-    InternalNode* child = new InternalNode;
-    ConfigureInternalNode(model_->GetChild(parent, start + i), child);
-    parent_node->Add(child, start + i);
+    std::unique_ptr<InternalNode> child = base::MakeUnique<InternalNode>();
+    ConfigureInternalNode(model_->GetChild(parent, start + i), child.get());
+    parent_node->Add(std::move(child), start + i);
   }
   if (IsExpanded(parent))
     DrawnNodesChanged();
@@ -450,7 +453,7 @@ void TreeView::TreeNodesRemoved(TreeModel* model,
     InternalNode* child_removing = parent_node->GetChild(start);
     if (selected_node_ && selected_node_->HasAncestor(child_removing))
       reset_selection = true;
-    delete parent_node->Remove(child_removing);
+    parent_node->Remove(child_removing);
   }
   if (reset_selection) {
     // selected_node_ is no longer valid (at the time we enter this function
@@ -630,6 +633,8 @@ void TreeView::OnFocus() {
   // Notify the InputMethod so that it knows to query the TextInputClient.
   if (GetInputMethod())
     GetInputMethod()->OnCaretBoundsChanged(GetPrefixSelector());
+
+  SetHasFocusRing(true);
 }
 
 void TreeView::OnBlur() {
@@ -638,6 +643,7 @@ void TreeView::OnBlur() {
   SchedulePaintForNode(selected_node_);
   if (selector_)
     selector_->OnViewBlur();
+  SetHasFocusRing(false);
 }
 
 bool TreeView::OnClickOrTap(const ui::LocatedEvent& event) {
@@ -667,9 +673,9 @@ void TreeView::LoadChildren(InternalNode* node) {
   node->set_loaded_children(true);
   for (int i = 0, child_count = model_->GetChildCount(node->model_node());
        i < child_count; ++i) {
-    InternalNode* child = new InternalNode;
-    ConfigureInternalNode(model_->GetChild(node->model_node(), i), child);
-    node->Add(child, node->child_count());
+    std::unique_ptr<InternalNode> child = base::MakeUnique<InternalNode>();
+    ConfigureInternalNode(model_->GetChild(node->model_node(), i), child.get());
+    node->Add(std::move(child), node->child_count());
   }
 }
 
@@ -1035,7 +1041,7 @@ bool TreeView::ExpandImpl(TreeModelNode* model_node) {
 
 PrefixSelector* TreeView::GetPrefixSelector() {
   if (!selector_)
-    selector_.reset(new PrefixSelector(this));
+    selector_.reset(new PrefixSelector(this, this));
   return selector_.get();
 }
 
@@ -1054,6 +1060,22 @@ bool TreeView::IsPointInExpandControl(InternalNode* node,
   if (base::i18n::IsRTL())
     arrow_bounds.set_x(bounds().width() - arrow_dx - kArrowRegionSize);
   return arrow_bounds.Contains(point);
+}
+
+void TreeView::SetHasFocusRing(bool shows) {
+  if (!ui::MaterialDesignController::IsSecondaryUiMaterial() ||
+      !PlatformStyle::kTreeViewHasFocusRing) {
+    return;
+  }
+  // If this View is the grandchild of a ScrollView, use the grandparent
+  // ScrollView for the focus ring instead of this View so that the focus ring
+  // won't be scrolled. Since ScrollViews have a single content view, which they
+  // wrap in a ScrollView::Viewport, being the grandchild of a ScrollView
+  // implies being the sole grandchild, which means it's fine to wrap the focus
+  // ring around the grandparent here.
+  View* grandparent = parent() ? parent()->parent() : nullptr;
+  if (grandparent && grandparent->GetClassName() == ScrollView::kViewClassName)
+    static_cast<ScrollView*>(grandparent)->SetHasFocusRing(shows);
 }
 
 // InternalNode ----------------------------------------------------------------

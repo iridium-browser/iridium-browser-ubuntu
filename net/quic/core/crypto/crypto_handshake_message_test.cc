@@ -6,7 +6,7 @@
 
 #include "net/quic/core/crypto/crypto_handshake.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
-#include "net/test/gtest_util.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
 namespace test {
@@ -115,6 +115,13 @@ TEST(CryptoHandshakeMessageTest, ServerDesignatedConnectionId) {
   // Test move-assign
   CryptoHandshakeMessage message5 = std::move(message3);
   EXPECT_EQ(str, message5.DebugString());
+}
+
+TEST(CryptoHandshakeMessageTest, HasStringPiece) {
+  CryptoHandshakeMessage message;
+  EXPECT_FALSE(message.HasStringPiece(kRCID));
+  message.SetStringPiece(kRCID, "foo");
+  EXPECT_TRUE(message.HasStringPiece(kRCID));
 }
 
 }  // namespace

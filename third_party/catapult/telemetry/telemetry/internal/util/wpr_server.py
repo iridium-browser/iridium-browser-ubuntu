@@ -14,9 +14,10 @@ import sys
 import tempfile
 import urllib
 
-from telemetry.core import exceptions
 from telemetry.core import util
 from telemetry.internal import forwarders
+
+import py_utils
 
 _REPLAY_DIR = os.path.join(
     util.GetTelemetryThirdPartyDir(), 'web-page-replay')
@@ -95,8 +96,18 @@ class ReplayServer(object):
     self.replay_process = None
 
   @staticmethod
+  def _GetLoggingLevel(log_level=None):
+    return {
+      logging.DEBUG: 'debug',
+      logging.INFO: 'info',
+      logging.WARNING: 'warning',
+      logging.ERROR: 'error',
+      logging.CRITICAL: 'critical',
+    }[log_level or logging.getLogger().level]
+
+  @staticmethod
   def _GetCommandLine(replay_py, host_ip, http_port, https_port, dns_port,
-                      replay_options, archive_path):
+                      replay_options, archive_path, log_level=None):
     """Set WPR command-line options. Can be overridden if needed."""
     cmd_line = [sys.executable, replay_py]
     cmd_line.extend([
@@ -112,7 +123,7 @@ class ReplayServer(object):
       cmd_line.append('--no-dns_forwarding')
     cmd_line.extend([
         '--use_closest_match',
-        '--log_level=warning'
+        '--log_level=%s' % ReplayServer._GetLoggingLevel(log_level)
         ])
     cmd_line.extend(replay_options)
     cmd_line.append(archive_path)
@@ -147,9 +158,9 @@ class ReplayServer(object):
       return ('http' not in self._started_ports or
               'https' not in self._started_ports or
               (self._use_dns_server and 'dns' not in self._started_ports))
+
     if HasIncompleteStartedPorts():
       self._started_ports = self._ParseLogFilePorts(self._LogLines())
-      logging.info('WPR ports: %s' % self._started_ports)
     if HasIncompleteStartedPorts():
       return False
     try:
@@ -199,19 +210,20 @@ class ReplayServer(object):
     is_posix = sys.platform.startswith('linux') or sys.platform == 'darwin'
     logging.info('Starting Web-Page-Replay: %s', self._cmd_line)
     self._CreateTempLogFilePath()
-    with self._OpenLogFile() as log_fh:
+    with open(self._temp_log_file_path, 'w') as log_fh:
       self.replay_process = subprocess.Popen(
           self._cmd_line, stdout=log_fh, stderr=subprocess.STDOUT,
           preexec_fn=(_ResetInterruptHandler if is_posix else None))
     try:
-      util.WaitFor(self._IsStarted, 30)
+      py_utils.WaitFor(self._IsStarted, 30)
+      logging.info('WPR ports: %s' % self._started_ports)
       atexit_with_log.Register(self.StopServer)
       return forwarders.PortSet(
           self._started_ports['http'],
           self._started_ports['https'],
           self._started_ports.get('dns'),  # None if unused
           )
-    except exceptions.TimeoutException:
+    except py_utils.TimeoutException:
       raise ReplayNotStartedError(
           'Web Page Replay failed to start. Log output:\n%s' %
           ''.join(self._LogLines()))
@@ -224,8 +236,6 @@ class ReplayServer(object):
       finally:
         # TODO(rnephew): Upload logs to google storage. crbug.com/525787
         self._CleanUpTempLogFilePath()
-    else:
-      logging.warning('Attempting to stop WPR server that is not running.')
 
   def _StopReplayProcess(self):
     if not self.replay_process:
@@ -240,8 +250,8 @@ class ReplayServer(object):
       pass
 
     try:
-      util.WaitFor(lambda: self.replay_process.poll() is not None, 10)
-    except exceptions.TimeoutException:
+      py_utils.WaitFor(lambda: self.replay_process.poll() is not None, 10)
+    except py_utils.TimeoutException:
       try:
         # Use a SIGINT so that it can do graceful cleanup.
         self.replay_process.send_signal(signal.SIGINT)
@@ -274,7 +284,7 @@ class ReplayServer(object):
 
   def _CleanUpTempLogFilePath(self):
     assert self._temp_log_file_path
-    if logging.getLogger('').isEnabledFor(logging.INFO):
+    if logging.getLogger('').isEnabledFor(logging.DEBUG):
       with open(self._temp_log_file_path, 'r') as f:
         wpr_log_content = '\n'.join([
             '************************** WPR LOG *****************************',

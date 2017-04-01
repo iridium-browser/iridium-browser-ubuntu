@@ -482,7 +482,7 @@ class IsolateServerStorageApiTest(TestCase):
     else:
       response = {'content': base64.b64encode(data[offset:])}
     return (
-      server + '/_ah/api/isolateservice/v1/retrieve',
+      server + '/api/isolateservice/v1/retrieve',
       {
           'data': {
               'digest': item,
@@ -501,7 +501,7 @@ class IsolateServerStorageApiTest(TestCase):
   @staticmethod
   def mock_server_details_request(server):
     return (
-        server + '/_ah/api/isolateservice/v1/server_details',
+        server + '/api/isolateservice/v1/server_details',
         {'data': {}},
         {'server_version': 'such a good version'}
     )
@@ -520,7 +520,7 @@ class IsolateServerStorageApiTest(TestCase):
   @staticmethod
   def mock_contains_request(
       server, namespace, request, response, compression=''):
-    url = server + '/_ah/api/isolateservice/v1/preupload'
+    url = server + '/api/isolateservice/v1/preupload'
     digest_collection = dict(request, namespace={
         'compression': compression,
         'digest_hash': 'sha-1',
@@ -530,7 +530,7 @@ class IsolateServerStorageApiTest(TestCase):
 
   @staticmethod
   def mock_upload_request(server, content, ticket, response=None):
-    url = server + '/_ah/api/isolateservice/v1/store_inline'
+    url = server + '/api/isolateservice/v1/store_inline'
     request = {'content': content, 'upload_ticket': ticket}
     return (url, {'data': request}, response)
 
@@ -697,7 +697,7 @@ class IsolateServerStorageApiTest(TestCase):
         None,
       ),
       (
-        server + '/_ah/api/isolateservice/v1/finalize_gs_upload',
+        server + '/api/isolateservice/v1/finalize_gs_upload',
         {'data': {'upload_ticket': 'ticket!'}},
         None,
       ),
@@ -741,7 +741,7 @@ class IsolateServerStorageApiTest(TestCase):
     self.assertEqual(set(missing), set(result.keys()))
     for i, (_item, push_state) in enumerate(result.iteritems()):
       self.assertEqual(
-          push_state.upload_url, '_ah/api/isolateservice/v1/store_inline')
+          push_state.upload_url, 'api/isolateservice/v1/store_inline')
       self.assertEqual(push_state.finalize_url, None)
 
   def test_contains_network_failure(self):
@@ -940,7 +940,7 @@ class IsolateServerDownloadTest(TestCase):
     server = 'http://example.com'
     requests = [
       (
-        server + '/_ah/api/isolateservice/v1/retrieve',
+        server + '/api/isolateservice/v1/retrieve',
         {
             'data': {
                 'digest': h.encode('utf-8'),
@@ -998,7 +998,7 @@ class IsolateServerDownloadTest(TestCase):
     requests.append((isolated_hash, isolated_data))
     requests = [
       (
-        server + '/_ah/api/isolateservice/v1/retrieve',
+        server + '/api/isolateservice/v1/retrieve',
         {
             'data': {
                 'digest': h.encode('utf-8'),
@@ -1100,7 +1100,7 @@ class IsolateServerDownloadTest(TestCase):
     requests.append((isolated_hash, isolated_data))
     requests = [
       (
-        server + '/_ah/api/isolateservice/v1/retrieve',
+        server + '/api/isolateservice/v1/retrieve',
         {
             'data': {
                 'digest': h.encode('utf-8'),
@@ -1306,6 +1306,11 @@ class DiskCacheTest(TestCase):
     h_c = self.to_hash('c')[0]
     h_large, large = self.to_hash('b' * 99)
 
+    def assertItems(expected):
+      actual = [
+        (digest, size) for digest, (size, _) in cache._lru._items.iteritems()]
+      self.assertEqual(expected, actual)
+
     # Max policies is 100 bytes, 2 items, 1000 bytes free space.
     self._free_disk = 1101
     with self.get_cache() as cache:
@@ -1315,8 +1320,7 @@ class DiskCacheTest(TestCase):
       # rationale is that a task may request more data than the size of the
       # cache policies. As long as there is free space, this is fine.
       cache.write(h_b, 'b')
-      expected = sorted(((h_a, 1), (h_large, len(large)), (h_b, 1)))
-      self.assertEqual(expected, sorted(cache._lru._items.iteritems()))
+      assertItems([(h_a, 1), (h_large, len(large)), (h_b, 1)])
       self.assertEqual(h_a, cache._protected)
       self.assertEqual(1000, cache._free_disk)
       self.assertEqual(0, cache.initial_number_items)
@@ -1346,8 +1350,7 @@ class DiskCacheTest(TestCase):
     # Assert that trimming is done in constructor too.
     self._policies = isolateserver.CachePolicies(100, 1000, 2)
     with self.get_cache() as cache:
-      expected = collections.OrderedDict([(h_c, 1), (h_large, len(large))])
-      self.assertEqual(expected, cache._lru._items)
+      assertItems([(h_c, 1), (h_large, len(large))])
       self.assertEqual(None, cache._protected)
       self.assertEqual(1101, cache._free_disk)
       self.assertEqual(2, cache.initial_number_items)

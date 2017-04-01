@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -23,16 +24,23 @@
 #include "net/cert/cert_database.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_server.h"
+#include "net/spdy/server_push_delegate.h"
+#include "net/spdy/spdy_protocol.h"
 #include "net/spdy/spdy_session_key.h"
 #include "net/ssl/ssl_config_service.h"
 
+namespace base {
+namespace trace_event {
+class ProcessMemoryDump;
+}
+}
+
 namespace net {
 
-class AddressList;
-class BoundNetLog;
 class ClientSocketHandle;
 class HostResolver;
 class HttpServerProperties;
+class NetLogWithSource;
 class ProxyDelegate;
 class SpdySession;
 class TransportSecurityState;
@@ -51,7 +59,7 @@ class NET_EXPORT SpdySessionPool
                   TransportSecurityState* transport_security_state,
                   bool enable_ping_based_connection_checking,
                   size_t session_max_recv_window_size,
-                  size_t stream_max_recv_window_size,
+                  const SettingsMap& initial_settings,
                   SpdySessionPool::TimeFunc time_func,
                   ProxyDelegate* proxy_delegate);
   ~SpdySessionPool() override;
@@ -68,10 +76,7 @@ class NET_EXPORT SpdySessionPool
   // not already be a session for the given key.
   //
   // |is_secure| can be false for testing or when SPDY is configured
-  // to work with non-secure sockets. If |is_secure| is true,
-  // |certificate_error_code| indicates that the certificate error
-  // encountered when connecting the SSL socket, with OK meaning there
-  // was no error.
+  // to work with non-secure sockets.
   //
   // Returns the new SpdySession. Note that the SpdySession begins reading from
   // |connection| on a subsequent event loop iteration, so it may be closed
@@ -79,16 +84,16 @@ class NET_EXPORT SpdySessionPool
   base::WeakPtr<SpdySession> CreateAvailableSessionFromSocket(
       const SpdySessionKey& key,
       std::unique_ptr<ClientSocketHandle> connection,
-      const BoundNetLog& net_log,
-      int certificate_error_code,
+      const NetLogWithSource& net_log,
       bool is_secure);
 
   // Return an available session for |key| that has an unclaimed push stream for
   // |url| if such exists and |url| is not empty, or else an available session
   // for |key| if such exists, or else nullptr.
-  base::WeakPtr<SpdySession> FindAvailableSession(const SpdySessionKey& key,
-                                                  const GURL& url,
-                                                  const BoundNetLog& net_log);
+  base::WeakPtr<SpdySession> FindAvailableSession(
+      const SpdySessionKey& key,
+      const GURL& url,
+      const NetLogWithSource& net_log);
 
   // Remove all mappings and aliases for the given session, which must
   // still be available. Except for in tests, this must be called by
@@ -129,6 +134,10 @@ class NET_EXPORT SpdySessionPool
     return http_server_properties_;
   }
 
+  void set_server_push_delegate(ServerPushDelegate* push_delegate) {
+    push_delegate_ = push_delegate;
+  }
+
   // NetworkChangeNotifier::IPAddressObserver methods:
 
   // We flush all idle sessions and release references to the active ones so
@@ -145,8 +154,10 @@ class NET_EXPORT SpdySessionPool
 
   // We perform the same flushing as described above when certificate database
   // is changed.
-  void OnCertAdded(const X509Certificate* cert) override;
-  void OnCACertChanged(const X509Certificate* cert) override;
+  void OnCertDBChanged(const X509Certificate* cert) override;
+
+  void DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
+                       const std::string& parent_dump_absolute_name) const;
 
  private:
   friend class SpdySessionPoolPeer;  // For testing.
@@ -217,12 +228,19 @@ class NET_EXPORT SpdySessionPool
   HostResolver* const resolver_;
 
   // Defaults to true. May be controlled via SpdySessionPoolPeer for tests.
-  bool verify_domain_authentication_;
   bool enable_sending_initial_data_;
   bool enable_ping_based_connection_checking_;
+
   size_t session_max_recv_window_size_;
-  size_t stream_max_recv_window_size_;
+
+  // Settings that are sent in the initial SETTINGS frame
+  // (if |enable_sending_initial_data_| is true),
+  // and also control SpdySession parameters like initial receive window size
+  // and maximum HPACK dynamic table size.
+  const SettingsMap initial_settings_;
+
   TimeFunc time_func_;
+  ServerPushDelegate* push_delegate_;
 
   // Determines if a proxy is a trusted SPDY proxy, which is allowed to push
   // resources from origins that are different from those of their associated

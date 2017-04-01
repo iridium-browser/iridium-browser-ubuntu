@@ -12,6 +12,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
@@ -26,16 +27,15 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/system/fake_statistics_provider.h"
 #include "chromeos/system/statistics_provider.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
-#include "components/sync/api/fake_sync_change_processor.h"
-#include "components/sync/api/sync_change_processor.h"
-#include "components/sync/api/sync_error_factory_mock.h"
-#include "components/sync/driver/pref_names.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
-#include "components/user_manager/fake_user_manager.h"
+#include "components/sync/base/pref_names.h"
+#include "components/sync/model/fake_sync_change_processor.h"
+#include "components/sync/model/sync_change_processor.h"
+#include "components/sync/model/sync_error_factory_mock.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 
@@ -49,7 +49,7 @@ const char kStandaloneAppId[] = "ldnnhddmnhbkjipkidpdiheffobcpfmf";
 class ExternalProviderImplChromeOSTest : public ExtensionServiceTestBase {
  public:
   ExternalProviderImplChromeOSTest()
-      : fake_user_manager_(new user_manager::FakeUserManager()),
+      : fake_user_manager_(new chromeos::FakeChromeUserManager()),
         scoped_user_manager_(fake_user_manager_) {}
 
   ~ExternalProviderImplChromeOSTest() override {}
@@ -71,11 +71,8 @@ class ExternalProviderImplChromeOSTest : public ExtensionServiceTestBase {
     extensions::ExternalProviderImpl::CreateExternalProviders(
         service_, profile_.get(), &providers);
 
-    for (ProviderCollection::iterator i = providers.begin();
-         i != providers.end();
-         ++i) {
-      service_->AddProviderForTesting(i->release());
-    }
+    for (std::unique_ptr<ExternalProviderInterface>& provider : providers)
+      service_->AddProviderForTesting(std::move(provider));
   }
 
   // ExtensionServiceTestBase overrides:
@@ -90,7 +87,7 @@ class ExternalProviderImplChromeOSTest : public ExtensionServiceTestBase {
  private:
   std::unique_ptr<base::ScopedPathOverride> external_externsions_overrides_;
   chromeos::system::ScopedFakeStatisticsProvider fake_statistics_provider_;
-  user_manager::FakeUserManager* fake_user_manager_;
+  chromeos::FakeChromeUserManager* fake_user_manager_;
   chromeos::ScopedUserManagerEnabler scoped_user_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalProviderImplChromeOSTest);
@@ -158,7 +155,7 @@ TEST_F(ExternalProviderImplChromeOSTest, PolicyDisabled) {
 
   // Log user in, start sync.
   TestingBrowserProcess::GetGlobal()->SetProfileManager(
-      new ProfileManagerWithoutInit(temp_dir().path()));
+      new ProfileManagerWithoutInit(temp_dir().GetPath()));
   SigninManagerBase* signin =
       SigninManagerFactory::GetForProfile(profile_.get());
   signin->SetAuthenticatedAccountInfo("gaia-id-test_user@gmail.com",
@@ -170,7 +167,7 @@ TEST_F(ExternalProviderImplChromeOSTest, PolicyDisabled) {
   service_->CheckForExternalUpdates();
 
   // Sync is dsabled by policy.
-  profile_->GetPrefs()->SetBoolean(sync_driver::prefs::kSyncManaged, true);
+  profile_->GetPrefs()->SetBoolean(syncer::prefs::kSyncManaged, true);
 
   content::WindowedNotificationObserver(
       extensions::NOTIFICATION_CRX_INSTALLER_DONE,

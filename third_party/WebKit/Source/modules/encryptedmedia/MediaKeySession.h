@@ -28,7 +28,7 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromiseProperty.h"
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMArrayPiece.h"
 #include "modules/EventTargetModules.h"
 #include "modules/encryptedmedia/MediaKeyStatusMap.h"
@@ -57,91 +57,111 @@ class MediaKeys;
 // object will be finalized and the WeakMember<> references will be cleared
 // out(zeroed) by the garbage collector.
 //
-// Because this object controls the lifetime of the WebContentDecryptionModuleSession,
-// it may outlive any JavaScript references as long as the MediaKeys object is alive.
+// Because this object controls the lifetime of the
+// WebContentDecryptionModuleSession, it may outlive any JavaScript references
+// as long as the MediaKeys object is alive.
 // The WebContentDecryptionModuleSession has the same lifetime as this object.
 class MediaKeySession final
-    : public EventTargetWithInlineData
-    , public ActiveScriptWrappable
-    , public ActiveDOMObject
-    , private WebContentDecryptionModuleSession::Client {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(MediaKeySession);
-    USING_PRE_FINALIZER(MediaKeySession, dispose);
-public:
-    static MediaKeySession* create(ScriptState*, MediaKeys*, WebEncryptedMediaSessionType);
-    ~MediaKeySession() override;
+    : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<MediaKeySession>,
+      public ContextLifecycleObserver,
+      private WebContentDecryptionModuleSession::Client {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(MediaKeySession);
+  USING_PRE_FINALIZER(MediaKeySession, dispose);
 
-    String sessionId() const;
-    double expiration() const { return m_expiration; }
-    ScriptPromise closed(ScriptState*);
-    MediaKeyStatusMap* keyStatuses();
+ public:
+  static MediaKeySession* create(ScriptState*,
+                                 MediaKeys*,
+                                 WebEncryptedMediaSessionType);
 
-    ScriptPromise generateRequest(ScriptState*, const String& initDataType, const DOMArrayPiece& initData);
-    ScriptPromise load(ScriptState*, const String& sessionId);
+  ~MediaKeySession() override;
 
-    ScriptPromise update(ScriptState*, const DOMArrayPiece& response);
-    ScriptPromise close(ScriptState*);
-    ScriptPromise remove(ScriptState*);
+  String sessionId() const;
+  double expiration() const { return m_expiration; }
+  ScriptPromise closed(ScriptState*);
+  MediaKeyStatusMap* keyStatuses();
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(keystatuseschange);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
 
-    // EventTarget
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override;
+  ScriptPromise generateRequest(ScriptState*,
+                                const String& initDataType,
+                                const DOMArrayPiece& initData);
+  ScriptPromise load(ScriptState*, const String& sessionId);
+  ScriptPromise update(ScriptState*, const DOMArrayPiece& response);
+  ScriptPromise close(ScriptState*);
+  ScriptPromise remove(ScriptState*);
 
-    // ScriptWrappable
-    bool hasPendingActivity() const final;
+  // EventTarget
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override;
 
-    // ActiveDOMObject
-    void stop() override;
+  // ScriptWrappable
+  bool hasPendingActivity() const final;
 
-    DECLARE_VIRTUAL_TRACE();
+  // ContextLifecycleObserver
+  void contextDestroyed(ExecutionContext*) override;
 
-private:
-    class PendingAction;
-    friend class NewSessionResultPromise;
-    friend class LoadSessionResultPromise;
+  DECLARE_VIRTUAL_TRACE();
 
-    MediaKeySession(ScriptState*, MediaKeys*, WebEncryptedMediaSessionType);
-    void dispose();
+ private:
+  class PendingAction;
+  friend class NewSessionResultPromise;
+  friend class LoadSessionResultPromise;
 
-    void actionTimerFired(TimerBase*);
+  MediaKeySession(ScriptState*, MediaKeys*, WebEncryptedMediaSessionType);
+  void dispose();
 
-    // WebContentDecryptionModuleSession::Client
-    void message(MessageType, const unsigned char* message, size_t messageLength) override;
-    void close() override;
-    void expirationChanged(double updatedExpiryTimeInMS) override;
-    void keysStatusesChange(const WebVector<WebEncryptedMediaKeyInformation>&, bool hasAdditionalUsableKey) override;
+  void actionTimerFired(TimerBase*);
 
-    // Called by NewSessionResult when the new session has been created.
-    void finishGenerateRequest();
+  // The following perform the asynchronous part of the command referenced.
+  void generateRequestTask(ContentDecryptionModuleResult*,
+                           WebEncryptedMediaInitDataType,
+                           DOMArrayBuffer* initDataBuffer);
+  void finishGenerateRequest();
+  void loadTask(ContentDecryptionModuleResult*, const String& sessionId);
+  void finishLoad();
+  void updateTask(ContentDecryptionModuleResult*,
+                  DOMArrayBuffer* sanitizedResponse);
+  void closeTask(ContentDecryptionModuleResult*);
+  void removeTask(ContentDecryptionModuleResult*);
 
-    // Called by LoadSessionResult when the session has been loaded.
-    void finishLoad();
+  // WebContentDecryptionModuleSession::Client
+  void message(MessageType,
+               const unsigned char* message,
+               size_t messageLength) override;
+  void close() override;
+  void expirationChanged(double updatedExpiryTimeInMS) override;
+  void keysStatusesChange(const WebVector<WebEncryptedMediaKeyInformation>&,
+                          bool hasAdditionalUsableKey) override;
 
-    Member<GenericEventQueue> m_asyncEventQueue;
-    std::unique_ptr<WebContentDecryptionModuleSession> m_session;
+  Member<GenericEventQueue> m_asyncEventQueue;
+  std::unique_ptr<WebContentDecryptionModuleSession> m_session;
 
-    // Used to determine if MediaKeys is still active.
-    WeakMember<MediaKeys> m_mediaKeys;
+  // Used to determine if MediaKeys is still active.
+  WeakMember<MediaKeys> m_mediaKeys;
 
-    // Session properties.
-    WebEncryptedMediaSessionType m_sessionType;
-    double m_expiration;
-    Member<MediaKeyStatusMap> m_keyStatusesMap;
+  // Session properties.
+  WebEncryptedMediaSessionType m_sessionType;
+  double m_expiration;
+  Member<MediaKeyStatusMap> m_keyStatusesMap;
 
-    // Session states.
-    bool m_isUninitialized;
-    bool m_isCallable;
-    bool m_isClosed; // Is the CDM finished with this session?
+  // Session states.
+  bool m_isUninitialized;
+  bool m_isCallable;
+  bool m_isClosed;  // Is the CDM finished with this session?
 
-    // Keep track of the closed promise.
-    typedef ScriptPromiseProperty<Member<MediaKeySession>, ToV8UndefinedGenerator, Member<DOMException>> ClosedPromise;
-    Member<ClosedPromise> m_closedPromise;
+  // Keep track of the closed promise.
+  typedef ScriptPromiseProperty<Member<MediaKeySession>,
+                                ToV8UndefinedGenerator,
+                                Member<DOMException>>
+      ClosedPromise;
+  Member<ClosedPromise> m_closedPromise;
 
-    HeapDeque<Member<PendingAction>> m_pendingActions;
-    Timer<MediaKeySession> m_actionTimer;
+  HeapDeque<Member<PendingAction>> m_pendingActions;
+  Timer<MediaKeySession> m_actionTimer;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MediaKeySession_h
+#endif  // MediaKeySession_h

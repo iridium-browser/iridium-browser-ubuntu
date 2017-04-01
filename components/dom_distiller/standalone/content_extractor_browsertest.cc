@@ -28,7 +28,7 @@
 #include "components/dom_distiller/core/task_tracker.h"
 #include "components/leveldb_proto/proto_database.h"
 #include "components/leveldb_proto/proto_database_impl.h"
-#include "components/pref_registry/testing_pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
@@ -171,8 +171,8 @@ std::unique_ptr<DomDistillerService> CreateDomDistillerService(
                                    options, file_to_url_map));
 
   // Setting up PrefService for DistilledPagePrefs.
-  user_prefs::TestingPrefServiceSyncable* pref_service =
-      new user_prefs::TestingPrefServiceSyncable();
+  sync_preferences::TestingPrefServiceSyncable* pref_service =
+      new sync_preferences::TestingPrefServiceSyncable();
   DistilledPagePrefs::RegisterProfilePrefs(pref_service->registry());
 
   return std::unique_ptr<DomDistillerService>(new DomDistillerService(
@@ -351,9 +351,8 @@ class ContentExtractor : public ContentBrowserTest {
         command_line, &file_to_url_map);
     content::BrowserContext* context =
         shell()->web_contents()->GetBrowserContext();
-    service_ = CreateDomDistillerService(context,
-                                         db_dir_.path(),
-                                         file_to_url_map);
+    service_ =
+        CreateDomDistillerService(context, db_dir_.GetPath(), file_to_url_map);
     PumpQueue();
   }
 

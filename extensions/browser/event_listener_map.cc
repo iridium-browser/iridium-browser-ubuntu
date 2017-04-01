@@ -14,6 +14,7 @@
 #include "extensions/browser/event_router.h"
 #include "ipc/ipc_message.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 using base::DictionaryValue;
 
@@ -37,7 +38,12 @@ std::unique_ptr<EventListener> EventListener::ForURL(
     const GURL& listener_url,
     content::RenderProcessHost* process,
     std::unique_ptr<base::DictionaryValue> filter) {
-  return base::WrapUnique(new EventListener(event_name, "", listener_url,
+  // Use only the origin to identify the event listener, e.g. chrome://settings
+  // for chrome://settings/accounts, to avoid multiple events being triggered
+  // for the same process. See crbug.com/536858 for details. // TODO(devlin): If
+  // we dispatched events to processes more intelligently this could be avoided.
+  return base::WrapUnique(new EventListener(event_name, "",
+                                            url::Origin(listener_url).GetURL(),
                                             process, std::move(filter)));
 }
 
@@ -105,10 +111,10 @@ bool EventListenerMap::AddListener(std::unique_ptr<EventListener> listener) {
     listeners_by_matcher_id_[id] = listener.get();
     filtered_events_.insert(listener->event_name());
   }
-  linked_ptr<EventListener> listener_ptr(listener.release());
-  listeners_[listener_ptr->event_name()].push_back(listener_ptr);
+  EventListener* listener_ptr = listener.get();
+  listeners_[listener->event_name()].push_back(std::move(listener));
 
-  delegate_->OnListenerAdded(listener_ptr.get());
+  delegate_->OnListenerAdded(listener_ptr);
 
   return true;
 }
@@ -189,10 +195,10 @@ void EventListenerMap::RemoveListenersForExtension(
     for (ListenerList::iterator it2 = it->second.begin();
          it2 != it->second.end();) {
       if ((*it2)->extension_id() == extension_id) {
-        linked_ptr<EventListener> listener(*it2);
-        CleanupListener(listener.get());
+        std::unique_ptr<EventListener> listener_removed = std::move(*it2);
+        CleanupListener(listener_removed.get());
         it2 = it->second.erase(it2);
-        delegate_->OnListenerRemoved(listener.get());
+        delegate_->OnListenerRemoved(listener_removed.get());
       } else {
         it2++;
       }
@@ -261,10 +267,10 @@ void EventListenerMap::RemoveListenersForProcess(
     for (ListenerList::iterator it2 = it->second.begin();
          it2 != it->second.end();) {
       if ((*it2)->process() == process) {
-        linked_ptr<EventListener> listener(*it2);
-        CleanupListener(it2->get());
+        std::unique_ptr<EventListener> listener_removed = std::move(*it2);
+        CleanupListener(listener_removed.get());
         it2 = it->second.erase(it2);
-        delegate_->OnListenerRemoved(listener.get());
+        delegate_->OnListenerRemoved(listener_removed.get());
       } else {
         it2++;
       }

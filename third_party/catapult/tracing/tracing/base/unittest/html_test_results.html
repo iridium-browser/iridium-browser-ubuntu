@@ -208,7 +208,7 @@ tr.exportTo('tr.b.unittest', function() {
       if (this.showHTMLOutput)
         display = '';
       else
-        display = (this.testStatus_ == TestStatus.RUNNING) ? '' : 'none';
+        display = (this.testStatus_ === TestStatus.RUNNING) ? '' : 'none';
       for (var i = 0; i < htmlResults.length; i++)
         htmlResults[i].style.display = display;
     },
@@ -249,10 +249,10 @@ tr.exportTo('tr.b.unittest', function() {
       } else if (this.isFlaky) {
         colorCls = 'unittest-flaky';
         status = 'flaky';
-      } else if (this.testStatus_ == TestStatus.PENDING) {
+      } else if (this.testStatus_ === TestStatus.PENDING) {
         colorCls = 'unittest-pending';
         status = 'pending';
-      } else if (this.testStatus_ == TestStatus.RUNNING) {
+      } else if (this.testStatus_ === TestStatus.RUNNING) {
         colorCls = 'unittest-running';
         status = 'running';
       } else { // DONE_RUNNING and no errors
@@ -279,9 +279,6 @@ tr.exportTo('tr.b.unittest', function() {
           .textContent = testReturnValue;
     }
   };
-
-
-
 
   /**
    * @constructor
@@ -345,7 +342,7 @@ tr.exportTo('tr.b.unittest', function() {
     updateDisplayStateForResult_: function(res) {
       var display;
       if (this.showPendingAndPassedTests_) {
-        if (res.testStatus == TestStatus.RUNNING ||
+        if (res.testStatus === TestStatus.RUNNING ||
             res.hadErrors) {
           display = '';
         } else {
@@ -457,19 +454,19 @@ tr.exportTo('tr.b.unittest', function() {
       };
     },
 
-    notifyTestResultToDevServer_: function(result, extra_msg) {
+    notifyTestResultToDevServer_: function(result, extraMsg) {
       var req = new XMLHttpRequest();
       var testName = this.currentTestCaseResult_.testCase.fullyQualifiedName;
-      var data = result + '  ' + testName + ' ' + (extra_msg || '');
+      var data = result + '  ' + testName + ' ' + (extraMsg || '');
       tr.b.postAsync('/tracing/notify_test_result', data);
     },
 
     notifyTestCompletionToDevServer_: function() {
       if (this.numTestsThatPassed_ + this.numTestsThatFailed_ +
-          this.numFlakyTests_ == 0) {
+          this.numFlakyTests_ === 0) {
         return;
       }
-      var data = this.numTestsThatFailed_ == 0 ? 'ALL_PASSED' : 'HAD_FAILURES';
+      var data = this.numTestsThatFailed_ === 0 ? 'ALL_PASSED' : 'HAD_FAILURES';
       data += '\nPassed tests: ' + this.numTestsThatPassed_ +
               '  Failed tests: ' + this.numTestsThatFailed_ +
               '  Flaky tests: ' + this.numFlakyTests_;
@@ -483,7 +480,7 @@ tr.exportTo('tr.b.unittest', function() {
   };
 
   return {
-    HTMLTestResults: HTMLTestResults
+    HTMLTestResults,
   };
 });
 </script>

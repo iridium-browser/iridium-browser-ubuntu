@@ -10,24 +10,25 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/containers/scoped_ptr_hash_map.h"
+#include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "components/user_prefs/tracked/hash_store_contents.h"
 #include "components/user_prefs/tracked/interceptable_pref_filter.h"
 #include "components/user_prefs/tracked/tracked_preference.h"
 
 class PrefHashStore;
 class PrefService;
-class PrefStore;
 class TrackedPreferenceValidationDelegate;
 
 namespace base {
 class DictionaryValue;
 class Time;
-class Value;
 }  // namespace base
 
 namespace user_prefs {
@@ -64,6 +65,9 @@ class PrefHashFilter : public InterceptablePrefFilter {
     ValueType value_type;
   };
 
+  using StoreContentsPair = std::pair<std::unique_ptr<PrefHashStore>,
+                                      std::unique_ptr<HashStoreContents>>;
+
   // Constructs a PrefHashFilter tracking the specified |tracked_preferences|
   // using |pref_hash_store| to check/store hashes. An optional |delegate| is
   // notified of the status of each preference as it is checked.
@@ -73,8 +77,11 @@ class PrefHashFilter : public InterceptablePrefFilter {
   // than |tracked_preferences.size()|). If |report_super_mac_validity| is true,
   // the state of the super MAC will be reported via UMA during
   // FinalizeFilterOnLoad.
+  // |external_validation_hash_store_pair_| will be used (if non-null) to
+  // perform extra validations without triggering resets.
   PrefHashFilter(
       std::unique_ptr<PrefHashStore> pref_hash_store,
+      StoreContentsPair external_validation_hash_store_pair_,
       const std::vector<TrackedPreferenceMetadata>& tracked_preferences,
       const base::Closure& on_reset_on_load,
       TrackedPreferenceValidationDelegate* delegate,
@@ -101,7 +108,8 @@ class PrefHashFilter : public InterceptablePrefFilter {
 
   // PrefFilter remaining implementation.
   void FilterUpdate(const std::string& path) override;
-  void FilterSerializeData(base::DictionaryValue* pref_store_contents) override;
+  OnWriteCallbackPair FilterSerializeData(
+      base::DictionaryValue* pref_store_contents) override;
 
  private:
   // InterceptablePrefFilter implementation.
@@ -110,6 +118,25 @@ class PrefHashFilter : public InterceptablePrefFilter {
       std::unique_ptr<base::DictionaryValue> pref_store_contents,
       bool prefs_altered) override;
 
+  // Helper function to generate FilterSerializeData()'s pre-write and
+  // post-write callbacks. The returned callbacks are thread-safe.
+  OnWriteCallbackPair GetOnWriteSynchronousCallbacks(
+      base::DictionaryValue* pref_store_contents);
+
+  // Clears the MACs contained in |external_validation_hash_store_contents|
+  // which are present in |paths_to_clear|.
+  static void ClearFromExternalStore(
+      HashStoreContents* external_validation_hash_store_contents,
+      const base::DictionaryValue* changed_paths_and_macs);
+
+  // Flushes the MACs contained in |changed_paths_and_mac| to
+  // external_hash_store_contents if |write_success|, otherwise discards the
+  // changes.
+  static void FlushToExternalStore(
+      std::unique_ptr<HashStoreContents> external_hash_store_contents,
+      std::unique_ptr<base::DictionaryValue> changed_paths_and_macs,
+      bool write_success);
+
   // Callback to be invoked only once (and subsequently reset) on the next
   // FilterOnLoad event. It will be allowed to modify the |prefs| handed to
   // FilterOnLoad before handing them back to this PrefHashFilter.
@@ -117,14 +144,19 @@ class PrefHashFilter : public InterceptablePrefFilter {
 
   // A map of paths to TrackedPreferences; this map owns this individual
   // TrackedPreference objects.
-  typedef base::ScopedPtrHashMap<std::string,
-                                 std::unique_ptr<TrackedPreference>>
-      TrackedPreferencesMap;
+  using TrackedPreferencesMap =
+      std::unordered_map<std::string, std::unique_ptr<TrackedPreference>>;
+
   // A map from changed paths to their corresponding TrackedPreferences (which
   // aren't owned by this map).
-  typedef std::map<std::string, const TrackedPreference*> ChangedPathsMap;
+  using ChangedPathsMap = std::map<std::string, const TrackedPreference*>;
 
   std::unique_ptr<PrefHashStore> pref_hash_store_;
+
+  // A store and contents on which to perform extra validations without
+  // triggering resets.
+  // Will be null if the platform does not support external validation.
+  const base::Optional<StoreContentsPair> external_validation_hash_store_pair_;
 
   // Invoked if a reset occurs in a call to FilterOnLoad.
   const base::Closure on_reset_on_load_;

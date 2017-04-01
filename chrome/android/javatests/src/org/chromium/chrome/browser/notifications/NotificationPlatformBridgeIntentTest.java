@@ -8,10 +8,11 @@ import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.preferences.Preferences;
@@ -29,6 +30,7 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
  * that the responsibility for correct initialization, e.g. loading the native library, lies with
  * the code exercised by this test.
  */
+@RetryOnFailure
 public class NotificationPlatformBridgeIntentTest
         extends ChromeActivityTestCaseBase<ChromeActivity> {
     /**
@@ -56,7 +58,7 @@ public class NotificationPlatformBridgeIntentTest
      */
     @MediumTest
     @Feature({"Browser", "Notifications"})
-    public void testLaunchNotificationPreferencesForCategory() throws Exception {
+    public void testLaunchNotificationPreferencesForCategory() {
         assertFalse("The native library should not be loaded yet", LibraryLoader.isInitialized());
 
         final Context context = getInstrumentation().getTargetContext().getApplicationContext();
@@ -88,7 +90,7 @@ public class NotificationPlatformBridgeIntentTest
      */
     @MediumTest
     @Feature({"Browser", "Notifications"})
-    public void testLaunchNotificationPreferencesForWebsite() throws Exception {
+    public void testLaunchNotificationPreferencesForWebsite() {
         assertFalse("The native library should not be loaded yet", LibraryLoader.isInitialized());
 
         final Context context = getInstrumentation().getTargetContext().getApplicationContext();

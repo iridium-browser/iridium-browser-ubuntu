@@ -5,16 +5,15 @@
 #ifndef CHROME_BROWSER_TASK_MANAGER_PROVIDERS_ARC_ARC_PROCESS_TASK_PROVIDER_H_
 #define CHROME_BROWSER_TASK_MANAGER_PROVIDERS_ARC_ARC_PROCESS_TASK_PROVIDER_H_
 
-#include <map>
 #include <memory>
-#include <set>
-#include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
-#include "chrome/browser/chromeos/arc/arc_process.h"
+#include "chrome/browser/chromeos/arc/process/arc_process.h"
 #include "chrome/browser/task_manager/providers/arc/arc_process_task.h"
 #include "chrome/browser/task_manager/providers/task_provider.h"
 
@@ -40,18 +39,28 @@ class ArcProcessTaskProvider : public TaskProvider {
                             int route_id) override;
 
  private:
-  // Auto-retry if ARC bridge service is not ready.
-  void RequestProcessList();
+  using ArcTaskMap =
+      std::unordered_map<base::ProcessId, std::unique_ptr<ArcProcessTask>>;
+  void ScheduleNextRequest(const base::Closure& task, const int delaySeconds);
 
-  void OnUpdateProcessList(const std::vector<arc::ArcProcess>& processes);
+  // Auto-retry if ARC bridge service is not ready.
+  void RequestAppProcessList();
+  void RequestSystemProcessList();
+
+  void UpdateProcessList(ArcTaskMap* pid_to_task,
+                         const std::vector<arc::ArcProcess>& processes);
+  void OnUpdateAppProcessList(const std::vector<arc::ArcProcess>& processes);
+  void OnUpdateSystemProcessList(const std::vector<arc::ArcProcess>& processes);
 
   // task_manager::TaskProvider:
   void StartUpdating() override;
   void StopUpdating() override;
 
-  void ScheduleNextRequest();
+  void ScheduleNextAppRequest();
+  void ScheduleNextSystemRequest();
 
-  std::map<base::ProcessId, std::unique_ptr<ArcProcessTask>> nspid_to_task_;
+  ArcTaskMap nspid_to_task_;
+  ArcTaskMap nspid_to_sys_task_;
 
   // Whether to continue the periodical polling.
   bool is_updating_;

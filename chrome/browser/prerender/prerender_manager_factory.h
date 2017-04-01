@@ -9,6 +9,10 @@
 #include "base/memory/singleton.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
+namespace content {
+class BrowserContext;
+}
+
 class Profile;
 
 namespace prerender {
@@ -20,8 +24,9 @@ class PrerenderManager;
 // associated PrerenderManager.
 class PrerenderManagerFactory : public BrowserContextKeyedServiceFactory {
  public:
-  // Returns the PrerenderManager for |profile|.
-  static PrerenderManager* GetForProfile(Profile* profile);
+  // Returns the PrerenderManager for |context|.
+  static PrerenderManager* GetForBrowserContext(
+      content::BrowserContext* context);
 
   static PrerenderManagerFactory* GetInstance();
 

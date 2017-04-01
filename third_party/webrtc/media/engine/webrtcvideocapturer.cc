@@ -18,8 +18,6 @@
 #include "webrtc/base/safe_conversions.h"
 #include "webrtc/base/thread.h"
 #include "webrtc/base/timeutils.h"
-#include "webrtc/media/engine/webrtcvideoframe.h"
-#include "webrtc/media/engine/webrtcvideoframefactory.h"
 
 #include "webrtc/base/win32.h"  // Need this to #include the impl files.
 #include "webrtc/modules/video_capture/video_capture_factory.h"
@@ -49,12 +47,11 @@ static kVideoFourCCEntry kSupportedFourCCs[] = {
 class WebRtcVcmFactory : public WebRtcVcmFactoryInterface {
  public:
   virtual rtc::scoped_refptr<webrtc::VideoCaptureModule> Create(
-      int id,
       const char* device) {
-    return webrtc::VideoCaptureFactory::Create(id, device);
+    return webrtc::VideoCaptureFactory::Create(device);
   }
-  virtual webrtc::VideoCaptureModule::DeviceInfo* CreateDeviceInfo(int id) {
-    return webrtc::VideoCaptureFactory::CreateDeviceInfo(id);
+  virtual webrtc::VideoCaptureModule::DeviceInfo* CreateDeviceInfo() {
+    return webrtc::VideoCaptureFactory::CreateDeviceInfo();
   }
   virtual void DestroyDeviceInfo(webrtc::VideoCaptureModule::DeviceInfo* info) {
     delete info;
@@ -113,18 +110,14 @@ WebRtcVideoCapturer::WebRtcVideoCapturer()
       module_(nullptr),
       captured_frames_(0),
       start_thread_(nullptr),
-      async_invoker_(nullptr) {
-  set_frame_factory(new WebRtcVideoFrameFactory());
-}
+      async_invoker_(nullptr) {}
 
 WebRtcVideoCapturer::WebRtcVideoCapturer(WebRtcVcmFactoryInterface* factory)
     : factory_(factory),
       module_(nullptr),
       captured_frames_(0),
       start_thread_(nullptr),
-      async_invoker_(nullptr) {
-  set_frame_factory(new WebRtcVideoFrameFactory());
-}
+      async_invoker_(nullptr) {}
 
 WebRtcVideoCapturer::~WebRtcVideoCapturer() {}
 
@@ -135,7 +128,7 @@ bool WebRtcVideoCapturer::Init(const Device& device) {
     return false;
   }
 
-  webrtc::VideoCaptureModule::DeviceInfo* info = factory_->CreateDeviceInfo(0);
+  webrtc::VideoCaptureModule::DeviceInfo* info = factory_->CreateDeviceInfo();
   if (!info) {
     return false;
   }
@@ -185,7 +178,7 @@ bool WebRtcVideoCapturer::Init(const Device& device) {
     return false;
   }
 
-  module_ = factory_->Create(0, vcm_id);
+  module_ = factory_->Create(vcm_id);
   if (!module_) {
     LOG(LS_ERROR) << "Failed to create capturer for id: " << device.id;
     return false;
@@ -279,7 +272,7 @@ CaptureState WebRtcVideoCapturer::Start(const VideoFormat& capture_format) {
   }
 
   int64_t start = rtc::TimeMillis();
-  module_->RegisterCaptureDataCallback(*this);
+  module_->RegisterCaptureDataCallback(this);
   if (module_->StartCapture(cap) != 0) {
     LOG(LS_ERROR) << "Camera '" << GetId() << "' failed to start";
     module_->DeRegisterCaptureDataCallback();
@@ -343,8 +336,7 @@ bool WebRtcVideoCapturer::GetPreferredFourccs(std::vector<uint32_t>* fourccs) {
   return true;
 }
 
-void WebRtcVideoCapturer::OnIncomingCapturedFrame(
-    const int32_t id,
+void WebRtcVideoCapturer::OnFrame(
     const webrtc::VideoFrame& sample) {
   // This can only happen between Start() and Stop().
   RTC_DCHECK(start_thread_);
@@ -358,15 +350,7 @@ void WebRtcVideoCapturer::OnIncomingCapturedFrame(
                  << ". Expected format " << GetCaptureFormat()->ToString();
   }
 
-  OnFrame(cricket::WebRtcVideoFrame(
-              sample.video_frame_buffer(), sample.rotation(),
-              sample.render_time_ms() * rtc::kNumMicrosecsPerMillisec, 0),
-          sample.width(), sample.height());
-}
-
-void WebRtcVideoCapturer::OnCaptureDelayChanged(const int32_t id,
-                                                const int32_t delay) {
-  LOG(LS_INFO) << "Capture delay changed to " << delay << " ms";
+  VideoCapturer::OnFrame(sample, sample.width(), sample.height());
 }
 
 }  // namespace cricket

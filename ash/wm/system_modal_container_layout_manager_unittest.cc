@@ -2,19 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/wm/system_modal_container_layout_manager.h"
+#include "ash/common/wm/system_modal_container_layout_manager.h"
 
 #include <memory>
 
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/wm/container_finder.h"
 #include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/test/test_window_delegate.h"
@@ -45,14 +48,13 @@ aura::Window* GetModalContainer() {
 }
 
 bool AllRootWindowsHaveModalBackgroundsForContainer(int container_id) {
-  std::vector<aura::Window*> containers =
-      Shell::GetContainersFromAllRootWindows(container_id, NULL);
+  WmWindow::Windows containers =
+      wm::GetContainersFromAllRootWindows(container_id);
   bool has_modal_screen = !containers.empty();
-  for (std::vector<aura::Window*>::iterator iter = containers.begin();
-       iter != containers.end(); ++iter) {
+  for (WmWindow* container : containers) {
     has_modal_screen &= static_cast<SystemModalContainerLayoutManager*>(
-                            (*iter)->layout_manager())
-                            ->has_modal_background();
+                            container->GetLayoutManager())
+                            ->has_window_dimmer();
   }
   return has_modal_screen;
 }
@@ -82,7 +84,6 @@ class TestWindow : public views::WidgetDelegateView {
   gfx::Size GetPreferredSize() const override { return gfx::Size(50, 50); }
 
   // Overridden from views::WidgetDelegate:
-  views::View* GetContentsView() override { return this; }
   ui::ModalType GetModalType() const override {
     return modal_ ? ui::MODAL_TYPE_SYSTEM : ui::MODAL_TYPE_NONE;
   }
@@ -771,23 +772,34 @@ TEST_F(SystemModalContainerLayoutManagerTest, VisibilityChange) {
                                              CurrentContext())
           ->GetNativeWindow());
   SystemModalContainerLayoutManager* layout_manager =
-      Shell::GetPrimaryRootWindowController()->GetSystemModalLayoutManager(
-          modal_window.get());
+      WmShell::Get()
+          ->GetPrimaryRootWindowController()
+          ->GetSystemModalLayoutManager(WmWindow::Get(modal_window.get()));
 
   EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
-  EXPECT_FALSE(layout_manager->has_modal_background());
+  EXPECT_FALSE(layout_manager->has_window_dimmer());
 
   modal_window->Show();
   EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
-  EXPECT_TRUE(layout_manager->has_modal_background());
+  EXPECT_TRUE(layout_manager->has_window_dimmer());
+
+  // Make sure that a child visibility change should not cause
+  // inconsistent state.
+  std::unique_ptr<aura::Window> child = base::MakeUnique<aura::Window>(nullptr);
+  child->SetType(ui::wm::WINDOW_TYPE_CONTROL);
+  child->Init(ui::LAYER_TEXTURED);
+  modal_window->AddChild(child.get());
+  child->Show();
+  EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
+  EXPECT_TRUE(layout_manager->has_window_dimmer());
 
   modal_window->Hide();
   EXPECT_FALSE(WmShell::Get()->IsSystemModalWindowOpen());
-  EXPECT_FALSE(layout_manager->has_modal_background());
+  EXPECT_FALSE(layout_manager->has_window_dimmer());
 
   modal_window->Show();
   EXPECT_TRUE(WmShell::Get()->IsSystemModalWindowOpen());
-  EXPECT_TRUE(layout_manager->has_modal_background());
+  EXPECT_TRUE(layout_manager->has_window_dimmer());
 }
 
 namespace {

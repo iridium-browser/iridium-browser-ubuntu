@@ -163,7 +163,7 @@ const Extension* ExtensionActionRunnerBrowserTest::CreateExtension(
                  injection_type == CONTENT_SCRIPT ? kContentScriptSource
                                                   : kBackgroundScriptSource);
 
-  const Extension* extension = LoadExtension(dir->unpacked_path());
+  const Extension* extension = LoadExtension(dir->UnpackedPath());
   if (extension) {
     test_extension_dirs_.push_back(std::move(dir));
     extensions_.push_back(extension);
@@ -183,6 +183,8 @@ class ActiveScriptTester {
   ~ActiveScriptTester();
 
   testing::AssertionResult Verify();
+
+  std::string name() const;
 
  private:
   // Returns the ExtensionActionRunner, or null if one does not exist.
@@ -205,13 +207,10 @@ class ActiveScriptTester {
   // asking the user.
   RequiresConsent requires_consent_;
 
-  // The type of injection this tester uses.
-  InjectionType type_;
-
   // All of these extensions should inject a script (either through content
   // scripts or through chrome.tabs.executeScript()) that sends a message with
   // the |kInjectSucceeded| message.
-  linked_ptr<ExtensionTestMessageListener> inject_success_listener_;
+  std::unique_ptr<ExtensionTestMessageListener> inject_success_listener_;
 };
 
 ActiveScriptTester::ActiveScriptTester(const std::string& name,
@@ -223,7 +222,6 @@ ActiveScriptTester::ActiveScriptTester(const std::string& name,
       extension_(extension),
       browser_(browser),
       requires_consent_(requires_consent),
-      type_(type),
       inject_success_listener_(
           new ExtensionTestMessageListener(kInjectSucceeded,
                                            false /* won't reply */)) {
@@ -231,6 +229,10 @@ ActiveScriptTester::ActiveScriptTester(const std::string& name,
 }
 
 ActiveScriptTester::~ActiveScriptTester() {}
+
+std::string ActiveScriptTester::name() const {
+  return name_;
+}
 
 testing::AssertionResult ActiveScriptTester::Verify() {
   if (!extension_)
@@ -308,13 +310,6 @@ bool ActiveScriptTester::WantsToRun() {
 
 IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
                        ActiveScriptsAreDisplayedAndDelayExecution) {
-  base::FilePath active_script_path =
-      test_data_dir_.AppendASCII("active_script");
-
-  const char* const kExtensionNames[] = {
-      "inject_scripts_all_hosts", "inject_scripts_explicit_hosts",
-      "content_scripts_all_hosts", "content_scripts_explicit_hosts"};
-
   // First, we load up three extensions:
   // - An extension that injects scripts into all hosts,
   // - An extension that injects scripts into explicit hosts,
@@ -322,20 +317,21 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
   // - An extension with a content script that runs on explicit hosts.
   // The extensions that operate on explicit hosts have permission; the ones
   // that request all hosts require user consent.
-  ActiveScriptTester testers[] = {
-      ActiveScriptTester(kExtensionNames[0],
-                         CreateExtension(ALL_HOSTS, EXECUTE_SCRIPT), browser(),
-                         REQUIRES_CONSENT, EXECUTE_SCRIPT),
-      ActiveScriptTester(kExtensionNames[1],
-                         CreateExtension(EXPLICIT_HOSTS, EXECUTE_SCRIPT),
-                         browser(), DOES_NOT_REQUIRE_CONSENT, EXECUTE_SCRIPT),
-      ActiveScriptTester(kExtensionNames[2],
-                         CreateExtension(ALL_HOSTS, CONTENT_SCRIPT), browser(),
-                         REQUIRES_CONSENT, CONTENT_SCRIPT),
-      ActiveScriptTester(kExtensionNames[3],
-                         CreateExtension(EXPLICIT_HOSTS, CONTENT_SCRIPT),
-                         browser(), DOES_NOT_REQUIRE_CONSENT, CONTENT_SCRIPT),
-  };
+  std::vector<std::unique_ptr<ActiveScriptTester>> testers;
+  testers.push_back(base::MakeUnique<ActiveScriptTester>(
+      "inject_scripts_all_hosts", CreateExtension(ALL_HOSTS, EXECUTE_SCRIPT),
+      browser(), REQUIRES_CONSENT, EXECUTE_SCRIPT));
+  testers.push_back(base::MakeUnique<ActiveScriptTester>(
+      "inject_scripts_explicit_hosts",
+      CreateExtension(EXPLICIT_HOSTS, EXECUTE_SCRIPT), browser(),
+      DOES_NOT_REQUIRE_CONSENT, EXECUTE_SCRIPT));
+  testers.push_back(base::MakeUnique<ActiveScriptTester>(
+      "content_scripts_all_hosts", CreateExtension(ALL_HOSTS, CONTENT_SCRIPT),
+      browser(), REQUIRES_CONSENT, CONTENT_SCRIPT));
+  testers.push_back(base::MakeUnique<ActiveScriptTester>(
+      "content_scripts_explicit_hosts",
+      CreateExtension(EXPLICIT_HOSTS, CONTENT_SCRIPT), browser(),
+      DOES_NOT_REQUIRE_CONSENT, CONTENT_SCRIPT));
 
   // Navigate to an URL (which matches the explicit host specified in the
   // extension content_scripts_explicit_hosts). All four extensions should
@@ -344,8 +340,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/extensions/test_file.html"));
 
-  for (size_t i = 0u; i < arraysize(testers); ++i)
-    EXPECT_TRUE(testers[i].Verify()) << kExtensionNames[i];
+  for (const auto& tester : testers)
+    EXPECT_TRUE(tester->Verify()) << tester->name();
 }
 
 // Test that removing an extension with pending injections a) removes the
@@ -473,8 +469,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
   // Wire up the runner to automatically accept the bubble to prompt for page
   // refresh.
   runner->set_default_bubble_close_action_for_testing(
-      base::WrapUnique(new ToolbarActionsBarBubbleDelegate::CloseAction(
-          ToolbarActionsBarBubbleDelegate::CLOSE_EXECUTE)));
+      base::MakeUnique<ToolbarActionsBarBubbleDelegate::CloseAction>(
+          ToolbarActionsBarBubbleDelegate::CLOSE_EXECUTE));
 
   content::NavigationEntry* entry =
       web_contents->GetController().GetLastCommittedEntry();
@@ -499,7 +495,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
       TabHelper::FromWebContents(web_contents)->active_tab_permission_granter();
   ASSERT_TRUE(active_tab_granter);
   active_tab_granter->RevokeForTesting();
-  web_contents->GetController().Reload(true);
+  web_contents->GetController().Reload(content::ReloadType::NORMAL, true);
   EXPECT_TRUE(content::WaitForLoadStop(web_contents));
 
   // The extension should again want to run. Automatically dismiss the bubble
@@ -509,8 +505,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
   const int next_nav_id =
       web_contents->GetController().GetLastCommittedEntry()->GetUniqueID();
   runner->set_default_bubble_close_action_for_testing(
-      base::WrapUnique(new ToolbarActionsBarBubbleDelegate::CloseAction(
-          ToolbarActionsBarBubbleDelegate::CLOSE_DISMISS_USER_ACTION)));
+      base::MakeUnique<ToolbarActionsBarBubbleDelegate::CloseAction>(
+          ToolbarActionsBarBubbleDelegate::CLOSE_DISMISS_USER_ACTION));
 
   // Try running the extension. Nothing should happen, because the user
   // didn't agree to refresh the page. The extension should still want to run.
@@ -524,8 +520,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionActionRunnerBrowserTest,
 
   // Repeat with a dismissal from bubble deactivation - same story.
   runner->set_default_bubble_close_action_for_testing(
-      base::WrapUnique(new ToolbarActionsBarBubbleDelegate::CloseAction(
-          ToolbarActionsBarBubbleDelegate::CLOSE_DISMISS_DEACTIVATION)));
+      base::MakeUnique<ToolbarActionsBarBubbleDelegate::CloseAction>(
+          ToolbarActionsBarBubbleDelegate::CLOSE_DISMISS_DEACTIVATION));
   runner->RunAction(extension, true);
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(content::WaitForLoadStop(web_contents));
@@ -548,24 +544,20 @@ class FlagOffExtensionActionRunnerBrowserTest
 
 IN_PROC_BROWSER_TEST_F(FlagOffExtensionActionRunnerBrowserTest,
                        ScriptsExecuteWhenFlagAbsent) {
-  const char* const kExtensionNames[] = {
-      "content_scripts_all_hosts", "inject_scripts_all_hosts",
-  };
-  ActiveScriptTester testers[] = {
-      ActiveScriptTester(kExtensionNames[0],
-                         CreateExtension(ALL_HOSTS, CONTENT_SCRIPT), browser(),
-                         DOES_NOT_REQUIRE_CONSENT, CONTENT_SCRIPT),
-      ActiveScriptTester(kExtensionNames[1],
-                         CreateExtension(ALL_HOSTS, EXECUTE_SCRIPT), browser(),
-                         DOES_NOT_REQUIRE_CONSENT, EXECUTE_SCRIPT),
-  };
+  std::vector<std::unique_ptr<ActiveScriptTester>> testers;
+  testers.push_back(base::MakeUnique<ActiveScriptTester>(
+      "content_scripts_all_hosts", CreateExtension(ALL_HOSTS, CONTENT_SCRIPT),
+      browser(), DOES_NOT_REQUIRE_CONSENT, CONTENT_SCRIPT));
+  testers.push_back(base::MakeUnique<ActiveScriptTester>(
+      "inject_scripts_all_hosts", CreateExtension(ALL_HOSTS, EXECUTE_SCRIPT),
+      browser(), DOES_NOT_REQUIRE_CONSENT, EXECUTE_SCRIPT));
 
   ASSERT_TRUE(embedded_test_server()->Start());
   ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL("/extensions/test_file.html"));
 
-  for (size_t i = 0u; i < arraysize(testers); ++i)
-    EXPECT_TRUE(testers[i].Verify()) << kExtensionNames[i];
+  for (const auto& tester : testers)
+    EXPECT_TRUE(tester->Verify()) << tester->name();
 }
 
 }  // namespace extensions

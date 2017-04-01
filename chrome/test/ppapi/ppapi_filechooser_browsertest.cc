@@ -3,15 +3,18 @@
 // found in the LICENSE file.
 
 #include <map>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/ppapi/ppapi_test.h"
+#include "content/public/common/quarantine.h"
 #include "ppapi/shared_impl/test_utils.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 #include "ui/shell_dialogs/select_file_dialog_factory.h"
@@ -164,6 +167,8 @@ class FakeDownloadProtectionService : public DownloadProtectionService {
 
   void CheckPPAPIDownloadRequest(
       const GURL& requestor_url,
+      const GURL& initiating_frame_url_unused,
+      content::WebContents* web_contents_unused,
       const base::FilePath& default_file_path,
       const std::vector<base::FilePath::StringType>& alternate_extensions,
       Profile* /* profile */,
@@ -268,7 +273,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest, FileChooser_Open_Success) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
 
-  base::FilePath existing_filename = temp_dir.path().AppendASCII("foo");
+  base::FilePath existing_filename = temp_dir.GetPath().AppendASCII("foo");
   ASSERT_EQ(
       static_cast<int>(sizeof(kContents) - 1),
       base::WriteFile(existing_filename, kContents, sizeof(kContents) - 1));
@@ -291,7 +296,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest, FileChooser_Open_Cancel) {
 IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest, FileChooser_SaveAs_Success) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath suggested_filename = temp_dir.path().AppendASCII("foo");
+  base::FilePath suggested_filename = temp_dir.GetPath().AppendASCII("foo");
 
   TestSelectFileDialogFactory::SelectedFileInfoList file_info_list;
   file_info_list.push_back(
@@ -307,7 +312,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
                        FileChooser_SaveAs_SafeDefaultName) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath suggested_filename = temp_dir.path().AppendASCII("foo");
+  base::FilePath suggested_filename = temp_dir.GetPath().AppendASCII("foo");
 
   TestSelectFileDialogFactory::SelectedFileInfoList file_info_list;
   file_info_list.push_back(
@@ -316,7 +321,8 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
       TestSelectFileDialogFactory::REPLACE_BASENAME, file_info_list);
 
   RunTestViaHTTP("FileChooser_SaveAsSafeDefaultName");
-  base::FilePath actual_filename = temp_dir.path().AppendASCII("innocuous.txt");
+  base::FilePath actual_filename =
+      temp_dir.GetPath().AppendASCII("innocuous.txt");
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;
@@ -328,7 +334,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
                        FileChooser_SaveAs_UnsafeDefaultName) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath suggested_filename = temp_dir.path().AppendASCII("foo");
+  base::FilePath suggested_filename = temp_dir.GetPath().AppendASCII("foo");
 
   TestSelectFileDialogFactory::SelectedFileInfoList file_info_list;
   file_info_list.push_back(
@@ -337,7 +343,8 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest,
       TestSelectFileDialogFactory::REPLACE_BASENAME, file_info_list);
 
   RunTestViaHTTP("FileChooser_SaveAsUnsafeDefaultName");
-  base::FilePath actual_filename = temp_dir.path().AppendASCII("unsafe.txt-");
+  base::FilePath actual_filename =
+      temp_dir.GetPath().AppendASCII("unsafe.txt-");
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;
@@ -351,6 +358,32 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest, FileChooser_SaveAs_Cancel) {
       TestSelectFileDialogFactory::SelectedFileInfoList());
   RunTestViaHTTP("FileChooser_SaveAsCancel");
 }
+
+#if defined(OS_WIN) || defined(OS_LINUX)
+// On Windows, tests that a file downloaded via PPAPI FileChooser API has the
+// mark-of-the-web. The PPAPI FileChooser implementation invokes QuarantineFile
+// in order to mark the file as being downloaded from the web as soon as the
+// file is created. This MOTW prevents the file being opened without due
+// security warnings if the file is executable.
+IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTest, FileChooser_Quarantine) {
+  base::ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  base::FilePath suggested_filename = temp_dir.GetPath().AppendASCII("foo");
+
+  TestSelectFileDialogFactory::SelectedFileInfoList file_info_list;
+  file_info_list.push_back(
+      ui::SelectedFileInfo(suggested_filename, suggested_filename));
+  TestSelectFileDialogFactory test_dialog_factory(
+      TestSelectFileDialogFactory::REPLACE_BASENAME, file_info_list);
+
+  RunTestViaHTTP("FileChooser_SaveAsDangerousExecutableAllowed");
+  base::FilePath actual_filename =
+      temp_dir.GetPath().AppendASCII("dangerous.exe");
+
+  ASSERT_TRUE(base::PathExists(actual_filename));
+  EXPECT_TRUE(content::IsFileQuarantined(actual_filename, GURL(), GURL()));
+}
+#endif  // defined(OS_WIN) || defined(OS_LINUX)
 
 #if defined(FULL_SAFE_BROWSING)
 // These tests only make sense when SafeBrowsing is enabled. They verify
@@ -367,7 +400,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTestWithSBService,
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath suggested_filename = temp_dir.path().AppendASCII("foo");
+  base::FilePath suggested_filename = temp_dir.GetPath().AppendASCII("foo");
 
   TestSelectFileDialogFactory::SelectedFileInfoList file_info_list;
   file_info_list.push_back(
@@ -376,7 +409,8 @@ IN_PROC_BROWSER_TEST_F(PPAPIFileChooserTestWithSBService,
       TestSelectFileDialogFactory::REPLACE_BASENAME, file_info_list);
 
   RunTestViaHTTP("FileChooser_SaveAsDangerousExecutableAllowed");
-  base::FilePath actual_filename = temp_dir.path().AppendASCII("dangerous.exe");
+  base::FilePath actual_filename =
+      temp_dir.GetPath().AppendASCII("dangerous.exe");
 
   ASSERT_TRUE(base::PathExists(actual_filename));
   std::string file_contents;

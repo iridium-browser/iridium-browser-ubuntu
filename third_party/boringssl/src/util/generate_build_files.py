@@ -26,6 +26,7 @@ import json
 OS_ARCH_COMBOS = [
     ('linux', 'arm', 'linux32', [], 'S'),
     ('linux', 'aarch64', 'linux64', [], 'S'),
+    ('linux', 'ppc64le', 'ppc64le', [], 'S'),
     ('linux', 'x86', 'elf', ['-fPIC', '-DOPENSSL_IA32_SSE2'], 'S'),
     ('linux', 'x86_64', 'elf', [], 'S'),
     ('mac', 'x86', 'macosx', ['-fPIC', '-DOPENSSL_IA32_SSE2'], 'S'),
@@ -78,9 +79,6 @@ class Android(object):
 
 """
 
-  def ExtraFiles(self):
-    return ['android_compat_hacks.c', 'android_compat_keywrap.c']
-
   def PrintVariableSection(self, out, name, files):
     out.write('%s := \\\n' % name)
     for f in sorted(files):
@@ -95,13 +93,13 @@ class Android(object):
       blueprint.write('cc_defaults {\n')
       blueprint.write('    name: "libcrypto_sources",\n')
       blueprint.write('    srcs: [\n')
-      for f in sorted(files['crypto'] + self.ExtraFiles()):
+      for f in sorted(files['crypto']):
         blueprint.write('        "%s",\n' % f)
       blueprint.write('    ],\n')
       blueprint.write('    target: {\n')
 
       for ((osname, arch), asm_files) in asm_outputs:
-        if osname != 'linux':
+        if osname != 'linux' or arch == 'ppc64le':
           continue
         if arch == 'aarch64':
           arch = 'arm64'
@@ -160,24 +158,13 @@ class Android(object):
     with open('sources.mk', 'w+') as makefile:
       makefile.write(self.header)
 
-      crypto_files = files['crypto'] + self.ExtraFiles()
-      self.PrintVariableSection(makefile, 'crypto_sources', crypto_files)
+      self.PrintVariableSection(makefile, 'crypto_sources', files['crypto'])
 
       for ((osname, arch), asm_files) in asm_outputs:
         if osname != 'linux':
           continue
         self.PrintVariableSection(
             makefile, '%s_%s_sources' % (osname, arch), asm_files)
-
-
-class AndroidStandalone(Android):
-  """AndroidStandalone is for Android builds outside of the Android-system, i.e.
-
-  for applications that wish wish to ship BoringSSL.
-  """
-
-  def ExtraFiles(self):
-    return []
 
 
 class Bazel(object):
@@ -279,7 +266,7 @@ class Bazel(object):
               out.write('          "%s",\n' % arg)
           out.write('      ],\n')
 
-        out.write('      copts = copts,\n')
+        out.write('      copts = copts + ["-DBORINGSSL_SHARED_LIBRARY"],\n')
 
         if len(data_files) > 0:
           out.write('      data = [\n')
@@ -586,6 +573,8 @@ def ArchForAsmFilename(filename):
     return ['aarch64']
   elif 'arm' in filename:
     return ['arm']
+  elif 'ppc' in filename:
+    return ['ppc64le']
   else:
     raise ValueError('Unknown arch for asm filename: ' + filename)
 
@@ -707,7 +696,7 @@ def main(platforms):
 
 if __name__ == '__main__':
   parser = optparse.OptionParser(usage='Usage: %prog [--prefix=<path>]'
-      ' [android|android-standalone|bazel|gn|gyp]')
+      ' [android|bazel|gn|gyp]')
   parser.add_option('--prefix', dest='prefix',
       help='For Bazel, prepend argument to all source files')
   options, args = parser.parse_args(sys.argv[1:])
@@ -721,8 +710,6 @@ if __name__ == '__main__':
   for s in args:
     if s == 'android':
       platforms.append(Android())
-    elif s == 'android-standalone':
-      platforms.append(AndroidStandalone())
     elif s == 'bazel':
       platforms.append(Bazel())
     elif s == 'gn':

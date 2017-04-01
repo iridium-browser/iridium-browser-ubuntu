@@ -11,7 +11,6 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
-#include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
@@ -34,6 +33,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
+
+namespace data_reduction_proxy {
 
 namespace {
 
@@ -98,58 +99,6 @@ void RecordContentLengthHistograms(bool lofi_low_header_added,
                        received_content_length);
 }
 
-// Scales |byte_count| by the ratio of |numerator|:|denomenator|.
-int64_t ScaleByteCountByRatio(int64_t byte_count,
-                              int64_t numerator,
-                              int64_t denomenator) {
-  DCHECK_LE(0, byte_count);
-  DCHECK_LE(0, numerator);
-  DCHECK_LT(0, denomenator);
-
-  // As an optimization, use integer arithmetic if it won't overflow.
-  if (byte_count <= std::numeric_limits<int32_t>::max() &&
-      numerator <= std::numeric_limits<int32_t>::max()) {
-    return byte_count * numerator / denomenator;
-  }
-
-  double scaled_byte_count = static_cast<double>(byte_count) *
-                             static_cast<double>(numerator) /
-                             static_cast<double>(denomenator);
-  if (scaled_byte_count >
-      static_cast<double>(std::numeric_limits<int64_t>::max())) {
-    // If this ever triggers, then byte counts can no longer be safely stored in
-    // 64-bit ints.
-    NOTREACHED();
-    return byte_count;
-  }
-  return static_cast<int64_t>(scaled_byte_count);
-}
-
-// Calculates the effective original content length of the |request|, accounting
-// for partial responses if necessary.
-int64_t CalculateEffectiveOCL(const net::URLRequest& request) {
-  int64_t original_content_length_from_header =
-      request.response_headers()->GetInt64HeaderValue(
-          "x-original-content-length");
-
-  if (original_content_length_from_header < 0)
-    return request.received_response_content_length();
-  if (request.status().is_success())
-    return original_content_length_from_header;
-
-  int64_t content_length_from_header =
-      request.response_headers()->GetContentLength();
-
-  if (content_length_from_header < 0)
-    return request.received_response_content_length();
-  if (content_length_from_header == 0)
-    return original_content_length_from_header;
-
-  return ScaleByteCountByRatio(request.received_response_content_length(),
-                               original_content_length_from_header,
-                               content_length_from_header);
-}
-
 // Given a |request| that went through the Data Reduction Proxy, this function
 // estimates how many bytes would have been received if the response had been
 // received directly from the origin using HTTP/1.1 with a content length of
@@ -161,12 +110,10 @@ int64_t EstimateOriginalReceivedBytes(const net::URLRequest& request) {
   // TODO(sclittle): Remove headers added by Data Reduction Proxy when computing
   // original size. http://crbug/535701.
   return request.response_headers()->raw_headers().size() +
-         CalculateEffectiveOCL(request);
+         util::CalculateEffectiveOCL(request);
 }
 
 }  // namespace
-
-namespace data_reduction_proxy {
 
 DataReductionProxyNetworkDelegate::DataReductionProxyNetworkDelegate(
     std::unique_ptr<net::NetworkDelegate> network_delegate,
@@ -174,8 +121,6 @@ DataReductionProxyNetworkDelegate::DataReductionProxyNetworkDelegate(
     DataReductionProxyRequestOptions* request_options,
     const DataReductionProxyConfigurator* configurator)
     : LayeredNetworkDelegate(std::move(network_delegate)),
-      total_received_bytes_(0),
-      total_original_received_bytes_(0),
       data_reduction_proxy_config_(config),
       data_reduction_proxy_bypass_stats_(nullptr),
       data_reduction_proxy_request_options_(request_options),
@@ -192,26 +137,17 @@ DataReductionProxyNetworkDelegate::~DataReductionProxyNetworkDelegate() {
 void DataReductionProxyNetworkDelegate::InitIODataAndUMA(
     DataReductionProxyIOData* io_data,
     DataReductionProxyBypassStats* bypass_stats) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(bypass_stats);
   data_reduction_proxy_io_data_ = io_data;
   data_reduction_proxy_bypass_stats_ = bypass_stats;
-}
-
-std::unique_ptr<base::Value>
-DataReductionProxyNetworkDelegate::SessionNetworkStatsInfoToValue() const {
-  auto dict = base::MakeUnique<base::DictionaryValue>();
-  // Use strings to avoid overflow. base::Value only supports 32-bit integers.
-  dict->SetString("session_received_content_length",
-                  base::Int64ToString(total_received_bytes_));
-  dict->SetString("session_original_content_length",
-                  base::Int64ToString(total_original_received_bytes_));
-  return std::move(dict);
 }
 
 void DataReductionProxyNetworkDelegate::OnBeforeURLRequestInternal(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (data_use_group_provider_) {
     // Creates and initializes a |DataUseGroup| for the |request| if it does not
     // exist. Even though we do not use the |DataUseGroup| here, we want to
@@ -224,8 +160,39 @@ void DataReductionProxyNetworkDelegate::OnBeforeURLRequestInternal(
 
   // |data_reduction_proxy_io_data_| can be NULL for Webview.
   if (data_reduction_proxy_io_data_ &&
-      (request->load_flags() & net::LOAD_MAIN_FRAME)) {
+      (request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED)) {
     data_reduction_proxy_io_data_->SetLoFiModeActiveOnMainFrame(false);
+  }
+}
+
+void DataReductionProxyNetworkDelegate::OnBeforeStartTransactionInternal(
+    net::URLRequest* request,
+    const net::CompletionCallback& callback,
+    net::HttpRequestHeaders* headers) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (!data_reduction_proxy_io_data_)
+    return;
+  if (!data_reduction_proxy_io_data_->IsEnabled())
+    return;
+
+  if (request->url().SchemeIsCryptographic() ||
+      !request->url().SchemeIsHTTPOrHTTPS()) {
+    return;
+  }
+
+  if (data_reduction_proxy_io_data_->resource_type_provider()) {
+    // Sets content type of |request| in the resource type provider, so it can
+    // be later used for determining the proxy that should be used for fetching
+    // |request|.
+    data_reduction_proxy_io_data_->resource_type_provider()->SetContentType(
+        *request);
+  }
+
+  if (data_reduction_proxy_io_data_->lofi_decider()) {
+    data_reduction_proxy_io_data_->lofi_decider()
+        ->MaybeSetAcceptTransformHeader(
+            *request, data_reduction_proxy_config_->lofi_off(), headers);
   }
 }
 
@@ -234,8 +201,13 @@ void DataReductionProxyNetworkDelegate::OnBeforeSendHeadersInternal(
     const net::ProxyInfo& proxy_info,
     const net::ProxyRetryInfoMap& proxy_retry_info,
     net::HttpRequestHeaders* headers) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(data_reduction_proxy_config_);
   DCHECK(request);
+
+  // If this is after a redirect, reset |request|'s DataReductionProxyData.
+  DataReductionProxyData::ClearData(request);
+
   if (params::IsIncludedInHoldbackFieldTrial()) {
     if (!WasEligibleWithoutHoldback(*request, proxy_info, proxy_retry_info))
       return;
@@ -247,13 +219,27 @@ void DataReductionProxyNetworkDelegate::OnBeforeSendHeadersInternal(
     return;
   }
 
+  bool using_data_reduction_proxy = true;
   // The following checks rule out direct, invalid, and othe connection types.
   if (!proxy_info.is_http() && !proxy_info.is_https() && !proxy_info.is_quic())
-    return;
-  if (proxy_info.proxy_server().host_port_pair().IsEmpty())
-    return;
-  if (!data_reduction_proxy_config_->IsDataReductionProxy(
-          proxy_info.proxy_server().host_port_pair(), nullptr)) {
+    using_data_reduction_proxy = false;
+  else if (proxy_info.proxy_server().host_port_pair().IsEmpty())
+    using_data_reduction_proxy = false;
+  else if (!data_reduction_proxy_config_->IsDataReductionProxy(
+               proxy_info.proxy_server(), nullptr)) {
+    using_data_reduction_proxy = false;
+  }
+
+  LoFiDecider* lofi_decider = nullptr;
+  if (data_reduction_proxy_io_data_)
+    lofi_decider = data_reduction_proxy_io_data_->lofi_decider();
+
+  if (!using_data_reduction_proxy) {
+    if (lofi_decider) {
+      // If not using the data reduction proxy, strip the
+      // Chrome-Proxy-Accept-Transform header.
+      lofi_decider->RemoveAcceptTransformHeader(headers);
+    }
     return;
   }
 
@@ -265,8 +251,8 @@ void DataReductionProxyNetworkDelegate::OnBeforeSendHeadersInternal(
     data->set_used_data_reduction_proxy(true);
     data->set_session_key(
         data_reduction_proxy_request_options_->GetSecureSession());
-    data->set_original_request_url(request->original_url());
-    if ((request->load_flags() & net::LOAD_MAIN_FRAME) &&
+    data->set_request_url(request->url());
+    if ((request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED) &&
         request->context()->network_quality_estimator()) {
       data->set_effective_connection_type(request->context()
                                               ->network_quality_estimator()
@@ -275,53 +261,51 @@ void DataReductionProxyNetworkDelegate::OnBeforeSendHeadersInternal(
   }
 
   if (data_reduction_proxy_io_data_ &&
-      data_reduction_proxy_io_data_->lofi_decider()) {
-    LoFiDecider* lofi_decider = data_reduction_proxy_io_data_->lofi_decider();
-    const bool is_using_lofi_mode =
-        lofi_decider->MaybeAddLoFiDirectiveToHeaders(*request, headers);
-
-    if ((request->load_flags() & net::LOAD_MAIN_FRAME)) {
-      data_reduction_proxy_io_data_->SetLoFiModeActiveOnMainFrame(
-          is_using_lofi_mode);
-    }
-
-    if (data)
-      data->set_lofi_requested(lofi_decider->ShouldRecordLoFiUMA(*request));
+      (request->load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED)) {
+    data_reduction_proxy_io_data_->SetLoFiModeActiveOnMainFrame(
+        lofi_decider ? lofi_decider->IsSlowPagePreviewRequested(*headers)
+                     : false);
   }
 
-  if (data_reduction_proxy_request_options_) {
-    data_reduction_proxy_request_options_->AddRequestHeader(headers);
+  if (data) {
+    data->set_lofi_requested(
+        lofi_decider ? lofi_decider->ShouldRecordLoFiUMA(*request) : false);
   }
+  MaybeAddBrotliToAcceptEncodingHeader(proxy_info, headers, *request);
+
+  data_reduction_proxy_request_options_->AddRequestHeader(headers);
+  if (lofi_decider)
+    lofi_decider->MaybeSetIgnorePreviewsBlacklistDirective(headers);
 }
 
 void DataReductionProxyNetworkDelegate::OnCompletedInternal(
     net::URLRequest* request,
     bool started) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(request);
+  // TODO(maksims): remove this once OnCompletedInternal() has net_error in
+  // arguments.
+  int net_error = request->status().error();
+  DCHECK_NE(net::ERR_IO_PENDING, net_error);
   if (data_reduction_proxy_bypass_stats_)
-    data_reduction_proxy_bypass_stats_->OnUrlRequestCompleted(request, started);
+    data_reduction_proxy_bypass_stats_->OnUrlRequestCompleted(request, started,
+                                                              net_error);
 
   net::HttpRequestHeaders request_headers;
   if (data_reduction_proxy_io_data_ && request->response_headers() &&
-      request->response_headers()->HasHeaderValue(
-          chrome_proxy_header(), chrome_proxy_lo_fi_directive())) {
+      IsEmptyImagePreview(*(request->response_headers()))) {
     data_reduction_proxy_io_data_->lofi_ui_service()->OnLoFiReponseReceived(
-        *request, false);
+        *request);
   } else if (data_reduction_proxy_io_data_ && request->response_headers() &&
-             request->response_headers()->HasHeaderValue(
-                 chrome_proxy_header(),
-                 chrome_proxy_lo_fi_preview_directive())) {
-    data_reduction_proxy_io_data_->lofi_ui_service()->OnLoFiReponseReceived(
-        *request, true);
-    RecordLoFiTransformationType(PREVIEW);
-  } else if (request->GetFullRequestHeaders(&request_headers) &&
-             request_headers.HasHeader(chrome_proxy_header())) {
+             IsLitePagePreview(*(request->response_headers()))) {
+    RecordLitePageTransformationType(LITE_PAGE);
+  } else if (request->GetFullRequestHeaders(&request_headers)) {
+    // TODO(bengr): transform processing logic should happen elsewhere.
     std::string header_value;
-    request_headers.GetHeader(chrome_proxy_header(), &header_value);
-    if (header_value.find(chrome_proxy_lo_fi_preview_directive()) !=
-        std::string::npos) {
-      RecordLoFiTransformationType(NO_TRANSFORMATION_PREVIEW_REQUESTED);
-    }
+    request_headers.GetHeader(chrome_proxy_accept_transform_header(),
+                              &header_value);
+    if (header_value == lite_page_directive())
+      RecordLitePageTransformationType(NO_TRANSFORMATION_LITE_PAGE_REQUESTED);
   }
 
   if (!request->response_info().network_accessed ||
@@ -340,16 +324,15 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
                 "x-original-content-length")
           : -1;
 
-  CalculateAndRecordDataUsage(*request, request_type, original_content_length);
+  CalculateAndRecordDataUsage(*request, request_type);
 
   RecordContentLength(*request, request_type, original_content_length);
 }
 
 void DataReductionProxyNetworkDelegate::CalculateAndRecordDataUsage(
     const net::URLRequest& request,
-    DataReductionProxyRequestType request_type,
-    int64_t original_content_length) {
-  DCHECK_LE(-1, original_content_length);
+    DataReductionProxyRequestType request_type) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   int64_t data_used = request.GetTotalReceivedBytes();
 
   // Estimate how many bytes would have been used if the DataReductionProxy was
@@ -377,6 +360,7 @@ void DataReductionProxyNetworkDelegate::AccumulateDataUsage(
     DataReductionProxyRequestType request_type,
     const scoped_refptr<DataUseGroup>& data_use_group,
     const std::string& mime_type) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_GE(data_used, 0);
   DCHECK_GE(original_size, 0);
   if (data_reduction_proxy_io_data_) {
@@ -384,14 +368,13 @@ void DataReductionProxyNetworkDelegate::AccumulateDataUsage(
         data_used, original_size, data_reduction_proxy_io_data_->IsEnabled(),
         request_type, data_use_group, mime_type);
   }
-  total_received_bytes_ += data_used;
-  total_original_received_bytes_ += original_size;
 }
 
 void DataReductionProxyNetworkDelegate::RecordContentLength(
     const net::URLRequest& request,
     DataReductionProxyRequestType request_type,
     int64_t original_content_length) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (!request.response_headers() || request.was_cached() ||
       request.received_response_content_length() == 0) {
     return;
@@ -421,19 +404,21 @@ void DataReductionProxyNetworkDelegate::RecordContentLength(
   }
 }
 
-void DataReductionProxyNetworkDelegate::RecordLoFiTransformationType(
-    LoFiTransformationType type) {
+void DataReductionProxyNetworkDelegate::RecordLitePageTransformationType(
+    LitePageTransformationType type) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   UMA_HISTOGRAM_ENUMERATION("DataReductionProxy.LoFi.TransformationType", type,
-                            LO_FI_TRANSFORMATION_TYPES_INDEX_BOUNDARY);
+                            LITE_PAGE_TRANSFORMATION_TYPES_INDEX_BOUNDARY);
 }
 
 bool DataReductionProxyNetworkDelegate::WasEligibleWithoutHoldback(
     const net::URLRequest& request,
     const net::ProxyInfo& proxy_info,
     const net::ProxyRetryInfoMap& proxy_retry_info) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(proxy_info.is_empty() || proxy_info.is_direct() ||
          !data_reduction_proxy_config_->IsDataReductionProxy(
-             proxy_info.proxy_server().host_port_pair(), nullptr));
+             proxy_info.proxy_server(), nullptr));
   if (!util::EligibleForDataReductionProxy(proxy_info, request.url(),
                                            request.method())) {
     return false;
@@ -448,7 +433,61 @@ bool DataReductionProxyNetworkDelegate::WasEligibleWithoutHoldback(
 
 void DataReductionProxyNetworkDelegate::SetDataUseGroupProvider(
     std::unique_ptr<DataUseGroupProvider> data_use_group_provider) {
-  data_use_group_provider_.reset(data_use_group_provider.release());
+  DCHECK(thread_checker_.CalledOnValidThread());
+  data_use_group_provider_ = std::move(data_use_group_provider);
+}
+
+void DataReductionProxyNetworkDelegate::MaybeAddBrotliToAcceptEncodingHeader(
+    const net::ProxyInfo& proxy_info,
+    net::HttpRequestHeaders* request_headers,
+    const net::URLRequest& request) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // This method should be called only when the resolved proxy was a data
+  // saver proxy.
+  DCHECK(data_reduction_proxy_config_->IsDataReductionProxy(
+      proxy_info.proxy_server(), nullptr));
+  DCHECK(request.url().is_valid());
+  DCHECK(!request.url().SchemeIsCryptographic());
+  DCHECK(request.url().SchemeIsHTTPOrHTTPS());
+
+  static const char kBrotli[] = "br";
+
+  if (!request.context()->enable_brotli()) {
+    // Verify that Brotli is enabled globally.
+    return;
+  }
+
+  if (!params::IsBrotliAcceptEncodingEnabled()) {
+    // Verify that Brotli is enabled for data reduction proxy.
+    return;
+  }
+
+  if (!proxy_info.proxy_server().is_https() &&
+      !proxy_info.proxy_server().is_quic()) {
+    // Brotli encoding can be used only when the proxy server is a secure proxy
+    // server.
+    return;
+  }
+
+  if (!request_headers->HasHeader(net::HttpRequestHeaders::kAcceptEncoding))
+    return;
+
+  std::string header_value;
+  request_headers->GetHeader(net::HttpRequestHeaders::kAcceptEncoding,
+                             &header_value);
+
+  // Brotli should not be already present in the header since the URL is non-
+  // cryptographic. This is an approximate check, and would trigger even if the
+  // accept-encoding header contains an encoding that has prefix |kBrotli|.
+  DCHECK_EQ(std::string::npos, header_value.find(kBrotli));
+
+  request_headers->RemoveHeader(net::HttpRequestHeaders::kAcceptEncoding);
+  if (!header_value.empty())
+    header_value += ", ";
+  header_value += kBrotli;
+  request_headers->SetHeader(net::HttpRequestHeaders::kAcceptEncoding,
+                             header_value);
 }
 
 }  // namespace data_reduction_proxy

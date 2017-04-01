@@ -239,7 +239,6 @@ TEST_F(BrowserAccessibilityTest, TestChildrenChange) {
   text2.id = 2;
   text2.role = ui::AX_ROLE_STATIC_TEXT;
   text2.SetName("new text");
-  text2.SetName("old text");
   AXEventNotificationDetails param;
   param.event_type = ui::AX_EVENT_CHILDREN_CHANGED;
   param.update.nodes.push_back(text2);
@@ -344,8 +343,8 @@ TEST_F(BrowserAccessibilityTest, TestTextBoundaries) {
   text_field.SetValue(text_value);
   std::vector<int32_t> line_start_offsets;
   line_start_offsets.push_back(15);
-  text_field.AddIntListAttribute(
-      ui::AX_ATTR_LINE_BREAKS, line_start_offsets);
+  text_field.AddIntListAttribute(ui::AX_ATTR_CACHED_LINE_STARTS,
+                                 line_start_offsets);
   text_field.child_ids.push_back(3);
   text_field.child_ids.push_back(5);
   text_field.child_ids.push_back(6);

@@ -6,13 +6,18 @@
 
 #include <string>
 
+#include "chrome/browser/media/router/media_source_helper.h"
+
 namespace media_router {
 
 MediaSource::MediaSource(const MediaSource::Id& source_id) : id_(source_id) {
+  GURL url(source_id);
+  if (IsValidPresentationUrl(url))
+    url_ = url;
 }
 
-MediaSource::MediaSource() {
-}
+MediaSource::MediaSource(const GURL& presentation_url)
+    : id_(presentation_url.spec()), url_(presentation_url) {}
 
 MediaSource::~MediaSource() {}
 
@@ -20,12 +25,12 @@ MediaSource::Id MediaSource::id() const {
   return id_;
 }
 
-bool MediaSource::Equals(const MediaSource& other) const {
-  return id_ == other.id();
+GURL MediaSource::url() const {
+  return url_;
 }
 
-bool MediaSource::Empty() const {
-  return id_.empty();
+bool MediaSource::operator==(const MediaSource& other) const {
+  return id_ == other.id();
 }
 
 std::string MediaSource::ToString() const {

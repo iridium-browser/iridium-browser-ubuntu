@@ -41,9 +41,18 @@ def ChromeRootPath(path='.'):
   return os.path.relpath(os.path.join(_CHROME_SOURCE_DIR, path))
 
 
-# Name of chrome extensions externs file.
+# Automation API externs file.
+_AUTOMATION_EXTERNS = (
+    ChromeRootPath('third_party/closure_compiler/externs/automation.js'))
+
+# MetricsPrivate externs file.
+_METRICS_PRIVATE_EXTERNS = (
+    ChromeRootPath('third_party/closure_compiler/externs/metrics_private.js'))
+
+# Additional chrome extension api externs file.
 _CHROME_EXTENSIONS_EXTERNS = (
     ChromeRootPath('third_party/closure_compiler/externs/chrome_extensions.js'))
+
 
 # Externs common to many ChromeVox scripts.
 _COMMON_EXTERNS = [
@@ -52,12 +61,13 @@ _COMMON_EXTERNS = [
     CVoxPath('chromevox/background/externs.js'),
     CVoxPath('chromevox/injected/externs.js'),
     CVoxPath('host/chrome/externs.js'),
-    _CHROME_EXTENSIONS_EXTERNS]
+    _AUTOMATION_EXTERNS,
+    _CHROME_EXTENSIONS_EXTERNS,
+    _METRICS_PRIVATE_EXTERNS]
 
 # List of top-level scripts and externs that we can check.
 _TOP_LEVEL_SCRIPTS = [
-    [[CVoxPath('chromevox/background/kbexplorer_loader.js')],
-     [_CHROME_EXTENSIONS_EXTERNS]],
+    [[CVoxPath('chromevox/background/kbexplorer_loader.js')], _COMMON_EXTERNS],
     [[CVoxPath('chromevox/background/options_loader.js')], _COMMON_EXTERNS],
     [[CVoxPath('chromevox/injected/loader.js')], _COMMON_EXTERNS],
     [[CVoxPath('cvox2/background/loader.js')], _COMMON_EXTERNS],

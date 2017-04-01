@@ -166,19 +166,6 @@ bool Validators::CmpFunctionValidator::IsValid(const GLenum value) const {
   return false;
 };
 
-static const GLenum valid_compressed_texture_format_table_es3[] = {
-    GL_COMPRESSED_R11_EAC,
-    GL_COMPRESSED_SIGNED_R11_EAC,
-    GL_COMPRESSED_RG11_EAC,
-    GL_COMPRESSED_SIGNED_RG11_EAC,
-    GL_COMPRESSED_RGB8_ETC2,
-    GL_COMPRESSED_SRGB8_ETC2,
-    GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
-    GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,
-    GL_COMPRESSED_RGBA8_ETC2_EAC,
-    GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
-};
-
 static const GLenum valid_coverage_modulation_components_table[] = {
     GL_RGB, GL_RGBA, GL_ALPHA, GL_NONE,
 };
@@ -1147,16 +1134,6 @@ static const GLenum valid_texture_internal_format_storage_table_es3[] = {
     GL_DEPTH_COMPONENT32F,
     GL_DEPTH24_STENCIL8,
     GL_DEPTH32F_STENCIL8,
-    GL_COMPRESSED_R11_EAC,
-    GL_COMPRESSED_SIGNED_R11_EAC,
-    GL_COMPRESSED_RG11_EAC,
-    GL_COMPRESSED_SIGNED_RG11_EAC,
-    GL_COMPRESSED_RGB8_ETC2,
-    GL_COMPRESSED_SRGB8_ETC2,
-    GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2,
-    GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2,
-    GL_COMPRESSED_RGBA8_ETC2_EAC,
-    GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC,
 };
 
 static const GLenum deprecated_texture_internal_format_storage_table_es3[] = {
@@ -1237,6 +1214,16 @@ static const GLenum
         GL_RGB_YCRCB_420_CHROMIUM,
         GL_RGB_YCBCR_422_CHROMIUM,
         GL_RGB_YCBCR_420V_CHROMIUM,
+};
+
+bool Validators::TextureSrgbDecodeExtValidator::IsValid(
+    const GLenum value) const {
+  switch (value) {
+    case GL_DECODE_EXT:
+    case GL_SKIP_DECODE_EXT:
+      return true;
+  }
+  return false;
 };
 
 static const GLenum
@@ -1467,9 +1454,6 @@ void Validators::UpdateValuesES3() {
   buffer_usage.SetIsES3(true);
   capability.AddValues(valid_capability_table_es3,
                        arraysize(valid_capability_table_es3));
-  compressed_texture_format.AddValues(
-      valid_compressed_texture_format_table_es3,
-      arraysize(valid_compressed_texture_format_table_es3));
   dst_blend_factor.AddValues(valid_dst_blend_factor_table_es3,
                              arraysize(valid_dst_blend_factor_table_es3));
   equation.AddValues(valid_equation_table_es3,
@@ -1528,6 +1512,33 @@ void Validators::UpdateValuesES3() {
                                arraysize(valid_vertex_attrib_type_table_es3));
   vertex_attribute.AddValues(valid_vertex_attribute_table_es3,
                              arraysize(valid_vertex_attribute_table_es3));
+}
+
+void Validators::UpdateETCCompressedTextureFormats() {
+  compressed_texture_format.AddValue(GL_COMPRESSED_R11_EAC);
+  compressed_texture_format.AddValue(GL_COMPRESSED_SIGNED_R11_EAC);
+  compressed_texture_format.AddValue(GL_COMPRESSED_RG11_EAC);
+  compressed_texture_format.AddValue(GL_COMPRESSED_SIGNED_RG11_EAC);
+  compressed_texture_format.AddValue(GL_COMPRESSED_RGB8_ETC2);
+  compressed_texture_format.AddValue(GL_COMPRESSED_SRGB8_ETC2);
+  compressed_texture_format.AddValue(
+      GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2);
+  compressed_texture_format.AddValue(
+      GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2);
+  compressed_texture_format.AddValue(GL_COMPRESSED_RGBA8_ETC2_EAC);
+  compressed_texture_format.AddValue(GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_R11_EAC);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_SIGNED_R11_EAC);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_RG11_EAC);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_SIGNED_RG11_EAC);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_RGB8_ETC2);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_SRGB8_ETC2);
+  texture_internal_format_storage.AddValue(
+      GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2);
+  texture_internal_format_storage.AddValue(
+      GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_RGBA8_ETC2_EAC);
+  texture_internal_format_storage.AddValue(GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC);
 }
 
 #endif  // GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_VALIDATION_IMPLEMENTATION_AUTOGEN_H_

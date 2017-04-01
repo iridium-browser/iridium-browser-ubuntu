@@ -8,11 +8,14 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/web_preferences.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
 
@@ -57,15 +60,24 @@ OffscreenTab* OffscreenTabsOwner::OpenNewTab(
   if (tabs_.size() >= kMaxOffscreenTabsPerExtension)
     return nullptr;  // Maximum number of offscreen tabs reached.
 
-  tabs_.push_back(new OffscreenTab(this));
+  // OffscreenTab cannot be created with MakeUnique<OffscreenTab> since the
+  // constructor is protected. So create it separately, and then move it to
+  // |tabs_| below.
+  std::unique_ptr<OffscreenTab> offscreen_tab(new OffscreenTab(this));
+  tabs_.push_back(std::move(offscreen_tab));
   tabs_.back()->Start(start_url, initial_size, optional_presentation_id);
-  return tabs_.back();
+  return tabs_.back().get();
 }
 
 void OffscreenTabsOwner::DestroyTab(OffscreenTab* tab) {
-  const auto it = std::find(tabs_.begin(), tabs_.end(), tab);
-  if (it != tabs_.end())
-    tabs_.erase(it);
+  for (std::vector<std::unique_ptr<OffscreenTab>>::iterator iter =
+           tabs_.begin();
+       iter != tabs_.end(); ++iter) {
+    if (iter->get() == tab) {
+      tabs_.erase(iter);
+      break;
+    }
+  }
 }
 
 OffscreenTab::OffscreenTab(OffscreenTabsOwner* owner)
@@ -110,6 +122,13 @@ void OffscreenTab::Start(const GURL& start_url,
   if (!optional_presentation_id.empty()) {
     NOTIMPLEMENTED()
         << "Register with PresentationRouter, id=" << optional_presentation_id;
+
+    if (auto* render_view_host =
+            offscreen_tab_web_contents_->GetRenderViewHost()) {
+      auto web_prefs = render_view_host->GetWebkitPreferences();
+      web_prefs.presentation_receiver = true;
+      render_view_host->UpdateWebkitPreferences(web_prefs);
+    }
   }
 
   // Navigate to the initial URL.
@@ -196,16 +215,18 @@ bool OffscreenTab::CanDragEnter(
 }
 
 bool OffscreenTab::ShouldCreateWebContents(
-    WebContents* contents,
+    content::WebContents* web_contents,
+    content::SiteInstance* source_site_instance,
     int32_t route_id,
     int32_t main_frame_route_id,
     int32_t main_frame_widget_route_id,
     WindowContainerType window_container_type,
+    const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
     const std::string& partition_id,
     content::SessionStorageNamespace* session_storage_namespace) {
-  DCHECK_EQ(offscreen_tab_web_contents_.get(), contents);
+  DCHECK_EQ(offscreen_tab_web_contents_.get(), web_contents);
   // Disallow creating separate WebContentses.  The WebContents implementation
   // uses this to spawn new windows/tabs, which is also not allowed for
   // offscreen tabs.

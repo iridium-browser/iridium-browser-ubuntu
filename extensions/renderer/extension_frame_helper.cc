@@ -4,9 +4,12 @@
 
 #include "extensions/renderer/extension_frame_helper.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
+#include "base/timer/elapsed_timer.h"
 #include "content/public/renderer/render_frame.h"
 #include "extensions/common/api/messaging/message.h"
+#include "extensions/common/api/messaging/port_id.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_handlers/background_info.h"
@@ -79,6 +82,12 @@ void RunCallbacksWhileFrameIsValid(
       return;  // Frame and ExtensionFrameHelper invalidated by callback.
   }
 }
+
+enum class PortType {
+  EXTENSION,
+  TAB,
+  NATIVE_APP,
+};
 
 }  // namespace
 
@@ -180,12 +189,35 @@ void ExtensionFrameHelper::DidMatchCSS(
       stopped_matching_selectors);
 }
 
+void ExtensionFrameHelper::DidStartProvisionalLoad() {
+  if (!delayed_main_world_script_initialization_)
+    return;
+
+  delayed_main_world_script_initialization_ = false;
+  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
+  v8::Local<v8::Context> context =
+      render_frame()->GetWebFrame()->mainWorldScriptContext();
+  v8::Context::Scope context_scope(context);
+  extension_dispatcher_->DidCreateScriptContext(render_frame()->GetWebFrame(),
+                                                context, 0);
+  // TODO(devlin): Add constants for main world id, no extension group.
+}
+
 void ExtensionFrameHelper::DidCreateScriptContext(
     v8::Local<v8::Context> context,
-    int extension_group,
     int world_id) {
-  extension_dispatcher_->DidCreateScriptContext(
-      render_frame()->GetWebFrame(), context, extension_group, world_id);
+  if (context == render_frame()->GetWebFrame()->mainWorldScriptContext() &&
+      render_frame()->IsBrowserSideNavigationPending()) {
+    DCHECK_EQ(0, world_id);
+    DCHECK(!delayed_main_world_script_initialization_);
+    // Defer initializing the extensions script context now because it depends
+    // on having the URL of the provisional load which isn't available at this
+    // point with PlzNavigate.
+    delayed_main_world_script_initialization_ = true;
+  } else {
+    extension_dispatcher_->DidCreateScriptContext(render_frame()->GetWebFrame(),
+                                                  context, world_id);
+  }
 }
 
 void ExtensionFrameHelper::WillReleaseScriptContext(
@@ -217,13 +249,13 @@ bool ExtensionFrameHelper::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void ExtensionFrameHelper::OnExtensionValidateMessagePort(int port_id) {
+void ExtensionFrameHelper::OnExtensionValidateMessagePort(const PortId& id) {
   MessagingBindings::ValidateMessagePort(
-      extension_dispatcher_->script_context_set(), port_id, render_frame());
+      extension_dispatcher_->script_context_set(), id, render_frame());
 }
 
 void ExtensionFrameHelper::OnExtensionDispatchOnConnect(
-    int target_port_id,
+    const PortId& target_port_id,
     const std::string& channel_name,
     const ExtensionMsg_TabConnectionInfo& source,
     const ExtensionMsg_ExternalConnectionInfo& info,
@@ -238,8 +270,7 @@ void ExtensionFrameHelper::OnExtensionDispatchOnConnect(
       render_frame());
 }
 
-void ExtensionFrameHelper::OnExtensionDeliverMessage(int target_id,
-                                                     int source_tab_id,
+void ExtensionFrameHelper::OnExtensionDeliverMessage(const PortId& target_id,
                                                      const Message& message) {
   MessagingBindings::DeliverMessage(
       extension_dispatcher_->script_context_set(), target_id, message,
@@ -247,10 +278,10 @@ void ExtensionFrameHelper::OnExtensionDeliverMessage(int target_id,
 }
 
 void ExtensionFrameHelper::OnExtensionDispatchOnDisconnect(
-    int port_id,
+    const PortId& id,
     const std::string& error_message) {
   MessagingBindings::DispatchOnDisconnect(
-      extension_dispatcher_->script_context_set(), port_id, error_message,
+      extension_dispatcher_->script_context_set(), id, error_message,
       render_frame());
 }
 
@@ -284,11 +315,9 @@ void ExtensionFrameHelper::OnExtensionMessageInvoke(
     const std::string& extension_id,
     const std::string& module_name,
     const std::string& function_name,
-    const base::ListValue& args,
-    bool user_gesture) {
-  extension_dispatcher_->InvokeModuleSystemMethod(render_frame(), extension_id,
-                                                  module_name, function_name,
-                                                  args, user_gesture);
+    const base::ListValue& args) {
+  extension_dispatcher_->InvokeModuleSystemMethod(
+      render_frame(), extension_id, module_name, function_name, args);
 }
 
 void ExtensionFrameHelper::OnDestruct() {

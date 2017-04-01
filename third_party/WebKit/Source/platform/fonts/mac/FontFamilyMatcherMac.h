@@ -29,15 +29,18 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/fonts/FontTraits.h"
+#include "wtf/Forward.h"
 #include <AppKit/NSFontManager.h>
 
 namespace blink {
 
-PLATFORM_EXPORT NSFont* MatchNSFontFamily(NSString* desiredFamily, NSFontTraitMask desiredTraits,
-    FontWeight desiredWeight, float size);
+PLATFORM_EXPORT NSFont* MatchNSFontFamily(const AtomicString& desiredFamily,
+                                          NSFontTraitMask desiredTraits,
+                                          FontWeight desiredWeight,
+                                          float size);
 
 // Converts a blink::FontWeight to an AppKit font weight.
 int toAppKitFontWeight(FontWeight);
 }
 
-#endif // FontFamilyMatcherMac_h
+#endif  // FontFamilyMatcherMac_h

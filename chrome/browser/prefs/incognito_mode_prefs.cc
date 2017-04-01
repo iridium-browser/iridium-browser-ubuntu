@@ -15,7 +15,6 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -31,9 +30,9 @@
 #include "base/win/windows_version.h"
 #endif  // OS_WIN
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 #include "chrome/browser/android/chrome_application.h"
-#endif  // BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // defined(OS_ANDROID)
 
 using content::BrowserThread;
 
@@ -75,7 +74,6 @@ class PlatformParentalControlsValue {
   static bool IsParentalControlActivityLoggingOn() {
     // Since we can potentially block, make sure the thread is okay with this.
     base::ThreadRestrictions::AssertIOAllowed();
-    base::ThreadRestrictions::AssertWaitAllowed();
 
     // Query this info on Windows 7 and above.
     if (base::win::GetVersion() < base::win::VERSION_WIN7)
@@ -142,17 +140,7 @@ bool IncognitoModePrefs::IntToAvailability(int in_value,
 // static
 IncognitoModePrefs::Availability IncognitoModePrefs::GetAvailability(
     const PrefService* pref_service) {
-  DCHECK(pref_service);
-  int pref_value = pref_service->GetInteger(prefs::kIncognitoModeAvailability);
-  Availability result = IncognitoModePrefs::ENABLED;
-  bool valid = IntToAvailability(pref_value, &result);
-  DCHECK(valid);
-  if (ArePlatformParentalControlsEnabled()) {
-    if (result == IncognitoModePrefs::FORCED)
-      LOG(ERROR) << "Ignoring FORCED incognito. Parental control logging on";
-    return IncognitoModePrefs::DISABLED;
-  }
-  return result;
+  return GetAvailabilityInternal(pref_service, CHECK_PARENTAL_CONTROLS);
 }
 
 // static
@@ -172,10 +160,17 @@ void IncognitoModePrefs::RegisterProfilePrefs(
 bool IncognitoModePrefs::ShouldLaunchIncognito(
     const base::CommandLine& command_line,
     const PrefService* prefs) {
-  Availability incognito_avail = GetAvailability(prefs);
-  return incognito_avail != IncognitoModePrefs::DISABLED &&
-         (command_line.HasSwitch(switches::kIncognito) ||
-          incognito_avail == IncognitoModePrefs::FORCED);
+  // Note: This code only checks parental controls if the user requested
+  // to launch in incognito mode or if it was forced via prefs. This way,
+  // the parental controls check (which can be quite slow) can be avoided
+  // most of the time.
+  const bool should_use_incognito =
+      command_line.HasSwitch(switches::kIncognito) ||
+      GetAvailabilityInternal(prefs, DONT_CHECK_PARENTAL_CONTROLS) ==
+          IncognitoModePrefs::FORCED;
+  return should_use_incognito &&
+         GetAvailabilityInternal(prefs, CHECK_PARENTAL_CONTROLS) !=
+             IncognitoModePrefs::DISABLED;
 }
 
 // static
@@ -213,10 +208,27 @@ void IncognitoModePrefs::InitializePlatformParentalControls() {
 bool IncognitoModePrefs::ArePlatformParentalControlsEnabled() {
 #if defined(OS_WIN)
   return PlatformParentalControlsValue::GetInstance()->is_enabled();
-#elif BUILDFLAG(ANDROID_JAVA_UI)
+#elif defined(OS_ANDROID)
   return chrome::android::ChromeApplication::AreParentalControlsEnabled();
 #else
   return false;
 #endif
 }
 
+// static
+IncognitoModePrefs::Availability IncognitoModePrefs::GetAvailabilityInternal(
+    const PrefService* pref_service,
+    GetAvailabilityMode mode) {
+  DCHECK(pref_service);
+  int pref_value = pref_service->GetInteger(prefs::kIncognitoModeAvailability);
+  Availability result = IncognitoModePrefs::ENABLED;
+  bool valid = IntToAvailability(pref_value, &result);
+  DCHECK(valid);
+  if (result != IncognitoModePrefs::DISABLED &&
+      mode == CHECK_PARENTAL_CONTROLS && ArePlatformParentalControlsEnabled()) {
+    if (result == IncognitoModePrefs::FORCED)
+      LOG(ERROR) << "Ignoring FORCED incognito. Parental control logging on";
+    return IncognitoModePrefs::DISABLED;
+  }
+  return result;
+}

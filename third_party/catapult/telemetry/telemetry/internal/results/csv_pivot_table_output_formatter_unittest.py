@@ -43,14 +43,13 @@ class CsvPivotTableOutputFormatterTest(unittest.TestCase):
         csv_pivot_table_output_formatter.CsvPivotTableOutputFormatter(
             self._output, trace_tag))
 
-  def SimulateBenchmarkRun(self, dict_of_values):
+  def SimulateBenchmarkRun(self, list_of_page_and_values):
     """Simulate one run of a benchmark, using the supplied values.
 
     Args:
-      dict_of_values: dictionary w/ Page instance as key, a list of Values
-          as value.
+      list_of_pages_and_values: a list of tuple (page, list of values)
     """
-    for page, values in dict_of_values.iteritems():
+    for page, values in list_of_page_and_values:
       self._results.WillRunPage(page)
       for v in values:
         v.page = page
@@ -63,10 +62,10 @@ class CsvPivotTableOutputFormatterTest(unittest.TestCase):
 
   def testSimple(self):
     # Test a simple benchmark with only one value:
-    self.SimulateBenchmarkRun({
-        self._story_set[0]: [scalar.ScalarValue(
+    self.SimulateBenchmarkRun([
+        (self._story_set[0], [scalar.ScalarValue(
             None, 'foo', 'seconds', 3,
-            improvement_direction=improvement_direction.DOWN)]})
+            improvement_direction=improvement_direction.DOWN)])])
     expected = self._LINE_SEPARATOR.join([
         'story_set,page,name,value,units,run_index',
         'story_set,http://www.foo.com/,foo,3,seconds,0',
@@ -74,17 +73,18 @@ class CsvPivotTableOutputFormatterTest(unittest.TestCase):
 
     self.assertEqual(expected, self.Format())
 
-  @mock.patch('catapult_base.cloud_storage.Insert')
+  @mock.patch('py_utils.cloud_storage.Insert')
   def testMultiplePagesAndValues(self, cs_insert_mock):
     cs_insert_mock.return_value = 'https://cloud_storage_url/foo'
-    trace_value = trace.TraceValue(None, trace_data.TraceData('{"events": 0}'))
+    trace_value = trace.TraceValue(
+        None, trace_data.CreateTraceDataFromRawData('{"traceEvents": []}'))
     trace_value.UploadToCloud(bucket='foo')
-    self.SimulateBenchmarkRun({
-        self._story_set[0]: [
+    self.SimulateBenchmarkRun([
+        (self._story_set[0], [
             scalar.ScalarValue(
               None, 'foo', 'seconds', 4,
-              improvement_direction=improvement_direction.DOWN)],
-        self._story_set[1]: [
+              improvement_direction=improvement_direction.DOWN)]),
+        (self._story_set[1], [
             scalar.ScalarValue(
                 None, 'foo', 'seconds', 3.4,
                 improvement_direction=improvement_direction.DOWN),
@@ -94,7 +94,7 @@ class CsvPivotTableOutputFormatterTest(unittest.TestCase):
                 improvement_direction=improvement_direction.DOWN),
             scalar.ScalarValue(
                 None, 'baz', 'count', 5,
-                improvement_direction=improvement_direction.DOWN)]})
+                improvement_direction=improvement_direction.DOWN)])])
 
     # Parse CSV output into list of lists.
     csv_string = self.Format()
@@ -110,14 +110,14 @@ class CsvPivotTableOutputFormatterTest(unittest.TestCase):
 
   def testTraceTag(self):
     self.MakeFormatter(trace_tag='date,option')
-    self.SimulateBenchmarkRun({
-        self._story_set[0]: [
+    self.SimulateBenchmarkRun([
+        (self._story_set[0], [
             scalar.ScalarValue(
                 None, 'foo', 'seconds', 3,
                 improvement_direction=improvement_direction.DOWN),
             scalar.ScalarValue(
                 None, 'bar', 'tons', 5,
-                improvement_direction=improvement_direction.DOWN)]})
+                improvement_direction=improvement_direction.DOWN)])])
     output = self.Format().split(self._LINE_SEPARATOR)
 
     self.assertTrue(output[0].endswith(',trace_tag_0,trace_tag_1'))

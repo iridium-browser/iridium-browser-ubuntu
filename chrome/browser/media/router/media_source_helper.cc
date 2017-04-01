@@ -4,32 +4,48 @@
 
 #include "chrome/browser/media/router/media_source_helper.h"
 
+#include <stdio.h>
+
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/media/router/media_source.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "url/gurl.h"
 
 namespace media_router {
 
+namespace {
+
 // Prefixes used to format and detect various protocols' media source URNs.
 // See: https://www.ietf.org/rfc/rfc3406.txt
-const char kTabMediaUrnPrefix[] = "urn:x-org.chromium.media:source:tab";
-const char kDesktopMediaUrn[] = "urn:x-org.chromium.media:source:desktop";
-const char kCastUrnPrefix[] = "urn:x-com.google.cast:application:";
+constexpr char kTabMediaUrnFormat[] = "urn:x-org.chromium.media:source:tab:%d";
+constexpr char kDesktopMediaUrn[] = "urn:x-org.chromium.media:source:desktop";
+constexpr char kTabRemotingUrnFormat[] =
+    "urn:x-org.chromium.media:source:tab_content_remoting:%d";
+constexpr char kCastPresentationUrlDomain[] = "google.com";
+constexpr char kCastPresentationUrlPath[] = "/cast";
+
+// This value must be the same as |chrome.cast.AUTO_JOIN_PRESENTATION_ID| in the
+// component extension.
+constexpr char kAutoJoinPresentationId[] = "auto-join";
+
+}  // namespace
 
 MediaSource MediaSourceForTab(int tab_id) {
-  return MediaSource(base::StringPrintf("%s:%d", kTabMediaUrnPrefix, tab_id));
+  return MediaSource(base::StringPrintf(kTabMediaUrnFormat, tab_id));
+}
+
+MediaSource MediaSourceForTabContentRemoting(content::WebContents* contents) {
+  DCHECK(contents);
+  return MediaSource(base::StringPrintf(kTabRemotingUrnFormat,
+                                        SessionTabHelper::IdForTab(contents)));
 }
 
 MediaSource MediaSourceForDesktop() {
   return MediaSource(std::string(kDesktopMediaUrn));
 }
 
-MediaSource MediaSourceForCastApp(const std::string& app_id) {
-  return MediaSource(kCastUrnPrefix + app_id);
-}
-
-MediaSource MediaSourceForPresentationUrl(const std::string& presentation_url) {
+MediaSource MediaSourceForPresentationUrl(const GURL& presentation_url) {
   return MediaSource(presentation_url);
 }
 
@@ -39,8 +55,9 @@ bool IsDesktopMirroringMediaSource(const MediaSource& source) {
 }
 
 bool IsTabMirroringMediaSource(const MediaSource& source) {
-  return base::StartsWith(source.id(), kTabMediaUrnPrefix,
-                          base::CompareCase::SENSITIVE);
+  int tab_id;
+  return sscanf(source.id().c_str(), kTabMediaUrnFormat, &tab_id) == 1 &&
+      tab_id > 0;
 }
 
 bool IsMirroringMediaSource(const MediaSource& source) {
@@ -48,23 +65,36 @@ bool IsMirroringMediaSource(const MediaSource& source) {
          IsTabMirroringMediaSource(source);
 }
 
+bool CanConnectToMediaSource(const MediaSource& source) {
+  // Compare host, port, scheme, and path prefix for source.url().
+  return source.url().SchemeIs(url::kHttpsScheme) &&
+         source.url().DomainIs(kCastPresentationUrlDomain) &&
+         source.url().has_path() &&
+         source.url().path() == kCastPresentationUrlPath;
+}
+
+int TabIdFromMediaSource(const MediaSource& source) {
+  int tab_id;
+  if (sscanf(source.id().c_str(), kTabMediaUrnFormat, &tab_id) == 1)
+    return tab_id;
+  else if (sscanf(source.id().c_str(), kTabRemotingUrnFormat, &tab_id) == 1)
+    return tab_id;
+  else
+    return -1;
+}
+
 bool IsValidMediaSource(const MediaSource& source) {
-  if (IsMirroringMediaSource(source) ||
-      base::StartsWith(source.id(), kCastUrnPrefix,
-                       base::CompareCase::SENSITIVE)) {
-    return true;
-  }
-  GURL url(source.id());
+  return TabIdFromMediaSource(source) > 0 ||
+         IsDesktopMirroringMediaSource(source) ||
+         IsValidPresentationUrl(GURL(source.id()));
+}
+
+bool IsValidPresentationUrl(const GURL& url) {
   return url.is_valid() && url.SchemeIsHTTPOrHTTPS();
 }
 
-std::string PresentationUrlFromMediaSource(const MediaSource& source) {
-  return IsValidPresentationUrl(source.id()) ? source.id() : "";
-}
-
-bool IsValidPresentationUrl(const std::string& url) {
-  GURL gurl(url);
-  return gurl.is_valid() && gurl.SchemeIsHTTPOrHTTPS();
+bool IsAutoJoinPresentationId(const std::string& presentation_id) {
+  return presentation_id == kAutoJoinPresentationId;
 }
 
 }  // namespace media_router

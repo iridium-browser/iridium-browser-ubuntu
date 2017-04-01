@@ -7,6 +7,7 @@
 #include <string>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "components/crx_file/id_util.h"
 #include "components/policy/core/common/configuration_policy_provider.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
@@ -62,7 +63,7 @@ void ExtensionManagementPrefUpdaterBase::
     ClearInstallationModesForIndividualExtensions() {
   for (base::DictionaryValue::Iterator it(*pref_); !it.IsAtEnd();
        it.Advance()) {
-    DCHECK(it.value().IsType(base::Value::TYPE_DICTIONARY));
+    DCHECK(it.value().IsType(base::Value::Type::DICTIONARY));
     if (it.key() != schema::kWildcard) {
       DCHECK(crx_file::id_util::IdIsValid(it.key()));
       pref_->Remove(make_path(it.key(), schema::kInstallationMode), nullptr);
@@ -232,7 +233,8 @@ void ExtensionManagementPrefUpdaterBase::AddStringToList(
     list_value = new base::ListValue();
     pref_->Set(path, list_value);
   }
-  CHECK(list_value->AppendIfNotPresent(new base::StringValue(str)));
+  CHECK(
+      list_value->AppendIfNotPresent(base::MakeUnique<base::StringValue>(str)));
 }
 
 void ExtensionManagementPrefUpdaterBase::RemoveStringFromList(

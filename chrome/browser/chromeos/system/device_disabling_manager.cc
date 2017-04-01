@@ -12,8 +12,8 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
-#include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/policy/server_backed_device_state.h"
+#include "chrome/browser/chromeos/settings/install_attributes.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/settings/cros_settings_names.h"
@@ -83,9 +83,8 @@ void DeviceDisablingManager::CacheDisabledMessageAndNotify(
     return;
 
   disabled_message_ = disabled_message;
-  FOR_EACH_OBSERVER(Observer,
-                    observers_,
-                    OnDisabledMessageChanged(disabled_message_));
+  for (auto& observer : observers_)
+    observer.OnDisabledMessageChanged(disabled_message_);
 }
 
 void DeviceDisablingManager::CheckWhetherDeviceDisabledDuringOOBE(

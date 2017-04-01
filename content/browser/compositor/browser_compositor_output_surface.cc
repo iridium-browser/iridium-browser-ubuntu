@@ -15,66 +15,39 @@
 #include "cc/scheduler/begin_frame_source.h"
 #include "components/display_compositor/compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/reflector_impl.h"
-#include "content/common/gpu/client/context_provider_command_buffer.h"
+#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
 
 namespace content {
 
 BrowserCompositorOutputSurface::BrowserCompositorOutputSurface(
     scoped_refptr<cc::ContextProvider> context_provider,
-    scoped_refptr<ui::CompositorVSyncManager> vsync_manager,
-    cc::SyntheticBeginFrameSource* begin_frame_source,
+    const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
     std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
         overlay_candidate_validator)
-    : OutputSurface(std::move(context_provider), nullptr, nullptr),
-      vsync_manager_(std::move(vsync_manager)),
-      synthetic_begin_frame_source_(begin_frame_source),
+    : OutputSurface(std::move(context_provider)),
+      update_vsync_parameters_callback_(update_vsync_parameters_callback),
       reflector_(nullptr) {
   overlay_candidate_validator_ = std::move(overlay_candidate_validator);
-  Initialize();
 }
 
 BrowserCompositorOutputSurface::BrowserCompositorOutputSurface(
     std::unique_ptr<cc::SoftwareOutputDevice> software_device,
-    const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
-    cc::SyntheticBeginFrameSource* begin_frame_source)
-    : OutputSurface(nullptr, nullptr, std::move(software_device)),
-      vsync_manager_(vsync_manager),
-      synthetic_begin_frame_source_(begin_frame_source),
-      reflector_(nullptr) {
-  Initialize();
-}
+    const UpdateVSyncParametersCallback& update_vsync_parameters_callback)
+    : OutputSurface(std::move(software_device)),
+      update_vsync_parameters_callback_(update_vsync_parameters_callback),
+      reflector_(nullptr) {}
 
 BrowserCompositorOutputSurface::BrowserCompositorOutputSurface(
     const scoped_refptr<cc::VulkanContextProvider>& vulkan_context_provider,
-    const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
-    cc::SyntheticBeginFrameSource* begin_frame_source)
+    const UpdateVSyncParametersCallback& update_vsync_parameters_callback)
     : OutputSurface(std::move(vulkan_context_provider)),
-      vsync_manager_(vsync_manager),
-      synthetic_begin_frame_source_(begin_frame_source),
-      reflector_(nullptr) {
-  Initialize();
-}
+      update_vsync_parameters_callback_(update_vsync_parameters_callback),
+      reflector_(nullptr) {}
 
 BrowserCompositorOutputSurface::~BrowserCompositorOutputSurface() {
   if (reflector_)
     reflector_->DetachFromOutputSurface();
   DCHECK(!reflector_);
-}
-
-void BrowserCompositorOutputSurface::Initialize() {
-  capabilities_.adjust_deadline_for_parent = false;
-}
-
-void BrowserCompositorOutputSurface::OnUpdateVSyncParametersFromGpu(
-    base::TimeTicks timebase,
-    base::TimeDelta interval) {
-  DCHECK(HasClient());
-  if (interval.is_zero()) {
-    // TODO(brianderson): We should not be receiving 0 intervals.
-    interval = cc::BeginFrameArgs::DefaultInterval();
-  }
-  synthetic_begin_frame_source_->OnUpdateVSyncParameters(timebase, interval);
-  vsync_manager_->UpdateVSyncParameters(timebase, interval);
 }
 
 void BrowserCompositorOutputSurface::SetReflector(ReflectorImpl* reflector) {
@@ -95,5 +68,11 @@ cc::OverlayCandidateValidator*
 BrowserCompositorOutputSurface::GetOverlayCandidateValidator() const {
   return overlay_candidate_validator_.get();
 }
+
+bool BrowserCompositorOutputSurface::HasExternalStencilTest() const {
+  return false;
+}
+
+void BrowserCompositorOutputSurface::ApplyExternalStencil() {}
 
 }  // namespace content

@@ -6,15 +6,15 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/values.h"
-#include "components/sync/core/base_transaction.h"
-#include "components/sync/core/user_share.h"
-#include "components/sync/engine/cycle/sync_cycle_snapshot.h"
+#include "components/sync/driver/data_type_controller.h"
+#include "components/sync/syncable/base_transaction.h"
+#include "components/sync/syncable/user_share.h"
 
-namespace sync_driver {
+namespace syncer {
 
 FakeSyncService::FakeSyncService()
     : error_(GoogleServiceAuthError::NONE),
-      user_share_(base::MakeUnique<syncer::UserShare>()) {}
+      user_share_(base::MakeUnique<UserShare>()) {}
 
 FakeSyncService::~FakeSyncService() {}
 
@@ -30,10 +30,14 @@ bool FakeSyncService::IsSyncActive() const {
   return false;
 }
 
-void FakeSyncService::TriggerRefresh(const syncer::ModelTypeSet& types) {}
+bool FakeSyncService::IsLocalSyncEnabled() const {
+  return false;
+}
 
-syncer::ModelTypeSet FakeSyncService::GetActiveDataTypes() const {
-  return syncer::ModelTypeSet();
+void FakeSyncService::TriggerRefresh(const ModelTypeSet& types) {}
+
+ModelTypeSet FakeSyncService::GetActiveDataTypes() const {
+  return ModelTypeSet();
 }
 
 SyncClient* FakeSyncService::GetSyncClient() const {
@@ -52,19 +56,18 @@ bool FakeSyncService::CanSyncStart() const {
   return false;
 }
 
-void FakeSyncService::OnDataTypeRequestsSyncStartup(syncer::ModelType type) {}
+void FakeSyncService::OnDataTypeRequestsSyncStartup(ModelType type) {}
 
-void FakeSyncService::RequestStop(
-    sync_driver::SyncService::SyncStopDataFate data_fate) {}
+void FakeSyncService::RequestStop(SyncService::SyncStopDataFate data_fate) {}
 
 void FakeSyncService::RequestStart() {}
 
-syncer::ModelTypeSet FakeSyncService::GetPreferredDataTypes() const {
-  return syncer::ModelTypeSet();
+ModelTypeSet FakeSyncService::GetPreferredDataTypes() const {
+  return ModelTypeSet();
 }
 
 void FakeSyncService::OnUserChoseDatatypes(bool sync_everything,
-                                           syncer::ModelTypeSet chosen_types) {}
+                                           ModelTypeSet chosen_types) {}
 
 void FakeSyncService::SetFirstSetupComplete() {}
 
@@ -93,11 +96,11 @@ bool FakeSyncService::HasUnrecoverableError() const {
   return false;
 }
 
-bool FakeSyncService::IsBackendInitialized() const {
+bool FakeSyncService::IsEngineInitialized() const {
   return false;
 }
 
-OpenTabsUIDelegate* FakeSyncService::GetOpenTabsUIDelegate() {
+sync_sessions::OpenTabsUIDelegate* FakeSyncService::GetOpenTabsUIDelegate() {
   return nullptr;
 }
 
@@ -126,12 +129,11 @@ bool FakeSyncService::SetDecryptionPassphrase(const std::string& passphrase) {
   return false;
 }
 
-bool FakeSyncService::IsCryptographerReady(
-    const syncer::BaseTransaction* trans) const {
+bool FakeSyncService::IsCryptographerReady(const BaseTransaction* trans) const {
   return false;
 }
 
-syncer::UserShare* FakeSyncService::GetUserShare() const {
+UserShare* FakeSyncService::GetUserShare() const {
   return user_share_.get();
 }
 
@@ -140,16 +142,16 @@ LocalDeviceInfoProvider* FakeSyncService::GetLocalDeviceInfoProvider() const {
 }
 
 void FakeSyncService::RegisterDataTypeController(
-    sync_driver::DataTypeController* data_type_controller) {}
+    std::unique_ptr<DataTypeController> data_type_controller) {}
 
-void FakeSyncService::ReenableDatatype(syncer::ModelType type) {}
+void FakeSyncService::ReenableDatatype(ModelType type) {}
 
 bool FakeSyncService::IsPassphraseRequired() const {
   return false;
 }
 
-syncer::ModelTypeSet FakeSyncService::GetEncryptedDataTypes() const {
-  return syncer::ModelTypeSet();
+ModelTypeSet FakeSyncService::GetEncryptedDataTypes() const {
+  return ModelTypeSet();
 }
 
 FakeSyncService::SyncTokenStatus FakeSyncService::GetSyncTokenStatus() const {
@@ -160,7 +162,7 @@ std::string FakeSyncService::QuerySyncStatusSummaryString() {
   return "";
 }
 
-bool FakeSyncService::QueryDetailedSyncStatus(syncer::SyncStatus* result) {
+bool FakeSyncService::QueryDetailedSyncStatus(SyncStatus* result) {
   return false;
 }
 
@@ -168,16 +170,16 @@ base::string16 FakeSyncService::GetLastSyncedTimeString() const {
   return base::string16();
 }
 
-std::string FakeSyncService::GetBackendInitializationStateString() const {
+std::string FakeSyncService::GetEngineInitializationStateString() const {
   return std::string();
 }
 
-syncer::SyncCycleSnapshot FakeSyncService::GetLastCycleSnapshot() const {
-  return syncer::SyncCycleSnapshot();
+SyncCycleSnapshot FakeSyncService::GetLastCycleSnapshot() const {
+  return SyncCycleSnapshot();
 }
 
-base::Value* FakeSyncService::GetTypeStatusMap() const {
-  return new base::ListValue();
+std::unique_ptr<base::Value> FakeSyncService::GetTypeStatusMap() {
+  return base::MakeUnique<base::ListValue>();
 }
 
 const GURL& FakeSyncService::sync_service_url() const {
@@ -194,22 +196,22 @@ tracked_objects::Location FakeSyncService::unrecoverable_error_location()
 }
 
 void FakeSyncService::AddProtocolEventObserver(
-    browser_sync::ProtocolEventObserver* observer) {}
+    ProtocolEventObserver* observer) {}
 
 void FakeSyncService::RemoveProtocolEventObserver(
-    browser_sync::ProtocolEventObserver* observer) {}
+    ProtocolEventObserver* observer) {}
 
 void FakeSyncService::AddTypeDebugInfoObserver(
-    syncer::TypeDebugInfoObserver* observer) {}
+    TypeDebugInfoObserver* observer) {}
 
 void FakeSyncService::RemoveTypeDebugInfoObserver(
-    syncer::TypeDebugInfoObserver* observer) {}
+    TypeDebugInfoObserver* observer) {}
 
-base::WeakPtr<syncer::JsController> FakeSyncService::GetJsController() {
-  return base::WeakPtr<syncer::JsController>();
+base::WeakPtr<JsController> FakeSyncService::GetJsController() {
+  return base::WeakPtr<JsController>();
 }
 
 void FakeSyncService::GetAllNodes(
     const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback) {}
 
-}  // namespace sync_driver
+}  // namespace syncer

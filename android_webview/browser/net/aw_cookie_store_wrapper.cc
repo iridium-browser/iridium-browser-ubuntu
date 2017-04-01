@@ -7,7 +7,7 @@
 #include <string>
 
 #include "android_webview/browser/net/init_native_callback.h"
-#include "base/memory/ref_counted_delete_on_message_loop.h"
+#include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "url/gurl.h"
 
@@ -46,12 +46,12 @@ class SubscriptionWrapper {
   // underlying subscription to the real CookieStore, and posting notifications
   // back to |callback_list_|.
   class NestedSubscription
-      : public base::RefCountedDeleteOnMessageLoop<NestedSubscription> {
+      : public base::RefCountedDeleteOnSequence<NestedSubscription> {
    public:
     NestedSubscription(const GURL& url,
                        const std::string& name,
                        base::WeakPtr<SubscriptionWrapper> subscription_wrapper)
-        : base::RefCountedDeleteOnMessageLoop<NestedSubscription>(
+        : base::RefCountedDeleteOnSequence<NestedSubscription>(
               GetCookieStoreTaskRunner()),
           subscription_wrapper_(subscription_wrapper),
           client_task_runner_(base::ThreadTaskRunnerHandle::Get()) {
@@ -60,7 +60,7 @@ class SubscriptionWrapper {
     }
 
    private:
-    friend class base::RefCountedDeleteOnMessageLoop<NestedSubscription>;
+    friend class base::RefCountedDeleteOnSequence<NestedSubscription>;
     friend class base::DeleteHelper<NestedSubscription>;
 
     ~NestedSubscription() {}
@@ -70,10 +70,11 @@ class SubscriptionWrapper {
           url, name, base::Bind(&NestedSubscription::OnChanged, this));
     }
 
-    void OnChanged(const net::CanonicalCookie& cookie, bool removed) {
+    void OnChanged(const net::CanonicalCookie& cookie,
+                   net::CookieStore::ChangeCause cause) {
       client_task_runner_->PostTask(
           FROM_HERE, base::Bind(&SubscriptionWrapper::OnChanged,
-                                subscription_wrapper_, cookie, removed));
+                                subscription_wrapper_, cookie, cause));
     }
 
     base::WeakPtr<SubscriptionWrapper> subscription_wrapper_;
@@ -84,8 +85,9 @@ class SubscriptionWrapper {
     DISALLOW_COPY_AND_ASSIGN(NestedSubscription);
   };
 
-  void OnChanged(const net::CanonicalCookie& cookie, bool removed) {
-    callback_list_.Notify(cookie, removed);
+  void OnChanged(const net::CanonicalCookie& cookie,
+                 net::CookieStore::ChangeCause cause) {
+    callback_list_.Notify(cookie, cause);
   }
 
   // The "list" only had one entry, so can just clean up now.

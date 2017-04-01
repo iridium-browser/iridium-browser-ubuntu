@@ -33,27 +33,30 @@
 
 namespace blink {
 
-class ExecutionContext;
+class ScriptState;
 
-class MODULES_EXPORT SpeechGrammarList final : public GarbageCollected<SpeechGrammarList>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static SpeechGrammarList* create();
+class MODULES_EXPORT SpeechGrammarList final
+    : public GarbageCollected<SpeechGrammarList>,
+      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    unsigned length() const { return m_grammars.size(); }
-    SpeechGrammar* item(unsigned) const;
+ public:
+  static SpeechGrammarList* create();
 
-    void addFromUri(ExecutionContext*, const String& src, double weight = 1.0);
-    void addFromString(const String&, double weight = 1.0);
+  unsigned length() const { return m_grammars.size(); }
+  SpeechGrammar* item(unsigned) const;
 
-    DECLARE_TRACE();
+  void addFromUri(ScriptState*, const String& src, double weight = 1.0);
+  void addFromString(const String&, double weight = 1.0);
 
-private:
-    SpeechGrammarList();
+  DECLARE_TRACE();
 
-    HeapVector<Member<SpeechGrammar>> m_grammars;
+ private:
+  SpeechGrammarList();
+
+  HeapVector<Member<SpeechGrammar>> m_grammars;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // SpeechGrammarList_h
+#endif  // SpeechGrammarList_h

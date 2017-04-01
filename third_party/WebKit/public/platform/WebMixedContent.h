@@ -31,25 +31,19 @@
 #ifndef WebMixedContent_h
 #define WebMixedContent_h
 
+#include "public/platform/WebMixedContentContextType.h"
 #include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
-// Types and helper functions related to mixed content checks.
+// Helper functions related to mixed content checks.
 class WebMixedContent {
-public:
-    enum class ContextType {
-        NotMixedContent,
-        Blockable,
-        OptionallyBlockable,
-        ShouldBeBlockable,
-    };
-
-    BLINK_PLATFORM_EXPORT static ContextType contextTypeFromRequestContext(WebURLRequest::RequestContext, bool strictMixedContentCheckingForPlugin);
-
-    BLINK_PLATFORM_EXPORT static const char* requestContextName(WebURLRequest::RequestContext);
+ public:
+  BLINK_PLATFORM_EXPORT static WebMixedContentContextType
+  contextTypeFromRequestContext(WebURLRequest::RequestContext,
+                                bool strictMixedContentCheckingForPlugin);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebMixedContent_h
+#endif  // WebMixedContent_h

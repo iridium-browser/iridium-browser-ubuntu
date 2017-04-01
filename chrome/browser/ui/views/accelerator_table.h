@@ -15,8 +15,6 @@ class Accelerator;
 }
 
 // This contains the list of accelerators for the Aura implementation.
-namespace chrome {
-
 struct AcceleratorMapping {
   ui::KeyboardCode keycode;
   int modifiers;
@@ -41,6 +39,8 @@ CHROME_VIEWS_EXPORT bool GetStandardAcceleratorForCommandId(
     int command_id,
     ui::Accelerator* accelerator);
 
-}  // namespace chrome
+// Returns true if the command identified by |command_id| should be executed
+// repeatedly while its accelerator keys are held down.
+CHROME_VIEWS_EXPORT bool IsCommandRepeatable(int command_id);
 
 #endif  // CHROME_BROWSER_UI_VIEWS_ACCELERATOR_TABLE_H_

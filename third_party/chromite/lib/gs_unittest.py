@@ -13,7 +13,7 @@ import mock
 import os
 import string
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
@@ -122,6 +122,60 @@ class CanonicalizeURLTest(cros_test_lib.TestCase):
          'https://storage.cloud.google.com/some/file/t.gz'),
         ('gs://releases/some/'
          'https://storage.cloud.google.com/some/file/t.gz'))
+
+
+class GsUrlToHttpTest(cros_test_lib.TestCase):
+  """Tests for the CanonicalizeURL function."""
+
+  def setUp(self):
+    self.testUrls = [
+        'gs://releases',
+        'gs://releases/',
+        'gs://releases/path',
+        'gs://releases/path/',
+        'gs://releases/path/file',
+    ]
+
+  def testPublicUrls(self):
+    """Test public https URLs."""
+    expected = [
+        'https://storage.googleapis.com/releases',
+        'https://storage.googleapis.com/releases/',
+        'https://storage.googleapis.com/releases/path',
+        'https://storage.googleapis.com/releases/path/',
+        'https://storage.googleapis.com/releases/path/file',
+    ]
+
+    for gs_url, http_url in zip(self.testUrls, expected):
+      self.assertEqual(gs.GsUrlToHttp(gs_url), http_url)
+      self.assertEqual(gs.GsUrlToHttp(gs_url, directory=True), http_url)
+
+  def testPrivateUrls(self):
+    """Test public https URLs."""
+    expected = [
+        'https://storage.cloud.google.com/releases',
+        'https://pantheon.corp.google.com/storage/browser/releases/',
+        'https://storage.cloud.google.com/releases/path',
+        'https://pantheon.corp.google.com/storage/browser/releases/path/',
+        'https://storage.cloud.google.com/releases/path/file',
+    ]
+
+    for gs_url, http_url in zip(self.testUrls, expected):
+      self.assertEqual(gs.GsUrlToHttp(gs_url, public=False), http_url)
+
+  def testPrivateDirectoryUrls(self):
+    """Test public https URLs."""
+    expected = [
+        'https://pantheon.corp.google.com/storage/browser/releases',
+        'https://pantheon.corp.google.com/storage/browser/releases/',
+        'https://pantheon.corp.google.com/storage/browser/releases/path',
+        'https://pantheon.corp.google.com/storage/browser/releases/path/',
+        'https://pantheon.corp.google.com/storage/browser/releases/path/file',
+    ]
+
+    for gs_url, http_url in zip(self.testUrls, expected):
+      self.assertEqual(
+          gs.GsUrlToHttp(gs_url, public=False, directory=True), http_url)
 
 
 class VersionTest(AbstractGSContextTest):
@@ -429,7 +483,7 @@ class CopyTest(AbstractGSContextTest, cros_test_lib.TempDirTestCase):
         'Copying file:///dev/null [Content-Type=application/octet-stream]...\n'
         'Uploading   %(uri)s:               0 B    \r'
         'Uploading   %(uri)s:               0 B    \r'
-        'Created: %(uri)s#%(gen)s'
+        'Created: %(uri)s#%(gen)s\n'
     ) % {'uri': self.GIVEN_REMOTE, 'gen': exp_gen}
     self.gs_mock.AddCmdResult(partial_mock.In('cp'), returncode=0, error=error)
     gen = self.Copy()
@@ -929,9 +983,62 @@ class GSRetryFilterTest(cros_test_lib.TestCase):
     e = self._getException(['gsutil', 'rm', 'gs://foo/bar/monkey'], error)
     self.assertEqual(self.ctx._RetryFilter(e), True)
 
+  def testRetrySSLEOF(self):
+    """Verify retry behavior when EOF occurs in violation of SSL protocol."""
+    error = ('ssl.SSLError: [Errno 8] _ssl.c:510: EOF occurred in violation of'
+             ' protocol')
+    e = self._getException(['gsutil', 'cat', 'gs://totally/legit/uri'], error)
+    self.assertEqual(self.ctx._RetryFilter(e), True)
+
+  def testRetrySSLTimeout(self):
+    """Verify retry behavior when read operation timed out."""
+    error = 'ssl.SSLError: (\'The read operation timed out\',)'
+    e = self._getException(['gsutil', 'cp', self.REMOTE_PATH, self.LOCAL_PATH],
+                           error)
+    self.assertEqual(self.ctx._RetryFilter(e), True)
+
+  def testRetrySSLHandshakeTimeout(self):
+    """Verify retry behavior when handshake operation timed out."""
+    error = 'ssl.SSLError: _ssl.c:495: The handshake operation timed out'
+    e = self._getException(['gsutil', 'cp', self.REMOTE_PATH, self.LOCAL_PATH],
+                           error)
+    self.assertEqual(self.ctx._RetryFilter(e), True)
 
 class GSContextTest(AbstractGSContextTest):
   """Tests for GSContext()"""
+
+  URL = 'gs://chromeos-image-archive/x86-mario-release/''R17-1413.0.0-a1-b1346'
+  FILE_NAME = 'chromeos_R17-1413.0.0-a1_x86-mario_full_dev.bin'
+  GS_PATH = 'gs://test/path/to/list'
+  DT = datetime.datetime(2000, 1, 2, 10, 10, 10)
+  DT_STR = DT.strftime(gs.DATETIME_FORMAT)
+  DETAILED_LS_OUTPUT_LINES = [
+      '%10d  %s  %s/mock_data' % (100, DT_STR, GS_PATH),
+      '%10d  %s  %s/mock_data' % (100, DT_STR, GS_PATH),
+      '%10d  %s  %s/%s' % (100, DT_STR, GS_PATH, FILE_NAME),
+      'TOTAL: 3 objects, XXXXX bytes (X.XX GB)',
+  ]
+
+  LIST_RESULT = [
+      gs.GSListResult(
+          content_length=100,
+          creation_time=DT,
+          url='%s/mock_data' % GS_PATH,
+          generation=None,
+          metageneration=None),
+      gs.GSListResult(
+          content_length=100,
+          creation_time=DT,
+          url='%s/mock_data' % GS_PATH,
+          generation=None,
+          metageneration=None),
+      gs.GSListResult(
+          content_length=100,
+          creation_time=DT,
+          url='%s/%s' % (GS_PATH, FILE_NAME),
+          generation=None,
+          metageneration=None),
+  ]
 
   def testTemporaryUrl(self):
     """Just verify the url helper generates valid URLs."""
@@ -1076,6 +1183,58 @@ class GSContextTest(AbstractGSContextTest):
     ctx.Copy('gs://abc/1', 'gs://abc/2', input='foo', parallel=True)
     self.assertFalse(any('-m' in cmd for cmd in self.gs_mock.raw_gs_cmds))
 
+  def testGetGsNamesWithWait(self):
+    """Test that we get the target artifact that is available."""
+    pattern = '*_full_*'
+
+    ctx = gs.GSContext()
+
+    # GSUtil ls gs://archive_url_prefix/.
+    self.gs_mock.SetDefaultCmdResult(
+        output='\n'.join(self.DETAILED_LS_OUTPUT_LINES))
+
+    # Timeout explicitly set to 0 to test that we always run at least once.
+    result = ctx.GetGsNamesWithWait(pattern, self.URL, period=1, timeout=0)
+    self.assertEqual([self.FILE_NAME], result)
+
+  def testGetGsNamesWithWaitWithDirectStat(self):
+    """We should directly stat an artifact whose name is fully spelled out."""
+    pattern = self.FILE_NAME
+
+    ctx = gs.GSContext()
+
+    exists = {'%s/%s' % (self.URL, self.FILE_NAME): True}
+    with mock.patch.object(ctx, 'Exists', side_effect=lambda p: exists[p]):
+      # Timeout explicitly set to 0 to test that we always run at least once.
+      result = ctx.GetGsNamesWithWait(pattern, self.URL, period=1, timeout=0)
+      self.assertEqual([self.FILE_NAME], result)
+
+  def testGetGsNamesWithWaitWithRetry(self):
+    """Test that we can poll until all target artifacts are available."""
+    pattern = '*_full_*'
+
+    ctx = gs.GSContext()
+
+    # GSUtil ls gs://archive_url_prefix/.
+    exists = [[], self.LIST_RESULT]
+    with mock.patch.object(ctx, 'List', side_effect=exists):
+      # Timeout explicitly set to 0 to test that we always run at least once.
+      result = ctx.GetGsNamesWithWait(pattern, self.URL, period=1, timeout=4)
+      self.assertEqual([self.FILE_NAME], result)
+
+  def testGetGsNamesWithWaitTimeout(self):
+    """Test that we can poll until all target artifacts are available."""
+    pattern = '*_full_*'
+
+    ctx = gs.GSContext()
+
+    # GSUtil ls gs://archive_url_prefix/.
+    self.gs_mock.SetDefaultCmdResult(output=[])
+
+    # Timeout explicitly set to 0 to test that we always run at least once.
+    result = ctx.GetGsNamesWithWait(pattern, self.URL, period=2, timeout=1)
+    self.assertEqual(None, result)
+
 
 class UnmockedGSContextTest(cros_test_lib.TempDirTestCase):
   """Tests for GSContext that go over the network."""
@@ -1089,6 +1248,44 @@ class UnmockedGSContextTest(cros_test_lib.TempDirTestCase):
       for i in xrange(1, 4):
         self.assertEqual(i, counter.Increment())
         self.assertEqual(i, counter.Get())
+
+  @cros_test_lib.NetworkTest()
+  def testGetGsNamesWithWait(self):
+    """Tests getting files from remote paths."""
+    file_name = 'chromeos_R17-1413.0.0-a1_x86-mario_full_dev.bin'
+    pattern = '*_full_*'
+
+    ctx = gs.GSContext()
+
+    with gs.TemporaryURL('testGetGsNamesWithWait') as url:
+      # The path shouldn't exist by default.
+      with self.assertRaises(gs.GSNoSuchKey):
+        ctx.GetGsNamesWithWait(pattern, url, period=2, timeout=1)
+
+      # Create files in bucket.
+      files = ['mock_data', file_name]
+      for f in files:
+        filename = os.path.join(self.tempdir, f)
+        osutils.WriteFile(filename, f * 10)
+        uri = os.path.join(url, f)
+        ctx.Copy(filename, uri)
+
+      # Use pattern to get google storage names.
+      self.assertEqual(
+          ctx.GetGsNamesWithWait(pattern, url, period=1, timeout=0),
+          [file_name])
+      # Use direct file name to get google storage names.
+      self.assertEqual(
+          ctx.GetGsNamesWithWait(file_name, url, period=1, timeout=0),
+          [file_name])
+
+      # Remove the matched file, verify that GetGsNamesWithWait returns None.
+      ctx.Remove(os.path.join(url, file_name), ignore_missing=True)
+
+      self.assertEqual(
+          ctx.GetGsNamesWithWait(pattern, url, period=1, timeout=3), None)
+      self.assertEqual(
+          ctx.GetGsNamesWithWait(file_name, url, period=1, timeout=3), None)
 
 
 class StatTest(AbstractGSContextTest):

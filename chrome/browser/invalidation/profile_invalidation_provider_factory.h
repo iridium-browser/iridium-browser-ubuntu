@@ -9,6 +9,8 @@
 #include "base/memory/singleton.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
+class Profile;
+
 namespace policy {
 class AffiliatedInvalidationServiceProviderImplTest;
 }
@@ -16,12 +18,6 @@ class AffiliatedInvalidationServiceProviderImplTest;
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
-
-namespace syncer {
-class Invalidator;
-}
-
-class Profile;
 
 namespace invalidation {
 

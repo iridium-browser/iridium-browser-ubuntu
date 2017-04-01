@@ -4,6 +4,9 @@
 
 #include "device/bluetooth/bluez/bluetooth_adapter_bluez.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -12,11 +15,13 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_device.h"
@@ -25,7 +30,6 @@
 #include "device/bluetooth/bluetooth_uuid.h"
 #include "device/bluetooth/bluez/bluetooth_adapter_profile_bluez.h"
 #include "device/bluetooth/bluez/bluetooth_advertisement_bluez.h"
-#include "device/bluetooth/bluez/bluetooth_audio_sink_bluez.h"
 #include "device/bluetooth/bluez/bluetooth_device_bluez.h"
 #include "device/bluetooth/bluez/bluetooth_gatt_service_bluez.h"
 #include "device/bluetooth/bluez/bluetooth_local_gatt_characteristic_bluez.h"
@@ -39,6 +43,7 @@
 #include "device/bluetooth/dbus/bluetooth_gatt_application_service_provider.h"
 #include "device/bluetooth/dbus/bluetooth_gatt_manager_client.h"
 #include "device/bluetooth/dbus/bluetooth_input_client.h"
+#include "device/bluetooth/dbus/bluetooth_le_advertising_manager_client.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -47,8 +52,8 @@
 #endif
 
 using device::BluetoothAdapter;
-using device::BluetoothAudioSink;
 using device::BluetoothDevice;
+using UUIDSet = device::BluetoothDevice::UUIDSet;
 using device::BluetoothDiscoveryFilter;
 using device::BluetoothSocket;
 using device::BluetoothUUID;
@@ -125,6 +130,24 @@ void OnRegisterationErrorCallback(
 
 void DoNothingOnError(
     device::BluetoothGattService::GattErrorCode /*error_code*/) {}
+void DoNothingOnAdvertisementError(
+    device::BluetoothAdvertisement::ErrorCode /*error_code*/) {}
+
+void SetIntervalErrorCallbackConnector(
+    const device::BluetoothAdapter::AdvertisementErrorCallback& error_callback,
+    const std::string& error_name,
+    const std::string& error_message) {
+  LOG(ERROR) << "Error while registering advertisement. error_name = "
+             << error_name << ", error_message = " << error_message;
+
+  device::BluetoothAdvertisement::ErrorCode code = device::
+      BluetoothAdvertisement::ErrorCode::INVALID_ADVERTISEMENT_ERROR_CODE;
+  if (error_name == bluetooth_advertising_manager::kErrorInvalidArguments) {
+    code = device::BluetoothAdvertisement::ErrorCode::
+        ERROR_INVALID_ADVERTISEMENT_INTERVAL;
+  }
+  error_callback.Run(code);
+}
 
 }  // namespace
 
@@ -166,6 +189,16 @@ void BluetoothAdapterBlueZ::Shutdown() {
   for (auto& it : profile_queues_)
     delete it.second;
   profile_queues_.clear();
+
+  // This may call unregister on advertisements that have already been
+  // unregistered but that's fine. The advertisement object keeps a track of
+  // the fact that it has been already unregistered and will call our empty
+  // error callback with an "Already unregistered" error, which we'll ignore.
+  for (auto& it : advertisements_) {
+    it->Unregister(base::Bind(&base::DoNothing),
+                   base::Bind(&DoNothingOnAdvertisementError));
+  }
+  advertisements_.clear();
 
   bluez::BluezDBusManager::Get()->GetBluetoothAdapterClient()->RemoveObserver(
       this);
@@ -379,6 +412,35 @@ bool BluetoothAdapterBlueZ::IsDiscovering() const {
   return properties->discovering.value();
 }
 
+std::unordered_map<BluetoothDevice*, UUIDSet>
+BluetoothAdapterBlueZ::RetrieveGattConnectedDevicesWithDiscoveryFilter(
+    const BluetoothDiscoveryFilter& discovery_filter) {
+  std::unordered_map<BluetoothDevice*, UUIDSet> connected_devices;
+
+  std::set<BluetoothUUID> filter_uuids;
+  discovery_filter.GetUUIDs(filter_uuids);
+
+  for (BluetoothDevice* device : GetDevices()) {
+    if (device->IsGattConnected() &&
+        (device->GetType() & device::BLUETOOTH_TRANSPORT_LE)) {
+      UUIDSet device_uuids = device->GetUUIDs();
+
+      UUIDSet intersection;
+      for (const BluetoothUUID& uuid : filter_uuids) {
+        if (base::ContainsKey(device_uuids, uuid)) {
+          intersection.insert(uuid);
+        }
+      }
+
+      if (filter_uuids.empty() || !intersection.empty()) {
+        connected_devices[device] = std::move(intersection);
+      }
+    }
+  }
+
+  return connected_devices;
+}
+
 BluetoothAdapterBlueZ::UUIDList BluetoothAdapterBlueZ::GetUUIDs() const {
   bluez::BluetoothAdapterClient::Properties* properties =
       bluez::BluezDBusManager::Get()
@@ -421,31 +483,33 @@ void BluetoothAdapterBlueZ::CreateL2capService(
                  base::Bind(callback, socket), error_callback);
 }
 
-void BluetoothAdapterBlueZ::RegisterAudioSink(
-    const BluetoothAudioSink::Options& options,
-    const device::BluetoothAdapter::AcquiredCallback& callback,
-    const BluetoothAudioSink::ErrorCallback& error_callback) {
-  VLOG(1) << "Registering audio sink";
-  if (!this->IsPresent()) {
-    error_callback.Run(BluetoothAudioSink::ERROR_INVALID_ADAPTER);
-    return;
-  }
-  scoped_refptr<BluetoothAudioSinkBlueZ> audio_sink(
-      new BluetoothAudioSinkBlueZ(this));
-  audio_sink->Register(options,
-                       base::Bind(&BluetoothAdapterBlueZ::OnRegisterAudioSink,
-                                  weak_ptr_factory_.GetWeakPtr(), callback,
-                                  error_callback, audio_sink),
-                       error_callback);
-}
-
 void BluetoothAdapterBlueZ::RegisterAdvertisement(
     std::unique_ptr<device::BluetoothAdvertisement::Data> advertisement_data,
     const CreateAdvertisementCallback& callback,
-    const CreateAdvertisementErrorCallback& error_callback) {
+    const AdvertisementErrorCallback& error_callback) {
   scoped_refptr<BluetoothAdvertisementBlueZ> advertisement(
       new BluetoothAdvertisementBlueZ(std::move(advertisement_data), this));
   advertisement->Register(base::Bind(callback, advertisement), error_callback);
+  advertisements_.emplace_back(advertisement);
+}
+
+void BluetoothAdapterBlueZ::SetAdvertisingInterval(
+    const base::TimeDelta& min,
+    const base::TimeDelta& max,
+    const base::Closure& callback,
+    const AdvertisementErrorCallback& error_callback) {
+  DCHECK(bluez::BluezDBusManager::Get());
+  uint16_t min_ms = static_cast<uint16_t>(
+      std::min(static_cast<int64_t>(std::numeric_limits<uint16_t>::max()),
+               min.InMilliseconds()));
+  uint16_t max_ms = static_cast<uint16_t>(
+      std::min(static_cast<int64_t>(std::numeric_limits<uint16_t>::max()),
+               max.InMilliseconds()));
+  bluez::BluezDBusManager::Get()
+      ->GetBluetoothLEAdvertisingManagerClient()
+      ->SetAdvertisingInterval(
+          object_path_, min_ms, max_ms, callback,
+          base::Bind(&SetIntervalErrorCallbackConnector, error_callback));
 }
 
 device::BluetoothLocalGattService* BluetoothAdapterBlueZ::GetGattService(
@@ -459,10 +523,9 @@ void BluetoothAdapterBlueZ::RemovePairingDelegateInternal(
     BluetoothDevice::PairingDelegate* pairing_delegate) {
   // Check if any device is using the pairing delegate.
   // If so, clear the pairing context which will make any responses no-ops.
-  for (DevicesMap::const_iterator iter = devices_.begin();
-       iter != devices_.end(); ++iter) {
+  for (auto iter = devices_.begin(); iter != devices_.end(); ++iter) {
     BluetoothDeviceBlueZ* device_bluez =
-        static_cast<BluetoothDeviceBlueZ*>(iter->second);
+        static_cast<BluetoothDeviceBlueZ*>(iter->second.get());
 
     BluetoothPairingBlueZ* pairing = device_bluez->GetPairing();
     if (pairing && pairing->GetPairingDelegate() == pairing_delegate)
@@ -516,24 +579,22 @@ void BluetoothAdapterBlueZ::DeviceAdded(const dbus::ObjectPath& object_path) {
       this, object_path, ui_task_runner_, socket_thread_);
   DCHECK(devices_.find(device_bluez->GetAddress()) == devices_.end());
 
-  devices_.set(device_bluez->GetAddress(),
-               std::unique_ptr<BluetoothDevice>(device_bluez));
+  devices_[device_bluez->GetAddress()] = base::WrapUnique(device_bluez);
 
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    DeviceAdded(this, device_bluez));
+  for (auto& observer : observers_)
+    observer.DeviceAdded(this, device_bluez);
 }
 
 void BluetoothAdapterBlueZ::DeviceRemoved(const dbus::ObjectPath& object_path) {
-  for (DevicesMap::const_iterator iter = devices_.begin();
-       iter != devices_.end(); ++iter) {
+  for (auto iter = devices_.begin(); iter != devices_.end(); ++iter) {
     BluetoothDeviceBlueZ* device_bluez =
-        static_cast<BluetoothDeviceBlueZ*>(iter->second);
+        static_cast<BluetoothDeviceBlueZ*>(iter->second.get());
     if (device_bluez->object_path() == object_path) {
-      std::unique_ptr<BluetoothDevice> scoped_device =
-          devices_.take_and_erase(iter->first);
+      std::unique_ptr<BluetoothDevice> scoped_device = std::move(iter->second);
+      devices_.erase(iter);
 
-      FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                        DeviceRemoved(this, device_bluez));
+      for (auto& observer : observers_)
+        observer.DeviceRemoved(this, device_bluez);
       return;
     }
   }
@@ -551,35 +612,43 @@ void BluetoothAdapterBlueZ::DevicePropertyChanged(
           object_path);
 
   if (property_name == properties->address.name()) {
-    for (DevicesMap::iterator iter = devices_.begin(); iter != devices_.end();
-         ++iter) {
+    for (auto iter = devices_.begin(); iter != devices_.end(); ++iter) {
       if (iter->second->GetAddress() == device_bluez->GetAddress()) {
         std::string old_address = iter->first;
         VLOG(1) << "Device changed address, old: " << old_address
                 << " new: " << device_bluez->GetAddress();
         std::unique_ptr<BluetoothDevice> scoped_device =
-            devices_.take_and_erase(iter);
-        ignore_result(scoped_device.release());
+            std::move(iter->second);
+        devices_.erase(iter);
 
         DCHECK(devices_.find(device_bluez->GetAddress()) == devices_.end());
-        devices_.set(device_bluez->GetAddress(),
-                     std::unique_ptr<BluetoothDevice>(device_bluez));
+        devices_[device_bluez->GetAddress()] = std::move(scoped_device);
         NotifyDeviceAddressChanged(device_bluez, old_address);
         break;
       }
     }
   }
 
+  if (property_name == properties->service_data.name())
+    device_bluez->UpdateServiceData();
+  else if (property_name == properties->manufacturer_data.name())
+    device_bluez->UpdateManufacturerData();
+  else if (property_name == properties->advertising_data_flags.name())
+    device_bluez->UpdateAdvertisingDataFlags();
+
   if (property_name == properties->bluetooth_class.name() ||
       property_name == properties->appearance.name() ||
       property_name == properties->address.name() ||
-      property_name == properties->alias.name() ||
+      property_name == properties->name.name() ||
       property_name == properties->paired.name() ||
       property_name == properties->trusted.name() ||
       property_name == properties->connected.name() ||
       property_name == properties->uuids.name() ||
       property_name == properties->rssi.name() ||
-      property_name == properties->tx_power.name()) {
+      property_name == properties->tx_power.name() ||
+      property_name == properties->service_data.name() ||
+      property_name == properties->manufacturer_data.name() ||
+      property_name == properties->advertising_data_flags.name()) {
     NotifyDeviceChanged(device_bluez);
   }
 
@@ -610,8 +679,7 @@ void BluetoothAdapterBlueZ::DevicePropertyChanged(
 
     int count = 0;
 
-    for (DevicesMap::const_iterator iter = devices_.begin();
-         iter != devices_.end(); ++iter) {
+    for (auto iter = devices_.begin(); iter != devices_.end(); ++iter) {
       if (iter->second->IsPaired() && iter->second->IsConnected())
         ++count;
     }
@@ -814,19 +882,6 @@ void BluetoothAdapterBlueZ::OnRequestDefaultAgentError(
                << ": " << error_message;
 }
 
-void BluetoothAdapterBlueZ::OnRegisterAudioSink(
-    const device::BluetoothAdapter::AcquiredCallback& callback,
-    const device::BluetoothAudioSink::ErrorCallback& error_callback,
-    scoped_refptr<BluetoothAudioSink> audio_sink) {
-  if (!IsPresent()) {
-    VLOG(1) << "Failed to register audio sink, adapter not present";
-    error_callback.Run(BluetoothAudioSink::ERROR_INVALID_ADAPTER);
-    return;
-  }
-  DCHECK(audio_sink.get());
-  callback.Run(audio_sink);
-}
-
 void BluetoothAdapterBlueZ::CreateServiceRecord(
     const BluetoothServiceRecordBlueZ& record,
     const ServiceRecordCallback& callback,
@@ -856,10 +911,9 @@ BluetoothDeviceBlueZ* BluetoothAdapterBlueZ::GetDeviceWithPath(
   if (!IsPresent())
     return nullptr;
 
-  for (DevicesMap::const_iterator iter = devices_.begin();
-       iter != devices_.end(); ++iter) {
+  for (auto iter = devices_.begin(); iter != devices_.end(); ++iter) {
     BluetoothDeviceBlueZ* device_bluez =
-        static_cast<BluetoothDeviceBlueZ*>(iter->second);
+        static_cast<BluetoothDeviceBlueZ*>(iter->second.get());
     if (device_bluez->object_path() == object_path)
       return device_bluez;
   }
@@ -993,16 +1047,16 @@ void BluetoothAdapterBlueZ::RemoveAdapter() {
   devices_swapped.swap(devices_);
 
   for (auto& iter : devices_swapped) {
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceRemoved(this, iter.second));
+    for (auto& observer : observers_)
+      observer.DeviceRemoved(this, iter.second.get());
   }
 
   PresentChanged(false);
 }
 
 void BluetoothAdapterBlueZ::DiscoverableChanged(bool discoverable) {
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterDiscoverableChanged(this, discoverable));
+  for (auto& observer : observers_)
+    observer.AdapterDiscoverableChanged(this, discoverable);
 }
 
 void BluetoothAdapterBlueZ::DiscoveringChanged(bool discovering) {
@@ -1015,13 +1069,13 @@ void BluetoothAdapterBlueZ::DiscoveringChanged(bool discovering) {
     num_discovery_sessions_ = 0;
     MarkDiscoverySessionsAsInactive();
   }
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterDiscoveringChanged(this, discovering));
+  for (auto& observer : observers_)
+    observer.AdapterDiscoveringChanged(this, discovering);
 }
 
 void BluetoothAdapterBlueZ::PresentChanged(bool present) {
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    AdapterPresentChanged(this, present));
+  for (auto& observer : observers_)
+    observer.AdapterPresentChanged(this, present);
 }
 
 void BluetoothAdapterBlueZ::NotifyDeviceAddressChanged(
@@ -1029,8 +1083,8 @@ void BluetoothAdapterBlueZ::NotifyDeviceAddressChanged(
     const std::string& old_address) {
   DCHECK(device->adapter_ == this);
 
-  FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                    DeviceAddressChanged(this, device, old_address));
+  for (auto& observer : observers_)
+    observer.DeviceAddressChanged(this, device, old_address);
 }
 
 void BluetoothAdapterBlueZ::UseProfile(

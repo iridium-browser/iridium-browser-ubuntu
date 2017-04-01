@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-<include src="extension_error.js">
+// <include src="extension_error.js">
 
 cr.define('extensions', function() {
   'use strict';
@@ -868,7 +868,7 @@ cr.define('extensions', function() {
             return;
           }
           var displayName;
-          if (view.url.indexOf('chrome-extension://') == 0) {
+          if (view.url.startsWith('chrome-extension://')) {
             var pathOffset = 'chrome-extension://'.length + 32 + 1;
             displayName = view.url.substring(pathOffset);
             if (displayName == '_generated_background_page.html')

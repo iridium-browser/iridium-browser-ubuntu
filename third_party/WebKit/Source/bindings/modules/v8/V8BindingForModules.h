@@ -11,44 +11,56 @@
 
 namespace blink {
 
-class IDBAny;
 class IDBKey;
 class IDBKeyPath;
 class IDBKeyRange;
 class IDBValue;
 class SerializedScriptValue;
-class SharedBuffer;
 class WebBlobInfo;
 
 // Exposed for unit testing:
-MODULES_EXPORT bool injectV8KeyIntoV8Value(v8::Isolate*, v8::Local<v8::Value> key, v8::Local<v8::Value>, const IDBKeyPath&);
+MODULES_EXPORT bool injectV8KeyIntoV8Value(v8::Isolate*,
+                                           v8::Local<v8::Value> key,
+                                           v8::Local<v8::Value>,
+                                           const IDBKeyPath&);
 
 // For use by Source/modules/indexeddb (and unit testing):
-MODULES_EXPORT bool canInjectIDBKeyIntoScriptValue(v8::Isolate*, const ScriptValue&, const IDBKeyPath&);
-ScriptValue deserializeScriptValue(ScriptState*, SerializedScriptValue*, const Vector<WebBlobInfo>*);
+MODULES_EXPORT bool canInjectIDBKeyIntoScriptValue(v8::Isolate*,
+                                                   const ScriptValue&,
+                                                   const IDBKeyPath&);
+ScriptValue deserializeScriptValue(ScriptState*,
+                                   SerializedScriptValue*,
+                                   const Vector<WebBlobInfo>*);
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON()
 void assertPrimaryKeyValidOrInjectable(ScriptState*, const IDBValue*);
 #endif
 
 template <>
 struct NativeValueTraits<SQLValue> {
-    static SQLValue nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+  static SQLValue nativeValue(v8::Isolate*,
+                              v8::Local<v8::Value>,
+                              ExceptionState&);
 };
 
 template <>
 struct NativeValueTraits<IDBKey*> {
-    static IDBKey* nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
-    MODULES_EXPORT static IDBKey* nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&, const IDBKeyPath&);
+  static IDBKey* nativeValue(v8::Isolate*,
+                             v8::Local<v8::Value>,
+                             ExceptionState&);
+  MODULES_EXPORT static IDBKey* nativeValue(v8::Isolate*,
+                                            v8::Local<v8::Value>,
+                                            ExceptionState&,
+                                            const IDBKeyPath&);
 };
 
 template <>
 struct NativeValueTraits<IDBKeyRange*> {
-    static IDBKeyRange* nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+  static IDBKeyRange* nativeValue(v8::Isolate*,
+                                  v8::Local<v8::Value>,
+                                  ExceptionState&);
 };
 
-void registerInstallOriginTrialsForModules();
+}  // namespace blink
 
-} // namespace blink
-
-#endif // V8BindingForModules_h
+#endif  // V8BindingForModules_h

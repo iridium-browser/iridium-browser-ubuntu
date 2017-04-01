@@ -5,8 +5,10 @@
 #include "device/bluetooth/bluetooth_device_win.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_simple_task_runner.h"
@@ -52,21 +54,21 @@ class BluetoothDeviceWinTest : public testing::Test {
     device_state_->name = std::string(kDeviceName);
     device_state_->address = kDeviceAddress;
 
-    BluetoothTaskManagerWin::ServiceRecordState* audio_state =
-        new BluetoothTaskManagerWin::ServiceRecordState();
+    auto audio_state =
+        base::MakeUnique<BluetoothTaskManagerWin::ServiceRecordState>();
     audio_state->name = kTestAudioSdpName;
     base::HexStringToBytes(kTestAudioSdpBytes, &audio_state->sdp_bytes);
-    device_state_->service_record_states.push_back(audio_state);
+    device_state_->service_record_states.push_back(std::move(audio_state));
 
-    BluetoothTaskManagerWin::ServiceRecordState* video_state =
-        new BluetoothTaskManagerWin::ServiceRecordState();
+    auto video_state =
+        base::MakeUnique<BluetoothTaskManagerWin::ServiceRecordState>();
     video_state->name = kTestVideoSdpName;
     base::HexStringToBytes(kTestVideoSdpBytes, &video_state->sdp_bytes);
-    device_state_->service_record_states.push_back(video_state);
+    device_state_->service_record_states.push_back(std::move(video_state));
 
     device_.reset(new BluetoothDeviceWin(NULL, *device_state_, ui_task_runner,
                                          socket_thread, NULL,
-                                         net::NetLog::Source()));
+                                         net::NetLogSource()));
 
     // Add empty device.
     empty_device_state_.reset(new BluetoothTaskManagerWin::DeviceState());
@@ -74,7 +76,7 @@ class BluetoothDeviceWinTest : public testing::Test {
     empty_device_state_->address = kDeviceAddress;
     empty_device_.reset(new BluetoothDeviceWin(NULL, *empty_device_state_,
                                                ui_task_runner, socket_thread,
-                                               NULL, net::NetLog::Source()));
+                                               NULL, net::NetLogSource()));
   }
 
  protected:

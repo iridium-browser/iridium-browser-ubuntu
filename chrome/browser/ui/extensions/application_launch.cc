@@ -8,9 +8,11 @@
 
 #include "apps/launcher.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
+#include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/launch_util.h"
@@ -231,7 +233,7 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
     browser = new Browser(Browser::CreateParams(Browser::TYPE_TABBED, profile));
     browser->window()->Show();
     // There's no current tab in this browser window, so add a new one.
-    disposition = NEW_FOREGROUND_TAB;
+    disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   } else {
     // For existing browser, ensure its window is shown and activated.
     browser->window()->Show();
@@ -251,7 +253,7 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
   params.tabstrip_add_types = add_type;
   params.disposition = disposition;
 
-  if (disposition == CURRENT_TAB) {
+  if (disposition == WindowOpenDisposition::CURRENT_TAB) {
     WebContents* existing_tab =
         browser->tab_strip_model()->GetActiveWebContents();
     TabStripModel* model = browser->tab_strip_model();
@@ -305,8 +307,8 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
   prefs->SetActiveBit(extension->id(), true);
 
   if (CanLaunchViaEvent(extension)) {
-    apps::LaunchPlatformAppWithCommandLine(
-        params.profile, extension, params.command_line,
+    apps::LaunchPlatformAppWithCommandLineAndLaunchId(
+        params.profile, extension, params.launch_id, params.command_line,
         params.current_directory, params.source, params.play_store_status);
     return NULL;
   }
@@ -316,17 +318,6 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
                             extensions::NUM_LAUNCH_CONTAINERS);
 
   GURL url = UrlForExtension(extension, params.override_url);
-  if (extension->from_bookmark()) {
-    UMA_HISTOGRAM_ENUMERATION("Extensions.BookmarkAppLaunchContainer",
-                              params.container,
-                              extensions::NUM_LAUNCH_CONTAINERS);
-
-    // Record the launch time in the site engagement service. A recent bookmark
-    // app launch will provide an engagement boost to the origin.
-    SiteEngagementService* service = SiteEngagementService::Get(params.profile);
-    if (service)
-      service->SetLastShortcutLaunchTime(url);
-  }
 
   // Record v1 app launch. Platform app launch is recorded when dispatching
   // the onLaunched event.
@@ -348,6 +339,25 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
     default:
       NOTREACHED();
       break;
+  }
+
+  if (extension->from_bookmark()) {
+    UMA_HISTOGRAM_ENUMERATION("Extensions.BookmarkAppLaunchContainer",
+                              params.container,
+                              extensions::NUM_LAUNCH_CONTAINERS);
+
+    // Record the launch time in the site engagement service. A recent bookmark
+    // app launch will provide an engagement boost to the origin.
+    SiteEngagementService* service = SiteEngagementService::Get(params.profile);
+    service->SetLastShortcutLaunchTime(url);
+
+    // Refresh the app banner added to homescreen event. The user may have
+    // cleared their browsing data since installing the app, which removes the
+    // event and will potentially permit a banner to be shown for the site.
+    AppBannerSettingsHelper::RecordBannerEvent(
+        tab, url, url.spec(),
+        AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
+        base::Time::Now());
   }
   return tab;
 }
@@ -386,7 +396,8 @@ WebContents* OpenAppShortcutWindow(Profile* profile,
                                    const GURL& url) {
   AppLaunchParams launch_params(profile,
                                 NULL,  // this is a URL app.  No extension.
-                                extensions::LAUNCH_CONTAINER_WINDOW, NEW_WINDOW,
+                                extensions::LAUNCH_CONTAINER_WINDOW,
+                                WindowOpenDisposition::NEW_WINDOW,
                                 extensions::SOURCE_COMMAND_LINE);
   launch_params.override_url = url;
 

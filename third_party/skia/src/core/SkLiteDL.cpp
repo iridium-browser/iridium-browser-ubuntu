@@ -7,13 +7,12 @@
 
 #include "SkCanvas.h"
 #include "SkData.h"
+#include "SkDrawFilter.h"
 #include "SkImageFilter.h"
 #include "SkLiteDL.h"
 #include "SkMath.h"
 #include "SkPicture.h"
-#include "SkMutex.h"
 #include "SkRSXform.h"
-#include "SkSpinlock.h"
 #include "SkTextBlob.h"
 
 #ifndef SKLITEDL_PAGE
@@ -51,11 +50,11 @@ static void make_threadsafe(SkPath* path, SkMatrix* matrix) {
 
 namespace {
 #define TYPES(M)                                                                \
-    M(Save) M(Restore) M(SaveLayer)                                             \
+    M(SetDrawFilter) M(Save) M(Restore) M(SaveLayer)                            \
     M(Concat) M(SetMatrix) M(Translate) M(TranslateZ)                           \
     M(ClipPath) M(ClipRect) M(ClipRRect) M(ClipRegion)                          \
-    M(DrawPaint) M(DrawPath) M(DrawRect) M(DrawOval) M(DrawArc) M(DrawRRect)    \
-    M(DrawDRRect) M(DrawAnnotation) M(DrawDrawable) M(DrawPicture)              \
+    M(DrawPaint) M(DrawPath) M(DrawRect) M(DrawRegion) M(DrawOval) M(DrawArc)   \
+    M(DrawRRect) M(DrawDRRect) M(DrawAnnotation) M(DrawDrawable) M(DrawPicture) \
     M(DrawShadowedPicture)                                                      \
     M(DrawImage) M(DrawImageNine) M(DrawImageRect) M(DrawImageLattice)          \
     M(DrawText) M(DrawPosText) M(DrawPosTextH)                                  \
@@ -73,6 +72,19 @@ namespace {
         uint32_t skip : 24;
     };
     static_assert(sizeof(Op) == 4, "");
+
+    struct SetDrawFilter final : Op {
+#ifdef SK_SUPPORT_LEGACY_DRAWFILTER
+        static const auto kType = Type::SetDrawFilter;
+        SetDrawFilter(SkDrawFilter* df) : drawFilter(sk_ref_sp(df)) {}
+        sk_sp<SkDrawFilter> drawFilter;
+#endif
+        void draw(SkCanvas* c, const SkMatrix&) {
+#ifdef SK_SUPPORT_LEGACY_DRAWFILTER
+            c->setDrawFilter(drawFilter.get());
+#endif
+        }
+    };
 
     struct Save final : Op {
         static const auto kType = Type::Save;
@@ -137,34 +149,34 @@ namespace {
 
     struct ClipPath final : Op {
         static const auto kType = Type::ClipPath;
-        ClipPath(const SkPath& path, SkRegion::Op op, bool aa) : path(path), op(op), aa(aa) {}
-        SkPath       path;
-        SkRegion::Op op;
-        bool         aa;
+        ClipPath(const SkPath& path, SkClipOp op, bool aa) : path(path), op(op), aa(aa) {}
+        SkPath   path;
+        SkClipOp op;
+        bool     aa;
         void draw(SkCanvas* c, const SkMatrix&) { c->clipPath(path, op, aa); }
         void makeThreadsafe() { make_threadsafe(&path, nullptr); }
     };
     struct ClipRect final : Op {
         static const auto kType = Type::ClipRect;
-        ClipRect(const SkRect& rect, SkRegion::Op op, bool aa) : rect(rect), op(op), aa(aa) {}
-        SkRect       rect;
-        SkRegion::Op op;
-        bool         aa;
+        ClipRect(const SkRect& rect, SkClipOp op, bool aa) : rect(rect), op(op), aa(aa) {}
+        SkRect   rect;
+        SkClipOp op;
+        bool     aa;
         void draw(SkCanvas* c, const SkMatrix&) { c->clipRect(rect, op, aa); }
     };
     struct ClipRRect final : Op {
         static const auto kType = Type::ClipRRect;
-        ClipRRect(const SkRRect& rrect, SkRegion::Op op, bool aa) : rrect(rrect), op(op), aa(aa) {}
-        SkRRect      rrect;
-        SkRegion::Op op;
-        bool         aa;
+        ClipRRect(const SkRRect& rrect, SkClipOp op, bool aa) : rrect(rrect), op(op), aa(aa) {}
+        SkRRect  rrect;
+        SkClipOp op;
+        bool     aa;
         void draw(SkCanvas* c, const SkMatrix&) { c->clipRRect(rrect, op, aa); }
     };
     struct ClipRegion final : Op {
         static const auto kType = Type::ClipRegion;
-        ClipRegion(const SkRegion& region, SkRegion::Op op) : region(region), op(op) {}
-        SkRegion     region;
-        SkRegion::Op op;
+        ClipRegion(const SkRegion& region, SkClipOp op) : region(region), op(op) {}
+        SkRegion region;
+        SkClipOp op;
         void draw(SkCanvas* c, const SkMatrix&) { c->clipRegion(region, op); }
     };
 
@@ -188,6 +200,13 @@ namespace {
         SkRect  rect;
         SkPaint paint;
         void draw(SkCanvas* c, const SkMatrix&) { c->drawRect(rect, paint); }
+    };
+    struct DrawRegion final : Op {
+        static const auto kType = Type::DrawRegion;
+        DrawRegion(const SkRegion& region, const SkPaint& paint) : region(region), paint(paint) {}
+        SkRegion region;
+        SkPaint  paint;
+        void draw(SkCanvas* c, const SkMatrix&) { c->drawRegion(region, paint); }
     };
     struct DrawOval final : Op {
         static const auto kType = Type::DrawOval;
@@ -270,17 +289,20 @@ namespace {
     };
     struct DrawShadowedPicture final : Op {
         static const auto kType = Type::DrawShadowedPicture;
-        DrawShadowedPicture(const SkPicture* picture, const SkMatrix* matrix, const SkPaint* paint)
+        DrawShadowedPicture(const SkPicture* picture, const SkMatrix* matrix,
+                            const SkPaint* paint, const SkShadowParams& params)
             : picture(sk_ref_sp(picture)) {
             if (matrix) { this->matrix = *matrix; }
             if (paint)  { this->paint  = *paint;  }
+            this->params = params;
         }
         sk_sp<const SkPicture> picture;
         SkMatrix               matrix = SkMatrix::I();
         SkPaint                paint;
+        SkShadowParams         params;
         void draw(SkCanvas* c, const SkMatrix&) {
         #ifdef SK_EXPERIMENTAL_SHADOWING
-            c->drawShadowedPicture(picture.get(), &matrix, &paint);
+            c->drawShadowedPicture(picture.get(), &matrix, &paint, params);
         #endif
         }
         void makeThreadsafe() { make_threadsafe(nullptr, &matrix); }
@@ -330,19 +352,22 @@ namespace {
     };
     struct DrawImageLattice final : Op {
         static const auto kType = Type::DrawImageLattice;
-        DrawImageLattice(sk_sp<const SkImage>&& image, int xs, int ys,
-                         const SkRect& dst, const SkPaint* paint)
-            : image(std::move(image)), xs(xs), ys(ys), dst(dst) {
+        DrawImageLattice(sk_sp<const SkImage>&& image, int xs, int ys, int fs,
+                         const SkIRect& src, const SkRect& dst, const SkPaint* paint)
+            : image(std::move(image)), xs(xs), ys(ys), fs(fs), src(src), dst(dst) {
             if (paint) { this->paint = *paint; }
         }
         sk_sp<const SkImage> image;
-        int                  xs, ys;
+        int                  xs, ys, fs;
+        SkIRect              src;
         SkRect               dst;
         SkPaint              paint;
         void draw(SkCanvas* c, const SkMatrix&) {
             auto xdivs = pod<int>(this, 0),
                  ydivs = pod<int>(this, xs*sizeof(int));
-            c->drawImageLattice(image.get(), {xdivs, xs, ydivs, ys}, dst, &paint);
+            auto flags = (0 == fs) ? nullptr :
+                                     pod<SkCanvas::Lattice::Flags>(this, (xs+ys)*sizeof(int));
+            c->drawImageLattice(image.get(), {xdivs, ydivs, flags, xs, ys, &src}, dst, &paint);
         }
     };
 
@@ -429,8 +454,9 @@ namespace {
     struct DrawPatch final : Op {
         static const auto kType = Type::DrawPatch;
         DrawPatch(const SkPoint cubics[12], const SkColor colors[4], const SkPoint texs[4],
-                  SkXfermode* xfermode, const SkPaint& paint)
-            : xfermode(sk_ref_sp(xfermode)), paint(paint) {
+                  SkBlendMode bmode, const SkPaint& paint)
+            : xfermode(bmode), paint(paint)
+        {
             copy_v(this->cubics, cubics, 12);
             if (colors) { copy_v(this->colors, colors, 4); has_colors = true; }
             if (texs  ) { copy_v(this->texs  , texs  , 4); has_texs   = true; }
@@ -438,13 +464,13 @@ namespace {
         SkPoint           cubics[12];
         SkColor           colors[4];
         SkPoint           texs[4];
-        sk_sp<SkXfermode> xfermode;
+        SkBlendMode       xfermode;
         SkPaint           paint;
         bool              has_colors = false;
         bool              has_texs   = false;
         void draw(SkCanvas* c, const SkMatrix&) {
             c->drawPatch(cubics, has_colors ? colors : nullptr, has_texs ? texs : nullptr,
-                         xfermode.get(), paint);
+                         xfermode, paint);
         }
     };
     struct DrawPoints final : Op {
@@ -460,13 +486,13 @@ namespace {
     };
     struct DrawVertices final : Op {
         static const auto kType = Type::DrawVertices;
-        DrawVertices(SkCanvas::VertexMode mode, int count, SkXfermode* xfermode, int nindices,
+        DrawVertices(SkCanvas::VertexMode mode, int count, SkBlendMode bmode, int nindices,
                      const SkPaint& paint, bool has_texs, bool has_colors, bool has_indices)
-            : mode(mode), count(count), xfermode(sk_ref_sp(xfermode)), nindices(nindices)
+            : mode(mode), count(count), xfermode(bmode), nindices(nindices)
             , paint(paint), has_texs(has_texs), has_colors(has_colors), has_indices(has_indices) {}
         SkCanvas::VertexMode mode;
         int                  count;
-        sk_sp<SkXfermode>    xfermode;
+        SkBlendMode          xfermode;
         int                  nindices;
         SkPaint              paint;
         bool                 has_texs;
@@ -492,13 +518,13 @@ namespace {
             if (has_indices) {
                 indices = pod<uint16_t>(this, offset);
             }
-            c->drawVertices(mode, count, vertices, texs, colors, xfermode.get(),
+            c->drawVertices(mode, count, vertices, texs, colors, xfermode,
                             indices, nindices, paint);
         }
     };
     struct DrawAtlas final : Op {
         static const auto kType = Type::DrawAtlas;
-        DrawAtlas(const SkImage* atlas, int count, SkXfermode::Mode xfermode,
+        DrawAtlas(const SkImage* atlas, int count, SkBlendMode xfermode,
                   const SkRect* cull, const SkPaint* paint, bool has_colors)
             : atlas(sk_ref_sp(atlas)), count(count), xfermode(xfermode), has_colors(has_colors) {
             if (cull)  { this->cull  = *cull; }
@@ -506,7 +532,7 @@ namespace {
         }
         sk_sp<const SkImage> atlas;
         int                  count;
-        SkXfermode::Mode     xfermode;
+        SkBlendMode          xfermode;
         SkRect               cull = kUnset;
         SkPaint              paint;
         bool                 has_colors;
@@ -555,6 +581,12 @@ inline void SkLiteDL::map(const Fn fns[], Args... args) {
     }
 }
 
+#ifdef SK_SUPPORT_LEGACY_DRAWFILTER
+void SkLiteDL::setDrawFilter(SkDrawFilter* df) {
+    this->push<SetDrawFilter>(0, df);
+}
+#endif
+
 void SkLiteDL::   save() { this->push   <Save>(0); }
 void SkLiteDL::restore() { this->push<Restore>(0); }
 void SkLiteDL::saveLayer(const SkRect* bounds, const SkPaint* paint,
@@ -567,16 +599,16 @@ void SkLiteDL::setMatrix(const SkMatrix& matrix)   { this->push<SetMatrix>(0, ma
 void SkLiteDL::translate(SkScalar dx, SkScalar dy) { this->push<Translate>(0, dx, dy); }
 void SkLiteDL::translateZ(SkScalar dz) { this->push<TranslateZ>(0, dz); }
 
-void SkLiteDL::clipPath(const SkPath& path, SkRegion::Op op, bool aa) {
+void SkLiteDL::clipPath(const SkPath& path, SkClipOp op, bool aa) {
     this->push<ClipPath>(0, path, op, aa);
 }
-void SkLiteDL::clipRect(const SkRect& rect, SkRegion::Op op, bool aa) {
+void SkLiteDL::clipRect(const SkRect& rect, SkClipOp op, bool aa) {
     this->push<ClipRect>(0, rect, op, aa);
 }
-void SkLiteDL::clipRRect(const SkRRect& rrect, SkRegion::Op op, bool aa) {
+void SkLiteDL::clipRRect(const SkRRect& rrect, SkClipOp op, bool aa) {
     this->push<ClipRRect>(0, rrect, op, aa);
 }
-void SkLiteDL::clipRegion(const SkRegion& region, SkRegion::Op op) {
+void SkLiteDL::clipRegion(const SkRegion& region, SkClipOp op) {
     this->push<ClipRegion>(0, region, op);
 }
 
@@ -588,6 +620,9 @@ void SkLiteDL::drawPath(const SkPath& path, const SkPaint& paint) {
 }
 void SkLiteDL::drawRect(const SkRect& rect, const SkPaint& paint) {
     this->push<DrawRect>(0, rect, paint);
+}
+void SkLiteDL::drawRegion(const SkRegion& region, const SkPaint& paint) {
+    this->push<DrawRegion>(0, region, paint);
 }
 void SkLiteDL::drawOval(const SkRect& oval, const SkPaint& paint) {
     this->push<DrawOval>(0, oval, paint);
@@ -615,50 +650,33 @@ void SkLiteDL::drawPicture(const SkPicture* picture,
                            const SkMatrix* matrix, const SkPaint* paint) {
     this->push<DrawPicture>(0, picture, matrix, paint);
 }
-void SkLiteDL::drawShadowedPicture(const SkPicture* picture,
-                                   const SkMatrix* matrix, const SkPaint* paint) {
-    this->push<DrawShadowedPicture>(0, picture, matrix, paint);
+void SkLiteDL::drawShadowedPicture(const SkPicture* picture, const SkMatrix* matrix,
+                                   const SkPaint* paint, const SkShadowParams& params) {
+    push<DrawShadowedPicture>(0, picture, matrix, paint, params);
 }
 
-void SkLiteDL::drawBitmap(const SkBitmap& bm, SkScalar x, SkScalar y, const SkPaint* paint) {
-    this->push<DrawImage>(0, SkImage::MakeFromBitmap(bm), x,y, paint);
+void SkLiteDL::drawImage(sk_sp<const SkImage> image, SkScalar x, SkScalar y, const SkPaint* paint) {
+    this->push<DrawImage>(0, std::move(image), x,y, paint);
 }
-void SkLiteDL::drawBitmapNine(const SkBitmap& bm, const SkIRect& center,
-                              const SkRect& dst, const SkPaint* paint) {
-    this->push<DrawImageNine>(0, SkImage::MakeFromBitmap(bm), center, dst, paint);
-}
-void SkLiteDL::drawBitmapRect(const SkBitmap& bm, const SkRect* src, const SkRect& dst,
-                              const SkPaint* paint, SkCanvas::SrcRectConstraint constraint) {
-    this->push<DrawImageRect>(0, SkImage::MakeFromBitmap(bm), src, dst, paint, constraint);
-}
-void SkLiteDL::drawBitmapLattice(const SkBitmap& bm, const SkCanvas::Lattice& lattice,
-                                 const SkRect& dst, const SkPaint* paint) {
-    int xs = lattice.fXCount, ys = lattice.fYCount;
-    size_t bytes = (xs + ys) * sizeof(int);
-    void* pod = this->push<DrawImageLattice>(bytes, SkImage::MakeFromBitmap(bm), xs, ys, dst,
-                                             paint);
-    copy_v(pod, lattice.fXDivs, xs,
-                lattice.fYDivs, ys);
-}
-
-void SkLiteDL::drawImage(const SkImage* image, SkScalar x, SkScalar y, const SkPaint* paint) {
-    this->push<DrawImage>(0, sk_ref_sp(image), x,y, paint);
-}
-void SkLiteDL::drawImageNine(const SkImage* image, const SkIRect& center,
+void SkLiteDL::drawImageNine(sk_sp<const SkImage> image, const SkIRect& center,
                              const SkRect& dst, const SkPaint* paint) {
-    this->push<DrawImageNine>(0, sk_ref_sp(image), center, dst, paint);
+    this->push<DrawImageNine>(0, std::move(image), center, dst, paint);
 }
-void SkLiteDL::drawImageRect(const SkImage* image, const SkRect* src, const SkRect& dst,
+void SkLiteDL::drawImageRect(sk_sp<const SkImage> image, const SkRect* src, const SkRect& dst,
                              const SkPaint* paint, SkCanvas::SrcRectConstraint constraint) {
-    this->push<DrawImageRect>(0, sk_ref_sp(image), src, dst, paint, constraint);
+    this->push<DrawImageRect>(0, std::move(image), src, dst, paint, constraint);
 }
-void SkLiteDL::drawImageLattice(const SkImage* image, const SkCanvas::Lattice& lattice,
+void SkLiteDL::drawImageLattice(sk_sp<const SkImage> image, const SkCanvas::Lattice& lattice,
                                 const SkRect& dst, const SkPaint* paint) {
     int xs = lattice.fXCount, ys = lattice.fYCount;
-    size_t bytes = (xs + ys) * sizeof(int);
-    void* pod = this->push<DrawImageLattice>(bytes, sk_ref_sp(image), xs, ys, dst, paint);
+    int fs = lattice.fFlags ? (xs + 1) * (ys + 1) : 0;
+    size_t bytes = (xs + ys) * sizeof(int) + fs * sizeof(SkCanvas::Lattice::Flags);
+    SkASSERT(lattice.fBounds);
+    void* pod = this->push<DrawImageLattice>(bytes, std::move(image), xs, ys, fs, *lattice.fBounds,
+                                             dst, paint);
     copy_v(pod, lattice.fXDivs, xs,
-                lattice.fYDivs, ys);
+                lattice.fYDivs, ys,
+                lattice.fFlags, fs);
 }
 
 void SkLiteDL::drawText(const void* text, size_t bytes,
@@ -694,8 +712,8 @@ void SkLiteDL::drawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y, cons
 }
 
 void SkLiteDL::drawPatch(const SkPoint points[12], const SkColor colors[4], const SkPoint texs[4],
-                         SkXfermode* xfermode, const SkPaint& paint) {
-    this->push<DrawPatch>(0, points, colors, texs, xfermode, paint);
+                         SkBlendMode bmode, const SkPaint& paint) {
+    this->push<DrawPatch>(0, points, colors, texs, bmode, paint);
 }
 void SkLiteDL::drawPoints(SkCanvas::PointMode mode, size_t count, const SkPoint points[],
                           const SkPaint& paint) {
@@ -703,7 +721,7 @@ void SkLiteDL::drawPoints(SkCanvas::PointMode mode, size_t count, const SkPoint 
     copy_v(pod, points,count);
 }
 void SkLiteDL::drawVertices(SkCanvas::VertexMode mode, int count, const SkPoint vertices[],
-                            const SkPoint texs[], const SkColor colors[], SkXfermode* xfermode,
+                            const SkPoint texs[], const SkColor colors[], SkBlendMode xfermode,
                             const uint16_t indices[], int nindices, const SkPaint& paint) {
     size_t bytes = count * sizeof(SkPoint);
     if (texs  )  { bytes += count    * sizeof(SkPoint); }
@@ -717,7 +735,7 @@ void SkLiteDL::drawVertices(SkCanvas::VertexMode mode, int count, const SkPoint 
                  indices, indices ? nindices : 0);
 }
 void SkLiteDL::drawAtlas(const SkImage* atlas, const SkRSXform xforms[], const SkRect texs[],
-                         const SkColor colors[], int count, SkXfermode::Mode xfermode,
+                         const SkColor colors[], int count, SkBlendMode xfermode,
                          const SkRect* cull, const SkPaint* paint) {
     size_t bytes = count*(sizeof(SkRSXform) + sizeof(SkRect));
     if (colors) {
@@ -777,5 +795,22 @@ void SkLiteDL::reset(SkRect bounds) {
 
     // Leave fBytes and fReserved alone.
     fUsed   = 0;
+    fBounds = bounds;
+}
+
+void SkLiteDL::drawAsLayer(SkCanvas* canvas, const SkMatrix* matrix, const SkPaint* paint) {
+    auto fallback_plan = [&] {
+        SkRect bounds = this->getBounds();
+        canvas->saveLayer(&bounds, paint);
+            this->draw(canvas, matrix);
+        canvas->restore();
+    };
+
+    // TODO: single-draw specializations
+
+    return fallback_plan();
+}
+
+void SkLiteDL::setBounds(const SkRect& bounds) {
     fBounds = bounds;
 }

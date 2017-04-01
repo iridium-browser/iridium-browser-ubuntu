@@ -10,17 +10,18 @@
 #include "net/quic/core/crypto/quic_decrypter.h"
 #include "net/quic/core/crypto/quic_encrypter.h"
 #include "net/quic/core/quic_flags.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_server_id.h"
 #include "net/quic/core/quic_utils.h"
 #include "net/quic/test_tools/crypto_test_utils.h"
+#include "net/quic/test_tools/quic_stream_peer.h"
+#include "net/quic/test_tools/quic_stream_sequencer_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/quic/test_tools/simple_quic_framer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using std::string;
-using std::vector;
 
 using testing::_;
 
@@ -40,7 +41,7 @@ class QuicCryptoClientStreamTest : public ::testing::Test {
   }
 
   void CreateConnection() {
-    connection_ = new PacketSavingConnection(&helper_, &alarm_factory_,
+    connection_ = new PacketSavingConnection(&client_helper_, &alarm_factory_,
                                              Perspective::IS_CLIENT);
     // Advance the time, because timers do not like uninitialized times.
     connection_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
@@ -52,9 +53,9 @@ class QuicCryptoClientStreamTest : public ::testing::Test {
   void CompleteCryptoHandshake() {
     stream()->CryptoConnect();
     QuicConfig config;
-    CryptoTestUtils::HandshakeWithFakeServer(&config, &helper_, &alarm_factory_,
-                                             connection_, stream(),
-                                             server_options_);
+    CryptoTestUtils::HandshakeWithFakeServer(&config, &server_helper_,
+                                             &alarm_factory_, connection_,
+                                             stream(), server_options_);
   }
 
   void ConstructHandshakeMessage() {
@@ -64,7 +65,8 @@ class QuicCryptoClientStreamTest : public ::testing::Test {
 
   QuicCryptoClientStream* stream() { return session_->GetCryptoStream(); }
 
-  MockQuicConnectionHelper helper_;
+  MockQuicConnectionHelper server_helper_;
+  MockQuicConnectionHelper client_helper_;
   MockAlarmFactory alarm_factory_;
   PacketSavingConnection* connection_;
   std::unique_ptr<TestQuicSpdyClientSession> session_;
@@ -116,8 +118,7 @@ TEST_F(QuicCryptoClientStreamTest, NegotiatedParameters) {
   CompleteCryptoHandshake();
 
   const QuicConfig* config = session_->config();
-  EXPECT_EQ(kMaximumIdleTimeoutSecs,
-            config->IdleConnectionStateLifetime().ToSeconds());
+  EXPECT_EQ(kMaximumIdleTimeoutSecs, config->IdleNetworkTimeout().ToSeconds());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection, config->MaxStreamsPerConnection());
 
   const QuicCryptoNegotiatedParameters& crypto_params(
@@ -141,6 +142,21 @@ TEST_F(QuicCryptoClientStreamTest, ExpiredServerConfig) {
   stream()->CryptoConnect();
   // Check that a client hello was sent.
   ASSERT_EQ(1u, connection_->encrypted_packets_.size());
+  EXPECT_EQ(ENCRYPTION_NONE, connection_->encryption_level());
+}
+
+TEST_F(QuicCryptoClientStreamTest, ClockSkew) {
+  // Test that if the client's clock is skewed with respect to the server,
+  // the handshake succeeds. In the past, the client would get the server
+  // config, notice that it had already expired and then close the connection.
+
+  // Advance time 5 years to ensure that we pass the expiry time in the server
+  // config, but the TTL is used instead.
+  connection_->AdvanceTime(
+      QuicTime::Delta::FromSeconds(60 * 60 * 24 * 365 * 5));
+
+  // The handshakes completes!
+  CompleteCryptoHandshake();
 }
 
 TEST_F(QuicCryptoClientStreamTest, InvalidCachedServerConfig) {
@@ -153,7 +169,7 @@ TEST_F(QuicCryptoClientStreamTest, InvalidCachedServerConfig) {
   QuicCryptoClientConfig::CachedState* state =
       crypto_config_.LookupOrCreate(server_id_);
 
-  vector<string> certs = state->certs();
+  std::vector<string> certs = state->certs();
   string cert_sct = state->cert_sct();
   string signature = state->signature();
   string chlo_hash = state->chlo_hash();
@@ -197,6 +213,8 @@ TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdate) {
   server_config_update.set_tag(kSCUP);
   server_config_update.SetValue(kSourceAddressTokenTag, stk);
   server_config_update.SetValue(kSCFG, scfg);
+  const uint64_t expiry_seconds = 60 * 60 * 24 * 2;
+  server_config_update.SetValue(kSTTL, expiry_seconds);
 
   std::unique_ptr<QuicData> data(
       CryptoFramer::ConstructHandshakeMessage(server_config_update));
@@ -206,10 +224,51 @@ TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdate) {
   // Make sure that the STK and SCFG are cached correctly.
   EXPECT_EQ("xstk", state->source_address_token());
 
-  string cached_scfg = state->server_config();
+  const string& cached_scfg = state->server_config();
   test::CompareCharArraysWithHexError(
       "scfg", cached_scfg.data(), cached_scfg.length(),
-      QuicUtils::AsChars(scfg), arraysize(scfg));
+      reinterpret_cast<char*>(scfg), arraysize(scfg));
+
+  QuicStreamSequencer* sequencer = QuicStreamPeer::sequencer(stream());
+  EXPECT_NE(
+      FLAGS_quic_reloadable_flag_quic_release_crypto_stream_buffer &&
+          FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time,  // NOLINT
+      QuicStreamSequencerPeer::IsUnderlyingBufferAllocated(sequencer));
+}
+
+TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdateWithCert) {
+  // Test that the crypto client stream can receive and use server config
+  // updates with certificates after the connection has been established.
+  CompleteCryptoHandshake();
+
+  // Build a server config update message with certificates
+  QuicCryptoServerConfig crypto_config(
+      QuicCryptoServerConfig::TESTING, QuicRandom::GetInstance(),
+      CryptoTestUtils::ProofSourceForTesting());
+  CryptoTestUtils::FakeServerOptions options;
+  CryptoTestUtils::SetupCryptoServerConfigForTest(
+      connection_->clock(), QuicRandom::GetInstance(), &crypto_config, options);
+  SourceAddressTokens tokens;
+  QuicCompressedCertsCache cache(1);
+  CachedNetworkParameters network_params;
+  CryptoHandshakeMessage server_config_update;
+  EXPECT_TRUE(crypto_config.BuildServerConfigUpdateMessage(
+      session_->connection()->version(), stream()->chlo_hash(), tokens,
+      QuicSocketAddress(QuicIpAddress::Loopback6(), 1234),
+      QuicIpAddress::Loopback6(), connection_->clock(),
+      QuicRandom::GetInstance(), &cache, stream()->crypto_negotiated_params(),
+      &network_params, QuicTagVector(), &server_config_update));
+
+  std::unique_ptr<QuicData> data(
+      CryptoFramer::ConstructHandshakeMessage(server_config_update));
+  stream()->OnStreamFrame(QuicStreamFrame(kCryptoStreamId, /*fin=*/false,
+                                          /*offset=*/0, data->AsStringPiece()));
+
+  // Recreate connection with the new config and verify a 0-RTT attempt.
+  CreateConnection();
+
+  stream()->CryptoConnect();
+  EXPECT_TRUE(session_->IsEncryptionEstablished());
 }
 
 TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdateBeforeHandshake) {
@@ -225,18 +284,18 @@ TEST_F(QuicCryptoClientStreamTest, ServerConfigUpdateBeforeHandshake) {
 }
 
 TEST_F(QuicCryptoClientStreamTest, TokenBindingNegotiation) {
-  server_options_.token_binding_enabled = true;
-  crypto_config_.tb_key_params.push_back(kP256);
+  server_options_.token_binding_params = QuicTagVector{kTB10, kP256};
+  crypto_config_.tb_key_params = QuicTagVector{kTB10};
 
   CompleteCryptoHandshake();
   EXPECT_TRUE(stream()->encryption_established());
   EXPECT_TRUE(stream()->handshake_confirmed());
-  EXPECT_EQ(kP256,
+  EXPECT_EQ(kTB10,
             stream()->crypto_negotiated_params().token_binding_key_param);
 }
 
 TEST_F(QuicCryptoClientStreamTest, NoTokenBindingWithoutServerSupport) {
-  crypto_config_.tb_key_params.push_back(kP256);
+  crypto_config_.tb_key_params = QuicTagVector{kTB10, kP256};
 
   CompleteCryptoHandshake();
   EXPECT_TRUE(stream()->encryption_established());
@@ -245,7 +304,7 @@ TEST_F(QuicCryptoClientStreamTest, NoTokenBindingWithoutServerSupport) {
 }
 
 TEST_F(QuicCryptoClientStreamTest, NoTokenBindingWithoutClientSupport) {
-  server_options_.token_binding_enabled = true;
+  server_options_.token_binding_params = QuicTagVector{kTB10, kP256};
 
   CompleteCryptoHandshake();
   EXPECT_TRUE(stream()->encryption_established());
@@ -254,6 +313,18 @@ TEST_F(QuicCryptoClientStreamTest, NoTokenBindingWithoutClientSupport) {
 }
 
 TEST_F(QuicCryptoClientStreamTest, TokenBindingNotNegotiated) {
+  CompleteCryptoHandshake();
+  EXPECT_TRUE(stream()->encryption_established());
+  EXPECT_TRUE(stream()->handshake_confirmed());
+  EXPECT_EQ(0u, stream()->crypto_negotiated_params().token_binding_key_param);
+}
+
+TEST_F(QuicCryptoClientStreamTest, NoTokenBindingInPrivacyMode) {
+  server_options_.token_binding_params = QuicTagVector{kTB10};
+  crypto_config_.tb_key_params = QuicTagVector{kTB10};
+  server_id_ = QuicServerId(kServerHostname, kServerPort, PRIVACY_MODE_ENABLED);
+  CreateConnection();
+
   CompleteCryptoHandshake();
   EXPECT_TRUE(stream()->encryption_established());
   EXPECT_TRUE(stream()->handshake_confirmed());
@@ -305,9 +376,11 @@ class QuicCryptoClientStreamStatelessTest : public ::testing::Test {
     CryptoTestUtils::FakeServerOptions options;
     CryptoTestUtils::SetupCryptoServerConfigForTest(
         server_connection_->clock(), server_connection_->random_generator(),
-        server_session_->config(), &server_crypto_config_, options);
-    FLAGS_enable_quic_stateless_reject_support = true;
+        &server_crypto_config_, options);
+    FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support = true;
   }
+
+  QuicFlagSaver flags_;  // Save/restore all QUIC flag values.
 
   MockQuicConnectionHelper helper_;
   MockAlarmFactory alarm_factory_;
@@ -326,8 +399,7 @@ class QuicCryptoClientStreamStatelessTest : public ::testing::Test {
 };
 
 TEST_F(QuicCryptoClientStreamStatelessTest, StatelessReject) {
-  ValueRestore<bool> old_flag(&FLAGS_enable_quic_stateless_reject_support,
-                              true);
+  FLAGS_quic_reloadable_flag_enable_quic_stateless_reject_support = true;
 
   QuicCryptoClientConfig::CachedState* client_state =
       client_crypto_config_.LookupOrCreate(server_id_);

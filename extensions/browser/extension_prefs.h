@@ -11,13 +11,12 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/sync/api/string_ordinal.h"
+#include "components/sync/model/string_ordinal.h"
 #include "extensions/browser/blacklist_state.h"
 #include "extensions/browser/extension_scoped_prefs.h"
 #include "extensions/browser/install_flag.h"
@@ -59,7 +58,7 @@ class URLPatternSet;
 //       maintains as the underlying extensions change.
 class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
  public:
-  typedef std::vector<linked_ptr<ExtensionInfo> > ExtensionsInfo;
+  using ExtensionsInfo = std::vector<std::unique_ptr<ExtensionInfo>>;
 
   // Vector containing identifiers for preferences.
   typedef std::set<std::string> PrefKeySet;
@@ -118,9 +117,9 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
 
     DISALLOW_COPY_AND_ASSIGN(ScopedUpdate);
   };
-  typedef ScopedUpdate<base::DictionaryValue, base::Value::TYPE_DICTIONARY>
+  typedef ScopedUpdate<base::DictionaryValue, base::Value::Type::DICTIONARY>
       ScopedDictionaryUpdate;
-  typedef ScopedUpdate<base::ListValue, base::Value::TYPE_LIST>
+  typedef ScopedUpdate<base::ListValue, base::Value::Type::LIST>
       ScopedListUpdate;
 
   // Creates an ExtensionPrefs object.

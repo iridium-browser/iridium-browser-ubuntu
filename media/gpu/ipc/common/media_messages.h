@@ -5,6 +5,9 @@
 // Multiply-included message file, hence no include guard here, but see below
 // for a much smaller-than-usual include guard section.
 
+#include <stdint.h>
+
+#include "base/unguessable_token.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/ipc/common/gpu_param_traits_macros.h"
 #include "ipc/ipc_message_macros.h"
@@ -13,6 +16,7 @@
 #include "media/video/jpeg_decode_accelerator.h"
 #include "media/video/video_decode_accelerator.h"
 #include "media/video/video_encode_accelerator.h"
+#include "ui/gfx/ipc/color/gfx_param_traits.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 
 #define IPC_MESSAGE_START MediaMsgStart
@@ -33,14 +37,25 @@ IPC_STRUCT_BEGIN(AcceleratedVideoEncoderMsg_Encode_Params)
   IPC_STRUCT_MEMBER(bool, force_keyframe)
 IPC_STRUCT_END()
 
-IPC_STRUCT_BEGIN(AcceleratedVideoEncoderMsg_Encode_Params2)
-  IPC_STRUCT_MEMBER(int32_t, frame_id)
-  IPC_STRUCT_MEMBER(base::TimeDelta, timestamp)
-  IPC_STRUCT_MEMBER(std::vector<gfx::GpuMemoryBufferHandle>,
-                    gpu_memory_buffer_handles)
-  IPC_STRUCT_MEMBER(gfx::Size, size)
-  IPC_STRUCT_MEMBER(bool, force_keyframe)
+IPC_STRUCT_BEGIN(AcceleratedVideoDecoderHostMsg_PictureReady_Params)
+  IPC_STRUCT_MEMBER(int32_t, picture_buffer_id)
+  IPC_STRUCT_MEMBER(int32_t, bitstream_buffer_id)
+  IPC_STRUCT_MEMBER(gfx::Rect, visible_rect)
+  IPC_STRUCT_MEMBER(gfx::ColorSpace, color_space)
+  IPC_STRUCT_MEMBER(bool, allow_overlay)
+  IPC_STRUCT_MEMBER(bool, size_changed)
+  IPC_STRUCT_MEMBER(bool, surface_texture)
+  IPC_STRUCT_MEMBER(bool, wants_promotion_hint)
 IPC_STRUCT_END()
+
+//------------------------------------------------------------------------------
+// Utility Messages
+
+// Sent from Renderer to GPU process to request a token identifying the channel.
+// These tokens can be used to prove ownership of the channel. The intended use
+// case is to share the command buffer with MojoMediaApplication.
+IPC_SYNC_MESSAGE_CONTROL0_1(GpuCommandBufferMsg_GetChannelToken,
+                            base::UnguessableToken /* channel_token */)
 
 //------------------------------------------------------------------------------
 // Accelerated Video Decoder Messages
@@ -77,6 +92,10 @@ IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderMsg_Flush)
 // Send reset request to the decoder.
 IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderMsg_Reset)
 
+// Send a surface id to the decoder.
+IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderMsg_SetSurface,
+                    int32_t) /* Surface ID */
+
 // Send destroy request to the decoder.
 IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderMsg_Destroy)
 
@@ -108,12 +127,8 @@ IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderHostMsg_DismissPictureBuffer,
                     int32_t) /* Picture buffer ID */
 
 // Decoder reports that a picture is ready.
-IPC_MESSAGE_ROUTED5(AcceleratedVideoDecoderHostMsg_PictureReady,
-                    int32_t,   /* Picture buffer ID */
-                    int32_t,   /* Bitstream buffer ID */
-                    gfx::Rect, /* Visible rectangle */
-                    bool,      /* Buffer is HW overlay capable */
-                    bool)      /* VDA updated picture size */
+IPC_MESSAGE_ROUTED1(AcceleratedVideoDecoderHostMsg_PictureReady,
+                    AcceleratedVideoDecoderHostMsg_PictureReady_Params)
 
 // Confirm decoder has been flushed.
 IPC_MESSAGE_ROUTED0(AcceleratedVideoDecoderHostMsg_FlushDone)
@@ -140,12 +155,6 @@ IPC_SYNC_MESSAGE_ROUTED1_1(GpuCommandBufferMsg_CreateVideoEncoder,
 // by AcceleratedVideoEncoderHostMsg_NotifyInputDone.
 IPC_MESSAGE_ROUTED1(AcceleratedVideoEncoderMsg_Encode,
                     AcceleratedVideoEncoderMsg_Encode_Params)
-
-// Queue a GpuMemoryBuffer backed video frame to the encoder to encode.
-// |frame_id| will be returned by
-// AcceleratedVideoEncoderHostMsg_NotifyInputDone.
-IPC_MESSAGE_ROUTED1(AcceleratedVideoEncoderMsg_Encode2,
-                    AcceleratedVideoEncoderMsg_Encode_Params2)
 
 // Queue a buffer to the encoder for use in returning output.  |buffer_id| will
 // be returned by AcceleratedVideoEncoderHostMsg_BitstreamBufferReady.

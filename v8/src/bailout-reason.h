@@ -20,9 +20,6 @@ namespace internal {
   V(kArgumentsObjectValueInATestContext,                                       \
     "Arguments object value in a test context")                                \
   V(kArrayIndexConstantValueTooBig, "Array index constant value too big")      \
-  V(kAssignmentToArguments, "Assignment to arguments")                         \
-  V(kAssignmentToLetVariableBeforeInitialization,                              \
-    "Assignment to let variable before initialization")                        \
   V(kAssignmentToLOOKUPVariable, "Assignment to LOOKUP variable")              \
   V(kAssignmentToParameterFunctionUsesArgumentsObject,                         \
     "Assignment to parameter, function uses arguments object")                 \
@@ -36,6 +33,7 @@ namespace internal {
   V(kBailoutWasNotPrepared, "Bailout was not prepared")                        \
   V(kBothRegistersWereSmisInSelectNonSmi,                                      \
     "Both registers were smis in SelectNonSmi")                                \
+  V(kClassConstructorFunction, "Class constructor function")                   \
   V(kClassLiteral, "Class literal")                                            \
   V(kCodeGenerationFailed, "Code generation failed")                           \
   V(kCodeObjectNotProperlyPatched, "Code object not properly patched")         \
@@ -61,9 +59,13 @@ namespace internal {
   V(kEliminatedBoundsCheckFailed, "Eliminated bounds check failed")            \
   V(kEmitLoadRegisterUnsupportedDoubleImmediate,                               \
     "EmitLoadRegister: Unsupported double immediate")                          \
+  V(kCyclicObjectStateDetectedInEscapeAnalysis,                                \
+    "Cyclic object state detected by escape analysis")                         \
   V(kEval, "eval")                                                             \
   V(kExpectedAllocationSite, "Expected allocation site")                       \
   V(kExpectedBooleanValue, "Expected boolean value")                           \
+  V(kExpectedFixedDoubleArrayMap,                                              \
+    "Expected a fixed double array map in fast shallow clone array literal")   \
   V(kExpectedFunctionObject, "Expected function object in register")           \
   V(kExpectedHeapNumber, "Expected HeapNumber")                                \
   V(kExpectedJSReceiver, "Expected object to have receiver type")              \
@@ -73,7 +75,6 @@ namespace internal {
   V(kExpectedPositiveZero, "Expected +0.0")                                    \
   V(kExpectedNewSpaceObject, "Expected new space object")                      \
   V(kExpectedUndefinedOrCell, "Expected undefined or cell in register")        \
-  V(kExpectingAlignmentForCopyBytes, "Expecting alignment for CopyBytes")      \
   V(kExternalStringExpectedButNotFound,                                        \
     "External string expected, but not found")                                 \
   V(kForInStatementWithNonLocalEachVariable,                                   \
@@ -85,6 +86,7 @@ namespace internal {
     "The function_data field should be a BytecodeArray on interpreter entry")  \
   V(kGeneratedCodeIsTooLarge, "Generated code is too large")                   \
   V(kGenerator, "Generator")                                                   \
+  V(kGetIterator, "GetIterator")                                               \
   V(kGlobalFunctionsMustHaveInitialMap,                                        \
     "Global functions must have initial map")                                  \
   V(kGraphBuildingFailed, "Optimized graph construction failed")               \
@@ -115,10 +117,6 @@ namespace internal {
   V(kInvalidLhsInCountOperation, "Invalid lhs in count operation")             \
   V(kInvalidMinLength, "Invalid min_length")                                   \
   V(kInvalidRegisterFileInGenerator, "invalid register file in generator")     \
-  V(kJSGlobalObjectNativeContextShouldBeANativeContext,                        \
-    "JSGlobalObject::native_context should be a native context")               \
-  V(kJSGlobalProxyContextShouldNotBeNull,                                      \
-    "JSGlobalProxy::context() should not be null")                             \
   V(kJSObjectWithFastElementsMapHasSlowElements,                               \
     "JSObject with fast elements map has slow elements")                       \
   V(kLetBindingReInitialization, "Let binding re-initialization")              \
@@ -126,6 +124,7 @@ namespace internal {
   V(kLookupVariableInCountOperation, "Lookup variable in count operation")     \
   V(kMapBecameDeprecated, "Map became deprecated")                             \
   V(kMapBecameUnstable, "Map became unstable")                                 \
+  V(kMissingBytecodeArray, "Missing bytecode array from function")             \
   V(kNativeFunctionLiteral, "Native function literal")                         \
   V(kNeedSmiLiteral, "Need a Smi literal here")                                \
   V(kNoCasesLeft, "No cases left")                                             \
@@ -139,7 +138,6 @@ namespace internal {
   V(kNotEnoughSpillSlotsForOsr, "Not enough spill slots for OSR")              \
   V(kNotEnoughVirtualRegistersRegalloc,                                        \
     "Not enough virtual registers (regalloc)")                                 \
-  V(kObjectFoundInSmiOnlyArray, "Object found in smi-only array")              \
   V(kObjectLiteralWithComplexProperty, "Object literal with complex property") \
   V(kOffsetOutOfRange, "Offset out of range")                                  \
   V(kOperandIsANumber, "Operand is a number")                                  \
@@ -166,7 +164,7 @@ namespace internal {
   V(kObjectNotTagged, "The object is not tagged")                              \
   V(kOptimizationDisabled, "Optimization disabled")                            \
   V(kOptimizationDisabledForTest, "Optimization disabled for test")            \
-  V(kOptimizedTooManyTimes, "Optimized too many times")                        \
+  V(kDeoptimizedTooManyTimes, "Deoptimized too many times")                    \
   V(kOutOfVirtualRegistersWhileTryingToAllocateTempRegister,                   \
     "Out of virtual registers while trying to allocate temp register")         \
   V(kParseScopeError, "Parse/scope error")                                     \
@@ -174,7 +172,9 @@ namespace internal {
   V(kReceivedInvalidReturnAddress, "Received invalid return address")          \
   V(kReferenceToAVariableWhichRequiresDynamicLookup,                           \
     "Reference to a variable which requires dynamic lookup")                   \
+  V(kReferenceToLetOrConstVariable, "Reference to let or const variable")      \
   V(kReferenceToGlobalLexicalVariable, "Reference to global lexical variable") \
+  V(kReferenceToModuleVariable, "Reference to module-allocated variable")      \
   V(kReferenceToUninitializedVariable, "Reference to uninitialized variable")  \
   V(kRegisterDidNotMatchExpectedRoot, "Register did not match expected root")  \
   V(kRegisterWasClobbered, "Register was clobbered")                           \
@@ -242,14 +242,10 @@ namespace internal {
   V(kUnexpectedTypeForRegExpDataFixedArrayExpected,                            \
     "Unexpected type for RegExp data, FixedArray expected")                    \
   V(kUnexpectedValue, "Unexpected value")                                      \
-  V(kUnsupportedConstCompoundAssignment,                                       \
-    "Unsupported const compound assignment")                                   \
-  V(kUnsupportedCountOperationWithConst,                                       \
-    "Unsupported count operation with const")                                  \
   V(kUnsupportedDoubleImmediate, "Unsupported double immediate")               \
-  V(kUnsupportedLetCompoundAssignment, "Unsupported let compound assignment")  \
   V(kUnsupportedLookupSlotInDeclaration,                                       \
     "Unsupported lookup slot in declaration")                                  \
+  V(kUnsupportedModuleOperation, "Unsupported module operation")               \
   V(kUnsupportedNonPrimitiveCompare, "Unsupported non-primitive compare")      \
   V(kUnsupportedPhiUseOfArguments, "Unsupported phi use of arguments")         \
   V(kUnsupportedPhiUseOfConstVariable,                                         \
@@ -257,9 +253,8 @@ namespace internal {
   V(kUnexpectedReturnFromThrow, "Unexpectedly returned from a throw")          \
   V(kUnsupportedSwitchStatement, "Unsupported switch statement")               \
   V(kUnsupportedTaggedImmediate, "Unsupported tagged immediate")               \
+  V(kUnstableConstantTypeHeapObject, "Unstable constant-type heap object")     \
   V(kVariableResolvedToWithContext, "Variable resolved to with context")       \
-  V(kWeShouldNotHaveAnEmptyLexicalContext,                                     \
-    "We should not have an empty lexical context")                             \
   V(kWithStatement, "WithStatement")                                           \
   V(kWrongFunctionContext, "Wrong context passed to function")                 \
   V(kWrongAddressOrValuePassedToRecordWrite,                                   \
@@ -268,8 +263,8 @@ namespace internal {
     "Wrong number of arguments for intrinsic")                                 \
   V(kShouldNotDirectlyEnterOsrFunction,                                        \
     "Should not directly enter OSR-compiled function")                         \
-  V(kConversionFromImpossibleValue,                                            \
-    "Reached conversion from value with empty type (i.e., impossible type)")
+  V(kUnexpectedReturnFromWasmTrap,                                             \
+    "Should not return after throwing a wasm trap")
 
 #define ERROR_MESSAGES_CONSTANTS(C, T) C,
 enum BailoutReason {

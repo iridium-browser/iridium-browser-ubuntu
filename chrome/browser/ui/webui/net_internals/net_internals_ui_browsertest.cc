@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/net_log/chrome_net_log.h"
@@ -42,6 +41,9 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_transaction_factory.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source_type.h"
+#include "net/log/net_log_with_source.h"
 #include "net/log/write_to_file_net_log_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
@@ -228,9 +230,7 @@ void NetInternalsTest::MessageHandler::LoadPage(
   ASSERT_TRUE(list_value->GetString(0, &url));
   LOG(WARNING) << "url: [" << url << "]";
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(url),
-      NEW_BACKGROUND_TAB,
+      browser(), GURL(url), WindowOpenDisposition::NEW_BACKGROUND_TAB,
       ui_test_utils::BROWSER_TEST_NONE);
 }
 
@@ -241,9 +241,7 @@ void NetInternalsTest::MessageHandler::PrerenderPage(
   GURL loader_url =
       net_internals_test_->CreatePrerenderLoaderUrl(GURL(prerender_url));
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      GURL(loader_url),
-      NEW_BACKGROUND_TAB,
+      browser(), GURL(loader_url), WindowOpenDisposition::NEW_BACKGROUND_TAB,
       ui_test_utils::BROWSER_TEST_NONE);
 }
 
@@ -281,8 +279,8 @@ void NetInternalsTest::MessageHandler::GetNetLogFileContents(
   base::ScopedTempDir temp_directory;
   ASSERT_TRUE(temp_directory.CreateUniqueTempDir());
   base::FilePath temp_file;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_directory.path(),
-                                             &temp_file));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_directory.GetPath(), &temp_file));
   base::ScopedFILE temp_file_handle(base::OpenFile(temp_file, "w"));
   ASSERT_TRUE(temp_file_handle);
 
@@ -295,11 +293,10 @@ void NetInternalsTest::MessageHandler::GetNetLogFileContents(
                                  std::move(temp_file_handle), constants.get(),
                                  nullptr);
   g_browser_process->net_log()->AddGlobalEntry(
-      net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED);
-  net::BoundNetLog bound_net_log = net::BoundNetLog::Make(
-      g_browser_process->net_log(),
-      net::NetLog::SOURCE_URL_REQUEST);
-  bound_net_log.BeginEvent(net::NetLog::TYPE_REQUEST_ALIVE);
+      net::NetLogEventType::NETWORK_IP_ADDRESSES_CHANGED);
+  net::NetLogWithSource net_log_with_source = net::NetLogWithSource::Make(
+      g_browser_process->net_log(), net::NetLogSourceType::URL_REQUEST);
+  net_log_with_source.BeginEvent(net::NetLogEventType::REQUEST_ALIVE);
   net_log_logger->StopObserving(nullptr);
   net_log_logger.reset();
 
@@ -332,20 +329,16 @@ NetInternalsTest::NetInternalsTest()
 NetInternalsTest::~NetInternalsTest() {
 }
 
-void NetInternalsTest::SetUpCommandLine(base::CommandLine* command_line) {
-  WebUIBrowserTest::SetUpCommandLine(command_line);
-  // Needed to test the prerender view.
-  command_line->AppendSwitchASCII(switches::kPrerenderMode,
-                                  switches::kPrerenderModeSwitchValueEnabled);
-}
-
 void NetInternalsTest::SetUpOnMainThread() {
   WebUIBrowserTest::SetUpOnMainThread();
+  // Needed to test the prerender view.
+  prerender::PrerenderManager::SetMode(
+      prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
   // Increase the memory allowed in a prerendered page above normal settings,
   // as debug builds use more memory and often go over the usual limit.
   Profile* profile = browser()->profile();
   prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile);
+      prerender::PrerenderManagerFactory::GetForBrowserContext(profile);
   prerender_manager->mutable_config().max_bytes = 1000 * 1024 * 1024;
 }
 

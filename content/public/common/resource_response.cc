@@ -18,7 +18,6 @@ scoped_refptr<ResourceResponse> ResourceResponse::DeepCopy() const {
   }
   new_response->head.mime_type = head.mime_type;
   new_response->head.charset = head.charset;
-  new_response->head.security_info = head.security_info;
   new_response->head.has_major_certificate_errors =
       head.has_major_certificate_errors;
   new_response->head.content_length = head.content_length;
@@ -32,13 +31,11 @@ scoped_refptr<ResourceResponse> ResourceResponse::DeepCopy() const {
   }
   new_response->head.download_file_path = head.download_file_path;
   new_response->head.was_fetched_via_spdy = head.was_fetched_via_spdy;
-  new_response->head.was_npn_negotiated = head.was_npn_negotiated;
+  new_response->head.was_alpn_negotiated = head.was_alpn_negotiated;
   new_response->head.was_alternate_protocol_available =
       head.was_alternate_protocol_available;
   new_response->head.connection_info = head.connection_info;
-  new_response->head.was_fetched_via_proxy = head.was_fetched_via_proxy;
-  new_response->head.proxy_server = head.proxy_server;
-  new_response->head.npn_negotiated_protocol = head.npn_negotiated_protocol;
+  new_response->head.alpn_negotiated_protocol = head.alpn_negotiated_protocol;
   new_response->head.socket_address = head.socket_address;
   new_response->head.was_fetched_via_service_worker =
       head.was_fetched_via_service_worker;
@@ -46,15 +43,15 @@ scoped_refptr<ResourceResponse> ResourceResponse::DeepCopy() const {
       head.was_fetched_via_foreign_fetch;
   new_response->head.was_fallback_required_by_service_worker =
       head.was_fallback_required_by_service_worker;
-  new_response->head.original_url_via_service_worker =
-      head.original_url_via_service_worker;
+  new_response->head.url_list_via_service_worker =
+      head.url_list_via_service_worker;
   new_response->head.response_type_via_service_worker =
       head.response_type_via_service_worker;
   new_response->head.service_worker_start_time =
       head.service_worker_start_time;
   new_response->head.service_worker_ready_time =
       head.service_worker_ready_time;
-  new_response->head.is_using_lofi = head.is_using_lofi;
+  new_response->head.previews_state = head.previews_state;
   new_response->head.effective_connection_type = head.effective_connection_type;
   new_response->head.signed_certificate_timestamps =
       head.signed_certificate_timestamps;

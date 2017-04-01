@@ -14,10 +14,9 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_restrictions.h"
@@ -60,7 +59,7 @@
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/user_script.h"
-#include "grit/extensions_strings.h"
+#include "extensions/strings/grit/extensions_strings.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -188,7 +187,7 @@ void CrxInstaller::InstallCrxFile(const CRXFileInfo& source_file) {
 
   if (!installer_task_runner_->PostTask(
           FROM_HERE, base::Bind(&SandboxedUnpacker::StartWithCrx,
-                                unpacker.get(), source_file))) {
+                                unpacker, source_file))) {
     NOTREACHED();
   }
 }
@@ -340,17 +339,20 @@ CrxInstallError CrxInstaller::AllowInstall(const Extension* extension) {
     } else {
       const char kHistogramName[] = "Extensions.OffStoreInstallDecisionHard";
       if (is_gallery_install()) {
-        UMA_HISTOGRAM_ENUMERATION(kHistogramName, OnStoreInstall,
+        UMA_HISTOGRAM_ENUMERATION(kHistogramName,
+                                  OffStoreInstallDecision::OnStoreInstall,
                                   NumOffStoreInstallDecision);
       } else if (off_store_install_allow_reason_ != OffStoreInstallDisallowed) {
-        UMA_HISTOGRAM_ENUMERATION(kHistogramName, OffStoreInstallAllowed,
-                                  NumOffStoreInstallDecision);
+        UMA_HISTOGRAM_ENUMERATION(
+            kHistogramName, OffStoreInstallDecision::OffStoreInstallAllowed,
+            NumOffStoreInstallDecision);
         UMA_HISTOGRAM_ENUMERATION("Extensions.OffStoreInstallAllowReason",
                                   off_store_install_allow_reason_,
                                   NumOffStoreInstallAllowReasons);
       } else {
-        UMA_HISTOGRAM_ENUMERATION(kHistogramName, OffStoreInstallDisallowed,
-                                  NumOffStoreInstallDecision);
+        UMA_HISTOGRAM_ENUMERATION(
+            kHistogramName, OffStoreInstallDecision::OffStoreInstallDisallowed,
+            NumOffStoreInstallDecision);
         // Don't delete source in this case so that the user can install
         // manually if they want.
         delete_source_ = false;
@@ -915,10 +917,10 @@ void CrxInstaller::ConfirmReEnable() {
     ExtensionInstallPrompt::PromptType type =
         ExtensionInstallPrompt::GetReEnablePromptTypeForExtension(
             service->profile(), extension());
-    client_->ShowDialog(
-        base::Bind(&CrxInstaller::OnInstallPromptDone, this), extension(),
-        nullptr, base::WrapUnique(new ExtensionInstallPrompt::Prompt(type)),
-        ExtensionInstallPrompt::GetDefaultShowDialogCallback());
+    client_->ShowDialog(base::Bind(&CrxInstaller::OnInstallPromptDone, this),
+                        extension(), nullptr,
+                        base::MakeUnique<ExtensionInstallPrompt::Prompt>(type),
+                        ExtensionInstallPrompt::GetDefaultShowDialogCallback());
   }
 }
 

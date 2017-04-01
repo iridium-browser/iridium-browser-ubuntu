@@ -28,17 +28,11 @@ class GpuVideoAcceleratorFactories;
 }
 
 namespace rtc {
-class NetworkManager;
-class PacketSocketFactory;
 class Thread;
 }
 
 namespace blink {
 class WebFrame;
-class WebMediaConstraints;
-class WebMediaStream;
-class WebMediaStreamSource;
-class WebMediaStreamTrack;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 }
@@ -48,10 +42,6 @@ namespace content {
 class IpcNetworkManager;
 class IpcPacketSocketFactory;
 class WebRtcAudioDeviceImpl;
-class WebRtcLoggingHandlerImpl;
-class WebRtcLoggingMessageFilter;
-class WebRtcVideoCapturerAdapter;
-struct StreamDeviceInfo;
 
 // Object factory for RTC PeerConnections.
 class CONTENT_EXPORT PeerConnectionDependencyFactory
@@ -67,24 +57,19 @@ class CONTENT_EXPORT PeerConnectionDependencyFactory
   blink::WebRTCPeerConnectionHandler* CreateRTCPeerConnectionHandler(
       blink::WebRTCPeerConnectionHandlerClient* client);
 
+  // Create a proxy object for a VideoTrackSource that makes sure it's called on
+  // the correct threads.
+  virtual scoped_refptr<webrtc::VideoTrackSourceInterface>
+  CreateVideoTrackSourceProxy(webrtc::VideoTrackSourceInterface* source);
+
   // Asks the PeerConnection factory to create a Local MediaStream object.
   virtual scoped_refptr<webrtc::MediaStreamInterface>
       CreateLocalMediaStream(const std::string& label);
-
-  // Creates an implementation of a cricket::VideoCapturer object that can be
-  // used when creating a libjingle webrtc::VideoTrackSourceInterface object.
-  virtual WebRtcVideoCapturerAdapter* CreateVideoCapturer(
-      bool is_screen_capture);
 
   // Asks the PeerConnection factory to create a Local VideoTrack object.
   virtual scoped_refptr<webrtc::VideoTrackInterface> CreateLocalVideoTrack(
       const std::string& id,
       webrtc::VideoTrackSourceInterface* source);
-
-  // Asks the PeerConnection factory to create a Video Source.
-  // The video source takes ownership of |capturer|.
-  virtual scoped_refptr<webrtc::VideoTrackSourceInterface> CreateVideoSource(
-      cricket::VideoCapturer* capturer);
 
   // Asks the libjingle PeerConnection factory to create a libjingle
   // PeerConnection object.
@@ -116,12 +101,6 @@ class CONTENT_EXPORT PeerConnectionDependencyFactory
       const;
 
  protected:
-  // Asks the PeerConnection factory to create a Local VideoTrack object with
-  // the video source using |capturer|.
-  virtual scoped_refptr<webrtc::VideoTrackInterface>
-      CreateLocalVideoTrack(const std::string& id,
-                            cricket::VideoCapturer* capturer);
-
   virtual const scoped_refptr<webrtc::PeerConnectionFactoryInterface>&
       GetPcFactory();
   virtual bool PeerConnectionFactoryCreated();

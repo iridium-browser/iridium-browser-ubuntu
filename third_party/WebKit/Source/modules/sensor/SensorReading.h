@@ -8,40 +8,54 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/DOMHighResTimeStamp.h"
 #include "core/dom/DOMTimeStamp.h"
-#include "modules/ModulesExport.h"
+#include "modules/sensor/SensorProxy.h"
 
 namespace blink {
 
-class MODULES_EXPORT SensorReading : public GarbageCollectedFinalized<SensorReading>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
+class ScriptState;
 
-public:
-    static SensorReading* create()
-    {
-        return new SensorReading;
-    }
+class SensorReading : public GarbageCollectedFinalized<SensorReading>,
+                      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    static SensorReading* create(bool providesTimeStamp, DOMHighResTimeStamp timestamp)
-    {
-        return new SensorReading(providesTimeStamp, timestamp);
-    }
+ public:
+  DEFINE_INLINE_VIRTUAL_TRACE() {}
 
-    virtual ~SensorReading();
+  DOMHighResTimeStamp timeStamp(ScriptState*) const;
 
-    DOMHighResTimeStamp timeStamp(bool& isNull);
+  // Returns 'true' if the current reading value is different than the given
+  // previous one; otherwise returns 'false'.
+  virtual bool isReadingUpdated(
+      const device::SensorReading& previous) const = 0;
 
-    void setTimeStamp(DOMHighResTimeStamp time) { m_timeStamp = time; }
+  const device::SensorReading& data() const { return m_data; }
 
-    DECLARE_VIRTUAL_TRACE();
+  virtual ~SensorReading();
 
-protected:
-    bool m_canProvideTimeStamp;
-    DOMHighResTimeStamp m_timeStamp;
+ protected:
+  explicit SensorReading(const device::SensorReading&);
 
-    SensorReading();
-    SensorReading(bool providesTimeStamp, DOMHighResTimeStamp timestamp);
+ private:
+  device::SensorReading m_data;
 };
 
-} // namepsace blink
+class SensorReadingFactory {
+ public:
+  virtual SensorReading* createSensorReading(const device::SensorReading&) = 0;
 
-#endif // SensorReading_h
+ protected:
+  SensorReadingFactory() = default;
+};
+
+template <typename SensorReadingType>
+class SensorReadingFactoryImpl : public SensorReadingFactory {
+ public:
+  SensorReading* createSensorReading(
+      const device::SensorReading& reading) override {
+    return SensorReadingType::create(reading);
+  }
+};
+
+}  // namepsace blink
+
+#endif  // SensorReading_h

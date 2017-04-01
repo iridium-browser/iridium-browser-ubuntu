@@ -61,6 +61,11 @@ typedef ViewsTestBase ViewAuraTest;
 //     +-- v8
 //     +-- v9
 TEST_F(ViewAuraTest, RecreateLayersWithWindows) {
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsMus())
+    return;
+
   Widget* w1 = CreateControlWidget(GetContext(), gfx::Rect(0, 0, 100, 100));
   w1->GetNativeView()->layer()->set_name("w1");
 
@@ -122,7 +127,7 @@ TEST_F(ViewAuraTest, RecreateLayersWithWindows) {
 
   {
     std::unique_ptr<ui::LayerTreeOwner> cloned_owner(
-        wm::RecreateLayers(w1->GetNativeView(), nullptr));
+        wm::RecreateLayers(w1->GetNativeView()));
     EXPECT_EQ(w1_layer, cloned_owner->root());
     EXPECT_NE(w1_layer, w1->GetNativeView()->layer());
 

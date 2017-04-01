@@ -6,6 +6,7 @@
 #define IOS_CHROME_BROWSER_UI_AUTOFILL_AUTOFILL_CLIENT_IOS_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -28,7 +29,7 @@ namespace password_manager {
 class PasswordGenerationManager;
 }
 
-namespace sync_driver {
+namespace syncer {
 class SyncService;
 }
 
@@ -37,8 +38,6 @@ namespace autofill {
 class PersonalDataManager;
 
 // iOS implementation of AutofillClient.
-// TODO(dconnelly): Split this up, as it collects functionality that doesn't
-// necessarily fit together on iOS. http://crbug.com/432487.
 class AutofillClientIOS : public AutofillClient {
  public:
   AutofillClientIOS(
@@ -52,9 +51,9 @@ class AutofillClientIOS : public AutofillClient {
   // AutofillClient implementation.
   PersonalDataManager* GetPersonalDataManager() override;
   PrefService* GetPrefs() override;
-  sync_driver::SyncService* GetSyncService() override;
+  syncer::SyncService* GetSyncService() override;
   IdentityProvider* GetIdentityProvider() override;
-  rappor::RapporService* GetRapporService() override;
+  rappor::RapporServiceImpl* GetRapporServiceImpl() override;
   void ShowAutofillSettings() override;
   void ShowUnmaskPrompt(const CreditCard& card,
                         UnmaskCardReason reason,
@@ -92,6 +91,7 @@ class AutofillClientIOS : public AutofillClient {
   bool IsContextSecure(const GURL& form_origin) override;
   bool ShouldShowSigninPromo() override;
   void StartSigninFlow() override;
+  void ShowHttpNotSecureExplanation() override;
 
  private:
   ios::ChromeBrowserState* browser_state_;

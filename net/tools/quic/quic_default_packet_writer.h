@@ -8,8 +8,9 @@
 #include <stddef.h>
 
 #include "base/macros.h"
-#include "net/base/ip_endpoint.h"
 #include "net/quic/core/quic_packet_writer.h"
+#include "net/quic/platform/api/quic_export.h"
+#include "net/quic/platform/api/quic_socket_address.h"
 
 namespace net {
 
@@ -17,7 +18,7 @@ struct WriteResult;
 
 
 // Default packet writer which wraps QuicSocketUtils WritePacket.
-class QuicDefaultPacketWriter : public QuicPacketWriter {
+class QUIC_EXPORT_PRIVATE QuicDefaultPacketWriter : public QuicPacketWriter {
  public:
   explicit QuicDefaultPacketWriter(int fd);
   ~QuicDefaultPacketWriter() override;
@@ -25,18 +26,19 @@ class QuicDefaultPacketWriter : public QuicPacketWriter {
   // QuicPacketWriter
   WriteResult WritePacket(const char* buffer,
                           size_t buf_len,
-                          const IPAddress& self_address,
-                          const IPEndPoint& peer_address,
+                          const QuicIpAddress& self_address,
+                          const QuicSocketAddress& peer_address,
                           PerPacketOptions* options) override;
   bool IsWriteBlockedDataBuffered() const override;
   bool IsWriteBlocked() const override;
   void SetWritable() override;
-  QuicByteCount GetMaxPacketSize(const IPEndPoint& peer_address) const override;
+  QuicByteCount GetMaxPacketSize(
+      const QuicSocketAddress& peer_address) const override;
 
   void set_fd(int fd) { fd_ = fd; }
 
  protected:
-  void set_write_blocked(bool is_blocked) { write_blocked_ = is_blocked; }
+  void set_write_blocked(bool is_blocked);
   int fd() { return fd_; }
 
  private:

@@ -11,12 +11,15 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/cronet/url_request_context_config.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_verifier.h"
 #include "net/dns/host_resolver_proc.h"
 #include "net/http/http_network_session.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/url_request/url_request_context.h"
@@ -181,7 +184,7 @@ class StaleHostResolverTest : public testing::Test {
         resolver_->Resolve(info, net::DEFAULT_PRIORITY, &resolve_addresses_,
                            base::Bind(&StaleHostResolverTest::OnResolveComplete,
                                       base::Unretained(this)),
-                           &request_, net::BoundNetLog());
+                           &request_, net::NetLogWithSource());
     if (rv != net::ERR_IO_PENDING) {
       resolve_pending_ = false;
       resolve_complete_ = true;

@@ -7,6 +7,7 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_util.h"
@@ -24,22 +25,23 @@
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/loader/chrome_resource_dispatcher_host_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu_test_util.h"
-#include "chrome/browser/renderer_host/chrome_resource_dispatcher_host_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
-#include "content/public/browser/resource_controller.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/resource_type.h"
 #include "content/public/common/url_constants.h"
@@ -52,8 +54,8 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
 
 using content::ResourceType;
 using content::WebContents;
@@ -92,7 +94,7 @@ class TestNavigationListener
     WeakThrottleList::const_iterator it;
     for (it = throttles_.begin(); it != throttles_.end(); ++it) {
       if (it->get())
-        (*it)->Resume();
+        (*it)->ResumeHandler();
     }
     throttles_.clear();
   }
@@ -108,7 +110,7 @@ class TestNavigationListener
     WeakThrottleList::iterator it;
     for (it = throttles_.begin(); it != throttles_.end(); ++it) {
       if (it->get() && it->get()->url() == url) {
-        (*it)->Resume();
+        (*it)->ResumeHandler();
         throttles_.erase(it);
         break;
       }
@@ -118,14 +120,13 @@ class TestNavigationListener
   // Constructs a ResourceThrottle if the request for |url| should be held.
   //
   // Needs to be invoked on the IO thread.
-  content::ResourceThrottle* CreateResourceThrottle(
-      const GURL& url,
-      ResourceType resource_type) {
+  std::unique_ptr<content::ResourceThrottle> CreateResourceThrottle(
+      const GURL& url) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     if (urls_to_delay_.find(url) == urls_to_delay_.end())
       return NULL;
 
-    Throttle* throttle = new Throttle();
+    auto throttle = base::MakeUnique<Throttle>();
     throttle->set_url(url);
     throttles_.push_back(throttle->AsWeakPtr());
     return throttle;
@@ -140,9 +141,7 @@ class TestNavigationListener
   class Throttle : public content::ResourceThrottle,
                    public base::SupportsWeakPtr<Throttle> {
    public:
-    void Resume() {
-      controller()->Resume();
-    }
+    void ResumeHandler() { Resume(); }
 
     // content::ResourceThrottle implementation.
     void WillStartRequest(bool* defer) override { *defer = true; }
@@ -188,7 +187,7 @@ class DelayLoadStartAndExecuteJavascript
         script_(script),
         has_user_gesture_(false),
         script_was_executed_(false),
-        rvh_(NULL) {
+        rfh_(nullptr) {
     registrar_.Add(this,
                    chrome::NOTIFICATION_TAB_ADDED,
                    content::NotificationService::AllSources());
@@ -208,35 +207,34 @@ class DelayLoadStartAndExecuteJavascript
     registrar_.RemoveAll();
   }
 
-  void DidStartProvisionalLoadForFrame(
-      content::RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      bool is_error_page,
-      bool is_iframe_srcdoc) override {
-    if (validated_url != delay_url_ || !rvh_)
+  void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override {
+    if (navigation_handle->GetURL() != delay_url_ || !rfh_)
       return;
 
     if (has_user_gesture_) {
-      rvh_->GetMainFrame()->ExecuteJavaScriptWithUserGestureForTests(
+      rfh_->ExecuteJavaScriptWithUserGestureForTests(
           base::UTF8ToUTF16(script_));
     } else {
-      rvh_->GetMainFrame()->ExecuteJavaScriptForTests(
-          base::UTF8ToUTF16(script_));
+      rfh_->ExecuteJavaScriptForTests(base::UTF8ToUTF16(script_));
     }
     script_was_executed_ = true;
   }
 
-  void DidCommitProvisionalLoadForFrame(
-      content::RenderFrameHost* render_frame_host,
-      const GURL& url,
-      ui::PageTransition transition_type) override {
+  void DidFinishNavigation(
+      content::NavigationHandle* navigation_handle) override {
+    if (!navigation_handle->HasCommitted() || navigation_handle->IsErrorPage())
+      return;
+
     if (script_was_executed_ &&
-        base::EndsWith(url.spec(), until_url_suffix_,
+        base::EndsWith(navigation_handle->GetURL().spec(), until_url_suffix_,
                        base::CompareCase::SENSITIVE)) {
       content::WebContentsObserver::Observe(NULL);
       test_navigation_listener_->ResumeAll();
     }
-    rvh_ = render_frame_host->GetRenderViewHost();
+
+    if (navigation_handle->IsInMainFrame())
+      rfh_ = navigation_handle->GetRenderFrameHost();
   }
 
   void set_has_user_gesture(bool has_user_gesture) {
@@ -253,7 +251,7 @@ class DelayLoadStartAndExecuteJavascript
   std::string script_;
   bool has_user_gesture_;
   bool script_was_executed_;
-  content::RenderViewHost* rvh_;
+  content::RenderFrameHost* rfh_;
 
   DISALLOW_COPY_AND_ASSIGN(DelayLoadStartAndExecuteJavascript);
 };
@@ -271,8 +269,7 @@ class StartProvisionalLoadObserver : public content::WebContentsObserver {
   void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
-      bool is_error_page,
-      bool is_iframe_srcdoc) override {
+      bool is_error_page) override {
     if (validated_url == url_) {
       url_seen_ = true;
       message_loop_runner_->Quit();
@@ -307,23 +304,22 @@ class TestResourceDispatcherHostDelegate
   }
   ~TestResourceDispatcherHostDelegate() override {}
 
-  void RequestBeginning(
-      net::URLRequest* request,
-      content::ResourceContext* resource_context,
-      content::AppCacheService* appcache_service,
-      ResourceType resource_type,
-      ScopedVector<content::ResourceThrottle>* throttles) override {
+  void RequestBeginning(net::URLRequest* request,
+                        content::ResourceContext* resource_context,
+                        content::AppCacheService* appcache_service,
+                        ResourceType resource_type,
+                        std::vector<std::unique_ptr<content::ResourceThrottle>>*
+                            throttles) override {
     ChromeResourceDispatcherHostDelegate::RequestBeginning(
         request,
         resource_context,
         appcache_service,
         resource_type,
         throttles);
-    content::ResourceThrottle* throttle =
-        test_navigation_listener_->CreateResourceThrottle(request->url(),
-                                                          resource_type);
+    std::unique_ptr<content::ResourceThrottle> throttle =
+        test_navigation_listener_->CreateResourceThrottle(request->url());
     if (throttle)
-      throttles->push_back(throttle);
+      throttles->push_back(std::move(throttle));
   }
 
  private:
@@ -405,7 +401,12 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, ClientRedirect) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, ServerRedirect) {
+#if defined(OS_LINUX)  // http://crbug.com/660288
+#define MAYBE_ServerRedirect DISABLED_ServerRedirect
+#else
+#define MAYBE_ServerRedirect ServerRedirect
+#endif
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_ServerRedirect) {
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("webnavigation/serverRedirect"))
       << message_;
@@ -416,7 +417,7 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, Download) {
   ASSERT_TRUE(download_directory.CreateUniqueTempDir());
   DownloadPrefs* download_prefs =
       DownloadPrefs::FromBrowserContext(browser()->profile());
-  download_prefs->SetDownloadPath(download_directory.path());
+  download_prefs->SetDownloadPath(download_directory.GetPath());
 
   DownloadTestObserverNotInProgress download_observer(
       content::BrowserContext::GetDownloadManager(profile()), 1);
@@ -504,7 +505,14 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, FilteredTest) {
   ASSERT_TRUE(RunExtensionTest("webnavigation/filtered")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
+// Flaky on Windows. See http://crbug.com/662160.
+#if defined(OS_WIN)
+#define MAYBE_UserAction DISABLED_UserAction
+#else
+#define MAYBE_UserAction UserAction
+#endif
+IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, MAYBE_UserAction) {
+  content::IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Wait for the extension to set itself up and return control to us.
@@ -519,7 +527,8 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
       browser()->profile())->extension_service();
   const extensions::Extension* extension =
       service->GetExtensionById(last_loaded_extension_id(), false);
-  GURL url = extension->GetResourceURL("a.html");
+  GURL url = extension->GetResourceURL(
+      "a.html?" + base::IntToString(embedded_test_server()->port()));
 
   ui_test_utils::NavigateToURL(browser(), url);
 
@@ -530,7 +539,13 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, UserAction) {
   params.page_url = url;
   params.link_url = extension->GetResourceURL("b.html");
 
-  TestRenderViewContextMenu menu(tab->GetMainFrame(), params);
+  // Get the child frame, which will be the one associated with the context
+  // menu.
+  std::vector<content::RenderFrameHost*> frames = tab->GetAllFrames();
+  EXPECT_EQ(2UL, frames.size());
+  EXPECT_TRUE(frames[1]->GetParent());
+
+  TestRenderViewContextMenu menu(frames[1], params);
   menu.Init();
   menu.ExecuteCommand(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB, 0);
 
@@ -558,14 +573,15 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, RequestOpenTab) {
   ui_test_utils::NavigateToURL(browser(), url);
 
   // There's a link on a.html. Middle-click on it to open it in a new tab.
-  blink::WebMouseEvent mouse_event;
-  mouse_event.type = blink::WebInputEvent::MouseDown;
+  blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
+                                   blink::WebInputEvent::NoModifiers,
+                                   blink::WebInputEvent::TimeStampForTesting);
   mouse_event.button = blink::WebMouseEvent::Button::Middle;
   mouse_event.x = 7;
   mouse_event.y = 7;
   mouse_event.clickCount = 1;
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
-  mouse_event.type = blink::WebInputEvent::MouseUp;
+  mouse_event.setType(blink::WebInputEvent::MouseUp);
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -590,14 +606,15 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlank) {
 
   // There's a link with target=_blank on a.html. Click on it to open it in a
   // new tab.
-  blink::WebMouseEvent mouse_event;
-  mouse_event.type = blink::WebInputEvent::MouseDown;
+  blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
+                                   blink::WebInputEvent::NoModifiers,
+                                   blink::WebInputEvent::TimeStampForTesting);
   mouse_event.button = blink::WebMouseEvent::Button::Left;
   mouse_event.x = 7;
   mouse_event.y = 7;
   mouse_event.clickCount = 1;
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
-  mouse_event.type = blink::WebInputEvent::MouseUp;
+  mouse_event.setType(blink::WebInputEvent::MouseUp);
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -620,14 +637,15 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, TargetBlankIncognito) {
 
   // There's a link with target=_blank on a.html. Click on it to open it in a
   // new tab.
-  blink::WebMouseEvent mouse_event;
-  mouse_event.type = blink::WebInputEvent::MouseDown;
+  blink::WebMouseEvent mouse_event(blink::WebInputEvent::MouseDown,
+                                   blink::WebInputEvent::NoModifiers,
+                                   blink::WebInputEvent::TimeStampForTesting);
   mouse_event.button = blink::WebMouseEvent::Button::Left;
   mouse_event.x = 7;
   mouse_event.y = 7;
   mouse_event.clickCount = 1;
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
-  mouse_event.type = blink::WebInputEvent::MouseUp;
+  mouse_event.setType(blink::WebInputEvent::MouseUp);
   tab->GetRenderViewHost()->GetWidget()->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
@@ -673,6 +691,11 @@ IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, CrossProcess) {
 // resumes all URL requests. Instead, the test explicitly delays each URL
 // and resumes manually at the required time.
 IN_PROC_BROWSER_TEST_F(WebNavigationApiTest, CrossProcessAbort) {
+  // This test does not make sense in PlzNavigate mode, as simultanious
+  // navigations that make network requests are not supported.
+  if (content::IsBrowserSideNavigationEnabled())
+    return;
+
   ASSERT_TRUE(StartEmbeddedTestServer());
 
   // Add the cross-site URL delay early on, as loading the extension will

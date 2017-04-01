@@ -30,9 +30,10 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "components/sync/driver/sync_type_preference_provider.h"
+#include "extensions/features/features.h"
 #include "net/url_request/url_request_context_getter.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/management_policy.h"
 #endif
@@ -61,7 +62,7 @@ namespace extensions {
 class ExtensionRegistry;
 }
 
-namespace sync_driver {
+namespace syncer {
 class SyncSetupInProgressHandle;
 }
 
@@ -73,13 +74,13 @@ class PrefRegistrySyncable;
 // (e.g. the installed content packs, the default URL filtering behavior, or
 // manual whitelist/blacklist overrides).
 class SupervisedUserService : public KeyedService,
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
                               public extensions::ExtensionRegistryObserver,
                               public extensions::ManagementPolicy::Provider,
 #endif
-                              public SyncTypePreferenceProvider,
+                              public syncer::SyncTypePreferenceProvider,
 #if !defined(OS_ANDROID)
-                              public sync_driver::SyncServiceObserver,
+                              public syncer::SyncServiceObserver,
                               public chrome::BrowserListObserver,
 #endif
                               public SupervisedUserURLFilter::Observer {
@@ -213,7 +214,7 @@ class SupervisedUserService : public KeyedService,
   syncer::ModelTypeSet GetPreferredDataTypes() const override;
 
 #if !defined(OS_ANDROID)
-  // sync_driver::SyncServiceObserver implementation:
+  // syncer::SyncServiceObserver implementation:
   void OnStateChanged() override;
 
   // chrome::BrowserListObserver implementation:
@@ -306,7 +307,7 @@ class SupervisedUserService : public KeyedService,
 
   void OnCustodianInfoChanged();
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // extensions::ManagementPolicy::Provider implementation:
   std::string GetDebugPolicyProviderName() const override;
   bool UserMayLoad(const extensions::Extension* extension,
@@ -462,7 +463,7 @@ class SupervisedUserService : public KeyedService,
   // Used to report inappropriate URLs to SafeSarch API.
   std::unique_ptr<SafeSearchURLReporter> url_reporter_;
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   ScopedObserver<extensions::ExtensionRegistry,
                  extensions::ExtensionRegistryObserver>
       registry_observer_;
@@ -471,7 +472,7 @@ class SupervisedUserService : public KeyedService,
   base::ObserverList<SupervisedUserServiceObserver> observer_list_;
 
   // Prevents Sync from running until configuration is complete.
-  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
+  std::unique_ptr<syncer::SyncSetupInProgressHandle> sync_blocker_;
 
   base::WeakPtrFactory<SupervisedUserService> weak_ptr_factory_;
 };

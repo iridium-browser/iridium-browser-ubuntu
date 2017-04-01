@@ -12,7 +12,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/desktop_capture/desktop_capture_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "chrome/browser/media/fake_desktop_media_list.h"
+#include "chrome/browser/media/webrtc/fake_desktop_media_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -188,8 +188,14 @@ IN_PROC_BROWSER_TEST_F(DesktopCaptureApiTest, MAYBE_ChooseDesktopMedia) {
       {false, true, false, false, content::DesktopMediaID()},
       // tabOnly()
       {false, false, true, false, content::DesktopMediaID()},
-      // audioShare()
-      {true, true, true, true, content::DesktopMediaID()},
+      // audioShareNoApproval()
+      {true, true, true, true,
+       content::DesktopMediaID(content::DesktopMediaID::TYPE_WEB_CONTENTS, 123,
+                               false)},
+      // audioShareApproval()
+      {true, true, true, true,
+       content::DesktopMediaID(content::DesktopMediaID::TYPE_WEB_CONTENTS, 123,
+                               true)},
       // chooseMediaAndGetStream()
       {true, true, false, false,
        content::DesktopMediaID(content::DesktopMediaID::TYPE_SCREEN,

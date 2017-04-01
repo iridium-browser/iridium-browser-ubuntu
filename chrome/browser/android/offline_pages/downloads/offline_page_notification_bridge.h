@@ -9,7 +9,7 @@
 
 #include "base/android/jni_android.h"
 #include "base/macros.h"
-#include "components/offline_pages/downloads/offline_page_download_notifier.h"
+#include "components/offline_pages/core/downloads/offline_page_download_notifier.h"
 
 namespace offline_pages {
 namespace android {
@@ -26,6 +26,8 @@ class OfflinePageNotificationBridge : public OfflinePageDownloadNotifier {
   void NotifyDownloadPaused(const DownloadUIItem& item) override;
   void NotifyDownloadInterrupted(const DownloadUIItem& item) override;
   void NotifyDownloadCanceled(const DownloadUIItem& item) override;
+
+  void ShowDownloadingToast();
 };
 
 }  // namespace android

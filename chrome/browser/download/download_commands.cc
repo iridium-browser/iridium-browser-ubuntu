@@ -25,12 +25,10 @@
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/google/core/browser/google_util.h"
-#include "grit/theme_resources.h"
 #include "net/base/url_util.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
@@ -39,7 +37,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/note_taking_app_utils.h"
+#include "chrome/browser/chromeos/note_taking_helper.h"
 #endif  // defined(OS_CHROMEOS)
 
 namespace {
@@ -193,6 +191,7 @@ bool DownloadCommands::IsCommandEnabled(Command command) const {
       return !download_item_->IsDone();
     case PAUSE:
       return !download_item_->IsDone() && !download_item_->IsPaused() &&
+             !download_item_->IsSavePackageDownload() &&
              download_item_->GetState() == content::DownloadItem::IN_PROGRESS;
     case RESUME:
       return download_item_->CanResume() &&
@@ -344,7 +343,8 @@ void DownloadCommands::ExecuteCommand(Command command) {
     case LEARN_MORE_INTERRUPTED:
       GetBrowser()->OpenURL(content::OpenURLParams(
           GetLearnMoreURLForInterruptedDownload(), content::Referrer(),
-          NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
+          WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
+          false));
       break;
     case PAUSE:
       download_item_->Pause();
@@ -358,7 +358,7 @@ void DownloadCommands::ExecuteCommand(Command command) {
     case ANNOTATE:
 #if defined(OS_CHROMEOS)
       if (DownloadItemModel(download_item_).HasSupportedImageMimeType()) {
-        chromeos::LaunchNoteTakingAppForNewNote(
+        chromeos::NoteTakingHelper::Get()->LaunchAppForNewNote(
             Profile::FromBrowserContext(download_item_->GetBrowserContext()),
             download_item_->GetTargetFilePath());
       }

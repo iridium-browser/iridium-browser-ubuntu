@@ -15,9 +15,9 @@ import android.content.Context;
 import android.os.Bundle;
 import android.text.TextUtils;
 
-import org.chromium.components.sync.signin.ChromeSigninController;
-import org.chromium.components.sync.test.util.AccountHolder;
-import org.chromium.components.sync.test.util.MockAccountManager;
+import org.chromium.components.signin.ChromeSigninController;
+import org.chromium.components.signin.test.util.AccountHolder;
+import org.chromium.components.signin.test.util.MockAccountManager;
 
 import java.io.IOException;
 
@@ -178,7 +178,7 @@ public class ChromeSigninUtils {
         private final Object mAuthenticationCompletionLock = new Object();
 
         /** Stores the result of account authentication. Null means not finished. */
-        private Bundle mResultBundle = null;
+        private Bundle mResultBundle;
 
         /**
          * Block and wait for the authentication callback to complete.

@@ -8,17 +8,20 @@ import android.content.Context;
 import android.util.Log;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.device.BatteryMonitor;
+import org.chromium.device.BatteryStatus;
 import org.chromium.device.battery.BatteryStatusManager.BatteryStatusCallback;
-import org.chromium.mojom.device.BatteryMonitor;
-import org.chromium.mojom.device.BatteryStatus;
+import org.chromium.services.service_manager.InterfaceFactory;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 
 /**
  * Factory that creates instances of BatteryMonitor implementations and notifies them about battery
  * status changes.
  */
-public class BatteryMonitorFactory {
+public class BatteryMonitorFactory implements InterfaceFactory<BatteryMonitor> {
     static final String TAG = "BatteryMonitorFactory";
 
     // Backing source of battery information.
@@ -32,7 +35,8 @@ public class BatteryMonitorFactory {
         public void onBatteryStatusChanged(BatteryStatus batteryStatus) {
             ThreadUtils.assertOnUiThread();
 
-            for (BatteryMonitorImpl monitor : mSubscribedMonitors) {
+            List<BatteryMonitorImpl> monitors = new ArrayList<>(mSubscribedMonitors);
+            for (BatteryMonitorImpl monitor : monitors) {
                 monitor.didChange(batteryStatus);
             }
         }
@@ -43,7 +47,8 @@ public class BatteryMonitorFactory {
         mManager = new BatteryStatusManager(applicationContext, mCallback);
     }
 
-    public BatteryMonitor createMonitor() {
+    @Override
+    public BatteryMonitor createImpl() {
         ThreadUtils.assertOnUiThread();
 
         if (mSubscribedMonitors.isEmpty() && !mManager.start()) {

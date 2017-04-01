@@ -15,8 +15,6 @@
 #include "ui/ozone/platform/drm/host/gpu_thread_adapter.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
 
-class SkBitmap;
-
 namespace gfx {
 class Point;
 }
@@ -36,10 +34,11 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
   ~DrmGpuPlatformSupportHost() override;
 
   // GpuPlatformSupportHost:
-  void OnChannelEstablished(
+  void OnGpuProcessLaunched(
       int host_id,
       scoped_refptr<base::SingleThreadTaskRunner> send_runner,
       const base::Callback<void(IPC::Message*)>& send_callback) override;
+  void OnChannelEstablished() override;
   void OnChannelDestroyed(int host_id) override;
 
   // IPC::Listener:
@@ -82,11 +81,11 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
                                  const gfx::Point& point) override;
   bool GpuDisableNativeDisplay(int64_t display_id) override;
   bool GpuGetHDCPState(int64_t display_id) override;
-  bool GpuSetHDCPState(int64_t display_id, ui::HDCPState state) override;
+  bool GpuSetHDCPState(int64_t display_id, display::HDCPState state) override;
   bool GpuSetColorCorrection(
       int64_t display_id,
-      const std::vector<GammaRampRGBEntry>& degamma_lut,
-      const std::vector<GammaRampRGBEntry>& gamma_lut,
+      const std::vector<display::GammaRampRGBEntry>& degamma_lut,
+      const std::vector<display::GammaRampRGBEntry>& gamma_lut,
       const std::vector<float>& correction_matrix) override;
 
   // Services needed by DrmWindowHost
@@ -100,7 +99,9 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
   void OnUpdateNativeDisplays(
       const std::vector<DisplaySnapshot_Params>& displays);
   void OnDisplayConfigured(int64_t display_id, bool status);
-  void OnHDCPStateReceived(int64_t display_id, bool status, HDCPState state);
+  void OnHDCPStateReceived(int64_t display_id,
+                           bool status,
+                           display::HDCPState state);
   void OnHDCPStateUpdated(int64_t display_id, bool status);
   void OnTakeDisplayControl(bool status);
   void OnRelinquishDisplayControl(bool status);
@@ -110,6 +111,7 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
                        const std::vector<OverlayCheck_Params>& params);
 
   int host_id_ = -1;
+  bool channel_established_ = false;
 
   scoped_refptr<base::SingleThreadTaskRunner> send_runner_;
   base::Callback<void(IPC::Message*)> send_callback_;

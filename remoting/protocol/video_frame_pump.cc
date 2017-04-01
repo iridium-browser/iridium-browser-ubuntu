@@ -30,8 +30,6 @@ namespace protocol {
 // must be smaller than the minimum RTO used in PseudoTCP, which is 250ms.
 static const int kKeepAlivePacketIntervalMs = 200;
 
-static bool g_enable_timestamps = false;
-
 VideoFramePump::FrameTimestamps::FrameTimestamps() {}
 VideoFramePump::FrameTimestamps::~FrameTimestamps() {}
 
@@ -41,11 +39,6 @@ VideoFramePump::PacketWithTimestamps::PacketWithTimestamps(
     : packet(std::move(packet)), timestamps(std::move(timestamps)) {}
 
 VideoFramePump::PacketWithTimestamps::~PacketWithTimestamps() {}
-
-// static
-void VideoFramePump::EnableTimestampsForTests() {
-  g_enable_timestamps = true;
-}
 
 VideoFramePump::VideoFramePump(
     scoped_refptr<base::SingleThreadTaskRunner> encode_task_runner,
@@ -76,19 +69,17 @@ VideoFramePump::~VideoFramePump() {
   encode_task_runner_->DeleteSoon(FROM_HERE, encoder_.release());
 }
 
+void VideoFramePump::SetEventTimestampsSource(
+    scoped_refptr<InputEventTimestampsSource> event_timestamps_source) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  event_timestamps_source_ = event_timestamps_source;
+}
+
 void VideoFramePump::Pause(bool pause) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   capture_scheduler_.Pause(pause);
-}
-
-void VideoFramePump::OnInputEventReceived(int64_t event_timestamp) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (!next_frame_timestamps_)
-    next_frame_timestamps_.reset(new FrameTimestamps());
-  next_frame_timestamps_->input_event_client_timestamp = event_timestamp;
-  next_frame_timestamps_->input_event_received_time = base::TimeTicks::Now();
 }
 
 void VideoFramePump::SetLosslessEncode(bool want_lossless) {
@@ -147,16 +138,15 @@ void VideoFramePump::OnCaptureResult(
 void VideoFramePump::CaptureNextFrame() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  // |next_frame_timestamps_| is not set if no input events were received since
-  // the previous frame. In that case create FrameTimestamps instance without
-  // setting |input_event_client_timestamp| and |input_event_received_time|.
-  if (!next_frame_timestamps_)
-    next_frame_timestamps_.reset(new FrameTimestamps());
-
-  captured_frame_timestamps_ = std::move(next_frame_timestamps_);
+  captured_frame_timestamps_.reset(new FrameTimestamps());
   captured_frame_timestamps_->capture_started_time = base::TimeTicks::Now();
 
-  capturer_->Capture(webrtc::DesktopRegion());
+  if (event_timestamps_source_) {
+    captured_frame_timestamps_->input_event_timestamps =
+        event_timestamps_source_->TakeLastEventTimestamps();
+  }
+
+  capturer_->CaptureFrame();
 }
 
 // static
@@ -169,7 +159,7 @@ VideoFramePump::EncodeFrame(VideoEncoder* encoder,
   std::unique_ptr<VideoPacket> packet;
   // If |frame| is non-NULL then let the encoder process it.
   if (frame)
-    packet = encoder->Encode(*frame, 0);
+    packet = encoder->Encode(*frame);
 
   // If |frame| is NULL, or the encoder returned nothing, return an empty
   // packet.
@@ -208,12 +198,6 @@ void VideoFramePump::SendPacket(std::unique_ptr<PacketWithTimestamps> packet) {
   packet->timestamps->can_send_time = base::TimeTicks::Now();
   UpdateFrameTimers(packet->packet.get(), packet->timestamps.get());
 
-  if (observer_) {
-    observer_->OnVideoFrameSent(
-        this, packet->packet->frame_id(),
-        packet->timestamps->input_event_client_timestamp);
-  }
-
   send_pending_ = true;
   video_stub_->ProcessVideoPacket(std::move(packet->packet),
                                   base::Bind(&VideoFramePump::OnVideoPacketSent,
@@ -222,16 +206,13 @@ void VideoFramePump::SendPacket(std::unique_ptr<PacketWithTimestamps> packet) {
 
 void VideoFramePump::UpdateFrameTimers(VideoPacket* packet,
                                        FrameTimestamps* timestamps) {
-  if (g_enable_timestamps)
-    packet->set_timestamp(timestamps->capture_ended_time.ToInternalValue());
-
-
-  if (!timestamps->input_event_received_time.is_null()) {
-    packet->set_capture_pending_time_ms((timestamps->capture_started_time -
-                                         timestamps->input_event_received_time)
-                                            .InMilliseconds());
+  if (!timestamps->input_event_timestamps.is_null()) {
+    packet->set_capture_pending_time_ms(
+        (timestamps->capture_started_time -
+         timestamps->input_event_timestamps.host_timestamp)
+            .InMilliseconds());
     packet->set_latest_event_timestamp(
-        timestamps->input_event_client_timestamp);
+        timestamps->input_event_timestamps.client_timestamp.ToInternalValue());
   }
 
   packet->set_capture_overhead_time_ms(
@@ -257,8 +238,9 @@ void VideoFramePump::OnVideoPacketSent() {
 
   // Send next packet if any.
   if (!pending_packets_.empty()) {
-    std::unique_ptr<PacketWithTimestamps> next(pending_packets_.front());
-    pending_packets_.weak_erase(pending_packets_.begin());
+    std::unique_ptr<PacketWithTimestamps> next =
+        std::move(pending_packets_.front());
+    pending_packets_.erase(pending_packets_.begin());
     SendPacket(std::move(next));
   }
 }

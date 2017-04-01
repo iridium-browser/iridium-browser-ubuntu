@@ -10,7 +10,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/test/test_simple_task_runner.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/win/registry.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -19,7 +18,8 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_notifier_impl.h"
 #include "components/prefs/testing_pref_store.h"
-#include "components/syncable_prefs/testing_pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace safe_browsing {
@@ -37,11 +37,11 @@ class PlatformStateStoreWinTest : public ::testing::Test {
   PlatformStateStoreWinTest()
       : profile_(nullptr),
         task_runner_(new base::TestSimpleTaskRunner()),
-        thread_task_runner_handle_(task_runner_),
         profile_manager_(TestingBrowserProcess::GetGlobal()) {}
 
   void SetUp() override {
     ::testing::Test::SetUp();
+    base::MessageLoop::current()->SetTaskRunner(task_runner_);
     registry_override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
     ASSERT_TRUE(profile_manager_.SetUp());
   }
@@ -62,10 +62,11 @@ class PlatformStateStoreWinTest : public ::testing::Test {
         new_profile ? PersistentPrefStore::PREF_READ_ERROR_NO_FILE
                     : PersistentPrefStore::PREF_READ_ERROR_NONE);
     // Ownership of |user_pref_store| is passed to the service.
-    std::unique_ptr<syncable_prefs::TestingPrefServiceSyncable> prefs(
-        new syncable_prefs::TestingPrefServiceSyncable(
-            new TestingPrefStore(), user_pref_store, new TestingPrefStore(),
-            new user_prefs::PrefRegistrySyncable(), new PrefNotifierImpl()));
+    std::unique_ptr<sync_preferences::TestingPrefServiceSyncable> prefs(
+        new sync_preferences::TestingPrefServiceSyncable(
+            new TestingPrefStore(), new TestingPrefStore(), user_pref_store,
+            new TestingPrefStore(), new user_prefs::PrefRegistrySyncable(),
+            new PrefNotifierImpl()));
     chrome::RegisterUserProfilePrefs(prefs->registry());
     profile_ = profile_manager_.CreateTestingProfile(
         kProfileName_, std::move(prefs), base::UTF8ToUTF16(kProfileName_), 0,
@@ -113,9 +114,9 @@ class PlatformStateStoreWinTest : public ::testing::Test {
   TestingProfile* profile_;
 
  private:
+  content::TestBrowserThreadBundle thread_bundle_;
   registry_util::RegistryOverrideManager registry_override_manager_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  base::ThreadTaskRunnerHandle thread_task_runner_handle_;
   TestingProfileManager profile_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(PlatformStateStoreWinTest);

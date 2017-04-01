@@ -28,7 +28,7 @@
 #define StyleMedia_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "core/frame/DOMWindowProperty.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "platform/heap/Handle.h"
 #include "wtf/text/WTFString.h"
 
@@ -36,21 +36,24 @@ namespace blink {
 
 class LocalFrame;
 
-class StyleMedia final : public GarbageCollected<StyleMedia>, public DOMWindowProperty, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(StyleMedia);
-public:
-    static StyleMedia* create(LocalFrame* frame) { return new StyleMedia(frame);}
+class StyleMedia final : public GarbageCollected<StyleMedia>,
+                         public ContextClient,
+                         public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(StyleMedia);
 
-    AtomicString type() const;
-    bool matchMedium(const String&) const;
+ public:
+  static StyleMedia* create(LocalFrame* frame) { return new StyleMedia(frame); }
 
-    DECLARE_VIRTUAL_TRACE();
+  AtomicString type() const;
+  bool matchMedium(const String&) const;
 
-private:
-    explicit StyleMedia(LocalFrame*);
+  DECLARE_VIRTUAL_TRACE();
+
+ private:
+  explicit StyleMedia(LocalFrame*);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // StyleMedia_h
+#endif  // StyleMedia_h

@@ -8,22 +8,24 @@
 #include "public/platform/WebCallbacks.h"
 #include "public/platform/modules/push_messaging/WebPushError.h"
 #include "public/platform/modules/push_messaging/WebPushProvider.h"
+#include <memory>
 
 namespace blink {
 
 class WebServiceWorkerRegistration;
-struct WebPushSubscription;
 struct WebPushSubscriptionOptions;
 
 class WebPushClient {
-public:
-    virtual ~WebPushClient() { }
+ public:
+  virtual ~WebPushClient() {}
 
-    // Ownership of the WebServiceWorkerRegistration is not transferred.
-    // Ownership of the callbacks is transferred to the client.
-    virtual void subscribe(WebServiceWorkerRegistration*, const WebPushSubscriptionOptions&, WebPushSubscriptionCallbacks*) = 0;
+  // Ownership of the WebServiceWorkerRegistration is not transferred.
+  // Ownership of the callbacks is transferred to the client.
+  virtual void subscribe(WebServiceWorkerRegistration*,
+                         const WebPushSubscriptionOptions&,
+                         std::unique_ptr<WebPushSubscriptionCallbacks>) = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebPushClient_h
+#endif  // WebPushClient_h

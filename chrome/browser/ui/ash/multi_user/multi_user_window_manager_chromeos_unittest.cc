@@ -4,22 +4,22 @@
 
 #include <stddef.h>
 
-#include "ash/aura/wm_window_aura.h"
-#include "ash/common/shelf/shelf.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/test/test_session_state_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_window_manager.h"
 #include "ash/common/wm/mru_window_tracker.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
 #include "ash/content/shell_content_state.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/ash_test_environment_content.h"
 #include "ash/test/ash_test_helper.h"
-#include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
@@ -53,9 +53,12 @@
 
 namespace {
 
-const char kAAccountIdString[] = "{\"email\":\"A\",\"gaia_id\":\"\"}";
-const char kBAccountIdString[] = "{\"email\":\"B\",\"gaia_id\":\"\"}";
-const char kArrowBAccountIdString[] = "->{\"email\":\"B\",\"gaia_id\":\"\"}";
+const char kAAccountIdString[] =
+    "{\"account_type\":\"unknown\",\"email\":\"A\"}";
+const char kBAccountIdString[] =
+    "{\"account_type\":\"unknown\",\"email\":\"B\"}";
+const char kArrowBAccountIdString[] =
+    "->{\"account_type\":\"unknown\",\"email\":\"B\"}";
 
 // TOOD(beng): This implementation seems only superficially different to the
 //             production impl. Evaluate whether or not we can just use that
@@ -111,7 +114,7 @@ class TestShellDelegateChromeOS : public ash::test::TestShellDelegate {
 
   bool CanShowWindowForUser(ash::WmWindow* window) const override {
     return ::CanShowWindowForUser(
-        ash::WmWindowAura::GetAuraWindow(window),
+        ash::WmWindow::GetAuraWindow(window),
         base::Bind(&ash::ShellContentState::GetActiveBrowserContext,
                    base::Unretained(ash::ShellContentState::GetInstance())));
   }
@@ -282,7 +285,10 @@ class MultiUserWindowManagerChromeOSTest : public AshTestBase {
 
 void MultiUserWindowManagerChromeOSTest::SetUp() {
   ash_test_helper()->set_test_shell_delegate(new TestShellDelegateChromeOS);
-  ash_test_helper()->set_content_state(new ::TestShellContentState);
+  ash::test::AshTestEnvironmentContent* test_environment =
+      static_cast<ash::test::AshTestEnvironmentContent*>(
+          ash_test_helper()->ash_test_environment());
+  test_environment->set_content_state(new ::TestShellContentState);
   AshTestBase::SetUp();
   session_state_delegate_ = AshTestHelper::GetTestSessionStateDelegate();
   profile_manager_.reset(
@@ -1021,7 +1027,7 @@ TEST_F(MultiUserWindowManagerChromeOSTest, AnimationSteps) {
   WmShelf* shelf = GetPrimaryShelf();
   EXPECT_NE(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
   EXPECT_EQ(1.0f, window(0)->layer()->GetTargetOpacity());
-  ShelfWidget* shelf_widget = shelf->GetShelfWidgetForTesting();
+  ShelfWidget* shelf_widget = shelf->shelf_widget();
   EXPECT_FALSE(shelf_widget->IsShelfHiddenBehindBlackBar());
 
   // Start the animation and see that the old window is becoming invisible, the
@@ -1307,7 +1313,7 @@ TEST_F(MultiUserWindowManagerChromeOSTest, TestBlackBarCover) {
   multi_user_window_manager()->SetAnimationSpeedForTest(
       chrome::MultiUserWindowManagerChromeOS::ANIMATION_SPEED_FAST);
   EXPECT_NE(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
-  ShelfWidget* shelf_widget = shelf->GetShelfWidgetForTesting();
+  ShelfWidget* shelf_widget = shelf->shelf_widget();
   EXPECT_FALSE(shelf_widget->IsShelfHiddenBehindBlackBar());
 
   // First test that with no maximized window we show/hide the shelf.
@@ -1499,7 +1505,7 @@ TEST_F(MultiUserWindowManagerChromeOSTest, WindowsOrderPreservedTests) {
   activation_client->ActivateWindow(window(0));
   EXPECT_EQ(wm::GetActiveWindow(), window(0));
 
-  aura::Window::Windows mru_list = WmWindowAura::ToAuraWindows(
+  aura::Window::Windows mru_list = WmWindow::ToAuraWindows(
       WmShell::Get()->mru_window_tracker()->BuildMruWindowList());
   EXPECT_EQ(mru_list[0], window(0));
   EXPECT_EQ(mru_list[1], window(1));
@@ -1515,7 +1521,7 @@ TEST_F(MultiUserWindowManagerChromeOSTest, WindowsOrderPreservedTests) {
   EXPECT_EQ("S[A], S[A], S[A]", GetStatus());
   EXPECT_EQ(wm::GetActiveWindow(), window(0));
 
-  mru_list = WmWindowAura::ToAuraWindows(
+  mru_list = WmWindow::ToAuraWindows(
       WmShell::Get()->mru_window_tracker()->BuildMruWindowList());
   EXPECT_EQ(mru_list[0], window(0));
   EXPECT_EQ(mru_list[1], window(1));

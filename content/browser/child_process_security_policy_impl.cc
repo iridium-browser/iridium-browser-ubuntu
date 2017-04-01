@@ -8,11 +8,12 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "content/browser/site_instance_impl.h"
@@ -200,6 +201,10 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
     can_send_midi_sysex_ = true;
   }
 
+  bool CanCommitOrigin(const url::Origin& origin) {
+    return base::ContainsKey(origin_set_, origin);
+  }
+
   // Determine whether permission has been granted to commit |url|.
   bool CanCommitURL(const GURL& url) {
     DCHECK(!url.SchemeIsBlob() && !url.SchemeIsFileSystem())
@@ -211,7 +216,7 @@ class ChildProcessSecurityPolicyImpl::SecurityState {
       return scheme_judgment->second;
 
     // Otherwise, check for permission for specific origin.
-    if (base::ContainsKey(origin_set_, url::Origin(url)))
+    if (CanCommitOrigin(url::Origin(url)))
       return true;
 
     // file:// URLs are more granular.  The child may have been given
@@ -339,6 +344,8 @@ ChildProcessSecurityPolicyImpl::ChildProcessSecurityPolicyImpl() {
   RegisterPseudoScheme(url::kAboutScheme);
   RegisterPseudoScheme(url::kJavaScriptScheme);
   RegisterPseudoScheme(kViewSourceScheme);
+  RegisterPseudoScheme(url::kHttpSuboriginScheme);
+  RegisterPseudoScheme(url::kHttpsSuboriginScheme);
   RegisterPseudoScheme(url::kTraceScheme);
 }
 
@@ -620,8 +627,8 @@ bool ChildProcessSecurityPolicyImpl::CanRequestURL(
     return false;  // Can't request invalid URLs.
 
   if (IsPseudoScheme(url.scheme())) {
-    // Every child process can request <about:blank>.
-    if (base::LowerCaseEqualsASCII(url.spec(), url::kAboutBlankURL))
+    // Every child process can request <about:blank> and <about:srcdoc>.
+    if (url == url::kAboutBlankURL || url == kAboutSrcDocURL)
       return true;
     // URLs like <about:version>, <about:crash>, <view-source:...> shouldn't be
     // requestable by any child process.  Also, this case covers
@@ -658,9 +665,10 @@ bool ChildProcessSecurityPolicyImpl::CanCommitURL(int child_id,
   if (!url.is_valid())
     return false;  // Can't commit invalid URLs.
 
-  // Of all the pseudo schemes, only about:blank is allowed to commit.
+  // Of all the pseudo schemes, only about:blank and about:srcdoc are allowed to
+  // commit.
   if (IsPseudoScheme(url.scheme()))
-    return base::LowerCaseEqualsASCII(url.spec(), url::kAboutBlankURL);
+    return url == url::kAboutBlankURL || url == kAboutSrcDocURL;
 
   // Blob and filesystem URLs require special treatment; validate the inner
   // origin they embed.
@@ -703,6 +711,17 @@ bool ChildProcessSecurityPolicyImpl::CanSetAsOriginHeader(int child_id,
                                                           const GURL& url) {
   if (!url.is_valid())
     return false;  // Can't set invalid URLs as origin headers.
+
+  // Suborigin URLs are a special case and are allowed to be an origin header.
+  if (url.scheme() == url::kHttpSuboriginScheme ||
+      url.scheme() == url::kHttpsSuboriginScheme) {
+    DCHECK(IsPseudoScheme(url.scheme()));
+    return true;
+  }
+
+  // about:srcdoc cannot be used as an origin
+  if (url == kAboutSrcDocURL)
+    return false;
 
   // If this process can commit |url|, it can use |url| as an origin for
   // outbound requests.
@@ -783,38 +802,40 @@ bool ChildProcessSecurityPolicyImpl::HasPermissionsForFile(
 
 bool ChildProcessSecurityPolicyImpl::HasPermissionsForFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url,
+    const storage::FileSystemURL& filesystem_url,
     int permissions) {
-  if (!url.is_valid())
+  if (!filesystem_url.is_valid())
     return false;
 
-  // If |url.origin()| is not committable in this process, then this page
-  // should not be able to place content in that origin via the filesystem
+  // If |filesystem_url.origin()| is not committable in this process, then this
+  // page should not be able to place content in that origin via the filesystem
   // API either.
-  if (!CanCommitURL(child_id, url.origin())) {
+  if (!CanCommitURL(child_id, filesystem_url.origin())) {
     UMA_HISTOGRAM_BOOLEAN("FileSystem.OriginFailedCanCommitURL", true);
+    // TODO(nick): Temporary instrumentation for https://crbug.com/654479.
+    base::debug::DumpWithoutCrashing();
     return false;
   }
 
-  if (url.path().ReferencesParent())
+  if (filesystem_url.path().ReferencesParent())
     return false;
 
   // Any write access is disallowed on the root path.
-  if (storage::VirtualPath::IsRootPath(url.path()) &&
+  if (storage::VirtualPath::IsRootPath(filesystem_url.path()) &&
       (permissions & ~READ_FILE_GRANT)) {
     return false;
   }
 
-  if (url.mount_type() == storage::kFileSystemTypeIsolated) {
+  if (filesystem_url.mount_type() == storage::kFileSystemTypeIsolated) {
     // When Isolated filesystems is overlayed on top of another filesystem,
     // its per-filesystem permission overrides the underlying filesystem
     // permissions).
     return HasPermissionsForFileSystem(
-        child_id, url.mount_filesystem_id(), permissions);
+        child_id, filesystem_url.mount_filesystem_id(), permissions);
   }
 
   FileSystemPermissionPolicyMap::iterator found =
-      file_system_policy_map_.find(url.type());
+      file_system_policy_map_.find(filesystem_url.type());
   if (found == file_system_policy_map_.end())
     return false;
 
@@ -824,7 +845,7 @@ bool ChildProcessSecurityPolicyImpl::HasPermissionsForFileSystemFile(
   }
 
   if (found->second & storage::FILE_PERMISSION_USE_FILE_PERMISSION)
-    return HasPermissionsForFile(child_id, url.path(), permissions);
+    return HasPermissionsForFile(child_id, filesystem_url.path(), permissions);
 
   if (found->second & storage::FILE_PERMISSION_SANDBOX)
     return true;
@@ -834,39 +855,44 @@ bool ChildProcessSecurityPolicyImpl::HasPermissionsForFileSystemFile(
 
 bool ChildProcessSecurityPolicyImpl::CanReadFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url) {
-  return HasPermissionsForFileSystemFile(child_id, url, READ_FILE_GRANT);
+    const storage::FileSystemURL& filesystem_url) {
+  return HasPermissionsForFileSystemFile(child_id, filesystem_url,
+                                         READ_FILE_GRANT);
 }
 
 bool ChildProcessSecurityPolicyImpl::CanWriteFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url) {
-  return HasPermissionsForFileSystemFile(child_id, url, WRITE_FILE_GRANT);
+    const storage::FileSystemURL& filesystem_url) {
+  return HasPermissionsForFileSystemFile(child_id, filesystem_url,
+                                         WRITE_FILE_GRANT);
 }
 
 bool ChildProcessSecurityPolicyImpl::CanCreateFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url) {
-  return HasPermissionsForFileSystemFile(child_id, url, CREATE_NEW_FILE_GRANT);
+    const storage::FileSystemURL& filesystem_url) {
+  return HasPermissionsForFileSystemFile(child_id, filesystem_url,
+                                         CREATE_NEW_FILE_GRANT);
 }
 
 bool ChildProcessSecurityPolicyImpl::CanCreateReadWriteFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url) {
-  return HasPermissionsForFileSystemFile(child_id, url,
+    const storage::FileSystemURL& filesystem_url) {
+  return HasPermissionsForFileSystemFile(child_id, filesystem_url,
                                          CREATE_READ_WRITE_FILE_GRANT);
 }
 
 bool ChildProcessSecurityPolicyImpl::CanCopyIntoFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url) {
-  return HasPermissionsForFileSystemFile(child_id, url, COPY_INTO_FILE_GRANT);
+    const storage::FileSystemURL& filesystem_url) {
+  return HasPermissionsForFileSystemFile(child_id, filesystem_url,
+                                         COPY_INTO_FILE_GRANT);
 }
 
 bool ChildProcessSecurityPolicyImpl::CanDeleteFileSystemFile(
     int child_id,
-    const storage::FileSystemURL& url) {
-  return HasPermissionsForFileSystemFile(child_id, url, DELETE_FILE_GRANT);
+    const storage::FileSystemURL& filesystem_url) {
+  return HasPermissionsForFileSystemFile(child_id, filesystem_url,
+                                         DELETE_FILE_GRANT);
 }
 
 bool ChildProcessSecurityPolicyImpl::HasWebUIBindings(int child_id) {
@@ -916,6 +942,16 @@ bool ChildProcessSecurityPolicyImpl::CanAccessDataForOrigin(int child_id,
     return true;
   }
   return state->second->CanAccessDataForOrigin(gurl);
+}
+
+bool ChildProcessSecurityPolicyImpl::HasSpecificPermissionForOrigin(
+    int child_id,
+    const url::Origin& origin) {
+  base::AutoLock lock(lock_);
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  if (state == security_state_.end())
+    return false;
+  return state->second->CanCommitOrigin(origin);
 }
 
 void ChildProcessSecurityPolicyImpl::LockToOrigin(int child_id,

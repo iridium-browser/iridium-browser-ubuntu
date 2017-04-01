@@ -27,22 +27,23 @@
 
 namespace blink {
 
-class Dictionary;
 class ExceptionState;
-class MediaDeviceInfoCallback;
 class MediaStreamConstraints;
 class Navigator;
 class NavigatorUserMediaErrorCallback;
 class NavigatorUserMediaSuccessCallback;
 
 class NavigatorMediaStream {
-    STATIC_ONLY(NavigatorMediaStream);
-public:
-    static void getUserMedia(Navigator&, const MediaStreamConstraints&, NavigatorUserMediaSuccessCallback*, NavigatorUserMediaErrorCallback*, ExceptionState&);
+  STATIC_ONLY(NavigatorMediaStream);
 
-    static void getMediaDevices(Navigator&, MediaDeviceInfoCallback*, ExceptionState&);
+ public:
+  static void getUserMedia(Navigator&,
+                           const MediaStreamConstraints&,
+                           NavigatorUserMediaSuccessCallback*,
+                           NavigatorUserMediaErrorCallback*,
+                           ExceptionState&);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // NavigatorMediaStream_h
+#endif  // NavigatorMediaStream_h

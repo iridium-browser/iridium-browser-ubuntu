@@ -7,11 +7,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
@@ -24,6 +28,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "components/drive/drive.pb.h"
 #include "components/drive/drive_api_util.h"
 #include "components/drive/drive_notification_manager.h"
@@ -40,7 +45,6 @@
 #include "google_apis/drive/drive_api_error_codes.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/time_util.h"
-#include "grit/browser_resources.h"
 
 using content::BrowserThread;
 
@@ -66,7 +70,7 @@ void GetGCacheContents(const base::FilePath& root_path,
   DCHECK(gcache_summary);
 
   // Use this map to sort the result list by the path.
-  std::map<base::FilePath, base::DictionaryValue*> files;
+  std::map<base::FilePath, std::unique_ptr<base::DictionaryValue>> files;
 
   const int options = (base::FileEnumerator::FILES |
                        base::FileEnumerator::DIRECTORIES |
@@ -82,7 +86,7 @@ void GetGCacheContents(const base::FilePath& root_path,
     const bool is_symbolic_link = base::IsLink(info.GetName());
     const base::Time last_modified = info.GetLastModifiedTime();
 
-    base::DictionaryValue* entry = new base::DictionaryValue;
+    auto entry = base::MakeUnique<base::DictionaryValue>();
     entry->SetString("path", current.value());
     // Use double instead of integer for large files.
     entry->SetDouble("size", size);
@@ -95,16 +99,14 @@ void GetGCacheContents(const base::FilePath& root_path,
     entry->SetString(
         "permission",
         base::StringPrintf("%03o", info.stat().st_mode & 0x1ff));
-    files[current] = entry;
+    files[current] = std::move(entry);
 
     total_size += size;
   }
 
   // Convert |files| into |gcache_contents|.
-  for (std::map<base::FilePath, base::DictionaryValue*>::const_iterator
-           iter = files.begin(); iter != files.end(); ++iter) {
-    gcache_contents->Append(iter->second);
-  }
+  for (auto& it : files)
+    gcache_contents->Append(std::move(it.second));
 
   gcache_summary->SetDouble("total_size", total_size);
 }
@@ -200,10 +202,10 @@ std::string SeverityToString(logging::LogSeverity severity) {
 void AppendKeyValue(base::ListValue* list,
                     const std::string& key,
                     const std::string& value) {
-  base::DictionaryValue* dict = new base::DictionaryValue;
+  auto dict = base::MakeUnique<base::DictionaryValue>();
   dict->SetString("key", key);
   dict->SetString("value", value);
-  list->Append(dict);
+  list->Append(std::move(dict));
 }
 
 // Class to handle messages from chrome://drive-internals.
@@ -351,14 +353,14 @@ void DriveInternalsWebUIHandler::OnGetAppList(
 
   base::ListValue* items = new base::ListValue();
   for (size_t i = 0; i < parsed_app_list->items().size(); ++i) {
-    const google_apis::AppResource* app = parsed_app_list->items()[i];
-    base::DictionaryValue* app_data = new base::DictionaryValue();
+    const google_apis::AppResource* app = parsed_app_list->items()[i].get();
+    auto app_data = base::MakeUnique<base::DictionaryValue>();
     app_data->SetString("name", app->name());
     app_data->SetString("application_id", app->application_id());
     app_data->SetString("object_type", app->object_type());
     app_data->SetBoolean("supports_create", app->supports_create());
 
-    items->Append(app_data);
+    items->Append(std::move(app_data));
   }
   app_list.Set("items", items);
 
@@ -646,14 +648,14 @@ void DriveInternalsWebUIHandler::UpdateInFlightOperationsSection(
   for (size_t i = 0; i < info_list.size(); ++i) {
     const drive::JobInfo& info = info_list[i];
 
-    base::DictionaryValue* dict = new base::DictionaryValue;
+    auto dict = base::MakeUnique<base::DictionaryValue>();
     dict->SetInteger("id", info.job_id);
     dict->SetString("type", drive::JobTypeToString(info.job_type));
     dict->SetString("file_path", info.file_path.AsUTF8Unsafe());
     dict->SetString("state", drive::JobStateToString(info.state));
     dict->SetDouble("progress_current", info.num_completed_bytes);
     dict->SetDouble("progress_total", info.num_total_bytes);
-    in_flight_operations.Append(dict);
+    in_flight_operations.Append(std::move(dict));
   }
   web_ui()->CallJavascriptFunctionUnsafe("updateInFlightOperations",
                                          in_flight_operations);
@@ -750,12 +752,12 @@ void DriveInternalsWebUIHandler::UpdateEventLogSection() {
 
     std::string severity = SeverityToString(log[i].severity);
 
-    base::DictionaryValue* dict = new base::DictionaryValue;
+    auto dict = base::MakeUnique<base::DictionaryValue>();
     dict->SetString("key",
         google_apis::util::FormatTimeAsStringLocaltime(log[i].when));
     dict->SetString("value", "[" + severity + "] " + log[i].what);
     dict->SetString("class", "log-" + severity);
-    list.Append(dict);
+    list.Append(std::move(dict));
     last_sent_event_id_ = log[i].id;
   }
   if (!list.empty())
@@ -891,7 +893,7 @@ void DriveInternalsWebUIHandler::OnPeriodicUpdate(const base::ListValue* args) {
 
 DriveInternalsUI::DriveInternalsUI(content::WebUI* web_ui)
     : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(new DriveInternalsWebUIHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<DriveInternalsWebUIHandler>());
 
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIDriveInternalsHost);

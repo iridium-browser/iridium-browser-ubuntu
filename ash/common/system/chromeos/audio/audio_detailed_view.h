@@ -8,10 +8,13 @@
 #include <map>
 
 #include "ash/common/system/tray/tray_details_view.h"
-#include "ash/common/system/tray/view_click_listener.h"
 #include "base/macros.h"
 #include "chromeos/audio/audio_device.h"
 #include "ui/gfx/font.h"
+
+namespace gfx {
+struct VectorIcon;
+}
 
 namespace views {
 class View;
@@ -22,7 +25,7 @@ class HoverHighlightView;
 
 namespace tray {
 
-class AudioDetailedView : public TrayDetailsView, public ViewClickListener {
+class AudioDetailedView : public TrayDetailsView {
  public:
   explicit AudioDetailedView(SystemTrayItem* owner);
 
@@ -31,20 +34,23 @@ class AudioDetailedView : public TrayDetailsView, public ViewClickListener {
   void Update();
 
  private:
-  void AddScrollListInfoItem(const base::string16& text);
+  // Helper functions to add non-clickable header rows within the scrollable
+  // list.
+  void AddInputHeader();
+  void AddOutputHeader();
+  void AddScrollListInfoItem(int text_id, const gfx::VectorIcon& icon);
 
   HoverHighlightView* AddScrollListItem(const base::string16& text,
                                         bool highlight,
                                         bool checked);
 
-  void CreateHeaderEntry();
   void CreateItems();
 
   void UpdateScrollableList();
   void UpdateAudioDevices();
 
-  // Overridden from ViewClickListener.
-  void OnViewClicked(views::View* sender) override;
+  // TrayDetailsView:
+  void HandleViewClicked(views::View* view) override;
 
   typedef std::map<views::View*, chromeos::AudioDevice> AudioDeviceMap;
 

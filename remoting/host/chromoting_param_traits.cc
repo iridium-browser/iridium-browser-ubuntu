@@ -213,66 +213,71 @@ void ParamTraits<remoting::ScreenResolution>::Log(
 }
 
 // static
-void ParamTraits<net::IPAddress>::GetSize(base::PickleSizer* s,
-                                          const param_type& p) {
-  GetParamSize(s, p.bytes());
+void ParamTraits<remoting::DesktopEnvironmentOptions>::Write(
+    base::Pickle* m,
+    const remoting::DesktopEnvironmentOptions& p) {
+  m->WriteBool(p.enable_curtaining());
+  m->WriteBool(p.enable_user_interface());
+  m->WriteBool(p.desktop_capture_options()->use_update_notifications());
+  m->WriteBool(p.desktop_capture_options()->disable_effects());
+  m->WriteBool(p.desktop_capture_options()->detect_updated_region());
+#if defined(WEBRTC_WIN)
+  m->WriteBool(p.desktop_capture_options()->allow_use_magnification_api());
+  m->WriteBool(p.desktop_capture_options()->allow_directx_capturer());
+#endif  // defined(WEBRTC_WIN)
 }
 
 // static
-void ParamTraits<net::IPAddress>::Write(base::Pickle* m, const param_type& p) {
-  WriteParam(m, p.bytes());
-}
+bool ParamTraits<remoting::DesktopEnvironmentOptions>::Read(
+    const base::Pickle* m,
+    base::PickleIterator* iter,
+    remoting::DesktopEnvironmentOptions* r) {
+  *r = remoting::DesktopEnvironmentOptions::CreateDefault();
+  bool enable_curtaining;
+  bool enable_user_interface;
+  bool use_update_notifications;
+  bool disable_effects;
+  bool detect_updated_region;
 
-// static
-bool ParamTraits<net::IPAddress>::Read(const base::Pickle* m,
-                                       base::PickleIterator* iter,
-                                       param_type* p) {
-  std::vector<uint8_t> bytes;
-  if (!ReadParam(m, iter, &bytes))
+  if (!iter->ReadBool(&enable_curtaining) ||
+      !iter->ReadBool(&enable_user_interface) ||
+      !iter->ReadBool(&use_update_notifications) ||
+      !iter->ReadBool(&disable_effects) ||
+      !iter->ReadBool(&detect_updated_region)) {
     return false;
-
-  net::IPAddress address(bytes);
-  if (address.empty() || address.IsValid()) {
-    *p = address;
-    return true;
   }
-  return false;
-}
 
-// static
-void ParamTraits<net::IPAddress>::Log(const param_type& p, std::string* l) {
-  l->append("IPAddress:" + (p.empty() ? "(empty)" : p.ToString()));
-}
+  r->set_enable_curtaining(enable_curtaining);
+  r->set_enable_user_interface(enable_user_interface);
+  r->desktop_capture_options()->set_use_update_notifications(
+      use_update_notifications);
+  r->desktop_capture_options()->set_detect_updated_region(
+      detect_updated_region);
+  r->desktop_capture_options()->set_disable_effects(disable_effects);
 
-// static
-void ParamTraits<net::IPEndPoint>::GetSize(base::PickleSizer* s,
-                                           const param_type& p) {
-  GetParamSize(s, p.address());
-  GetParamSize(s, p.port());
-}
+#if defined(WEBRTC_WIN)
+  bool allow_use_magnification_api;
+  bool allow_directx_capturer;
 
-// static
-void ParamTraits<net::IPEndPoint>::Write(base::Pickle* m, const param_type& p) {
-  WriteParam(m, p.address());
-  WriteParam(m, p.port());
-}
-
-// static
-bool ParamTraits<net::IPEndPoint>::Read(const base::Pickle* m,
-                                        base::PickleIterator* iter,
-                                        param_type* p) {
-  net::IPAddress address;
-  uint16_t port;
-  if (!ReadParam(m, iter, &address) || !ReadParam(m, iter, &port))
+  if (!iter->ReadBool(&allow_use_magnification_api) ||
+      !iter->ReadBool(&allow_directx_capturer)) {
     return false;
+  }
 
-  *p = net::IPEndPoint(address, port);
+  r->desktop_capture_options()->set_allow_use_magnification_api(
+      allow_use_magnification_api);
+  r->desktop_capture_options()->set_allow_directx_capturer(
+      allow_directx_capturer);
+#endif  // defined(WEBRTC_WIN)
+
   return true;
 }
 
 // static
-void ParamTraits<net::IPEndPoint>::Log(const param_type& p, std::string* l) {
-  l->append("IPEndPoint: " + p.ToString());
+void ParamTraits<remoting::DesktopEnvironmentOptions>::Log(
+    const remoting::DesktopEnvironmentOptions& p,
+    std::string* l) {
+  l->append("DesktopEnvironmentOptions()");
 }
 
 }  // namespace IPC

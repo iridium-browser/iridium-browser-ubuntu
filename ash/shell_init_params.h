@@ -5,16 +5,11 @@
 #ifndef ASH_SHELL_INIT_PARAMS_H_
 #define ASH_SHELL_INIT_PARAMS_H_
 
-#include <memory>
-
-#include "build/build_config.h"
-
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
 #include "ash/ash_export.h"
-#include "base/callback.h"
+
+namespace aura {
+class WindowTreeHostMus;
+}
 
 namespace base {
 class SequencedWorkerPool;
@@ -26,26 +21,19 @@ class ContextFactory;
 
 namespace ash {
 
-class KeyboardUI;
 class ShellDelegate;
 
 struct ASH_EXPORT ShellInitParams {
-  ShellInitParams();
-  ~ShellInitParams();
-
-  ShellDelegate* delegate;
-
-  ui::ContextFactory* context_factory;
-  base::SequencedWorkerPool* blocking_pool;
-
-  // True if running inside mus.
-  bool in_mus = false;
-
-  base::Callback<std::unique_ptr<KeyboardUI>()> keyboard_factory;
-
-#if defined(OS_WIN)
-  HWND remote_hwnd;
-#endif
+  // Shell takes ownership of |wm_shell|, if null WmShellAura is created.
+  // TODO(sky): temporary, will eventually go away.
+  WmShell* wm_shell = nullptr;
+  // Shell takes ownership of |primary_window_tree_host|. This is only used
+  // by mash.
+  aura::WindowTreeHostMus* primary_window_tree_host = nullptr;
+  ShellDelegate* delegate = nullptr;
+  ui::ContextFactory* context_factory = nullptr;
+  ui::ContextFactoryPrivate* context_factory_private = nullptr;
+  base::SequencedWorkerPool* blocking_pool = nullptr;
 };
 
 }  // namespace ash

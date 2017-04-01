@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_CONNECTION_LOGGER_H_
-#define NET_QUIC_QUIC_CONNECTION_LOGGER_H_
+#ifndef NET_QUIC_CHROMIUM_QUIC_CONNECTION_LOGGER_H_
+#define NET_QUIC_CHROMIUM_QUIC_CONNECTION_LOGGER_H_
 
 #include <stddef.h>
 
@@ -11,13 +11,13 @@
 #include <string>
 
 #include "base/macros.h"
-#include "net/base/ip_endpoint.h"
+#include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/cert/cert_verify_result.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/quic/core/crypto/crypto_handshake_message.h"
 #include "net/quic/core/quic_connection.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_spdy_session.h"
 #include "net/socket/socket_performance_watcher.h"
 
@@ -37,7 +37,7 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
       QuicSpdySession* session,
       const char* const connection_description,
       std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
-      const BoundNetLog& net_log);
+      const NetLogWithSource& net_log);
 
   ~QuicConnectionLogger() override;
 
@@ -50,8 +50,9 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
                     QuicPacketNumber original_packet_number,
                     TransmissionType transmission_type,
                     QuicTime sent_time) override;
-  void OnPacketReceived(const IPEndPoint& self_address,
-                        const IPEndPoint& peer_address,
+  void OnPingSent() override;
+  void OnPacketReceived(const QuicSocketAddress& self_address,
+                        const QuicSocketAddress& peer_address,
                         const QuicEncryptedPacket& packet) override;
   void OnUnauthenticatedHeader(const QuicPacketHeader& header) override;
   void OnIncorrectConnectionId(QuicConnectionId connection_id) override;
@@ -97,20 +98,19 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
   // the overall packet loss rate, and record it into a histogram.
   void RecordAggregatePacketLossRate() const;
 
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   QuicSpdySession* session_;  // Unowned.
   // The last packet number received.
   QuicPacketNumber last_received_packet_number_;
   // The size of the most recently received packet.
   size_t last_received_packet_size_;
+  // True if a PING frame has been sent and no packet has been received.
+  bool no_packet_received_after_ping_;
   // The size of the previously received packet.
   size_t previous_received_packet_size_;
   // The largest packet number received.  In the case where a packet is
   // received late (out of order), this value will not be updated.
   QuicPacketNumber largest_received_packet_number_;
-  // The largest packet number which the peer has failed to
-  // receive, according to the missing packet set in their ack frames.
-  QuicPacketNumber largest_received_missing_packet_number_;
   // Number of times that the current received packet number is
   // smaller than the last received packet number.
   size_t num_out_of_order_received_packets_;
@@ -161,4 +161,4 @@ class NET_EXPORT_PRIVATE QuicConnectionLogger
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_CONNECTION_LOGGER_H_
+#endif  // NET_QUIC_CHROMIUM_QUIC_CONNECTION_LOGGER_H_

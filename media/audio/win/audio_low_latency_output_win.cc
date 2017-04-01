@@ -6,17 +6,21 @@
 
 #include <Functiondiscoverykeys_devpkey.h>
 
+#include <climits>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_propvariant.h"
 #include "media/audio/audio_device_description.h"
 #include "media/audio/win/audio_manager_win.h"
 #include "media/audio/win/avrt_wrapper_win.h"
 #include "media/audio/win/core_audio_util_win.h"
+#include "media/base/audio_sample_types.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 
@@ -70,8 +74,7 @@ WASAPIAudioOutputStream::WASAPIAudioOutputStream(AudioManagerWin* manager,
       device_role_(device_role),
       share_mode_(GetShareMode()),
       num_written_frames_(0),
-      source_(NULL),
-      audio_bus_(AudioBus::Create(params)) {
+      source_(NULL) {
   DCHECK(manager_);
 
   // The empty string is used to indicate a default device and the
@@ -88,6 +91,15 @@ WASAPIAudioOutputStream::WASAPIAudioOutputStream(AudioManagerWin* manager,
   bool avrt_init = avrt::Initialize();
   DCHECK(avrt_init) << "Failed to load the avrt.dll";
 
+  // New set that appropriate for float output.
+  AudioParameters float_params(
+      params.format(), params.channel_layout(), params.sample_rate(),
+      // Ignore the given bits per sample because we're outputting
+      // floats.
+      sizeof(float) * CHAR_BIT, params.frames_per_buffer());
+
+  audio_bus_ = AudioBus::Create(float_params);
+
   // Set up the desired render format specified by the client. We use the
   // WAVE_FORMAT_EXTENSIBLE structure to ensure that multiple channel ordering
   // and high precision data can be supported.
@@ -95,27 +107,27 @@ WASAPIAudioOutputStream::WASAPIAudioOutputStream(AudioManagerWin* manager,
   // Begin with the WAVEFORMATEX structure that specifies the basic format.
   WAVEFORMATEX* format = &format_.Format;
   format->wFormatTag = WAVE_FORMAT_EXTENSIBLE;
-  format->nChannels = params.channels();
-  format->nSamplesPerSec = params.sample_rate();
-  format->wBitsPerSample = params.bits_per_sample();
+  format->nChannels = float_params.channels();
+  format->nSamplesPerSec = float_params.sample_rate();
+  format->wBitsPerSample = float_params.bits_per_sample();
   format->nBlockAlign = (format->wBitsPerSample / 8) * format->nChannels;
   format->nAvgBytesPerSec = format->nSamplesPerSec * format->nBlockAlign;
   format->cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
 
   // Add the parts which are unique to WAVE_FORMAT_EXTENSIBLE.
-  format_.Samples.wValidBitsPerSample = params.bits_per_sample();
+  format_.Samples.wValidBitsPerSample = float_params.bits_per_sample();
   format_.dwChannelMask = CoreAudioUtil::GetChannelConfig(device_id, eRender);
-  format_.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+  format_.SubFormat = KSDATAFORMAT_SUBTYPE_IEEE_FLOAT;
 
   // Store size (in different units) of audio packets which we expect to
   // get from the audio endpoint device in each render event.
-  packet_size_frames_ = params.frames_per_buffer();
-  packet_size_bytes_ = params.GetBytesPerBuffer();
+  packet_size_frames_ = float_params.frames_per_buffer();
+  packet_size_bytes_ = float_params.GetBytesPerBuffer();
   DVLOG(1) << "Number of bytes per audio frame  : " << format->nBlockAlign;
   DVLOG(1) << "Number of audio frames per packet: " << packet_size_frames_;
   DVLOG(1) << "Number of bytes per packet       : " << packet_size_bytes_;
   DVLOG(1) << "Number of milliseconds per packet: "
-          << params.GetBufferDuration().InMillisecondsF();
+           << float_params.GetBufferDuration().InMillisecondsF();
 
   // All events are auto-reset events and non-signaled initially.
 
@@ -511,41 +523,41 @@ bool WASAPIAudioOutputStream::RenderAudioFromSource(UINT64 device_frequency) {
     // can typically be utilized by an acoustic echo-control (AEC)
     // unit at the render side.
     UINT64 position = 0;
-    uint32_t audio_delay_bytes = 0;
-    hr = audio_clock_->GetPosition(&position, NULL);
+    UINT64 qpc_position = 0;
+    base::TimeDelta delay;
+    base::TimeTicks delay_timestamp;
+    hr = audio_clock_->GetPosition(&position, &qpc_position);
     if (SUCCEEDED(hr)) {
-      // Stream position of the sample that is currently playing
-      // through the speaker.
-      double pos_sample_playing_frames = format_.Format.nSamplesPerSec *
-          (static_cast<double>(position) / device_frequency);
+      // Number of frames already played out through the speaker.
+      const uint64_t played_out_frames =
+          format_.Format.nSamplesPerSec * position / device_frequency;
 
-      // Stream position of the last sample written to the endpoint
-      // buffer. Note that, the packet we are about to receive in
-      // the upcoming callback is also included.
-      size_t pos_last_sample_written_frames =
-          num_written_frames_ + packet_size_frames_;
+      // Number of frames that have been written to the buffer but not yet
+      // played out.
+      const uint64_t delay_frames = num_written_frames_ - played_out_frames;
 
-      // Derive the actual delay value which will be fed to the
-      // render client using the OnMoreData() callback.
-      audio_delay_bytes = (pos_last_sample_written_frames -
-          pos_sample_playing_frames) *  format_.Format.nBlockAlign;
+      // Convert the delay from frames to time.
+      delay = base::TimeDelta::FromMicroseconds(
+          delay_frames * base::Time::kMicrosecondsPerSecond /
+          format_.Format.nSamplesPerSec);
+
+      delay_timestamp = base::TimeTicks::FromQPCValue(qpc_position);
+    } else {
+      // Use a delay of zero.
+      delay_timestamp = base::TimeTicks::Now();
     }
 
     // Read a data packet from the registered client source and
     // deliver a delay estimate in the same callback to the client.
 
     int frames_filled =
-        source_->OnMoreData(audio_bus_.get(), audio_delay_bytes, 0);
+        source_->OnMoreData(delay, delay_timestamp, 0, audio_bus_.get());
     uint32_t num_filled_bytes = frames_filled * format_.Format.nBlockAlign;
     DCHECK_LE(num_filled_bytes, packet_size_bytes_);
 
-    // Note: If this ever changes to output raw float the data must be
-    // clipped and sanitized since it may come from an untrusted
-    // source such as NaCl.
-    const int bytes_per_sample = format_.Format.wBitsPerSample >> 3;
     audio_bus_->Scale(volume_);
-    audio_bus_->ToInterleaved(
-        frames_filled, bytes_per_sample, audio_data);
+    audio_bus_->ToInterleaved<Float32SampleTypeTraits>(
+        frames_filled, reinterpret_cast<float*>(audio_data));
 
     // Release the buffer space acquired in the GetBuffer() call.
     // Render silence if we were not able to fill up the buffer totally.
@@ -641,7 +653,7 @@ HRESULT WASAPIAudioOutputStream::ExclusiveModeInitialization(
 }
 
 void WASAPIAudioOutputStream::StopThread() {
-  if (render_thread_ ) {
+  if (render_thread_) {
     if (render_thread_->HasBeenStarted()) {
       // Wait until the thread completes and perform cleanup.
       SetEvent(stop_render_event_.Get());

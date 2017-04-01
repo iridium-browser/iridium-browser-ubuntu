@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_CRYPTO_CLIENT_STREAM_H_
-#define NET_QUIC_QUIC_CRYPTO_CLIENT_STREAM_H_
+#ifndef NET_QUIC_CORE_QUIC_CRYPTO_CLIENT_STREAM_H_
+#define NET_QUIC_CORE_QUIC_CRYPTO_CLIENT_STREAM_H_
 
 #include <cstdint>
 #include <memory>
@@ -16,6 +16,7 @@
 #include "net/quic/core/quic_config.h"
 #include "net/quic/core/quic_crypto_stream.h"
 #include "net/quic/core/quic_server_id.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
@@ -24,7 +25,7 @@ class CryptoTestUtils;
 class QuicChromiumClientSessionPeer;
 }  // namespace test
 
-class NET_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
+class QUIC_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
  public:
   explicit QuicCryptoClientStreamBase(QuicSession* session);
 
@@ -44,7 +45,7 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStreamBase : public QuicCryptoStream {
   virtual int num_scup_messages_received() const = 0;
 };
 
-class NET_EXPORT_PRIVATE QuicCryptoClientStream
+class QUIC_EXPORT_PRIVATE QuicCryptoClientStream
     : public QuicCryptoClientStreamBase {
  public:
   // kMaxClientHellos is the maximum number of times that we'll send a client
@@ -57,7 +58,7 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream
 
   // ProofHandler is an interface that handles callbacks from the crypto
   // stream when the client has proof verification details of the server.
-  class NET_EXPORT_PRIVATE ProofHandler {
+  class QUIC_EXPORT_PRIVATE ProofHandler {
    public:
     virtual ~ProofHandler() {}
 
@@ -97,6 +98,8 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream
   // Returns true if our ChannelIDSourceCallback was run, which implies the
   // ChannelIDSource operated asynchronously. Intended for testing.
   bool WasChannelIDSourceCallbackRun() const;
+
+  std::string chlo_hash() const { return chlo_hash_; }
 
  private:
   // ChannelIDSourceCallbackImpl is passed as the callback method to
@@ -273,4 +276,4 @@ class NET_EXPORT_PRIVATE QuicCryptoClientStream
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_CRYPTO_CLIENT_STREAM_H_
+#endif  // NET_QUIC_CORE_QUIC_CRYPTO_CLIENT_STREAM_H_

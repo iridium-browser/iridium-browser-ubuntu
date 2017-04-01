@@ -23,8 +23,6 @@
 
 #include "core/SVGNames.h"
 #include "core/dom/ScriptLoaderClient.h"
-#include "core/svg/SVGAnimatedBoolean.h"
-#include "core/svg/SVGAnimatedString.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGURIReference.h"
 #include "platform/heap/Handle.h"
@@ -33,57 +31,63 @@ namespace blink {
 
 class ScriptLoader;
 
-class SVGScriptElement final
-    : public SVGElement
-    , public SVGURIReference
-    , public ScriptLoaderClient {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(SVGScriptElement);
-public:
-    static SVGScriptElement* create(Document&, bool wasInsertedByParser);
+class SVGScriptElement final : public SVGElement,
+                               public SVGURIReference,
+                               public ScriptLoaderClient {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(SVGScriptElement);
 
-    ScriptLoader* loader() const { return m_loader.get(); }
+ public:
+  static SVGScriptElement* create(Document&, bool wasInsertedByParser);
 
-#if ENABLE(ASSERT)
-    bool isAnimatableAttribute(const QualifiedName&) const override;
+  ScriptLoader* loader() const { return m_loader.get(); }
+
+#if DCHECK_IS_ON()
+  bool isAnimatableAttribute(const QualifiedName&) const override;
 #endif
 
-    DECLARE_VIRTUAL_TRACE();
+  // ScriptLoaderClient
+  AtomicString nonce() const override { return m_nonce; }
+  void setNonce(const String& nonce) override { m_nonce = AtomicString(nonce); }
+  void clearNonce() override { m_nonce = nullAtom; }
 
-private:
-    SVGScriptElement(Document&, bool wasInsertedByParser, bool alreadyStarted);
+  DECLARE_VIRTUAL_TRACE();
 
-    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
-    InsertionNotificationRequest insertedInto(ContainerNode*) override;
-    void didNotifySubtreeInsertionsToDocument() override;
-    void childrenChanged(const ChildrenChange&) override;
-    void didMoveToNewDocument(Document& oldDocument) override;
+ private:
+  SVGScriptElement(Document&, bool wasInsertedByParser, bool alreadyStarted);
 
-    void svgAttributeChanged(const QualifiedName&) override;
-    bool isURLAttribute(const Attribute&) const override;
-    bool isStructurallyExternal() const override { return hasSourceAttribute(); }
-    void finishParsingChildren() override;
+  void parseAttribute(const AttributeModificationParams&) override;
+  InsertionNotificationRequest insertedInto(ContainerNode*) override;
+  void didNotifySubtreeInsertionsToDocument() override;
+  void childrenChanged(const ChildrenChange&) override;
+  void didMoveToNewDocument(Document& oldDocument) override;
 
-    bool haveLoadedRequiredResources() override;
+  void svgAttributeChanged(const QualifiedName&) override;
+  bool isURLAttribute(const Attribute&) const override;
+  bool isStructurallyExternal() const override { return hasSourceAttribute(); }
+  void finishParsingChildren() override;
 
-    String sourceAttributeValue() const override;
-    String charsetAttributeValue() const override;
-    String typeAttributeValue() const override;
-    String languageAttributeValue() const override;
-    String forAttributeValue() const override;
-    String eventAttributeValue() const override;
-    bool asyncAttributeValue() const override;
-    bool deferAttributeValue() const override;
-    bool hasSourceAttribute() const override;
+  bool haveLoadedRequiredResources() override;
 
-    void dispatchLoadEvent() override;
+  String sourceAttributeValue() const override;
+  String charsetAttributeValue() const override;
+  String typeAttributeValue() const override;
+  String languageAttributeValue() const override;
+  String forAttributeValue() const override;
+  String eventAttributeValue() const override;
+  bool asyncAttributeValue() const override;
+  bool deferAttributeValue() const override;
+  bool hasSourceAttribute() const override;
 
-    Element* cloneElementWithoutAttributesAndChildren() override;
-    bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
+  void dispatchLoadEvent() override;
 
-    Member<ScriptLoader> m_loader;
+  Element* cloneElementWithoutAttributesAndChildren() override;
+  bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
+
+  Member<ScriptLoader> m_loader;
+  AtomicString m_nonce;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // SVGScriptElement_h
+#endif  // SVGScriptElement_h

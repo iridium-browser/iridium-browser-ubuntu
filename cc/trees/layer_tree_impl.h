@@ -37,14 +37,11 @@ class ContextProvider;
 class DebugRectHistory;
 class FrameRateCounter;
 class HeadsUpDisplayLayerImpl;
-class ImageDecodeController;
-class LayerExternalScrollOffsetListener;
+class ImageDecodeCache;
 class LayerTreeDebugState;
 class LayerTreeImpl;
 class LayerTreeSettings;
 class MemoryHistory;
-class OutputSurface;
-class PageScaleAnimation;
 class PictureLayerImpl;
 class TaskRunnerProvider;
 class ResourceProvider;
@@ -54,33 +51,33 @@ class VideoFrameControllerClient;
 struct PendingPageScaleAnimation;
 
 typedef std::vector<UIResourceRequest> UIResourceRequestQueue;
-typedef SyncedProperty<AdditionGroup<float>> SyncedTopControls;
+typedef SyncedProperty<AdditionGroup<float>> SyncedBrowserControls;
 typedef SyncedProperty<AdditionGroup<gfx::Vector2dF>> SyncedElasticOverscroll;
 
 class CC_EXPORT LayerTreeImpl {
  public:
-  // This is the number of times a fixed point has to be hit contiuously by a
+  // This is the number of times a fixed point has to be hit continuously by a
   // layer to consider it as jittering.
   enum : int { kFixedPointHitsThreshold = 3 };
   LayerTreeImpl(LayerTreeHostImpl* layer_tree_host_impl,
                 scoped_refptr<SyncedProperty<ScaleGroup>> page_scale_factor,
-                scoped_refptr<SyncedTopControls> top_controls_shown_ratio,
+                scoped_refptr<SyncedBrowserControls> top_controls_shown_ratio,
                 scoped_refptr<SyncedElasticOverscroll> elastic_overscroll);
   virtual ~LayerTreeImpl();
 
   void Shutdown();
   void ReleaseResources();
-  void RecreateResources();
+  void ReleaseTileResources();
+  void RecreateTileResources();
 
   // Methods called by the layer tree that pass-through or access LTHI.
   // ---------------------------------------------------------------------------
   const LayerTreeSettings& settings() const;
   const LayerTreeDebugState& debug_state() const;
   ContextProvider* context_provider() const;
-  OutputSurface* output_surface() const;
   ResourceProvider* resource_provider() const;
   TileManager* tile_manager() const;
-  ImageDecodeController* image_decode_controller() const;
+  ImageDecodeCache* image_decode_cache() const;
   FrameRateCounter* frame_rate_counter() const;
   MemoryHistory* memory_history() const;
   gfx::Size device_viewport_size() const;
@@ -106,8 +103,8 @@ class CC_EXPORT LayerTreeImpl {
   bool RequiresHighResToDraw() const;
   bool SmoothnessTakesPriority() const;
   VideoFrameControllerClient* GetVideoFrameControllerClient() const;
-  AnimationHost* animation_host() const {
-    return layer_tree_host_impl_->animation_host();
+  MutatorHost* mutator_host() const {
+    return layer_tree_host_impl_->mutator_host();
   }
 
   // Tree specific methods exposed to layer-impl tree.
@@ -140,6 +137,8 @@ class CC_EXPORT LayerTreeImpl {
   void PushPropertiesTo(LayerTreeImpl* tree_impl);
 
   void MoveChangeTrackingToLayers();
+
+  void ForceRecalculateRasterScales();
 
   LayerImplList::const_iterator begin() const;
   LayerImplList::const_iterator end() const;
@@ -204,10 +203,6 @@ class CC_EXPORT LayerTreeImpl {
   }
 
   void UpdatePropertyTreeScrollingAndAnimationFromMainThread();
-  void UpdatePropertyTreeScrollOffset(PropertyTrees* property_trees) {
-    property_trees_.scroll_tree.UpdateScrollOffsetMap(
-        &property_trees->scroll_tree.scroll_offset_map(), this);
-  }
   void SetPageScaleOnActiveTree(float active_page_scale);
   void PushPageScaleFromMainThread(float page_scale_factor,
                                    float min_page_scale_factor,
@@ -233,6 +228,11 @@ class CC_EXPORT LayerTreeImpl {
     return painted_device_scale_factor_;
   }
 
+  void SetDeviceColorSpace(const gfx::ColorSpace& device_color_space);
+  const gfx::ColorSpace& device_color_space() const {
+    return device_color_space_;
+  }
+
   SyncedElasticOverscroll* elastic_overscroll() {
     return elastic_overscroll_.get();
   }
@@ -240,10 +240,10 @@ class CC_EXPORT LayerTreeImpl {
     return elastic_overscroll_.get();
   }
 
-  SyncedTopControls* top_controls_shown_ratio() {
+  SyncedBrowserControls* top_controls_shown_ratio() {
     return top_controls_shown_ratio_.get();
   }
-  const SyncedTopControls* top_controls_shown_ratio() const {
+  const SyncedBrowserControls* top_controls_shown_ratio() const {
     return top_controls_shown_ratio_.get();
   }
 
@@ -252,7 +252,9 @@ class CC_EXPORT LayerTreeImpl {
   // Updates draw properties and render surface layer list, as well as tile
   // priorities. Returns false if it was unable to update.  Updating lcd
   // text may cause invalidations, so should only be done after a commit.
-  bool UpdateDrawProperties(bool update_lcd_text);
+  bool UpdateDrawProperties(
+      bool update_lcd_text,
+      bool force_skip_verify_visible_rect_calculations = false);
   void BuildPropertyTreesForTesting();
   void BuildLayerListAndPropertyTreesForTesting();
 
@@ -278,7 +280,7 @@ class CC_EXPORT LayerTreeImpl {
   }
   bool has_ever_been_drawn() const { return has_ever_been_drawn_; }
 
-  void set_ui_resource_request_queue(const UIResourceRequestQueue& queue);
+  void set_ui_resource_request_queue(UIResourceRequestQueue queue);
 
   const LayerImplList& RenderSurfaceLayerList() const;
   const Region& UnoccludedScreenSpaceRegion() const;
@@ -363,6 +365,7 @@ class CC_EXPORT LayerTreeImpl {
   void AppendSwapPromises(
       std::vector<std::unique_ptr<SwapPromise>> new_swap_promises);
   void FinishSwapPromises(CompositorFrameMetadata* metadata);
+  void ClearSwapPromises();
   void BreakSwapPromises(SwapPromise::DidNotSwapReason reason);
 
   void DidModifyTilePriorities();
@@ -403,17 +406,17 @@ class CC_EXPORT LayerTreeImpl {
   // the viewport.
   void GetViewportSelection(Selection<gfx::SelectionBound>* selection);
 
-  void set_top_controls_shrink_blink_size(bool shrink);
-  bool top_controls_shrink_blink_size() const {
-    return top_controls_shrink_blink_size_;
+  void set_browser_controls_shrink_blink_size(bool shrink);
+  bool browser_controls_shrink_blink_size() const {
+    return browser_controls_shrink_blink_size_;
   }
-  bool SetCurrentTopControlsShownRatio(float ratio);
-  float CurrentTopControlsShownRatio() const {
+  bool SetCurrentBrowserControlsShownRatio(float ratio);
+  float CurrentBrowserControlsShownRatio() const {
     return top_controls_shown_ratio_->Current(IsActiveTree());
   }
   void set_top_controls_height(float top_controls_height);
   float top_controls_height() const { return top_controls_height_; }
-  void PushTopControlsFromMainThread(float top_controls_shown_ratio);
+  void PushBrowserControlsFromMainThread(float top_controls_shown_ratio);
   void set_bottom_controls_height(float bottom_controls_height);
   float bottom_controls_height() const { return bottom_controls_height_; }
 
@@ -421,7 +424,7 @@ class CC_EXPORT LayerTreeImpl {
       std::unique_ptr<PendingPageScaleAnimation> pending_animation);
   std::unique_ptr<PendingPageScaleAnimation> TakePendingPageScaleAnimation();
 
-  void DidUpdateScrollOffset(int layer_id, int transform_id);
+  void DidUpdateScrollOffset(int layer_id);
   void DidUpdateScrollState(int layer_id);
 
   void ScrollAnimationAbort(bool needs_completion);
@@ -461,8 +464,8 @@ class CC_EXPORT LayerTreeImpl {
   bool IsViewportLayerId(int id) const;
   void UpdateScrollbars(int scroll_layer_id, int clip_layer_id);
   void DidUpdatePageScale();
-  void PushTopControls(const float* top_controls_shown_ratio);
-  bool ClampTopControlsShownRatio();
+  void PushBrowserControls(const float* top_controls_shown_ratio);
+  bool ClampBrowserControlsShownRatio();
 
   LayerTreeHostImpl* layer_tree_host_impl_;
   int source_frame_number_;
@@ -487,6 +490,7 @@ class CC_EXPORT LayerTreeImpl {
 
   float device_scale_factor_;
   float painted_device_scale_factor_;
+  gfx::ColorSpace device_color_space_;
 
   scoped_refptr<SyncedElasticOverscroll> elastic_overscroll_;
 
@@ -544,13 +548,13 @@ class CC_EXPORT LayerTreeImpl {
 
   // Whether or not Blink's viewport size was shrunk by the height of the top
   // controls at the time of the last layout.
-  bool top_controls_shrink_blink_size_;
+  bool browser_controls_shrink_blink_size_;
   float top_controls_height_;
   float bottom_controls_height_;
 
-  // The amount that the top controls are shown from 0 (hidden) to 1 (fully
+  // The amount that the browser controls are shown from 0 (hidden) to 1 (fully
   // shown).
-  scoped_refptr<SyncedTopControls> top_controls_shown_ratio_;
+  scoped_refptr<SyncedBrowserControls> top_controls_shown_ratio_;
 
   std::unique_ptr<PendingPageScaleAnimation> pending_page_scale_animation_;
 

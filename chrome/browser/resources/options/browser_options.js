@@ -6,6 +6,7 @@ cr.exportPath('options');
 
 /**
  * @typedef {{actionLinkText: (string|undefined),
+ *            accountInfo: (string|undefined),
  *            childUser: (boolean|undefined),
  *            hasError: (boolean|undefined),
  *            hasUnrecoverableError: (boolean|undefined),
@@ -15,6 +16,7 @@ cr.exportPath('options');
  *            signedIn: (boolean|undefined),
  *            signinAllowed: (boolean|undefined),
  *            signoutAllowed: (boolean|undefined),
+ *            statusAction: (string|undefined),
  *            statusText: (string|undefined),
  *            supervisedUser: (boolean|undefined),
  *            syncSystemEnabled: (boolean|undefined)}}
@@ -214,6 +216,10 @@ cr.define('options', function() {
       // Sync (Sign in) section.
       this.updateSyncState_(/** @type {options.SyncStatus} */(
           loadTimeData.getValue('syncData')));
+      if (!$('sync-overview').hidden) {
+        chrome.send('metricsHandler:recordAction',
+                    ['Signin_Impression_FromSettings']);
+      }
 
       $('start-stop-sync').onclick = function(event) {
         if (self.signedIn_) {
@@ -357,14 +363,11 @@ cr.define('options', function() {
           chrome.send('coreOptionsUserMetricsAction',
                       ['Options_ShowTouchpadSettings']);
         };
-        if (loadTimeData.getBoolean('enableStorageManager')) {
-          $('storage-manager-button').hidden = false;
-          $('storage-manager-button').onclick = function(evt) {
-            PageManager.showPageByName('storage');
-            chrome.send('coreOptionsUserMetricsAction',
-                        ['Options_ShowStorageManager']);
-          };
-        }
+        $('storage-manager-button').onclick = function(evt) {
+          PageManager.showPageByName('storage');
+          chrome.send('coreOptionsUserMetricsAction',
+                      ['Options_ShowStorageManager']);
+        };
       }
 
       // Search section.
@@ -438,6 +441,8 @@ cr.define('options', function() {
         if (loadTimeData.getBoolean('showQuickUnlockSettings')) {
           $('manage-screenlock').onclick = function(event) {
             PageManager.showPageByName('quickUnlockConfigureOverlay');
+            settings.recordLockScreenProgress(
+                LockScreenProgress.START_SCREEN_LOCK);
           };
           $('manage-screenlock').hidden = false;
         }
@@ -677,6 +682,10 @@ cr.define('options', function() {
         chrome.send('defaultZoomFactorAction',
             [String(event.target.options[event.target.selectedIndex].value)]);
       };
+      $('safeBrowsingExtendedReportingCheckbox').onchange = function(event) {
+        chrome.send('safeBrowsingExtendedReportingAction',
+            [event.target.checked]);
+      };
 
       // Languages section.
       var showLanguageOptions = function(event) {
@@ -712,6 +721,16 @@ cr.define('options', function() {
           chrome.send('coreOptionsUserMetricsAction',
                       ['Options_ManageSSLCertificates']);
         };
+      }
+
+      // CUPS Print section (CrOS only).
+      if (cr.isChromeOS) {
+        if (loadTimeData.getBoolean('cupsPrintEnabled')) {
+          $('cups-printers-section').hidden = false;
+          $('cupsPrintersManageButton').onclick = function() {
+            chrome.send('showCupsPrintDevicesPage');
+          };
+        }
       }
 
       if (loadTimeData.getBoolean('cloudPrintShowMDnsOptions')) {
@@ -798,7 +817,11 @@ cr.define('options', function() {
 
       // Reset profile settings section.
       $('reset-profile-settings').onclick = function(event) {
-        PageManager.showPageByName('resetProfileSettings');
+        // We use the hash to indicate the source of the reset request. The hash
+        // is removed by the reset profile settings overlay once it has been
+        // consumed.
+        PageManager.showPageByName('resetProfileSettings', true,
+                                   {hash: '#userclick'});
       };
 
       // Extension controlled UI.
@@ -849,7 +872,10 @@ cr.define('options', function() {
         });
 
         $('android-apps-settings-link').addEventListener('click', function(e) {
-            chrome.send('showAndroidAppsSettings');
+            // MouseEvent.detail indicates the current click count (or tap
+            // count, in the case of touch events) in the 'click' event.
+            var activatedFromKeyboard = e.detail == 0;
+            chrome.send('showAndroidAppsSettings', [activatedFromKeyboard]);
         });
       }
     },
@@ -1180,6 +1206,9 @@ cr.define('options', function() {
                   loadTimeData.getString('syncButtonTextSignIn');
       $('start-stop-sync-indicator').hidden = signInButton.hidden;
 
+      $('account-info').textContent = syncData.accountInfo;
+      $('account-info').hidden = !this.signedIn_;
+
       // TODO(estade): can this just be textContent?
       $('sync-status-text').innerHTML = syncData.statusText;
       var statusSet = syncData.statusText.length != 0;
@@ -1194,13 +1223,34 @@ cr.define('options', function() {
       $('sync-action-link').disabled = syncData.managed ||
                                        !syncData.syncSystemEnabled;
 
-      // On Chrome OS, sign out the user and sign in again to get fresh
-      // credentials on auth errors.
       $('sync-action-link').onclick = function(event) {
-        if (cr.isChromeOS && syncData.hasError)
-          SyncSetupOverlay.doSignOutOnAuthError();
-        else
-          SyncSetupOverlay.showSetupUI();
+        switch (syncData.statusAction) {
+          case 'reauthenticate':
+            SyncSetupOverlay.startSignIn(false /* creatingSupervisedUser */);
+            break;
+          case 'signOutAndSignIn':
+// <if expr="chromeos">
+            // On Chrome OS, sign out the user and sign in again to get fresh
+            // credentials on auth errors.
+            SyncSetupOverlay.doSignOutOnAuthError();
+// </if>
+// <if expr="not chromeos">
+            if (syncData.signoutAllowed) {
+              // Silently sign the user out without deleting their profile and
+              // prompt them to sign back in.
+              chrome.send('SyncSetupStopSyncing', [false /* deleteProfile */]);
+              SyncSetupOverlay.startSignIn(false /* creatingSupervisedUser */);
+            } else {
+              chrome.send('showDisconnectManagedProfileDialog');
+            }
+// </if>
+            break;
+          case 'upgradeClient':
+            PageManager.showPageByName('help');
+            break;
+          default:
+            SyncSetupOverlay.showSetupUI();
+        }
       };
 
       if (syncData.hasError)
@@ -1876,6 +1926,15 @@ cr.define('options', function() {
     },
 
     /**
+      * Set the checked state of the Safe Browsing Extended Reporting Enabled
+      * checkbox.
+      * @private
+      */
+    setExtendedReportingEnabledCheckboxState_: function(checked) {
+      $('safeBrowsingExtendedReportingCheckbox').checked = checked;
+    },
+
+    /**
      * Set network prediction checkbox value.
      *
      * @param {{value: number, disabled: boolean}} pref Information about
@@ -2338,27 +2397,28 @@ cr.define('options', function() {
     'removeBluetoothDevice',
     'scrollToSection',
     'setAccountPictureManaged',
-    'setWallpaperManaged',
+    'setAllHotwordSectionsVisible',
+    'setAudioHistorySectionVisible',
     'setAutoOpenFileTypesDisplayed',
     'setCanSetTime',
+    'setExtendedReportingEnabledCheckboxState',
     'setFontSize',
+    'setHighContrastCheckboxState',
     'setHotwordRetrainLinkVisible',
+    'setMetricsReportingCheckboxState',
+    'setMetricsReportingSettingVisibility',
     'setNativeThemeButtonEnabled',
     'setNetworkPredictionValue',
     'setNowSectionVisible',
-    'setHighContrastCheckboxState',
-    'setAllHotwordSectionsVisible',
-    'setMetricsReportingCheckboxState',
-    'setMetricsReportingSettingVisibility',
     'setProfilesInfo',
     'setSpokenFeedbackCheckboxState',
-    'setSystemTimezoneManaged',
     'setSystemTimezoneAutomaticDetectionManaged',
+    'setSystemTimezoneManaged',
     'setThemesResetButtonEnabled',
     'setVirtualKeyboardCheckboxState',
+    'setWallpaperManaged',
     'setupPageZoomSelector',
     'setupProxySettingsButton',
-    'setAudioHistorySectionVisible',
     'showCreateProfileError',
     'showCreateProfileSuccess',
     'showCreateProfileWarning',

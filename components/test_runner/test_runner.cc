@@ -11,10 +11,11 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/strings/nullable_string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "components/test_runner/app_banner_client.h"
 #include "components/test_runner/layout_and_paint_async_then.h"
 #include "components/test_runner/layout_dump.h"
 #include "components/test_runner/mock_content_settings_client.h"
@@ -29,7 +30,6 @@
 #include "components/test_runner/test_interfaces.h"
 #include "components/test_runner/test_preferences.h"
 #include "components/test_runner/test_runner_for_specific_view.h"
-#include "components/test_runner/web_task.h"
 #include "components/test_runner/web_test_delegate.h"
 #include "components/test_runner/web_view_test_proxy.h"
 #include "gin/arguments.h"
@@ -130,7 +130,6 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void DidNotAcquirePointerLock();
   void DisableMockScreenOrientation();
   void DispatchBeforeInstallPromptEvent(
-      int request_id,
       const std::vector<std::string>& event_platforms,
       v8::Local<v8::Function> callback);
   void DumpAsMarkup();
@@ -182,16 +181,15 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
                                         const std::string& destination_protocol,
                                         const std::string& destination_host,
                                         bool allow_destination_subdomains);
+  void RemoveSpellCheckResolvedCallback();
   void RemoveWebPageOverlay();
   void ResetDeviceLight();
   void ResetTestHelperControllers();
-  void ResolveBeforeInstallPromptPromise(int request_id,
-                                         const std::string& platform);
+  void ResolveBeforeInstallPromptPromise(const std::string& platform);
   void RunIdleTasks(v8::Local<v8::Function> callback);
   void SendBluetoothManualChooserEvent(const std::string& event,
                                        const std::string& argument);
   void SetAcceptLanguages(const std::string& accept_languages);
-  void SetAllowDisplayOfInsecureContent(bool allowed);
   void SetAllowFileAccessFromFileURLs(bool allow);
   void SetAllowRunningOfInsecureContent(bool allowed);
   void SetAutoplayAllowed(bool allowed);
@@ -214,6 +212,8 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetDomainRelaxationForbiddenForURLScheme(bool forbidden,
                                                 const std::string& scheme);
   void SetDumpConsoleMessages(bool value);
+  void SetDumpJavaScriptDialogs(bool value);
+  void SetEffectiveConnectionType(const std::string& connection_type);
   void SetMockSpellCheckerEnabled(bool enabled);
   void SetImagesAllowed(bool allowed);
   void SetIsolatedWorldContentSecurityPolicy(int world_id,
@@ -242,6 +242,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetPrinting();
   void SetScriptsAllowed(bool allowed);
   void SetShouldStayOnPageAfterHandlingBeforeUnload(bool value);
+  void SetSpellCheckResolvedCallback(v8::Local<v8::Function> callback);
   void SetStorageAllowed(bool allowed);
   void SetTabKeyCyclesThroughElements(bool tab_key_cycles_through_elements);
   void SetTextDirection(const std::string& direction_name);
@@ -253,17 +254,20 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetXSSAuditorEnabled(bool enabled);
   void ShowWebInspector(gin::Arguments* args);
   void SimulateWebNotificationClick(const std::string& title, int action_index);
+  void SimulateWebNotificationClickWithReply(const std::string& title,
+                                             int action_index,
+                                             const std::string& reply);
   void SimulateWebNotificationClose(const std::string& title, bool by_user);
   void UseUnfortunateSynchronousResizeMode();
   void WaitForPolicyDelegate();
   void WaitUntilDone();
   void WaitUntilExternalURLLoad();
-  void AddMockCredentialManagerError(const std::string& error);
-  void AddMockCredentialManagerResponse(const std::string& id,
+  void SetMockCredentialManagerError(const std::string& error);
+  void SetMockCredentialManagerResponse(const std::string& id,
                                         const std::string& name,
                                         const std::string& avatar,
                                         const std::string& password);
-  bool AnimationScheduled();
+  void ClearMockCredentialManagerResponse();
   bool CallShouldCloseOnWebView();
   bool DisableAutoResizeMode(int new_width, int new_height);
   bool EnableAutoResizeMode(int min_width,
@@ -337,16 +341,17 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
   return gin::Wrappable<TestRunnerBindings>::GetObjectTemplateBuilder(isolate)
       .SetMethod("abortModal", &TestRunnerBindings::NotImplemented)
       .SetMethod("addDisallowedURL", &TestRunnerBindings::NotImplemented)
-      .SetMethod("addMockCredentialManagerError",
-                 &TestRunnerBindings::AddMockCredentialManagerError)
-      .SetMethod("addMockCredentialManagerResponse",
-                 &TestRunnerBindings::AddMockCredentialManagerResponse)
+      .SetMethod("setMockCredentialManagerError",
+                 &TestRunnerBindings::SetMockCredentialManagerError)
+      .SetMethod("setMockCredentialManagerResponse",
+                 &TestRunnerBindings::SetMockCredentialManagerResponse)
+      .SetMethod("clearMockCredentialManagerResponse",
+                 &TestRunnerBindings::ClearMockCredentialManagerResponse)
       .SetMethod("addMockSpeechRecognitionResult",
                  &TestRunnerBindings::AddMockSpeechRecognitionResult)
       .SetMethod("addOriginAccessWhitelistEntry",
                  &TestRunnerBindings::AddOriginAccessWhitelistEntry)
       .SetMethod("addWebPageOverlay", &TestRunnerBindings::AddWebPageOverlay)
-      .SetMethod("animationScheduled", &TestRunnerBindings::AnimationScheduled)
       .SetMethod("callShouldCloseOnWebView",
                  &TestRunnerBindings::CallShouldCloseOnWebView)
       .SetMethod("capturePixelsAsyncThen",
@@ -466,6 +471,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("queueReload", &TestRunnerBindings::QueueReload)
       .SetMethod("removeOriginAccessWhitelistEntry",
                  &TestRunnerBindings::RemoveOriginAccessWhitelistEntry)
+      .SetMethod("removeSpellCheckResolvedCallback",
+                 &TestRunnerBindings::RemoveSpellCheckResolvedCallback)
       .SetMethod("removeWebPageOverlay",
                  &TestRunnerBindings::RemoveWebPageOverlay)
       .SetMethod("resetDeviceLight", &TestRunnerBindings::ResetDeviceLight)
@@ -481,8 +488,6 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("sendBluetoothManualChooserEvent",
                  &TestRunnerBindings::SendBluetoothManualChooserEvent)
       .SetMethod("setAcceptLanguages", &TestRunnerBindings::SetAcceptLanguages)
-      .SetMethod("setAllowDisplayOfInsecureContent",
-                 &TestRunnerBindings::SetAllowDisplayOfInsecureContent)
       .SetMethod("setAllowFileAccessFromFileURLs",
                  &TestRunnerBindings::SetAllowFileAccessFromFileURLs)
       .SetMethod("setAllowRunningOfInsecureContent",
@@ -515,6 +520,10 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::SetDomainRelaxationForbiddenForURLScheme)
       .SetMethod("setDumpConsoleMessages",
                  &TestRunnerBindings::SetDumpConsoleMessages)
+      .SetMethod("setDumpJavaScriptDialogs",
+                 &TestRunnerBindings::SetDumpJavaScriptDialogs)
+      .SetMethod("setEffectiveConnectionType",
+                 &TestRunnerBindings::SetEffectiveConnectionType)
       .SetMethod("setMockSpellCheckerEnabled",
                  &TestRunnerBindings::SetMockSpellCheckerEnabled)
       .SetMethod("setIconDatabaseEnabled", &TestRunnerBindings::NotImplemented)
@@ -555,6 +564,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod(
           "setShouldStayOnPageAfterHandlingBeforeUnload",
           &TestRunnerBindings::SetShouldStayOnPageAfterHandlingBeforeUnload)
+      .SetMethod("setSpellCheckResolvedCallback",
+                 &TestRunnerBindings::SetSpellCheckResolvedCallback)
       .SetMethod("setStorageAllowed", &TestRunnerBindings::SetStorageAllowed)
       .SetMethod("setTabKeyCyclesThroughElements",
                  &TestRunnerBindings::SetTabKeyCyclesThroughElements)
@@ -574,6 +585,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       .SetMethod("showWebInspector", &TestRunnerBindings::ShowWebInspector)
       .SetMethod("simulateWebNotificationClick",
                  &TestRunnerBindings::SimulateWebNotificationClick)
+      .SetMethod("simulateWebNotificationClickWithReply",
+                 &TestRunnerBindings::SimulateWebNotificationClickWithReply)
       .SetMethod("simulateWebNotificationClose",
                  &TestRunnerBindings::SimulateWebNotificationClose)
       .SetProperty("tooltipText", &TestRunnerBindings::TooltipText)
@@ -708,9 +721,48 @@ void TestRunnerBindings::SetDumpConsoleMessages(bool enabled) {
     runner_->SetDumpConsoleMessages(enabled);
 }
 
+void TestRunnerBindings::SetDumpJavaScriptDialogs(bool enabled) {
+  if (runner_)
+    runner_->SetDumpJavaScriptDialogs(enabled);
+}
+
+void TestRunnerBindings::SetEffectiveConnectionType(
+    const std::string& connection_type) {
+  blink::WebEffectiveConnectionType web_type =
+      blink::WebEffectiveConnectionType::TypeUnknown;
+  if (connection_type == "TypeUnknown")
+    web_type = blink::WebEffectiveConnectionType::TypeUnknown;
+  else if (connection_type == "TypeOffline")
+    web_type = blink::WebEffectiveConnectionType::TypeOffline;
+  else if (connection_type == "TypeSlow2G")
+    web_type = blink::WebEffectiveConnectionType::TypeSlow2G;
+  else if (connection_type == "Type2G")
+    web_type = blink::WebEffectiveConnectionType::Type2G;
+  else if (connection_type == "Type3G")
+    web_type = blink::WebEffectiveConnectionType::Type3G;
+  else if (connection_type == "Type4G")
+    web_type = blink::WebEffectiveConnectionType::Type4G;
+  else
+    NOTREACHED();
+
+  if (runner_)
+    runner_->SetEffectiveConnectionType(web_type);
+}
+
 void TestRunnerBindings::SetMockSpellCheckerEnabled(bool enabled) {
   if (runner_)
     runner_->SetMockSpellCheckerEnabled(enabled);
+}
+
+void TestRunnerBindings::SetSpellCheckResolvedCallback(
+    v8::Local<v8::Function> callback) {
+  if (runner_)
+    runner_->spellcheck_->SetSpellCheckResolvedCallback(callback);
+}
+
+void TestRunnerBindings::RemoveSpellCheckResolvedCallback() {
+  if (runner_)
+    runner_->spellcheck_->RemoveSpellCheckResolvedCallback();
 }
 
 v8::Local<v8::Value>
@@ -1020,13 +1072,6 @@ void TestRunnerBindings::SetPluginsEnabled(bool enabled) {
     runner_->SetPluginsEnabled(enabled);
 }
 
-bool TestRunnerBindings::AnimationScheduled() {
-  if (runner_)
-    return runner_->GetAnimationScheduled();
-  else
-    return false;
-}
-
 void TestRunnerBindings::DumpEditingCallbacks() {
   if (runner_)
     runner_->DumpEditingCallbacks();
@@ -1130,11 +1175,6 @@ void TestRunnerBindings::SetStorageAllowed(bool allowed) {
 void TestRunnerBindings::SetPluginsAllowed(bool allowed) {
   if (runner_)
     runner_->SetPluginsAllowed(allowed);
-}
-
-void TestRunnerBindings::SetAllowDisplayOfInsecureContent(bool allowed) {
-  if (runner_)
-    runner_->SetAllowDisplayOfInsecureContent(allowed);
 }
 
 void TestRunnerBindings::SetAllowRunningOfInsecureContent(bool allowed) {
@@ -1329,15 +1369,30 @@ void TestRunnerBindings::SetPOSIXLocale(const std::string& locale) {
 }
 
 void TestRunnerBindings::SetMIDIAccessorResult(bool result) {
-  if (runner_)
-    runner_->SetMIDIAccessorResult(result);
+  if (runner_) {
+    runner_->SetMIDIAccessorResult(
+        result ? midi::mojom::Result::OK
+               : midi::mojom::Result::INITIALIZATION_ERROR);
+  }
 }
 
 void TestRunnerBindings::SimulateWebNotificationClick(const std::string& title,
                                                       int action_index) {
   if (!runner_)
     return;
-  runner_->SimulateWebNotificationClick(title, action_index);
+  runner_->SimulateWebNotificationClick(title, action_index,
+                                        base::NullableString16());
+}
+
+void TestRunnerBindings::SimulateWebNotificationClickWithReply(
+    const std::string& title,
+    int action_index,
+    const std::string& reply) {
+  if (!runner_)
+    return;
+  runner_->SimulateWebNotificationClick(
+      title, action_index,
+      base::NullableString16(base::UTF8ToUTF16(reply), false /* is_null */));
 }
 
 void TestRunnerBindings::SimulateWebNotificationClose(const std::string& title,
@@ -1359,19 +1414,24 @@ void TestRunnerBindings::SetMockSpeechRecognitionError(
     runner_->SetMockSpeechRecognitionError(error, message);
 }
 
-void TestRunnerBindings::AddMockCredentialManagerResponse(
+void TestRunnerBindings::SetMockCredentialManagerResponse(
     const std::string& id,
     const std::string& name,
     const std::string& avatar,
     const std::string& password) {
   if (runner_)
-    runner_->AddMockCredentialManagerResponse(id, name, avatar, password);
+    runner_->SetMockCredentialManagerResponse(id, name, avatar, password);
 }
 
-void TestRunnerBindings::AddMockCredentialManagerError(
+void TestRunnerBindings::ClearMockCredentialManagerResponse() {
+  if (runner_)
+    runner_->ClearMockCredentialManagerResponse();
+}
+
+void TestRunnerBindings::SetMockCredentialManagerError(
     const std::string& error) {
   if (runner_)
-    runner_->AddMockCredentialManagerError(error);
+    runner_->SetMockCredentialManagerError(error);
 }
 
 void TestRunnerBindings::AddWebPageOverlay() {
@@ -1435,23 +1495,21 @@ void TestRunnerBindings::SetPermission(const std::string& name,
 }
 
 void TestRunnerBindings::DispatchBeforeInstallPromptEvent(
-    int request_id,
     const std::vector<std::string>& event_platforms,
     v8::Local<v8::Function> callback) {
   if (!view_runner_)
     return;
 
-  return view_runner_->DispatchBeforeInstallPromptEvent(
-      request_id, event_platforms, callback);
+  return view_runner_->DispatchBeforeInstallPromptEvent(event_platforms,
+                                                        callback);
 }
 
 void TestRunnerBindings::ResolveBeforeInstallPromptPromise(
-    int request_id,
     const std::string& platform) {
   if (!runner_)
     return;
 
-  runner_->ResolveBeforeInstallPromptPromise(request_id, platform);
+  runner_->ResolveBeforeInstallPromptPromise(platform);
 }
 
 void TestRunnerBindings::RunIdleTasks(v8::Local<v8::Function> callback) {
@@ -1504,8 +1562,8 @@ void TestRunner::WorkQueue::ProcessWorkSoon() {
 
   if (!queue_.empty()) {
     // We delay processing queued work to avoid recursion problems.
-    controller_->delegate_->PostTask(new WebCallbackTask(base::Bind(
-        &TestRunner::WorkQueue::ProcessWork, weak_factory_.GetWeakPtr())));
+    controller_->delegate_->PostTask(base::Bind(
+        &TestRunner::WorkQueue::ProcessWork, weak_factory_.GetWeakPtr()));
   } else if (!controller_->layout_test_runtime_flags_.wait_until_done()) {
     controller_->delegate_->TestFinished();
   }
@@ -1562,6 +1620,8 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       chooser_count_(0),
       previously_focused_view_(nullptr),
       is_web_platform_tests_mode_(false),
+      effective_connection_type_(
+          blink::WebEffectiveConnectionType::TypeUnknown),
       weak_factory_(this) {}
 
 TestRunner::~TestRunner() {}
@@ -1583,6 +1643,8 @@ void TestRunner::SetDelegate(WebTestDelegate* delegate) {
 
 void TestRunner::SetMainView(WebView* web_view) {
   main_view_ = web_view;
+  if (disable_v8_cache_)
+    SetV8CacheDisabled(true);
 }
 
 void TestRunner::Reset() {
@@ -1592,7 +1654,6 @@ void TestRunner::Reset() {
   layout_test_runtime_flags_.Reset();
   mock_screen_orientation_client_->ResetData();
   drag_image_.reset();
-  widgets_with_scheduled_animations_.clear();
 
   WebSecurityPolicy::resetOriginAccessWhitelists();
 #if defined(__linux__) || defined(ANDROID)
@@ -1618,7 +1679,7 @@ void TestRunner::Reset() {
   dump_back_forward_list_ = false;
   test_repaint_ = false;
   sweep_horizontally_ = false;
-  midi_accessor_result_ = true;
+  midi_accessor_result_ = midi::mojom::Result::OK;
   has_custom_text_output_ = false;
   custom_text_output_.clear();
 
@@ -1638,7 +1699,7 @@ void TestRunner::Reset() {
   else
     close_remaining_windows_ = true;
 
-  spellcheck_->SetEnabled(false);
+  spellcheck_->Reset();
 }
 
 void TestRunner::SetTestIsRunning(bool running) {
@@ -1880,6 +1941,10 @@ WebFrame* TestRunner::topLoadingFrame() const {
   return top_loading_frame_;
 }
 
+WebFrame* TestRunner::mainFrame() const {
+  return main_view_->mainFrame();
+}
+
 void TestRunner::policyDelegateDone() {
   DCHECK(layout_test_runtime_flags_.wait_until_done());
   delegate_->TestFinished();
@@ -1915,12 +1980,22 @@ bool TestRunner::shouldDumpNavigationPolicy() const {
   return layout_test_runtime_flags_.dump_navigation_policy();
 }
 
-bool TestRunner::midiAccessorResult() {
+midi::mojom::Result TestRunner::midiAccessorResult() {
   return midi_accessor_result_;
 }
 
 void TestRunner::ClearDevToolsLocalStorage() {
   delegate_->ClearDevToolsLocalStorage();
+}
+
+void TestRunner::SetV8CacheDisabled(bool disabled) {
+  if (!main_view_) {
+    disable_v8_cache_ = disabled;
+    return;
+  }
+  main_view_->settings()->setV8CacheOptions(disabled ?
+      blink::WebSettings::V8CacheOptionsNone :
+      blink::WebSettings::V8CacheOptionsDefault);
 }
 
 void TestRunner::ShowDevTools(const std::string& settings,
@@ -2313,8 +2388,6 @@ void TestRunner::OverridePreference(const std::string& key,
     prefs->hyperlink_auditing_enabled = value->BooleanValue();
   } else if (key == "WebKitEnableCaretBrowsing") {
     prefs->caret_browsing_enabled = value->BooleanValue();
-  } else if (key == "WebKitAllowDisplayingInsecureContent") {
-    prefs->allow_display_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitAllowRunningInsecureContent") {
     prefs->allow_running_of_insecure_content = value->BooleanValue();
   } else if (key == "WebKitDisableReadingFromCanvas") {
@@ -2355,19 +2428,6 @@ void TestRunner::SetAcceptLanguages(const std::string& accept_languages) {
 void TestRunner::SetPluginsEnabled(bool enabled) {
   delegate_->Preferences()->plugins_enabled = enabled;
   delegate_->ApplyPreferences();
-}
-
-bool TestRunner::GetAnimationScheduled() const {
-  bool is_animation_scheduled = !widgets_with_scheduled_animations_.empty();
-  return is_animation_scheduled;
-}
-
-void TestRunner::OnAnimationScheduled(blink::WebWidget* widget) {
-  widgets_with_scheduled_animations_.insert(widget);
-}
-
-void TestRunner::OnAnimationBegun(blink::WebWidget* widget) {
-  widgets_with_scheduled_animations_.erase(widget);
 }
 
 void TestRunner::DumpEditingCallbacks() {
@@ -2481,11 +2541,6 @@ void TestRunner::SetPluginsAllowed(bool allowed) {
   OnLayoutTestRuntimeFlagsChanged();
 }
 
-void TestRunner::SetAllowDisplayOfInsecureContent(bool allowed) {
-  layout_test_runtime_flags_.set_displaying_insecure_content_allowed(allowed);
-  OnLayoutTestRuntimeFlagsChanged();
-}
-
 void TestRunner::SetAllowRunningOfInsecureContent(bool allowed) {
   layout_test_runtime_flags_.set_running_insecure_content_allowed(allowed);
   OnLayoutTestRuntimeFlagsChanged();
@@ -2580,12 +2635,26 @@ void TestRunner::SetDumpConsoleMessages(bool value) {
   OnLayoutTestRuntimeFlagsChanged();
 }
 
+void TestRunner::SetDumpJavaScriptDialogs(bool value) {
+  layout_test_runtime_flags_.set_dump_javascript_dialogs(value);
+  OnLayoutTestRuntimeFlagsChanged();
+}
+
+void TestRunner::SetEffectiveConnectionType(
+    blink::WebEffectiveConnectionType connection_type) {
+  effective_connection_type_ = connection_type;
+}
+
 void TestRunner::SetMockSpellCheckerEnabled(bool enabled) {
   spellcheck_->SetEnabled(enabled);
 }
 
 bool TestRunner::ShouldDumpConsoleMessages() const {
   return layout_test_runtime_flags_.dump_console_messages();
+}
+
+bool TestRunner::ShouldDumpJavaScriptDialogs() const {
+  return layout_test_runtime_flags_.dump_javascript_dialogs();
 }
 
 void TestRunner::CloseWebInspector() {
@@ -2645,24 +2714,23 @@ void TestRunner::SetPermission(const std::string& name,
 }
 
 void TestRunner::ResolveBeforeInstallPromptPromise(
-    int request_id,
     const std::string& platform) {
-  if (!test_interfaces_->GetAppBannerClient())
-    return;
-  test_interfaces_->GetAppBannerClient()->ResolvePromise(request_id, platform);
+  delegate_->ResolveBeforeInstallPromptPromise(platform);
 }
 
 void TestRunner::SetPOSIXLocale(const std::string& locale) {
   delegate_->SetLocale(locale);
 }
 
-void TestRunner::SetMIDIAccessorResult(bool result) {
+void TestRunner::SetMIDIAccessorResult(midi::mojom::Result result) {
   midi_accessor_result_ = result;
 }
 
-void TestRunner::SimulateWebNotificationClick(const std::string& title,
-                                              int action_index) {
-  delegate_->SimulateWebNotificationClick(title, action_index);
+void TestRunner::SimulateWebNotificationClick(
+    const std::string& title,
+    int action_index,
+    const base::NullableString16& reply) {
+  delegate_->SimulateWebNotificationClick(title, action_index, reply);
 }
 
 void TestRunner::SimulateWebNotificationClose(const std::string& title,
@@ -2682,7 +2750,7 @@ void TestRunner::SetMockSpeechRecognitionError(const std::string& error,
                                          WebString::fromUTF8(message));
 }
 
-void TestRunner::AddMockCredentialManagerResponse(const std::string& id,
+void TestRunner::SetMockCredentialManagerResponse(const std::string& id,
                                                   const std::string& name,
                                                   const std::string& avatar,
                                                   const std::string& password) {
@@ -2691,7 +2759,11 @@ void TestRunner::AddMockCredentialManagerResponse(const std::string& id,
       WebString::fromUTF8(name), WebURL(GURL(avatar))));
 }
 
-void TestRunner::AddMockCredentialManagerError(const std::string& error) {
+void TestRunner::ClearMockCredentialManagerResponse() {
+  credential_manager_client_->SetResponse(nullptr);
+}
+
+void TestRunner::SetMockCredentialManagerError(const std::string& error) {
   credential_manager_client_->SetError(error);
 }
 

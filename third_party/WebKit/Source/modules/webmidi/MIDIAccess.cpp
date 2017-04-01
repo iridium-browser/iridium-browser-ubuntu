@@ -45,173 +45,195 @@
 
 namespace blink {
 
-using PortState = MIDIAccessor::MIDIPortState;
+namespace {
 
-MIDIAccess::MIDIAccess(std::unique_ptr<MIDIAccessor> accessor, bool sysexEnabled, const Vector<MIDIAccessInitializer::PortDescriptor>& ports, ExecutionContext* executionContext)
-    : ActiveScriptWrappable(this)
-    , ActiveDOMObject(executionContext)
-    , m_accessor(std::move(accessor))
-    , m_sysexEnabled(sysexEnabled)
-    , m_hasPendingActivity(false)
-{
-    ThreadState::current()->registerPreFinalizer(this);
-    m_accessor->setClient(this);
-    for (size_t i = 0; i < ports.size(); ++i) {
-        const MIDIAccessInitializer::PortDescriptor& port = ports[i];
-        if (port.type == MIDIPort::TypeInput) {
-            m_inputs.append(MIDIInput::create(this, port.id, port.manufacturer, port.name, port.version, port.state));
-        } else {
-            m_outputs.append(MIDIOutput::create(this, m_outputs.size(), port.id, port.manufacturer, port.name, port.version, port.state));
-        }
-    }
+using midi::mojom::PortState;
+
+// Since "open" status is separately managed per MIDIAccess instance, we do not
+// expose service level PortState directly.
+PortState ToDeviceState(PortState state) {
+  if (state == PortState::OPENED)
+    return PortState::CONNECTED;
+  return state;
 }
 
-MIDIAccess::~MIDIAccess()
-{
-}
+}  // namespace
 
-void MIDIAccess::dispose()
-{
-    m_accessor.reset();
-}
-
-EventListener* MIDIAccess::onstatechange()
-{
-    return getAttributeEventListener(EventTypeNames::statechange);
-}
-
-void MIDIAccess::setOnstatechange(EventListener* listener)
-{
-    m_hasPendingActivity = listener;
-    setAttributeEventListener(EventTypeNames::statechange, listener);
-}
-
-bool MIDIAccess::hasPendingActivity() const
-{
-    return m_hasPendingActivity && !getExecutionContext()->activeDOMObjectsAreStopped();
-}
-
-MIDIInputMap* MIDIAccess::inputs() const
-{
-    HeapVector<Member<MIDIInput>> inputs;
-    HashSet<String> ids;
-    for (size_t i = 0; i < m_inputs.size(); ++i) {
-        MIDIInput* input = m_inputs[i];
-        if (input->getState() != PortState::MIDIPortStateDisconnected) {
-            inputs.append(input);
-            ids.add(input->id());
-        }
-    }
-    if (inputs.size() != ids.size()) {
-        // There is id duplication that violates the spec.
-        inputs.clear();
-    }
-    return new MIDIInputMap(inputs);
-}
-
-MIDIOutputMap* MIDIAccess::outputs() const
-{
-    HeapVector<Member<MIDIOutput>> outputs;
-    HashSet<String> ids;
-    for (size_t i = 0; i < m_outputs.size(); ++i) {
-        MIDIOutput* output = m_outputs[i];
-        if (output->getState() != PortState::MIDIPortStateDisconnected) {
-            outputs.append(output);
-            ids.add(output->id());
-        }
-    }
-    if (outputs.size() != ids.size()) {
-        // There is id duplication that violates the spec.
-        outputs.clear();
-    }
-    return new MIDIOutputMap(outputs);
-}
-
-void MIDIAccess::didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version, PortState state)
-{
-    DCHECK(isMainThread());
-    MIDIInput* port = MIDIInput::create(this, id, manufacturer, name, version, state);
-    m_inputs.append(port);
-    dispatchEvent(MIDIConnectionEvent::create(port));
-}
-
-void MIDIAccess::didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version, PortState state)
-{
-    DCHECK(isMainThread());
-    unsigned portIndex = m_outputs.size();
-    MIDIOutput* port = MIDIOutput::create(this, portIndex, id, manufacturer, name, version, state);
-    m_outputs.append(port);
-    dispatchEvent(MIDIConnectionEvent::create(port));
-}
-
-void MIDIAccess::didSetInputPortState(unsigned portIndex, PortState state)
-{
-    DCHECK(isMainThread());
-    if (portIndex >= m_inputs.size())
-        return;
-
-    m_inputs[portIndex]->setState(state);
-}
-
-void MIDIAccess::didSetOutputPortState(unsigned portIndex, PortState state)
-{
-    DCHECK(isMainThread());
-    if (portIndex >= m_outputs.size())
-        return;
-
-    m_outputs[portIndex]->setState(state);
-}
-
-void MIDIAccess::didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp)
-{
-    DCHECK(isMainThread());
-    if (portIndex >= m_inputs.size())
-        return;
-
-    // Convert from time in seconds which is based on the time coordinate system of monotonicallyIncreasingTime()
-    // into time in milliseconds (a DOMHighResTimeStamp) according to the same time coordinate system as performance.now().
-    // This is how timestamps are defined in the Web MIDI spec.
-    Document* document = toDocument(getExecutionContext());
-    DCHECK(document);
-
-    double timeStampInMilliseconds = 1000 * document->loader()->timing().monotonicTimeToZeroBasedDocumentTime(timeStamp);
-
-    m_inputs[portIndex]->didReceiveMIDIData(portIndex, data, length, timeStampInMilliseconds);
-}
-
-void MIDIAccess::sendMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStampInMilliseconds)
-{
-    if (!data || !length || portIndex >= m_outputs.size())
-        return;
-    // Convert from a time in milliseconds (a DOMHighResTimeStamp) according to the same time coordinate system as performance.now()
-    // into a time in seconds which is based on the time coordinate system of monotonicallyIncreasingTime().
-    double timeStamp;
-
-    if (!timeStampInMilliseconds) {
-        // We treat a value of 0 (which is the default value) as special, meaning "now".
-        // We need to translate it exactly to 0 seconds.
-        timeStamp = 0;
+MIDIAccess::MIDIAccess(
+    std::unique_ptr<MIDIAccessor> accessor,
+    bool sysexEnabled,
+    const Vector<MIDIAccessInitializer::PortDescriptor>& ports,
+    ExecutionContext* executionContext)
+    : ContextLifecycleObserver(executionContext),
+      m_accessor(std::move(accessor)),
+      m_sysexEnabled(sysexEnabled),
+      m_hasPendingActivity(false) {
+  m_accessor->setClient(this);
+  for (size_t i = 0; i < ports.size(); ++i) {
+    const MIDIAccessInitializer::PortDescriptor& port = ports[i];
+    if (port.type == MIDIPort::TypeInput) {
+      m_inputs.push_back(MIDIInput::create(this, port.id, port.manufacturer,
+                                           port.name, port.version,
+                                           ToDeviceState(port.state)));
     } else {
-        Document* document = toDocument(getExecutionContext());
-        DCHECK(document);
-        double documentStartTime = document->loader()->timing().referenceMonotonicTime();
-        timeStamp = documentStartTime + 0.001 * timeStampInMilliseconds;
+      m_outputs.push_back(MIDIOutput::create(
+          this, m_outputs.size(), port.id, port.manufacturer, port.name,
+          port.version, ToDeviceState(port.state)));
     }
-
-    m_accessor->sendMIDIData(portIndex, data, length, timeStamp);
+  }
 }
 
-void MIDIAccess::stop()
-{
-    m_accessor.reset();
+MIDIAccess::~MIDIAccess() {}
+
+void MIDIAccess::dispose() {
+  m_accessor.reset();
 }
 
-DEFINE_TRACE(MIDIAccess)
-{
-    visitor->trace(m_inputs);
-    visitor->trace(m_outputs);
-    EventTargetWithInlineData::trace(visitor);
-    ActiveDOMObject::trace(visitor);
+EventListener* MIDIAccess::onstatechange() {
+  return getAttributeEventListener(EventTypeNames::statechange);
 }
 
-} // namespace blink
+void MIDIAccess::setOnstatechange(EventListener* listener) {
+  m_hasPendingActivity = listener;
+  setAttributeEventListener(EventTypeNames::statechange, listener);
+}
+
+bool MIDIAccess::hasPendingActivity() const {
+  return m_hasPendingActivity && getExecutionContext() &&
+         !getExecutionContext()->isContextDestroyed();
+}
+
+MIDIInputMap* MIDIAccess::inputs() const {
+  HeapVector<Member<MIDIInput>> inputs;
+  HashSet<String> ids;
+  for (size_t i = 0; i < m_inputs.size(); ++i) {
+    MIDIInput* input = m_inputs[i];
+    if (input->getState() != PortState::DISCONNECTED) {
+      inputs.push_back(input);
+      ids.add(input->id());
+    }
+  }
+  if (inputs.size() != ids.size()) {
+    // There is id duplication that violates the spec.
+    inputs.clear();
+  }
+  return new MIDIInputMap(inputs);
+}
+
+MIDIOutputMap* MIDIAccess::outputs() const {
+  HeapVector<Member<MIDIOutput>> outputs;
+  HashSet<String> ids;
+  for (size_t i = 0; i < m_outputs.size(); ++i) {
+    MIDIOutput* output = m_outputs[i];
+    if (output->getState() != PortState::DISCONNECTED) {
+      outputs.push_back(output);
+      ids.add(output->id());
+    }
+  }
+  if (outputs.size() != ids.size()) {
+    // There is id duplication that violates the spec.
+    outputs.clear();
+  }
+  return new MIDIOutputMap(outputs);
+}
+
+void MIDIAccess::didAddInputPort(const String& id,
+                                 const String& manufacturer,
+                                 const String& name,
+                                 const String& version,
+                                 PortState state) {
+  DCHECK(isMainThread());
+  MIDIInput* port = MIDIInput::create(this, id, manufacturer, name, version,
+                                      ToDeviceState(state));
+  m_inputs.push_back(port);
+  dispatchEvent(MIDIConnectionEvent::create(port));
+}
+
+void MIDIAccess::didAddOutputPort(const String& id,
+                                  const String& manufacturer,
+                                  const String& name,
+                                  const String& version,
+                                  PortState state) {
+  DCHECK(isMainThread());
+  unsigned portIndex = m_outputs.size();
+  MIDIOutput* port = MIDIOutput::create(this, portIndex, id, manufacturer, name,
+                                        version, ToDeviceState(state));
+  m_outputs.push_back(port);
+  dispatchEvent(MIDIConnectionEvent::create(port));
+}
+
+void MIDIAccess::didSetInputPortState(unsigned portIndex, PortState state) {
+  DCHECK(isMainThread());
+  if (portIndex >= m_inputs.size())
+    return;
+
+  PortState deviceState = ToDeviceState(state);
+  if (m_inputs[portIndex]->getState() != deviceState)
+    m_inputs[portIndex]->setState(deviceState);
+}
+
+void MIDIAccess::didSetOutputPortState(unsigned portIndex, PortState state) {
+  DCHECK(isMainThread());
+  if (portIndex >= m_outputs.size())
+    return;
+
+  PortState deviceState = ToDeviceState(state);
+  if (m_outputs[portIndex]->getState() != deviceState)
+    m_outputs[portIndex]->setState(deviceState);
+}
+
+void MIDIAccess::didReceiveMIDIData(unsigned portIndex,
+                                    const unsigned char* data,
+                                    size_t length,
+                                    double timeStamp) {
+  DCHECK(isMainThread());
+  if (portIndex >= m_inputs.size())
+    return;
+
+  m_inputs[portIndex]->didReceiveMIDIData(portIndex, data, length, timeStamp);
+}
+
+void MIDIAccess::sendMIDIData(unsigned portIndex,
+                              const unsigned char* data,
+                              size_t length,
+                              double timeStampInMilliseconds) {
+  // Do not continue sending when document is going to be closed.
+  Document* document = toDocument(getExecutionContext());
+  DCHECK(document);
+  DocumentLoader* loader = document->loader();
+  if (!loader)
+    return;
+
+  if (!data || !length || portIndex >= m_outputs.size())
+    return;
+
+  // Convert from a time in milliseconds (a DOMHighResTimeStamp) according to
+  // the same time coordinate system as performance.now() into a time in seconds
+  // which is based on the time coordinate system of
+  // monotonicallyIncreasingTime().
+  double timeStamp;
+
+  if (!timeStampInMilliseconds) {
+    // We treat a value of 0 (which is the default value) as special, meaning
+    // "now".  We need to translate it exactly to 0 seconds.
+    timeStamp = 0;
+  } else {
+    double documentStartTime = loader->timing().referenceMonotonicTime();
+    timeStamp = documentStartTime + 0.001 * timeStampInMilliseconds;
+  }
+
+  m_accessor->sendMIDIData(portIndex, data, length, timeStamp);
+}
+
+void MIDIAccess::contextDestroyed(ExecutionContext*) {
+  m_accessor.reset();
+}
+
+DEFINE_TRACE(MIDIAccess) {
+  visitor->trace(m_inputs);
+  visitor->trace(m_outputs);
+  EventTargetWithInlineData::trace(visitor);
+  ContextLifecycleObserver::trace(visitor);
+}
+
+}  // namespace blink

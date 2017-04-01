@@ -25,6 +25,7 @@
 #ifndef StyleMultiColData_h
 #define StyleMultiColData_h
 
+#include "core/CoreExport.h"
 #include "core/style/BorderValue.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "wtf/PassRefPtr.h"
@@ -34,41 +35,42 @@ namespace blink {
 
 // CSS3 Multi Column Layout
 
-class StyleMultiColData : public RefCounted<StyleMultiColData> {
-public:
-    static PassRefPtr<StyleMultiColData> create() { return adoptRef(new StyleMultiColData); }
-    PassRefPtr<StyleMultiColData> copy() const { return adoptRef(new StyleMultiColData(*this)); }
+class CORE_EXPORT StyleMultiColData : public RefCounted<StyleMultiColData> {
+ public:
+  static PassRefPtr<StyleMultiColData> create() {
+    return adoptRef(new StyleMultiColData);
+  }
+  PassRefPtr<StyleMultiColData> copy() const {
+    return adoptRef(new StyleMultiColData(*this));
+  }
 
-    bool operator==(const StyleMultiColData&) const;
-    bool operator!=(const StyleMultiColData &o) const
-    {
-        return !(*this == o);
-    }
+  bool operator==(const StyleMultiColData&) const;
+  bool operator!=(const StyleMultiColData& o) const { return !(*this == o); }
 
-    unsigned short ruleWidth() const
-    {
-        if (m_rule.style() == BorderStyleNone || m_rule.style() == BorderStyleHidden)
-            return 0;
-        return m_rule.width();
-    }
+  unsigned short ruleWidth() const {
+    if (m_rule.style() == BorderStyleNone ||
+        m_rule.style() == BorderStyleHidden)
+      return 0;
+    return m_rule.width();
+  }
 
-    float m_width;
-    unsigned short m_count;
-    float m_gap;
-    BorderValue m_rule;
-    StyleColor m_visitedLinkColumnRuleColor;
+  float m_width;
+  unsigned short m_count;
+  float m_gap;
+  BorderValue m_rule;
+  StyleColor m_visitedLinkColumnRuleColor;
 
-    unsigned m_autoWidth : 1;
-    unsigned m_autoCount : 1;
-    unsigned m_normalGap : 1;
-    unsigned m_fill : 1; // ColumnFill
-    unsigned m_columnSpan : 1;
+  unsigned m_autoWidth : 1;
+  unsigned m_autoCount : 1;
+  unsigned m_normalGap : 1;
+  unsigned m_fill : 1;  // ColumnFill
+  unsigned m_columnSpan : 1;
 
-private:
-    StyleMultiColData();
-    StyleMultiColData(const StyleMultiColData&);
+ private:
+  StyleMultiColData();
+  StyleMultiColData(const StyleMultiColData&);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // StyleMultiColData_h
+#endif  // StyleMultiColData_h

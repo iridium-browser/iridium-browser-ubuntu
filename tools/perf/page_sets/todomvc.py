@@ -5,6 +5,7 @@
 from telemetry.page import page as page_module
 from telemetry.page import shared_page_state
 from telemetry import story
+from telemetry.util import js_template
 
 
 URL_LIST = [
@@ -31,27 +32,25 @@ class TodoMVCPage(page_module.Page):
     # TODO(jochen): This interaction does not include the
     # WindowProxy::initialize portion before the commit. To fix this, we'll
     # have to migrate to TBMv2.
-    self.script_to_evaluate_on_commit = (
-        'console.time("%s");' % INTERACTION_NAME)
+    self.script_to_evaluate_on_commit = js_template.Render(
+        'console.time({{ label }});', label=INTERACTION_NAME)
 
   def RunPageInteractions(self, action_runner):
     action_runner.ExecuteJavaScript(
         """
         this.becameIdle = false;
         this.idleCallback = function(deadline) {
-            let idletime = deadline.timeRemaining();
-            console.time("time remaining: " + idletime);
-            if (idletime > 10)
+            if (deadline.timeRemaining() > 20)
                 this.becameIdle = true;
             else
                 requestIdleCallback(this.idleCallback);
-            console.timeEnd("time remaining: " + idletime);
         };
         requestIdleCallback(this.idleCallback);
         """
     )
     action_runner.WaitForJavaScriptCondition('this.becameIdle === true')
-    action_runner.ExecuteJavaScript('console.timeEnd("%s");' % INTERACTION_NAME)
+    action_runner.ExecuteJavaScript(
+        'console.timeEnd({{ label }});', label=INTERACTION_NAME)
 
 
 class TodoMVCPageSet(story.StorySet):

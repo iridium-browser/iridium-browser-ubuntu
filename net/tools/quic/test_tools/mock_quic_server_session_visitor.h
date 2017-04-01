@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright (c) 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,16 +6,17 @@
 #define NET_TOOLS_QUIC_TEST_TOOLS_MOCK_QUIC_SERVER_SESSION_VISITOR_H_
 
 #include "base/macros.h"
-#include "net/quic/core/quic_server_session_base.h"
+#include "net/quic/core/quic_crypto_server_stream.h"
+#include "net/tools/quic/quic_time_wait_list_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace net {
 namespace test {
 
-class MockQuicServerSessionVisitor : public QuicServerSessionBase::Visitor {
+class MockQuicSessionVisitor : public QuicTimeWaitListManager::Visitor {
  public:
-  MockQuicServerSessionVisitor();
-  virtual ~MockQuicServerSessionVisitor() override;
+  MockQuicSessionVisitor();
+  ~MockQuicSessionVisitor() override;
   MOCK_METHOD3(OnConnectionClosed,
                void(QuicConnectionId connection_id,
                     QuicErrorCode error,
@@ -26,22 +27,22 @@ class MockQuicServerSessionVisitor : public QuicServerSessionBase::Visitor {
                void(QuicConnectionId connection_id));
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockQuicServerSessionVisitor);
+  DISALLOW_COPY_AND_ASSIGN(MockQuicSessionVisitor);
 };
 
-class MockQuicServerSessionHelper : public QuicServerSessionBase::Helper {
+class MockQuicCryptoServerStreamHelper : public QuicCryptoServerStream::Helper {
  public:
-  MockQuicServerSessionHelper();
-  ~MockQuicServerSessionHelper() override;
+  MockQuicCryptoServerStreamHelper();
+  ~MockQuicCryptoServerStreamHelper() override;
   MOCK_CONST_METHOD1(GenerateConnectionIdForReject,
                      QuicConnectionId(QuicConnectionId connection_id));
   MOCK_CONST_METHOD3(CanAcceptClientHello,
                      bool(const CryptoHandshakeMessage& message,
-                          const IPEndPoint& self_address,
+                          const QuicSocketAddress& self_address,
                           std::string* error_details));
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(MockQuicServerSessionHelper);
+  DISALLOW_COPY_AND_ASSIGN(MockQuicCryptoServerStreamHelper);
 };
 
 }  // namespace test

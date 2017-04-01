@@ -8,9 +8,7 @@
 
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
-#include "components/sync/base/model_type.h"
 #include "components/sync/base/time.h"
-#include "components/sync/engine_impl/cycle/sync_cycle.h"
 #include "components/sync/engine_impl/net/server_connection_manager.h"
 #include "components/sync/engine_impl/syncer.h"
 #include "components/sync/engine_impl/syncer_types.h"
@@ -19,7 +17,6 @@
 #include "components/sync/protocol/sync_protocol_error.h"
 #include "components/sync/syncable/directory.h"
 #include "components/sync/syncable/entry.h"
-#include "components/sync/syncable/syncable-inl.h"
 #include "components/sync/syncable/syncable_proto_util.h"
 #include "google_apis/google_api_keys.h"
 
@@ -426,6 +423,10 @@ SyncerError SyncerProtoUtil::PostClientToServerMessage(
       std::map<ModelType, base::TimeDelta> delay_map;
       delay_map[SESSIONS] =
           base::TimeDelta::FromSeconds(command.sessions_commit_delay_seconds());
+      delay_map[FAVICON_TRACKING] =
+          base::TimeDelta::FromSeconds(command.sessions_commit_delay_seconds());
+      delay_map[FAVICON_IMAGES] =
+          base::TimeDelta::FromSeconds(command.sessions_commit_delay_seconds());
       cycle->delegate()->OnReceivedCustomNudgeDelays(delay_map);
     }
 
@@ -471,9 +472,15 @@ SyncerError SyncerProtoUtil::PostClientToServerMessage(
         DLOG(WARNING) << "Client fully throttled by syncer.";
         cycle->delegate()->OnThrottled(GetThrottleDelay(*response));
       } else {
+        // This is a special case, since server only throttle some of datatype,
+        // so can treat this case as partial failure.
         DLOG(WARNING) << "Some types throttled by syncer.";
         cycle->delegate()->OnTypesThrottled(
             sync_protocol_error.error_data_types, GetThrottleDelay(*response));
+        if (partial_failure_data_types != nullptr) {
+          *partial_failure_data_types = sync_protocol_error.error_data_types;
+        }
+        return SYNCER_OK;
       }
       return SERVER_RETURN_THROTTLED;
     case TRANSIENT_ERROR:
@@ -491,16 +498,17 @@ SyncerError SyncerProtoUtil::PostClientToServerMessage(
     case DISABLED_BY_ADMIN:
       return SERVER_RETURN_DISABLED_BY_ADMIN;
     case PARTIAL_FAILURE:
-      // This only happens when partial throttling during GetUpdates.
+      // This only happens when partial backoff during GetUpdates.
       if (!sync_protocol_error.error_data_types.Empty()) {
-        DLOG(WARNING) << "Some types throttled by syncer during GetUpdates.";
-        cycle->delegate()->OnTypesThrottled(
-            sync_protocol_error.error_data_types, GetThrottleDelay(*response));
+        DLOG(WARNING)
+            << "Some types got partial failure by syncer during GetUpdates.";
+        cycle->delegate()->OnTypesBackedOff(
+            sync_protocol_error.error_data_types);
       }
-      if (partial_failure_data_types != NULL) {
+      if (partial_failure_data_types != nullptr) {
         *partial_failure_data_types = sync_protocol_error.error_data_types;
       }
-      return SERVER_RETURN_PARTIAL_FAILURE;
+      return SYNCER_OK;
     case CLIENT_DATA_OBSOLETE:
       return SERVER_RETURN_CLIENT_DATA_OBSOLETE;
     default:

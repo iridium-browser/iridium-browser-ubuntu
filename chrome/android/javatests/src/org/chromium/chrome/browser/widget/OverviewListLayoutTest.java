@@ -5,7 +5,7 @@
 package org.chromium.chrome.browser.widget;
 
 import android.os.SystemClock;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ListView;
@@ -13,8 +13,10 @@ import android.widget.TextView;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutTab;
@@ -28,7 +30,6 @@ import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.TabStripUtils;
 import org.chromium.chrome.test.util.browser.TabLoadObserver;
-import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TestTouchUtils;
@@ -176,6 +177,7 @@ public class OverviewListLayoutTest extends ChromeTabbedActivityTestBase {
     @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
     @MediumTest
     @Feature({"Accessibility"})
+    @RetryOnFailure
     public void testCanCloseWithCloseButton() throws InterruptedException, TimeoutException {
         setupTabs();
 
@@ -311,6 +313,7 @@ public class OverviewListLayoutTest extends ChromeTabbedActivityTestBase {
     @Restriction(ChromeRestriction.RESTRICTION_TYPE_PHONE)
     @MediumTest
     @Feature({"Accessibility"})
+    @RetryOnFailure
     public void testCloseAllIncognito() throws InterruptedException {
         setupTabs();
         newIncognitoTabsFromMenu(2);
@@ -391,6 +394,7 @@ public class OverviewListLayoutTest extends ChromeTabbedActivityTestBase {
      */
     @MediumTest
     @Feature({"Accessibility"})
+    @RetryOnFailure
     public void testObservesTitleChanges() throws Exception {
         loadUrl(PAGE_1_HTML);
 

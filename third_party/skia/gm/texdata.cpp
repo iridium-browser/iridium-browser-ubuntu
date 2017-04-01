@@ -11,17 +11,18 @@
 
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
-#include "GrDrawContext.h"
+#include "GrRenderTargetContext.h"
 #include "GrFixedClip.h"
 #include "SkColorPriv.h"
 #include "effects/GrPorterDuffXferProcessor.h"
 #include "effects/GrSimpleTextureEffect.h"
 
-static const int S = 200;
+constexpr int S = 200;
 
 DEF_SIMPLE_GM_BG(texdata, canvas, 2 * S, 2 * S, SK_ColorBLACK) {
-    GrDrawContext* drawContext = canvas->internal_private_accessTopLayerDrawContext();
-    if (!drawContext) {
+    GrRenderTargetContext* renderTargetContext =
+        canvas->internal_private_accessTopLayerRenderTargetContext();
+    if (!renderTargetContext) {
         skiagm::GM::DrawGpuOnlyMessage(canvas);
         return;
     }
@@ -32,13 +33,13 @@ DEF_SIMPLE_GM_BG(texdata, canvas, 2 * S, 2 * S, SK_ColorBLACK) {
     }
 
     SkAutoTArray<SkPMColor> gTextureData((2 * S) * (2 * S));
-    static const int stride = 2 * S;
-    static const SkPMColor gray  = SkPackARGB32(0x40, 0x40, 0x40, 0x40);
-    static const SkPMColor white = SkPackARGB32(0xff, 0xff, 0xff, 0xff);
-    static const SkPMColor red   = SkPackARGB32(0x80, 0x80, 0x00, 0x00);
-    static const SkPMColor blue  = SkPackARGB32(0x80, 0x00, 0x00, 0x80);
-    static const SkPMColor green = SkPackARGB32(0x80, 0x00, 0x80, 0x00);
-    static const SkPMColor black = SkPackARGB32(0x00, 0x00, 0x00, 0x00);
+    constexpr int stride = 2 * S;
+    const SkPMColor gray  = SkPackARGB32(0x40, 0x40, 0x40, 0x40);
+    const SkPMColor white = SkPackARGB32(0xff, 0xff, 0xff, 0xff);
+    const SkPMColor red   = SkPackARGB32(0x80, 0x80, 0x00, 0x00);
+    const SkPMColor blue  = SkPackARGB32(0x80, 0x00, 0x00, 0x80);
+    const SkPMColor green = SkPackARGB32(0x80, 0x00, 0x80, 0x00);
+    const SkPMColor black = SkPackARGB32(0x00, 0x00, 0x00, 0x00);
     for (int i = 0; i < 2; ++i) {
         int offset = 0;
         // fill upper-left
@@ -80,13 +81,13 @@ DEF_SIMPLE_GM_BG(texdata, canvas, 2 * S, 2 * S, SK_ColorBLACK) {
         if (!texture) {
             return;
         }
-        SkAutoTUnref<GrTexture> au(texture);
+        sk_sp<GrTexture> au(texture);
 
         // setup new clip
         GrFixedClip clip(SkIRect::MakeWH(2*S, 2*S));
 
         GrPaint paint;
-        paint.setPorterDuffXPFactory(SkXfermode::kSrcOver_Mode);
+        paint.setPorterDuffXPFactory(SkBlendMode::kSrcOver);
 
         SkMatrix vm;
         if (i) {
@@ -101,7 +102,8 @@ DEF_SIMPLE_GM_BG(texdata, canvas, 2 * S, 2 * S, SK_ColorBLACK) {
         tm.postIDiv(2*S, 2*S);
         paint.addColorTextureProcessor(texture, nullptr, tm);
 
-        drawContext->drawRect(clip, paint, vm, SkRect::MakeWH(2*S, 2*S));
+        renderTargetContext->drawRect(clip, GrPaint(paint), GrAA::kNo, vm,
+                                      SkRect::MakeWH(2 * S, 2 * S));
 
         // now update the lower right of the texture in first pass
         // or upper right in second pass
@@ -115,7 +117,8 @@ DEF_SIMPLE_GM_BG(texdata, canvas, 2 * S, 2 * S, SK_ColorBLACK) {
         texture->writePixels(S, (i ? 0 : S), S, S,
                                 texture->config(), gTextureData.get(),
                                 4 * stride);
-        drawContext->drawRect(clip, paint, vm, SkRect::MakeWH(2*S, 2*S));
+        renderTargetContext->drawRect(clip, std::move(paint), GrAA::kNo, vm,
+                                      SkRect::MakeWH(2 * S, 2 * S));
     }
 }
 #endif

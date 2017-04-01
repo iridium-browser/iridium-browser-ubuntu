@@ -4,29 +4,23 @@
 
 package org.chromium.chrome.browser.payments;
 
-import android.app.Activity;
-
 import org.chromium.chrome.browser.ChromeFeatureList;
-import org.chromium.chrome.browser.payments.PaymentRequestImpl.PaymentRequestDismissObserver;
-import org.chromium.content.browser.ContentViewCore;
-import org.chromium.content.browser.InterfaceRegistry.ImplementationFactory;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.mojo.system.MojoException;
-import org.chromium.mojom.payments.PaymentDetails;
-import org.chromium.mojom.payments.PaymentErrorReason;
-import org.chromium.mojom.payments.PaymentMethodData;
-import org.chromium.mojom.payments.PaymentOptions;
-import org.chromium.mojom.payments.PaymentRequest;
-import org.chromium.mojom.payments.PaymentRequestClient;
-import org.chromium.ui.base.WindowAndroid;
+import org.chromium.payments.mojom.CanMakePaymentQueryResult;
+import org.chromium.payments.mojom.PaymentDetails;
+import org.chromium.payments.mojom.PaymentErrorReason;
+import org.chromium.payments.mojom.PaymentMethodData;
+import org.chromium.payments.mojom.PaymentOptions;
+import org.chromium.payments.mojom.PaymentRequest;
+import org.chromium.payments.mojom.PaymentRequestClient;
+import org.chromium.services.service_manager.InterfaceFactory;
 
 /**
  * Creates instances of PaymentRequest.
  */
-public class PaymentRequestFactory implements ImplementationFactory<PaymentRequest>,
-        PaymentRequestDismissObserver {
+public class PaymentRequestFactory implements InterfaceFactory<PaymentRequest> {
     private final WebContents mWebContents;
-    private boolean mIsPaymentRequestRunning;
 
     /**
      * An implementation of PaymentRequest that immediately rejects all connections.
@@ -59,6 +53,13 @@ public class PaymentRequestFactory implements ImplementationFactory<PaymentReque
         public void complete(int result) {}
 
         @Override
+        public void canMakePayment() {
+            if (mClient != null) {
+                mClient.onCanMakePayment(CanMakePaymentQueryResult.CANNOT_MAKE_PAYMENT);
+            }
+        }
+
+        @Override
         public void close() {}
 
         @Override
@@ -82,23 +83,6 @@ public class PaymentRequestFactory implements ImplementationFactory<PaymentReque
 
         if (mWebContents == null) return new InvalidPaymentRequest();
 
-        ContentViewCore contentViewCore = ContentViewCore.fromWebContents(mWebContents);
-        if (contentViewCore == null) return new InvalidPaymentRequest();
-
-        WindowAndroid window = contentViewCore.getWindowAndroid();
-        if (window == null) return new InvalidPaymentRequest();
-
-        Activity context = window.getActivity().get();
-        if (context == null) return new InvalidPaymentRequest();
-
-        if (mIsPaymentRequestRunning) return new InvalidPaymentRequest();
-        mIsPaymentRequestRunning = true;
-
-        return new PaymentRequestImpl(context, mWebContents, this);
-    }
-
-    @Override
-    public void onPaymentRequestDismissed() {
-        mIsPaymentRequestRunning = false;
+        return new PaymentRequestImpl(mWebContents);
     }
 }

@@ -13,9 +13,10 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
-#include "services/ui/public/interfaces/display.mojom.h"
+#include "services/ui/public/interfaces/display_manager.mojom.h"
 #include "services/ui/ws/event_dispatcher.h"
 #include "services/ui/ws/event_dispatcher_delegate.h"
+#include "services/ui/ws/server_window_observer.h"
 #include "services/ui/ws/user_id.h"
 #include "services/ui/ws/window_server.h"
 
@@ -23,6 +24,7 @@ namespace ui {
 namespace ws {
 
 class DisplayManager;
+class WindowManagerDisplayRoot;
 class WindowTree;
 
 namespace test {
@@ -32,7 +34,8 @@ class WindowManagerStateTestApi;
 // Manages state specific to a WindowManager that is shared across displays.
 // WindowManagerState is owned by the WindowTree the window manager is
 // associated with.
-class WindowManagerState : public EventDispatcherDelegate {
+class WindowManagerState : public EventDispatcherDelegate,
+                           public ServerWindowObserver {
  public:
   explicit WindowManagerState(WindowTree* window_tree);
   ~WindowManagerState() override;
@@ -61,7 +64,21 @@ class WindowManagerState : public EventDispatcherDelegate {
   void ReleaseCaptureBlockedByModalWindow(const ServerWindow* modal_window);
   void ReleaseCaptureBlockedByAnyModalWindow();
 
+  void SetDragDropSourceWindow(
+      DragSource* drag_source,
+      ServerWindow* window,
+      DragTargetConnection* source_connection,
+      const std::unordered_map<std::string, std::vector<uint8_t>>& drag_data,
+      uint32_t drag_operation);
+  void CancelDragDrop();
+  void EndDragDrop();
+
   void AddSystemModalWindow(ServerWindow* window);
+
+  // Returns the ServerWindow corresponding to an orphaned root with the
+  // specified id. See |orphaned_window_manager_display_roots_| for details on
+  // what on orphaned root is.
+  ServerWindow* GetOrphanedRootWithId(const WindowId& id);
 
   // TODO(sky): EventDispatcher is really an implementation detail and should
   // not be exposed.
@@ -88,6 +105,11 @@ class WindowManagerState : public EventDispatcherDelegate {
   class ProcessedEventTarget;
   friend class Display;
   friend class test::WindowManagerStateTestApi;
+
+  // Set of display roots. This is a vector rather than a set to support removal
+  // without deleting.
+  using WindowManagerDisplayRoots =
+      std::vector<std::unique_ptr<WindowManagerDisplayRoot>>;
 
   enum class DebugAcceleratorType {
     PRINT_WINDOWS,
@@ -133,6 +155,14 @@ class WindowManagerState : public EventDispatcherDelegate {
 
   DisplayManager* display_manager();
   const DisplayManager* display_manager() const;
+
+  // Adds |display_root| to the set of WindowManagerDisplayRoots owned by this
+  // WindowManagerState.
+  void AddWindowManagerDisplayRoot(
+      std::unique_ptr<WindowManagerDisplayRoot> display_root);
+
+  // Called when a Display is deleted.
+  void OnDisplayDestroying(Display* display);
 
   // Sets the visibility of all window manager roots windows to |value|.
   void SetAllRootWindowsVisible(bool value);
@@ -185,6 +215,7 @@ class WindowManagerState : public EventDispatcherDelegate {
   ServerWindow* GetFocusedWindowForEventDispatcher() override;
   void SetNativeCapture(ServerWindow* window) override;
   void ReleaseNativeCapture() override;
+  void UpdateNativeCursorFromDispatcher() override;
   void OnCaptureChanged(ServerWindow* new_capture,
                         ServerWindow* old_capture) override;
   void OnMouseCursorLocationChanged(const gfx::Point& point) override;
@@ -197,6 +228,9 @@ class WindowManagerState : public EventDispatcherDelegate {
   ServerWindow* GetRootWindowContaining(gfx::Point* location) override;
   void OnEventTargetNotFound(const ui::Event& event) override;
 
+  // ServerWindowObserver:
+  void OnWindowEmbeddedAppDisconnected(ServerWindow* window) override;
+
   // The single WindowTree this WindowManagerState is associated with.
   // |window_tree_| owns this.
   WindowTree* window_tree_;
@@ -207,7 +241,7 @@ class WindowManagerState : public EventDispatcherDelegate {
 
   EventDispatchPhase event_dispatch_phase_ = EventDispatchPhase::NONE;
   // The tree we're waiting to process the current accelerator or event.
-  mojom::WindowTree* tree_awaiting_input_ack_ = nullptr;
+  WindowTree* tree_awaiting_input_ack_ = nullptr;
   // The event we're awaiting an accelerator or input ack from.
   std::unique_ptr<ui::Event> event_awaiting_input_ack_;
   base::WeakPtr<Accelerator> post_target_accelerator_;
@@ -220,6 +254,16 @@ class WindowManagerState : public EventDispatcherDelegate {
 
   // PlatformDisplay that currently has capture.
   PlatformDisplay* platform_display_with_capture_ = nullptr;
+
+  // All the active WindowManagerDisplayRoots.
+  WindowManagerDisplayRoots window_manager_display_roots_;
+
+  // Set of WindowManagerDisplayRoots corresponding to Displays that have been
+  // destroyed. WindowManagerDisplayRoots are not destroyed immediately when
+  // the Display is destroyed to allow the client to destroy the window when it
+  // wants to. Once the client destroys the window WindowManagerDisplayRoots is
+  // destroyed.
+  WindowManagerDisplayRoots orphaned_window_manager_display_roots_;
 
   base::WeakPtrFactory<WindowManagerState> weak_factory_;
 

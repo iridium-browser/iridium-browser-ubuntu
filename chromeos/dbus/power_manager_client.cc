@@ -59,6 +59,7 @@ class PowerManagerClientImpl : public PowerManagerClient {
         suspend_is_pending_(false),
         suspending_from_dark_resume_(false),
         num_pending_suspend_readiness_callbacks_(0),
+        notifying_observers_about_suspend_imminent_(false),
         last_is_projecting_(false),
         weak_ptr_factory_(this) {}
 
@@ -242,6 +243,25 @@ class PowerManagerClientImpl : public PowerManagerClient {
         dbus::ObjectProxy::EmptyResponseCallback());
   }
 
+  void SetBacklightsForcedOff(bool forced_off) override {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kSetBacklightsForcedOffMethod);
+    dbus::MessageWriter(&method_call).AppendBool(forced_off);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        dbus::ObjectProxy::EmptyResponseCallback());
+  }
+
+  void GetBacklightsForcedOff(
+      const GetBacklightsForcedOffCallback& callback) override {
+    dbus::MethodCall method_call(power_manager::kPowerManagerInterface,
+                                 power_manager::kGetBacklightsForcedOffMethod);
+    power_manager_proxy_->CallMethod(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::Bind(&PowerManagerClientImpl::OnGetBacklightsForcedOff,
+                   weak_ptr_factory_.GetWeakPtr(), callback));
+  }
+
   base::Closure GetSuspendReadinessCallback() override {
     DCHECK(OnOriginThread());
     DCHECK(suspend_is_pending_);
@@ -384,7 +404,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
       POWER_LOG(EVENT) << "Sending initial state to power manager";
       RegisterSuspendDelays();
       SetIsProjecting(last_is_projecting_);
-      FOR_EACH_OBSERVER(Observer, observers_, PowerManagerRestarted());
+      for (auto& observer : observers_)
+        observer.PowerManagerRestarted();
     }
   }
 
@@ -400,8 +421,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
     }
     POWER_LOG(DEBUG) << "Brightness changed to " << brightness_level
                      << ": user initiated " << user_initiated;
-    FOR_EACH_OBSERVER(Observer, observers_,
-                      BrightnessChanged(brightness_level, user_initiated));
+    for (auto& observer : observers_)
+      observer.BrightnessChanged(brightness_level, user_initiated);
   }
 
   void PeripheralBatteryStatusReceived(dbus::Signal* signal) {
@@ -421,8 +442,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
     POWER_LOG(DEBUG) << "Device battery status received " << level << " for "
                      << name << " at " << path;
 
-    FOR_EACH_OBSERVER(Observer, observers_,
-                      PeripheralBatteryStatusReceived(path, name, level));
+    for (auto& observer : observers_)
+      observer.PeripheralBatteryStatusReceived(path, name, level);
   }
 
   void PowerSupplyPollReceived(dbus::Signal* signal) {
@@ -467,15 +488,33 @@ class PowerManagerClientImpl : public PowerManagerClient {
     }
     dbus::MessageReader reader(response);
     double percent = 0.0;
-    if (!reader.PopDouble(&percent))
+    if (!reader.PopDouble(&percent)) {
       POWER_LOG(ERROR) << "Error reading response from powerd: "
                        << response->ToString();
+    }
     callback.Run(percent);
+  }
+
+  void OnGetBacklightsForcedOff(const GetBacklightsForcedOffCallback& callback,
+                                dbus::Response* response) {
+    if (!response) {
+      POWER_LOG(ERROR) << "Error calling "
+                       << power_manager::kGetBacklightsForcedOffMethod;
+      return;
+    }
+    dbus::MessageReader reader(response);
+    bool state = false;
+    if (!reader.PopBool(&state)) {
+      POWER_LOG(ERROR) << "Error reading response from powerd: "
+                       << response->ToString();
+    }
+    callback.Run(state);
   }
 
   void HandlePowerSupplyProperties(
       const power_manager::PowerSupplyProperties& proto) {
-    FOR_EACH_OBSERVER(Observer, observers_, PowerChanged(proto));
+    for (auto& observer : observers_)
+      observer.PowerChanged(proto);
     const bool on_battery = proto.external_power() ==
         power_manager::PowerSupplyProperties_ExternalPower_DISCONNECTED;
     base::PowerMonitorDeviceSource::SetPowerSource(on_battery);
@@ -543,10 +582,20 @@ class PowerManagerClientImpl : public PowerManagerClient {
     suspend_is_pending_ = true;
     suspending_from_dark_resume_ = in_dark_resume;
     num_pending_suspend_readiness_callbacks_ = 0;
+
+    // Record the fact that observers are being notified to ensure that we don't
+    // report readiness prematurely if one of them calls
+    // GetSuspendReadinessCallback() and then runs the callback synchonously
+    // instead of asynchronously.
+    notifying_observers_about_suspend_imminent_ = true;
     if (suspending_from_dark_resume_)
-      FOR_EACH_OBSERVER(Observer, observers_, DarkSuspendImminent());
+      for (auto& observer : observers_)
+        observer.DarkSuspendImminent();
     else
-      FOR_EACH_OBSERVER(Observer, observers_, SuspendImminent());
+      for (auto& observer : observers_)
+        observer.SuspendImminent();
+    notifying_observers_about_suspend_imminent_ = false;
+
     base::PowerMonitorDeviceSource::HandleSystemSuspending();
     MaybeReportSuspendReadiness();
   }
@@ -567,11 +616,25 @@ class PowerManagerClientImpl : public PowerManagerClient {
                      << " suspend_id=" << proto.suspend_id()
                      << " duration=" << duration.InSeconds() << " sec";
 
-    if (render_process_manager_delegate_)
+    // RenderProcessManagerDelegate is only notified that suspend is imminent
+    // when readiness is being reported to powerd. If the suspend attempt was
+    // cancelled before then, we shouldn't notify the delegate about completion.
+    const bool cancelled_while_regular_suspend_pending =
+        suspend_is_pending_ && !suspending_from_dark_resume_;
+    if (render_process_manager_delegate_ &&
+        !cancelled_while_regular_suspend_pending)
       render_process_manager_delegate_->SuspendDone();
 
-    FOR_EACH_OBSERVER(
-        PowerManagerClient::Observer, observers_, SuspendDone(duration));
+    // powerd always pairs each SuspendImminent signal with SuspendDone before
+    // starting the next suspend attempt, so we should no longer report
+    // readiness for any in-progress suspend attempts.
+    pending_suspend_id_ = -1;
+    suspend_is_pending_ = false;
+    suspending_from_dark_resume_ = false;
+    num_pending_suspend_readiness_callbacks_ = 0;
+
+    for (auto& observer : observers_)
+      observer.SuspendDone(duration);
     base::PowerMonitorDeviceSource::HandleSystemResumed();
   }
 
@@ -583,13 +646,15 @@ class PowerManagerClientImpl : public PowerManagerClient {
                        << power_manager::kIdleActionImminentSignal << " signal";
       return;
     }
-    FOR_EACH_OBSERVER(Observer, observers_,
-        IdleActionImminent(base::TimeDelta::FromInternalValue(
-            proto.time_until_idle_action())));
+    for (auto& observer : observers_) {
+      observer.IdleActionImminent(
+          base::TimeDelta::FromInternalValue(proto.time_until_idle_action()));
+    }
   }
 
   void IdleActionDeferredReceived(dbus::Signal* signal) {
-    FOR_EACH_OBSERVER(Observer, observers_, IdleActionDeferred());
+    for (auto& observer : observers_)
+      observer.IdleActionDeferred();
   }
 
   void InputEventReceived(dbus::Signal* signal) {
@@ -611,8 +676,8 @@ class PowerManagerClientImpl : public PowerManagerClient {
       case power_manager::InputEvent_Type_POWER_BUTTON_UP: {
         const bool down =
             (proto.type() == power_manager::InputEvent_Type_POWER_BUTTON_DOWN);
-        FOR_EACH_OBSERVER(PowerManagerClient::Observer, observers_,
-                          PowerButtonEventReceived(down, timestamp));
+        for (auto& observer : observers_)
+          observer.PowerButtonEventReceived(down, timestamp);
 
         // Tell powerd that Chrome has handled power button presses.
         if (down) {
@@ -632,16 +697,16 @@ class PowerManagerClientImpl : public PowerManagerClient {
       case power_manager::InputEvent_Type_LID_CLOSED: {
         bool open =
             (proto.type() == power_manager::InputEvent_Type_LID_OPEN);
-        FOR_EACH_OBSERVER(PowerManagerClient::Observer, observers_,
-                          LidEventReceived(open, timestamp));
+        for (auto& observer : observers_)
+          observer.LidEventReceived(open, timestamp);
         break;
       }
       case power_manager::InputEvent_Type_TABLET_MODE_ON:
       case power_manager::InputEvent_Type_TABLET_MODE_OFF: {
         bool on =
             (proto.type() == power_manager::InputEvent_Type_TABLET_MODE_ON);
-        FOR_EACH_OBSERVER(PowerManagerClient::Observer, observers_,
-                          TabletModeEventReceived(on, timestamp));
+        for (auto& observer : observers_)
+          observer.TabletModeEventReceived(on, timestamp);
         break;
       }
     }
@@ -711,7 +776,14 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // Reports suspend readiness to powerd if no observers are still holding
   // suspend readiness callbacks.
   void MaybeReportSuspendReadiness() {
-    if (!suspend_is_pending_ || num_pending_suspend_readiness_callbacks_ > 0)
+    CHECK(suspend_is_pending_);
+
+    // Avoid reporting suspend readiness if some observers have yet to be
+    // notified about the pending attempt.
+    if (notifying_observers_about_suspend_imminent_)
+      return;
+
+    if (num_pending_suspend_readiness_callbacks_ > 0)
       return;
 
     std::string method_name;
@@ -756,16 +828,16 @@ class PowerManagerClientImpl : public PowerManagerClient {
   dbus::ObjectProxy* power_manager_proxy_;
   base::ObserverList<Observer> observers_;
 
-  // The delay_id_ obtained from the RegisterSuspendDelay request.
+  // The delay ID obtained from the RegisterSuspendDelay request.
   int32_t suspend_delay_id_;
   bool has_suspend_delay_id_;
 
-  // The delay_id_ obtained from the RegisterDarkSuspendDelay request.
+  // The delay ID obtained from the RegisterDarkSuspendDelay request.
   int32_t dark_suspend_delay_id_;
   bool has_dark_suspend_delay_id_;
 
-  // powerd-supplied ID corresponding to an imminent suspend attempt that is
-  // currently being delayed.
+  // powerd-supplied ID corresponding to an imminent (either regular or dark)
+  // suspend attempt that is currently being delayed.
   int32_t pending_suspend_id_;
   bool suspend_is_pending_;
 
@@ -779,6 +851,11 @@ class PowerManagerClientImpl : public PowerManagerClient {
   // GetSuspendReadinessCallback() during the currently-pending suspend
   // attempt but have not yet been called.
   int num_pending_suspend_readiness_callbacks_;
+
+  // Inspected by MaybeReportSuspendReadiness() to avoid prematurely notifying
+  // powerd about suspend readiness while |observers_|' SuspendImminent()
+  // methods are being called by HandleSuspendImminent().
+  bool notifying_observers_about_suspend_imminent_;
 
   // Last state passed to SetIsProjecting().
   bool last_is_projecting_;
@@ -805,7 +882,7 @@ PowerManagerClient* PowerManagerClient::Create(
     DBusClientImplementationType type) {
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
     return new PowerManagerClientImpl();
-  DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
+  DCHECK_EQ(FAKE_DBUS_CLIENT_IMPLEMENTATION, type);
   return new FakePowerManagerClient();
 }
 

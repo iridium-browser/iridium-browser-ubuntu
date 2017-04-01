@@ -112,6 +112,14 @@ NET_ERROR(CONTEXT_SHUT_DOWN, -26)
 // checks, for instance).
 NET_ERROR(BLOCKED_BY_RESPONSE, -27)
 
+// The request failed after the response was received, based on client-side
+// heuristics that point to the possiblility of a cross-site scripting attack.
+NET_ERROR(BLOCKED_BY_XSS_AUDITOR, -28)
+
+// The request was blocked by system policy disallowing some or all cleartext
+// requests. Used for NetworkSecurityPolicy on Android.
+NET_ERROR(CLEARTEXT_NOT_PERMITTED, -29)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -190,7 +198,7 @@ NET_ERROR(SOCKS_CONNECTION_FAILED, -120)
 NET_ERROR(SOCKS_CONNECTION_HOST_UNREACHABLE, -121)
 
 // The request to negotiate an alternate protocol failed.
-NET_ERROR(NPN_NEGOTIATION_FAILED, -122)
+NET_ERROR(ALPN_NEGOTIATION_FAILED, -122)
 
 // The peer sent an SSL no_renegotiation alert message.
 NET_ERROR(SSL_NO_RENEGOTIATION, -123)
@@ -314,12 +322,9 @@ NET_ERROR(WS_THROTTLE_QUEUE_TOO_LARGE, -154)
 // The SSL server certificate changed in a renegotiation.
 NET_ERROR(SSL_SERVER_CERT_CHANGED, -156)
 
-// The SSL server indicated that an unnecessary TLS version fallback was
-// performed.
-NET_ERROR(SSL_INAPPROPRIATE_FALLBACK, -157)
+// Error -157 was removed (SSL_INAPPROPRIATE_FALLBACK).
 
-// Certificate Transparency: All Signed Certificate Timestamps failed to verify.
-NET_ERROR(CT_NO_SCTS_VERIFIED_OK, -158)
+// Error -158 was removed (CT_NO_SCTS_VERIFIED_OK).
 
 // The SSL server sent us a fatal unrecognized_name alert.
 NET_ERROR(SSL_UNRECOGNIZED_NAME_ALERT, -159)
@@ -342,9 +347,7 @@ NET_ERROR(SOCKET_SEND_BUFFER_SIZE_UNCHANGEABLE, -163)
 // library.
 NET_ERROR(SSL_CLIENT_AUTH_CERT_BAD_FORMAT, -164)
 
-// The SSL server requires falling back to a version older than the configured
-// minimum fallback version, and thus fallback failed.
-NET_ERROR(SSL_FALLBACK_BEYOND_MINIMUM_VERSION, -165)
+// Error -165 was removed (SSL_FALLBACK_BEYOND_MINIMUM_VERSION).
 
 // Resolving a hostname to an IP address list included the IPv4 address
 // "127.0.53.53". This is a special IP address which ICANN has recommended to
@@ -378,6 +381,10 @@ NET_ERROR(CT_CONSISTENCY_PROOF_PARSING_FAILED, -171)
 // releases immediately following a cipher suite's removal, after which the
 // fallback will be removed.
 NET_ERROR(SSL_OBSOLETE_CIPHER, -172)
+
+// When a WebSocket handshake is done successfully and the connection has been
+// upgraded, the URLRequest is cancelled with this error code.
+NET_ERROR(WS_UPGRADE, -173)
 
 // Certificate error codes
 //
@@ -683,6 +690,14 @@ NET_ERROR(PAC_SCRIPT_TERMINATED, -367)
 // than treat it as HTTP/0.9, this error is returned.
 NET_ERROR(INVALID_HTTP_RESPONSE, -370)
 
+// Initializing content decoding failed.
+NET_ERROR(CONTENT_DECODING_INIT_FAILED, -371)
+
+// Received HTTP/2 RST_STREAM frame with NO_ERROR error code.  This error should
+// be handled internally by HTTP/2 code, and should not make it above the
+// SpdyStream layer.
+NET_ERROR(SPDY_RST_STREAM_NO_ERROR_RECEIVED, -372)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -728,11 +743,11 @@ NET_ERROR(CACHE_AUTH_FAILURE_AFTER_READ, -410)
 // The server's response was insecure (e.g. there was a cert error).
 NET_ERROR(INSECURE_RESPONSE, -501)
 
-// The server responded to a <keygen> with a generated client cert that we
-// don't have the matching private key for.
+// An attempt to import a client certificate failed, as the user's key
+// database lacked a corresponding private key.
 NET_ERROR(NO_PRIVATE_KEY_FOR_CERT, -502)
 
-// An error adding to the OS certificate database (e.g. OS X Keychain).
+// An error adding a certificate to the OS certificate database.
 NET_ERROR(ADD_USER_CERT_FAILED, -503)
 
 // *** Code -600 is reserved (was FTP_PASV_COMMAND_FAILED). ***

@@ -457,8 +457,8 @@ private:
         kAllPublic_Masks = 0xF
     };
 
-    void as4x3ColMajorf(float[]) const;
-    void set4x3ColMajorf(const float[]);
+    void as3x4RowMajorf(float[]) const;
+    void set3x4RowMajorf(const float[]);
 
     SkMScalar transX() const { return fMat[3][0]; }
     SkMScalar transY() const { return fMat[3][1]; }
@@ -491,7 +491,10 @@ private:
         return 0 == fTypeMask;
     }
 
+    inline const SkMScalar* values() const { return &fMat[0][0]; }
+
     friend class SkColorSpace;
+    friend class SkColorSpace_XYZ;
 };
 
 #endif

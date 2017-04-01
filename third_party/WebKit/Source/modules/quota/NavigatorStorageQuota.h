@@ -31,44 +31,46 @@
 #ifndef NavigatorStorageQuota_h
 #define NavigatorStorageQuota_h
 
-#include "core/frame/DOMWindowProperty.h"
+#include "core/frame/Navigator.h"
 #include "modules/quota/DeprecatedStorageQuota.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class LocalFrame;
 class Navigator;
 class StorageManager;
 class StorageQuota;
 
-class NavigatorStorageQuota final : public GarbageCollected<NavigatorStorageQuota>, public Supplement<Navigator>, public DOMWindowProperty {
-    USING_GARBAGE_COLLECTED_MIXIN(NavigatorStorageQuota);
-public:
-    static NavigatorStorageQuota& from(Navigator&);
-    static StorageQuota* storageQuota(Navigator&);
-    static DeprecatedStorageQuota* webkitTemporaryStorage(Navigator&);
-    static DeprecatedStorageQuota* webkitPersistentStorage(Navigator&);
-    static StorageManager* storage(Navigator&);
+class NavigatorStorageQuota final
+    : public GarbageCollected<NavigatorStorageQuota>,
+      public Supplement<Navigator> {
+  USING_GARBAGE_COLLECTED_MIXIN(NavigatorStorageQuota);
 
-    StorageQuota* storageQuota() const;
-    DeprecatedStorageQuota* webkitTemporaryStorage() const;
-    DeprecatedStorageQuota* webkitPersistentStorage() const;
-    StorageManager* storage() const;
+ public:
+  static NavigatorStorageQuota& from(Navigator&);
+  static StorageQuota* storageQuota(Navigator&);
+  static DeprecatedStorageQuota* webkitTemporaryStorage(Navigator&);
+  static DeprecatedStorageQuota* webkitPersistentStorage(Navigator&);
+  static StorageManager* storage(Navigator&);
 
-    DECLARE_TRACE();
+  StorageQuota* storageQuota() const;
+  DeprecatedStorageQuota* webkitTemporaryStorage() const;
+  DeprecatedStorageQuota* webkitPersistentStorage() const;
+  StorageManager* storage() const;
 
-private:
-    explicit NavigatorStorageQuota(LocalFrame*);
-    static const char* supplementName();
+  DECLARE_TRACE();
 
-    mutable Member<StorageQuota> m_storageQuota;
-    mutable Member<DeprecatedStorageQuota> m_temporaryStorage;
-    mutable Member<DeprecatedStorageQuota> m_persistentStorage;
-    mutable Member<StorageManager> m_storageManager;
+ private:
+  explicit NavigatorStorageQuota(Navigator&);
+  static const char* supplementName();
+
+  mutable Member<StorageQuota> m_storageQuota;
+  mutable Member<DeprecatedStorageQuota> m_temporaryStorage;
+  mutable Member<DeprecatedStorageQuota> m_persistentStorage;
+  mutable Member<StorageManager> m_storageManager;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // NavigatorStorageQuota_h
+#endif  // NavigatorStorageQuota_h

@@ -28,7 +28,6 @@
 #include "SkSurface.h"
 #include "SkTextBlob.h"
 #include "SkTypeface.h"
-#include "SkXfermode.h"
 
 extern "C" {
     #include "lua.h"
@@ -59,7 +58,6 @@ DEF_MTNAME(SkShader)
 DEF_MTNAME(SkSurface)
 DEF_MTNAME(SkTextBlob)
 DEF_MTNAME(SkTypeface)
-DEF_MTNAME(SkXfermode)
 
 template <typename T> T* push_new(lua_State* L) {
     T* addr = (T*)lua_newuserdata(L, sizeof(T));
@@ -73,6 +71,13 @@ template <typename T> void push_obj(lua_State* L, const T& obj) {
     new (lua_newuserdata(L, sizeof(T))) T(obj);
     luaL_getmetatable(L, get_mtname<T>());
     lua_setmetatable(L, -2);
+}
+
+template <typename T> T* push_ptr(lua_State* L, T* ptr) {
+    *(T**)lua_newuserdata(L, sizeof(T*)) = ptr;
+    luaL_getmetatable(L, get_mtname<T>());
+    lua_setmetatable(L, -2);
+    return ptr;
 }
 
 template <typename T> T* push_ref(lua_State* L, T* ref) {
@@ -335,7 +340,7 @@ void SkLua::pushPath(const SkPath& path, const char key[]) {
 }
 
 void SkLua::pushCanvas(SkCanvas* canvas, const char key[]) {
-    push_ref(fL, canvas);
+    push_ptr(fL, canvas);
     CHECK_SETFIELD(key);
 }
 
@@ -405,7 +410,7 @@ void SkLua::pushClipStackElement(const SkClipStack::Element& element, const char
             this->pushPath(element.getPath(), "path");
             break;
     }
-    this->pushString(region_op(element.getOp()), "op");
+    this->pushString(region_op((SkRegion::Op)element.getOp()), "op");
     this->pushBool(element.isAA(), "aa");
     CHECK_SETFIELD(key);
 }
@@ -575,7 +580,7 @@ static int lcanvas_drawPatch(lua_State* L) {
         texs = texStorage;
     }
 
-    get_ref<SkCanvas>(L, 1)->drawPatch(cubics, colors, texs, nullptr, *get_obj<SkPaint>(L, 5));
+    get_ref<SkCanvas>(L, 1)->drawPatch(cubics, colors, texs, *get_obj<SkPaint>(L, 5));
     return 0;
 }
 
@@ -717,7 +722,7 @@ static int lcanvas_newSurface(lua_State* L) {
 }
 
 static int lcanvas_gc(lua_State* L) {
-    get_ref<SkCanvas>(L, 1)->unref();
+    // don't know how to track a ptr...
     return 0;
 }
 
@@ -759,7 +764,7 @@ const struct luaL_Reg gSkCanvas_Methods[] = {
 
 static int ldocument_beginPage(lua_State* L) {
     const SkRect* contentPtr = nullptr;
-    push_ref(L, get_ref<SkDocument>(L, 1)->beginPage(lua2scalar(L, 2),
+    push_ptr(L, get_ref<SkDocument>(L, 1)->beginPage(lua2scalar(L, 2),
                                                      lua2scalar(L, 3),
                                                      contentPtr));
     return 1;
@@ -1073,24 +1078,7 @@ static int lpaint_getEffects(lua_State* L) {
     setfield_bool_if(L, "shader",      !!paint->getShader());
     setfield_bool_if(L, "colorFilter", !!paint->getColorFilter());
     setfield_bool_if(L, "imageFilter", !!paint->getImageFilter());
-    setfield_bool_if(L, "xfermode",    !!paint->getXfermode());
     return 1;
-}
-
-static int lpaint_getXfermode(lua_State* L) {
-    const SkPaint* paint = get_obj<SkPaint>(L, 1);
-    SkXfermode* xfermode = paint->getXfermode();
-    if (xfermode) {
-        push_ref(L, xfermode);
-        return 1;
-    }
-    return 0;
-}
-
-static int lpaint_setXfermode(lua_State* L) {
-    SkPaint* paint = get_obj<SkPaint>(L, 1);
-    paint->setXfermode(sk_ref_sp(get_ref<SkXfermode>(L, 2)));
-    return 0;
 }
 
 static int lpaint_getColorFilter(lua_State* L) {
@@ -1121,7 +1109,7 @@ static int lpaint_getImageFilter(lua_State* L) {
 
 static int lpaint_setImageFilter(lua_State* L) {
     SkPaint* paint = get_obj<SkPaint>(L, 1);
-    paint->setImageFilter(get_ref<SkImageFilter>(L, 2));
+    paint->setImageFilter(sk_ref_sp(get_ref<SkImageFilter>(L, 2)));
     return 0;
 }
 
@@ -1217,8 +1205,6 @@ static const struct luaL_Reg gSkPaint_Methods[] = {
     { "setColorFilter", lpaint_setColorFilter },
     { "getImageFilter", lpaint_getImageFilter },
     { "setImageFilter", lpaint_setImageFilter },
-    { "getXfermode", lpaint_getXfermode },
-    { "setXfermode", lpaint_setXfermode },
     { "getShader", lpaint_getShader },
     { "setShader", lpaint_setShader },
     { "getPathEffect", lpaint_getPathEffect },
@@ -1248,17 +1234,16 @@ static int lshader_isOpaque(lua_State* L) {
     return shader && shader->isOpaque();
 }
 
-static int lshader_isABitmap(lua_State* L) {
+static int lshader_isAImage(lua_State* L) {
     SkShader* shader = get_ref<SkShader>(L, 1);
     if (shader) {
-        SkBitmap bm;
         SkMatrix matrix;
         SkShader::TileMode modes[2];
-        if (shader->isABitmap(&bm, &matrix, modes)) {
+        if (SkImage* image = shader->isAImage(&matrix, modes)) {
             lua_newtable(L);
-            setfield_number(L, "genID", bm.pixelRef() ? bm.pixelRef()->getGenerationID() : 0);
-            setfield_number(L, "width", bm.width());
-            setfield_number(L, "height", bm.height());
+            setfield_number(L, "id", image->uniqueID());
+            setfield_number(L, "width", image->width());
+            setfield_number(L, "height", image->height());
             setfield_string(L, "tileX", mode2string(modes[0]));
             setfield_string(L, "tileY", mode2string(modes[1]));
             return 1;
@@ -1305,7 +1290,7 @@ static int lshader_gc(lua_State* L) {
 
 static const struct luaL_Reg gSkShader_Methods[] = {
     { "isOpaque",       lshader_isOpaque },
-    { "isABitmap",      lshader_isABitmap },
+    { "isAImage",       lshader_isAImage },
     { "asAGradient",    lshader_asAGradient },
     { "__gc",           lshader_gc },
     { nullptr, nullptr }
@@ -1337,24 +1322,6 @@ static int lpatheffect_gc(lua_State* L) {
 static const struct luaL_Reg gSkPathEffect_Methods[] = {
     { "asADash",        lpatheffect_asADash },
     { "__gc",           lpatheffect_gc },
-    { nullptr, nullptr }
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
-static int lpxfermode_getTypeName(lua_State* L) {
-    lua_pushstring(L, get_ref<SkXfermode>(L, 1)->getTypeName());
-    return 1;
-}
-
-static int lpxfermode_gc(lua_State* L) {
-    get_ref<SkXfermode>(L, 1)->unref();
-    return 0;
-}
-
-static const struct luaL_Reg gSkXfermode_Methods[] = {
-    { "getTypeName",    lpxfermode_getTypeName },
-    { "__gc",           lpxfermode_gc },
     { nullptr, nullptr }
 };
 
@@ -1790,7 +1757,7 @@ static int lsurface_getCanvas(lua_State* L) {
     if (nullptr == canvas) {
         lua_pushnil(L);
     } else {
-        push_ref(L, canvas);
+        push_ptr(L, canvas);
         // note: we don't unref canvas, since getCanvas did not ref it.
         // warning: this is weird: now Lua owns a ref on this canvas, but what if they let
         // the real owner (the surface) go away, but still hold onto the canvas?
@@ -1854,7 +1821,7 @@ static int lpicturerecorder_beginRecording(lua_State* L) {
         return 1;
     }
 
-    push_ref(L, canvas);
+    push_ptr(L, canvas);
     return 1;
 }
 
@@ -1864,7 +1831,7 @@ static int lpicturerecorder_getCanvas(lua_State* L) {
         lua_pushnil(L);
         return 1;
     }
-    push_ref(L, canvas);
+    push_ptr(L, canvas);
     return 1;
 }
 
@@ -2076,8 +2043,7 @@ static int lsk_newTextBlob(lua_State* L) {
     box.setText(text, strlen(text), paint);
 
     SkScalar newBottom;
-    SkAutoTUnref<SkTextBlob> blob(box.snapshotTextBlob(&newBottom));
-    push_ref<SkTextBlob>(L, blob);
+    push_ref<SkTextBlob>(L, box.snapshotTextBlob(&newBottom));
     SkLua(L).pushScalar(newBottom);
     return 2;
 }
@@ -2180,7 +2146,6 @@ void SkLua::Load(lua_State* L) {
     REG_CLASS(L, SkSurface);
     REG_CLASS(L, SkTextBlob);
     REG_CLASS(L, SkTypeface);
-    REG_CLASS(L, SkXfermode);
 }
 
 extern "C" int luaopen_skia(lua_State* L);

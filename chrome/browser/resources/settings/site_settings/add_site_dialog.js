@@ -10,19 +10,32 @@
 Polymer({
   is: 'add-site-dialog',
 
-  behaviors: [SiteSettingsBehavior],
+  behaviors: [SiteSettingsBehavior, WebUIListenerBehavior],
 
   properties: {
+    /**
+     * What kind of setting, e.g. Location, Camera, Cookies, and so on.
+     * @type {settings.ContentSettingsTypes}
+     */
+    category: String,
+
+    /**
+     * Whether this is about an Allow, Block, SessionOnly, or other.
+     * @type {settings.PermissionValues}
+     */
+    contentSetting: String,
+
     /**
      * The site to add an exception for.
      * @private
      */
     site_: String,
+  },
 
-    /**
-     * Whether this is an allow exception this dialog is adding.
-     */
-     allowException: Boolean,
+  /** @override */
+  attached: function() {
+    assert(this.category);
+    assert(this.contentSetting);
   },
 
   /**
@@ -31,7 +44,9 @@ Polymer({
    *     Block list.
    */
   open: function(type) {
-    this.allowException = type == settings.PermissionValues.ALLOW;
+    this.addWebUIListener('onIncognitoStatusChanged',
+        this.onIncognitoStatusChanged_.bind(this));
+    this.browserProxy.updateIncognitoStatus();
     this.$.dialog.showModal();
   },
 
@@ -40,8 +55,7 @@ Polymer({
    * @private
    */
   validate_: function() {
-    var pattern = this.addPatternWildcard_(this.site_);
-    this.browserProxy.isPatternValid(pattern).then(function(isValid) {
+    this.browserProxy.isPatternValid(this.site_).then(function(isValid) {
       this.$.add.disabled = !isValid;
     }.bind(this));
   },
@@ -52,6 +66,19 @@ Polymer({
   },
 
   /**
+   * A handler for when we get notified of the current profile creating or
+   * destroying their incognito counterpart.
+   * @param {boolean} incognitoEnabled Whether the current profile has an
+   *     incognito profile.
+   * @private
+   */
+  onIncognitoStatusChanged_: function(incognitoEnabled) {
+    this.$.incognito.disabled = !incognitoEnabled;
+    if (!incognitoEnabled)
+      this.$.incognito.checked = false;
+  },
+
+  /**
    * The tap handler for the Add [Site] button (adds the pattern and closes
    * the dialog).
    * @private
@@ -59,10 +86,10 @@ Polymer({
   onSubmit_: function() {
     if (this.$.add.disabled)
       return;  // Can happen when Enter is pressed.
-    var pattern = this.addPatternWildcard_(this.site_);
-    this.setCategoryPermissionForOrigin(
-        pattern, pattern, this.category, this.allowException ?
-            settings.PermissionValues.ALLOW : settings.PermissionValues.BLOCK);
+    var pattern = this.addPatternWildcard(this.site_);
+    this.browserProxy.setCategoryPermissionForOrigin(
+        pattern, pattern, this.category, this.contentSetting,
+        this.$.incognito.checked);
     this.$.dialog.close();
   },
 });

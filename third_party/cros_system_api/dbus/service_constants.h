@@ -10,6 +10,7 @@
 // We use relative includes here to make this compatible with both the
 // Chromium OS and Chromium environment.
 #include "apmanager/dbus-constants.h"
+#include "authpolicy/dbus-constants.h"
 #include "cros-disks/dbus-constants.h"
 #include "cryptohome/dbus-constants.h"
 #include "debugd/dbus-constants.h"
@@ -53,6 +54,17 @@ const char kBurnImage[] = "BurnImage";
 const char kSignalBurnFinishedName[] = "burn_finished";
 const char kSignalBurnUpdateName[] = "burn_progress_update";
 }  // namespace imageburn
+
+namespace imageloader {
+const char kImageLoaderServiceInterface[] = "org.chromium.ImageLoaderInterface";
+const char kImageLoaderServiceName[] = "org.chromium.ImageLoader";
+const char kImageLoaderServicePath[] = "/org/chromium/ImageLoader";
+// Methods
+const char kRegisterComponent[] = "RegisterComponent";
+const char kGetComponentVersion[] = "GetComponentVersion";
+// Constants
+const char kBadResult[] = "";
+}  // namespace imageloader
 
 namespace speech_synthesis {
 const char kSpeechSynthesizerInterface[] =
@@ -309,6 +321,7 @@ const char kManufacturerDataProperty[] = "ManufacturerData";
 const char kServiceDataProperty[] = "ServiceData";
 const char kGattServicesProperty[] = "GattServices";         // DEPRECATED
 const char kServicesResolvedProperty[] = "ServicesResolved";
+const char kAdvertisingDataFlagsProperty[] = "AdvertisingFlags";
 
 // Bluetooth Device errors.
 const char kErrorNotReady[] = "org.bluez.Error.NotReady";
@@ -612,6 +625,7 @@ const char kBluetoothAdvertisingManagerInterface[] =
 // Bluetooth LE Advertising Manager methods.
 const char kRegisterAdvertisement[] = "RegisterAdvertisement";
 const char kUnregisterAdvertisement[] = "UnregisterAdvertisement";
+const char kSetAdvertisingIntervals[] = "SetAdvertisingIntervals";
 
 // Bluetooth LE Advertising Manager errors.
 const char kErrorAlreadyExists[] = "org.bluez.Error.AlreadyExists";
@@ -849,6 +863,7 @@ const char kSystemClockServiceName[] = "org.torproject.tlsdate";
 // Methods.
 const char kSystemClockCanSet[] = "CanSetTime";
 const char kSystemClockSet[] = "SetTime";
+const char kSystemLastSyncInfo[] = "LastSyncInfo";
 
 // Signals.
 const char kSystemClockUpdated[] = "TimeUpdated";
@@ -892,6 +907,7 @@ const char kActiveProperty[] = "Active";
 const char kPluggedTimeProperty[] = "PluggedTime";
 const char kMicPositionsProperty[] = "MicPositions";
 const char kStableDeviceIdProperty[] = "StableDeviceId";
+const char kStableDeviceIdNewProperty[] = "StableDeviceIdNew";
 
 // Signals.
 const char kOutputVolumeChanged[] = "OutputVolumeChanged";

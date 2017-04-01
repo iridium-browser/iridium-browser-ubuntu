@@ -11,71 +11,85 @@
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/page/PageVisibilityObserver.h"
 #include "device/nfc/nfc.mojom-blink.h"
+#include "modules/nfc/MessageCallback.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "wtf/HashMap.h"
 
 namespace blink {
 
 class MessageCallback;
-class NFCError;
 class NFCPushOptions;
 using NFCPushMessage = StringOrArrayBufferOrNFCMessage;
 class NFCWatchOptions;
 
-class NFC final
-    : public GarbageCollectedFinalized<NFC>
-    , public ScriptWrappable
-    , public PageVisibilityObserver
-    , public ContextLifecycleObserver
-    , public device::nfc::blink::NFCClient {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(NFC);
-    USING_PRE_FINALIZER(NFC, dispose);
+class NFC final : public GarbageCollectedFinalized<NFC>,
+                  public ScriptWrappable,
+                  public PageVisibilityObserver,
+                  public ContextLifecycleObserver,
+                  public device::nfc::mojom::blink::NFCClient {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(NFC);
+  USING_PRE_FINALIZER(NFC, dispose);
 
-public:
-    static NFC* create(LocalFrame*);
+ public:
+  static NFC* create(LocalFrame*);
 
-    virtual ~NFC();
+  virtual ~NFC();
 
-    void dispose();
+  void dispose();
 
-    // ContextLifecycleObserver overrides.
-    void contextDestroyed() override;
+  // ContextLifecycleObserver overrides.
+  void contextDestroyed(ExecutionContext*) override;
 
-    // Pushes NFCPushMessage asynchronously to NFC tag / peer.
-    ScriptPromise push(ScriptState*, const NFCPushMessage&, const NFCPushOptions&);
+  // Pushes NFCPushMessage asynchronously to NFC tag / peer.
+  ScriptPromise push(ScriptState*,
+                     const NFCPushMessage&,
+                     const NFCPushOptions&);
 
-    // Cancels ongoing push operation.
-    ScriptPromise cancelPush(ScriptState*, const String&);
+  // Cancels ongoing push operation.
+  ScriptPromise cancelPush(ScriptState*, const String&);
 
-    // Starts watching for NFC messages that match NFCWatchOptions criteria.
-    ScriptPromise watch(ScriptState*, MessageCallback*, const NFCWatchOptions&);
+  // Starts watching for NFC messages that match NFCWatchOptions criteria.
+  ScriptPromise watch(ScriptState*, MessageCallback*, const NFCWatchOptions&);
 
-    // Cancels watch operation with id.
-    ScriptPromise cancelWatch(ScriptState*, long id);
+  // Cancels watch operation with id.
+  ScriptPromise cancelWatch(ScriptState*, long id);
 
-    // Cancels all watch operations.
-    ScriptPromise cancelWatch(ScriptState*);
+  // Cancels all watch operations.
+  ScriptPromise cancelWatch(ScriptState*);
 
-    // Implementation of PageVisibilityObserver.
-    void pageVisibilityChanged() override;
+  // Implementation of PageVisibilityObserver.
+  void pageVisibilityChanged() override;
 
-    // Interface required by garbage collection.
-    DECLARE_VIRTUAL_TRACE();
+  // Interface required by garbage collection.
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    void OnRequestCompleted(ScriptPromiseResolver*, device::nfc::blink::NFCErrorPtr);
-    void OnConnectionError();
+ private:
+  // Returns promise with DOMException if feature is not supported
+  // or when context is not secure. Otherwise, returns empty promise.
+  ScriptPromise rejectIfNotSupported(ScriptState*);
 
-    // device::nfc::blink::NFCClient implementation.
-    void OnWatch(mojo::WTFArray<uint32_t> ids, device::nfc::blink::NFCMessagePtr) override;
+  void OnRequestCompleted(ScriptPromiseResolver*,
+                          device::nfc::mojom::blink::NFCErrorPtr);
+  void OnConnectionError();
+  void OnWatchRegistered(MessageCallback*,
+                         ScriptPromiseResolver*,
+                         uint32_t id,
+                         device::nfc::mojom::blink::NFCErrorPtr);
 
-private:
-    explicit NFC(LocalFrame*);
-    device::nfc::blink::NFCPtr m_nfc;
-    mojo::Binding<device::nfc::blink::NFCClient> m_client;
-    HeapHashSet<Member<ScriptPromiseResolver>> m_requests;
+  // device::nfc::mojom::blink::NFCClient implementation.
+  void OnWatch(const WTF::Vector<uint32_t>& ids,
+               device::nfc::mojom::blink::NFCMessagePtr) override;
+
+ private:
+  explicit NFC(LocalFrame*);
+  device::nfc::mojom::blink::NFCPtr m_nfc;
+  mojo::Binding<device::nfc::mojom::blink::NFCClient> m_client;
+  HeapHashSet<Member<ScriptPromiseResolver>> m_requests;
+  using WatchCallbacksMap = HeapHashMap<uint32_t, Member<MessageCallback>>;
+  WatchCallbacksMap m_callbacks;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // NFC_h
+#endif  // NFC_h

@@ -31,6 +31,7 @@
 #define ClipPathOperation_h
 
 #include "core/style/BasicShapes.h"
+#include "core/svg/SVGElementProxy.h"
 #include "platform/graphics/Path.h"
 #include "wtf/PtrUtil.h"
 #include "wtf/RefCounted.h"
@@ -39,103 +40,104 @@
 
 namespace blink {
 
+class SVGElement;
+class SVGResourceClient;
+class TreeScope;
+
 class ClipPathOperation : public RefCounted<ClipPathOperation> {
-public:
-    enum OperationType {
-        REFERENCE,
-        SHAPE
-    };
+ public:
+  enum OperationType { REFERENCE, SHAPE };
 
-    virtual ~ClipPathOperation() { }
+  virtual ~ClipPathOperation() {}
 
-    virtual bool operator==(const ClipPathOperation&) const = 0;
-    bool operator!=(const ClipPathOperation& o) const { return !(*this == o); }
+  virtual bool operator==(const ClipPathOperation&) const = 0;
+  bool operator!=(const ClipPathOperation& o) const { return !(*this == o); }
 
-    OperationType type() const { return m_type; }
-    bool isSameType(const ClipPathOperation& o) const { return o.type() == m_type; }
+  virtual OperationType type() const = 0;
+  bool isSameType(const ClipPathOperation& o) const {
+    return o.type() == type();
+  }
 
-protected:
-    ClipPathOperation(OperationType type)
-        : m_type(type)
-    {
-    }
-
-    OperationType m_type;
+ protected:
+  ClipPathOperation() {}
 };
 
 class ReferenceClipPathOperation final : public ClipPathOperation {
-public:
-    static PassRefPtr<ReferenceClipPathOperation> create(const String& url, const AtomicString& fragment)
-    {
-        return adoptRef(new ReferenceClipPathOperation(url, fragment));
-    }
+ public:
+  static PassRefPtr<ReferenceClipPathOperation> create(
+      const String& url,
+      SVGElementProxy& elementProxy) {
+    return adoptRef(new ReferenceClipPathOperation(url, elementProxy));
+  }
 
-    const String& url() const { return m_url; }
-    const AtomicString& fragment() const { return m_fragment; }
+  void addClient(SVGResourceClient*);
+  void removeClient(SVGResourceClient*);
 
-private:
-    bool operator==(const ClipPathOperation& o) const override
-    {
-        return isSameType(o) && m_url == static_cast<const ReferenceClipPathOperation&>(o).m_url;
-    }
+  SVGElement* findElement(TreeScope&) const;
 
-    ReferenceClipPathOperation(const String& url, const AtomicString& fragment)
-        : ClipPathOperation(REFERENCE)
-        , m_url(url)
-        , m_fragment(fragment)
-    {
-    }
+  const String& url() const { return m_url; }
 
-    String m_url;
-    AtomicString m_fragment;
+ private:
+  bool operator==(const ClipPathOperation&) const override;
+  OperationType type() const override { return REFERENCE; }
+
+  ReferenceClipPathOperation(const String& url, SVGElementProxy& elementProxy)
+      : m_elementProxy(&elementProxy), m_url(url) {}
+
+  Persistent<SVGElementProxy> m_elementProxy;
+  String m_url;
 };
 
-DEFINE_TYPE_CASTS(ReferenceClipPathOperation, ClipPathOperation, op, op->type() == ClipPathOperation::REFERENCE, op.type() == ClipPathOperation::REFERENCE);
+DEFINE_TYPE_CASTS(ReferenceClipPathOperation,
+                  ClipPathOperation,
+                  op,
+                  op->type() == ClipPathOperation::REFERENCE,
+                  op.type() == ClipPathOperation::REFERENCE);
 
 class ShapeClipPathOperation final : public ClipPathOperation {
-public:
-    static PassRefPtr<ShapeClipPathOperation> create(PassRefPtr<BasicShape> shape)
-    {
-        return adoptRef(new ShapeClipPathOperation(shape));
-    }
+ public:
+  static PassRefPtr<ShapeClipPathOperation> create(
+      PassRefPtr<BasicShape> shape) {
+    return adoptRef(new ShapeClipPathOperation(std::move(shape)));
+  }
 
-    const BasicShape* basicShape() const { return m_shape.get(); }
-    bool isValid() const { return m_shape.get(); }
-    const Path& path(const FloatRect& boundingRect)
-    {
-        ASSERT(m_shape);
-        m_path.reset();
-        m_path = wrapUnique(new Path);
-        m_shape->path(*m_path, boundingRect);
-        m_path->setWindRule(m_shape->getWindRule());
-        return *m_path;
-    }
+  const BasicShape* basicShape() const { return m_shape.get(); }
+  bool isValid() const { return m_shape.get(); }
+  const Path& path(const FloatRect& boundingRect) {
+    ASSERT(m_shape);
+    m_path.reset();
+    m_path = WTF::wrapUnique(new Path);
+    m_shape->path(*m_path, boundingRect);
+    m_path->setWindRule(m_shape->getWindRule());
+    return *m_path;
+  }
 
-private:
-    bool operator==(const ClipPathOperation&) const override;
+ private:
+  bool operator==(const ClipPathOperation&) const override;
+  OperationType type() const override { return SHAPE; }
 
-    ShapeClipPathOperation(PassRefPtr<BasicShape> shape)
-        : ClipPathOperation(SHAPE)
-        , m_shape(shape)
-    {
-    }
+  ShapeClipPathOperation(PassRefPtr<BasicShape> shape) : m_shape(shape) {}
 
-    RefPtr<BasicShape> m_shape;
-    std::unique_ptr<Path> m_path;
+  RefPtr<BasicShape> m_shape;
+  std::unique_ptr<Path> m_path;
 };
 
-DEFINE_TYPE_CASTS(ShapeClipPathOperation, ClipPathOperation, op, op->type() == ClipPathOperation::SHAPE, op.type() == ClipPathOperation::SHAPE);
+DEFINE_TYPE_CASTS(ShapeClipPathOperation,
+                  ClipPathOperation,
+                  op,
+                  op->type() == ClipPathOperation::SHAPE,
+                  op.type() == ClipPathOperation::SHAPE);
 
-inline bool ShapeClipPathOperation::operator==(const ClipPathOperation& o) const
-{
-    if (!isSameType(o))
-        return false;
-    BasicShape* otherShape = toShapeClipPathOperation(o).m_shape.get();
-    if (!m_shape.get() || !otherShape)
-        return static_cast<bool>(m_shape.get()) == static_cast<bool>(otherShape);
-    return *m_shape == *otherShape;
+inline bool ShapeClipPathOperation::operator==(
+    const ClipPathOperation& o) const {
+  if (!isSameType(o))
+    return false;
+  BasicShape* otherShape = toShapeClipPathOperation(o).m_shape.get();
+  if (!m_shape.get() || !otherShape)
+    return static_cast<bool>(m_shape.get()) == static_cast<bool>(otherShape);
+  return *m_shape == *otherShape;
 }
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ClipPathOperation_h
+#endif  // ClipPathOperation_h

@@ -33,6 +33,7 @@
 
 #include "core/workers/WorkerReportingProxy.h"
 #include "platform/heap/Handle.h"
+#include "platform/heap/HeapAllocator.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/WebString.h"
 #include "public/web/modules/serviceworker/WebServiceWorkerContextProxy.h"
@@ -41,12 +42,15 @@
 
 namespace blink {
 
-class ConsoleMessage;
 class Document;
+class FetchEvent;
 class ServiceWorkerGlobalScope;
+class WebDataConsumerHandle;
 class WebEmbeddedWorkerImpl;
 class WebServiceWorkerContextClient;
+struct WebServiceWorkerError;
 class WebServiceWorkerRequest;
+class WebURLResponse;
 
 // This class is created and destructed on the main thread, but live most
 // of its time as a resident of the worker thread.
@@ -61,65 +65,115 @@ class WebServiceWorkerRequest;
 // workerThreadTerminated() is called by its corresponding
 // WorkerGlobalScope.
 class ServiceWorkerGlobalScopeProxy final
-    : public GarbageCollectedFinalized<ServiceWorkerGlobalScopeProxy>
-    , public WebServiceWorkerContextProxy
-    , public WorkerReportingProxy {
-    WTF_MAKE_NONCOPYABLE(ServiceWorkerGlobalScopeProxy);
-public:
-    static ServiceWorkerGlobalScopeProxy* create(WebEmbeddedWorkerImpl&, Document&, WebServiceWorkerContextClient&);
-    ~ServiceWorkerGlobalScopeProxy() override;
+    : public GarbageCollectedFinalized<ServiceWorkerGlobalScopeProxy>,
+      public WebServiceWorkerContextProxy,
+      public WorkerReportingProxy {
+  WTF_MAKE_NONCOPYABLE(ServiceWorkerGlobalScopeProxy);
 
-    // WebServiceWorkerContextProxy overrides:
-    void setRegistration(std::unique_ptr<WebServiceWorkerRegistration::Handle>) override;
-    void dispatchActivateEvent(int) override;
-    void dispatchExtendableMessageEvent(int eventID, const WebString& message, const WebSecurityOrigin& sourceOrigin, const WebMessagePortChannelArray&, const WebServiceWorkerClientInfo&) override;
-    void dispatchExtendableMessageEvent(int eventID, const WebString& message, const WebSecurityOrigin& sourceOrigin, const WebMessagePortChannelArray&, std::unique_ptr<WebServiceWorker::Handle>) override;
-    void dispatchFetchEvent(int responseID, int eventFinishID, const WebServiceWorkerRequest&) override;
-    void dispatchForeignFetchEvent(int responseID, int eventFinishID, const WebServiceWorkerRequest&) override;
-    void dispatchInstallEvent(int) override;
-    void dispatchNotificationClickEvent(int, int64_t notificationID, const WebNotificationData&, int actionIndex) override;
-    void dispatchNotificationCloseEvent(int, int64_t notificationID, const WebNotificationData&) override;
-    void dispatchPushEvent(int, const WebString& data) override;
-    void dispatchSyncEvent(int, const WebString& tag, LastChanceOption) override;
-    bool hasFetchEventHandler() override;
+ public:
+  static ServiceWorkerGlobalScopeProxy* create(WebEmbeddedWorkerImpl&,
+                                               Document&,
+                                               WebServiceWorkerContextClient&);
+  ~ServiceWorkerGlobalScopeProxy() override;
 
-    // WorkerReportingProxy overrides:
-    void reportException(const String& errorMessage, std::unique_ptr<SourceLocation>, int exceptionId) override;
-    void reportConsoleMessage(MessageSource, MessageLevel, const String& message, SourceLocation*) override;
-    void postMessageToPageInspector(const String&) override;
-    void didEvaluateWorkerScript(bool success) override;
-    void didInitializeWorkerContext() override;
-    void workerGlobalScopeStarted(WorkerOrWorkletGlobalScope*) override;
-    void workerGlobalScopeClosed() override;
-    void willDestroyWorkerGlobalScope() override;
-    void workerThreadTerminated() override;
+  // WebServiceWorkerContextProxy overrides:
+  void setRegistration(
+      std::unique_ptr<WebServiceWorkerRegistration::Handle>) override;
+  void dispatchActivateEvent(int) override;
+  void dispatchExtendableMessageEvent(
+      int eventID,
+      const WebString& message,
+      const WebSecurityOrigin& sourceOrigin,
+      const WebMessagePortChannelArray&,
+      const WebServiceWorkerClientInfo&) override;
+  void dispatchExtendableMessageEvent(
+      int eventID,
+      const WebString& message,
+      const WebSecurityOrigin& sourceOrigin,
+      const WebMessagePortChannelArray&,
+      std::unique_ptr<WebServiceWorker::Handle>) override;
+  void dispatchFetchEvent(int fetchEventID,
+                          const WebServiceWorkerRequest&,
+                          bool navigationPreloadSent) override;
+  void dispatchForeignFetchEvent(int fetchEventID,
+                                 const WebServiceWorkerRequest&) override;
+  void dispatchInstallEvent(int) override;
+  void dispatchNotificationClickEvent(int,
+                                      const WebString& notificationID,
+                                      const WebNotificationData&,
+                                      int actionIndex,
+                                      const WebString& reply) override;
+  void dispatchNotificationCloseEvent(int,
+                                      const WebString& notificationID,
+                                      const WebNotificationData&) override;
+  void dispatchPushEvent(int, const WebString& data) override;
+  void dispatchSyncEvent(int, const WebString& tag, LastChanceOption) override;
+  void dispatchPaymentRequestEvent(int,
+                                   const WebPaymentAppRequestData&) override;
+  bool hasFetchEventHandler() override;
+  void onNavigationPreloadResponse(
+      int fetchEventID,
+      std::unique_ptr<WebURLResponse>,
+      std::unique_ptr<WebDataConsumerHandle>) override;
+  void onNavigationPreloadError(
+      int fetchEventID,
+      std::unique_ptr<WebServiceWorkerError>) override;
 
-    DECLARE_TRACE();
+  // WorkerReportingProxy overrides:
+  void countFeature(UseCounter::Feature) override;
+  void countDeprecation(UseCounter::Feature) override;
+  void reportException(const String& errorMessage,
+                       std::unique_ptr<SourceLocation>,
+                       int exceptionId) override;
+  void reportConsoleMessage(MessageSource,
+                            MessageLevel,
+                            const String& message,
+                            SourceLocation*) override;
+  void postMessageToPageInspector(const String&) override;
+  ParentFrameTaskRunners* getParentFrameTaskRunners() override;
+  void didCreateWorkerGlobalScope(WorkerOrWorkletGlobalScope*) override;
+  void didInitializeWorkerContext() override;
+  void willEvaluateWorkerScript(size_t scriptSize,
+                                size_t cachedMetadataSize) override;
+  void willEvaluateImportedScript(size_t scriptSize,
+                                  size_t cachedMetadataSize) override;
+  void didEvaluateWorkerScript(bool success) override;
+  void didCloseWorkerGlobalScope() override;
+  void willDestroyWorkerGlobalScope() override;
+  void didTerminateWorkerThread() override;
 
-    // Detach this proxy object entirely from the outside world,
-    // clearing out all references.
-    //
-    // It is called during WebEmbeddedWorkerImpl finalization _after_
-    // the worker thread using the proxy has been terminated.
-    void detach();
+  DECLARE_TRACE();
 
-private:
-    ServiceWorkerGlobalScopeProxy(WebEmbeddedWorkerImpl&, Document&, WebServiceWorkerContextClient&);
+  // Detach this proxy object entirely from the outside world,
+  // clearing out all references.
+  //
+  // It is called during WebEmbeddedWorkerImpl finalization _after_
+  // the worker thread using the proxy has been terminated.
+  void detach();
 
-    WebServiceWorkerContextClient& client() const;
-    Document& document() const;
-    ServiceWorkerGlobalScope* workerGlobalScope() const;
+ private:
+  ServiceWorkerGlobalScopeProxy(WebEmbeddedWorkerImpl&,
+                                Document&,
+                                WebServiceWorkerContextClient&);
 
-    // Non-null until the WebEmbeddedWorkerImpl explicitly detach()es
-    // as part of its finalization.
-    WebEmbeddedWorkerImpl* m_embeddedWorker;
-    Member<Document> m_document;
+  WebServiceWorkerContextClient& client() const;
+  Document& document() const;
+  ServiceWorkerGlobalScope* workerGlobalScope() const;
 
-    WebServiceWorkerContextClient* m_client;
+  // Non-null until the WebEmbeddedWorkerImpl explicitly detach()es
+  // as part of its finalization.
+  WebEmbeddedWorkerImpl* m_embeddedWorker;
+  Member<Document> m_document;
 
-    Member<ServiceWorkerGlobalScope> m_workerGlobalScope;
+  Member<ParentFrameTaskRunners> m_parentFrameTaskRunners;
+
+  HeapHashMap<int, Member<FetchEvent>> m_pendingPreloadFetchEvents;
+
+  WebServiceWorkerContextClient* m_client;
+
+  CrossThreadPersistent<ServiceWorkerGlobalScope> m_workerGlobalScope;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ServiceWorkerGlobalScopeProxy_h
+#endif  // ServiceWorkerGlobalScopeProxy_h

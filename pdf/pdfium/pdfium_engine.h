@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 #include "pdf/document_loader.h"
 #include "pdf/pdf_engine.h"
@@ -33,7 +34,6 @@
 namespace pp {
 class KeyboardInputEvent;
 class MouseInputEvent;
-class VarDictionary;
 }
 
 namespace chrome_pdf {
@@ -116,9 +116,11 @@ class PDFiumEngine : public PDFEngine,
   void OnPartialDocumentLoaded() override;
   void OnPendingRequestComplete() override;
   void OnNewDataAvailable() override;
+  void OnDocumentFailed() override;
   void OnDocumentComplete() override;
 
   void UnsupportedFeature(int type);
+  void FontSubstituted();
 
   std::string current_find_text() const { return current_find_text_; }
 
@@ -248,6 +250,11 @@ class PDFiumEngine : public PDFEngine,
   // Returns true iff the given page index is visible.  CalculateVisiblePages
   // must have been called first.
   bool IsPageVisible(int index) const;
+
+  // Internal interface that caches the page index requested by PDFium to get
+  // scrolled to. The cache is to be be used during the interval the PDF
+  // plugin has not finished handling the scroll request.
+  void ScrollToPage(int page);
 
   // Checks if a page is now available, and if so marks it as such and returns
   // true.  Otherwise, it will return false and will add the index to the given
@@ -432,6 +439,8 @@ class PDFiumEngine : public PDFEngine,
   // Setting selection status of document.
   void SetSelecting(bool selecting);
 
+  bool PageIndexInBounds(int index) const;
+
   // FPDF_FORMFILLINFO callbacks.
   static void Form_Invalidate(FPDF_FORMFILLINFO* param,
                               FPDF_PAGE page,
@@ -611,10 +620,8 @@ class PDFiumEngine : public PDFEngine,
   // on the page.
   FPDF_FORMHANDLE form_;
 
-  // The page(s) of the document. Store a vector of pointers so that when the
-  // vector is resized we don't close the pages that are used in pending
-  // paints.
-  std::vector<PDFiumPage*> pages_;
+  // The page(s) of the document.
+  std::vector<std::unique_ptr<PDFiumPage>> pages_;
 
   // The indexes of the pages currently visible.
   std::vector<int> visible_pages_;
@@ -678,6 +685,10 @@ class PDFiumEngine : public PDFEngine,
   // calling CalculateVisiblePages()
   int most_visible_page_;
 
+  // Holds the page index requested by PDFium while the scroll operation
+  // is being handled (asynchronously).
+  base::Optional<int> in_flight_visible_page_;
+
   // Set to true after FORM_DoDocumentJSAction/FORM_DoDocumentOpenAction have
   // been called. Only after that can we call FORM_DoPageAAction.
   bool called_do_document_action_;
@@ -688,6 +699,9 @@ class PDFiumEngine : public PDFEngine,
 
   // Whether to render in grayscale or in color.
   bool render_grayscale_;
+
+  // Whether to render PDF annotations.
+  bool render_annots_;
 
   // The link currently under the cursor.
   std::string link_under_cursor_;
@@ -729,6 +743,21 @@ class ScopedUnsupportedFeature {
 
  private:
   PDFiumEngine* const old_engine_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedUnsupportedFeature);
+};
+
+// Create a local variable of this when calling PDFium functions which can call
+// our global callback when a substitute font is mapped.
+class ScopedSubstFont {
+ public:
+  explicit ScopedSubstFont(PDFiumEngine* engine);
+  ~ScopedSubstFont();
+
+ private:
+  PDFiumEngine* const old_engine_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedSubstFont);
 };
 
 class PDFiumEngineExports : public PDFEngineExports {
@@ -746,6 +775,8 @@ class PDFiumEngineExports : public PDFEngineExports {
       PDFEnsureTypefaceCharactersAccessible func) override;
 
   void SetPDFUseGDIPrinting(bool enable) override;
+
+  void SetPDFPostscriptPrintingLevel(int postscript_level) override;
 #endif  // defined(OS_WIN)
   bool RenderPDFPageToBitmap(const void* pdf_buffer,
                              int pdf_buffer_size,

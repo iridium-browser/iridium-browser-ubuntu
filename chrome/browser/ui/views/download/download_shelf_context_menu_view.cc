@@ -10,31 +10,30 @@
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
 #include "ui/gfx/geometry/point.h"
-#include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
 
 DownloadShelfContextMenuView::DownloadShelfContextMenuView(
-    content::DownloadItem* download_item)
-    : DownloadShelfContextMenu(download_item) {
-}
+    DownloadItemView* download_item_view)
+    : DownloadShelfContextMenu(download_item_view->download()),
+      download_item_view_(download_item_view) {}
 
 DownloadShelfContextMenuView::~DownloadShelfContextMenuView() {}
 
-void DownloadShelfContextMenuView::Run(views::Widget* parent_widget,
-                                       const gfx::Rect& rect,
-                                       ui::MenuSourceType source_type) {
+void DownloadShelfContextMenuView::Run(
+    views::Widget* parent_widget,
+    const gfx::Rect& rect,
+    ui::MenuSourceType source_type,
+    const base::Closure& on_menu_closed_callback) {
   ui::MenuModel* menu_model = GetMenuModel();
   // Run() should not be getting called if the DownloadItem was destroyed.
   DCHECK(menu_model);
 
-  menu_model_adapter_.reset(new views::MenuModelAdapter(
-      menu_model, base::Bind(&DownloadShelfContextMenuView::OnMenuClosed,
-                             base::Unretained(this))));
-
-  menu_runner_.reset(new views::MenuRunner(menu_model_adapter_->CreateMenu(),
-                                           views::MenuRunner::HAS_MNEMONICS |
-                                               views::MenuRunner::CONTEXT_MENU |
-                                               views::MenuRunner::ASYNC));
+  menu_runner_.reset(new views::MenuRunner(
+      menu_model,
+      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU |
+          views::MenuRunner::ASYNC,
+      base::Bind(&DownloadShelfContextMenuView::OnMenuClosed,
+                 base::Unretained(this), on_menu_closed_callback)));
 
   // The menu's alignment is determined based on the UI layout.
   views::MenuAnchorPosition position;
@@ -46,8 +45,27 @@ void DownloadShelfContextMenuView::Run(views::Widget* parent_widget,
   menu_runner_->RunMenuAt(parent_widget, NULL, rect, position, source_type);
 }
 
-void DownloadShelfContextMenuView::OnMenuClosed() {
+void DownloadShelfContextMenuView::OnMenuClosed(
+    const base::Closure& on_menu_closed_callback) {
   close_time_ = base::TimeTicks::Now();
-  menu_model_adapter_.reset();
+
+  // This must be run before clearing |menu_runner_| who owns the reference.
+  if (!on_menu_closed_callback.is_null())
+    on_menu_closed_callback.Run();
+
   menu_runner_.reset();
+}
+
+void DownloadShelfContextMenuView::ExecuteCommand(int command_id,
+                                                  int event_flags) {
+  DownloadCommands::Command command =
+      static_cast<DownloadCommands::Command>(command_id);
+  DCHECK_NE(command, DownloadCommands::DISCARD);
+
+  if (command == DownloadCommands::KEEP) {
+    download_item_view_->MaybeSubmitDownloadToFeedbackService(
+        DownloadCommands::KEEP);
+  } else {
+    DownloadShelfContextMenu::ExecuteCommand(command_id, event_flags);
+  }
 }

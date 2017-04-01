@@ -57,14 +57,11 @@ class MEDIA_EXPORT SourceBufferStream {
   };
 
   SourceBufferStream(const AudioDecoderConfig& audio_config,
-                     const scoped_refptr<MediaLog>& media_log,
-                     bool splice_frames_enabled);
+                     const scoped_refptr<MediaLog>& media_log);
   SourceBufferStream(const VideoDecoderConfig& video_config,
-                     const scoped_refptr<MediaLog>& media_log,
-                     bool splice_frames_enabled);
+                     const scoped_refptr<MediaLog>& media_log);
   SourceBufferStream(const TextTrackConfig& text_config,
-                     const scoped_refptr<MediaLog>& media_log,
-                     bool splice_frames_enabled);
+                     const scoped_refptr<MediaLog>& media_log);
 
   ~SourceBufferStream();
 
@@ -79,7 +76,6 @@ class MEDIA_EXPORT SourceBufferStream {
   // of order or overlapping. Assumes all buffers within |buffers| are in
   // presentation order and are non-overlapping.
   // Returns true if Append() was successful, false if |buffers| are not added.
-  // TODO(vrk): Implement garbage collection. (crbug.com/125070)
   bool Append(const BufferQueue& buffers);
 
   // Removes buffers between |start| and |end| according to the steps
@@ -240,6 +236,9 @@ class MEDIA_EXPORT SourceBufferStream {
   // Resets this stream back to an unseeked state.
   void ResetSeekState();
 
+  // Reset state tracking various metadata about the last appended buffer.
+  void ResetLastAppendedState();
+
   // Returns true if |seek_timestamp| refers to the beginning of the first range
   // in |ranges_|, false otherwise or if |ranges_| is empty.
   bool ShouldSeekToStartOfBuffered(base::TimeDelta seek_timestamp) const;
@@ -286,6 +285,10 @@ class MEDIA_EXPORT SourceBufferStream {
   // stream, and "TEXT" for a text stream.
   std::string GetStreamTypeName() const;
 
+  // (Audio only) If |new_buffers| overlap existing buffers, trims end of
+  // existing buffers to remove overlap. |new_buffers| are not modified.
+  void TrimSpliceOverlap(const BufferQueue& new_buffers);
+
   // Returns true if end of stream has been reached, i.e. the
   // following conditions are met:
   // 1. end of stream is marked and there is nothing in the track_buffer.
@@ -321,12 +324,15 @@ class MEDIA_EXPORT SourceBufferStream {
                       bool exclude_start,
                       BufferQueue* deleted_buffers);
 
-  Type GetType() const;
+  // Helper function used by RemoveInternal() to evaluate whether remove will
+  // disrupt the last appended GOP. If disruption is expected, reset state
+  // tracking the last append. This will trigger frame filtering in Append()
+  // until a new key frame is provided.
+  void UpdateLastAppendStateForRemove(DecodeTimestamp remove_start,
+                                      DecodeTimestamp remove_end,
+                                      bool exclude_start);
 
-  // See GetNextBuffer() for additional details.  This method handles splice
-  // frame processing.
-  Status HandleNextBufferWithSplice(
-      scoped_refptr<StreamParserBuffer>* out_buffer);
+  Type GetType() const;
 
   // See GetNextBuffer() for additional details.  This method handles preroll
   // frame processing.
@@ -335,7 +341,7 @@ class MEDIA_EXPORT SourceBufferStream {
 
   // See GetNextBuffer() for additional details.  The internal method hands out
   // single buffers from the |track_buffer_| and |selected_range_| without
-  // additional processing for splice frame or preroll buffers.
+  // additional processing for preroll buffers.
   Status GetNextBufferInternal(scoped_refptr<StreamParserBuffer>* out_buffer);
 
   // If the next buffer's timestamp is significantly beyond the last output
@@ -346,14 +352,8 @@ class MEDIA_EXPORT SourceBufferStream {
   void WarnIfTrackBufferExhaustionSkipsForward(
       const scoped_refptr<StreamParserBuffer>& next_buffer);
 
-  // Called by PrepareRangesForNextAppend() before pruning overlapped buffers to
-  // generate a splice frame with a small portion of the overlapped buffers.  If
-  // a splice frame is generated, the first buffer in |new_buffers| will have
-  // its timestamps, duration, and fade out preroll updated.
-  void GenerateSpliceFrame(const BufferQueue& new_buffers);
-
-  // If |out_buffer| has splice buffers or preroll, sets |pending_buffer_|
-  // appropriately and returns true.  Otherwise returns false.
+  // If |out_buffer| has preroll, sets |pending_buffer_| to feed out preroll and
+  // returns true.  Otherwise returns false.
   bool SetPendingBuffer(scoped_refptr<StreamParserBuffer>* out_buffer);
 
   // Used to report log messages that can help the web developer figure out what
@@ -439,24 +439,15 @@ class MEDIA_EXPORT SourceBufferStream {
   // GetCurrentXXXDecoderConfig() has been called.
   bool config_change_pending_ = false;
 
-  // Used by HandleNextBufferWithSplice() or HandleNextBufferWithPreroll() when
-  // a splice frame buffer or buffer with preroll is returned from
-  // GetNextBufferInternal().
+  // Used by HandleNextBufferWithPreroll() when a buffer with preroll is
+  // returned from GetNextBufferInternal().
   scoped_refptr<StreamParserBuffer> pending_buffer_;
-
-  // Indicates which of the splice buffers in |splice_buffer_| should be
-  // handled out next.
-  size_t splice_buffers_index_ = 0;
 
   // Indicates that all buffers before |pending_buffer_| have been handed out.
   bool pending_buffers_complete_ = false;
 
-  // Indicates that splice frame generation is enabled.
-  const bool splice_frames_enabled_;
-
-  // To prevent log spam, count the number of warnings and successes logged.
-  int num_splice_generation_warning_logs_ = 0;
-  int num_splice_generation_success_logs_ = 0;
+  // To prevent log spam, count the number of logs for different log scenarios.
+  int num_splice_logs_ = 0;
   int num_track_buffer_gap_warning_logs_ = 0;
   int num_garbage_collect_algorithm_logs_ = 0;
   int num_strange_same_timestamps_logs_ = 0;

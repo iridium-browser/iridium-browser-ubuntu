@@ -62,14 +62,16 @@ class ChromotingHostTest : public testing::Test {
     task_runner_ = new AutoThreadTaskRunner(message_loop_.task_runner(),
                                             base::Bind(&base::DoNothing));
 
-    desktop_environment_factory_.reset(new FakeDesktopEnvironmentFactory());
+    desktop_environment_factory_.reset(
+        new FakeDesktopEnvironmentFactory(message_loop_.task_runner()));
     session_manager_ = new protocol::MockSessionManager();
 
     host_.reset(new ChromotingHost(
         desktop_environment_factory_.get(), base::WrapUnique(session_manager_),
         protocol::TransportContext::ForTests(protocol::TransportRole::SERVER),
         task_runner_,    // Audio
-        task_runner_));  // Video encode
+        task_runner_,
+        DesktopEnvironmentOptions::CreateDefault()));  // Video encode
     host_->AddStatusObserver(&host_status_observer_);
 
     xmpp_login_ = "host@domain";
@@ -127,24 +129,23 @@ class ChromotingHostTest : public testing::Test {
         (connection_index == 0) ? owned_connection1_ : owned_connection2_);
     protocol::ConnectionToClient* connection_ptr = connection.get();
     std::unique_ptr<ClientSession> client(new ClientSession(
-        host_.get(), task_runner_ /* audio_task_runner */,
-        std::move(connection), desktop_environment_factory_.get(),
-        base::TimeDelta(), nullptr, std::vector<HostExtension*>()));
+        host_.get(), std::move(connection), desktop_environment_factory_.get(),
+        DesktopEnvironmentOptions::CreateDefault(), base::TimeDelta(), nullptr,
+        std::vector<HostExtension*>()));
     ClientSession* client_ptr = client.get();
 
     connection_ptr->set_host_stub(client.get());
     get_client(connection_index) = client_ptr;
 
     // |host| is responsible for deleting |client| from now on.
-    host_->clients_.push_back(client.release());
+    host_->clients_.push_back(std::move(client));
 
     if (authenticate) {
-      client_ptr->OnConnectionAuthenticated(connection_ptr);
+      client_ptr->OnConnectionAuthenticated();
       if (!reject)
-        client_ptr->OnConnectionChannelsConnected(connection_ptr);
+        client_ptr->OnConnectionChannelsConnected();
     } else {
-      client_ptr->OnConnectionClosed(connection_ptr,
-                                 protocol::AUTHENTICATION_FAILED);
+      client_ptr->OnConnectionClosed(protocol::AUTHENTICATION_FAILED);
     }
   }
 
@@ -154,10 +155,6 @@ class ChromotingHostTest : public testing::Test {
     task_runner_ = nullptr;
 
     base::RunLoop().RunUntilIdle();
-  }
-
-  void DisconnectAllClients() {
-    host_->DisconnectAllClients();
   }
 
   void NotifyConnectionClosed1() {
@@ -245,11 +242,6 @@ class ChromotingHostTest : public testing::Test {
     return (connection_index == 0) ? client1_ : client2_;
   }
 
-  // Returns the list of clients of the host_.
-  std::list<ClientSession*>& get_clients_from_host() {
-    return host_->clients_;
-  }
-
   const std::string& get_session_jid(int connection_index) {
     return (connection_index == 0) ? session_jid1_ : session_jid2_;
   }
@@ -283,7 +275,7 @@ TEST_F(ChromotingHostTest, Reconnect) {
 
   // Disconnect first client.
   ExpectClientDisconnected(0);
-  client1_->OnConnectionClosed(connection1_, protocol::OK);
+  client1_->OnConnectionClosed(protocol::OK);
 
   // Connect second client.
   ExpectClientConnected(1);
@@ -291,7 +283,7 @@ TEST_F(ChromotingHostTest, Reconnect) {
 
   // Disconnect second client.
   ExpectClientDisconnected(1);
-  client2_->OnConnectionClosed(connection2_, protocol::OK);
+  client2_->OnConnectionClosed(protocol::OK);
 }
 
 TEST_F(ChromotingHostTest, ConnectWhenAnotherClientIsConnected) {
@@ -311,7 +303,7 @@ TEST_F(ChromotingHostTest, ConnectWhenAnotherClientIsConnected) {
 
   // Disconnect second client.
   ExpectClientDisconnected(1);
-  client2_->OnConnectionClosed(connection2_, protocol::OK);
+  client2_->OnConnectionClosed(protocol::OK);
 }
 
 TEST_F(ChromotingHostTest, IncomingSessionAccepted) {
@@ -339,7 +331,8 @@ TEST_F(ChromotingHostTest, LoginBackOffUponConnection) {
   host_->OnIncomingSession(session_unowned1_.release(), &response);
   EXPECT_EQ(protocol::SessionManager::ACCEPT, response);
 
-  host_->OnSessionAuthenticating(get_clients_from_host().front());
+  host_->OnSessionAuthenticating(
+      host_->client_sessions_for_tests().front().get());
   host_->OnIncomingSession(session_unowned2_.get(), &response);
   EXPECT_EQ(protocol::SessionManager::OVERLOAD, response);
 }
@@ -363,13 +356,15 @@ TEST_F(ChromotingHostTest, LoginBackOffUponAuthenticating) {
   EXPECT_EQ(protocol::SessionManager::ACCEPT, response);
 
   // This will set the backoff.
-  host_->OnSessionAuthenticating(get_clients_from_host().front());
+  host_->OnSessionAuthenticating(
+      host_->client_sessions_for_tests().front().get());
 
   // This should disconnect client2.
-  host_->OnSessionAuthenticating(get_clients_from_host().back());
+  host_->OnSessionAuthenticating(
+      host_->client_sessions_for_tests().back().get());
 
   // Verify that the host only has 1 client at this point.
-  EXPECT_EQ(get_clients_from_host().size(), 1U);
+  EXPECT_EQ(host_->client_sessions_for_tests().size(), 1U);
 }
 
 TEST_F(ChromotingHostTest, OnSessionRouteChange) {
@@ -384,17 +379,6 @@ TEST_F(ChromotingHostTest, OnSessionRouteChange) {
   EXPECT_CALL(host_status_observer_,
               OnClientRouteChange(session_jid1_, channel_name, _));
   host_->OnSessionRouteChange(get_client(0), channel_name, route);
-}
-
-TEST_F(ChromotingHostTest, DisconnectAllClients) {
-  StartHost();
-
-  ExpectClientConnected(0);
-  SimulateClientConnection(0, true, false);
-
-  ExpectClientDisconnected(0);
-  DisconnectAllClients();
-  testing::Mock::VerifyAndClearExpectations(&host_status_observer_);
 }
 
 }  // namespace remoting

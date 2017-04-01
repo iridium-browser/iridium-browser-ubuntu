@@ -5,17 +5,27 @@
 #ifndef V8_COMPILER_LOAD_ELIMINATION_H_
 #define V8_COMPILER_LOAD_ELIMINATION_H_
 
+#include "src/base/compiler-specific.h"
 #include "src/compiler/graph-reducer.h"
+#include "src/globals.h"
+#include "src/zone/zone-handle-set.h"
 
 namespace v8 {
 namespace internal {
+
+// Forward declarations.
+class Factory;
+
 namespace compiler {
 
 // Foward declarations.
+class CommonOperatorBuilder;
 struct FieldAccess;
+class Graph;
 class JSGraph;
 
-class LoadElimination final : public AdvancedReducer {
+class V8_EXPORT_PRIVATE LoadElimination final
+    : public NON_EXPORTED_BASE(AdvancedReducer) {
  public:
   LoadElimination(Editor* editor, JSGraph* jsgraph, Zone* zone)
       : AdvancedReducer(editor), node_states_(zone), jsgraph_(jsgraph) {}
@@ -24,6 +34,39 @@ class LoadElimination final : public AdvancedReducer {
   Reduction Reduce(Node* node) final;
 
  private:
+  static const size_t kMaxTrackedChecks = 8;
+
+  // Abstract state to approximate the current state of checks that are
+  // only invalidated by calls, i.e. array buffer neutering checks, along
+  // the effect paths through the graph.
+  class AbstractChecks final : public ZoneObject {
+   public:
+    explicit AbstractChecks(Zone* zone) {
+      for (size_t i = 0; i < arraysize(nodes_); ++i) {
+        nodes_[i] = nullptr;
+      }
+    }
+    AbstractChecks(Node* node, Zone* zone) : AbstractChecks(zone) {
+      nodes_[next_index_++] = node;
+    }
+
+    AbstractChecks const* Extend(Node* node, Zone* zone) const {
+      AbstractChecks* that = new (zone) AbstractChecks(*this);
+      that->nodes_[that->next_index_] = node;
+      that->next_index_ = (that->next_index_ + 1) % arraysize(nodes_);
+      return that;
+    }
+    Node* Lookup(Node* node) const;
+    bool Equals(AbstractChecks const* that) const;
+    AbstractChecks const* Merge(AbstractChecks const* that, Zone* zone) const;
+
+    void Print() const;
+
+   private:
+    Node* nodes_[kMaxTrackedChecks];
+    size_t next_index_ = 0;
+  };
+
   static const size_t kMaxTrackedElements = 8;
 
   // Abstract state to approximate the current state of an element along the
@@ -52,6 +95,8 @@ class LoadElimination final : public AdvancedReducer {
     bool Equals(AbstractElements const* that) const;
     AbstractElements const* Merge(AbstractElements const* that,
                                   Zone* zone) const;
+
+    void Print() const;
 
    private:
     struct Element {
@@ -104,11 +149,56 @@ class LoadElimination final : public AdvancedReducer {
       return copy;
     }
 
+    void Print() const;
+
    private:
     ZoneMap<Node*, Node*> info_for_node_;
   };
 
   static size_t const kMaxTrackedFields = 32;
+
+  // Abstract state to approximate the current map of an object along the
+  // effect paths through the graph.
+  class AbstractMaps final : public ZoneObject {
+   public:
+    explicit AbstractMaps(Zone* zone) : info_for_node_(zone) {}
+    AbstractMaps(Node* object, ZoneHandleSet<Map> maps, Zone* zone)
+        : info_for_node_(zone) {
+      info_for_node_.insert(std::make_pair(object, maps));
+    }
+
+    AbstractMaps const* Extend(Node* object, ZoneHandleSet<Map> maps,
+                               Zone* zone) const {
+      AbstractMaps* that = new (zone) AbstractMaps(zone);
+      that->info_for_node_ = this->info_for_node_;
+      that->info_for_node_.insert(std::make_pair(object, maps));
+      return that;
+    }
+    bool Lookup(Node* object, ZoneHandleSet<Map>* object_maps) const;
+    AbstractMaps const* Kill(Node* object, Zone* zone) const;
+    bool Equals(AbstractMaps const* that) const {
+      return this == that || this->info_for_node_ == that->info_for_node_;
+    }
+    AbstractMaps const* Merge(AbstractMaps const* that, Zone* zone) const {
+      if (this->Equals(that)) return this;
+      AbstractMaps* copy = new (zone) AbstractMaps(zone);
+      for (auto this_it : this->info_for_node_) {
+        Node* this_object = this_it.first;
+        ZoneHandleSet<Map> this_maps = this_it.second;
+        auto that_it = that->info_for_node_.find(this_object);
+        if (that_it != that->info_for_node_.end() &&
+            that_it->second == this_maps) {
+          copy->info_for_node_.insert(this_it);
+        }
+      }
+      return copy;
+    }
+
+    void Print() const;
+
+   private:
+    ZoneMap<Node*, ZoneHandleSet<Map>> info_for_node_;
+  };
 
   class AbstractState final : public ZoneObject {
    public:
@@ -121,10 +211,16 @@ class LoadElimination final : public AdvancedReducer {
     bool Equals(AbstractState const* that) const;
     void Merge(AbstractState const* that, Zone* zone);
 
+    AbstractState const* AddMaps(Node* object, ZoneHandleSet<Map> maps,
+                                 Zone* zone) const;
+    AbstractState const* KillMaps(Node* object, Zone* zone) const;
+    bool LookupMaps(Node* object, ZoneHandleSet<Map>* object_maps) const;
+
     AbstractState const* AddField(Node* object, size_t index, Node* value,
                                   Zone* zone) const;
     AbstractState const* KillField(Node* object, size_t index,
                                    Zone* zone) const;
+    AbstractState const* KillFields(Node* object, Zone* zone) const;
     Node* LookupField(Node* object, size_t index) const;
 
     AbstractState const* AddElement(Node* object, Node* index, Node* value,
@@ -133,9 +229,16 @@ class LoadElimination final : public AdvancedReducer {
                                      Zone* zone) const;
     Node* LookupElement(Node* object, Node* index) const;
 
+    AbstractState const* AddCheck(Node* node, Zone* zone) const;
+    Node* LookupCheck(Node* node) const;
+
+    void Print() const;
+
    private:
+    AbstractChecks const* checks_ = nullptr;
     AbstractElements const* elements_ = nullptr;
     AbstractField const* fields_[kMaxTrackedFields];
+    AbstractMaps const* maps_ = nullptr;
   };
 
   class AbstractStateForEffectNodes final : public ZoneObject {
@@ -150,6 +253,7 @@ class LoadElimination final : public AdvancedReducer {
     ZoneVector<AbstractState const*> info_for_node_;
   };
 
+  Reduction ReduceArrayBufferWasNeutered(Node* node);
   Reduction ReduceCheckMaps(Node* node);
   Reduction ReduceEnsureWritableFastElements(Node* node);
   Reduction ReduceMaybeGrowFastElements(Node* node);
@@ -168,9 +272,13 @@ class LoadElimination final : public AdvancedReducer {
   AbstractState const* ComputeLoopState(Node* node,
                                         AbstractState const* state) const;
 
+  static int FieldIndexOf(int offset);
   static int FieldIndexOf(FieldAccess const& access);
 
+  CommonOperatorBuilder* common() const;
   AbstractState const* empty_state() const { return &empty_state_; }
+  Factory* factory() const;
+  Graph* graph() const;
   JSGraph* jsgraph() const { return jsgraph_; }
   Zone* zone() const { return node_states_.zone(); }
 

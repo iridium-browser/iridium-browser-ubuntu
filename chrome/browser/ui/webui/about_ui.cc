@@ -44,9 +44,11 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
+#include "components/grit/components_resources.h"
 #include "components/strings/grit/components_locale_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -56,22 +58,20 @@
 #include "content/public/common/content_client.h"
 #include "content/public/common/process_type.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-#include "grit/browser_resources.h"
-#include "grit/components_resources.h"
 #include "net/base/escape.h"
 #include "net/base/filename_util.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
-#include "third_party/brotli/dec/decode.h"
+#include "third_party/brotli/include/brotli/decode.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/gurl.h"
 
-#if defined(ENABLE_THEMES)
+#if !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/theme_source.h"
 #endif
 
@@ -424,7 +424,7 @@ std::string ChromeURLs() {
   return html;
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
 
 const char kAboutDiscardsRunCommand[] = "run";
 
@@ -582,7 +582,7 @@ std::string AboutDiscards(const std::string& path) {
   return output;
 }
 
-#endif  // OS_WIN || OS_CHROMEOS
+#endif  // OS_WIN || OS_MACOSX || OS_LINUX
 
 // AboutDnsHandler bounces the request back to the IO thread to collect
 // the DNS information.
@@ -746,8 +746,7 @@ std::string AboutUIHTMLSource::GetSource() const {
 
 void AboutUIHTMLSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   std::string response;
   // Add your data source here, in alphabetical order.
@@ -765,23 +764,30 @@ void AboutUIHTMLSource::StartDataRequest(
     base::StringPiece raw_response =
         ResourceBundle::GetSharedInstance().GetRawDataResource(idr);
     if (idr == IDR_ABOUT_UI_CREDITS_HTML) {
-      size_t decoded_size;
-      const uint8_t* encoded_response_buffer =
+      const uint8_t* next_encoded_byte =
           reinterpret_cast<const uint8_t*>(raw_response.data());
-      CHECK(BrotliDecompressedSize(raw_response.size(), encoded_response_buffer,
-                                   &decoded_size));
-
-      // Resizing the response and using it as the buffer Brotli decompresses
-      // into.
-      response.resize(decoded_size);
-      CHECK(BrotliDecompressBuffer(raw_response.size(), encoded_response_buffer,
-                                   &decoded_size,
-                                   reinterpret_cast<uint8_t*>(&response[0])) ==
-            BROTLI_RESULT_SUCCESS);
+      size_t input_size_remaining = raw_response.size();
+      BrotliDecoderState* decoder =
+          BrotliDecoderCreateInstance(nullptr /* no custom allocator */,
+                                      nullptr /* no custom deallocator */,
+                                      nullptr /* no custom memory handle */);
+      CHECK(!!decoder);
+      while (!BrotliDecoderIsFinished(decoder)) {
+        size_t output_size_remaining = 0;
+        CHECK(BrotliDecoderDecompressStream(
+                  decoder, &input_size_remaining, &next_encoded_byte,
+                  &output_size_remaining, nullptr,
+                  nullptr) != BROTLI_DECODER_RESULT_ERROR);
+        const uint8_t* output_buffer =
+            BrotliDecoderTakeOutput(decoder, &output_size_remaining);
+        response.insert(response.end(), output_buffer,
+                        output_buffer + output_size_remaining);
+      }
+      BrotliDecoderDestroyInstance(decoder);
     } else {
       response = raw_response.as_string();
     }
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
   } else if (source_name_ == chrome::kChromeUIDiscardsHost) {
     response = AboutDiscards(path);
 #endif
@@ -856,7 +862,7 @@ AboutUI::AboutUI(content::WebUI* web_ui, const std::string& name)
     : WebUIController(web_ui) {
   Profile* profile = Profile::FromWebUI(web_ui);
 
-#if defined(ENABLE_THEMES)
+#if !defined(OS_ANDROID)
   // Set up the chrome://theme/ source.
   ThemeSource* theme = new ThemeSource(profile);
   content::URLDataSource::Add(profile, theme);

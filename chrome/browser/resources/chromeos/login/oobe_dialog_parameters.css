@@ -16,17 +16,14 @@ oobe-dialog .header {
 oobe-dialog h1.title {
   color: rgba(0, 0, 0, 0.87);
   font-size: 28px;
+  font-weight: normal;
   margin: 36px 0 0 0; /* = 64 - font height*/
 }
 
 oobe-dialog .subtitle {
   color: rgba(0, 0, 0, 0.87);
   font-size: 13px;
-  margin: 27px 0 0 0; /* = 40 - line-height */
-}
-
-oobe-dialog .footer {
-  height: 100%;
+  margin: 23px 0 0 0; /* = 40 - 4 (adjustment) - line-height */
 }
 
 oobe-dialog .bottom-buttons {

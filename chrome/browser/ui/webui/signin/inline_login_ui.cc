@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/signin/inline_login_ui.h"
 
 #include "base/command_line.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/tab_helper.h"
@@ -15,13 +16,13 @@
 #include "chrome/browser/ui/webui/test_files_request_filter.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/common/content_switches.h"
-#include "grit/browser_resources.h"
-#include "grit/generated_resources.h"
 
 namespace {
 
@@ -60,8 +61,8 @@ InlineLoginUI::InlineLoginUI(content::WebUI* web_ui)
       auth_extension_(Profile::FromWebUI(web_ui)) {
   Profile* profile = Profile::FromWebUI(web_ui);
   content::WebUIDataSource::Add(profile, CreateWebUIDataSource());
-  web_ui->AddMessageHandler(new InlineLoginHandlerImpl());
-  web_ui->AddMessageHandler(new MetricsHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<InlineLoginHandlerImpl>());
+  web_ui->AddMessageHandler(base::MakeUnique<MetricsHandler>());
 
   content::WebContents* contents = web_ui->GetWebContents();
   // Required for intercepting extension function calls when the page is loaded

@@ -22,7 +22,7 @@ namespace {
 std::string GetManagedBookmarksDomain(Profile* profile) {
   policy::ProfilePolicyConnector* connector =
       policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile);
-  if (connector->IsPolicyFromCloudPolicy(policy::key::kManagedBookmarks))
+  if (connector->IsProfilePolicy(policy::key::kManagedBookmarks))
     return connector->GetManagementDomain();
   return std::string();
 }
@@ -30,9 +30,9 @@ std::string GetManagedBookmarksDomain(Profile* profile) {
 std::unique_ptr<KeyedService> BuildManagedBookmarkService(
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
-  return base::WrapUnique(new bookmarks::ManagedBookmarkService(
+  return base::MakeUnique<bookmarks::ManagedBookmarkService>(
       profile->GetPrefs(),
-      base::Bind(&GetManagedBookmarksDomain, base::Unretained(profile))));
+      base::Bind(&GetManagedBookmarksDomain, base::Unretained(profile)));
 }
 
 }  // namespace

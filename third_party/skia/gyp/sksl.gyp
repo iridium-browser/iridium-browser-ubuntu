@@ -8,15 +8,24 @@
       'target_name': 'sksl',
       'type': 'static_library',
       'standalone_static_library': 1,
-      'includes': [
-        'sksl.gypi',
+      'sources': [ '<!@(python read_gni.py ../gn/sksl.gni skia_sksl_sources)' ],
+      'include_dirs': [
+        '../include/config',
+        '../include/core',
+        '../include/gpu',
+        '../include/private',
+        '../include/utils',
+        '../src/core',
+        '../src/gpu',
+        '../src/sksl',
+        '../src/utils',
       ],
       'defines': [
         'SKIA'
       ],
       'all_dependent_settings': {
         'include_dirs': [
-          '../src/sksl',
+          '<(skia_src_path)/sksl',
         ],
       },
     },

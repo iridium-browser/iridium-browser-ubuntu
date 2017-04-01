@@ -87,8 +87,10 @@ public class TabDelegate extends TabCreator {
         Class<? extends Activity> targetActivity =
                 MultiWindowUtils.getInstance().getOpenInOtherWindowActivity(activity);
         if (targetActivity == null) return;
+
         MultiWindowUtils.setOpenInOtherWindowIntentExtras(intent, activity, targetActivity);
-        IntentHandler.addTrustedIntentExtras(intent, activity);
+        IntentHandler.addTrustedIntentExtras(intent);
+        MultiWindowUtils.onMultiInstanceModeStarted();
         activity.startActivity(intent);
     }
 
@@ -120,7 +122,7 @@ public class TabDelegate extends TabCreator {
 
         Intent intent = createNewTabIntent(
                 asyncParams, parentId, type == TabLaunchType.FROM_CHROME_UI);
-        IntentHandler.startActivityForTrustedIntent(intent, ContextUtils.getApplicationContext());
+        IntentHandler.startActivityForTrustedIntent(intent);
     }
 
     private Intent createNewTabIntent(
@@ -151,11 +153,12 @@ public class TabDelegate extends TabCreator {
         intent.putExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, mIsIncognito);
         intent.putExtra(IntentHandler.EXTRA_PARENT_TAB_ID, parentId);
 
-        if (isChromeUI) {
+        if (mIsIncognito || isChromeUI) {
             intent.putExtra(Browser.EXTRA_APPLICATION_ID,
                     ContextUtils.getApplicationContext().getPackageName());
-            intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
         }
+
+        if (isChromeUI) intent.putExtra(Browser.EXTRA_CREATE_NEW_TAB, true);
 
         Activity parentActivity = ActivityDelegate.getActivityForTabId(parentId);
         if (parentActivity != null && parentActivity.getIntent() != null) {
@@ -179,7 +182,6 @@ public class TabDelegate extends TabCreator {
         assert intent != null;
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                 | ApiCompatibilityUtils.getActivityNewDocumentFlag());
-        IntentHandler.startActivityForTrustedIntent(intent,
-                ContextUtils.getApplicationContext());
+        IntentHandler.startActivityForTrustedIntent(intent);
     }
 }

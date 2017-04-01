@@ -6,12 +6,12 @@
 
 #include <cmath>
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/display/mouse_cursor_event_filter.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/wm/window_util.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/window_targeter.h"
@@ -88,7 +88,7 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
  public:
   ScreenshotLayer(ui::Layer* parent, bool immediate_overlay)
       : draw_inactive_overlay_(immediate_overlay) {
-    SetLayer(new ui::Layer(ui::LAYER_TEXTURED));
+    SetLayer(base::MakeUnique<ui::Layer>(ui::LAYER_TEXTURED));
     layer()->SetFillsBoundsOpaquely(false);
     layer()->SetBounds(parent->bounds());
     parent->Add(layer());
@@ -137,17 +137,12 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
     DrawPseudoCursor(recorder.canvas());
 
     if (!region_.IsEmpty())
-      recorder.canvas()->FillRect(region_, SK_ColorBLACK,
-                                  SkXfermode::kClear_Mode);
+      recorder.canvas()->FillRect(region_, SK_ColorBLACK, SkBlendMode::kClear);
   }
 
   void OnDelegatedFrameDamage(const gfx::Rect& damage_rect_in_dip) override {}
 
   void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
-
-  base::Closure PrepareForLayerBoundsChange() override {
-    return base::Closure();
-  }
 
   // Mouse cursor may move sub DIP, so paint pseudo cursor instead of
   // using platform cursor so that it's aliend with the region.
@@ -169,7 +164,7 @@ class ScreenshotController::ScreenshotLayer : public ui::LayerOwner,
     paint.setAntiAlias(false);
     paint.setStrokeWidth(1);
     paint.setColor(SK_ColorWHITE);
-    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    paint.setBlendMode(SkBlendMode::kSrc);
     gfx::Vector2d width(kCursorSize / 2, 0);
     gfx::Vector2d height(0, kCursorSize / 2);
     gfx::Vector2d white_x_offset(1, -1);
@@ -260,7 +255,7 @@ void ScreenshotController::StartWindowScreenshotSession(
 
   display::Screen::GetScreen()->AddObserver(this);
   for (aura::Window* root : Shell::GetAllRootWindows()) {
-    layers_[root] = new ScreenshotLayer(
+    layers_[root] = base::MakeUnique<ScreenshotLayer>(
         Shell::GetContainer(root, kShellWindowId_OverlayContainer)->layer(),
         true);
   }
@@ -285,7 +280,7 @@ void ScreenshotController::StartPartialScreenshotSession(
   mode_ = PARTIAL;
   display::Screen::GetScreen()->AddObserver(this);
   for (aura::Window* root : Shell::GetAllRootWindows()) {
-    layers_[root] = new ScreenshotLayer(
+    layers_[root] = base::MakeUnique<ScreenshotLayer>(
         Shell::GetContainer(root, kShellWindowId_OverlayContainer)->layer(),
         draw_overlay_immediately);
   }
@@ -299,13 +294,21 @@ void ScreenshotController::StartPartialScreenshotSession(
 }
 
 void ScreenshotController::CancelScreenshotSession() {
+  for (aura::Window* root : Shell::GetAllRootWindows()) {
+    // Having pre-handled all mouse events, widgets that had mouse capture may
+    // now misbehave, so break any existing captures. Do this after the
+    // screenshot session is over so that it's still possible to screenshot
+    // things like menus.
+    aura::client::GetCaptureClient(root)->SetCapture(nullptr);
+  }
+
   mode_ = NONE;
   pen_events_only_ = false;
   root_window_ = nullptr;
   SetSelectedWindow(nullptr);
   screenshot_delegate_ = nullptr;
   display::Screen::GetScreen()->RemoveObserver(this);
-  base::STLDeleteValues(&layers_);
+  layers_.clear();
   cursor_setter_.reset();
   EnableMouseWarp(true);
 
@@ -377,7 +380,7 @@ void ScreenshotController::Update(const ui::LocatedEvent& event) {
     MaybeStart(event);
   DCHECK(layers_.find(root_window_) != layers_.end());
 
-  ScreenshotLayer* layer = layers_.at(root_window_);
+  ScreenshotLayer* layer = layers_.at(root_window_).get();
   layer->set_cursor_location_in_root(event.root_location());
   layer->SetRegion(
       gfx::Rect(std::min(start_position_.x(), event.root_location().x()),
@@ -395,8 +398,8 @@ void ScreenshotController::UpdateSelectedWindow(ui::LocatedEvent* event) {
     selected = selected->parent();
   }
 
-  if (selected->parent()->id() == kShellWindowId_DesktopBackgroundContainer ||
-      selected->parent()->id() == kShellWindowId_LockScreenBackgroundContainer)
+  if (selected->parent()->id() == kShellWindowId_WallpaperContainer ||
+      selected->parent()->id() == kShellWindowId_LockScreenWallpaperContainer)
     selected = nullptr;
 
   SetSelectedWindow(selected);

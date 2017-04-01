@@ -25,7 +25,7 @@
 #include "webrtc/media/base/mediaengine.h"  // For DataChannelType
 #include "webrtc/media/base/streamparams.h"
 #include "webrtc/p2p/base/sessiondescription.h"
-#include "webrtc/p2p/base/transport.h"
+#include "webrtc/p2p/base/jseptransport.h"
 #include "webrtc/p2p/base/transportdescriptionfactory.h"
 
 namespace cricket {
@@ -160,6 +160,7 @@ struct MediaSessionOptions {
   // bps. -1 == auto.
   int video_bandwidth;
   int data_bandwidth;
+  bool enable_ice_renomination = false;
   // content name ("mid") => options.
   std::map<std::string, TransportOptions> transport_options;
   std::string rtcp_cname;

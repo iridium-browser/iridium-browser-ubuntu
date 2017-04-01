@@ -10,10 +10,13 @@
 #include "net/base/auth.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/cert/sct_status_flags.h"
 #include "net/cert/signed_certificate_timestamp.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/http_response_headers.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "net/ssl/ssl_connection_status_flags.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 
 using base::Time;
 
@@ -31,6 +34,19 @@ X509Certificate::PickleType GetPickleTypeForVersion(int version) {
     default:
       return X509Certificate::PICKLETYPE_CERTIFICATE_CHAIN_V3;
   }
+}
+
+bool KeyExchangeGroupIsValid(int ssl_connection_status) {
+  // TLS 1.3 and later always treat the field correctly.
+  if (SSLConnectionStatusToVersion(ssl_connection_status) >=
+      SSL_CONNECTION_VERSION_TLS1_3) {
+    return true;
+  }
+
+  // Prior to TLS 1.3, only ECDHE ciphers have groups.
+  const SSL_CIPHER* cipher = SSL_get_cipher_by_value(
+      SSLConnectionStatusToCipherSuite(ssl_connection_status));
+  return cipher && SSL_CIPHER_is_ECDHE(cipher);
 }
 
 }  // namespace
@@ -68,8 +84,8 @@ enum {
   // This bit is set if the response was received via SPDY.
   RESPONSE_INFO_WAS_SPDY = 1 << 13,
 
-  // This bit is set if the request has NPN negotiated.
-  RESPONSE_INFO_WAS_NPN = 1 << 14,
+  // This bit is set if the request has ALPN negotiated.
+  RESPONSE_INFO_WAS_ALPN = 1 << 14,
 
   // This bit is set if the request was fetched via an explicit proxy.
   RESPONSE_INFO_WAS_PROXY = 1 << 15,
@@ -80,7 +96,7 @@ enum {
   RESPONSE_INFO_HAS_SSL_CONNECTION_STATUS = 1 << 16,
 
   // This bit is set if the response info has protocol version.
-  RESPONSE_INFO_HAS_NPN_NEGOTIATED_PROTOCOL = 1 << 17,
+  RESPONSE_INFO_HAS_ALPN_NEGOTIATED_PROTOCOL = 1 << 17,
 
   // This bit is set if the response info has connection info.
   RESPONSE_INFO_HAS_CONNECTION_INFO = 1 << 18,
@@ -93,8 +109,8 @@ enum {
 
   RESPONSE_INFO_UNUSED_SINCE_PREFETCH = 1 << 21,
 
-  // This bit is set if the response has a key-exchange-info field at the end.
-  RESPONSE_INFO_HAS_KEY_EXCHANGE_INFO = 1 << 22,
+  // This bit is set if the response has a key exchange group.
+  RESPONSE_INFO_HAS_KEY_EXCHANGE_GROUP = 1 << 22,
 
   // This bit is set if ssl_info recorded that PKP was bypassed due to a local
   // trust anchor.
@@ -110,7 +126,7 @@ HttpResponseInfo::HttpResponseInfo()
       server_data_unavailable(false),
       network_accessed(false),
       was_fetched_via_spdy(false),
-      was_npn_negotiated(false),
+      was_alpn_negotiated(false),
       was_fetched_via_proxy(false),
       did_use_http_auth(false),
       unused_since_prefetch(false),
@@ -123,14 +139,14 @@ HttpResponseInfo::HttpResponseInfo(const HttpResponseInfo& rhs)
       server_data_unavailable(rhs.server_data_unavailable),
       network_accessed(rhs.network_accessed),
       was_fetched_via_spdy(rhs.was_fetched_via_spdy),
-      was_npn_negotiated(rhs.was_npn_negotiated),
+      was_alpn_negotiated(rhs.was_alpn_negotiated),
       was_fetched_via_proxy(rhs.was_fetched_via_proxy),
       proxy_server(rhs.proxy_server),
       did_use_http_auth(rhs.did_use_http_auth),
       unused_since_prefetch(rhs.unused_since_prefetch),
       async_revalidation_required(rhs.async_revalidation_required),
       socket_address(rhs.socket_address),
-      npn_negotiated_protocol(rhs.npn_negotiated_protocol),
+      alpn_negotiated_protocol(rhs.alpn_negotiated_protocol),
       connection_info(rhs.connection_info),
       request_time(rhs.request_time),
       response_time(rhs.response_time),
@@ -151,13 +167,13 @@ HttpResponseInfo& HttpResponseInfo::operator=(const HttpResponseInfo& rhs) {
   network_accessed = rhs.network_accessed;
   was_fetched_via_spdy = rhs.was_fetched_via_spdy;
   proxy_server = rhs.proxy_server;
-  was_npn_negotiated = rhs.was_npn_negotiated;
+  was_alpn_negotiated = rhs.was_alpn_negotiated;
   was_fetched_via_proxy = rhs.was_fetched_via_proxy;
   did_use_http_auth = rhs.did_use_http_auth;
   unused_since_prefetch = rhs.unused_since_prefetch;
   async_revalidation_required = rhs.async_revalidation_required;
   socket_address = rhs.socket_address;
-  npn_negotiated_protocol = rhs.npn_negotiated_protocol;
+  alpn_negotiated_protocol = rhs.alpn_negotiated_protocol;
   connection_info = rhs.connection_info;
   request_time = rhs.request_time;
   response_time = rhs.response_time;
@@ -239,6 +255,8 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
       uint16_t status;
       if (!sct.get() || !iter.ReadUInt16(&status))
         return false;
+      if (!net::ct::IsValidSCTStatus(status))
+        return false;
       ssl_info.signed_certificate_timestamps.push_back(
           SignedCertificateTimestampAndStatus(
               sct, static_cast<ct::SCTVerifyStatus>(status)));
@@ -266,8 +284,8 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
   }
 
   // Read protocol-version.
-  if (flags & RESPONSE_INFO_HAS_NPN_NEGOTIATED_PROTOCOL) {
-    if (!iter.ReadString(&npn_negotiated_protocol))
+  if (flags & RESPONSE_INFO_HAS_ALPN_NEGOTIATED_PROTOCOL) {
+    if (!iter.ReadString(&alpn_negotiated_protocol))
       return false;
   }
 
@@ -283,17 +301,22 @@ bool HttpResponseInfo::InitFromPickle(const base::Pickle& pickle,
     }
   }
 
-  // Read key_exchange_info
-  if (flags & RESPONSE_INFO_HAS_KEY_EXCHANGE_INFO) {
-    int key_exchange_info;
-    if (!iter.ReadInt(&key_exchange_info))
+  // Read key_exchange_group
+  if (flags & RESPONSE_INFO_HAS_KEY_EXCHANGE_GROUP) {
+    int key_exchange_group;
+    if (!iter.ReadInt(&key_exchange_group))
       return false;
-    ssl_info.key_exchange_info = key_exchange_info;
+
+    // Historically, the key_exchange_group field was key_exchange_info which
+    // conflated a number of different values based on the cipher suite, so some
+    // values must be discarded. See https://crbug.com/639421.
+    if (KeyExchangeGroupIsValid(ssl_info.connection_status))
+      ssl_info.key_exchange_group = key_exchange_group;
   }
 
   was_fetched_via_spdy = (flags & RESPONSE_INFO_WAS_SPDY) != 0;
 
-  was_npn_negotiated = (flags & RESPONSE_INFO_WAS_NPN) != 0;
+  was_alpn_negotiated = (flags & RESPONSE_INFO_WAS_ALPN) != 0;
 
   was_fetched_via_proxy = (flags & RESPONSE_INFO_WAS_PROXY) != 0;
 
@@ -317,8 +340,8 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
     flags |= RESPONSE_INFO_HAS_CERT_STATUS;
     if (ssl_info.security_bits != -1)
       flags |= RESPONSE_INFO_HAS_SECURITY_BITS;
-    if (ssl_info.key_exchange_info != 0)
-      flags |= RESPONSE_INFO_HAS_KEY_EXCHANGE_INFO;
+    if (ssl_info.key_exchange_group != 0)
+      flags |= RESPONSE_INFO_HAS_KEY_EXCHANGE_GROUP;
     if (ssl_info.connection_status != 0)
       flags |= RESPONSE_INFO_HAS_SSL_CONNECTION_STATUS;
   }
@@ -328,9 +351,9 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
     flags |= RESPONSE_INFO_TRUNCATED;
   if (was_fetched_via_spdy)
     flags |= RESPONSE_INFO_WAS_SPDY;
-  if (was_npn_negotiated) {
-    flags |= RESPONSE_INFO_WAS_NPN;
-    flags |= RESPONSE_INFO_HAS_NPN_NEGOTIATED_PROTOCOL;
+  if (was_alpn_negotiated) {
+    flags |= RESPONSE_INFO_WAS_ALPN;
+    flags |= RESPONSE_INFO_HAS_ALPN_NEGOTIATED_PROTOCOL;
   }
   if (was_fetched_via_proxy)
     flags |= RESPONSE_INFO_WAS_PROXY;
@@ -387,31 +410,42 @@ void HttpResponseInfo::Persist(base::Pickle* pickle,
   pickle->WriteString(socket_address.host());
   pickle->WriteUInt16(socket_address.port());
 
-  if (was_npn_negotiated)
-    pickle->WriteString(npn_negotiated_protocol);
+  if (was_alpn_negotiated)
+    pickle->WriteString(alpn_negotiated_protocol);
 
   if (connection_info != CONNECTION_INFO_UNKNOWN)
     pickle->WriteInt(static_cast<int>(connection_info));
 
-  if (ssl_info.is_valid() && ssl_info.key_exchange_info != 0)
-    pickle->WriteInt(ssl_info.key_exchange_info);
+  if (ssl_info.is_valid() && ssl_info.key_exchange_group != 0)
+    pickle->WriteInt(ssl_info.key_exchange_group);
 }
 
-HttpResponseInfo::ConnectionInfo HttpResponseInfo::ConnectionInfoFromNextProto(
-    NextProto next_proto) {
-  switch (next_proto) {
-    case kProtoHTTP2:
-      return CONNECTION_INFO_HTTP2;
-    case kProtoQUIC1SPDY3:
-      return CONNECTION_INFO_QUIC1_SPDY3;
-
-    case kProtoUnknown:
-    case kProtoHTTP11:
-      break;
+bool HttpResponseInfo::DidUseQuic() const {
+  switch (connection_info) {
+    case CONNECTION_INFO_UNKNOWN:
+    case CONNECTION_INFO_HTTP1_1:
+    case CONNECTION_INFO_DEPRECATED_SPDY2:
+    case CONNECTION_INFO_DEPRECATED_SPDY3:
+    case CONNECTION_INFO_HTTP2:
+    case CONNECTION_INFO_DEPRECATED_HTTP2_14:
+    case CONNECTION_INFO_DEPRECATED_HTTP2_15:
+    case CONNECTION_INFO_HTTP0_9:
+    case CONNECTION_INFO_HTTP1_0:
+      return false;
+    case CONNECTION_INFO_QUIC_UNKNOWN_VERSION:
+    case CONNECTION_INFO_QUIC_32:
+    case CONNECTION_INFO_QUIC_33:
+    case CONNECTION_INFO_QUIC_34:
+    case CONNECTION_INFO_QUIC_35:
+    case CONNECTION_INFO_QUIC_36:
+    case CONNECTION_INFO_QUIC_37:
+      return true;
+    case NUM_OF_CONNECTION_INFOS:
+      NOTREACHED();
+      return false;
   }
-
   NOTREACHED();
-  return CONNECTION_INFO_UNKNOWN;
+  return false;
 }
 
 // static
@@ -435,8 +469,20 @@ std::string HttpResponseInfo::ConnectionInfoToString(
     case CONNECTION_INFO_DEPRECATED_HTTP2_15:
     case CONNECTION_INFO_HTTP2:
       return "h2";
-    case CONNECTION_INFO_QUIC1_SPDY3:
-      return "quic/1+spdy/3";
+    case CONNECTION_INFO_QUIC_UNKNOWN_VERSION:
+      return "http/2+quic";
+    case CONNECTION_INFO_QUIC_32:
+      return "http/2+quic/32";
+    case CONNECTION_INFO_QUIC_33:
+      return "http/2+quic/33";
+    case CONNECTION_INFO_QUIC_34:
+      return "http/2+quic/34";
+    case CONNECTION_INFO_QUIC_35:
+      return "http/2+quic/35";
+    case CONNECTION_INFO_QUIC_36:
+      return "http/2+quic/36";
+    case CONNECTION_INFO_QUIC_37:
+      return "http/2+quic/37";
     case CONNECTION_INFO_HTTP0_9:
       return "http/0.9";
     case CONNECTION_INFO_HTTP1_0:

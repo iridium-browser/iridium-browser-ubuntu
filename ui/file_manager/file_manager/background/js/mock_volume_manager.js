@@ -7,7 +7,7 @@
  * @constructor
  */
 function MockVolumeManager() {
-  this.volumeInfoList = new VolumeInfoList();
+  this.volumeInfoList = new VolumeInfoListImpl();
   this.driveConnectionState = {
     type: VolumeManagerCommon.DriveConnectionType.ONLINE
   };
@@ -33,7 +33,7 @@ MockVolumeManager.instance_ = null;
 MockVolumeManager.installMockSingleton = function(opt_singleton) {
   MockVolumeManager.instance_ = opt_singleton || new MockVolumeManager();
 
-  VolumeManager.getInstance = function() {
+  volumeManagerFactory.getInstance = function() {
     return Promise.resolve(MockVolumeManager.instance_);
   };
 };
@@ -74,14 +74,14 @@ MockVolumeManager.prototype.getVolumeInfo = function(entry) {
  */
 MockVolumeManager.prototype.getLocationInfo = function(entry) {
   if (util.isFakeEntry(entry)) {
-    return new EntryLocation(this.volumeInfoList.item(0), entry.rootType, true,
-        true);
+    return new EntryLocationImpl(this.volumeInfoList.item(0), entry.rootType,
+        true, true);
   }
 
   if (entry.filesystem.name === VolumeManagerCommon.VolumeType.DRIVE) {
     var volumeInfo = this.volumeInfoList.item(0);
     var isRootEntry = entry.fullPath === '/root';
-    return new EntryLocation(volumeInfo, VolumeManagerCommon.RootType.DRIVE,
+    return new EntryLocationImpl(volumeInfo, VolumeManagerCommon.RootType.DRIVE,
         isRootEntry, true);
   }
 
@@ -93,7 +93,7 @@ MockVolumeManager.prototype.getLocationInfo = function(entry) {
  * @return {VolumeInfo} Volume info.
  */
 MockVolumeManager.prototype.getCurrentProfileVolumeInfo = function(volumeType) {
-  return VolumeManager.prototype.getCurrentProfileVolumeInfo.call(
+  return VolumeManagerImpl.prototype.getCurrentProfileVolumeInfo.call(
       this, volumeType);
 };
 
@@ -123,7 +123,8 @@ MockVolumeManager.createMockVolumeInfo = function(type, volumeId, label) {
       '',      // error
       '',      // deviceType
       '',      // devicePath
-      false,   // isReadonly
+      false,   // isReadOnly
+      false,   // isReadOnlyRemovableDevice
       {isCurrentProfile: true, displayName: ''},  // profile
       label,   // label
       '',      // extensionId
@@ -165,7 +166,7 @@ MockVolumeManagerWrapper.instance_ = null;
 MockVolumeManagerWrapper.installMockSingleton = function(opt_singleton) {
   MockVolumeManagerWrapper.instance_ =
       opt_singleton || new MockVolumeManagerWrapper();
-  VolumeManager.getInstance = function() {
+  volumeManagerFactory.getInstance = function() {
     return Promise.resolve(MockVolumeManagerWrapper.instance_);
   };
 };
@@ -207,13 +208,13 @@ MockVolumeManagerWrapper.prototype.getVolumeInfo = function(entry) {
  */
 MockVolumeManagerWrapper.prototype.getLocationInfo = function(entry) {
   if (util.isFakeEntry(entry)) {
-    return new EntryLocation(this.volumeInfoList.item(0), entry.rootType, true,
-        true);
+    return new EntryLocationImpl(this.volumeInfoList.item(0), entry.rootType,
+        true, true);
   }
   if (entry.filesystem.name === VolumeManagerCommon.VolumeType.DRIVE) {
     var volumeInfo = this.volumeInfoList.item(0);
     var isRootEntry = entry.fullPath === '/root';
-    return new EntryLocation(volumeInfo, VolumeManagerCommon.RootType.DRIVE,
+    return new EntryLocationImpl(volumeInfo, VolumeManagerCommon.RootType.DRIVE,
         isRootEntry, true);
   }
   throw new Error('Not implemented exception.');
@@ -255,6 +256,7 @@ MockVolumeManagerWrapper.createMockVolumeInfo =
       '',     // deviceType
       '',     // devicePath
       false,  // isReadonly
+      false,  // isReadOnlyRemovableDevice
       {isCurrentProfile: true, displayName: ''},  // profile
       label,  // label
       '',     // extensionId

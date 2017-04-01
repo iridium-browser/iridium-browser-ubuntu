@@ -12,7 +12,7 @@
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket_impl.h"
 #include "net/socket/tcp_client_socket.h"
-#include "net/udp/udp_client_socket.h"
+#include "net/socket/udp_client_socket.h"
 
 namespace net {
 
@@ -33,14 +33,8 @@ class DefaultClientSocketFactory : public ClientSocketFactory,
     CertDatabase::GetInstance()->RemoveObserver(this);
   }
 
-  void OnCertAdded(const X509Certificate* cert) override {
-    ClearSSLSessionCache();
-  }
-
-  void OnCACertChanged(const X509Certificate* cert) override {
-    // Per wtc, we actually only need to flush when trust is reduced.
-    // Always flush now because OnCACertChanged does not tell us this.
-    // See comments in ClientSocketPoolManager::OnCACertChanged.
+  void OnCertDBChanged(const X509Certificate* cert) override {
+    // Flush sockets whenever CA trust changes.
     ClearSSLSessionCache();
   }
 
@@ -48,7 +42,7 @@ class DefaultClientSocketFactory : public ClientSocketFactory,
       DatagramSocket::BindType bind_type,
       const RandIntCallback& rand_int_cb,
       NetLog* net_log,
-      const NetLog::Source& source) override {
+      const NetLogSource& source) override {
     return std::unique_ptr<DatagramClientSocket>(
         new UDPClientSocket(bind_type, rand_int_cb, net_log, source));
   }
@@ -57,7 +51,7 @@ class DefaultClientSocketFactory : public ClientSocketFactory,
       const AddressList& addresses,
       std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
       NetLog* net_log,
-      const NetLog::Source& source) override {
+      const NetLogSource& source) override {
     return std::unique_ptr<StreamSocket>(new TCPClientSocket(
         addresses, std::move(socket_performance_watcher), net_log, source));
   }

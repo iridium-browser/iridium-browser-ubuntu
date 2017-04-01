@@ -7,10 +7,11 @@ package org.chromium.chrome.browser.media.remote;
 import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
 
 import android.graphics.Rect;
-import android.test.suitebuilder.annotation.LargeTest;
+import android.support.test.filters.LargeTest;
 
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.content.browser.test.util.JavaScriptUtils;
 
@@ -22,6 +23,7 @@ import java.util.concurrent.TimeoutException;
  * Tests related to the transfer of the playback position between the local and
  * the remote player.
  */
+@RetryOnFailure
 public class CastPositionTransferTest extends CastTestBase {
 
     /** Reference position in the video where we should start casting */
@@ -64,6 +66,7 @@ public class CastPositionTransferTest extends CastTestBase {
     /** Test for crbug.com/428409 */
     @Feature({"VideoFling"})
     @LargeTest
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE) // crbug.com/652872
     public void testLocalToRemotePositionTransfer() throws InterruptedException, TimeoutException {
         final Tab tab = getActivity().getActivityTab();
         final Rect videoRect = prepareDefaultVideofromPage(DEFAULT_VIDEO_PAGE, tab);
@@ -91,6 +94,7 @@ public class CastPositionTransferTest extends CastTestBase {
     /** Test for crbug.com/428409 */
     @Feature({"VideoFling"})
     @LargeTest
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE) // crbug.com/652872
     public void testRemoteToLocalPositionTransfer() throws InterruptedException, TimeoutException {
         final Tab tab = getActivity().getActivityTab();
         final Rect videoRect = prepareDefaultVideofromPage(DEFAULT_VIDEO_PAGE, tab);
@@ -136,7 +140,7 @@ public class CastPositionTransferTest extends CastTestBase {
     /** Test for crbug.com/425105 */
     @Feature({"VideoFling"})
     @LargeTest
-    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE) // Flaky - crbug.com/593840
+    @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE) // crbug.com/593840, crbug.com/652872
     public void testPositionUpdate() throws InterruptedException, TimeoutException {
         final Tab tab = getActivity().getActivityTab();
         final Rect videoRect = prepareDefaultVideofromPage(DEFAULT_VIDEO_PAGE, tab);

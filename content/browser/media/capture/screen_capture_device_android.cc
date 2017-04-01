@@ -11,7 +11,7 @@
 namespace content {
 
 ScreenCaptureDeviceAndroid::ScreenCaptureDeviceAndroid()
-    : core_(base::WrapUnique(new media::ScreenCaptureMachineAndroid())) {}
+    : core_(base::MakeUnique<media::ScreenCaptureMachineAndroid>()) {}
 
 ScreenCaptureDeviceAndroid::~ScreenCaptureDeviceAndroid() {
   DVLOG(2) << "ScreenCaptureDeviceAndroid@" << this << " destroying.";
@@ -31,4 +31,10 @@ void ScreenCaptureDeviceAndroid::StopAndDeAllocate() {
 void ScreenCaptureDeviceAndroid::RequestRefreshFrame() {
   core_.RequestRefreshFrame();
 }
+
+void ScreenCaptureDeviceAndroid::OnUtilizationReport(int frame_feedback_id,
+                                                     double utilization) {
+  core_.OnConsumerReportingUtilization(frame_feedback_id, utilization);
+}
+
 }  // namespace content

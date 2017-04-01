@@ -11,15 +11,17 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
+#include "chrome/browser/ui/passwords/password_dialog_prompts.h"
 #include "chrome/browser/ui/passwords/passwords_model_delegate.h"
+#include "chrome/browser/ui/views/desktop_ios_promotion/desktop_ios_promotion_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 #include "chrome/browser/ui/views/passwords/credentials_selection_view.h"
 #include "chrome/browser/ui/views/passwords/manage_password_items_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_views.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -40,9 +42,6 @@ int ManagePasswordsBubbleView::auto_signin_toast_timeout_ = 3;
 // Helpers --------------------------------------------------------------------
 
 namespace {
-
-const int kDesiredBubbleWidth = 370;
-const SkColor kWarmWelcomeColor = SkColorSetARGB(0xFF, 0x64, 0x64, 0x64);
 
 enum ColumnSetType {
   // | | (FILL, FILL) | |
@@ -76,7 +75,7 @@ enum TextRowType { ROW_SINGLE, ROW_MULTILINE };
 // to |layout|.
 void BuildColumnSet(views::GridLayout* layout, ColumnSetType type) {
   views::ColumnSet* column_set = layout->AddColumnSet(type);
-  int full_width = kDesiredBubbleWidth;
+  int full_width = ManagePasswordsBubbleView::kDesiredBubbleWidth;
   switch (type) {
     case SINGLE_VIEW_COLUMN_SET:
       column_set->AddColumn(views::GridLayout::FILL,
@@ -218,13 +217,10 @@ ManagePasswordsBubbleView::AutoSigninView::AutoSigninView(
   SetLayoutManager(new views::FillLayout);
   const autofill::PasswordForm& form = parent_->model()->pending_password();
   CredentialsItemView* credential = new CredentialsItemView(
-      this,
-      base::string16(),
+      this, base::string16(),
       l10n_util::GetStringFUTF16(IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE,
                                  form.username_value),
-      GetNativeTheme()->GetSystemColor(
-          ui::NativeTheme::kColorId_ButtonBackgroundColor),
-      &form,
+      kButtonHoverColor, &form,
       parent_->model()->GetProfile()->GetRequestContext());
   credential->SetEnabled(false);
   AddChildView(credential);
@@ -321,21 +317,6 @@ ManagePasswordsBubbleView::PendingView::PendingView(
     layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
   }
 
-  // Smart Lock warm welcome.
-  if (parent_->model()->ShouldShowGoogleSmartLockWelcome()) {
-    views::Label* smart_lock_label = new views::Label(
-        l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_SMART_LOCK_WELCOME));
-    smart_lock_label->SetMultiLine(true);
-    smart_lock_label->SetFontList(
-        ui::ResourceBundle::GetSharedInstance().GetFontList(
-            ui::ResourceBundle::SmallFont));
-    smart_lock_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    smart_lock_label->SetEnabledColor(kWarmWelcomeColor);
-    layout->StartRow(0, SINGLE_VIEW_COLUMN_SET);
-    layout->AddView(smart_lock_label);
-    layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
-  }
-
   // Button row.
   BuildColumnSet(layout, DOUBLE_BUTTON_COLUMN_SET);
   layout->StartRow(0, DOUBLE_BUTTON_COLUMN_SET);
@@ -353,7 +334,7 @@ void ManagePasswordsBubbleView::PendingView::ButtonPressed(
     const ui::Event& event) {
   if (sender == save_button_) {
     parent_->model()->OnSaveClicked();
-    if (parent_->model()->ReplaceToShowSignInPromoIfNeeded()) {
+    if (parent_->model()->ReplaceToShowPromotionIfNeeded()) {
       parent_->Refresh();
       return;
     }
@@ -655,7 +636,7 @@ ManagePasswordsBubbleView::UpdatePendingView::UpdatePendingView(
   nope_button_ = views::MdTextButton::CreateSecondaryUiButton(
       this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_CANCEL_BUTTON));
 
-  update_button_ = new views::BlueButton(
+  update_button_ = views::MdTextButton::CreateSecondaryUiBlueButton(
       this, l10n_util::GetStringUTF16(IDS_PASSWORD_MANAGER_UPDATE_BUTTON));
 
   // Title row.
@@ -722,10 +703,15 @@ void ManagePasswordsBubbleView::ShowBubble(
 
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   bool is_fullscreen = browser_view->IsFullscreen();
-  ManagePasswordsIconViews* anchor_view =
-      is_fullscreen
-          ? NULL
-          : browser_view->GetLocationBarView()->manage_passwords_icon_view();
+  views::View* anchor_view = nullptr;
+  if (!is_fullscreen) {
+    if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+      anchor_view = browser_view->GetLocationBarView();
+    } else {
+      anchor_view =
+          browser_view->GetLocationBarView()->manage_passwords_icon_view();
+    }
+  }
   manage_passwords_bubble_ = new ManagePasswordsBubbleView(
       web_contents, anchor_view, reason);
 
@@ -734,8 +720,10 @@ void ManagePasswordsBubbleView::ShowBubble(
 
   views::Widget* manage_passwords_bubble_widget =
       views::BubbleDialogDelegateView::CreateBubble(manage_passwords_bubble_);
-  if (anchor_view)
-    manage_passwords_bubble_widget->AddObserver(anchor_view);
+  if (anchor_view) {
+    manage_passwords_bubble_widget->AddObserver(
+        browser_view->GetLocationBarView()->manage_passwords_icon_view());
+  }
 
   // Adjust for fullscreen after creation as it relies on the content size.
   if (is_fullscreen) {
@@ -808,7 +796,8 @@ bool ManagePasswordsBubbleView::ShouldShowWindowTitle() const {
 
 bool ManagePasswordsBubbleView::ShouldShowCloseButton() const {
   return model_.state() == password_manager::ui::PENDING_PASSWORD_STATE ||
-      model_.state() == password_manager::ui::CHROME_SIGN_IN_PROMO_STATE;
+         model_.state() == password_manager::ui::CHROME_SIGN_IN_PROMO_STATE ||
+         model_.state() == password_manager::ui::CHROME_DESKTOP_IOS_PROMO_STATE;
 }
 
 void ManagePasswordsBubbleView::Refresh() {
@@ -835,6 +824,10 @@ void ManagePasswordsBubbleView::CreateChild() {
   } else if (model_.state() ==
              password_manager::ui::CHROME_SIGN_IN_PROMO_STATE) {
     AddChildView(new SignInPromoView(this));
+  } else if (model_.state() ==
+             password_manager::ui::CHROME_DESKTOP_IOS_PROMO_STATE) {
+    AddChildView(new DesktopIOSPromotionView(
+        desktop_ios_promotion::PromotionEntryPoint::SAVE_PASSWORD_BUBBLE));
   } else {
     AddChildView(new ManageView(this));
   }

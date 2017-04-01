@@ -17,7 +17,7 @@ import java.util.ArrayList;
 /**
  * Triggers updates to the underlying network state in Chrome.
  *
- * By default, connectivity is assumed and changes must pushed from the embedder via the
+ * By default, connectivity is assumed and changes must be pushed from the embedder via the
  * forceConnectivityState function.
  * Embedders may choose to have this class auto-detect changes in network connectivity by invoking
  * the setAutoDetectConnectivityState function.
@@ -77,9 +77,9 @@ public class NetworkChangeNotifier {
 
     @CalledByNative
     public int getCurrentConnectionSubtype() {
-        return mAutoDetector == null
-                ? ConnectionSubtype.SUBTYPE_UNKNOWN
-                : mAutoDetector.getCurrentConnectionSubtype(mAutoDetector.getCurrentNetworkState());
+        return mAutoDetector == null ? ConnectionSubtype.SUBTYPE_UNKNOWN
+                                     : NetworkChangeNotifierAutoDetect.convertToConnectionSubtype(
+                                               mAutoDetector.getCurrentNetworkState());
     }
 
     @CalledByNative
@@ -217,7 +217,8 @@ public class NetworkChangeNotifier {
                         mContext, policy);
                 final NetworkChangeNotifierAutoDetect.NetworkState networkState =
                         mAutoDetector.getCurrentNetworkState();
-                updateCurrentConnectionType(mAutoDetector.getCurrentConnectionType(networkState));
+                updateCurrentConnectionType(
+                        NetworkChangeNotifierAutoDetect.convertToConnectionType(networkState));
                 updateCurrentMaxBandwidth(mAutoDetector.getCurrentMaxBandwidthInMbps(networkState));
             }
         } else {

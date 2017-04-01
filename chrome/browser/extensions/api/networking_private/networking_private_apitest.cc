@@ -98,7 +98,7 @@ class TestDelegate : public NetworkingPrivateDelegate {
       network->SetString(::onc::network_config::kType,
                          ::onc::network_config::kEthernet);
       network->SetString(::onc::network_config::kGUID, kGuid);
-      result->Append(network.release());
+      result->Append(std::move(network));
       success_callback.Run(std::move(result));
     }
   }
@@ -181,6 +181,10 @@ class TestDelegate : public NetworkingPrivateDelegate {
     properties->state = api::networking_private::DEVICE_STATE_TYPE_ENABLED;
     result->push_back(std::move(properties));
     return result;
+  }
+
+  std::unique_ptr<base::DictionaryValue> GetGlobalPolicy() override {
+    return base::MakeUnique<base::DictionaryValue>();
   }
 
   bool EnableNetworkType(const std::string& type) override {
@@ -462,6 +466,10 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, SetCellularSimState) {
   EXPECT_TRUE(RunNetworkingSubtest("setCellularSimState")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, GetGlobalPolicy) {
+  EXPECT_TRUE(RunNetworkingSubtest("getGlobalPolicy")) << message_;
+}
+
 // Test failure case
 
 class NetworkingPrivateApiTestFail : public NetworkingPrivateApiTest {
@@ -516,6 +524,7 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, GetDeviceStates) {
 // * disableNetworkType
 // * enableNetworkType
 // * requestNetworkScan
+// * getGlobalPolicy
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTestFail, StartConnect) {
   EXPECT_FALSE(RunNetworkingSubtest("startConnect")) << message_;

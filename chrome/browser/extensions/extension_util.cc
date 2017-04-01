@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/extension_util.h"
 
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
@@ -44,10 +46,6 @@ namespace extensions {
 namespace util {
 
 namespace {
-
-const char kSupervisedUserExtensionPermissionIncreaseFieldTrialName[] =
-    "SupervisedUserExtensionPermissionIncrease";
-
 // The entry into the prefs used to flag an extension as installed by custodian.
 // It is relevant only for supervised users.
 const char kWasInstalledByCustodianPrefName[] = "was_installed_by_custodian";
@@ -55,7 +53,7 @@ const char kWasInstalledByCustodianPrefName[] = "was_installed_by_custodian";
 // Returns true if |extension| should always be enabled in incognito mode.
 bool IsWhitelistedForIncognito(const Extension* extension) {
   const Feature* feature = FeatureProvider::GetBehaviorFeature(
-      BehaviorFeature::kWhitelistedForIncognito);
+      behavior_feature::kWhitelistedForIncognito);
   return feature && feature->IsAvailableToExtension(extension).is_available();
 }
 
@@ -312,11 +310,9 @@ std::unique_ptr<base::DictionaryValue> GetExtensionInfo(
   dict->SetString("name", extension->name());
 
   GURL icon = extensions::ExtensionIconSource::GetIconURL(
-      extension,
-      extension_misc::EXTENSION_ICON_SMALLISH,
+      extension, extension_misc::EXTENSION_ICON_SMALLISH,
       ExtensionIconSet::MATCH_BIGGER,
-      false,  // Not grayscale.
-      NULL);  // Don't set bool if exists.
+      false);  // Not grayscale.
   dict->SetString("icon", icon.spec());
 
   return dict;
@@ -354,18 +350,6 @@ bool CanHostedAppsOpenInWindows() {
 bool IsExtensionSupervised(const Extension* extension, Profile* profile) {
   return WasInstalledByCustodian(extension->id(), profile) &&
          profile->IsSupervised();
-}
-
-bool NeedCustodianApprovalForPermissionIncrease(const Profile* profile) {
-  if (!profile->IsSupervised())
-    return false;
-  // Query the trial group name first, to make sure it's properly initialized.
-  base::FieldTrialList::FindFullName(
-      kSupervisedUserExtensionPermissionIncreaseFieldTrialName);
-  std::string value = variations::GetVariationParamValue(
-      kSupervisedUserExtensionPermissionIncreaseFieldTrialName,
-      profile->IsChild() ? "child_account" : "legacy_supervised_user");
-  return value == "true";
 }
 
 }  // namespace util

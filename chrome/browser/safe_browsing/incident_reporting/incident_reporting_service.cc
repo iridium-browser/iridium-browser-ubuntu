@@ -15,10 +15,9 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/process_info.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -39,6 +38,7 @@
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing_db/database_manager.h"
+#include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "components/user_prefs/tracked/tracked_preference_validation_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -135,8 +135,7 @@ bool ProfileCanAcceptIncident(Profile* profile, const Incident& incident) {
     case MinimumProfileConsent::SAFE_BROWSING_ENABLED:
       return true;
     case MinimumProfileConsent::SAFE_BROWSING_EXTENDED_REPORTING_ENABLED:
-      return profile->GetPrefs()->GetBoolean(
-          prefs::kSafeBrowsingExtendedReportingEnabled);
+      return IsExtendedReportingEnabled(*profile->GetPrefs());
   }
   NOTREACHED();
   return false;
@@ -330,8 +329,7 @@ bool IncidentReportingService::IsEnabledForProfile(Profile* profile) {
     return false;
   if (IsFieldTrialEnabled())
     return true;
-  return profile->GetPrefs()->GetBoolean(
-      prefs::kSafeBrowsingExtendedReportingEnabled);
+  return IsExtendedReportingEnabled(*profile->GetPrefs());
 #endif
 }
 
@@ -395,8 +393,6 @@ IncidentReportingService::~IncidentReportingService() {
   CancelEnvironmentCollection();
   CancelDownloadCollection();
   CancelAllReportUploads();
-
-  base::STLDeleteValues(&profiles_);
 }
 
 std::unique_ptr<IncidentReceiver>
@@ -444,9 +440,7 @@ void IncidentReportingService::
   // extended reporting. If none are now, running will commence if/when such a
   // profile is added.
   Profile* profile = FindEligibleProfile();
-  if (profile &&
-      profile->GetPrefs()->GetBoolean(
-          prefs::kSafeBrowsingExtendedReportingEnabled)) {
+  if (profile && IsExtendedReportingEnabled(*profile->GetPrefs())) {
     extended_reporting_only_delayed_analysis_callbacks_.Start();
   }
 }
@@ -536,8 +530,7 @@ void IncidentReportingService::OnProfileAdded(Profile* profile) {
     // if they're already running.
     delayed_analysis_callbacks_.Start();
 
-    if (profile->GetPrefs()->GetBoolean(
-            prefs::kSafeBrowsingExtendedReportingEnabled)) {
+    if (IsExtendedReportingEnabled(*profile->GetPrefs())) {
       extended_reporting_only_delayed_analysis_callbacks_.Start();
     }
 
@@ -592,29 +585,27 @@ bool IncidentReportingService::IsProcessingReport() const {
 
 IncidentReportingService::ProfileContext*
 IncidentReportingService::GetOrCreateProfileContext(Profile* profile) {
-  ProfileContextCollection::iterator it =
-      profiles_.insert(ProfileContextCollection::value_type(profile, nullptr))
-          .first;
-  if (!it->second)
-    it->second = new ProfileContext();
-  return it->second;
+  std::unique_ptr<ProfileContext>& context = profiles_[profile];
+  if (!context)
+    context = base::MakeUnique<ProfileContext>();
+  return context.get();
 }
 
 IncidentReportingService::ProfileContext*
 IncidentReportingService::GetProfileContext(Profile* profile) {
-  ProfileContextCollection::iterator it = profiles_.find(profile);
-  return it != profiles_.end() ? it->second : nullptr;
+  auto it = profiles_.find(profile);
+  return it != profiles_.end() ? it->second.get() : nullptr;
 }
 
 void IncidentReportingService::OnProfileDestroyed(Profile* profile) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  ProfileContextCollection::iterator it = profiles_.find(profile);
+  auto it = profiles_.find(profile);
   if (it == profiles_.end())
     return;
 
   // Take ownership of the context.
-  std::unique_ptr<ProfileContext> context(it->second);
+  std::unique_ptr<ProfileContext> context = std::move(it->second);
   it->second = nullptr;
 
   // TODO(grt): Persist incidents for upload on future profile load.
@@ -630,26 +621,23 @@ void IncidentReportingService::OnProfileDestroyed(Profile* profile) {
 
 Profile* IncidentReportingService::FindEligibleProfile() const {
   Profile* candidate = nullptr;
-  for (ProfileContextCollection::const_iterator scan = profiles_.begin();
-       scan != profiles_.end();
-       ++scan) {
+  for (const auto& scan : profiles_) {
     // Skip over profiles that have yet to be added to the profile manager.
     // This will also skip over the NULL-profile context used to hold
     // process-wide incidents.
-    if (!scan->second->added)
+    if (!scan.second->added)
       continue;
     // Also skip over profiles for which IncidentReporting is not enabled.
-    if (!IsEnabledForProfile(scan->first))
+    if (!IsEnabledForProfile(scan.first))
       continue;
     // If the current profile has Extended Reporting enabled, stop looking and
     // use that one.
-    if (scan->first->GetPrefs()->GetBoolean(
-            prefs::kSafeBrowsingExtendedReportingEnabled)) {
-      return scan->first;
+    if (IsExtendedReportingEnabled(*scan.first->GetPrefs())) {
+      return scan.first;
     }
     // Otherwise, store this one as a candidate and keep looking (in case we
     // find one with Extended Reporting enabled).
-    candidate = scan->first;
+    candidate = scan.first;
   }
 
   return candidate;
@@ -745,9 +733,8 @@ void IncidentReportingService::OnCollationTimeout() {
 
   // Wait another round if profile-bound incidents have come in from a profile
   // that has yet to complete creation.
-  for (ProfileContextCollection::iterator scan = profiles_.begin();
-       scan != profiles_.end(); ++scan) {
-    if (scan->first && !scan->second->added && scan->second->HasIncidents()) {
+  for (const auto& scan : profiles_) {
+    if (scan.first && !scan.second->added && scan.second->HasIncidents()) {
       collation_timer_.Reset();
       return;
     }
@@ -852,10 +839,8 @@ bool IncidentReportingService::WaitingForMostRecentDownload() {
   if (!HasIncidentsToUpload())
     return false;
   // Harder case 2: waiting if a non-NULL profile has not yet been added.
-  for (ProfileContextCollection::const_iterator scan = profiles_.begin();
-       scan != profiles_.end();
-       ++scan) {
-    if (scan->first && !scan->second->added)
+  for (const auto& scan : profiles_) {
+    if (scan.first && !scan.second->added)
       return true;
   }
   // There is no most recent download and there's nothing more to wait for.
@@ -917,9 +902,8 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
   // Find the profile that benefits from the strongest protections.
   Profile* eligible_profile = FindEligibleProfile();
   process->set_extended_consent(
-      eligible_profile ? eligible_profile->GetPrefs()->GetBoolean(
-                             prefs::kSafeBrowsingExtendedReportingEnabled) :
-                       false);
+      eligible_profile &&
+      IsExtendedReportingEnabled(*eligible_profile->GetPrefs()));
 
   process->set_field_trial_participant(enabled_by_field_trial_);
 
@@ -953,7 +937,7 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
         profile_and_context.second->incidents_to_clear.empty()) {
       continue;
     }
-    ProfileContext* context = profile_and_context.second;
+    ProfileContext* context = profile_and_context.second.get();
     StateStore::Transaction transaction(context->state_store.get());
     for (const auto& incident : context->incidents_to_clear)
       transaction.Clear(incident->GetType(), incident->GetKey());
@@ -976,7 +960,7 @@ void IncidentReportingService::ProcessIncidentsIfCollectionComplete() {
     // profile.
     if (!profile_and_context.first)
       continue;
-    ProfileContext* context = profile_and_context.second;
+    ProfileContext* context = profile_and_context.second.get();
     if (context->incidents.empty())
       continue;
     StateStore::Transaction transaction(context->state_store.get());

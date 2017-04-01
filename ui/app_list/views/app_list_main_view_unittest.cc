@@ -147,7 +147,7 @@ class AppListMainViewTest : public views::ViewsTestBase {
     DCHECK(view);
 
     gfx::Point translated =
-        gfx::PointAtOffsetFromOrigin(point - view->bounds().origin());
+        gfx::PointAtOffsetFromOrigin(point - view->origin());
     ui::MouseEvent pressed_event(ui::ET_MOUSE_PRESSED, translated, point,
                                  ui::EventTimeForNow(), 0, 0);
     grid_view->InitiateDrag(view, pointer, pressed_event);
@@ -161,7 +161,7 @@ class AppListMainViewTest : public views::ViewsTestBase {
                           const gfx::Point& point) {
     DCHECK(drag_view);
     gfx::Point translated =
-        gfx::PointAtOffsetFromOrigin(point - drag_view->bounds().origin());
+        gfx::PointAtOffsetFromOrigin(point - drag_view->origin());
     ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED, translated, point,
                               ui::EventTimeForNow(), 0, 0);
     grid_view->UpdateDragFromItem(pointer, drag_event);
@@ -275,11 +275,9 @@ TEST_F(AppListMainViewTest, MouseHoverToHighlight) {
   AppListItemView* item0 = RootViewModel()->view_at(0);
   AppListItemView* item1 = RootViewModel()->view_at(1);
 
-  // If experimental launcher, switch to All Apps page
-  if (app_list::switches::IsExperimentalAppListEnabled()) {
-    GetContentsView()->SetActiveState(AppListModel::STATE_APPS);
-    GetContentsView()->Layout();
-  }
+  // Switch to All Apps page.
+  GetContentsView()->SetActiveState(AppListModel::STATE_APPS);
+  GetContentsView()->Layout();
 
   generator.MoveMouseTo(item0->GetBoundsInScreen().CenterPoint());
   EXPECT_TRUE(item0->is_highlighted());
@@ -310,11 +308,9 @@ TEST_F(AppListMainViewTest, MAYBE_TapGestureToHighlight) {
                                      main_widget_->GetNativeWindow());
   AppListItemView* item = RootViewModel()->view_at(0);
 
-  // If experimental launcher, switch to All Apps page
-  if (app_list::switches::IsExperimentalAppListEnabled()) {
-    GetContentsView()->SetActiveState(AppListModel::STATE_APPS);
-    GetContentsView()->Layout();
-  }
+  // Switch to All Apps page.
+  GetContentsView()->SetActiveState(AppListModel::STATE_APPS);
+  GetContentsView()->Layout();
 
   generator.set_current_location(item->GetBoundsInScreen().CenterPoint());
   generator.PressTouch();

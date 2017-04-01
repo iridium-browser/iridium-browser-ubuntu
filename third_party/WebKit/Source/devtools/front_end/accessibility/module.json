@@ -7,7 +7,7 @@
             "title": "Accessibility",
             "order": 10,
             "persistence": "permanent",
-            "className": "WebInspector.AccessibilitySidebarView"
+            "className": "Accessibility.AccessibilitySidebarView"
         }
     ],
     "dependencies": ["elements"],
@@ -17,7 +17,13 @@
         "AccessibilitySidebarView.js",
         "AccessibilityNodeView.js",
         "AccessibilityStrings.js",
-        "ARIAAttributesView.js"
+        "ARIAAttributesView.js",
+        "ARIAMetadata.js",
+        "ARIAConfig.js",
+        "AXTreePane.js"
+    ],
+    "skip_compilation": [
+        "ARIAConfig.js"
     ],
     "resources": [
         "accessibilityNode.css"

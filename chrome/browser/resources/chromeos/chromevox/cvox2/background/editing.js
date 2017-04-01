@@ -21,7 +21,7 @@ goog.scope(function() {
 var AutomationEvent = chrome.automation.AutomationEvent;
 var AutomationNode = chrome.automation.AutomationNode;
 var Cursor = cursors.Cursor;
-var Dir = constants.Dir;
+var Dir = AutomationUtil.Dir;
 var EventType = chrome.automation.EventType;
 var Range = cursors.Range;
 var RoleType = chrome.automation.RoleType;
@@ -110,6 +110,8 @@ function AutomationEditableText(node) {
   this.multiline = node.state.multiline || false;
   /** @type {!AutomationNode} @private */
   this.node_ = node;
+  /** @type {Array<number>} @private */
+  this.lineBreaks_ = [];
 }
 
 AutomationEditableText.prototype = {
@@ -120,6 +122,10 @@ AutomationEditableText.prototype = {
    */
   onUpdate: function() {
     var newValue = this.node_.value;
+
+    if (this.value != newValue)
+      this.lineBreaks_ = [];
+
     var textChangeEvent = new cvox.TextChangeEvent(
         newValue,
         this.node_.textSelStart,
@@ -141,20 +147,6 @@ AutomationEditableText.prototype = {
   },
 
   /** @override */
-  describeLine: function(lineIndex, triggeredByUser) {
-    if (!this.node_.state.richlyEditable) {
-      cvox.ChromeVoxEditableTextBase.prototype.describeLine.call(
-          this, lineIndex, triggeredByUser);
-      return;
-    }
-    var line = this.getSelectedAutomationLine_();
-    if (line) {
-      new Output().withRichSpeech(line, null, Output.EventType.NAVIGATE)
-          .go();
-    }
-  },
-
-  /** @override */
   getLineStart: function(lineIndex) {
     if (!this.multiline || lineIndex == 0)
       return 0;
@@ -168,11 +160,7 @@ AutomationEditableText.prototype = {
     var value = this.node_.value;
     if (lineIndex >= breaks.length)
       return value.length;
-    var end = breaks[lineIndex];
-    // A hard newline shouldn't be considered part of the line itself.
-    if (0 < end && value[end - 1] == '\n')
-      return end - 1;
-    return end;
+    return breaks[lineIndex] - 1;
   },
 
   /**
@@ -187,42 +175,25 @@ AutomationEditableText.prototype = {
 
   /** @private */
   outputBraille_: function() {
-    // First line in a multiline field.
-    var lineIndex = this.getLineIndex(this.start);
-    var isFirstLine = this.multiline && lineIndex == 0;
+    var isFirstLine = false;  // First line in a multiline field.
     var output = new Output();
     var range;
-    if (this.node_.state.richlyEditable) {
-      range = this.getSelectedAutomationLine_();
-    } else if (this.multiline) {
-      if (isFirstLine)
+    if (this.multiline) {
+      var lineIndex = this.getLineIndex(this.start);
+      if (lineIndex == 0) {
+        isFirstLine = true;
         output.formatForBraille('$name', this.node_);
+      }
       range = new Range(
           new Cursor(this.node_, this.getLineStart(lineIndex)),
           new Cursor(this.node_, this.getLineEnd(lineIndex)));
     } else {
       range = Range.fromNode(this.node_);
     }
-    if (range)
-      output.withBraille(range, null, Output.EventType.NAVIGATE);
+    output.withBraille(range, null, Output.EventType.NAVIGATE);
     if (isFirstLine)
       output.formatForBraille('@tag_textarea');
     output.go();
-  },
-
-  /**
-   * @return {Range}
-   * @private
-   */
-  getSelectedAutomationLine_: function() {
-    if (!this.node_.root.anchorObject || !this.node_.root.focusObject)
-      return null;
-
-    var start = Cursor.fromNode(this.node_.root.anchorObject);
-    start = start.move(Unit.LINE, Movement.BOUND, Dir.BACKWARD);
-    var end = Cursor.fromNode(this.node_.root.focusObject);
-    end = end.move(Unit.LINE, Movement.BOUND, Dir.FORWARD);
-    return new Range(start, end);
   }
 };
 

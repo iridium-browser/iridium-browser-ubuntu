@@ -13,7 +13,7 @@
 #include "chrome/browser/search/suggestions/suggestions_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/app_list/search/suggestions/url_suggestion_result.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/suggestions/proto/suggestions.pb.h"
 #include "components/suggestions/suggestions_service.h"
@@ -44,8 +44,9 @@ void SuggestionsSearchProvider::Start(bool /*is_voice_query*/,
   if (!query.empty())
     return;
 
-  const suggestions::SuggestionsProfile& suggestions_profile =
-      suggestions_service_->GetSuggestionsDataFromCache();
+  const suggestions::SuggestionsProfile suggestions_profile =
+      suggestions_service_->GetSuggestionsDataFromCache().value_or(
+          suggestions::SuggestionsProfile());
   for (int i = 0; i < suggestions_profile.suggestions_size(); ++i) {
     const suggestions::ChromeSuggestion& suggestion =
         suggestions_profile.suggestions(i);

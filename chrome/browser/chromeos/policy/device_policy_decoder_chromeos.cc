@@ -161,7 +161,7 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
     const em::UserWhitelistProto& container(policy.user_whitelist());
     std::unique_ptr<base::ListValue> whitelist(new base::ListValue);
     for (const auto& entry : container.user_whitelist())
-      whitelist->Append(new base::StringValue(entry));
+      whitelist->AppendString(entry);
     policies->Set(key::kDeviceUserWhitelist, POLICY_LEVEL_MANDATORY,
                   POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD,
                   std::move(whitelist), nullptr);
@@ -205,6 +205,21 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
           entry_dict->SetStringWithoutPathExpansion(
               chromeos::kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL,
               entry.kiosk_app().update_url());
+        }
+        if (entry.android_kiosk_app().has_package_name()) {
+          entry_dict->SetStringWithoutPathExpansion(
+              chromeos::kAccountsPrefDeviceLocalAccountsKeyArcKioskPackage,
+              entry.android_kiosk_app().package_name());
+        }
+        if (entry.android_kiosk_app().has_class_name()) {
+          entry_dict->SetStringWithoutPathExpansion(
+              chromeos::kAccountsPrefDeviceLocalAccountsKeyArcKioskClass,
+              entry.android_kiosk_app().class_name());
+        }
+        if (entry.android_kiosk_app().has_action()) {
+          entry_dict->SetStringWithoutPathExpansion(
+              chromeos::kAccountsPrefDeviceLocalAccountsKeyArcKioskAction,
+              entry.android_kiosk_app().action());
         }
       } else if (entry.has_deprecated_public_session_id()) {
         // Deprecated public session specification.
@@ -302,7 +317,7 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
         policy.login_video_capture_allowed_urls());
     std::unique_ptr<base::ListValue> urls(new base::ListValue());
     for (const auto& entry : container.urls()) {
-      urls->Append(new base::StringValue(entry));
+      urls->AppendString(entry);
     }
     policies->Set(key::kLoginVideoCaptureAllowedUrls, POLICY_LEVEL_MANDATORY,
                   POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD, std::move(urls),
@@ -313,7 +328,7 @@ void DecodeLoginPolicies(const em::ChromeDeviceSettingsProto& policy,
     const em::LoginAppsProto& login_apps_proto(policy.login_apps());
     std::unique_ptr<base::ListValue> login_apps(new base::ListValue);
     for (const auto& login_app : login_apps_proto.login_apps())
-      login_apps->Append(new base::StringValue(login_app));
+      login_apps->AppendString(login_app);
     policies->Set(key::kLoginApps, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_MACHINE,
                   POLICY_SOURCE_CLOUD, std::move(login_apps), nullptr);
   }
@@ -330,6 +345,26 @@ void DecodeNetworkPolicies(const em::ChromeDeviceSettingsProto& policy,
                         container.data_roaming_enabled()),
                     nullptr);
     }
+  }
+
+  if (policy.has_network_throttling()) {
+    const em::NetworkThrottlingEnabledProto& container(
+        policy.network_throttling());
+    std::unique_ptr<base::DictionaryValue> throttling_status(
+        new base::DictionaryValue());
+    bool enabled = (container.has_enabled()) ? container.enabled() : false;
+    uint32_t upload_rate_kbits =
+        (container.has_upload_rate_kbits()) ? container.upload_rate_kbits() : 0;
+    uint32_t download_rate_kbits = (container.has_download_rate_kbits())
+                                       ? container.download_rate_kbits()
+                                       : 0;
+
+    throttling_status->SetBoolean("enabled", enabled);
+    throttling_status->SetInteger("upload_rate_kbits", upload_rate_kbits);
+    throttling_status->SetInteger("download_rate_kbits", download_rate_kbits);
+    policies->Set(key::kNetworkThrottlingEnabled, POLICY_LEVEL_MANDATORY,
+                  POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD,
+                  std::move(throttling_status), nullptr);
   }
 
   if (policy.has_open_network_configuration() &&
@@ -803,6 +838,19 @@ void DecodeGenericPolicies(const em::ChromeDeviceSettingsProto& policy,
                     base::MakeUnique<base::FundamentalValue>(
                         container.quirks_download_enabled()),
                     nullptr);
+    }
+  }
+
+  if (policy.has_device_wallpaper_image()) {
+    const em::DeviceWallpaperImageProto& container(
+        policy.device_wallpaper_image());
+    if (container.has_device_wallpaper_image()) {
+      std::unique_ptr<base::DictionaryValue> dict_val =
+          base::DictionaryValue::From(
+              base::JSONReader::Read(container.device_wallpaper_image()));
+      policies->Set(key::kDeviceWallpaperImage, POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE, POLICY_SOURCE_CLOUD,
+                    std::move(dict_val), nullptr);
     }
   }
 }

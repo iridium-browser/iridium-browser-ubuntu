@@ -13,8 +13,8 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
-#include "chrome/browser/chromeos/policy/stub_enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
+#include "chrome/browser/chromeos/settings/stub_install_attributes.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -170,11 +170,7 @@ class EPKPChallengeKeyTestBase : public BrowserWithTestWindowTest {
     ON_CALL(mock_attestation_flow_, GetCertificate(_, _, _, _, _))
         .WillByDefault(Invoke(GetCertificateCallbackTrue));
 
-    // Set the Enterprise install attributes.
-    stub_install_attributes_.SetDomain("google.com");
-    stub_install_attributes_.SetRegistrationUser(kUserEmail);
-    stub_install_attributes_.SetDeviceId("device_id");
-    stub_install_attributes_.SetMode(policy::DEVICE_MODE_ENTERPRISE);
+    stub_install_attributes_.SetEnterprise("google.com", "device_id");
 
     settings_helper_.ReplaceProvider(chromeos::kDeviceAttestationEnabled);
     settings_helper_.SetBoolean(chromeos::kDeviceAttestationEnabled, true);
@@ -219,7 +215,7 @@ class EPKPChallengeKeyTestBase : public BrowserWithTestWindowTest {
   NiceMock<chromeos::attestation::MockAttestationFlow> mock_attestation_flow_;
   chromeos::ScopedCrosSettingsTestHelper settings_helper_;
   scoped_refptr<extensions::Extension> extension_;
-  policy::StubEnterpriseInstallAttributes stub_install_attributes_;
+  chromeos::StubInstallAttributes stub_install_attributes_;
   TestingProfileManager profile_manager_;
   // fake_user_manager_ is owned by user_manager_enabler_.
   chromeos::FakeChromeUserManager* fake_user_manager_;
@@ -262,7 +258,7 @@ TEST_F(EPKPChallengeMachineKeyTest, ChallengeBadBase64) {
 }
 
 TEST_F(EPKPChallengeMachineKeyTest, NonEnterpriseDevice) {
-  stub_install_attributes_.SetRegistrationUser("");
+  stub_install_attributes_.SetConsumer();
 
   EXPECT_EQ(EPKPChallengeMachineKey::kNonEnterpriseDeviceError,
             utils::RunFunctionAndReturnError(func_.get(), kArgs, browser()));
@@ -477,7 +473,7 @@ TEST_F(EPKPChallengeUserKeyTest, KeyNotRegistered) {
 }
 
 TEST_F(EPKPChallengeUserKeyTest, PersonalDevice) {
-  stub_install_attributes_.SetRegistrationUser("");
+  stub_install_attributes_.SetConsumer();
 
   // Currently personal devices are not supported.
   EXPECT_EQ(GetCertificateError(kUserRejected),

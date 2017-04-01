@@ -8,13 +8,15 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/location.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
@@ -31,6 +33,8 @@
 #include "content/public/browser/local_storage_usage_info.h"
 #include "content/public/browser/session_storage_usage_info.h"
 #include "storage/browser/quota/special_storage_policy.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 namespace content {
 namespace {
@@ -72,12 +76,12 @@ DOMStorageContextImpl::DOMStorageContextImpl(
     const base::FilePath& localstorage_directory,
     const base::FilePath& sessionstorage_directory,
     storage::SpecialStoragePolicy* special_storage_policy,
-    DOMStorageTaskRunner* task_runner)
+    scoped_refptr<DOMStorageTaskRunner> task_runner)
     : localstorage_directory_(localstorage_directory),
       sessionstorage_directory_(sessionstorage_directory),
-      task_runner_(task_runner),
-      session_id_offset_(
-          abs((g_session_id_offset_sequence++ % 10)) * kSessionIdOffsetAmount),
+      task_runner_(std::move(task_runner)),
+      session_id_offset_(abs((g_session_id_offset_sequence++ % 10)) *
+                         kSessionIdOffsetAmount),
       session_id_sequence_(session_id_offset_),
       is_shutdown_(false),
       force_keep_session_state_(false),
@@ -200,15 +204,41 @@ void DOMStorageContextImpl::GetSessionStorageUsage(
   }
 }
 
-void DOMStorageContextImpl::DeleteLocalStorage(const GURL& origin) {
+void DOMStorageContextImpl::DeleteLocalStorageForPhysicalOrigin(
+    const GURL& origin_url) {
   DCHECK(!is_shutdown_);
+  url::Origin origin(origin_url);
   DOMStorageNamespace* local = GetStorageNamespace(kLocalStorageNamespaceId);
-  local->DeleteLocalStorageOrigin(origin);
+  std::vector<GURL> origins;
+  local->GetOriginsWithAreas(&origins);
+  // Suborigin at the physical origin of |origin_url| should have their storage
+  // deleted as well.
+  // https://w3c.github.io/webappsec-suborigins/
+  for (const auto& origin_candidate_url : origins) {
+    url::Origin origin_candidate(origin_candidate_url);
+    // |origin| is guaranteed to be deleted below, so don't delete it until
+    // then. That is, only suborigins at the same physical origin as |origin|
+    // should be deleted at this point.
+    if (!origin_candidate.IsSameOriginWith(origin) &&
+        origin_candidate.IsSamePhysicalOriginWith(origin)) {
+      DeleteLocalStorage(origin_candidate_url);
+    }
+  }
+  // It is important to always explicitly delete |origin|. If it does not appear
+  // it |origins| above, there still may be a directory open in the namespace in
+  // preparation for this storage, and this call will make sure that the
+  // directory is deleted.
+  DeleteLocalStorage(origin_url);
+}
+
+void DOMStorageContextImpl::DeleteLocalStorage(const GURL& origin_url) {
+  DOMStorageNamespace* local = GetStorageNamespace(kLocalStorageNamespaceId);
+  local->DeleteLocalStorageOrigin(origin_url);
   // Synthesize a 'cleared' event if the area is open so CachedAreas in
   // renderers get emptied out too.
-  DOMStorageArea* area = local->GetOpenStorageArea(origin);
+  DOMStorageArea* area = local->GetOpenStorageArea(origin_url);
   if (area)
-    NotifyAreaCleared(area, origin);
+    NotifyAreaCleared(area, origin_url);
 }
 
 void DOMStorageContextImpl::DeleteSessionStorage(
@@ -240,7 +270,8 @@ void DOMStorageContextImpl::Flush() {
 }
 
 void DOMStorageContextImpl::Shutdown() {
-  DCHECK(!task_runner_ || task_runner_->IsRunningOnPrimarySequence());
+  if (task_runner_)
+    task_runner_->AssertIsRunningOnPrimarySequence();
   is_shutdown_ = true;
   StorageNamespaceMap::const_iterator it = namespaces_.begin();
   for (; it != namespaces_.end(); ++it)
@@ -287,9 +318,8 @@ void DOMStorageContextImpl::NotifyItemSet(
     const base::string16& new_value,
     const base::NullableString16& old_value,
     const GURL& page_url) {
-  FOR_EACH_OBSERVER(
-      EventObserver, event_observers_,
-      OnDOMStorageItemSet(area, key, new_value, old_value, page_url));
+  for (auto& observer : event_observers_)
+    observer.OnDOMStorageItemSet(area, key, new_value, old_value, page_url);
 }
 
 void DOMStorageContextImpl::NotifyItemRemoved(
@@ -297,17 +327,15 @@ void DOMStorageContextImpl::NotifyItemRemoved(
     const base::string16& key,
     const base::string16& old_value,
     const GURL& page_url) {
-  FOR_EACH_OBSERVER(
-      EventObserver, event_observers_,
-      OnDOMStorageItemRemoved(area, key, old_value, page_url));
+  for (auto& observer : event_observers_)
+    observer.OnDOMStorageItemRemoved(area, key, old_value, page_url);
 }
 
 void DOMStorageContextImpl::NotifyAreaCleared(
     const DOMStorageArea* area,
     const GURL& page_url) {
-  FOR_EACH_OBSERVER(
-      EventObserver, event_observers_,
-      OnDOMStorageAreaCleared(area, page_url));
+  for (auto& observer : event_observers_)
+    observer.OnDOMStorageAreaCleared(area, page_url);
 }
 
 int64_t DOMStorageContextImpl::AllocateSessionId() {

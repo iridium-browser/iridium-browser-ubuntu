@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
+#include <deque>
 #include <memory>
+#include <queue>
 #include <string>
 
 #include "base/callback.h"
@@ -18,20 +20,21 @@
 #include "chrome/browser/metrics/metrics_memory_details.h"
 #include "components/metrics/metrics_service_client.h"
 #include "components/metrics/profiler/tracking_synchronizer_observer.h"
+#include "components/metrics/proto/system_profile.pb.h"
 #include "components/omnibox/browser/omnibox_event_global_tracker.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "ppapi/features/features.h"
 
 class AntiVirusMetricsProvider;
 class ChromeOSMetricsProvider;
 class GoogleUpdateMetricsProviderWin;
 class PluginMetricsProvider;
 class PrefRegistrySimple;
-class PrefService;
 
-#if !defined(OS_CHROMEOS)
-class SigninStatusMetricsProvider;
-#endif
+namespace browser_watcher {
+class WatcherMetricsProviderWin;
+}  // namespace browser_watcher
 
 namespace metrics {
 class DriveMetricsProvider;
@@ -59,17 +62,19 @@ class ChromeMetricsServiceClient
   // metrics::MetricsServiceClient:
   metrics::MetricsService* GetMetricsService() override;
   void SetMetricsClientId(const std::string& client_id) override;
-  bool IsOffTheRecordSessionActive() override;
   int32_t GetProduct() override;
   std::string GetApplicationLocale() override;
   bool GetBrand(std::string* brand_code) override;
   metrics::SystemProfileProto::Channel GetChannel() override;
   std::string GetVersionString() override;
-  void OnLogUploadComplete() override;
+  void OnEnvironmentUpdate(std::string* serialized_environment) override;
+  void OnLogCleanShutdown() override;
   void InitializeSystemProfileMetrics(
       const base::Closure& done_callback) override;
   void CollectFinalMetricsForLog(const base::Closure& done_callback) override;
   std::unique_ptr<metrics::MetricsLogUploader> CreateUploader(
+      const std::string& server_url,
+      const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) override;
   base::TimeDelta GetStandardUploadInterval() override;
   base::string16 GetRegistryBackupKey() override;
@@ -91,27 +96,10 @@ class ChromeMetricsServiceClient
   // Completes the two-phase initialization of ChromeMetricsServiceClient.
   void Initialize();
 
-  // Callback that continues the init task by getting a Bluetooth Adapter.
-  void OnInitTaskGotHardwareClass();
-
-  // Callback that continues the init task by loading plugin information.
-  void OnInitTaskGotBluetoothAdapter();
-
-  // Called after the Plugin init task has been completed that continues the
-  // init task by launching a task to gather Google Update statistics.
-  void OnInitTaskGotPluginInfo();
-
-  // Called after GoogleUpdate init task has been completed that continues the
-  // init task by loading AntiVirus metrics.
-  void OnInitTaskGotGoogleUpdateData();
-
-  // Called after AntiVirus init task has been completed that continues the
-  // init task by loading drive metrics.
-  void OnInitTaskGotAntiVirusData();
-
-  // Called after the drive metrics init task has been completed that continues
-  // the init task by loading profiler data.
-  void OnInitTaskGotDriveMetrics();
+  // Callback to chain init tasks: Pops and executes the next init task from
+  // |initialize_task_queue_|, then passes itself as callback for each init task
+  // to call upon completion.
+  void OnInitNextTask();
 
   // Returns true iff profiler data should be included in the next metrics log.
   // NOTE: This method is probabilistic and also updates internal state as a
@@ -171,6 +159,10 @@ class ChromeMetricsServiceClient
   ChromeOSMetricsProvider* chromeos_metrics_provider_;
 #endif
 
+  // A queue of tasks for initial metrics gathering. These may be asynchronous
+  // or synchronous.
+  std::deque<base::Closure> initialize_task_queue_;
+
   // Saved callback received from CollectFinalMetricsForLog().
   base::Closure collect_final_metrics_done_callback_;
 
@@ -184,7 +176,7 @@ class ChromeMetricsServiceClient
   // MetricsService. Has the same lifetime as |metrics_service_|.
   metrics::ProfilerMetricsProvider* profiler_metrics_provider_;
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   // The PluginMetricsProvider instance that was registered with
   // MetricsService. Has the same lifetime as |metrics_service_|.
   PluginMetricsProvider* plugin_metrics_provider_;
@@ -195,6 +187,10 @@ class ChromeMetricsServiceClient
   // MetricsService. Has the same lifetime as |metrics_service_|.
   GoogleUpdateMetricsProviderWin* google_update_metrics_provider_;
 
+  // The WatcherMetricsProviderWin instance that was registered with
+  // MetricsService. Has the same lifetime as |metrics_service_|.
+  browser_watcher::WatcherMetricsProviderWin* watcher_metrics_provider_;
+
   // The AntiVirusMetricsProvider instance that was registered with
   // MetricsService. Has the same lifetime as |metrics_service_|.
   AntiVirusMetricsProvider* antivirus_metrics_provider_;
@@ -203,9 +199,6 @@ class ChromeMetricsServiceClient
   // The DriveMetricsProvider instance that was registered with MetricsService.
   // Has the same lifetime as |metrics_service_|.
   metrics::DriveMetricsProvider* drive_metrics_provider_;
-
-  // Callback that is called when initial metrics gathering is complete.
-  base::Closure finished_init_task_callback_;
 
   // The MemoryGrowthTracker instance that tracks memory usage growth in
   // MemoryDetails.

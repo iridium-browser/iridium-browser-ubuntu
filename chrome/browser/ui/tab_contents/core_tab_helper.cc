@@ -9,13 +9,13 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_switches.h"
@@ -32,12 +32,15 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/context_menu_params.h"
-#include "content/public/common/ssl_status.h"
 #include "net/base/load_states.h"
-#include "net/base/url_util.h"
 #include "net/http/http_request_headers.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/ui/browser.h"
+#endif
 
 using content::WebContents;
 
@@ -119,7 +122,7 @@ void CoreTabHelper::RequestThumbnailForContextNode(
     gfx::Size maximum_size,
     const ContextNodeThumbnailCallback& callback) {
   int callback_id = thumbnail_callbacks_.Add(
-      new ContextNodeThumbnailCallback(callback));
+      base::MakeUnique<ContextNodeThumbnailCallback>(callback));
 
   render_frame_host->Send(
       new ChromeViewMsg_RequestThumbnailForContextNode(
@@ -226,6 +229,9 @@ bool CoreTabHelper::GetStatusTextForWebContents(
           l10n_util::GetStringFUTF16(IDS_LOAD_STATE_WAITING_FOR_RESPONSE,
                                      source->GetLoadStateHost());
       return true;
+    case net::LOAD_STATE_THROTTLED:
+      *status_text = l10n_util::GetStringUTF16(IDS_LOAD_STATE_THROTTLED);
+      return true;
     // Ignore net::LOAD_STATE_READING_RESPONSE and net::LOAD_STATE_IDLE
     case net::LOAD_STATE_IDLE:
     case net::LOAD_STATE_READING_RESPONSE:
@@ -249,33 +255,6 @@ bool CoreTabHelper::GetStatusTextForWebContents(
 
 void CoreTabHelper::DidStartLoading() {
   UpdateContentRestrictions(0);
-}
-
-void CoreTabHelper::DocumentOnLoadCompletedInMainFrame() {
-  bool allow_localhost = base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kAllowInsecureLocalhost);
-  if (!allow_localhost)
-    return;
-
-  content::NavigationEntry* entry =
-      web_contents()->GetController().GetLastCommittedEntry();
-  if (!net::IsLocalhost(entry->GetURL().host()))
-    return;
-
-  content::SSLStatus ssl_status = entry->GetSSL();
-  bool is_cert_error = net::IsCertStatusError(ssl_status.cert_status) &&
-                       !net::IsCertStatusMinorError(ssl_status.cert_status);
-  if (!is_cert_error)
-    return;
-
-  web_contents()->GetMainFrame()->AddMessageToConsole(
-      content::CONSOLE_MESSAGE_LEVEL_WARNING,
-      base::StringPrintf(
-          "This site does not have a valid SSL "
-          "certificate! Without SSL, your site's and "
-          "visitors' data is vulnerable to theft and "
-          "tampering. Get a valid SSL certificate before"
-          " releasing your website to the public."));
 }
 
 void CoreTabHelper::WasShown() {
@@ -378,7 +357,7 @@ void CoreTabHelper::DoSearchByImageInNewTab(const GURL& src_url,
     return;
 
   content::OpenURLParams open_url_params(
-      result, content::Referrer(), NEW_FOREGROUND_TAB,
+      result, content::Referrer(), WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui::PAGE_TRANSITION_LINK, false);
   const std::string& content_type = post_content.first;
   const std::string& post_data = post_content.second;

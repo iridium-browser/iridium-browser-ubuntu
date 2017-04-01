@@ -29,6 +29,10 @@ class NotificationDelegate;
 class NotificationDisplayService;
 class ScopedKeepAlive;
 
+namespace base {
+class NullableString16;
+}
+
 namespace content {
 class BrowserContext;
 struct NotificationResources;
@@ -50,18 +54,18 @@ class PlatformNotificationServiceImpl
   // To be called when a persistent notification has been clicked on. The
   // Service Worker associated with the registration will be started if
   // needed, on which the event will be fired. Must be called on the UI thread.
-  void OnPersistentNotificationClick(
-      content::BrowserContext* browser_context,
-      int64_t persistent_notification_id,
-      const GURL& origin,
-      int action_index);
+  void OnPersistentNotificationClick(content::BrowserContext* browser_context,
+                                     const std::string& notification_id,
+                                     const GURL& origin,
+                                     int action_index,
+                                     const base::NullableString16& reply);
 
   // To be called when a persistent notification has been closed. The data
   // associated with the notification has to be pruned from the database in this
   // case, to make sure that it continues to be in sync. Must be called on the
   // UI thread.
   void OnPersistentNotificationClose(content::BrowserContext* browser_context,
-                                     int64_t persistent_notification_id,
+                                     const std::string& notification_id,
                                      const GURL& origin,
                                      bool by_user);
 
@@ -76,6 +80,7 @@ class PlatformNotificationServiceImpl
       int render_process_id) override;
   void DisplayNotification(
       content::BrowserContext* browser_context,
+      const std::string& notification_id,
       const GURL& origin,
       const content::PlatformNotificationData& notification_data,
       const content::NotificationResources& notification_resources,
@@ -83,15 +88,14 @@ class PlatformNotificationServiceImpl
       base::Closure* cancel_callback) override;
   void DisplayPersistentNotification(
       content::BrowserContext* browser_context,
-      int64_t persistent_notification_id,
+      const std::string& notification_id,
       const GURL& service_worker_scope,
       const GURL& origin,
       const content::PlatformNotificationData& notification_data,
       const content::NotificationResources& notification_resources) override;
-  void ClosePersistentNotification(
-      content::BrowserContext* browser_context,
-      int64_t persistent_notification_id) override;
-  bool GetDisplayedPersistentNotifications(
+  void ClosePersistentNotification(content::BrowserContext* browser_context,
+                                   const std::string& notification_id) override;
+  bool GetDisplayedNotifications(
       content::BrowserContext* browser_context,
       std::set<std::string>* displayed_notifications) override;
 
@@ -115,7 +119,8 @@ class PlatformNotificationServiceImpl
   void OnCloseEventDispatchComplete(
       content::PersistentNotificationStatus status);
 
-  // Creates a new Web Notification-based Notification object.
+  // Creates a new Web Notification-based Notification object. Should only be
+  // called when the notification is first shown.
   // TODO(peter): |delegate| can be a scoped_refptr, but properly passing this
   // through requires changing a whole lot of Notification constructor calls.
   Notification CreateNotificationFromData(
@@ -149,13 +154,9 @@ class PlatformNotificationServiceImpl
   int pending_click_dispatch_events_;
 #endif
 
-  // Mapping between a persistent notification id and the id of the associated
-  // message_center::Notification object. Must only be used on the UI thread.
-  std::map<int64_t, std::string> persistent_notifications_;
-
   // Tracks the id of persistent notifications that have been closed
   // programmatically to avoid dispatching close events for them.
-  std::unordered_set<int64_t> closed_notifications_;
+  std::unordered_set<std::string> closed_notifications_;
 
   // Only set and used for tests, owned by the caller in that case.
   NotificationDisplayService* test_display_service_;

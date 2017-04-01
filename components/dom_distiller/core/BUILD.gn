@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: components/dom_distiller.gypi:dom_distiller_core
 static_library("core") {
   sources = [
     "article_attachments_data.cc",
@@ -64,6 +63,7 @@ static_library("core") {
   ]
   deps = [
     "//base",
+    "//components/data_use_measurement/core",
     "//components/leveldb_proto",
     "//components/pref_registry",
     "//components/prefs",
@@ -80,6 +80,8 @@ static_library("core") {
 
   if (is_android) {
     sources += [
+      "android/core_jni_registrar.cc",
+      "android/core_jni_registrar.h",
       "dom_distiller_service_android.cc",
       "dom_distiller_service_android.h",
     ]
@@ -87,7 +89,6 @@ static_library("core") {
   }
 }
 
-# GYP version: components/dom_distiller.gypi:dom_distiller_test_support
 static_library("test_support") {
   testonly = true
   sources = [
@@ -149,10 +150,10 @@ source_set("unit_tests") {
     ":unit_tests_bundle_data",
     "//base",
     "//components/leveldb_proto:test_support",
-    "//components/pref_registry:test_support",
     "//components/resources",
     "//components/strings",
     "//components/sync",
+    "//components/sync_preferences:test_support",
     "//net:test_support",
     "//testing/gmock",
     "//testing/gtest",
@@ -166,9 +167,9 @@ if (is_android) {
 
   generate_jni("jni_headers") {
     sources = [
-      "../android/java/src/org/chromium/components/dom_distiller/core/DistilledPagePrefs.java",
-      "../android/java/src/org/chromium/components/dom_distiller/core/DomDistillerService.java",
-      "../android/java/src/org/chromium/components/dom_distiller/core/DomDistillerUrlUtils.java",
+      "android/java/src/org/chromium/components/dom_distiller/core/DistilledPagePrefs.java",
+      "android/java/src/org/chromium/components/dom_distiller/core/DomDistillerService.java",
+      "android/java/src/org/chromium/components/dom_distiller/core/DomDistillerUrlUtils.java",
     ]
     jni_package = "dom_distiller_core"
   }

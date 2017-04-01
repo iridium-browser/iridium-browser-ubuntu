@@ -8,14 +8,17 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 #include "base/gtest_prod_util.h"
 #include "base/strings/string_piece.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/base/net_export.h"
 #include "net/socket/ssl_socket.h"
 #include "net/socket/stream_socket.h"
+#include "net/ssl/token_binding.h"
 
 namespace base {
 class FilePath;
@@ -33,10 +36,7 @@ class CertVerifier;
 class ChannelIDService;
 class CTVerifier;
 class SSLCertRequestInfo;
-struct SSLConfig;
-class SSLInfo;
 class TransportSecurityState;
-class X509Certificate;
 
 // This struct groups together several fields which are used by various
 // classes related to SSLClientSocket.
@@ -76,35 +76,10 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
  public:
   SSLClientSocket();
 
-  // Next Protocol Negotiation (NPN) allows a TLS client and server to come to
-  // an agreement about the application level protocol to speak over a
-  // connection.
-  enum NextProtoStatus {
-    // WARNING: These values are serialized to disk. Don't change them.
-
-    kNextProtoUnsupported = 0,  // The server doesn't support NPN.
-    kNextProtoNegotiated = 1,   // We agreed on a protocol.
-    kNextProtoNoOverlap = 2,    // No protocols in common. We requested
-                                // the first protocol in our list.
-  };
-
-  // TLS extension used to negotiate protocol.
-  enum SSLNegotiationExtension {
-    kExtensionUnknown,
-    kExtensionALPN,
-    kExtensionNPN,
-  };
-
   // Gets the SSL CertificateRequest info of the socket after Connect failed
   // with ERR_SSL_CLIENT_AUTH_CERT_NEEDED.
   virtual void GetSSLCertRequestInfo(
       SSLCertRequestInfo* cert_request_info) = 0;
-
-  static NextProto NextProtoFromString(base::StringPiece proto_string);
-
-  static const char* NextProtoToString(NextProto next_proto);
-
-  static const char* NextProtoStatusToString(const NextProtoStatus status);
 
   // Log SSL key material to |path| on |task_runner|. Must be called before any
   // SSLClientSockets are created.
@@ -129,20 +104,17 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   // channel ids are not supported.
   virtual ChannelIDService* GetChannelIDService() const = 0;
 
-  // Signs the EKM value for Token Binding with |*key| and puts it in |*out|.
-  // Returns a net error code.
-  virtual Error GetSignedEKMForTokenBinding(crypto::ECPrivateKey* key,
-                                            std::vector<uint8_t>* out) = 0;
+  // Generates the signature used in Token Binding using key |*key| and for a
+  // Token Binding of type |tb_type|, putting the signature in |*out|. Returns a
+  // net error code.
+  virtual Error GetTokenBindingSignature(crypto::ECPrivateKey* key,
+                                         TokenBindingType tb_type,
+                                         std::vector<uint8_t>* out) = 0;
 
   // This method is only for debugging crbug.com/548423 and will be removed when
   // that bug is closed. This returns the channel ID key that was used when
   // establishing the connection (or NULL if no channel ID was used).
   virtual crypto::ECPrivateKey* GetChannelIDKey() const = 0;
-
-  // Returns true if the CECPQ1 (experimental post-quantum) experiment is
-  // enabled.  This should be removed after the experiment is ended, around
-  // 2017-18.
-  static bool IsPostQuantumExperimentEnabled();
 
  protected:
   void set_signed_cert_timestamps_received(

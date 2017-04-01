@@ -47,9 +47,10 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/features.h"
+#include "chrome/grit/chrome_unscaled_resources.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/chrome_unscaled_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_family.h"
 #include "url/gurl.h"
@@ -267,7 +268,7 @@ namespace shell_integration_linux {
 
 namespace {
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 // The Categories for the App Launcher desktop shortcut. Should be the same as
 // the Chrome desktop shortcut, so they are in the same sub-menu.
 const char kAppListCategories[] = "Network;WebBrowser;";
@@ -283,8 +284,8 @@ std::string CreateShortcutIcon(const gfx::ImageFamily& icon_images,
   if (!temp_dir.CreateUniqueTempDir())
     return std::string();
 
-  base::FilePath temp_file_path = temp_dir.path().Append(
-      shortcut_filename.ReplaceExtension("png"));
+  base::FilePath temp_file_path =
+      temp_dir.GetPath().Append(shortcut_filename.ReplaceExtension("png"));
   std::string icon_name = temp_file_path.BaseName().RemoveExtension().value();
 
   for (gfx::ImageFamily::const_iterator it = icon_images.begin();
@@ -386,7 +387,7 @@ bool CreateShortcutInApplicationsMenu(const base::FilePath& shortcut_filename,
 
   base::FilePath temp_directory_path;
   if (!directory_filename.empty()) {
-    temp_directory_path = temp_dir.path().Append(directory_filename);
+    temp_directory_path = temp_dir.GetPath().Append(directory_filename);
 
     int bytes_written = base::WriteFile(temp_directory_path,
                                         directory_contents.data(),
@@ -396,7 +397,7 @@ bool CreateShortcutInApplicationsMenu(const base::FilePath& shortcut_filename,
       return false;
   }
 
-  base::FilePath temp_file_path = temp_dir.path().Append(shortcut_filename);
+  base::FilePath temp_file_path = temp_dir.GetPath().Append(shortcut_filename);
 
   int bytes_written = base::WriteFile(temp_file_path, contents.data(),
                                       contents.length());
@@ -499,7 +500,7 @@ const char kXdgOpenShebang[] = "#!/usr/bin/env xdg-open";
 
 const char kDirectoryFilename[] = "chrome-apps.directory";
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 #if defined(GOOGLE_CHROME_BUILD)
 const char kAppListDesktopName[] = "chrome-app-list";
 #else  // CHROMIUM_BUILD
@@ -1028,7 +1029,7 @@ bool CreateDesktopShortcut(
   return success;
 }
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 bool CreateAppListDesktopShortcut(
     const std::string& wm_class,
     const std::string& title) {

@@ -9,50 +9,41 @@
 
 namespace blink {
 
-WebGLTransformFeedback* WebGLTransformFeedback::create(WebGL2RenderingContextBase* ctx)
-{
-    return new WebGLTransformFeedback(ctx);
-}
-
-WebGLTransformFeedback::~WebGLTransformFeedback()
-{
-    // See the comment in WebGLObject::detachAndDeleteObject().
-    detachAndDeleteObject();
+WebGLTransformFeedback* WebGLTransformFeedback::create(
+    WebGL2RenderingContextBase* ctx) {
+  return new WebGLTransformFeedback(ctx);
 }
 
 WebGLTransformFeedback::WebGLTransformFeedback(WebGL2RenderingContextBase* ctx)
-    : WebGLSharedPlatform3DObject(ctx)
-    , m_target(0)
-    , m_program(nullptr)
-{
-    GLuint tf;
-    ctx->contextGL()->GenTransformFeedbacks(1, &tf);
-    setObject(tf);
+    : WebGLSharedPlatform3DObject(ctx), m_target(0), m_program(nullptr) {
+  GLuint tf;
+  ctx->contextGL()->GenTransformFeedbacks(1, &tf);
+  setObject(tf);
 }
 
-void WebGLTransformFeedback::deleteObjectImpl(gpu::gles2::GLES2Interface* gl)
-{
-    gl->DeleteTransformFeedbacks(1, &m_object);
-    m_object = 0;
+WebGLTransformFeedback::~WebGLTransformFeedback() {
+  runDestructor();
 }
 
-void WebGLTransformFeedback::setTarget(GLenum target)
-{
-    if (m_target)
-        return;
-    if (target == GL_TRANSFORM_FEEDBACK)
-        m_target = target;
+void WebGLTransformFeedback::deleteObjectImpl(gpu::gles2::GLES2Interface* gl) {
+  gl->DeleteTransformFeedbacks(1, &m_object);
+  m_object = 0;
 }
 
-void WebGLTransformFeedback::setProgram(WebGLProgram* program)
-{
-    m_program = program;
+void WebGLTransformFeedback::setTarget(GLenum target) {
+  if (m_target)
+    return;
+  if (target == GL_TRANSFORM_FEEDBACK)
+    m_target = target;
 }
 
-DEFINE_TRACE(WebGLTransformFeedback)
-{
-    visitor->trace(m_program);
-    WebGLSharedPlatform3DObject::trace(visitor);
+void WebGLTransformFeedback::setProgram(WebGLProgram* program) {
+  m_program = program;
 }
 
-} // namespace blink
+DEFINE_TRACE(WebGLTransformFeedback) {
+  visitor->trace(m_program);
+  WebGLSharedPlatform3DObject::trace(visitor);
+}
+
+}  // namespace blink

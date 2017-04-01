@@ -18,11 +18,6 @@ RENDERING_VALUE_PREFIX = 'WebRTCRendering_'
 # http://crbug.com/568333 is fixed.
 
 
-# Disabled because the reference set becomes flaky with the new
-# https:// page set introduced in http://crbug.com/523517.
-# Try removing once the Chrome used for ref builds advances
-# past blink commit pos 200986.
-@benchmark.Disabled('reference')
 class _Webrtc(perf_benchmark.PerfBenchmark):
   """Base class for WebRTC metrics for real-time communications tests."""
   test = webrtc.WebRTC
@@ -53,6 +48,21 @@ class WebrtcDataChannel(_Webrtc):
   @classmethod
   def Name(cls):
     return 'webrtc.datachannel'
+
+
+@benchmark.Disabled('android')  # http://crbug.com/663802
+class WebrtcStressTest(perf_benchmark.PerfBenchmark):
+  """Measures WebRtc CPU and GPU usage with multiple peer connections."""
+  page_set = page_sets.WebrtcStresstestPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'webrtc.stress'
+
+  def CreatePageTest(self, options):
+    # Exclude all stats.
+    return webrtc.WebRTC(particular_metrics=['googAvgEncodeMs',
+                                             'googFrameRateReceived'])
 
 
 # WebrtcRendering must be a PerfBenchmark, and not a _Webrtc, because it is a

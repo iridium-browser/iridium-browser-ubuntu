@@ -16,7 +16,6 @@
 #include "SkRefCnt.h"
 #include "SkScalar.h"
 #include "SkSmallAllocator.h"
-#include "SkXfermode.h"
 #include "Test.h"
 
 static SkBitmap make_bm(int w, int h) {
@@ -53,19 +52,22 @@ static void test_frontToBack(skiatest::Reporter* reporter) {
     layerInfo.fOffset.set(10.0f, 20.0f);
     layerInfo.fPaintBits |= SkLayerDrawLooper::kXfermode_Bit;
     SkPaint* layerPaint = looperBuilder.addLayer(layerInfo);
-    layerPaint->setXfermodeMode(SkXfermode::kSrc_Mode);
+    layerPaint->setBlendMode(SkBlendMode::kSrc);
 
     FakeDevice device;
     SkCanvas canvas(&device);
     SkPaint paint;
     auto looper(looperBuilder.detach());
     SkSmallAllocator<1, 32> allocator;
-    void* buffer = allocator.reserveT<SkDrawLooper::Context>(looper->contextSize());
-    SkDrawLooper::Context* context = looper->createContext(&canvas, buffer);
+    SkDrawLooper::Context* context = allocator.createWithIniter(
+        looper->contextSize(),
+        [&](void* buffer) {
+            return looper->createContext(&canvas, buffer);
+        });
 
     // The back layer should come first.
     REPORTER_ASSERT(reporter, context->next(&canvas, &paint));
-    REPORTER_ASSERT(reporter, SkXfermode::IsMode(paint.getXfermode(), SkXfermode::kSrc_Mode));
+    REPORTER_ASSERT(reporter, paint.getBlendMode() == SkBlendMode::kSrc);
     canvas.drawRect(SkRect::MakeWH(50.0f, 50.0f), paint);
     REPORTER_ASSERT(reporter, 10.0f == device.fLastMatrix.getTranslateX());
     REPORTER_ASSERT(reporter, 20.0f == device.fLastMatrix.getTranslateY());
@@ -73,7 +75,7 @@ static void test_frontToBack(skiatest::Reporter* reporter) {
 
     // Then the front layer.
     REPORTER_ASSERT(reporter, context->next(&canvas, &paint));
-    REPORTER_ASSERT(reporter, SkXfermode::IsMode(paint.getXfermode(), SkXfermode::kSrcOver_Mode));
+    REPORTER_ASSERT(reporter, paint.getBlendMode() == SkBlendMode::kSrcOver);
     canvas.drawRect(SkRect::MakeWH(50.0f, 50.0f), paint);
     REPORTER_ASSERT(reporter, 0.0f == device.fLastMatrix.getTranslateX());
     REPORTER_ASSERT(reporter, 0.0f == device.fLastMatrix.getTranslateY());
@@ -93,19 +95,22 @@ static void test_backToFront(skiatest::Reporter* reporter) {
     layerInfo.fOffset.set(10.0f, 20.0f);
     layerInfo.fPaintBits |= SkLayerDrawLooper::kXfermode_Bit;
     SkPaint* layerPaint = looperBuilder.addLayerOnTop(layerInfo);
-    layerPaint->setXfermodeMode(SkXfermode::kSrc_Mode);
+    layerPaint->setBlendMode(SkBlendMode::kSrc);
 
     FakeDevice device;
     SkCanvas canvas(&device);
     SkPaint paint;
     auto looper(looperBuilder.detach());
     SkSmallAllocator<1, 32> allocator;
-    void* buffer = allocator.reserveT<SkDrawLooper::Context>(looper->contextSize());
-    SkDrawLooper::Context* context = looper->createContext(&canvas, buffer);
+    SkDrawLooper::Context* context = allocator.createWithIniter(
+        looper->contextSize(),
+        [&](void* buffer) {
+            return looper->createContext(&canvas, buffer);
+        });
 
     // The back layer should come first.
     REPORTER_ASSERT(reporter, context->next(&canvas, &paint));
-    REPORTER_ASSERT(reporter, SkXfermode::IsMode(paint.getXfermode(), SkXfermode::kSrcOver_Mode));
+    REPORTER_ASSERT(reporter, paint.getBlendMode() == SkBlendMode::kSrcOver);
     canvas.drawRect(SkRect::MakeWH(50.0f, 50.0f), paint);
     REPORTER_ASSERT(reporter, 0.0f == device.fLastMatrix.getTranslateX());
     REPORTER_ASSERT(reporter, 0.0f == device.fLastMatrix.getTranslateY());
@@ -113,7 +118,7 @@ static void test_backToFront(skiatest::Reporter* reporter) {
 
     // Then the front layer.
     REPORTER_ASSERT(reporter, context->next(&canvas, &paint));
-    REPORTER_ASSERT(reporter, SkXfermode::IsMode(paint.getXfermode(), SkXfermode::kSrc_Mode));
+    REPORTER_ASSERT(reporter, paint.getBlendMode() == SkBlendMode::kSrc);
     canvas.drawRect(SkRect::MakeWH(50.0f, 50.0f), paint);
     REPORTER_ASSERT(reporter, 10.0f == device.fLastMatrix.getTranslateX());
     REPORTER_ASSERT(reporter, 20.0f == device.fLastMatrix.getTranslateY());
@@ -133,19 +138,22 @@ static void test_mixed(skiatest::Reporter* reporter) {
     layerInfo.fOffset.set(10.0f, 20.0f);
     layerInfo.fPaintBits |= SkLayerDrawLooper::kXfermode_Bit;
     SkPaint* layerPaint = looperBuilder.addLayerOnTop(layerInfo);
-    layerPaint->setXfermodeMode(SkXfermode::kSrc_Mode);
+    layerPaint->setBlendMode(SkBlendMode::kSrc);
 
     FakeDevice device;
     SkCanvas canvas(&device);
     SkPaint paint;
     sk_sp<SkDrawLooper> looper(looperBuilder.detach());
     SkSmallAllocator<1, 32> allocator;
-    void* buffer = allocator.reserveT<SkDrawLooper::Context>(looper->contextSize());
-    SkDrawLooper::Context* context = looper->createContext(&canvas, buffer);
+    SkDrawLooper::Context* context = allocator.createWithIniter(
+        looper->contextSize(),
+        [&](void* buffer) {
+            return looper->createContext(&canvas, buffer);
+        });
 
     // The back layer should come first.
     REPORTER_ASSERT(reporter, context->next(&canvas, &paint));
-    REPORTER_ASSERT(reporter, SkXfermode::IsMode(paint.getXfermode(), SkXfermode::kSrcOver_Mode));
+    REPORTER_ASSERT(reporter, paint.getBlendMode() == SkBlendMode::kSrcOver);
     canvas.drawRect(SkRect::MakeWH(50.0f, 50.0f), paint);
     REPORTER_ASSERT(reporter, 0.0f == device.fLastMatrix.getTranslateX());
     REPORTER_ASSERT(reporter, 0.0f == device.fLastMatrix.getTranslateY());
@@ -153,7 +161,7 @@ static void test_mixed(skiatest::Reporter* reporter) {
 
     // Then the front layer.
     REPORTER_ASSERT(reporter, context->next(&canvas, &paint));
-    REPORTER_ASSERT(reporter, SkXfermode::IsMode(paint.getXfermode(), SkXfermode::kSrc_Mode));
+    REPORTER_ASSERT(reporter, paint.getBlendMode() == SkBlendMode::kSrc);
     canvas.drawRect(SkRect::MakeWH(50.0f, 50.0f), paint);
     REPORTER_ASSERT(reporter, 10.0f == device.fLastMatrix.getTranslateX());
     REPORTER_ASSERT(reporter, 20.0f == device.fLastMatrix.getTranslateY());

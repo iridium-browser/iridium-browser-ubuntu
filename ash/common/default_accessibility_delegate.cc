@@ -124,6 +124,8 @@ bool DefaultAccessibilityDelegate::IsBrailleDisplayConnected() const {
 
 void DefaultAccessibilityDelegate::SilenceSpokenFeedback() const {}
 
+void DefaultAccessibilityDelegate::ClearFocusHighlight() const {}
+
 void DefaultAccessibilityDelegate::ToggleSpokenFeedback(
     AccessibilityNotificationVisibility notify) {
   spoken_feedback_enabled_ = !spoken_feedback_enabled_;
@@ -143,6 +145,13 @@ void DefaultAccessibilityDelegate::TriggerAccessibilityAlert(
 AccessibilityAlert DefaultAccessibilityDelegate::GetLastAccessibilityAlert() {
   return accessibility_alert_;
 }
+
+bool DefaultAccessibilityDelegate::ShouldToggleSpokenFeedbackViaTouch() {
+  return false;
+}
+
+void DefaultAccessibilityDelegate::PlaySpokenFeedbackToggleCountdown(
+    int tick_count) {}
 
 void DefaultAccessibilityDelegate::PlayEarcon(int sound_key) {}
 

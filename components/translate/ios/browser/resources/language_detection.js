@@ -2,8 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-__gCrWeb['languageDetection'] = {};
+/**
+ * @fileoverview Installs Language Detection management functions on the
+ * __gCrWeb object.
+ *
+ * TODO(crbug.com/659442): Enable checkTypes error for this file.
+ * @suppress {checkTypes}
+ */
 
+__gCrWeb.languageDetection = {};
+
+// Store languageDetection namespace object in a global __gCrWeb object
+// referenced by a string, so it does not get renamed by closure compiler during
+// the minification.
+__gCrWeb['languageDetection'] = __gCrWeb.languageDetection;
 
 (function() {
 /**
@@ -91,7 +103,7 @@ __gCrWeb.languageDetection['getTextContent'] = function(node, maxLen) {
       return '';
     }
     // No need to add a line break before |body| as it is the first element.
-    if (node.nodeName !== 'BODY' && style.display !== 'inline') {
+    if (node.nodeName.toUpperCase() !== 'BODY' && style.display !== 'inline') {
       txt = '\n';
     }
   }

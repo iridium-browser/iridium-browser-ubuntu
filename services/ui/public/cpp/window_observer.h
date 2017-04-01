@@ -29,9 +29,15 @@ class WindowObserver {
  public:
   struct TreeChangeParams {
     TreeChangeParams();
+    // The window whose parent changed or is changing.
     Window* target;
     Window* old_parent;
     Window* new_parent;
+
+    // TreeChangeParams is supplied as an argument to various WindowObserver
+    // functions. |receiver| is the window being observed by the receipient of
+    // this notification, which may equal any of the struct members above.
+    // TODO(sky): move this outside of TreeChangeParams.
     Window* receiver;
   };
 
@@ -64,8 +70,24 @@ class WindowObserver {
 
   virtual void OnWindowPredefinedCursorChanged(Window* window,
                                                mojom::Cursor cursor) {}
-  virtual void OnWindowVisibilityChanging(Window* window) {}
-  virtual void OnWindowVisibilityChanged(Window* window) {}
+
+  // Changing the visibility of a window results in the following sequence of
+  // functions being called:
+  // . OnWindowVisibilityChanging(): called on observers added to the window
+  //    whose visibility is changing. This is called before the visibility has
+  //    changed internally.
+  // The following are called after the visibility changes:
+  // . OnChildWindowVisibilityChanged(): called on observers added to the
+  //   parent of the window whose visibility changed. This function is generally
+  //   intended for layout managers that need to do processing before
+  //   OnWindowVisibilityChanged() is called on observers of the window.
+  // . OnWindowVisibilityChanged(): called on observers added to the window
+  //   whose visibility changed, as well as observers added to all ancestors and
+  //   all descendants of the window.
+  virtual void OnWindowVisibilityChanging(Window* window, bool visible) {}
+  virtual void OnChildWindowVisibilityChanged(Window* window, bool visible) {}
+  virtual void OnWindowVisibilityChanged(Window* window, bool visible) {}
+
   virtual void OnWindowOpacityChanged(Window* window,
                                       float old_opacity,
                                       float new_opacity) {}
@@ -97,10 +119,8 @@ class WindowObserver {
   virtual void OnWindowDrawnChanging(Window* window) {}
   virtual void OnWindowDrawnChanged(Window* window) {}
 
-  virtual void OnTransientChildAdded(ui::Window* window,
-                                     ui::Window* transient) {}
-  virtual void OnTransientChildRemoved(ui::Window* window,
-                                       ui::Window* transient) {}
+  virtual void OnTransientChildAdded(Window* window, Window* transient) {}
+  virtual void OnTransientChildRemoved(Window* window, Window* transient) {}
 
   // The WindowManager has requested the window to close. If the observer
   // allows the close it should destroy the window as appropriate.

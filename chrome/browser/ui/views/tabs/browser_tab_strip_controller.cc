@@ -22,13 +22,11 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_utils.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/favicon/content/content_favicon_driver.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/mime_util/mime_util.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
@@ -49,6 +47,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/widget.h"
+#include "url/origin.h"
 
 using base::UserMetricsAction;
 using content::WebContents;
@@ -59,6 +58,7 @@ TabRendererData::NetworkState TabContentsNetworkState(
     WebContents* contents) {
   if (!contents)
     return TabRendererData::NETWORK_STATE_NONE;
+
   if (!contents->IsLoadingToDifferentDocument()) {
     content::NavigationEntry* entry =
         contents->GetController().GetLastCommittedEntry();
@@ -66,6 +66,7 @@ TabRendererData::NetworkState TabContentsNetworkState(
       return TabRendererData::NETWORK_STATE_ERROR;
     return TabRendererData::NETWORK_STATE_NONE;
   }
+
   if (contents->IsWaitingForResponse())
     return TabRendererData::NETWORK_STATE_WAITING;
   return TabRendererData::NETWORK_STATE_LOADING;
@@ -189,11 +190,11 @@ class BrowserTabStripController::TabContextMenuContents
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, public:
 
-BrowserTabStripController::BrowserTabStripController(Browser* browser,
-                                                     TabStripModel* model)
+BrowserTabStripController::BrowserTabStripController(TabStripModel* model,
+                                                     BrowserView* browser_view)
     : model_(model),
       tabstrip_(NULL),
-      browser_(browser),
+      browser_view_(browser_view),
       hover_tab_selector_(model),
       weak_ptr_factory_(this) {
   model_->AddObserver(this);
@@ -347,15 +348,16 @@ void BrowserTabStripController::OnDropIndexUpdate(int index,
 void BrowserTabStripController::PerformDrop(bool drop_before,
                                             int index,
                                             const GURL& url) {
-  chrome::NavigateParams params(browser_, url, ui::PAGE_TRANSITION_LINK);
+  chrome::NavigateParams params(browser_view_->browser(), url,
+                                ui::PAGE_TRANSITION_LINK);
   params.tabstrip_index = index;
 
   if (drop_before) {
     content::RecordAction(UserMetricsAction("Tab_DropURLBetweenTabs"));
-    params.disposition = NEW_FOREGROUND_TAB;
+    params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   } else {
     content::RecordAction(UserMetricsAction("Tab_DropURLOnTab"));
-    params.disposition = CURRENT_TAB;
+    params.disposition = WindowOpenDisposition::CURRENT_TAB;
     params.source_contents = model_->GetWebContentsAt(index);
   }
   params.window_action = chrome::NavigateParams::SHOW_WINDOW;
@@ -384,7 +386,8 @@ void BrowserTabStripController::CreateNewTabWithLocation(
 }
 
 bool BrowserTabStripController::IsIncognito() {
-  return browser_->profile()->GetProfileType() == Profile::INCOGNITO_PROFILE;
+  return browser_view_->browser()->profile()->GetProfileType() ==
+      Profile::INCOGNITO_PROFILE;
 }
 
 void BrowserTabStripController::StackedLayoutMaybeChanged() {
@@ -399,14 +402,13 @@ void BrowserTabStripController::StackedLayoutMaybeChanged() {
 }
 
 void BrowserTabStripController::OnStartedDraggingTabs() {
-  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
-  if (browser_view && !immersive_reveal_lock_.get()) {
+  if (!immersive_reveal_lock_.get()) {
     // The top-of-window views should be revealed while the user is dragging
     // tabs in immersive fullscreen. The top-of-window views may not be already
     // revealed if the user is attempting to attach a tab to a tabstrip
     // belonging to an immersive fullscreen window.
     immersive_reveal_lock_.reset(
-        browser_view->immersive_mode_controller()->GetRevealedLock(
+        browser_view_->immersive_mode_controller()->GetRevealedLock(
             ImmersiveModeController::ANIMATE_REVEAL_NO));
   }
 }
@@ -426,14 +428,20 @@ void BrowserTabStripController::CheckFileSupported(const GURL& url) {
 }
 
 SkColor BrowserTabStripController::GetToolbarTopSeparatorColor() const {
-  return BrowserView::GetBrowserViewForBrowser(browser_)->frame()
-      ->GetFrameView()->GetToolbarTopSeparatorColor();
+  return browser_view_->frame()->GetFrameView()->GetToolbarTopSeparatorColor();
+}
+
+base::string16 BrowserTabStripController::GetAccessibleTabName(
+    const Tab* tab) const {
+  return browser_view_->GetAccessibleTabLabel(
+      false /* include_app_name */, tabstrip_->GetModelIndexOfTab(tab));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripController, TabStripModelObserver implementation:
 
-void BrowserTabStripController::TabInsertedAt(WebContents* contents,
+void BrowserTabStripController::TabInsertedAt(TabStripModel* tab_strip_model,
+                                              WebContents* contents,
                                               int model_index,
                                               bool is_active) {
   DCHECK(contents);
@@ -486,8 +494,10 @@ void BrowserTabStripController::TabReplacedAt(TabStripModel* tab_strip_model,
   SetTabDataAt(new_contents, model_index);
 }
 
-void BrowserTabStripController::TabPinnedStateChanged(WebContents* contents,
-                                                      int model_index) {
+void BrowserTabStripController::TabPinnedStateChanged(
+    TabStripModel* tab_strip_model,
+    WebContents* contents,
+    int model_index) {
   SetTabDataAt(contents, model_index);
 }
 
@@ -501,10 +511,7 @@ void BrowserTabStripController::SetTabRendererDataFromModel(
     int model_index,
     TabRendererData* data,
     TabStatus tab_status) {
-  favicon::FaviconDriver* favicon_driver =
-      favicon::ContentFaviconDriver::FromWebContents(contents);
-
-  data->favicon = favicon_driver->GetFavicon().AsImageSkia();
+  data->favicon = favicon::TabFaviconFromWebContents(contents).AsImageSkia();
   data->network_state = TabContentsNetworkState(contents);
   data->title = contents->GetTitle();
   data->url = contents->GetURL();
@@ -585,6 +592,6 @@ void BrowserTabStripController::OnFindURLMimeTypeCompleted(
           content::PluginService::GetInstance()->GetPluginInfo(
               -1,                // process ID
               MSG_ROUTING_NONE,  // routing ID
-              model_->profile()->GetResourceContext(), url, GURL(), mime_type,
-              false, NULL, &plugin, NULL));
+              model_->profile()->GetResourceContext(), url, url::Origin(),
+              mime_type, false, NULL, &plugin, NULL));
 }

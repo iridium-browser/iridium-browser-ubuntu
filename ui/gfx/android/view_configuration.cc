@@ -24,7 +24,6 @@ struct ViewConfigurationData {
       : double_tap_timeout_in_ms_(0),
         long_press_timeout_in_ms_(0),
         tap_timeout_in_ms_(0),
-        scroll_friction_(1.f),
         max_fling_velocity_in_dips_s_(0),
         min_fling_velocity_in_dips_s_(0),
         touch_slop_in_dips_(0),
@@ -40,14 +39,17 @@ struct ViewConfigurationData {
     long_press_timeout_in_ms_ =
         Java_ViewConfigurationHelper_getLongPressTimeout(env);
     tap_timeout_in_ms_ = Java_ViewConfigurationHelper_getTapTimeout(env);
-    scroll_friction_ = Java_ViewConfigurationHelper_getScrollFriction(env);
 
-    jobject obj = j_view_configuration_helper_.obj();
-    Update(Java_ViewConfigurationHelper_getMaximumFlingVelocity(env, obj),
-           Java_ViewConfigurationHelper_getMinimumFlingVelocity(env, obj),
-           Java_ViewConfigurationHelper_getTouchSlop(env, obj),
-           Java_ViewConfigurationHelper_getDoubleTapSlop(env, obj),
-           Java_ViewConfigurationHelper_getMinScalingSpan(env, obj));
+    Update(Java_ViewConfigurationHelper_getMaximumFlingVelocity(
+               env, j_view_configuration_helper_),
+           Java_ViewConfigurationHelper_getMinimumFlingVelocity(
+               env, j_view_configuration_helper_),
+           Java_ViewConfigurationHelper_getTouchSlop(
+               env, j_view_configuration_helper_),
+           Java_ViewConfigurationHelper_getDoubleTapSlop(
+               env, j_view_configuration_helper_),
+           Java_ViewConfigurationHelper_getMinScalingSpan(
+               env, j_view_configuration_helper_));
   }
 
   ~ViewConfigurationData() {}
@@ -65,7 +67,6 @@ struct ViewConfigurationData {
   int double_tap_timeout_in_ms() const { return double_tap_timeout_in_ms_; }
   int long_press_timeout_in_ms() const { return long_press_timeout_in_ms_; }
   int tap_timeout_in_ms() const { return tap_timeout_in_ms_; }
-  float scroll_friction() const { return scroll_friction_; }
 
   int max_fling_velocity_in_dips_s() {
     base::AutoLock autolock(lock_);
@@ -114,7 +115,6 @@ struct ViewConfigurationData {
   int double_tap_timeout_in_ms_;
   int long_press_timeout_in_ms_;
   int tap_timeout_in_ms_;
-  float scroll_friction_;
 
   // These values may vary as view-specific parameters change, so read/write
   // access must be synchronized.
@@ -156,10 +156,6 @@ int ViewConfiguration::GetLongPressTimeoutInMs() {
 
 int ViewConfiguration::GetTapTimeoutInMs() {
   return g_view_configuration.Get().tap_timeout_in_ms();
-}
-
-float ViewConfiguration::GetScrollFriction() {
-  return g_view_configuration.Get().scroll_friction();
 }
 
 int ViewConfiguration::GetMaximumFlingVelocityInDipsPerSecond() {

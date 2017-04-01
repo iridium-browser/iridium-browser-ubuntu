@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from common.chrome_proxy_shared_page_state import ChromeProxySharedPageState
 from telemetry.page import page as page_module
 from telemetry import story
 
@@ -9,7 +10,8 @@ from telemetry import story
 class BlockOncePage(page_module.Page):
 
   def __init__(self, url, page_set):
-    super(BlockOncePage, self).__init__(url=url, page_set=page_set)
+    super(BlockOncePage, self).__init__(url=url,page_set=page_set,
+        shared_page_state_class=ChromeProxySharedPageState)
 
   def RunNavigateSteps(self, action_runner):
     super(BlockOncePage, self).RunNavigateSteps(action_runner)
@@ -34,7 +36,7 @@ class BlockOncePage(page_module.Page):
       })();
     ''')
     action_runner.WaitForJavaScriptCondition(
-        "window.post_request_completed == true", 30)
+        "window.post_request_completed == true", timeout_in_seconds=30)
 
 class BlockOnceStorySet(story.StorySet):
 

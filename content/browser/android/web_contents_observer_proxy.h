@@ -11,13 +11,13 @@
 #include "base/macros.h"
 #include "base/process/kill.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "url/gurl.h"
 
 namespace content {
 
-class RenderViewHost;
 class WebContents;
 
 // Extends WebContentsObserver for providing a public Java API for some of the
@@ -32,7 +32,6 @@ class WebContentsObserverProxy : public WebContentsObserver {
  private:
   void RenderViewReady() override;
   void RenderProcessGone(base::TerminationStatus termination_status) override;
-  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
   void DidStartLoading() override;
   void DidStopLoading() override;
   void DidFailProvisionalLoad(RenderFrameHost* render_frame_host,
@@ -52,14 +51,20 @@ class WebContentsObserverProxy : public WebContentsObserver {
                            const FrameNavigateParams& params) override;
   void DocumentAvailableInMainFrame() override;
   void DidFirstVisuallyNonEmptyPaint() override;
+  void WasShown() override;
+  void WasHidden() override;
+  void TitleWasSet(NavigationEntry* entry, bool explicit_set) override;
   void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
                                        const GURL& validated_url,
-                                       bool is_error_page,
-                                       bool is_iframe_srcdoc) override;
+                                       bool is_error_page) override;
   void DidCommitProvisionalLoadForFrame(
       RenderFrameHost* render_frame_host,
       const GURL& url,
       ui::PageTransition transition_type) override;
+
+  void DidStartNavigation(NavigationHandle* navigation_handle) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
+
   void DidFinishLoad(RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
   void DocumentLoadedInFrame(RenderFrameHost* render_frame_host) override;
@@ -71,10 +76,7 @@ class WebContentsObserverProxy : public WebContentsObserver {
   void DidChangeThemeColor(SkColor color) override;
   void DidStartNavigationToPendingEntry(
       const GURL& url,
-      NavigationController::ReloadType reload_type) override;
-  void MediaSessionStateChanged(bool is_controllable,
-                                bool is_suspended,
-                                const MediaMetadata& metadata) override;
+      ReloadType reload_type) override;
   void SetToBaseURLForDataURLIfNeeded(std::string* url);
 
   void DidFailLoadInternal(bool is_provisional_load,

@@ -5,31 +5,36 @@
 #ifndef AppliedTextDecoration_h
 #define AppliedTextDecoration_h
 
-#include "core/css/StyleColor.h"
 #include "core/style/ComputedStyleConstants.h"
+#include "platform/graphics/Color.h"
 #include "wtf/Allocator.h"
 
 namespace blink {
 
 class AppliedTextDecoration {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-public:
-    AppliedTextDecoration(TextDecoration, TextDecorationStyle, StyleColor);
-    explicit AppliedTextDecoration(TextDecoration);
+  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
 
-    TextDecoration line() const { return static_cast<TextDecoration>(m_line); }
-    TextDecorationStyle style() const { return static_cast<TextDecorationStyle>(m_style); }
+ public:
+  AppliedTextDecoration(TextDecoration, TextDecorationStyle, Color);
 
-    bool isSimpleUnderline() const { return m_line == TextDecorationUnderline && m_style == TextDecorationStyleSolid && m_color.isCurrentColor(); }
-    bool operator==(const AppliedTextDecoration&) const;
-    bool operator!=(const AppliedTextDecoration& o) const { return !(*this == o); }
+  TextDecoration lines() const { return static_cast<TextDecoration>(m_lines); }
+  TextDecorationStyle style() const {
+    return static_cast<TextDecorationStyle>(m_style);
+  }
+  Color color() const { return m_color; }
+  void setColor(Color color) { m_color = color; }
 
-private:
-    unsigned m_line : TextDecorationBits;
-    unsigned m_style : 3; // TextDecorationStyle
-    StyleColor m_color;
+  bool operator==(const AppliedTextDecoration&) const;
+  bool operator!=(const AppliedTextDecoration& o) const {
+    return !(*this == o);
+  }
+
+ private:
+  unsigned m_lines : TextDecorationBits;
+  unsigned m_style : 3;  // TextDecorationStyle
+  Color m_color;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // AppliedTextDecoration_h
+#endif  // AppliedTextDecoration_h

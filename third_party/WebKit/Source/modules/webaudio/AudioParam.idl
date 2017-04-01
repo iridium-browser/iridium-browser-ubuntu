@@ -26,8 +26,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-[
-] interface AudioParam {
+// See https://webaudio.github.io/web-audio-api/#AudioParam
+interface AudioParam {
     attribute float value;
     readonly attribute float defaultValue;
 
@@ -49,5 +49,8 @@
 
     // Cancels all scheduled parameter changes with times greater than or equal to startTime.
     [RaisesException, MeasureAs=AudioParamCancelScheduledValues] AudioParam cancelScheduledValues(double startTime);
+
+    // Cancel scheduled parameter changes and hold the last value
+    [RaisesException, MeasureAs=AudioParamCancelAndHoldAtTime] AudioParam cancelAndHoldAtTime(double startTime);
 
 };

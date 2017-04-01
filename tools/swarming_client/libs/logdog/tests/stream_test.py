@@ -14,7 +14,7 @@ ROOT_DIR = os.path.dirname(os.path.abspath(os.path.join(
     os.pardir, os.pardir, os.pardir)))
 sys.path.insert(0, ROOT_DIR)
 
-from libs.logdog import stream, varint
+from libs.logdog import stream, streamname, varint
 
 
 class StreamParamsTestCase(unittest.TestCase):
@@ -84,19 +84,23 @@ class StreamClientTestCase(unittest.TestCase):
 
     def interpret(self):
       data = StringIO.StringIO(self.buffer.getvalue())
+      magic = data.read(len(stream.BUTLER_MAGIC))
+      if magic != stream.BUTLER_MAGIC:
+        raise ValueError('Invalid magic value ([%s] != [%s])' % (
+            magic, stream.BUTLER_MAGIC))
       length, _ = varint.read_uvarint(data)
       header = data.read(length)
       return json.loads(header), data.read()
 
   class _TestStreamClient(stream.StreamClient):
-    def __init__(self, value):
-      super(StreamClientTestCase._TestStreamClient, self).__init__()
+    def __init__(self, value, **kwargs):
+      super(StreamClientTestCase._TestStreamClient, self).__init__(**kwargs)
       self.value = value
       self.last_conn = None
 
     @classmethod
-    def _create(cls, value):
-      return cls(value)
+    def _create(cls, value, **kwargs):
+      return cls(value, **kwargs)
 
     def _connect_raw(self):
       conn = StreamClientTestCase._TestStreamClientConnection()
@@ -124,8 +128,17 @@ class StreamClientTestCase(unittest.TestCase):
     self.assertEqual(client.value, 'value')
 
   def testTextStream(self):
-    client = self._registry.create('test:value')
+    client = self._registry.create('test:value',
+                                   project='test',
+                                   prefix='foo/bar',
+                                   coordinator_host='example.appspot.com')
     with client.text('mystream') as fd:
+      self.assertEqual(
+          fd.path,
+          streamname.StreamPath(prefix='foo/bar', name='mystream'))
+      self.assertEqual(
+          fd.get_viewer_url(),
+          'https://example.appspot.com/v/?s=test%2Ffoo%2Fbar%2F%2B%2Fmystream')
       fd.write('text\nstream\nlines')
 
     conn = client.last_conn
@@ -140,6 +153,14 @@ class StreamClientTestCase(unittest.TestCase):
     with client.text('mystream', content_type='foo/bar',
                      tee=stream.StreamParams.TEE_STDOUT,
                      tags={'foo': 'bar', 'baz': 'qux'}) as fd:
+      self.assertEqual(
+          fd.params,
+          stream.StreamParams.make(
+              name='mystream',
+              type=stream.StreamParams.TEXT,
+              content_type='foo/bar',
+              tee=stream.StreamParams.TEE_STDOUT,
+              tags={'foo': 'bar', 'baz': 'qux'}))
       fd.write('text!')
 
     conn = client.last_conn
@@ -156,8 +177,17 @@ class StreamClientTestCase(unittest.TestCase):
     self.assertEqual(data, 'text!')
 
   def testBinaryStream(self):
-    client = self._registry.create('test:value')
+    client = self._registry.create('test:value',
+                                   project='test',
+                                   prefix='foo/bar',
+                                   coordinator_host='example.appspot.com')
     with client.binary('mystream') as fd:
+      self.assertEqual(
+          fd.path,
+          streamname.StreamPath(prefix='foo/bar', name='mystream'))
+      self.assertEqual(
+          fd.get_viewer_url(),
+          'https://example.appspot.com/v/?s=test%2Ffoo%2Fbar%2F%2B%2Fmystream')
       fd.write('\x60\x0d\xd0\x65')
 
     conn = client.last_conn
@@ -168,8 +198,17 @@ class StreamClientTestCase(unittest.TestCase):
     self.assertEqual(data, '\x60\x0d\xd0\x65')
 
   def testDatagramStream(self):
-    client = self._registry.create('test:value')
+    client = self._registry.create('test:value',
+                                   project='test',
+                                   prefix='foo/bar',
+                                   coordinator_host='example.appspot.com')
     with client.datagram('mystream') as fd:
+      self.assertEqual(
+          fd.path,
+          streamname.StreamPath(prefix='foo/bar', name='mystream'))
+      self.assertEqual(
+          fd.get_viewer_url(),
+          'https://example.appspot.com/v/?s=test%2Ffoo%2Fbar%2F%2B%2Fmystream')
       fd.send('datagram0')
       fd.send('dg1')
       fd.send('')
@@ -182,6 +221,35 @@ class StreamClientTestCase(unittest.TestCase):
     self.assertEqual(header, {'name': 'mystream', 'type': 'datagram'})
     self.assertEqual(list(self._split_datagrams(data)),
         ['datagram0', 'dg1', '', 'dg3'])
+
+  def testStreamWithoutPrefixCannotGenerateUrls(self):
+    client = self._registry.create('test:value',
+                                   coordinator_host='example.appspot.com')
+    with client.text('mystream') as fd:
+      self.assertRaises(KeyError, fd.get_viewer_url)
+
+  def testStreamWithoutInvalidPrefixCannotGenerateUrls(self):
+    client = self._registry.create('test:value',
+                                   project='test',
+                                   prefix='!!! invalid !!!',
+                                   coordinator_host='example.appspot.com')
+    with client.text('mystream') as fd:
+      self.assertRaises(ValueError, fd.get_viewer_url)
+
+  def testStreamWithoutProjectCannotGenerateUrls(self):
+    client = self._registry.create('test:value',
+                                   prefix='foo/bar',
+                                   coordinator_host='example.appspot.com')
+    with client.text('mystream') as fd:
+      self.assertRaises(KeyError, fd.get_viewer_url)
+
+  def testStreamWithoutCoordinatorHostCannotGenerateUrls(self):
+    client = self._registry.create('test:value',
+                                   project='test',
+                                   prefix='foo/bar')
+    with client.text('mystream') as fd:
+      self.assertRaises(KeyError, fd.get_viewer_url)
+
 
   def testCreatingDuplicateStreamNameRaisesValueError(self):
     client = self._registry.create('test:value')

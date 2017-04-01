@@ -6,19 +6,23 @@
 
 #include <utility>
 
-#include "android_webview/browser/child_frame.h"
 #include "android_webview/browser/compositor_frame_producer.h"
 #include "android_webview/browser/compositor_id.h"
 #include "android_webview/browser/deferred_gpu_command_service.h"
 #include "android_webview/browser/hardware_renderer.h"
 #include "android_webview/browser/render_thread_manager_client.h"
 #include "android_webview/browser/scoped_app_gl_state_restore.h"
+#include "android_webview/common/aw_switches.h"
 #include "android_webview/public/browser/draw_gl.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
+#include "cc/output/compositor_frame.h"
 
 namespace android_webview {
 
@@ -94,8 +98,10 @@ RenderThreadManager::RenderThreadManager(
     : ui_loop_(ui_loop),
       client_(client),
       compositor_frame_producer_(nullptr),
+      has_received_frame_(false),
       renderer_manager_key_(GLViewRendererManager::GetInstance()->NullKey()),
-      hardware_renderer_has_frame_(false),
+      sync_on_draw_hardware_(base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kSyncOnDrawHardware)),
       inside_hardware_release_(false),
       weak_factory_on_ui_thread_(this) {
   DCHECK(ui_loop_->BelongsToCurrentThread());
@@ -173,22 +179,54 @@ gfx::Vector2d RenderThreadManager::GetScrollOffsetOnRT() {
   return scroll_offset_;
 }
 
-void RenderThreadManager::SetFrameOnUI(std::unique_ptr<ChildFrame> frame) {
+std::unique_ptr<ChildFrame> RenderThreadManager::SetFrameOnUI(
+    std::unique_ptr<ChildFrame> new_frame) {
+  DCHECK(new_frame);
   base::AutoLock lock(lock_);
-  DCHECK(!child_frame_.get());
-  child_frame_ = std::move(frame);
+
+  has_received_frame_ = true;
+
+  if (child_frames_.empty()) {
+    child_frames_.emplace_back(std::move(new_frame));
+    return nullptr;
+  }
+  std::unique_ptr<ChildFrame> uncommitted_frame;
+  if (new_frame->frame) {
+    // Optimization for synchronous path.
+    // TODO(boliu): Remove when synchronous path is fully removed.
+    DCHECK_LE(child_frames_.size(), 1u);
+    if (!child_frames_.empty()) {
+      uncommitted_frame = std::move(child_frames_.front());
+      child_frames_.pop_front();
+    }
+    child_frames_.emplace_back(std::move(new_frame));
+    return uncommitted_frame;
+  }
+
+  DCHECK_LE(child_frames_.size(), 2u);
+  ChildFrameQueue pruned_frames =
+      HardwareRenderer::WaitAndPruneFrameQueue(&child_frames_);
+  DCHECK_LE(pruned_frames.size(), 1u);
+  if (pruned_frames.size())
+    uncommitted_frame = std::move(pruned_frames.front());
+  child_frames_.emplace_back(std::move(new_frame));
+  return uncommitted_frame;
 }
 
-std::unique_ptr<ChildFrame> RenderThreadManager::PassFrameOnRT() {
+ChildFrameQueue RenderThreadManager::PassFramesOnRT() {
   base::AutoLock lock(lock_);
-  hardware_renderer_has_frame_ =
-      hardware_renderer_has_frame_ || child_frame_.get();
-  return std::move(child_frame_);
+  ChildFrameQueue returned_frames;
+  returned_frames.swap(child_frames_);
+  return returned_frames;
 }
 
-std::unique_ptr<ChildFrame> RenderThreadManager::PassUncommittedFrameOnUI() {
+ChildFrameQueue RenderThreadManager::PassUncommittedFrameOnUI() {
   base::AutoLock lock(lock_);
-  return std::move(child_frame_);
+  for (auto& frame_ptr : child_frames_)
+    frame_ptr->WaitOnFutureIfNeeded();
+  ChildFrameQueue returned_frames;
+  returned_frames.swap(child_frames_);
+  return returned_frames;
 }
 
 void RenderThreadManager::PostExternalDrawConstraintsToChildCompositorOnRT(
@@ -222,23 +260,23 @@ bool RenderThreadManager::IsInsideHardwareRelease() const {
 }
 
 RenderThreadManager::ReturnedResources::ReturnedResources()
-    : output_surface_id(0u) {}
+    : compositor_frame_sink_id(0u) {}
 
 RenderThreadManager::ReturnedResources::~ReturnedResources() {}
 
 void RenderThreadManager::InsertReturnedResourcesOnRT(
     const cc::ReturnedResourceArray& resources,
     const CompositorID& compositor_id,
-    uint32_t output_surface_id) {
+    uint32_t compositor_frame_sink_id) {
   base::AutoLock lock(lock_);
   ReturnedResources& returned_resources =
       returned_resources_map_[compositor_id];
-  if (returned_resources.output_surface_id != output_surface_id) {
+  if (returned_resources.compositor_frame_sink_id != compositor_frame_sink_id) {
     returned_resources.resources.clear();
   }
   returned_resources.resources.insert(returned_resources.resources.end(),
                                       resources.begin(), resources.end());
-  returned_resources.output_surface_id = output_surface_id;
+  returned_resources.compositor_frame_sink_id = compositor_frame_sink_id;
 }
 
 void RenderThreadManager::SwapReturnedResourcesOnUI(
@@ -297,7 +335,6 @@ void RenderThreadManager::DrawGL(AwDrawGLInfo* draw_info) {
   }
 
   if (IsInsideHardwareRelease()) {
-    hardware_renderer_has_frame_ = false;
     hardware_renderer_.reset();
     // Flush the idle queue in tear down.
     DeferredGpuCommandService::GetInstance()->PerformAllIdleWork();
@@ -325,8 +362,12 @@ void RenderThreadManager::DeleteHardwareRendererOnUI() {
 
   // If the WebView gets onTrimMemory >= MODERATE twice in a row, the 2nd
   // onTrimMemory will result in an unnecessary Render Thread InvokeGL call.
-  bool hardware_initialized = HasFrameOnUI();
-  if (hardware_initialized) {
+  // TODO(boliu): removing the requirement that the first frame be
+  // synchronous will require changing the following test.
+  if (has_received_frame_) {
+    // Receiving at least one frame is a precondition for
+    // initialization (such as looing up GL bindings and constructing
+    // hardware_renderer_).
     bool draw_functor_succeeded = client_->RequestInvokeGL(true);
     if (!draw_functor_succeeded) {
       LOG(ERROR) << "Unable to free GL resources. Has the Window leaked?";
@@ -347,10 +388,12 @@ void RenderThreadManager::DeleteHardwareRendererOnUI() {
     }
   }
 
-  if (hardware_initialized) {
+  if (has_received_frame_) {
     // Flush any invoke functors that's caused by ReleaseHardware.
     client_->RequestInvokeGL(true);
   }
+
+  has_received_frame_ = false;
 }
 
 void RenderThreadManager::SetCompositorFrameProducer(
@@ -363,12 +406,12 @@ void RenderThreadManager::SetCompositorFrameProducer(
 
 bool RenderThreadManager::HasFrameOnUI() const {
   base::AutoLock lock(lock_);
-  return hardware_renderer_has_frame_ || child_frame_.get();
+  return has_received_frame_;
 }
 
 bool RenderThreadManager::HasFrameForHardwareRendererOnRT() const {
   base::AutoLock lock(lock_);
-  return !!child_frame_;
+  return !child_frames_.empty();
 }
 
 void RenderThreadManager::InitializeHardwareDrawIfNeededOnUI() {

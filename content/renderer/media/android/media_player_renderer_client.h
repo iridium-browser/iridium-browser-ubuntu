@@ -55,8 +55,6 @@ class CONTENT_EXPORT MediaPlayerRendererClient : public media::Renderer,
   void SetPlaybackRate(double playback_rate) override;
   void SetVolume(float volume) override;
   base::TimeDelta GetMediaTime() override;
-  bool HasAudio() override;
-  bool HasVideo() override;
 
   // media::RendererClient implementation.
   void OnError(media::PipelineStatus status) override;
@@ -73,9 +71,12 @@ class CONTENT_EXPORT MediaPlayerRendererClient : public media::Renderer,
   void OnFrameAvailable();
 
  private:
-  void InitializeRemoteRenderer(
-      media::DemuxerStreamProvider* demuxer_stream_provider);
-  void CompleteInitialization(media::PipelineStatus status);
+  void OnStreamTextureWrapperInitialized(
+      media::DemuxerStreamProvider* demuxer_stream_provider,
+      bool success);
+  void OnRemoteRendererInitialized(media::PipelineStatus status);
+
+  void OnScopedSurfaceRequested(const base::UnguessableToken& request_token);
 
   // Used to forward calls to the MediaPlayerRenderer living in the Browser.
   std::unique_ptr<media::MojoRenderer> mojo_renderer_;

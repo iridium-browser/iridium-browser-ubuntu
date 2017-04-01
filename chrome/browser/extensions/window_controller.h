@@ -18,14 +18,9 @@
 class Browser;  // TODO(stevenjb) eliminate this dependency.
 class GURL;
 class Profile;
-class SessionID;
 
 namespace base {
 class DictionaryValue;
-}
-
-namespace gfx {
-class Rect;
 }
 
 namespace ui {
@@ -89,10 +84,6 @@ class WindowController {
   virtual std::unique_ptr<api::tabs::Tab> CreateTabObject(
       const extensions::Extension* extension,
       int tab_index) const = 0;
-
-  // DEPRECATED: Use std::unique_ptr<api::tabs::Tab> CreateTabObject(...)
-  virtual base::DictionaryValue* CreateTabValue(
-      const extensions::Extension* extension, int tab_index) const = 0;
 
   // Returns false if the window is in a state where closing the window is not
   // permitted and sets |reason| if not NULL.

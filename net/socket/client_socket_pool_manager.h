@@ -9,28 +9,31 @@
 #ifndef NET_SOCKET_CLIENT_SOCKET_POOL_MANAGER_H_
 #define NET_SOCKET_CLIENT_SOCKET_POOL_MANAGER_H_
 
+#include <string>
+
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_network_session.h"
 
-class GURL;
-
 namespace base {
 class Value;
+namespace trace_event {
+class ProcessMemoryDump;
+}
 }
 
 namespace net {
 
-typedef base::Callback<int(const AddressList&, const BoundNetLog& net_log)>
-OnHostResolutionCallback;
+typedef base::Callback<int(const AddressList&, const NetLogWithSource& net_log)>
+    OnHostResolutionCallback;
 
-class BoundNetLog;
 class ClientSocketHandle;
 class HostPortPair;
 class HttpNetworkSession;
 class HttpProxyClientSocketPool;
 class HttpRequestHeaders;
+class NetLogWithSource;
 class ProxyInfo;
 class TransportClientSocketPool;
 class SOCKSClientSocketPool;
@@ -85,6 +88,12 @@ class NET_EXPORT_PRIVATE ClientSocketPoolManager {
       const HostPortPair& proxy_server) = 0;
   // Creates a Value summary of the state of the socket pools.
   virtual std::unique_ptr<base::Value> SocketPoolInfoToValue() const = 0;
+
+  // Dumps memory allocation stats. |parent_dump_absolute_name| is the name
+  // used by the parent MemoryAllocatorDump in the memory dump hierarchy.
+  virtual void DumpMemoryStats(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const std::string& parent_dump_absolute_name) const = 0;
 };
 
 // A helper method that uses the passed in proxy information to initialize a
@@ -108,7 +117,7 @@ int InitSocketHandleForHttpRequest(
     const SSLConfig& ssl_config_for_origin,
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     const OnHostResolutionCallback& resolution_callback,
     const CompletionCallback& callback);
@@ -134,7 +143,7 @@ int InitSocketHandleForWebSocketRequest(
     const SSLConfig& ssl_config_for_origin,
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     const OnHostResolutionCallback& resolution_callback,
     const CompletionCallback& callback);
@@ -150,7 +159,7 @@ NET_EXPORT int InitSocketHandleForRawConnect(
     const SSLConfig& ssl_config_for_origin,
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     const CompletionCallback& callback);
 
@@ -165,7 +174,7 @@ NET_EXPORT int InitSocketHandleForTlsConnect(
     const SSLConfig& ssl_config_for_origin,
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     const CompletionCallback& callback);
 
@@ -183,7 +192,7 @@ int PreconnectSocketsForHttpRequest(
     const SSLConfig& ssl_config_for_origin,
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     int num_preconnect_streams);
 
 }  // namespace net

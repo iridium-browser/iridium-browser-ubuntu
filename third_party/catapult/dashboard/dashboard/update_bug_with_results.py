@@ -15,17 +15,18 @@ from google.appengine.ext import ndb
 
 from dashboard import bisect_fyi
 from dashboard import bisect_report
-from dashboard import buildbucket_service
-from dashboard import datastore_hooks
 from dashboard import email_template
-from dashboard import issue_tracker_service
 from dashboard import layered_cache
 from dashboard import quick_logger
-from dashboard import request_handler
-from dashboard import utils
+from dashboard.common import datastore_hooks
+from dashboard.common import request_handler
+from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import bug_data
 from dashboard.models import try_job
+from dashboard.services import buildbucket_service
+from dashboard.services import issue_tracker_service
+
 
 COMPLETED, FAILED, PENDING, ABORTED = ('completed', 'failed', 'pending',
                                        'aborted')
@@ -38,9 +39,8 @@ _STALE_TRYJOB_DELTA = datetime.timedelta(days=7)
 _AUTO_ASSIGN_MSG = """
 === Auto-CCing suspected CL author %(author)s ===
 
-Hi %(author)s, the bisect results pointed to your CL below as possibly
-causing a regression. Please have a look at this info and see whether
-your CL be related.
+Hi %(author)s, the bisect results pointed to your CL, please take a look at the
+results.
 
 """
 
@@ -91,9 +91,8 @@ class UpdateBugWithResultsHandler(request_handler.RequestHandler):
     jobs and send comments to an issue on the issue tracker if a bisect job has
     completed.
     """
-    credentials = utils.ServiceAccountCredentials()
     issue_tracker = issue_tracker_service.IssueTrackerService(
-        additional_credentials=credentials)
+        utils.ServiceAccountHttp())
 
     # Set privilege so we can also fetch internal try_job entities.
     datastore_hooks.SetPrivilegedRequest()
@@ -123,8 +122,12 @@ def _CheckJob(job, issue_tracker):
     job: A TryJob entity, which represents one bisect try job.
     issue_tracker: An issue_tracker_service.IssueTrackerService instance.
   """
-  logging.info('Checking job %s', job.key.id())
+  logging.info('Checking job %s for bug %s, with buildbucket_job_id %s',
+               job.key.id(), job.bug_id, job.buildbucket_job_id)
 
+  if not _IsJobCompleted(job):
+    logging.info('Not yet COMPLETED.')
+    return
 
   job.CheckFailureFromBuildBucket()
 
@@ -137,14 +140,6 @@ def _CheckJob(job, issue_tracker):
     return
 
   results_data = job.results_data
-  # Skip this check for bisect fyi jobs, because if the job is fails due to
-  # bisect recipe or infra failures then an alert message should be sent to the
-  # team.
-  if (job.job_type != 'bisect-fyi' and (
-      not results_data or results_data.get('status') not in [COMPLETED,
-                                                             FAILED])):
-    logging.info('Not yet COMPLETED/FAILED')
-    return
 
   if job.job_type == 'perf-try':
     logging.info('Sending perf try job mail')
@@ -178,11 +173,14 @@ def _CheckFYIBisectJob(job, issue_tracker):
       job.key.delete()
       return
 
-    if not _IsBisectJobCompleted(job):
-      return
     if not job.results_data:
       raise BisectJobFailure('Bisect job completed, but results data is not '
                              'found, bot might have failed to post results.')
+    # FAILED implies failed or cancelled jobs.
+    if job.status == FAILED:
+      raise BisectJobFailure(
+          _BUILD_FAILURE_REASON.get(
+              job.results_data.get('failure_reason'), 'Unknown'))
     error_message = bisect_fyi.VerifyBisectFYIResults(job)
     _PostSuccessfulResult(job, issue_tracker)
     if not bisect_fyi.IsBugUpdated(job, issue_tracker):
@@ -191,22 +189,13 @@ def _CheckFYIBisectJob(job, issue_tracker):
     error_message = 'Bisect job failed because, %s' % e
   except BugUpdateFailure as e:
     error_message = 'Failed to update bug with bisect results: %s' % e
+  except Exception as e:  # pylint: disable=broad-except
+    error_message = 'Failed to update bug with bisect results: %s' % e
   finally:
-    job_info = buildbucket_service.GetJobStatus(job.buildbucket_job_id)
-    job_info = job_info.get('build', {})
-    if not job.results_data:
-      job.results_data = {}
-    job.results_data['buildbot_log_url'] = str(job_info.get('url'))
-
-
-  # When the job fails before getting to the point where it post bisect results
-  # to the dashboard, the tryjob's results_data is not set.
-  # As a special case for Bisect FYI jobs, we query buildbucket to get the
-  # bisect job's status.
-  if ((job.results_data and job.results_data.get('status') == FAILED) or
-      error_message):
-    job.SetFailed()
-    _SendFYIBisectEmail(job, error_message)
+    if ((job.results_data and job.results_data.get('status') == FAILED) or
+        error_message):
+      job.SetFailed()
+      _SendFYIBisectEmail(job, error_message)
 
 
 def _SendPerfTryJobEmail(job):
@@ -223,6 +212,26 @@ def _SendPerfTryJobEmail(job):
                  html=email_report['html'])
 
 
+def _GetMergeIssue(issue_tracker, commit_cache_key):
+  """Get's the issue this one might be merged into."""
+  merge_issue = layered_cache.GetExternal(commit_cache_key)
+  if merge_issue:
+    return issue_tracker.GetIssue(merge_issue)
+  return {}
+
+
+def _GetCulpritCLOwnerAndComment(job, authors_to_cc):
+  """Get's the owner for a CL and the comment to update the bug with."""
+  comment = bisect_report.GetReport(job)
+  owner = None
+  if authors_to_cc:
+    comment = '%s%s' % (
+        _AUTO_ASSIGN_MSG % {'author': authors_to_cc[0]},
+        comment)
+    owner = authors_to_cc[0]
+  return owner, comment
+
+
 def _PostSuccessfulResult(job, issue_tracker):
   """Posts successful bisect results on issue tracker."""
   # From the results, get the list of people to CC (if applicable), the bug
@@ -231,26 +240,35 @@ def _PostSuccessfulResult(job, issue_tracker):
   if job.bug_id < 0:
     return
 
-  results_data = job.results_data
+  commit_cache_key = _GetCommitHashCacheKey(job.results_data)
+
+  # Check to see if there's already an issue for this commit, if so we can
+  # potentially merge the bugs.
+  merge_issue = _GetMergeIssue(issue_tracker, commit_cache_key)
+
+  # Check if we can duplicate this issue against an existing issue.
+  # We won't duplicate against an issue that itself is already
+  # a duplicate though. Could follow the whole chain through but we'll
+  # just keep things simple and flat for now.
+  merge_issue_id = None
+  if merge_issue:
+    if merge_issue.get('status') != issue_tracker_service.STATUS_DUPLICATE:
+      merge_issue_id = merge_issue.get('id')
+
+  # Only skip cc'ing the authors if we're going to merge this isn't another
+  # issue.
   authors_to_cc = []
-  commit_cache_key = _GetCommitHashCacheKey(results_data)
-
-  merge_issue = layered_cache.GetExternal(commit_cache_key)
-  if not merge_issue:
-    authors_to_cc = _GetAuthorsToCC(results_data)
-
-  comment = bisect_report.GetReport(job)
+  if not merge_issue_id:
+    authors_to_cc = _GetAuthorsToCC(job.results_data)
 
   # Add a friendly message to author of culprit CL.
-  owner = None
-  if authors_to_cc:
-    comment = '%s%s' % (_AUTO_ASSIGN_MSG % {'author': authors_to_cc[0]},
-                        comment)
-    owner = authors_to_cc[0]
+  owner, comment = _GetCulpritCLOwnerAndComment(job, authors_to_cc)
+
   # Set restrict view label if the bisect results are internal only.
   labels = ['Restrict-View-Google'] if job.internal_only else None
+
   comment_added = issue_tracker.AddBugComment(
-      job.bug_id, comment, cc_list=authors_to_cc, merge_issue=merge_issue,
+      job.bug_id, comment, cc_list=authors_to_cc, merge_issue=merge_issue_id,
       labels=labels, owner=owner)
   if not comment_added:
     raise BugUpdateFailure('Failed to update bug %s with comment %s'
@@ -259,8 +277,13 @@ def _PostSuccessfulResult(job, issue_tracker):
   logging.info('Updated bug %s with results from %s',
                job.bug_id, job.rietveld_issue_id)
 
-  if merge_issue:
-    _MapAnomaliesToMergeIntoBug(merge_issue, job.bug_id)
+  # If the issue we were going to merge into was itself a duplicate, we don't
+  # dup against it but we also don't merge existing anomalies to it or cache it.
+  if merge_issue.get('status') == issue_tracker_service.STATUS_DUPLICATE:
+    return
+
+  if merge_issue_id:
+    _MapAnomaliesToMergeIntoBug(merge_issue_id, job.bug_id)
     # Mark the duplicate bug's Bug entity status as closed so that
     # it doesn't get auto triaged.
     bug = ndb.Key('Bug', job.bug_id).get()
@@ -271,7 +294,7 @@ def _PostSuccessfulResult(job, issue_tracker):
   # Cache the commit info and bug ID to datastore when there is no duplicate
   # issue that this issue is getting merged into. This has to be done only
   # after the issue is updated successfully with bisect information.
-  if commit_cache_key and not merge_issue:
+  if commit_cache_key and not merge_issue_id:
     layered_cache.SetExternal(commit_cache_key, str(job.bug_id),
                               days_to_keep=30)
     logging.info('Cached bug id %s and commit info %s in the datastore.',
@@ -289,6 +312,7 @@ def _PostFailedResult(job, issue_tracker):
     bug_comment += 'Additional errors:\n'
     for code in job.results_data.get('extra_result_code'):
       bug_comment += '%s\n' % _BUILD_FAILURE_DETAIL.get(code, code)
+  logging.info('Adding bug comment: %s', bug_comment)
   issue_tracker.AddBugComment(job.bug_id, bug_comment)
 
 
@@ -297,6 +321,7 @@ def _IsStale(job):
     return False
   time_since_last_ran = datetime.datetime.now() - job.last_ran_timestamp
   return time_since_last_ran > _STALE_TRYJOB_DELTA
+
 
 def _MapAnomaliesToMergeIntoBug(dest_bug_id, source_bug_id):
   """Maps anomalies from source bug to destination bug.
@@ -342,8 +367,6 @@ def _GetAuthorsToCC(results_data):
   Returns:
     A list of email addresses, possibly empty.
   """
-  if results_data.get('score') < _CONFIDENCE_LEVEL_TO_CC_AUTHOR:
-    return []
   culprit_data = results_data.get('culprit_data')
   if not culprit_data:
     return []
@@ -420,9 +443,28 @@ def UpdateQuickLog(job):
     job.put()
 
 
-def _IsBisectJobCompleted(job):
-  return _ValidateBuildbucketResponse(
-      buildbucket_service.GetJobStatus(job.buildbucket_job_id))
+def _IsJobCompleted(job):
+  """Checks whether the bisect job is completed."""
+  # Perf try jobs triggered by dashboard still not using buildbucket APIs.
+  # https://github.com/catapult-project/catapult/issues/2817
+  if not job.buildbucket_job_id:
+    if (job.results_data and
+        job.results_data.get('status') in [COMPLETED, FAILED]):
+      return True
+    else:
+      return False
+
+  job_info = buildbucket_service.GetJobStatus(job.buildbucket_job_id)
+  if not job_info:
+    return False
+  data = job_info.get('build', {})
+  # The status of the build can be one of [STARTED, SCHEDULED or COMPLETED]
+  # The buildbucket 'status' fields are documented here:
+  # https://goto.google.com/bb_status
+  if data.get('status') != 'COMPLETED':
+    return False
+
+  return True
 
 
 def _ValidateBuildbucketResponse(job_info):

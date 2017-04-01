@@ -7,6 +7,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -355,9 +356,8 @@ INSTANTIATE_TEST_CASE_P(
     FindRequestManagerTests, FindRequestManagerTest, testing::Bool());
 #endif
 
-// TODO(crbug.com/615291): These tests sometimes fail on the
-// linux_android_rel_ng trybot.
-#if defined(OS_ANDROID) && defined(NDEBUG)
+// TODO(crbug.com/615291): These tests frequently fail on Android.
+#if defined(OS_ANDROID)
 #define MAYBE(x) DISABLED_##x
 #else
 #define MAYBE(x) x
@@ -425,8 +425,16 @@ IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE(CharacterByCharacter)) {
   EXPECT_EQ(1, results.active_match_ordinal);
 }
 
+// TODO(crbug.com/615291): This test frequently fails on Android.
+// TODO(crbug.com/674742): This test is flaky on Win
+#if defined(OS_ANDROID) || defined(OS_WIN)
+#define MAYBE_RapidFire DISABLED_RapidFire
+#else
+#define MAYBE_RapidFire RapidFire
+#endif
+
 // Tests sending a large number of find requests subsequently.
-IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE(RapidFire)) {
+IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE_RapidFire) {
   LoadAndWait("/find_in_page.html");
   if (GetParam())
     MakeChildFrameCrossProcess();
@@ -447,7 +455,8 @@ IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE(RapidFire)) {
 }
 
 // Tests removing a frame during a find session.
-IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE(RemoveFrame)) {
+// TODO(crbug.com/657331): Test is flaky on all platforms.
+IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, DISABLED_RemoveFrame) {
   LoadMultiFramePage(2 /* height */, GetParam() /* cross_process */);
 
   blink::WebFindOptions options;
@@ -476,8 +485,125 @@ IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE(RemoveFrame)) {
   results = delegate()->GetFindResults();
   EXPECT_EQ(12, results.number_of_matches);
   EXPECT_EQ(8, results.active_match_ordinal);
+}
 
-  // TODO(paulemeyer): Once adding frames mid-session is handled, test that too.
+// Tests adding a frame during a find session.
+// TODO(crbug.com/657331): Test is flaky on all platforms.
+IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, DISABLED_AddFrame) {
+  LoadMultiFramePage(2 /* height */, GetParam() /* cross_process */);
+
+  blink::WebFindOptions options;
+  Find("result", options);
+  options.findNext = true;
+  Find("result", options);
+  Find("result", options);
+  Find("result", options);
+  Find("result", options);
+  delegate()->WaitForFinalReply();
+
+  FindResults results = delegate()->GetFindResults();
+  EXPECT_EQ(last_request_id(), results.request_id);
+  EXPECT_EQ(21, results.number_of_matches);
+  EXPECT_EQ(5, results.active_match_ordinal);
+
+  // Add a frame. It contains 5 new matches.
+  std::string url = embedded_test_server()->GetURL(
+      GetParam() ? "b.com" : "a.com", "/find_in_simple_page.html").spec();
+  std::string script = std::string() +
+      "var frame = document.createElement('iframe');" +
+      "frame.src = '" + url + "';" +
+      "document.body.appendChild(frame);";
+  delegate()->MarkNextReply();
+  ASSERT_TRUE(ExecuteScript(shell(), script));
+  delegate()->WaitForNextReply();
+
+  // The number of matches should update automatically to include the matches
+  // from the newly added frame.
+  results = delegate()->GetFindResults();
+  EXPECT_EQ(26, results.number_of_matches);
+  EXPECT_EQ(5, results.active_match_ordinal);
+}
+
+// Tests adding a frame during a find session where there were previously no
+// matches.
+IN_PROC_BROWSER_TEST_F(FindRequestManagerTest, MAYBE(AddFrameAfterNoMatches)) {
+  TestNavigationObserver navigation_observer(contents());
+  NavigateToURL(shell(), GURL("about:blank"));
+  EXPECT_TRUE(navigation_observer.last_navigation_succeeded());
+
+  blink::WebFindOptions default_options;
+  Find("result", default_options);
+  delegate()->WaitForFinalReply();
+
+  // Initially, there are no matches on the page.
+  FindResults results = delegate()->GetFindResults();
+  EXPECT_EQ(last_request_id(), results.request_id);
+  EXPECT_EQ(0, results.number_of_matches);
+  EXPECT_EQ(0, results.active_match_ordinal);
+
+  // Add a frame. It contains 5 new matches.
+  std::string url =
+      embedded_test_server()->GetURL("/find_in_simple_page.html").spec();
+  std::string script = std::string() +
+      "var frame = document.createElement('iframe');" +
+      "frame.src = '" + url + "';" +
+      "document.body.appendChild(frame);";
+  delegate()->MarkNextReply();
+  ASSERT_TRUE(ExecuteScript(shell(), script));
+  delegate()->WaitForNextReply();
+
+  // The matches from the new frame should be found automatically, and the first
+  // match in the frame should be activated.
+  results = delegate()->GetFindResults();
+  EXPECT_EQ(5, results.number_of_matches);
+  EXPECT_EQ(1, results.active_match_ordinal);
+}
+
+// Tests a frame navigating to a different page during a find session.
+IN_PROC_BROWSER_TEST_P(FindRequestManagerTest, MAYBE(NavigateFrame)) {
+  LoadMultiFramePage(2 /* height */, GetParam() /* cross_process */);
+
+  blink::WebFindOptions options;
+  Find("result", options);
+  options.findNext = true;
+  options.forward = false;
+  Find("result", options);
+  Find("result", options);
+  Find("result", options);
+  delegate()->WaitForFinalReply();
+
+  FindResults results = delegate()->GetFindResults();
+  EXPECT_EQ(last_request_id(), results.request_id);
+  EXPECT_EQ(21, results.number_of_matches);
+  EXPECT_EQ(19, results.active_match_ordinal);
+
+  // Navigate one of the empty frames to a page with 5 matches.
+  FrameTreeNode* root =
+      static_cast<WebContentsImpl*>(shell()->web_contents())->
+      GetFrameTree()->root();
+  GURL url(embedded_test_server()->GetURL(
+      GetParam() ? "b.com" : "a.com", "/find_in_simple_page.html"));
+  delegate()->MarkNextReply();
+  TestNavigationObserver navigation_observer(contents());
+  NavigateFrameToURL(root->child_at(0)->child_at(1)->child_at(0), url);
+  EXPECT_TRUE(navigation_observer.last_navigation_succeeded());
+  delegate()->WaitForNextReply();
+
+  // The navigation results in an extra reply before the one we care about. This
+  // extra reply happens because the RenderFrameHost changes before it navigates
+  // (because the navigation is cross-origin). The first reply will not change
+  // the number of matches because the frame that is navigating was empty
+  // before.
+  if (delegate()->GetFindResults().number_of_matches == 21) {
+    delegate()->MarkNextReply();
+    delegate()->WaitForNextReply();
+  }
+
+  // The number of matches and the active match ordinal should update
+  // automatically to include the new matches.
+  results = delegate()->GetFindResults();
+  EXPECT_EQ(26, results.number_of_matches);
+  EXPECT_EQ(24, results.active_match_ordinal);
 }
 
 // Tests Searching in a hidden frame. Matches in the hidden frame should be
@@ -551,6 +677,34 @@ IN_PROC_BROWSER_TEST_F(FindRequestManagerTest, MAYBE(FindInPage_Issue627799)) {
     EXPECT_TRUE(reply.number_of_matches == kInvalidId ||
                 reply.number_of_matches == results.number_of_matches);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(FindRequestManagerTest, MAYBE(FindInPage_Issue644448)) {
+  TestNavigationObserver navigation_observer(contents());
+  NavigateToURL(shell(), GURL("about:blank"));
+  EXPECT_TRUE(navigation_observer.last_navigation_succeeded());
+
+  blink::WebFindOptions default_options;
+  Find("result", default_options);
+  delegate()->WaitForFinalReply();
+
+  // Initially, there are no matches on the page.
+  FindResults results = delegate()->GetFindResults();
+  EXPECT_EQ(last_request_id(), results.request_id);
+  EXPECT_EQ(0, results.number_of_matches);
+  EXPECT_EQ(0, results.active_match_ordinal);
+
+  // Load a page with matches.
+  LoadAndWait("/find_in_simple_page.html");
+
+  Find("result", default_options);
+  delegate()->WaitForFinalReply();
+
+  // There should now be matches found. When the bug was present, there were
+  // still no matches found.
+  results = delegate()->GetFindResults();
+  EXPECT_EQ(last_request_id(), results.request_id);
+  EXPECT_EQ(5, results.number_of_matches);
 }
 
 #if defined(OS_ANDROID)

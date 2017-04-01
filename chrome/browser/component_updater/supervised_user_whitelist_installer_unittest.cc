@@ -142,9 +142,8 @@ class MockComponentUpdateService : public ComponentUpdateService,
   }
 
   // OnDemandUpdater implementation:
-  void OnDemandUpdate(
-      const std::string& crx_id,
-      ComponentUpdateService::CompletionCallback callback) override {
+  void OnDemandUpdate(const std::string& crx_id,
+                      const Callback& callback) override {
     on_demand_update_called_ = true;
 
     if (!component_) {
@@ -346,13 +345,15 @@ TEST_F(SupervisedUserWhitelistInstallerTest, InstallNewWhitelist) {
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  base::FilePath unpacked_path = temp_dir.path();
+  base::FilePath unpacked_path = temp_dir.GetPath();
   ASSERT_NO_FATAL_FAILURE(PrepareWhitelistDirectory(unpacked_path));
 
   const CrxComponent* component =
       component_update_service_.registered_component();
   ASSERT_TRUE(component);
-  EXPECT_TRUE(component->installer->Install(manifest_, unpacked_path));
+  const auto result = component->installer->Install(manifest_, unpacked_path);
+  EXPECT_EQ(0, result.error);
+  EXPECT_EQ(0, result.extended_error);
 
   observer.Wait();
   EXPECT_EQ(whitelist_path_.value(), observer.whitelist_path().value());

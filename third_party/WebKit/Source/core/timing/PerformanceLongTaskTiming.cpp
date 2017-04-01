@@ -4,21 +4,57 @@
 
 #include "core/timing/PerformanceLongTaskTiming.h"
 
+#include "core/frame/DOMWindow.h"
+#include "core/timing/TaskAttributionTiming.h"
+
 namespace blink {
 
-PerformanceLongTaskTiming::PerformanceLongTaskTiming(
-    double startTime, double endTime, String frameContextUrl)
-    : PerformanceEntry(frameContextUrl, "longtask", startTime, endTime)
-{
+namespace {
+
+double clampToMillisecond(double timeInMillis) {
+  // Long task times are clamped to 1 millisecond for security.
+  return floor(timeInMillis);
 }
 
-PerformanceLongTaskTiming::~PerformanceLongTaskTiming()
-{
+}  // namespace
+
+// static
+PerformanceLongTaskTiming* PerformanceLongTaskTiming::create(double startTime,
+                                                             double endTime,
+                                                             String name,
+                                                             String frameSrc,
+                                                             String frameId,
+                                                             String frameName) {
+  return new PerformanceLongTaskTiming(startTime, endTime, name, frameSrc,
+                                       frameId, frameName);
 }
 
-DEFINE_TRACE(PerformanceLongTaskTiming)
-{
-    PerformanceEntry::trace(visitor);
+PerformanceLongTaskTiming::PerformanceLongTaskTiming(double startTime,
+                                                     double endTime,
+                                                     String name,
+                                                     String culpritFrameSrc,
+                                                     String culpritFrameId,
+                                                     String culpritFrameName)
+    : PerformanceEntry(name,
+                       "longtask",
+                       clampToMillisecond(startTime),
+                       clampToMillisecond(endTime)) {
+  // Only one possible task type exists currently: "script"
+  // Only one possible container type exists currently: "iframe"
+  TaskAttributionTiming* attributionEntry = TaskAttributionTiming::create(
+      "script", "iframe", culpritFrameSrc, culpritFrameId, culpritFrameName);
+  m_attribution.push_back(*attributionEntry);
 }
 
-} // namespace blink
+PerformanceLongTaskTiming::~PerformanceLongTaskTiming() {}
+
+TaskAttributionVector PerformanceLongTaskTiming::attribution() const {
+  return m_attribution;
+}
+
+DEFINE_TRACE(PerformanceLongTaskTiming) {
+  visitor->trace(m_attribution);
+  PerformanceEntry::trace(visitor);
+}
+
+}  // namespace blink

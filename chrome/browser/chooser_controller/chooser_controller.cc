@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chooser_controller/chooser_controller.h"
 
+#include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/render_frame_host.h"
@@ -55,6 +56,26 @@ bool ChooserController::ShouldShowIconBeforeText() const {
   return false;
 }
 
+bool ChooserController::ShouldShowFootnoteView() const {
+  return true;
+}
+
+bool ChooserController::AllowMultipleSelection() const {
+  return false;
+}
+
 int ChooserController::GetSignalStrengthLevel(size_t index) const {
   return -1;
+}
+
+bool ChooserController::IsConnected(size_t index) const {
+  return false;
+}
+
+bool ChooserController::IsPaired(size_t index) const {
+  return false;
+}
+
+void ChooserController::OpenAdapterOffHelpUrl() const {
+  NOTREACHED();
 }

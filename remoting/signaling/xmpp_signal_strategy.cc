@@ -32,7 +32,7 @@
 #include "remoting/base/logging.h"
 #include "remoting/signaling/xmpp_login_handler.h"
 #include "remoting/signaling/xmpp_stream_parser.h"
-#include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/libjingle_xmpp/xmllite/xmlelement.h"
 
 // Use 50 seconds keep-alive interval, in case routers terminate
 // connections that are idle for more than a minute.
@@ -141,7 +141,7 @@ class XmppSignalStrategy::Core : public XmppLoginHandler::Delegate {
 
   base::ObserverList<Listener, true> listeners_;
 
-  base::Timer keep_alive_timer_;
+  base::RepeatingTimer keep_alive_timer_;
 
   base::ThreadChecker thread_checker_;
 
@@ -154,16 +154,12 @@ XmppSignalStrategy::Core::Core(
     const XmppSignalStrategy::XmppServerConfig& xmpp_server_config)
     : socket_factory_(socket_factory),
       request_context_getter_(request_context_getter),
-      xmpp_server_config_(xmpp_server_config),
-      keep_alive_timer_(
-          FROM_HERE,
-          base::TimeDelta::FromSeconds(kKeepAliveIntervalSeconds),
-          base::Bind(&Core::SendKeepAlive, base::Unretained(this)),
-          true) {
+      xmpp_server_config_(xmpp_server_config) {
 #if defined(NDEBUG)
   // Non-secure connections are allowed only for debugging.
   CHECK(xmpp_server_config_.use_tls);
 #endif
+  thread_checker_.DetachFromThread();
 }
 
 XmppSignalStrategy::Core::~Core() {
@@ -178,8 +174,8 @@ void XmppSignalStrategy::Core::Connect() {
 
   error_ = OK;
 
-  FOR_EACH_OBSERVER(Listener, listeners_,
-                    OnSignalStrategyStateChange(CONNECTING));
+  for (auto& observer : listeners_)
+    observer.OnSignalStrategyStateChange(CONNECTING);
 
   socket_.reset(new jingle_glue::ProxyResolvingClientSocket(
       socket_factory_, request_context_getter_, net::SSLConfig(),
@@ -187,6 +183,11 @@ void XmppSignalStrategy::Core::Connect() {
 
   int result = socket_->Connect(base::Bind(
       &Core::OnSocketConnected, base::Unretained(this)));
+
+  keep_alive_timer_.Start(
+      FROM_HERE, base::TimeDelta::FromSeconds(kKeepAliveIntervalSeconds),
+      base::Bind(&Core::SendKeepAlive, base::Unretained(this)));
+
   if (result != net::ERR_IO_PENDING)
     OnSocketConnected(result);
 }
@@ -202,8 +203,8 @@ void XmppSignalStrategy::Core::Disconnect() {
     tls_state_ = TlsState::NOT_REQUESTED;
     read_pending_ = false;
 
-    FOR_EACH_OBSERVER(Listener, listeners_,
-                      OnSignalStrategyStateChange(DISCONNECTED));
+    for (auto& observer : listeners_)
+      observer.OnSignalStrategyStateChange(DISCONNECTED);
   }
 }
 
@@ -335,8 +336,8 @@ void XmppSignalStrategy::Core::OnHandshakeDone(
   // Don't need |login_handler_| anymore.
   login_handler_.reset();
 
-  FOR_EACH_OBSERVER(Listener, listeners_,
-                    OnSignalStrategyStateChange(CONNECTED));
+  for (auto& observer : listeners_)
+    observer.OnSignalStrategyStateChange(CONNECTED);
 }
 
 void XmppSignalStrategy::Core::OnLoginHandlerError(
@@ -365,9 +366,8 @@ void XmppSignalStrategy::Core::OnStanza(
             << stanza->Str()
             << "\n=========================================================";
 
-  base::ObserverListBase<Listener>::Iterator it(&listeners_);
-  for (Listener* listener = it.GetNext(); listener; listener = it.GetNext()) {
-    if (listener->OnSignalStrategyIncomingStanza(stanza.get()))
+  for (auto& listener : listeners_) {
+    if (listener.OnSignalStrategyIncomingStanza(stanza.get()))
       return;
   }
 }

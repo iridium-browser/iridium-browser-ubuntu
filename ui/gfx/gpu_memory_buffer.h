@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #include "base/memory/shared_memory.h"
-#include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/generic_shared_memory_id.h"
@@ -17,7 +16,7 @@
 #include "ui/gfx/gfx_export.h"
 
 #if defined(USE_OZONE)
-#include "ui/gfx/native_pixmap_handle_ozone.h"
+#include "ui/gfx/native_pixmap_handle.h"
 #elif defined(OS_MACOSX) && !defined(OS_IOS)
 #include "ui/gfx/mac/io_surface.h"
 #endif
@@ -32,7 +31,6 @@ enum GpuMemoryBufferType {
   EMPTY_BUFFER,
   SHARED_MEMORY_BUFFER,
   IO_SURFACE_BUFFER,
-  SURFACE_TEXTURE_BUFFER,
   OZONE_NATIVE_PIXMAP,
   GPU_MEMORY_BUFFER_TYPE_LAST = OZONE_NATIVE_PIXMAP
 };
@@ -55,10 +53,6 @@ struct GFX_EXPORT GpuMemoryBufferHandle {
   ScopedRefCountedIOSurfaceMachPort mach_port;
 #endif
 };
-
-base::trace_event::MemoryAllocatorDumpGuid GFX_EXPORT
-GetGpuMemoryBufferGUIDForTracing(uint64_t tracing_process_id,
-                                 GpuMemoryBufferId buffer_id);
 
 // This interface typically correspond to a type of shared memory that is also
 // shared with the GPU. A GPU memory buffer can be written to directly by
@@ -104,6 +98,12 @@ class GFX_EXPORT GpuMemoryBuffer {
   // Type-checking downcast routine.
   virtual ClientBuffer AsClientBuffer() = 0;
 };
+
+// Returns an instance of |handle| which can be sent over IPC. This duplicates
+// the file-handles as appropriate, so that the IPC code take ownership of them,
+// without invalidating |handle| itself.
+GFX_EXPORT GpuMemoryBufferHandle
+CloneHandleForIPC(const GpuMemoryBufferHandle& handle);
 
 }  // namespace gfx
 

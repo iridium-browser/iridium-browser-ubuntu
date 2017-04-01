@@ -387,6 +387,7 @@ void WaitForMultipleFullscreenEvents(
 // - document.webkitFullscreenElement is correctly updated in both frames.
 // - fullscreenchange events fire in both frames.
 // - fullscreen CSS is applied correctly in both frames.
+//
 IN_PROC_BROWSER_TEST_F(SitePerProcessInteractiveBrowserTest,
                        FullscreenElementInSubframe) {
   // Start on a page with one subframe (id "child-0") that has

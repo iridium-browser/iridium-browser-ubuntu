@@ -25,6 +25,7 @@ namespace extensions {
 
 class Dispatcher;
 struct Message;
+struct PortId;
 class ScriptContext;
 
 // RenderFrame-level plumbing for extension features.
@@ -89,25 +90,24 @@ class ExtensionFrameHelper
       const blink::WebVector<blink::WebString>& newly_matching_selectors,
       const blink::WebVector<blink::WebString>& stopped_matching_selectors)
           override;
+  void DidStartProvisionalLoad() override;
   void DidCreateScriptContext(v8::Local<v8::Context>,
-                              int extension_group,
                               int world_id) override;
   void WillReleaseScriptContext(v8::Local<v8::Context>, int world_id) override;
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() override;
 
   // IPC handlers.
-  void OnExtensionValidateMessagePort(int port_id);
+  void OnExtensionValidateMessagePort(const PortId& id);
   void OnExtensionDispatchOnConnect(
-      int target_port_id,
+      const PortId& target_port_id,
       const std::string& channel_name,
       const ExtensionMsg_TabConnectionInfo& source,
       const ExtensionMsg_ExternalConnectionInfo& info,
       const std::string& tls_channel_id);
-  void OnExtensionDeliverMessage(int target_port_id,
-                                 int source_tab_id,
+  void OnExtensionDeliverMessage(const PortId& target_port_id,
                                  const Message& message);
-  void OnExtensionDispatchOnDisconnect(int port_id,
+  void OnExtensionDispatchOnDisconnect(const PortId& id,
                                        const std::string& error_message);
   void OnExtensionSetTabId(int tab_id);
   void OnUpdateBrowserWindowId(int browser_window_id);
@@ -119,8 +119,7 @@ class ExtensionFrameHelper
   void OnExtensionMessageInvoke(const std::string& extension_id,
                                 const std::string& module_name,
                                 const std::string& function_name,
-                                const base::ListValue& args,
-                                bool user_gesture);
+                                const base::ListValue& args);
 
   // Type of view associated with the RenderFrame.
   ViewType view_type_;
@@ -141,6 +140,8 @@ class ExtensionFrameHelper
 
   // Callbacks to be run at the next RunScriptsAtDocumentEnd notification.
   std::vector<base::Closure> document_load_finished_callbacks_;
+
+  bool delayed_main_world_script_initialization_ = false;
 
   base::WeakPtrFactory<ExtensionFrameHelper> weak_ptr_factory_;
 

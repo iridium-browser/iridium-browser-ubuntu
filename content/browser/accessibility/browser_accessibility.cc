@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/utf_string_conversions.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/common/accessibility_messages.h"
 #include "ui/accessibility/ax_text_utils.h"
@@ -133,6 +132,12 @@ bool BrowserAccessibility::IsTextOnlyObject() const {
          GetRole() == ui::AX_ROLE_INLINE_TEXT_BOX;
 }
 
+bool BrowserAccessibility::IsLineBreakObject() const {
+  return GetRole() == ui::AX_ROLE_LINE_BREAK ||
+         (IsTextOnlyObject() && GetParent() &&
+          GetParent()->GetRole() == ui::AX_ROLE_LINE_BREAK);
+}
+
 BrowserAccessibility* BrowserAccessibility::PlatformGetChild(
     uint32_t child_index) const {
   BrowserAccessibility* result = nullptr;
@@ -229,7 +234,7 @@ bool BrowserAccessibility::IsNextSiblingOnSameLine() const {
     const BrowserAccessibility* next_on_line =
         manager()->GetFromID(next_on_line_id);
     // In the case of a static text sibling, the object designated to be the
-    // next object on this line might be one of its children, i.e. the last
+    // next object on this line might be one of its children, i.e. the first
     // inline text box.
     return next_on_line && next_on_line->IsDescendantOf(next_sibling);
   }
@@ -414,7 +419,7 @@ gfx::Rect BrowserAccessibility::GetPageBoundsForRange(int start, int len)
       else
         start = 0;
     }
-    return RelativeToAbsoluteBounds(gfx::RectF(bounds), false);
+    return bounds;
   }
 
   int end = start + len;
@@ -450,14 +455,19 @@ gfx::Rect BrowserAccessibility::GetPageBoundsForRange(int start, int len)
 
     const std::vector<int32_t>& character_offsets =
         child->GetIntListAttribute(ui::AX_ATTR_CHARACTER_OFFSETS);
-    if (static_cast<int>(character_offsets.size()) != child_length)
-      continue;
+    int character_offsets_length = static_cast<int>(character_offsets.size());
+    if (character_offsets_length < child_length) {
+      // Blink might not return pixel offsets for all characters.
+      // Clamp the character range to be within the number of provided pixels.
+      local_start = std::min(local_start, character_offsets_length);
+      local_end = std::min(local_end, character_offsets_length);
+    }
     int start_pixel_offset =
         local_start > 0 ? character_offsets[local_start - 1] : 0;
     int end_pixel_offset =
         local_end > 0 ? character_offsets[local_end - 1] : 0;
 
-    gfx::Rect child_rect = gfx::ToEnclosingRect(child->GetLocation());
+    gfx::Rect child_rect = child->GetPageBoundsRect();
     auto text_direction = static_cast<ui::AXTextDirection>(
         child->GetIntAttribute(ui::AX_ATTR_TEXT_DIRECTION));
     gfx::Rect child_overlap_rect;
@@ -491,8 +501,6 @@ gfx::Rect BrowserAccessibility::GetPageBoundsForRange(int start, int len)
                                        child_rect.width(), bottom - top);
         break;
       }
-      default:
-        NOTREACHED();
     }
 
     if (bounds.width() == 0 && bounds.height() == 0)
@@ -501,7 +509,7 @@ gfx::Rect BrowserAccessibility::GetPageBoundsForRange(int start, int len)
       bounds.Union(child_overlap_rect);
   }
 
-  return RelativeToAbsoluteBounds(gfx::RectF(bounds), false);
+  return bounds;
 }
 
 gfx::Rect BrowserAccessibility::GetScreenBoundsForRange(int start, int len)
@@ -520,7 +528,9 @@ base::string16 BrowserAccessibility::GetValue() const {
   // Some screen readers like Jaws and older versions of VoiceOver require a
   // value to be set in text fields with rich content, even though the same
   // information is available on the children.
-  if (value.empty() && (IsSimpleTextControl() || IsRichTextControl()))
+  if (value.empty() &&
+      (IsSimpleTextControl() || IsRichTextControl()) &&
+      !IsNativeTextControl())
     value = GetInnerText();
   return value;
 }
@@ -533,9 +543,7 @@ int BrowserAccessibility::GetLineStartBoundary(
   DCHECK_LE(start, static_cast<int>(GetText().length()));
 
   if (IsSimpleTextControl()) {
-    const std::vector<int32_t>& line_breaks =
-        GetIntListAttribute(ui::AX_ATTR_LINE_BREAKS);
-    return ui::FindAccessibleTextBoundary(GetText(), line_breaks,
+    return ui::FindAccessibleTextBoundary(GetText(), GetLineStartOffsets(),
                                           ui::LINE_BOUNDARY, start, direction,
                                           affinity);
   }
@@ -718,7 +726,7 @@ int BrowserAccessibility::GetWordStartBoundary(
   }
 }
 
-BrowserAccessibility* BrowserAccessibility::BrowserAccessibilityForPoint(
+BrowserAccessibility* BrowserAccessibility::ApproximateHitTest(
     const gfx::Point& point) {
   // The best result found that's a child of this object.
   BrowserAccessibility* child_result = NULL;
@@ -738,7 +746,7 @@ BrowserAccessibility* BrowserAccessibility::BrowserAccessibilityForPoint(
       continue;
 
     if (child->GetScreenBoundsRect().Contains(point)) {
-      BrowserAccessibility* result = child->BrowserAccessibilityForPoint(point);
+      BrowserAccessibility* result = child->ApproximateHitTest(point);
       if (result == child && !child_result)
         child_result = result;
       if (result != child && !descendant_result)
@@ -983,6 +991,12 @@ bool BrowserAccessibility::IsCellOrTableHeaderRole() const {
           GetRole() == ui::AX_ROLE_ROW_HEADER);
 }
 
+bool BrowserAccessibility::IsTableOrGridOrTreeGridRole() const {
+  return (GetRole() == ui::AX_ROLE_TABLE ||
+          GetRole() == ui::AX_ROLE_GRID ||
+          GetRole() == ui::AX_ROLE_TREE_GRID);
+}
+
 bool BrowserAccessibility::HasCaret() const {
   if (IsSimpleTextControl() && HasIntAttribute(ui::AX_ATTR_TEXT_SEL_START) &&
       HasIntAttribute(ui::AX_ATTR_TEXT_SEL_END)) {
@@ -1140,6 +1154,12 @@ std::string BrowserAccessibility::ComputeAccessibleNameFromDescendants() {
   }
 
   return name;
+}
+
+std::vector<int> BrowserAccessibility::GetLineStartOffsets() const {
+  if (!instance_active())
+    return std::vector<int>();
+  return node()->GetOrComputeLineStartOffsets();
 }
 
 base::string16 BrowserAccessibility::GetInnerText() const {

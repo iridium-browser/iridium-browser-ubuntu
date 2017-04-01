@@ -4,7 +4,7 @@
 
 package org.chromium.chrome.browser.widget;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.test.util.Feature;
@@ -20,6 +20,7 @@ public class RoundedIconGeneratorTest extends NativeLibraryTestBase {
 
     @Override
     protected void setUp() throws Exception {
+        super.setUp();
         CommandLine.init(null);
         loadNativeLibraryAndInitBrowserProcess();
     }

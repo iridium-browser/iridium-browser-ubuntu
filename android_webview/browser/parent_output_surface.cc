@@ -6,35 +6,46 @@
 
 #include "android_webview/browser/aw_render_thread_context_provider.h"
 #include "android_webview/browser/scoped_app_gl_state_restore.h"
-#include "cc/output/compositor_frame.h"
 #include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 
 namespace android_webview {
 
 ParentOutputSurface::ParentOutputSurface(
     scoped_refptr<AwRenderThreadContextProvider> context_provider)
-    : cc::OutputSurface(std::move(context_provider), nullptr, nullptr) {
+    : cc::OutputSurface(std::move(context_provider)) {
 }
 
 ParentOutputSurface::~ParentOutputSurface() {
 }
 
-void ParentOutputSurface::DidLoseOutputSurface() {
-  // Android WebView does not handle context loss.
-  LOG(FATAL) << "Render thread context loss";
+void ParentOutputSurface::BindToClient(cc::OutputSurfaceClient* client) {}
+
+void ParentOutputSurface::EnsureBackbuffer() {}
+
+void ParentOutputSurface::DiscardBackbuffer() {
+  context_provider()->ContextGL()->DiscardBackbufferCHROMIUM();
+}
+
+void ParentOutputSurface::BindFramebuffer() {
+  context_provider()->ContextGL()->BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void ParentOutputSurface::Reshape(const gfx::Size& size,
                                   float scale_factor,
                                   const gfx::ColorSpace& color_space,
-                                  bool has_alpha) {
-  DCHECK_EQ(1.f, scale_factor);
-  surface_size_ = size;
+                                  bool has_alpha,
+                                  bool use_stencil) {}
+
+void ParentOutputSurface::SwapBuffers(cc::OutputSurfaceFrame frame) {
+  context_provider_->ContextGL()->ShallowFlushCHROMIUM();
 }
 
-void ParentOutputSurface::SwapBuffers(cc::CompositorFrame frame) {
-  context_provider_->ContextGL()->ShallowFlushCHROMIUM();
+bool ParentOutputSurface::HasExternalStencilTest() const {
+  return ScopedAppGLStateRestore::Current()
+      ->stencil_state()
+      .stencil_test_enabled;
 }
 
 void ParentOutputSurface::ApplyExternalStencil() {
@@ -63,9 +74,21 @@ uint32_t ParentOutputSurface::GetFramebufferCopyTextureFormat() {
   return gl->GetCopyTextureInternalFormat();
 }
 
-void ParentOutputSurface::UpdateStencilTest() {
-  SetExternalStencilTest(
-      ScopedAppGLStateRestore::Current()->stencil_state().stencil_test_enabled);
+cc::OverlayCandidateValidator*
+ParentOutputSurface::GetOverlayCandidateValidator() const {
+  return nullptr;
+}
+
+bool ParentOutputSurface::IsDisplayedAsOverlayPlane() const {
+  return false;
+}
+
+unsigned ParentOutputSurface::GetOverlayTextureId() const {
+  return 0;
+}
+
+bool ParentOutputSurface::SurfaceIsSuspendForRecycle() const {
+  return false;
 }
 
 }  // namespace android_webview

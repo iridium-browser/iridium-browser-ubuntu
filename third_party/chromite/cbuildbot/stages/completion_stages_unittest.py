@@ -10,21 +10,25 @@ import itertools
 import mock
 import sys
 
+from chromite.cbuildbot import buildbucket_lib
+from chromite.cbuildbot import build_status
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import prebuilts
-from chromite.cbuildbot import results_lib
 from chromite.cbuildbot.stages import completion_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import sync_stages_unittest
 from chromite.cbuildbot.stages import sync_stages
 from chromite.lib import alerts
+from chromite.lib import auth
 from chromite.lib import cidb
 from chromite.lib import clactions
+from chromite.lib import cros_logging as logging
+from chromite.lib import config_lib
+from chromite.lib import constants
+from chromite.lib import failures_lib
+from chromite.lib import results_lib
 from chromite.lib import patch as cros_patch
 from chromite.lib import patch_unittest
 
@@ -133,6 +137,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         build_type=self.build_type,
         master=True,
         manifest_version=True,
+        active_waterfall=constants.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test1',
@@ -146,6 +151,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=False,
         master=False,
+        active_waterfall=constants.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test2',
@@ -159,6 +165,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=False,
         master=False,
+        active_waterfall=constants.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test3',
@@ -172,6 +179,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=True,
         master=False,
+        active_waterfall=constants.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test4',
@@ -185,6 +193,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=True,
         internal=True,
         master=False,
+        active_waterfall=constants.WATERFALL_INTERNAL,
     )
     test_config.Add(
         'test5',
@@ -198,6 +207,7 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
         branch=False,
         internal=False,
         master=False,
+        active_waterfall=constants.WATERFALL_INTERNAL,
     )
     return test_config
 
@@ -262,10 +272,13 @@ class MasterSlaveSyncCompletionStageTest(
     inflight = {}
     failed_msg = failures_lib.BuildFailureMessage(
         'message', [], True, 'reason', 'bot')
-    status = manifest_version.BuilderStatus('failed', failed_msg, 'url')
+    status = build_status.BuilderStatus('failed', failed_msg, 'url')
 
     statuses = {'a' : status}
     no_stat = set()
+    stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses)
+
+    no_stat = set(['b'])
     stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses)
 
   def testExceptionHandler(self):
@@ -279,6 +292,151 @@ class MasterSlaveSyncCompletionStageTest(
       self.assertTrue(isinstance(ret, tuple))
       self.assertEqual(len(ret), 3)
       self.assertEqual(ret[0], e)
+
+
+class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
+    generic_stages_unittest.AbstractStageTestCase):
+  """Tests MasterSlaveSyncCompletionStage with master-paladin."""
+  BOT_ID = 'master-paladin'
+
+  def setUp(self):
+    self.source_repo = 'ssh://source/repo'
+    self.manifest_version_url = 'fake manifest url'
+    self.branch = 'master'
+
+    self.PatchObject(buildbucket_lib, 'GetServiceAccount',
+                     return_value=True)
+    self.PatchObject(auth.AuthorizedHttp, '__init__',
+                     return_value=None)
+    self.PatchObject(buildbucket_lib.BuildbucketClient,
+                     'SendBuildbucketRequest',
+                     return_value=None)
+    self.PatchObject(buildbucket_lib.BuildbucketClient,
+                     '_GetHost',
+                     return_value=buildbucket_lib.BUILDBUCKET_TEST_HOST)
+
+    self._Prepare()
+
+  def ConstructStage(self):
+    sync_stage = sync_stages.ManifestVersionedSyncStage(self._run)
+
+    scheduled_slaves_list = {
+        ('build_1', 'buildbucket_id_1', 1),
+        ('build_2', 'buildbucket_id_2', 2)
+    }
+    self._run.attrs.metadata.ExtendKeyListWithList(
+        constants.METADATA_SCHEDULED_SLAVES, scheduled_slaves_list)
+    return completion_stages.MasterSlaveSyncCompletionStage(
+        self._run, sync_stage, success=True)
+
+  def testPerformStage(self):
+    """Test PerformStage on master-paladin."""
+    stage = self.ConstructStage()
+
+    stage._run.attrs.manifest_manager = mock.MagicMock()
+
+    statuses = {
+        'build_1': build_status.BuilderStatus(
+            constants.BUILDER_STATUS_MISSING, None),
+        'build_2': build_status.BuilderStatus(
+            constants.BUILDER_STATUS_MISSING, None)
+    }
+
+    self.PatchObject(completion_stages.MasterSlaveSyncCompletionStage,
+                     '_FetchSlaveStatuses', return_value=statuses)
+
+    with self.assertRaises(completion_stages.ImportantBuilderFailedException):
+      stage.PerformStage()
+
+  def testAnnotateBuildStatusFromBuildbucket(self):
+    """Test AnnotateBuildStatusFromBuildbucket"""
+    stage = self.ConstructStage()
+
+    scheduled_slaves_list = {
+        ('build_1', 'buildbucket_id_1', 1),
+        ('build_2', 'buildbucket_id_2', 2)
+    }
+    stage.buildbucket_info_dict = (
+        buildbucket_lib.GetScheduledBuildDict(scheduled_slaves_list))
+
+    mock_logging_link = self.PatchObject(
+        logging, 'PrintBuildbotLink',
+        side_effect=logging.PrintBuildbotLink)
+    mock_logging_text = self.PatchObject(
+        logging, 'PrintBuildbotStepText',
+        side_effect=logging.PrintBuildbotStepText)
+
+    no_stat = set(['not_scheduled_build_1'])
+    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    mock_logging_text.assert_called_once_with(
+        '%s wasn\'t scheduled by master.' % 'not_scheduled_build_1')
+
+    build_content = {
+        'build': {
+            'status': 'COMPLETED',
+            'result': 'FAILURE',
+            'url': 'dashboard_url',
+            "failure_reason": "BUILD_FAILURE",
+        }
+    }
+    self.PatchObject(buildbucket_lib.BuildbucketClient,
+                     'GetBuildRequest',
+                     return_value=build_content)
+    no_stat = set(['build_1'])
+    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    mock_logging_link.assert_called_once_with(
+        '%s: [status] %s [result] %s [failure_reason] %s' %
+        ('build_1', 'COMPLETED', 'FAILURE', 'BUILD_FAILURE'),
+        'dashboard_url')
+
+    mock_logging_link.reset_mock()
+    build_content = {
+        'build': {
+            'status': 'COMPLETED',
+            'result': 'CANCELED',
+            'url': 'dashboard_url',
+            "cancelation_reason": "CANCELED_EXPLICITLY",
+        }
+    }
+    self.PatchObject(buildbucket_lib.BuildbucketClient,
+                     'GetBuildRequest',
+                     return_value=build_content)
+    no_stat = set(['build_1'])
+    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    mock_logging_link.assert_called_once_with(
+        '%s: [status] %s [result] %s [cancelation_reason] %s' %
+        ('build_1', 'COMPLETED', 'CANCELED', 'CANCELED_EXPLICITLY'),
+        'dashboard_url')
+
+
+    mock_logging_text.reset_mock()
+    self.PatchObject(buildbucket_lib.BuildbucketClient,
+                     'GetBuildRequest',
+                     side_effect=buildbucket_lib.BuildbucketResponseException)
+    no_stat = set(['build_1'])
+    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    mock_logging_text.assert_called_once_with(
+        'No status found for build %s buildbucket_id %s' %
+        ('build_1', 'buildbucket_id_1'))
+
+  def testAnnotateFailingBuilders(self):
+    """Tests that _AnnotateFailingBuilders is free of syntax errors."""
+    stage = self.ConstructStage()
+
+    annotate_mock = self.PatchObject(
+        completion_stages.MasterSlaveSyncCompletionStage,
+        '_AnnotateBuildStatusFromBuildbucket')
+
+    failing = {'failing_build'}
+    inflight = {}
+    failed_msg = failures_lib.BuildFailureMessage(
+        'message', [], True, 'reason', 'bot')
+    status = build_status.BuilderStatus('failed', failed_msg, 'url')
+
+    statuses = {'failing_build' : status}
+    no_stat = set(['no_stat_build'])
+    stage._AnnotateFailingBuilders(failing, inflight, no_stat, statuses)
+    annotate_mock.called_once_with(no_stat)
 
 
 class MasterSlaveSyncCompletionStageTestWithLKGMSync(
@@ -402,10 +560,10 @@ class BaseCommitQueueCompletionStageTest(
     stage._run.attrs.manifest_manager = mock.MagicMock()
     statuses = {}
     for x in failing:
-      statuses[x] = manifest_version.BuilderStatus(
+      statuses[x] = build_status.BuilderStatus(
           constants.BUILDER_STATUS_FAILED, message=None)
     for x in inflight:
-      statuses[x] = manifest_version.BuilderStatus(
+      statuses[x] = build_status.BuilderStatus(
           constants.BUILDER_STATUS_INFLIGHT, message=None)
     if self._run.config.master:
       self.PatchObject(stage._run.attrs.manifest_manager, 'GetBuildersStatus',
@@ -599,7 +757,7 @@ class MasterCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
                      return_value=changes_by_build_id)
 
     stage = self.ConstructStage()
-    results = stage.GetRelevantChangesForSlaves(changes, no_stat)
+    results = stage.GetRelevantChangesForSlaves(changes, no_stat, None)
     self.assertEqual(results, expected)
 
   def testWithExponentialFallbackApplied(self):
@@ -754,6 +912,8 @@ class PublishUprevChangesStageTest(
     self.push_mock.assert_called_once_with(self.build_root, ['bar'], False,
                                            staging_branch=None)
     self.assertTrue(self._run.attrs.metadata.GetValue('UprevvedChrome'))
+    metadata_dict = self._run.attrs.metadata.GetDict()
+    self.assertFalse(metadata_dict.has_key('UprevvedAndroid'))
 
   def testCheckSlaveUploadPrebuiltsTest(self):
     """Tests for CheckSlaveUploadPrebuiltsTest."""
@@ -814,3 +974,20 @@ class PublishUprevChangesStageTest(
     # No stage information for slave_c
     self.assertFalse(stage.CheckSlaveUploadPrebuiltsTest(
         mock_cidb, build_id))
+
+  def testAndroidPush(self):
+    """Test values for PublishUprevChanges with Android PFQ."""
+    self.build_type = constants.ANDROID_PFQ_TYPE
+    self._Prepare(bot_id='master-android-pfq',
+                  extra_config={'build_type': constants.BUILD_FROM_SOURCE_TYPE,
+                                'push_overlays': constants.PUBLIC_OVERLAYS,
+                                'master': True},
+                  extra_cmd_args=['--android_rev',
+                                  constants.ANDROID_REV_LATEST])
+    self._run.options.prebuilts = True
+    self.RunStage()
+    self.push_mock.assert_called_once_with(self.build_root, ['bar'], False,
+                                           staging_branch=None)
+    self.assertTrue(self._run.attrs.metadata.GetValue('UprevvedAndroid'))
+    metadata_dict = self._run.attrs.metadata.GetDict()
+    self.assertFalse(metadata_dict.has_key('UprevvedChrome'))

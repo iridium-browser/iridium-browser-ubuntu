@@ -94,7 +94,7 @@ class ChannelBuffer {
   // 0 <= sample < |num_frames_per_band_|
   const T* const* bands(size_t channel) const {
     RTC_DCHECK_LT(channel, num_channels_);
-    RTC_DCHECK_GE(channel, 0u);
+    RTC_DCHECK_GE(channel, 0);
     return &bands_[channel * num_bands_];
   }
   T* const* bands(size_t channel) {
@@ -153,6 +153,7 @@ class ChannelBuffer {
 class IFChannelBuffer {
  public:
   IFChannelBuffer(size_t num_frames, size_t num_channels, size_t num_bands = 1);
+  ~IFChannelBuffer();
 
   ChannelBuffer<int16_t>* ibuf();
   ChannelBuffer<float>* fbuf();

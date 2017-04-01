@@ -12,7 +12,7 @@ namespace blink {
 namespace scheduler {
 
 // A time domain for throttled tasks. behaves like an RealTimeDomain except it
-// relies on the owner (ThrottlingHelper) to schedule wakeups.
+// relies on the owner (TaskQueueThrottler) to schedule wakeups.
 class BLINK_PLATFORM_EXPORT ThrottledTimeDomain : public RealTimeDomain {
  public:
   ThrottledTimeDomain(TimeDomain::Observer* observer,
@@ -22,9 +22,9 @@ class BLINK_PLATFORM_EXPORT ThrottledTimeDomain : public RealTimeDomain {
   // TimeDomain implementation:
   const char* GetName() const override;
   void RequestWakeup(base::TimeTicks now, base::TimeDelta delay) override;
-  bool MaybeAdvanceTime() override;
+  base::Optional<base::TimeDelta> DelayTillNextTask(LazyNow* lazy_now) override;
 
-  using TimeDomain::ClearExpiredWakeups;
+  using TimeDomain::WakeupReadyDelayedQueues;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ThrottledTimeDomain);

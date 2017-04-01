@@ -28,6 +28,10 @@ class AuraTestHelper;
 }
 }
 
+namespace display {
+class Screen;
+}
+
 namespace ui {
 class ScopedOleInitializer;
 }
@@ -41,7 +45,6 @@ class MockRenderProcessHost;
 class MockRenderProcessHostFactory;
 class NavigationController;
 class RenderProcessHostFactory;
-class RenderViewHostDelegate;
 class TestRenderFrameHostFactory;
 class TestRenderViewHostFactory;
 class WebContents;
@@ -56,12 +59,7 @@ class RenderFrameHostTester {
   // RenderViewHostTestEnabler instance (see below) to do this.
   static RenderFrameHostTester* For(RenderFrameHost* host);
 
-  // If the given NavigationController has a pending main frame, returns it,
-  // otherwise NULL. This is an alternative to
-  // WebContentsTester::GetPendingMainFrame() when your WebContents was not
-  // created via a TestWebContents.
-  static RenderFrameHost* GetPendingForController(
-      NavigationController* controller);
+  static void CommitPendingLoad(NavigationController* controller);
 
   virtual ~RenderFrameHostTester() {}
 
@@ -108,16 +106,13 @@ class RenderFrameHostTester {
   // - did_create_new_entry should be true if simulating a navigation that
   //   created a new navigation entry; false for history navigations, reloads,
   //   and other navigations that don't affect the history list.
-  virtual void SendNavigate(int page_id,
-                            int nav_entry_id,
+  virtual void SendNavigate(int nav_entry_id,
                             bool did_create_new_entry,
                             const GURL& url) = 0;
-  virtual void SendFailedNavigate(int page_id,
-                                  int nav_entry_id,
+  virtual void SendFailedNavigate(int nav_entry_id,
                                   bool did_create_new_entry,
                                   const GURL& url) = 0;
-  virtual void SendNavigateWithTransition(int page_id,
-                                          int nav_entry_id,
+  virtual void SendNavigateWithTransition(int nav_entry_id,
                                           bool did_create_new_entry,
                                           const GURL& url,
                                           ui::PageTransition transition) = 0;
@@ -132,6 +127,10 @@ class RenderFrameHostTester {
   // Simulates the SwapOut_ACK that fires if you commit a cross-site
   // navigation without making any network requests.
   virtual void SimulateSwapOutACK() = 0;
+
+  // Simulate a renderer-initiated navigation up until commit.
+  virtual void NavigateAndCommitRendererInitiated(bool did_create_new_entry,
+                                                  const GURL& url) = 0;
 };
 
 // An interface and utility for driving tests of RenderViewHost.
@@ -157,7 +156,6 @@ class RenderViewHostTester {
   virtual bool CreateTestRenderView(const base::string16& frame_name,
                                     int opener_frame_route_id,
                                     int proxy_routing_id,
-                                    int32_t max_page_id,
                                     bool created_with_opener) = 0;
 
   // Makes the WasHidden/WasShown calls to the RenderWidget that
@@ -181,6 +179,10 @@ class RenderViewHostTestEnabler {
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestEnabler);
   friend class RenderViewHostTestHarness;
 
+#if defined(OS_ANDROID)
+  std::unique_ptr<MockGpuChannelEstablishFactory> gpu_channel_factory_;
+  std::unique_ptr<display::Screen> screen_;
+#endif
   std::unique_ptr<MockRenderProcessHostFactory> rph_factory_;
   std::unique_ptr<TestRenderViewHostFactory> rvh_factory_;
   std::unique_ptr<TestRenderFrameHostFactory> rfh_factory_;
@@ -282,10 +284,8 @@ class RenderViewHostTestHarness : public testing::Test {
 #if defined(USE_AURA)
   std::unique_ptr<aura::test::AuraTestHelper> aura_test_helper_;
 #endif
-#if defined(OS_ANDROID)
-  std::unique_ptr<MockGpuChannelEstablishFactory> gpu_channel_factory_;
-#endif
-  RenderViewHostTestEnabler rvh_test_enabler_;
+  std::unique_ptr<RenderViewHostTestEnabler> rvh_test_enabler_;
+  RenderProcessHostFactory* factory_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostTestHarness);
 };

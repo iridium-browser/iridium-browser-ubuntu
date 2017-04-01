@@ -128,13 +128,10 @@ PrintingContext::Result PrintingContextLinux::UpdatePrinterSettings(
   return OK;
 }
 
-PrintingContext::Result PrintingContextLinux::InitWithSettings(
-    const PrintSettings& settings) {
+void PrintingContextLinux::InitWithSettings(const PrintSettings& settings) {
   DCHECK(!in_print_job_);
 
   settings_ = settings;
-
-  return OK;
 }
 
 PrintingContext::Result PrintingContextLinux::NewDocument(
@@ -185,7 +182,7 @@ void PrintingContextLinux::ReleaseContext() {
   // Intentional No-op.
 }
 
-gfx::NativeDrawingContext PrintingContextLinux::context() const {
+skia::NativeDrawingContext PrintingContextLinux::context() const {
   // Intentional No-op.
   return NULL;
 }

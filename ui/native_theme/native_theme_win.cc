@@ -15,8 +15,8 @@
 #include "base/win/scoped_gdi_object.h"
 #include "base/win/scoped_hdc.h"
 #include "base/win/scoped_select_object.h"
+#include "base/win/win_util.h"
 #include "base/win/windows_version.h"
-#include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/platform_canvas.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -111,24 +111,56 @@ RECT InsetRect(const RECT* rect, int size) {
   return result.ToRECT();
 }
 
+// Custom scoped object for storing DC and a bitmap that was selected into it,
+// and making sure that they are deleted in the right order.
+class ScopedCreateDCWithBitmap {
+ public:
+  explicit ScopedCreateDCWithBitmap(base::win::ScopedCreateDC::Handle hdc)
+      : dc_(hdc) {}
+
+  ~ScopedCreateDCWithBitmap() {
+    // Delete DC before the bitmap, since objects should not be deleted while
+    // selected into a DC.
+    dc_.Close();
+  }
+
+  bool IsValid() const { return dc_.IsValid(); }
+
+  base::win::ScopedCreateDC::Handle Get() const { return dc_.Get(); }
+
+  // Selects |handle| to bitmap into DC. Returns false if handle is not valid.
+  bool SelectBitmap(base::win::ScopedBitmap::element_type handle) {
+    bitmap_.reset(handle);
+    if (!bitmap_.is_valid())
+      return false;
+
+    SelectObject(dc_.Get(), bitmap_.get());
+    return true;
+  }
+
+ private:
+  base::win::ScopedCreateDC dc_;
+  base::win::ScopedBitmap bitmap_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedCreateDCWithBitmap);
+};
+
 }  // namespace
 
 namespace ui {
 
-bool NativeThemeWin::IsThemingActive() const {
-  return is_theme_active_ && is_theme_active_();
+NativeTheme* NativeTheme::GetInstanceForNativeUi() {
+  return NativeThemeWin::instance();
 }
 
-bool NativeThemeWin::IsUsingHighContrastTheme() const {
-  if (is_using_high_contrast_valid_)
-    return is_using_high_contrast_;
-  HIGHCONTRAST result;
-  result.cbSize = sizeof(HIGHCONTRAST);
-  is_using_high_contrast_ =
-      SystemParametersInfo(SPI_GETHIGHCONTRAST, result.cbSize, &result, 0) &&
-      (result.dwFlags & HCF_HIGHCONTRASTON) == HCF_HIGHCONTRASTON;
-  is_using_high_contrast_valid_ = true;
-  return is_using_high_contrast_;
+// static
+bool NativeThemeWin::IsUsingHighContrastTheme() {
+  return instance()->IsUsingHighContrastThemeInternal();
+}
+
+// static
+void NativeThemeWin::CloseHandles() {
+  instance()->CloseHandlesInternal();
 }
 
 HRESULT NativeThemeWin::GetThemeColor(ThemeName theme,
@@ -168,18 +200,6 @@ gfx::Size NativeThemeWin::GetThemeBorderSize(ThemeName theme) const {
 void NativeThemeWin::DisableTheming() const {
   if (set_theme_properties_)
     set_theme_properties_(0);
-}
-
-void NativeThemeWin::CloseHandles() const {
-  if (!close_theme_)
-    return;
-
-  for (int i = 0; i < LAST; ++i) {
-    if (theme_handles_[i]) {
-      close_theme_(theme_handles_[i]);
-      theme_handles_[i] = NULL;
-    }
-  }
 }
 
 bool NativeThemeWin::IsClassicTheme(ThemeName name) const {
@@ -257,18 +277,17 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
       break;
   }
 
-  skia::ScopedPlatformPaint paint(canvas);
-  HDC surface = paint.GetPlatformSurface();
+  HDC surface = skia::GetNativeDrawingContext(canvas);
 
   // When drawing the task manager or the bookmark editor, we draw into an
   // offscreen buffer, where we can use OS-specific drawing routines for
   // UI features like scrollbars. However, we need to set up that buffer,
   // and then read it back when it's done and blit it onto the screen.
 
-  if (skia::SupportsPlatformPaint(canvas))
+  if (surface)
     PaintDirect(canvas, surface, part, state, rect, extra);
   else
-    PaintIndirect(canvas, surface, part, state, rect, extra);
+    PaintIndirect(canvas, part, state, rect, extra);
 }
 
 NativeThemeWin::NativeThemeWin()
@@ -280,7 +299,6 @@ NativeThemeWin::NativeThemeWin()
       open_theme_(NULL),
       close_theme_(NULL),
       set_theme_properties_(NULL),
-      is_theme_active_(NULL),
       get_theme_int_(NULL),
       theme_dll_(LoadLibrary(L"uxtheme.dll")),
       color_change_listener_(this),
@@ -303,8 +321,6 @@ NativeThemeWin::NativeThemeWin()
         GetProcAddress(theme_dll_, "CloseThemeData"));
     set_theme_properties_ = reinterpret_cast<SetThemeAppPropertiesPtr>(
         GetProcAddress(theme_dll_, "SetThemeAppProperties"));
-    is_theme_active_ = reinterpret_cast<IsThemeActivePtr>(
-        GetProcAddress(theme_dll_, "IsThemeActive"));
     get_theme_int_ = reinterpret_cast<GetThemeIntPtr>(
         GetProcAddress(theme_dll_, "GetThemeInt"));
   }
@@ -320,6 +336,30 @@ NativeThemeWin::~NativeThemeWin() {
     // certain tests and the reliability bots.
     // CloseHandles();
     FreeLibrary(theme_dll_);
+  }
+}
+
+bool NativeThemeWin::IsUsingHighContrastThemeInternal() {
+  if (is_using_high_contrast_valid_)
+    return is_using_high_contrast_;
+  HIGHCONTRAST result;
+  result.cbSize = sizeof(HIGHCONTRAST);
+  is_using_high_contrast_ =
+      SystemParametersInfo(SPI_GETHIGHCONTRAST, result.cbSize, &result, 0) &&
+      (result.dwFlags & HCF_HIGHCONTRASTON) == HCF_HIGHCONTRASTON;
+  is_using_high_contrast_valid_ = true;
+  return is_using_high_contrast_;
+}
+
+void NativeThemeWin::CloseHandlesInternal() {
+  if (!close_theme_)
+    return;
+
+  for (int i = 0; i < LAST; ++i) {
+    if (theme_handles_[i]) {
+      close_theme_(theme_handles_[i]);
+      theme_handles_[i] = nullptr;
+    }
   }
 }
 
@@ -421,7 +461,7 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
                           extra.scrollbar_track);
       return;
     case kScrollbarCorner:
-      destination_canvas->drawColor(SK_ColorWHITE, SkXfermode::kSrc_Mode);
+      destination_canvas->drawColor(SK_ColorWHITE, SkBlendMode::kSrc);
       return;
     case kTabPanelBackground:
       PaintTabPanelBackground(hdc, rect);
@@ -444,25 +484,6 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
 }
 
 SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
-  const bool md = ui::MaterialDesignController::IsModeMaterial();
-  if (!md) {
-    // Link:
-    const SkColor kLinkPressedColor = SkColorSetRGB(200, 0, 0);
-
-    switch (color_id) {
-      // Link
-      case kColorId_LinkDisabled:
-        return system_colors_[COLOR_WINDOWTEXT];
-      case kColorId_LinkEnabled:
-        return system_colors_[COLOR_HOTLIGHT];
-      case kColorId_LinkPressed:
-        return kLinkPressedColor;
-
-      default:
-        break;
-    }
-  }
-
   // TODO: Obtain the correct colors using GetSysColor.
   // Dialogs:
   const SkColor kDialogBackgroundColor = SkColorSetRGB(251, 251, 251);
@@ -470,10 +491,8 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
   const SkColor kFocusedBorderColor = SkColorSetRGB(0x4d, 0x90, 0xfe);
   const SkColor kUnfocusedBorderColor = SkColorSetRGB(0xd9, 0xd9, 0xd9);
   // Button:
-  const SkColor kButtonBackgroundColor = SkColorSetRGB(0xde, 0xde, 0xde);
-  const SkColor kButtonHighlightColor = SkColorSetARGB(200, 255, 255, 255);
   const SkColor kButtonHoverColor = SkColorSetRGB(6, 45, 117);
-  const SkColor kCallToActionColorInvert = gfx::kGoogleBlue300;
+  const SkColor kProminentButtonColorInvert = gfx::kGoogleBlue300;
   // MenuItem:
   const SkColor kMenuSchemeHighlightBackgroundColorInvert =
       SkColorSetRGB(0x30, 0x30, 0x30);
@@ -481,9 +500,10 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
   const SkColor kPositiveTextColor = SkColorSetRGB(0x0b, 0x80, 0x43);
   const SkColor kNegativeTextColor = SkColorSetRGB(0xc5, 0x39, 0x29);
   // Results Tables:
-  const SkColor kResultsTableUrlColor =
-      md ? gfx::kGoogleBlue700 : SkColorSetRGB(0x0b, 0x80, 0x43);
+  const SkColor kResultsTableUrlColor = gfx::kGoogleBlue700;
   const SkColor kResultsTableSelectedUrlColor = SK_ColorWHITE;
+  // Label:
+  const SkColor kLabelTextSelectionBackgroundFocusedColor = gfx::kGoogleBlue700;
 
   switch (color_id) {
     // Windows
@@ -506,12 +526,8 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
       return kUnfocusedBorderColor;
 
     // Button
-    case kColorId_ButtonBackgroundColor:
-      return kButtonBackgroundColor;
     case kColorId_ButtonEnabledColor:
       return system_colors_[COLOR_BTNTEXT];
-    case kColorId_ButtonHighlightColor:
-      return kButtonHighlightColor;
     case kColorId_ButtonHoverColor:
       return kButtonHoverColor;
 
@@ -520,8 +536,10 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
       return system_colors_[COLOR_BTNTEXT];
     case kColorId_LabelDisabledColor:
       return system_colors_[COLOR_GRAYTEXT];
-    case kColorId_LabelBackgroundColor:
-      return system_colors_[COLOR_WINDOW];
+    case kColorId_LabelTextSelectionColor:
+      return system_colors_[COLOR_HIGHLIGHTTEXT];
+    case kColorId_LabelTextSelectionBackgroundFocused:
+      return kLabelTextSelectionBackgroundFocusedColor;
 
     // Textfield
     case kColorId_TextfieldDefaultColor:
@@ -643,8 +661,8 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
     switch (color_id) {
       case NativeTheme::kColorId_FocusedMenuItemBackgroundColor:
         return kMenuSchemeHighlightBackgroundColorInvert;
-      case NativeTheme::kColorId_CallToActionColor:
-        return kCallToActionColorInvert;
+      case NativeTheme::kColorId_ProminentButtonColor:
+        return kProminentButtonColorInvert;
       default:
         return color_utils::InvertColor(GetAuraColor(color_id, this));
     }
@@ -654,7 +672,6 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
 }
 
 void NativeThemeWin::PaintIndirect(SkCanvas* destination_canvas,
-                                   HDC destination_hdc,
                                    Part part,
                                    State state,
                                    const gfx::Rect& rect,
@@ -664,13 +681,26 @@ void NativeThemeWin::PaintIndirect(SkCanvas* destination_canvas,
   //                  be sped up by doing it only once per part/state and
   //                  keeping a cache of the resulting bitmaps.
 
-  // Create an offscreen canvas that is backed by an HDC.
-  // This can fail if we don't have access to GDI or if lower-level Windows
-  // calls fail, possibly due to GDI handle exhaustion.
-  base::win::ScopedCreateDC offscreen_hdc(
-      skia::CreateOffscreenSurface(rect.width(), rect.height()));
+  // If this process doesn't have access to GDI, we'd need to use shared memory
+  // segment instead but that is not supported right now.
+  if (!base::win::IsUser32AndGdi32Available())
+    return;
+
+  ScopedCreateDCWithBitmap offscreen_hdc(CreateCompatibleDC(nullptr));
   if (!offscreen_hdc.IsValid())
     return;
+
+  skia::InitializeDC(offscreen_hdc.Get());
+  HRGN clip = CreateRectRgn(0, 0, rect.width(), rect.height());
+  if ((SelectClipRgn(offscreen_hdc.Get(), clip) == ERROR) ||
+      !DeleteObject(clip)) {
+    return;
+  }
+
+  if (!offscreen_hdc.SelectBitmap(skia::CreateHBitmap(
+          rect.width(), rect.height(), false, nullptr, nullptr))) {
+    return;
+  }
 
   // Will be NULL if lower-level Windows calls fail, or if the backing
   // allocated is 0 pixels in size (which should never happen according to

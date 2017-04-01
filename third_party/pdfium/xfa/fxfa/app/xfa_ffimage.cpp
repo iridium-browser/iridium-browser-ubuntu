@@ -7,22 +7,22 @@
 #include "xfa/fxfa/app/xfa_ffimage.h"
 
 #include "xfa/fxfa/app/xfa_ffdraw.h"
-#include "xfa/fxfa/include/xfa_ffapp.h"
-#include "xfa/fxfa/include/xfa_ffdoc.h"
-#include "xfa/fxfa/include/xfa_ffpageview.h"
-#include "xfa/fxfa/include/xfa_ffwidget.h"
+#include "xfa/fxfa/xfa_ffapp.h"
+#include "xfa/fxfa/xfa_ffdoc.h"
+#include "xfa/fxfa/xfa_ffpageview.h"
+#include "xfa/fxfa/xfa_ffwidget.h"
 
 CXFA_FFImage::CXFA_FFImage(CXFA_FFPageView* pPageView, CXFA_WidgetAcc* pDataAcc)
     : CXFA_FFDraw(pPageView, pDataAcc) {}
 CXFA_FFImage::~CXFA_FFImage() {
   CXFA_FFImage::UnloadWidget();
 }
-FX_BOOL CXFA_FFImage::IsLoaded() {
+bool CXFA_FFImage::IsLoaded() {
   return !!GetDataAcc()->GetImageImage();
 }
-FX_BOOL CXFA_FFImage::LoadWidget() {
+bool CXFA_FFImage::LoadWidget() {
   if (GetDataAcc()->GetImageImage()) {
-    return TRUE;
+    return true;
   }
   GetDataAcc()->LoadImageImage();
   return CXFA_FFDraw::LoadWidget();

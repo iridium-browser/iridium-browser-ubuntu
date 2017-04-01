@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/base/io_buffer.h"
@@ -20,9 +21,6 @@
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
-
-using net::test::IsError;
-using net::test::IsOk;
 
 using testing::AnyNumber;
 using testing::CreateFunctor;
@@ -78,13 +76,14 @@ class MockQuicClientSessionBase : public QuicClientSessionBase {
   MOCK_METHOD1(CreateIncomingDynamicStream, QuicSpdyStream*(QuicStreamId id));
   MOCK_METHOD1(CreateOutgoingDynamicStream,
                QuicChromiumClientStream*(SpdyPriority priority));
-  MOCK_METHOD6(WritevData,
-               QuicConsumedData(ReliableQuicStream* stream,
-                                QuicStreamId id,
-                                QuicIOVector data,
-                                QuicStreamOffset offset,
-                                bool fin,
-                                QuicAckListenerInterface*));
+  MOCK_METHOD6(
+      WritevData,
+      QuicConsumedData(QuicStream* stream,
+                       QuicStreamId id,
+                       QuicIOVector data,
+                       QuicStreamOffset offset,
+                       bool fin,
+                       QuicReferenceCountedPointer<QuicAckListenerInterface>));
   MOCK_METHOD3(SendRstStream,
                void(QuicStreamId stream_id,
                     QuicRstStreamErrorCode error,
@@ -105,20 +104,23 @@ class MockQuicClientSessionBase : public QuicClientSessionBase {
   MOCK_METHOD0(IsCryptoHandshakeConfirmed, bool());
   // Methods taking non-copyable types like SpdyHeaderBlock by value cannot be
   // mocked directly.
-  size_t WriteHeaders(
-      QuicStreamId id,
-      SpdyHeaderBlock headers,
-      bool fin,
-      SpdyPriority priority,
-      QuicAckListenerInterface* ack_notifier_delegate) override {
-    return WriteHeadersMock(id, headers, fin, priority, ack_notifier_delegate);
-  }
-  MOCK_METHOD5(WriteHeadersMock,
-               size_t(QuicStreamId id,
-                      const SpdyHeaderBlock& headers,
+  size_t WriteHeaders(QuicStreamId id,
+                      SpdyHeaderBlock headers,
                       bool fin,
                       SpdyPriority priority,
-                      QuicAckListenerInterface* ack_notifier_delegate));
+                      QuicReferenceCountedPointer<QuicAckListenerInterface>
+                          ack_listener) override {
+    return WriteHeadersMock(id, headers, fin, priority,
+                            std::move(ack_listener));
+  }
+  MOCK_METHOD5(
+      WriteHeadersMock,
+      size_t(QuicStreamId id,
+             const SpdyHeaderBlock& headers,
+             bool fin,
+             SpdyPriority priority,
+             const QuicReferenceCountedPointer<QuicAckListenerInterface>&
+                 ack_listener));
   MOCK_METHOD1(OnHeadersHeadOfLineBlocking, void(QuicTime::Delta delta));
 
   using QuicSession::ActivateStream;
@@ -130,7 +132,7 @@ class MockQuicClientSessionBase : public QuicClientSessionBase {
       const QuicIOVector& data,
       QuicStreamOffset offset,
       bool fin,
-      QuicAckListenerInterface* ack_notifier_delegate);
+      QuicAckListenerInterface* ack_listener);
 
   void OnProofValid(
       const QuicCryptoClientConfig::CachedState& cached) override {}
@@ -172,9 +174,9 @@ class QuicChromiumClientStreamTest
                                         Perspective::IS_CLIENT,
                                         SupportedVersions(GetParam())),
                  &push_promise_index_) {
-    stream_ =
-        new QuicChromiumClientStream(kTestStreamId, &session_, BoundNetLog());
-    session_.ActivateStream(stream_);
+    stream_ = new QuicChromiumClientStream(kTestStreamId, &session_,
+                                           NetLogWithSource());
+    session_.ActivateStream(base::WrapUnique(stream_));
     stream_->SetDelegate(&delegate_);
   }
 
@@ -216,6 +218,28 @@ class QuicChromiumClientStreamTest
               StringPiece(buffer->data(), expected_data.length()));
   }
 
+  QuicHeaderList ProcessHeaders(const SpdyHeaderBlock& headers) {
+    QuicHeaderList h = AsHeaderList(headers);
+    stream_->OnStreamHeaderList(false, h.uncompressed_header_bytes(), h);
+    return h;
+  }
+
+  QuicHeaderList ProcessTrailers(const SpdyHeaderBlock& headers) {
+    QuicHeaderList h = AsHeaderList(headers);
+    stream_->OnStreamHeaderList(true, h.uncompressed_header_bytes(), h);
+    return h;
+  }
+
+  QuicHeaderList ProcessHeadersFull(const SpdyHeaderBlock& headers) {
+    QuicHeaderList h = ProcessHeaders(headers);
+    EXPECT_CALL(delegate_,
+                OnHeadersAvailableMock(_, h.uncompressed_header_bytes()));
+    base::RunLoop().RunUntilIdle();
+    EXPECT_EQ(headers, delegate_.headers_);
+    EXPECT_TRUE(stream_->header_list().empty());
+    return h;
+  }
+
   QuicCryptoClientConfig crypto_config_;
   testing::StrictMock<MockDelegate> delegate_;
   MockQuicConnectionHelper helper_;
@@ -232,18 +256,8 @@ INSTANTIATE_TEST_CASE_P(Version,
 
 TEST_P(QuicChromiumClientStreamTest, OnFinRead) {
   InitializeHeaders();
-  std::string uncompressed_headers =
-      SpdyUtils::SerializeUncompressedHeaders(headers_);
   QuicStreamOffset offset = 0;
-  stream_->OnStreamHeaders(uncompressed_headers);
-  stream_->OnStreamHeadersComplete(false, uncompressed_headers.length());
-
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_headers.length()));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(headers_, delegate_.headers_);
-  EXPECT_TRUE(stream_->decompressed_headers().empty());
-
+  ProcessHeadersFull(headers_);
   QuicStreamFrame frame2(kTestStreamId, true, offset, StringPiece());
   EXPECT_CALL(delegate_, OnClose());
   stream_->OnStreamFrame(frame2);
@@ -258,16 +272,7 @@ TEST_P(QuicChromiumClientStreamTest, OnDataAvailableBeforeHeaders) {
 
 TEST_P(QuicChromiumClientStreamTest, OnDataAvailable) {
   InitializeHeaders();
-  std::string uncompressed_headers =
-      SpdyUtils::SerializeUncompressedHeaders(headers_);
-  stream_->OnStreamHeaders(uncompressed_headers);
-  stream_->OnStreamHeadersComplete(false, uncompressed_headers.length());
-
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_headers.length()));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(headers_, delegate_.headers_);
-  EXPECT_TRUE(stream_->decompressed_headers().empty());
+  ProcessHeadersFull(headers_);
 
   const char data[] = "hello world!";
   stream_->OnStreamFrame(QuicStreamFrame(kTestStreamId, /*fin=*/false,
@@ -284,12 +289,14 @@ TEST_P(QuicChromiumClientStreamTest, OnDataAvailable) {
 }
 
 TEST_P(QuicChromiumClientStreamTest, ProcessHeadersWithError) {
-  std::string bad_headers = "...";
+  SpdyHeaderBlock bad_headers;
+  bad_headers["NAME"] = "...";
   EXPECT_CALL(session_,
               SendRstStream(kTestStreamId, QUIC_BAD_APPLICATION_PAYLOAD, 0));
 
-  stream_->OnStreamHeaders(StringPiece(bad_headers));
-  stream_->OnStreamHeadersComplete(false, bad_headers.length());
+  auto headers = AsHeaderList(bad_headers);
+  stream_->OnStreamHeaderList(false, headers.uncompressed_header_bytes(),
+                              headers);
 
   base::RunLoop().RunUntilIdle();
 
@@ -298,16 +305,8 @@ TEST_P(QuicChromiumClientStreamTest, ProcessHeadersWithError) {
 
 TEST_P(QuicChromiumClientStreamTest, OnDataAvailableWithError) {
   InitializeHeaders();
-  std::string uncompressed_headers =
-      SpdyUtils::SerializeUncompressedHeaders(headers_);
-  stream_->OnStreamHeaders(uncompressed_headers);
-  stream_->OnStreamHeadersComplete(false, uncompressed_headers.length());
-
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_headers.length()));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(headers_, delegate_.headers_);
-  EXPECT_TRUE(stream_->decompressed_headers().empty());
+  auto headers = AsHeaderList(headers_);
+  ProcessHeadersFull(headers_);
 
   const char data[] = "hello world!";
   stream_->OnStreamFrame(QuicStreamFrame(kTestStreamId, /*fin=*/false,
@@ -330,16 +329,7 @@ TEST_P(QuicChromiumClientStreamTest, OnError) {
 
 TEST_P(QuicChromiumClientStreamTest, OnTrailers) {
   InitializeHeaders();
-  std::string uncompressed_headers =
-      SpdyUtils::SerializeUncompressedHeaders(headers_);
-  stream_->OnStreamHeaders(uncompressed_headers);
-  stream_->OnStreamHeadersComplete(false, uncompressed_headers.length());
-
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_headers.length()));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(headers_, delegate_.headers_);
-  EXPECT_TRUE(stream_->decompressed_headers().empty());
+  ProcessHeadersFull(headers_);
 
   const char data[] = "hello world!";
   stream_->OnStreamFrame(QuicStreamFrame(kTestStreamId, /*fin=*/false,
@@ -353,18 +343,25 @@ TEST_P(QuicChromiumClientStreamTest, OnTrailers) {
   SpdyHeaderBlock trailers;
   trailers["bar"] = "foo";
   trailers[kFinalOffsetHeaderKey] = base::IntToString(strlen(data));
-  std::string uncompressed_trailers =
-      SpdyUtils::SerializeUncompressedHeaders(trailers);
 
-  stream_->OnStreamHeaders(uncompressed_trailers);
-  stream_->OnStreamHeadersComplete(true, uncompressed_trailers.length());
-
+  auto t = ProcessTrailers(trailers);
   base::RunLoop run_loop;
   EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_trailers.length()))
+              OnHeadersAvailableMock(_, t.uncompressed_header_bytes()))
       .WillOnce(testing::InvokeWithoutArgs([&run_loop]() { run_loop.Quit(); }));
 
   run_loop.Run();
+
+  // OnDataAvailable callback should follow trailers notification.
+  base::RunLoop run_loop3;
+  EXPECT_CALL(delegate_, OnDataAvailable())
+      .Times(1)
+      .WillOnce(testing::DoAll(
+          testing::Invoke(CreateFunctor(&QuicChromiumClientStreamTest::ReadData,
+                                        base::Unretained(this), StringPiece())),
+          testing::InvokeWithoutArgs([&run_loop3]() { run_loop3.Quit(); })));
+  run_loop3.Run();
+
   // Make sure kFinalOffsetHeaderKey is gone from the delivered actual trailers.
   trailers.erase(kFinalOffsetHeaderKey);
   EXPECT_EQ(trailers, delegate_.headers_);
@@ -376,16 +373,7 @@ TEST_P(QuicChromiumClientStreamTest, OnTrailers) {
 // immediately notified about trailers.
 TEST_P(QuicChromiumClientStreamTest, MarkTrailersConsumedWhenNotifyDelegate) {
   InitializeHeaders();
-  std::string uncompressed_headers =
-      SpdyUtils::SerializeUncompressedHeaders(headers_);
-  stream_->OnStreamHeaders(uncompressed_headers);
-  stream_->OnStreamHeadersComplete(false, uncompressed_headers.length());
-
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_headers.length()));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(headers_, delegate_.headers_);
-  EXPECT_TRUE(stream_->decompressed_headers().empty());
+  ProcessHeadersFull(headers_);
 
   const char data[] = "hello world!";
   stream_->OnStreamFrame(QuicStreamFrame(kTestStreamId, /*fin=*/false,
@@ -410,38 +398,96 @@ TEST_P(QuicChromiumClientStreamTest, MarkTrailersConsumedWhenNotifyDelegate) {
   SpdyHeaderBlock trailers;
   trailers["bar"] = "foo";
   trailers[kFinalOffsetHeaderKey] = base::IntToString(strlen(data));
-  std::string uncompressed_trailers =
-      SpdyUtils::SerializeUncompressedHeaders(trailers);
-
-  stream_->OnStreamHeaders(uncompressed_trailers);
-  stream_->OnStreamHeadersComplete(true, uncompressed_trailers.length());
+  QuicHeaderList t = ProcessTrailers(trailers);
   EXPECT_FALSE(stream_->IsDoneReading());
 
-  // Now the pending should complete. Make sure that IsDoneReading() is false
-  // even though ReadData returns 0 byte, because OnHeadersAvailable callback
-  // comes after this OnDataAvailable callback.
   base::RunLoop run_loop2;
+  EXPECT_CALL(delegate_,
+              OnHeadersAvailableMock(_, t.uncompressed_header_bytes()))
+      .WillOnce(
+          testing::InvokeWithoutArgs([&run_loop2]() { run_loop2.Quit(); }));
+
+  run_loop2.Run();
+
+  // OnDataAvailable callback should follow trailers notification.
+  base::RunLoop run_loop3;
   EXPECT_CALL(delegate_, OnDataAvailable())
       .Times(1)
       .WillOnce(testing::DoAll(
           testing::Invoke(CreateFunctor(&QuicChromiumClientStreamTest::ReadData,
                                         base::Unretained(this), StringPiece())),
-          testing::InvokeWithoutArgs([&run_loop2]() { run_loop2.Quit(); })));
-  run_loop2.Run();
-  // Make sure that the stream is not closed, even though ReadData returns 0.
-  EXPECT_FALSE(stream_->IsDoneReading());
-
-  // The OnHeadersAvailable call should follow.
-  base::RunLoop run_loop3;
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_trailers.length()))
-      .WillOnce(
-          testing::InvokeWithoutArgs([&run_loop3]() { run_loop3.Quit(); }));
-
+          testing::InvokeWithoutArgs([&run_loop3]() { run_loop3.Quit(); })));
   run_loop3.Run();
+
   // Make sure the stream is properly closed since trailers and data are all
   // consumed.
   EXPECT_TRUE(stream_->IsDoneReading());
+  // Make sure kFinalOffsetHeaderKey is gone from the delivered actual trailers.
+  trailers.erase(kFinalOffsetHeaderKey);
+  EXPECT_EQ(trailers, delegate_.headers_);
+
+  base::RunLoop().RunUntilIdle();
+  EXPECT_CALL(delegate_, OnClose());
+}
+
+// Test that if Read() is called after response body is read and after trailers
+// are received but not yet delivered, Read() will return ERR_IO_PENDING instead
+// of 0 (EOF).
+TEST_P(QuicChromiumClientStreamTest, ReadAfterTrailersReceivedButNotDelivered) {
+  InitializeHeaders();
+  ProcessHeadersFull(headers_);
+
+  const char data[] = "hello world!";
+  stream_->OnStreamFrame(QuicStreamFrame(kTestStreamId, /*fin=*/false,
+                                         /*offset=*/0, data));
+
+  base::RunLoop run_loop;
+  EXPECT_CALL(delegate_, OnDataAvailable())
+      .Times(1)
+      .WillOnce(testing::DoAll(
+          testing::Invoke(CreateFunctor(
+              &QuicChromiumClientStreamTest::ReadData, base::Unretained(this),
+              StringPiece(data, arraysize(data) - 1))),
+          testing::Invoke([&run_loop]() { run_loop.Quit(); })));
+
+  // Wait for the read to complete.
+  run_loop.Run();
+
+  // Deliver trailers. Delegate notification is posted asynchronously.
+  SpdyHeaderBlock trailers;
+  trailers["bar"] = "foo";
+  trailers[kFinalOffsetHeaderKey] = base::IntToString(strlen(data));
+
+  QuicHeaderList t = ProcessTrailers(trailers);
+
+  // Read again, it return ERR_IO_PENDING.
+  scoped_refptr<IOBuffer> buffer(new IOBuffer(1));
+  EXPECT_THAT(stream_->Read(buffer.get(), 1), ERR_IO_PENDING);
+
+  // Trailers are not delivered
+  EXPECT_FALSE(stream_->IsDoneReading());
+
+  base::RunLoop run_loop2;
+  EXPECT_CALL(delegate_,
+              OnHeadersAvailableMock(_, t.uncompressed_header_bytes()))
+      .WillOnce(
+          testing::InvokeWithoutArgs([&run_loop2]() { run_loop2.Quit(); }));
+
+  run_loop2.Run();
+
+  base::RunLoop run_loop3;
+  // OnDataAvailable() should follow right after and Read() will return 0.
+  EXPECT_CALL(delegate_, OnDataAvailable())
+      .WillOnce(testing::DoAll(
+          testing::Invoke(CreateFunctor(&QuicChromiumClientStreamTest::ReadData,
+                                        base::Unretained(this), StringPiece())),
+          testing::Invoke([&run_loop3]() { run_loop3.Quit(); })));
+  run_loop3.Run();
+
+  // Make sure the stream is properly closed since trailers and data are all
+  // consumed.
+  EXPECT_TRUE(stream_->IsDoneReading());
+
   // Make sure kFinalOffsetHeaderKey is gone from the delivered actual trailers.
   trailers.erase(kFinalOffsetHeaderKey);
   EXPECT_EQ(trailers, delegate_.headers_);
@@ -538,21 +584,12 @@ TEST_P(QuicChromiumClientStreamTest, HeadersBeforeDelegate) {
   // We don't use stream_ because we want an incoming server push
   // stream.
   QuicChromiumClientStream* stream = new QuicChromiumClientStream(
-      kServerDataStreamId1, &session_, BoundNetLog());
-  session_.ActivateStream(stream);
+      kServerDataStreamId1, &session_, NetLogWithSource());
+  session_.ActivateStream(base::WrapUnique(stream));
 
   InitializeHeaders();
-  std::string uncompressed_headers =
-      SpdyUtils::SerializeUncompressedHeaders(headers_);
-  stream->OnStreamHeaders(uncompressed_headers);
-  stream->OnStreamHeadersComplete(false, uncompressed_headers.length());
-  EXPECT_TRUE(stream->decompressed_headers().empty());
-
-  EXPECT_CALL(delegate_,
-              OnHeadersAvailableMock(_, uncompressed_headers.length()));
   stream->SetDelegate(&delegate_);
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(headers_, delegate_.headers_);
+  ProcessHeadersFull(headers_);
 
   // Times(2) because OnClose will be called for stream and stream_.
   EXPECT_CALL(delegate_, OnClose()).Times(2);

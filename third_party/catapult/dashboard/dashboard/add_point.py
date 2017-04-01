@@ -14,9 +14,9 @@ from google.appengine.api import datastore_errors
 from google.appengine.api import taskqueue
 from google.appengine.ext import ndb
 
-from dashboard import datastore_hooks
 from dashboard import math_utils
 from dashboard import post_data_handler
+from dashboard.common import datastore_hooks
 from dashboard.models import graph_data
 
 _TASK_QUEUE_NAME = 'new-points-queue'
@@ -124,14 +124,17 @@ class AddPointHandler(post_data_handler.PostDataHandler):
       # TODO(qyearsley): Add test coverage. See catapult:#1346.
       return
 
-    data = self.request.get('data')
-    if not data:
+    data_str = self.request.get('data')
+    if not data_str:
       # TODO(qyearsley): Add test coverage. See catapult:#1346.
       self.ReportError('Missing "data" parameter.', status=400)
       return
 
+    self.AddData(data_str)
+
+  def AddData(self, data_str):
     try:
-      data = json.loads(self.request.get('data'))
+      data = json.loads(data_str)
     except ValueError:
       self.ReportError('Invalid JSON string.', status=400)
       return

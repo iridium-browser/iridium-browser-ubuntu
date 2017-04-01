@@ -8,7 +8,7 @@ chrome.runtime.onMessageExternal.addListener(
         var error = null;
         if (errorString) {
           error = {};
-          error['name'] = 'ComponentExtensonError';
+          error['name'] = 'ComponentExtensionError';
           error['message'] = errorString;
         }
 
@@ -33,7 +33,16 @@ chrome.runtime.onMessageExternal.addListener(
 
       try {
         var requestInfo = {};
-        if (sender.tab) {
+
+        // Set the tab ID. If it's passed in the message, use that.
+        // Otherwise use the sender information.
+        if (message['tabId']) {
+          requestInfo['tabId'] = +message['tabId'];
+          if (isNaN(requestInfo['tabId'])) {
+            throw new Error('Cannot convert tab ID string to integer: ' +
+                            message['tabId']);
+          }
+        } else if (sender.tab) {
           requestInfo['tabId'] = sender.tab.id;
         }
 
@@ -42,7 +51,16 @@ chrome.runtime.onMessageExternal.addListener(
         }
 
         var method = message['method'];
-        var origin = getHost(sender.url);
+
+        // Set the origin. If a URL is passed in the message, use that.
+        // Otherwise use the sender information.
+        var origin;
+        if (message['winUrl']) {
+          origin = getHost(message['winUrl']);
+        } else {
+          origin = getHost(sender.url);
+        }
+
         if (method == 'cpu.getInfo') {
           chrome.system.cpu.getInfo(doSendResponse);
           return true;
@@ -79,36 +97,39 @@ chrome.runtime.onMessageExternal.addListener(
               requestInfo, origin, logId, doSendResponse);
           return true;
         } else if (method == 'logging.stopAndUpload') {
-          stopAllRtpDump(requestInfo, origin,
-                         function(rtpDumpValue, rtpDumpErrorString) {
-            if (chrome.extension.lastError !== undefined) {
-              // Stopping RTP dump failed, try to stop logging but don't try
-              // to upload since that will fail.
+          // Stop everything and upload. This is allowed to be called even if
+          // logs have already been stopped or not started. Therefore, ignore
+          // any errors along the way, but store them, so that if upload fails
+          // they are all reported back.
+          // Stop incoming and outgoing RTP dumps separately, otherwise
+          // stopRtpDump will fail and not stop anything if either type has not
+          // been started.
+          var errors = [];
+          chrome.webrtcLoggingPrivate.stopRtpDump(
+              requestInfo, origin, true /* incoming */, false /* outgoing */,
+              function() {
+            appendLastErrorMessage(errors);
+            chrome.webrtcLoggingPrivate.stopRtpDump(
+                requestInfo, origin, false /* incoming */, true /* outgoing */,
+                function() {
+              appendLastErrorMessage(errors);
               chrome.webrtcLoggingPrivate.stop(
-                  requestInfo, origin, function(stopValue, stopErrorString) {
-                if (chrome.extension.lastError !== undefined) {
-                  // Stopping logging also failed, report the error for logging.
-                  doSendResponse(stopValue, stopErrorString);
-                } else {
-                  // Stopping logging succeeded, report the error for RTP dump.
-                  doSendResponse(rtpDumpValue, rtpDumpErrorString);
-                }
+                  requestInfo, origin, function() {
+                appendLastErrorMessage(errors);
+                chrome.webrtcLoggingPrivate.upload(
+                    requestInfo, origin,
+                    function(uploadValue) {
+                  var errorMessage = null;
+                  // If upload fails, report all previous errors. Otherwise,
+                  // throw them away.
+                  if (chrome.extension.lastError !== undefined) {
+                    appendLastErrorMessage(errors);
+                    errorMessage = errors.join('; ');
+                  }
+                  doSendResponse(uploadValue, errorMessage);
+                });
               });
-            } else {
-              // Stopping RTP dump succeeded.
-              chrome.webrtcLoggingPrivate.stop(
-                  requestInfo, origin, function(stopValue, stopErrorString) {
-                if (chrome.extension.lastError !== undefined) {
-                  // Stopping logging failed, report error and don't try to
-                  // upload since that will fail.
-                  doSendResponse(stopValue, stopErrorString);
-                } else {
-                  // Stopping logging succeeded.
-                  chrome.webrtcLoggingPrivate.upload(
-                      requestInfo, origin, doSendResponse);
-                }
-              });
-            }
+            });
           });
           return true;
         } else if (method == 'logging.store') {
@@ -289,15 +310,9 @@ function onProcessCpu(port) {
   });
 }
 
-function stopAllRtpDump(requestInfo, origin, callback) {
-  // Stops incoming and outgoing separately, otherwise stopRtpDump will fail if
-  // either type of dump has not been started.
-  chrome.webrtcLoggingPrivate.stopRtpDump(
-      requestInfo, origin, true, false,
-      function() {
-        chrome.webrtcLoggingPrivate.stopRtpDump(
-            requestInfo, origin, false, true, callback);
-      });
+function appendLastErrorMessage(errors) {
+  if (chrome.extension.lastError !== undefined)
+    errors.push(chrome.extension.lastError.message);
 }
 
 chrome.runtime.onConnectExternal.addListener(function(port) {

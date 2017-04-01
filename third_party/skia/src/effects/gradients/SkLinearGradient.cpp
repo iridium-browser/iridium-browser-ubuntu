@@ -63,8 +63,9 @@ sk_sp<SkFlattenable> SkLinearGradient::CreateProc(SkReadBuffer& buffer) {
     SkPoint pts[2];
     pts[0] = buffer.readPoint();
     pts[1] = buffer.readPoint();
-    return SkGradientShader::MakeLinear(pts, desc.fColors, desc.fPos, desc.fCount, desc.fTileMode,
-                                        desc.fGradFlags, desc.fLocalMatrix);
+    return SkGradientShader::MakeLinear(pts, desc.fColors, std::move(desc.fColorSpace), desc.fPos,
+                                        desc.fCount, desc.fTileMode, desc.fGradFlags,
+                                        desc.fLocalMatrix);
 }
 
 void SkLinearGradient::flatten(SkWriteBuffer& buffer) const {
@@ -81,8 +82,8 @@ size_t SkLinearGradient::onContextSize(const ContextRec& rec) const {
 
 SkShader::Context* SkLinearGradient::onCreateContext(const ContextRec& rec, void* storage) const {
     return use_4f_context(rec, fGradFlags)
-        ? static_cast<SkShader::Context*>(new (storage) LinearGradient4fContext(*this, rec))
-        : static_cast<SkShader::Context*>(new (storage) LinearGradientContext(*this, rec));
+        ? CheckedCreateContext<LinearGradient4fContext>(storage, *this, rec)
+        : CheckedCreateContext<  LinearGradientContext>(storage, *this, rec);
 }
 
 // This swizzles SkColor into the same component order as SkPMColor, but does not actually
@@ -275,15 +276,12 @@ void SkLinearGradient::LinearGradientContext::shadeSpan(int x, int y, SkPMColor*
     SkASSERT(count > 0);
     const SkLinearGradient& linearGradient = static_cast<const SkLinearGradient&>(fShader);
 
-// Only use the Sk4f impl when known to be fast.
-#if defined(SKNX_IS_FAST)
     if (SkShader::kClamp_TileMode == linearGradient.fTileMode &&
         kLinear_MatrixClass == fDstToIndexClass)
     {
         this->shade4_clamp(x, y, dstC, count);
         return;
     }
-#endif
 
     SkPoint             srcPt;
     SkMatrix::MapXYProc dstProc = fDstToIndexProc;
@@ -341,7 +339,8 @@ SkShader::GradientType SkLinearGradient::asAGradient(GradientInfo* info) const {
 
 #if SK_SUPPORT_GPU
 
-#include "glsl/GrGLSLCaps.h"
+#include "GrColorSpaceXform.h"
+#include "GrShaderCaps.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
 #include "SkGr.h"
 
@@ -351,11 +350,8 @@ class GrLinearGradient : public GrGradientEffect {
 public:
     class GLSLLinearProcessor;
 
-    static sk_sp<GrFragmentProcessor> Make(GrContext* ctx,
-                                           const SkLinearGradient& shader,
-                                           const SkMatrix& matrix,
-                                           SkShader::TileMode tm) {
-        return sk_sp<GrFragmentProcessor>(new GrLinearGradient(ctx, shader, matrix, tm));
+    static sk_sp<GrFragmentProcessor> Make(const CreateArgs& args) {
+        return sk_sp<GrFragmentProcessor>(new GrLinearGradient(args));
     }
 
     virtual ~GrLinearGradient() { }
@@ -363,17 +359,14 @@ public:
     const char* name() const override { return "Linear Gradient"; }
 
 private:
-    GrLinearGradient(GrContext* ctx,
-                     const SkLinearGradient& shader,
-                     const SkMatrix& matrix,
-                     SkShader::TileMode tm)
-        : INHERITED(ctx, shader, matrix, tm) {
+    GrLinearGradient(const CreateArgs& args)
+        : INHERITED(args) {
         this->initClassID<GrLinearGradient>();
     }
 
     GrGLSLFragmentProcessor* onCreateGLSLInstance() const override;
 
-    virtual void onGetGLSLProcessorKey(const GrGLSLCaps& caps,
+    virtual void onGetGLSLProcessorKey(const GrShaderCaps& caps,
                                        GrProcessorKeyBuilder* b) const override;
 
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
@@ -391,7 +384,7 @@ public:
 
     virtual void emitCode(EmitArgs&) override;
 
-    static void GenKey(const GrProcessor& processor, const GrGLSLCaps&, GrProcessorKeyBuilder* b) {
+    static void GenKey(const GrProcessor& processor, const GrShaderCaps&, GrProcessorKeyBuilder* b) {
         b->add32(GenBaseGradientKey(processor));
     }
 
@@ -405,7 +398,7 @@ GrGLSLFragmentProcessor* GrLinearGradient::onCreateGLSLInstance() const {
     return new GrLinearGradient::GLSLLinearProcessor(*this);
 }
 
-void GrLinearGradient::onGetGLSLProcessorKey(const GrGLSLCaps& caps,
+void GrLinearGradient::onGetGLSLProcessorKey(const GrShaderCaps& caps,
                                              GrProcessorKeyBuilder* b) const {
     GrLinearGradient::GLSLLinearProcessor::GenKey(*this, caps, b);
 }
@@ -418,16 +411,14 @@ sk_sp<GrFragmentProcessor> GrLinearGradient::TestCreate(GrProcessorTestData* d) 
     SkPoint points[] = {{d->fRandom->nextUScalar1(), d->fRandom->nextUScalar1()},
                         {d->fRandom->nextUScalar1(), d->fRandom->nextUScalar1()}};
 
-    SkColor colors[kMaxRandomGradientColors];
-    SkScalar stopsArray[kMaxRandomGradientColors];
-    SkScalar* stops = stopsArray;
-    SkShader::TileMode tm;
-    int colorCount = RandomGradientParams(d->fRandom, colors, &stops, &tm);
-    auto shader = SkGradientShader::MakeLinear(points, colors, stops, colorCount, tm);
-    SkMatrix viewMatrix = GrTest::TestMatrix(d->fRandom);
-    sk_sp<GrFragmentProcessor> fp = shader->asFragmentProcessor(SkShader::AsFPArgs(
-        d->fContext, &viewMatrix, NULL, kNone_SkFilterQuality, nullptr,
-        SkSourceGammaTreatment::kRespect));
+    RandomGradientParams params(d->fRandom);
+    auto shader = params.fUseColors4f ?
+        SkGradientShader::MakeLinear(points, params.fColors4f, params.fColorSpace, params.fStops,
+                                     params.fColorCount, params.fTileMode) :
+        SkGradientShader::MakeLinear(points, params.fColors, params.fStops,
+                                     params.fColorCount, params.fTileMode);
+    GrTest::TestAsFPArgs asFPArgs(d);
+    sk_sp<GrFragmentProcessor> fp = shader->asFragmentProcessor(asFPArgs.args());
     GrAlwaysAssert(fp);
     return fp;
 }
@@ -437,11 +428,11 @@ sk_sp<GrFragmentProcessor> GrLinearGradient::TestCreate(GrProcessorTestData* d) 
 void GrLinearGradient::GLSLLinearProcessor::emitCode(EmitArgs& args) {
     const GrLinearGradient& ge = args.fFp.cast<GrLinearGradient>();
     this->emitUniforms(args.fUniformHandler, ge);
-    SkString t = args.fFragBuilder->ensureFSCoords2D(args.fCoords, 0);
+    SkString t = args.fFragBuilder->ensureCoords2D(args.fTransformedCoords[0]);
     t.append(".x");
     this->emitColor(args.fFragBuilder,
                     args.fUniformHandler,
-                    args.fGLSLCaps,
+                    args.fShaderCaps,
                     ge,
                     t.c_str(),
                     args.fOutputColor,
@@ -467,8 +458,11 @@ sk_sp<GrFragmentProcessor> SkLinearGradient::asFragmentProcessor(const AsFPArgs&
     }
     matrix.postConcat(fPtsToUnit);
 
-    sk_sp<GrFragmentProcessor> inner(
-        GrLinearGradient::Make(args.fContext, *this, matrix, fTileMode));
+    sk_sp<GrColorSpaceXform> colorSpaceXform = GrColorSpaceXform::Make(fColorSpace.get(),
+                                                                       args.fDstColorSpace);
+    sk_sp<GrFragmentProcessor> inner(GrLinearGradient::Make(
+        GrGradientEffect::CreateArgs(args.fContext, this, &matrix, fTileMode,
+                                     std::move(colorSpaceXform), SkToBool(args.fDstColorSpace))));
     return GrFragmentProcessor::MulOutputByInputAlpha(std::move(inner));
 }
 
@@ -525,25 +519,46 @@ find_backward(const SkLinearGradient::LinearGradientContext::Rec rec[], float ti
     return rec;
 }
 
-template <bool apply_alpha> SkPMColor trunc_from_255(const Sk4f& x) {
+// As an optimization, we can apply the dither bias before interpolation -- but only when
+// operating in premul space (apply_alpha == false).  When apply_alpha == true, we must
+// defer the bias application until after premul.
+//
+// The following two helpers encapsulate this logic: pre_bias is called before interpolation,
+// and effects the bias when apply_alpha == false, while post_bias is called after premul and
+// effects the bias for the apply_alpha == true case.
+
+template <bool apply_alpha>
+Sk4f pre_bias(const Sk4f& x, const Sk4f& bias) {
+    return apply_alpha ? x : x + bias;
+}
+
+template <bool apply_alpha>
+Sk4f post_bias(const Sk4f& x, const Sk4f& bias) {
+    return apply_alpha ? x + bias : x;
+}
+
+template <bool apply_alpha> SkPMColor trunc_from_255(const Sk4f& x, const Sk4f& bias) {
     SkPMColor c;
-    SkNx_cast<uint8_t>(x).store(&c);
+    Sk4f c4f255 = x;
     if (apply_alpha) {
-        c = SkPreMultiplyARGB(SkGetPackedA32(c), SkGetPackedR32(c),
-                              SkGetPackedG32(c), SkGetPackedB32(c));
+        const float scale = x[SkPM4f::A] * (1 / 255.f);
+        c4f255 *= Sk4f(scale, scale, scale, 1);
     }
+    SkNx_cast<uint8_t>(post_bias<apply_alpha>(c4f255, bias)).store(&c);
+
     return c;
 }
 
 template <bool apply_alpha> void fill(SkPMColor dst[], int count,
-                                      const Sk4f& c4, const Sk4f& c4other) {
-    sk_memset32_dither(dst, trunc_from_255<apply_alpha>(c4),
-                       trunc_from_255<apply_alpha>(c4other), count);
+                                      const Sk4f& c4, const Sk4f& bias0, const Sk4f& bias1) {
+    const SkPMColor c0 = trunc_from_255<apply_alpha>(pre_bias<apply_alpha>(c4, bias0), bias0);
+    const SkPMColor c1 = trunc_from_255<apply_alpha>(pre_bias<apply_alpha>(c4, bias1), bias1);
+    sk_memset32_dither(dst, c0, c1, count);
 }
 
 template <bool apply_alpha> void fill(SkPMColor dst[], int count, const Sk4f& c4) {
     // Assumes that c4 does not need to be dithered.
-    sk_memset32(dst, trunc_from_255<apply_alpha>(c4), count);
+    sk_memset32(dst, trunc_from_255<apply_alpha>(c4, 0), count);
 }
 
 /*
@@ -573,8 +588,8 @@ template <bool apply_alpha> void ramp(SkPMColor dstC[], int n, const Sk4f& c, co
                                       const Sk4f& dither0, const Sk4f& dither1) {
     Sk4f dc2 = dc + dc;
     Sk4f dc4 = dc2 + dc2;
-    Sk4f cd0 = c + dither0;
-    Sk4f cd1 = c + dc + dither1;
+    Sk4f cd0 = pre_bias<apply_alpha>(c     , dither0);
+    Sk4f cd1 = pre_bias<apply_alpha>(c + dc, dither1);
     Sk4f cd2 = cd0 + dc2;
     Sk4f cd3 = cd1 + dc2;
     while (n >= 4) {
@@ -582,10 +597,10 @@ template <bool apply_alpha> void ramp(SkPMColor dstC[], int n, const Sk4f& c, co
             Sk4f_ToBytes((uint8_t*)dstC, cd0, cd1, cd2, cd3);
             dstC += 4;
         } else {
-            *dstC++ = trunc_from_255<apply_alpha>(cd0);
-            *dstC++ = trunc_from_255<apply_alpha>(cd1);
-            *dstC++ = trunc_from_255<apply_alpha>(cd2);
-            *dstC++ = trunc_from_255<apply_alpha>(cd3);
+            *dstC++ = trunc_from_255<apply_alpha>(cd0, dither0);
+            *dstC++ = trunc_from_255<apply_alpha>(cd1, dither1);
+            *dstC++ = trunc_from_255<apply_alpha>(cd2, dither0);
+            *dstC++ = trunc_from_255<apply_alpha>(cd3, dither1);
         }
         cd0 = cd0 + dc4;
         cd1 = cd1 + dc4;
@@ -594,12 +609,12 @@ template <bool apply_alpha> void ramp(SkPMColor dstC[], int n, const Sk4f& c, co
         n -= 4;
     }
     if (n & 2) {
-        *dstC++ = trunc_from_255<apply_alpha>(cd0);
-        *dstC++ = trunc_from_255<apply_alpha>(cd1);
+        *dstC++ = trunc_from_255<apply_alpha>(cd0, dither0);
+        *dstC++ = trunc_from_255<apply_alpha>(cd1, dither1);
         cd0 = cd0 + dc2;
     }
     if (n & 1) {
-        *dstC++ = trunc_from_255<apply_alpha>(cd0);
+        *dstC++ = trunc_from_255<apply_alpha>(cd0, dither0);
     }
 }
 
@@ -740,19 +755,20 @@ void SkLinearGradient::LinearGradientContext::shade4_clamp(int x, int y, SkPMCol
         }
     }
     const float dither[2] = { dither0, dither1 };
-    const float invDx = 1 / dx;
 
     if (SkScalarNearlyZero(dx * count)) { // gradient is vertical
         const float pinFx = SkTPin(fx, 0.0f, 1.0f);
         Sk4f c = lerp_color(pinFx, find_forward(fRecs.begin(), pinFx));
         if (fApplyAlphaAfterInterp) {
-            fill<true>(dstC, count, c + dither0, c + dither1);
+            fill<true>(dstC, count, c, dither0, dither1);
         } else {
-            fill<false>(dstC, count, c + dither0, c + dither1);
+            fill<false>(dstC, count, c, dither0, dither1);
         }
         return;
     }
 
+    SkASSERT(0.f != dx);
+    const float invDx = 1 / dx;
     if (dx > 0) {
         if (fApplyAlphaAfterInterp) {
             this->shade4_dx_clamp<true, true>(dstC, count, fx, dx, invDx, dither);

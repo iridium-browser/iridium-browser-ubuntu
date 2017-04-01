@@ -106,7 +106,7 @@ import os
 import re
 import sys
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
@@ -268,9 +268,30 @@ def ParseCmdline(argv):
                       help='Write to SD card instead of USB/em100')
   parser.add_argument('-z', '--size', action='store_true', default=False,
                       help='Display U-Boot image size')
-  parser.add_argument('target', nargs='?',
+  parser.add_argument('target', nargs='?', default='all',
                       help='The target to work on')
   return parser.parse_args(argv)
+
+
+def FindCompiler(gcc, cros_prefix):
+  """Look up the compiler for an architecture.
+
+  Args:
+    gcc: GCC architecture, either 'arm' or 'aarch64'
+    cros_prefix: Full Chromium OS toolchain prefix
+  """
+  if in_chroot:
+    # Use the Chromium OS toolchain.
+    prefix = cros_prefix
+  else:
+    prefix = glob.glob('/opt/linaro/gcc-linaro-%s-linux-*/bin/*gcc' % gcc)
+    if not prefix:
+      cros_build_lib.Die("""Please install an %s toolchain for your machine.
+Install a Linaro toolchain from:
+https://launchpad.net/linaro-toolchain-binaries
+or see cros/commands/cros_chrome_sdk.py.""" % gcc)
+    prefix = re.sub('gcc$', '', prefix[0])
+  return prefix
 
 
 def SetupBuild(options):
@@ -339,11 +360,16 @@ def SetupBuild(options):
           smdk = fields[3]
           vendor = fields[4]
           family = fields[5]
+          target = fields[6]
         elif board_format in (PRE_KCONFIG, KCONFIG):
           smdk = fields[5]
           vendor = fields[4]
           family = fields[3]
-        break
+          target = fields[0]
+
+        # Make sure this is the right target.
+        if target == uboard:
+          break
   if not arch:
     cros_build_lib.Die("Selected board '%s' not found in boards.cfg." % board)
 
@@ -355,18 +381,11 @@ def SetupBuild(options):
     else:
       compiler = '/opt/i686/bin/i686-unknown-elf-'
   elif arch == 'arm':
-    if in_chroot:
-      # Use the Chrome OS toolchain
-      compiler = 'armv7a-cros-linux-gnueabi-'
-    else:
-      compiler = glob.glob('/opt/linaro/gcc-linaro-arm-linux-*/bin/*gcc')
-      if not compiler:
-        cros_build_lib.Die("""Please install an ARM toolchain for your machine.
-'Install a Linaro toolchain from:'
-'https://launchpad.net/linaro-toolchain-binaries'
-'or see cros/commands/cros_chrome_sdk.py.""")
-      compiler = compiler[0]
-    compiler = re.sub('gcc$', '', compiler)
+    compiler = FindCompiler(arch, 'armv7a-cros-linux-gnueabi-')
+  elif arch == 'aarch64':
+    compiler = FindCompiler(arch, 'aarch64-cros-linux-gnu-')
+    # U-Boot builds both arm and aarch64 with the 'arm' architecture.
+    arch = 'arm'
   elif arch == 'sandbox':
     compiler = ''
   else:
@@ -391,6 +410,8 @@ def SetupBuild(options):
 
   if options.verbose < 2:
     base.append('-s')
+  elif options.verbose > 2:
+    base.append('V=1')
 
   if options.ro and options.rw:
     cros_build_lib.Die('Cannot specify both --ro and --rw options')
@@ -441,6 +462,7 @@ def SetupBuild(options):
   if result.returncode == 0:
     base.append('USE_STDINT=1')
 
+  base.append('BUILD_ROM=1')
   if options.trace:
     base.append('FTRACE=1')
   if options.separate:
@@ -480,15 +502,24 @@ def RunBuild(options, base, target, queue):
   if not options.incremental:
     # Ignore any error from this, some older U-Boots fail on this.
     cros_build_lib.RunCommand(base + ['distclean'], **kwargs)
-    result = cros_build_lib.RunCommand(base + ['%s_config' % uboard], **kwargs)
+    if os.path.exists('tools/genboardscfg.py'):
+      mtarget = 'defconfig'
+    else:
+      mtarget = 'config'
+    cmd = base + ['%s_%s' % (uboard, mtarget)]
+    result = cros_build_lib.RunCommand(cmd, capture_output=True,
+                                       combine_stdout_stderr=True, **kwargs)
     if result.returncode:
-      sys.exit()
+      print("cmd: '%s', output: '%s'" % (result.cmdstr, result.output))
+      sys.exit(result.returncode)
 
   # Do the actual build.
   if options.build:
-    result = cros_build_lib.RunCommand(base + [target], **kwargs)
+    result = cros_build_lib.RunCommand(base + [target], capture_output=True,
+                                       combine_stdout_stderr=True, **kwargs)
     if result.returncode:
-      sys.exit()
+      print("cmd: '%s', output: '%s'" % (result.cmdstr, result.output))
+      sys.exit(result.returncode)
 
   files = ['%s/u-boot' % outdir]
   spl = glob.glob('%s/spl/u-boot-spl' % outdir)

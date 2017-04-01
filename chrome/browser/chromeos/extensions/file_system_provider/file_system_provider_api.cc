@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
@@ -114,31 +113,32 @@ void FillFileSystemInfo(const ProvidedFileSystemInfo& file_system_info,
 
 }  // namespace
 
-bool FileSystemProviderMountFunction::RunSync() {
+ExtensionFunction::ResponseAction FileSystemProviderMountFunction::Run() {
   using api::file_system_provider::Mount::Params;
   const std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   // It's an error if the file system Id is empty.
   if (params->options.file_system_id.empty()) {
-    SetError(FileErrorToString(base::File::FILE_ERROR_INVALID_OPERATION));
-    return false;
+    return RespondNow(
+        Error(FileErrorToString(base::File::FILE_ERROR_INVALID_OPERATION)));
   }
 
   // It's an error if the display name is empty.
   if (params->options.display_name.empty()) {
-    SetError(FileErrorToString(base::File::FILE_ERROR_INVALID_OPERATION));
-    return false;
+    return RespondNow(
+        Error(FileErrorToString(base::File::FILE_ERROR_INVALID_OPERATION)));
   }
 
   // If the opened files limit is set, then it must be larger or equal than 0.
   if (params->options.opened_files_limit.get() &&
       *params->options.opened_files_limit.get() < 0) {
-    SetError(FileErrorToString(base::File::FILE_ERROR_INVALID_OPERATION));
-    return false;
+    return RespondNow(
+        Error(FileErrorToString(base::File::FILE_ERROR_INVALID_OPERATION)));
   }
 
-  Service* const service = Service::Get(GetProfile());
+  Service* const service =
+      Service::Get(Profile::FromBrowserContext(browser_context()));
   DCHECK(service);
 
   MountOptions options;
@@ -152,36 +152,34 @@ bool FileSystemProviderMountFunction::RunSync() {
 
   const base::File::Error result =
       service->MountFileSystem(extension_id(), options);
-  if (result != base::File::FILE_OK) {
-    SetError(FileErrorToString(result));
-    return false;
-  }
+  if (result != base::File::FILE_OK)
+    return RespondNow(Error(FileErrorToString(result)));
 
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool FileSystemProviderUnmountFunction::RunSync() {
+ExtensionFunction::ResponseAction FileSystemProviderUnmountFunction::Run() {
   using api::file_system_provider::Unmount::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  Service* const service = Service::Get(GetProfile());
+  Service* const service =
+      Service::Get(Profile::FromBrowserContext(browser_context()));
   DCHECK(service);
 
   const base::File::Error result =
       service->UnmountFileSystem(extension_id(), params->options.file_system_id,
                                  Service::UNMOUNT_REASON_USER);
-  if (result != base::File::FILE_OK) {
-    SetError(FileErrorToString(result));
-    return false;
-  }
+  if (result != base::File::FILE_OK)
+    return RespondNow(Error(FileErrorToString(result)));
 
-  return true;
+  return RespondNow(NoArguments());
 }
 
-bool FileSystemProviderGetAllFunction::RunSync() {
+ExtensionFunction::ResponseAction FileSystemProviderGetAllFunction::Run() {
   using api::file_system_provider::FileSystemInfo;
-  Service* const service = Service::Get(GetProfile());
+  Service* const service =
+      Service::Get(Profile::FromBrowserContext(browser_context()));
   DCHECK(service);
 
   const std::vector<ProvidedFileSystemInfo> file_systems =
@@ -204,17 +202,18 @@ bool FileSystemProviderGetAllFunction::RunSync() {
     }
   }
 
-  SetResultList(api::file_system_provider::GetAll::Results::Create(items));
-  return true;
+  return RespondNow(
+      ArgumentList(api::file_system_provider::GetAll::Results::Create(items)));
 }
 
-bool FileSystemProviderGetFunction::RunSync() {
+ExtensionFunction::ResponseAction FileSystemProviderGetFunction::Run() {
   using api::file_system_provider::Get::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   using api::file_system_provider::FileSystemInfo;
-  Service* const service = Service::Get(GetProfile());
+  Service* const service =
+      Service::Get(Profile::FromBrowserContext(browser_context()));
   DCHECK(service);
 
   chromeos::file_system_provider::ProvidedFileSystemInterface* const
@@ -222,17 +221,16 @@ bool FileSystemProviderGetFunction::RunSync() {
                                                    params->file_system_id);
 
   if (!file_system) {
-    SetError(FileErrorToString(base::File::FILE_ERROR_NOT_FOUND));
-    return false;
+    return RespondNow(
+        Error(FileErrorToString(base::File::FILE_ERROR_NOT_FOUND)));
   }
 
   FileSystemInfo file_system_info;
   FillFileSystemInfo(file_system->GetFileSystemInfo(),
                      *file_system->GetWatchers(), file_system->GetOpenedFiles(),
                      &file_system_info);
-  SetResultList(
-      api::file_system_provider::Get::Results::Create(file_system_info));
-  return true;
+  return RespondNow(ArgumentList(
+      api::file_system_provider::Get::Results::Create(file_system_info)));
 }
 
 bool FileSystemProviderNotifyFunction::RunAsync() {
@@ -274,7 +272,8 @@ void FileSystemProviderNotifyFunction::OnNotifyCompleted(
   SendResponse(true);
 }
 
-bool FileSystemProviderInternalUnmountRequestedSuccessFunction::RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalUnmountRequestedSuccessFunction::Run() {
   using api::file_system_provider_internal::UnmountRequestedSuccess::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -284,8 +283,8 @@ bool FileSystemProviderInternalUnmountRequestedSuccessFunction::RunWhenValid() {
       false /* has_more */);
 }
 
-bool
-FileSystemProviderInternalGetMetadataRequestedSuccessFunction::RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalGetMetadataRequestedSuccessFunction::Run() {
   using api::file_system_provider_internal::GetMetadataRequestedSuccess::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -295,8 +294,8 @@ FileSystemProviderInternalGetMetadataRequestedSuccessFunction::RunWhenValid() {
       false /* has_more */);
 }
 
-bool FileSystemProviderInternalGetActionsRequestedSuccessFunction::
-    RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalGetActionsRequestedSuccessFunction::Run() {
   using api::file_system_provider_internal::GetActionsRequestedSuccess::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -306,8 +305,8 @@ bool FileSystemProviderInternalGetActionsRequestedSuccessFunction::
       false /* has_more */);
 }
 
-bool FileSystemProviderInternalReadDirectoryRequestedSuccessFunction::
-    RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalReadDirectoryRequestedSuccessFunction::Run() {
   using api::file_system_provider_internal::ReadDirectoryRequestedSuccess::
       Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
@@ -318,8 +317,8 @@ bool FileSystemProviderInternalReadDirectoryRequestedSuccessFunction::
       RequestValue::CreateForReadDirectorySuccess(std::move(params)), has_more);
 }
 
-bool
-FileSystemProviderInternalReadFileRequestedSuccessFunction::RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalReadFileRequestedSuccessFunction::Run() {
   TRACE_EVENT0("file_system_provider", "ReadFileRequestedSuccess");
   using api::file_system_provider_internal::ReadFileRequestedSuccess::Params;
 
@@ -331,8 +330,8 @@ FileSystemProviderInternalReadFileRequestedSuccessFunction::RunWhenValid() {
       RequestValue::CreateForReadFileSuccess(std::move(params)), has_more);
 }
 
-bool
-FileSystemProviderInternalOperationRequestedSuccessFunction::RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalOperationRequestedSuccessFunction::Run() {
   using api::file_system_provider_internal::OperationRequestedSuccess::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -343,7 +342,8 @@ FileSystemProviderInternalOperationRequestedSuccessFunction::RunWhenValid() {
       false /* has_more */);
 }
 
-bool FileSystemProviderInternalOperationRequestedErrorFunction::RunWhenValid() {
+ExtensionFunction::ResponseAction
+FileSystemProviderInternalOperationRequestedErrorFunction::Run() {
   using api::file_system_provider_internal::OperationRequestedError::Params;
   std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);

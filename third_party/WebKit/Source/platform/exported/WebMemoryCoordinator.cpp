@@ -8,14 +8,13 @@
 
 namespace blink {
 
-void WebMemoryCoordinator::onMemoryPressure(WebMemoryPressureLevel pressureLevel)
-{
-    MemoryCoordinator::instance().onMemoryPressure(pressureLevel);
+void WebMemoryCoordinator::onMemoryPressure(
+    WebMemoryPressureLevel pressureLevel) {
+  MemoryCoordinator::instance().onMemoryPressure(pressureLevel);
 }
 
-void WebMemoryCoordinator::prepareToSuspend()
-{
-    MemoryCoordinator::instance().prepareToSuspend();
+void WebMemoryCoordinator::onMemoryStateChange(MemoryState state) {
+  MemoryCoordinator::instance().onMemoryStateChange(state);
 }
 
-} // namespace blink
+}  // namespace blink

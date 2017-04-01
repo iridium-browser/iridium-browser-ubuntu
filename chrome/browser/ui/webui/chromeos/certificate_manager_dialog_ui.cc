@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -16,12 +17,12 @@
 #include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chromeos/chromeos_constants.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -42,8 +43,7 @@ class CertificateManagerDialogHTMLSource : public content::URLDataSource {
   std::string GetSource() const override;
   void StartDataRequest(
       const std::string& path,
-      int render_process_id,
-      int render_frame_id,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
   std::string GetMimeType(const std::string&) const override {
     return "text/html";
@@ -70,8 +70,7 @@ std::string CertificateManagerDialogHTMLSource::GetSource() const {
 
 void CertificateManagerDialogHTMLSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   scoped_refptr<base::RefCountedMemory> response_bytes;
   const std::string& app_locale = g_browser_process->GetApplicationLocale();
@@ -96,18 +95,20 @@ void CertificateManagerDialogHTMLSource::StartDataRequest(
 namespace chromeos {
 
 CertificateManagerDialogUI::CertificateManagerDialogUI(content::WebUI* web_ui)
-    : ui::WebDialogUI(web_ui),
-      initialized_handlers_(false),
-      cert_handler_(new ::options::CertificateManagerHandler(true)),
-      core_handler_(new options::CoreChromeOSOptionsHandler()) {
+    : ui::WebDialogUI(web_ui), initialized_handlers_(false) {
   // |localized_strings| will be owned by CertificateManagerDialogHTMLSource.
   base::DictionaryValue* localized_strings = new base::DictionaryValue();
 
-  web_ui->AddMessageHandler(core_handler_);
+  auto core_handler = base::MakeUnique<options::CoreChromeOSOptionsHandler>();
+  core_handler_ = core_handler.get();
+  web_ui->AddMessageHandler(std::move(core_handler));
   core_handler_->set_handlers_host(this);
   core_handler_->GetLocalizedValues(localized_strings);
 
-  web_ui->AddMessageHandler(cert_handler_);
+  auto cert_handler =
+      base::MakeUnique<::options::CertificateManagerHandler>(true);
+  cert_handler_ = cert_handler.get();
+  web_ui->AddMessageHandler(std::move(cert_handler));
   cert_handler_->GetLocalizedValues(localized_strings);
 
   bool keyboard_driven_oobe =

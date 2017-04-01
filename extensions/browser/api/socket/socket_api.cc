@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/ptr_util.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/resource_context.h"
@@ -30,7 +31,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/network_interfaces.h"
 #include "net/base/url_util.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -207,7 +208,7 @@ void SocketExtensionWithDnsLookupFunction::StartDnsLookup(
   int resolve_result = host_resolver->Resolve(
       request_info, net::DEFAULT_PRIORITY, &addresses_,
       base::Bind(&SocketExtensionWithDnsLookupFunction::OnDnsLookup, this),
-      &request_, net::BoundNetLog());
+      &request_, net::NetLogWithSource());
 
   if (resolve_result != net::ERR_IO_PENDING)
     OnDnsLookup(resolve_result);
@@ -358,7 +359,7 @@ bool SocketDisconnectFunction::Prepare() {
 void SocketDisconnectFunction::Work() {
   Socket* socket = GetSocket(socket_id_);
   if (socket)
-    socket->Disconnect();
+    socket->Disconnect(false /* socket_destroying */);
   else
     error_ = kSocketNotFoundError;
   SetResult(base::Value::CreateNullValue());
@@ -504,7 +505,7 @@ void SocketReadFunction::AsyncWorkStart() {
   Socket* socket = GetSocket(params_->socket_id);
   if (!socket) {
     error_ = kSocketNotFoundError;
-    OnCompleted(-1, NULL);
+    OnCompleted(-1, nullptr, false /* socket_destroying */);
     return;
   }
 
@@ -513,7 +514,8 @@ void SocketReadFunction::AsyncWorkStart() {
 }
 
 void SocketReadFunction::OnCompleted(int bytes_read,
-                                     scoped_refptr<net::IOBuffer> io_buffer) {
+                                     scoped_refptr<net::IOBuffer> io_buffer,
+                                     bool socket_destroying) {
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetInteger(kResultCodeKey, bytes_read);
   if (bytes_read > 0) {
@@ -579,7 +581,7 @@ void SocketRecvFromFunction::AsyncWorkStart() {
   Socket* socket = GetSocket(params_->socket_id);
   if (!socket || socket->GetSocketType() != Socket::TYPE_UDP) {
     error_ = kSocketNotFoundError;
-    OnCompleted(-1, NULL, std::string(), 0);
+    OnCompleted(-1, nullptr, false /* socket_destroying*/, std::string(), 0);
     return;
   }
 
@@ -589,6 +591,7 @@ void SocketRecvFromFunction::AsyncWorkStart() {
 
 void SocketRecvFromFunction::OnCompleted(int bytes_read,
                                          scoped_refptr<net::IOBuffer> io_buffer,
+                                         bool socket_destroying,
                                          const std::string& address,
                                          uint16_t port) {
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());

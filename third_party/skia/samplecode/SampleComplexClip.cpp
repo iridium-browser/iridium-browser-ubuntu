@@ -4,10 +4,12 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #include "SampleCode.h"
 #include "SkCanvas.h"
 #include "SkPath.h"
 #include "SkView.h"
+#include "SkClipOpPriv.h"
 
 class ComplexClipView : public SampleView {
 public:
@@ -79,14 +81,14 @@ protected:
         canvas->drawPath(clipB, paint);
 
         static const struct {
-            SkRegion::Op fOp;
-            const char*  fName;
+            SkClipOp    fOp;
+            const char* fName;
         } gOps[] = { //extra spaces in names for measureText
-            {SkRegion::kIntersect_Op,         "Isect "},
-            {SkRegion::kDifference_Op,        "Diff " },
-            {SkRegion::kUnion_Op,             "Union "},
-            {SkRegion::kXOR_Op,               "Xor "  },
-            {SkRegion::kReverseDifference_Op, "RDiff "}
+            {kIntersect_SkClipOp,         "Isect "},
+            {kDifference_SkClipOp,        "Diff " },
+            {kUnion_SkClipOp,             "Union "},
+            {kXOR_SkClipOp,               "Xor "  },
+            {kReverseDifference_SkClipOp, "RDiff "}
         };
 
         canvas->translate(0, SkIntToScalar(40));

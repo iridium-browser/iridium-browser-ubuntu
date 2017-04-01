@@ -9,33 +9,35 @@
 
 namespace blink {
 
-class MediaSettingsRange final
-    : public GarbageCollected<MediaSettingsRange>
-    , public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static MediaSettingsRange* create(unsigned long max, unsigned long min, unsigned long current)
-    {
-        return new MediaSettingsRange(max, min, current);
-    }
+class MediaSettingsRange final : public GarbageCollected<MediaSettingsRange>,
+                                 public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    unsigned long max() const { return m_max; }
-    unsigned long min() const { return m_min; }
-    unsigned long current() const { return m_current; }
+ public:
+  static MediaSettingsRange* create(double max,
+                                    double min,
+                                    double current,
+                                    double step) {
+    return new MediaSettingsRange(max, min, current, step);
+  }
 
-    DEFINE_INLINE_TRACE() {}
+  double max() const { return m_max; }
+  double min() const { return m_min; }
+  double current() const { return m_current; }
+  double step() const { return m_step; }
 
-private:
-    MediaSettingsRange(unsigned long max, unsigned long min, unsigned long current)
-        : m_max(max)
-        , m_min(min)
-        , m_current(current) { }
+  DEFINE_INLINE_TRACE() {}
 
-    unsigned long m_max;
-    unsigned long m_min;
-    unsigned long m_current;
+ private:
+  MediaSettingsRange(double max, double min, double current, double step)
+      : m_max(max), m_min(min), m_current(current), m_step(step) {}
+
+  double m_max;
+  double m_min;
+  double m_current;
+  double m_step;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MediaSettingsRange_h
+#endif  // MediaSettingsRange_h

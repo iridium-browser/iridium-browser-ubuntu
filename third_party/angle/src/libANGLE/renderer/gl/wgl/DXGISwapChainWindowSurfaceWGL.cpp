@@ -36,6 +36,7 @@ DXGISwapChainWindowSurfaceWGL::DXGISwapChainWindowSurfaceWGL(const egl::SurfaceS
       mWindow(window),
       mStateManager(renderer->getStateManager()),
       mWorkarounds(renderer->getWorkarounds()),
+      mRenderer(renderer),
       mFunctionsGL(functionsGL),
       mFunctionsWGL(functionsWGL),
       mDevice(device),
@@ -85,7 +86,7 @@ DXGISwapChainWindowSurfaceWGL::~DXGISwapChainWindowSurfaceWGL()
     SafeRelease(mSwapChain1);
 }
 
-egl::Error DXGISwapChainWindowSurfaceWGL::initialize()
+egl::Error DXGISwapChainWindowSurfaceWGL::initialize(const DisplayImpl *displayImpl)
 {
     if (mOrientation != EGL_SURFACE_ORIENTATION_INVERT_Y_ANGLE)
     {
@@ -127,7 +128,7 @@ egl::Error DXGISwapChainWindowSurfaceWGL::makeCurrent()
     return egl::Error(EGL_SUCCESS);
 }
 
-egl::Error DXGISwapChainWindowSurfaceWGL::swap()
+egl::Error DXGISwapChainWindowSurfaceWGL::swap(const DisplayImpl *displayImpl)
 {
     mFunctionsGL->flush();
 
@@ -292,7 +293,8 @@ EGLint DXGISwapChainWindowSurfaceWGL::getSwapBehavior() const
 FramebufferImpl *DXGISwapChainWindowSurfaceWGL::createDefaultFramebuffer(
     const gl::FramebufferState &data)
 {
-    return new FramebufferGL(mFramebufferID, data, mFunctionsGL, mWorkarounds, mStateManager);
+    return new FramebufferGL(mFramebufferID, data, mFunctionsGL, mWorkarounds,
+                             mRenderer->getBlitter(), mStateManager);
 }
 
 egl::Error DXGISwapChainWindowSurfaceWGL::setObjectsLocked(bool locked)

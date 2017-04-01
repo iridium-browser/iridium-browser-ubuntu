@@ -11,7 +11,6 @@
 #include <string>
 #include <utility>
 
-#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
+#include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/error_utils.h"
@@ -65,8 +65,6 @@ const char kUnprotectedWebKey[] = "unprotectedWeb";
 const char kBadDataTypeDetails[] = "Invalid value for data type '%s'.";
 const char kDeleteProhibitedError[] = "Browsing history and downloads are not "
                                       "permitted to be removed.";
-const char kOneAtATimeError[] = "Only one 'browsingData' API call can run at "
-                                "a time.";
 
 }  // namespace extension_browsing_data_api_constants
 
@@ -123,8 +121,8 @@ bool IsRemovalPermitted(int removal_mask, PrefService* prefs) {
 
 }  // namespace
 
-bool BrowsingDataSettingsFunction::RunSync() {
-  PrefService* prefs = GetProfile()->GetPrefs();
+ExtensionFunction::ResponseAction BrowsingDataSettingsFunction::Run() {
+  prefs_ = Profile::FromBrowserContext(browser_context())->GetPrefs();
 
   // Fill origin types.
   // The "cookies" and "hosted apps" UI checkboxes both map to
@@ -135,15 +133,15 @@ bool BrowsingDataSettingsFunction::RunSync() {
       new base::DictionaryValue);
   origin_types->SetBoolean(
       extension_browsing_data_api_constants::kUnprotectedWebKey,
-      prefs->GetBoolean(browsing_data::prefs::kDeleteCookies));
+      prefs_->GetBoolean(browsing_data::prefs::kDeleteCookies));
   origin_types->SetBoolean(
       extension_browsing_data_api_constants::kProtectedWebKey,
-      prefs->GetBoolean(browsing_data::prefs::kDeleteHostedAppsData));
+      prefs_->GetBoolean(browsing_data::prefs::kDeleteHostedAppsData));
   origin_types->SetBoolean(
       extension_browsing_data_api_constants::kExtensionsKey, false);
 
   // Fill deletion time period.
-  int period_pref = prefs->GetInteger(browsing_data::prefs::kDeleteTimePeriod);
+  int period_pref = prefs_->GetInteger(browsing_data::prefs::kDeleteTimePeriod);
   browsing_data::TimePeriod period =
       static_cast<browsing_data::TimePeriod>(period_pref);
   double since = 0;
@@ -162,8 +160,8 @@ bool BrowsingDataSettingsFunction::RunSync() {
   std::unique_ptr<base::DictionaryValue> permitted(new base::DictionaryValue);
 
   bool delete_site_data =
-      prefs->GetBoolean(browsing_data::prefs::kDeleteCookies) ||
-      prefs->GetBoolean(browsing_data::prefs::kDeleteHostedAppsData);
+      prefs_->GetBoolean(browsing_data::prefs::kDeleteCookies) ||
+      prefs_->GetBoolean(browsing_data::prefs::kDeleteHostedAppsData);
 
   SetDetails(selected.get(), permitted.get(),
              extension_browsing_data_api_constants::kAppCacheKey,
@@ -194,24 +192,25 @@ bool BrowsingDataSettingsFunction::RunSync() {
              delete_site_data);
 
   SetDetails(selected.get(), permitted.get(),
-      extension_browsing_data_api_constants::kPluginDataKey,
-      delete_site_data && prefs->GetBoolean(prefs::kClearPluginLSODataEnabled));
+             extension_browsing_data_api_constants::kPluginDataKey,
+             delete_site_data &&
+                 prefs_->GetBoolean(prefs::kClearPluginLSODataEnabled));
 
   SetDetails(selected.get(), permitted.get(),
              extension_browsing_data_api_constants::kHistoryKey,
-             prefs->GetBoolean(browsing_data::prefs::kDeleteBrowsingHistory));
+             prefs_->GetBoolean(browsing_data::prefs::kDeleteBrowsingHistory));
   SetDetails(selected.get(), permitted.get(),
              extension_browsing_data_api_constants::kDownloadsKey,
-             prefs->GetBoolean(browsing_data::prefs::kDeleteDownloadHistory));
+             prefs_->GetBoolean(browsing_data::prefs::kDeleteDownloadHistory));
   SetDetails(selected.get(), permitted.get(),
              extension_browsing_data_api_constants::kCacheKey,
-             prefs->GetBoolean(browsing_data::prefs::kDeleteCache));
+             prefs_->GetBoolean(browsing_data::prefs::kDeleteCache));
   SetDetails(selected.get(), permitted.get(),
              extension_browsing_data_api_constants::kFormDataKey,
-             prefs->GetBoolean(browsing_data::prefs::kDeleteFormData));
+             prefs_->GetBoolean(browsing_data::prefs::kDeleteFormData));
   SetDetails(selected.get(), permitted.get(),
              extension_browsing_data_api_constants::kPasswordsKey,
-             prefs->GetBoolean(browsing_data::prefs::kDeletePasswords));
+             prefs_->GetBoolean(browsing_data::prefs::kDeletePasswords));
 
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue);
   result->Set(extension_browsing_data_api_constants::kOptionsKey,
@@ -220,8 +219,7 @@ bool BrowsingDataSettingsFunction::RunSync() {
               selected.release());
   result->Set(extension_browsing_data_api_constants::kDataRemovalPermittedKey,
               permitted.release());
-  SetResult(std::move(result));
-  return true;
+  return RespondNow(OneArgument(std::move(result)));
 }
 
 void BrowsingDataSettingsFunction::SetDetails(
@@ -229,8 +227,7 @@ void BrowsingDataSettingsFunction::SetDetails(
     base::DictionaryValue* permitted_dict,
     const char* data_type,
     bool is_selected) {
-  bool is_permitted =
-      IsRemovalPermitted(MaskForKey(data_type), GetProfile()->GetPrefs());
+  bool is_permitted = IsRemovalPermitted(MaskForKey(data_type), prefs_);
   selected_dict->SetBoolean(data_type, is_selected && is_permitted);
   permitted_dict->SetBoolean(data_type, is_permitted);
 }
@@ -273,7 +270,7 @@ bool BrowsingDataRemoverFunction::RunAsync() {
       base::Time::FromDoubleT(ms_since_epoch / 1000.0);
 
   removal_mask_ = GetRemovalMask();
-  if (bad_message_)
+  if (bad_message())
     return false;
 
   // Check for prohibited data types.
@@ -315,14 +312,7 @@ void BrowsingDataRemoverFunction::CheckRemovingPluginDataSupported(
 void BrowsingDataRemoverFunction::StartRemoving() {
   BrowsingDataRemover* remover =
       BrowsingDataRemoverFactory::GetForBrowserContext(GetProfile());
-  // TODO(msramek): This restriction is no longer needed. Remove it.
-  if (remover->is_removing()) {
-    error_ = extension_browsing_data_api_constants::kOneAtATimeError;
-    SendResponse(false);
-    return;
-  }
-
-  // If we're good to go, add a ref (Balanced in OnBrowsingDataRemoverDone)
+  // Add a ref (Balanced in OnBrowsingDataRemoverDone)
   AddRef();
 
   // Create a BrowsingDataRemover, set the current object as an observer (so
@@ -331,7 +321,7 @@ void BrowsingDataRemoverFunction::StartRemoving() {
   // remover is responsible for deleting itself once data removal is complete.
   observer_.Add(remover);
   remover->RemoveAndReply(
-      BrowsingDataRemover::TimeRange(remove_since_, base::Time::Max()),
+      remove_since_, base::Time::Max(),
       removal_mask_, origin_type_mask_, this);
 }
 
@@ -382,7 +372,7 @@ int BrowsingDataRemoverFunction::ParseOriginTypeMask(
 int BrowsingDataRemoveFunction::GetRemovalMask() {
   base::DictionaryValue* data_to_remove;
   if (!args_->GetDictionary(1, &data_to_remove)) {
-    bad_message_ = true;
+    set_bad_message(true);
     return 0;
   }
 
@@ -393,7 +383,7 @@ int BrowsingDataRemoveFunction::GetRemovalMask() {
        i.Advance()) {
     bool selected = false;
     if (!i.value().GetAsBoolean(&selected)) {
-      bad_message_ = true;
+      set_bad_message(true);
       return 0;
     }
     if (selected)

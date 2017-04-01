@@ -200,19 +200,20 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, InitialSelection) {
 
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), embedded_test_server()->GetURL("b.com", "/title3.html"),
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // When the task manager is initially shown, the row for the active tab should
   // be selected.
   chrome::ShowTaskManager(browser());
 
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
   EXPECT_EQ(GetTable()->FirstSelectedRow(),
             FindRowForTab(browser()->tab_strip_model()->GetWebContentsAt(1)));
 
   // Activate tab 0. The selection should not change.
   browser()->tab_strip_model()->ActivateTabAt(0, true);
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
   EXPECT_EQ(GetTable()->FirstSelectedRow(),
             FindRowForTab(browser()->tab_strip_model()->GetWebContentsAt(1)));
 
@@ -220,7 +221,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, InitialSelection) {
   // should set the TaskManager selection to the active tab.
   chrome::ShowTaskManager(browser());
 
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
   EXPECT_EQ(GetTable()->FirstSelectedRow(),
             FindRowForTab(browser()->tab_strip_model()->GetWebContentsAt(0)));
 }
@@ -235,10 +236,12 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, SelectionConsistency) {
       browser(), embedded_test_server()->GetURL("a.com", "/title2.html"));
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), embedded_test_server()->GetURL("b.com", "/title2.html"),
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), embedded_test_server()->GetURL("c.com", "/title2.html"),
-      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // Wait for their titles to appear in the TaskManager. There should be three
   // rows.
@@ -264,7 +267,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, SelectionConsistency) {
   // Select the middle row, and store its tab id.
   GetTable()->Select(FindRowForTab(tabs[1]));
   EXPECT_EQ(GetTable()->FirstSelectedRow(), FindRowForTab(tabs[1]));
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
 
   // Add 3 rows above the selection. The selected tab should not change.
   for (int i = 0; i < 3; ++i) {
@@ -273,7 +276,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, SelectionConsistency) {
   }
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows((rows += 3), pattern));
   EXPECT_EQ(GetTable()->FirstSelectedRow(), FindRowForTab(tabs[1]));
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
 
   // Add 2 rows below the selection. The selected tab should not change.
   for (int i = 0; i < 2; ++i) {
@@ -282,7 +285,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, SelectionConsistency) {
   }
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows((rows += 2), pattern));
   EXPECT_EQ(GetTable()->FirstSelectedRow(), FindRowForTab(tabs[1]));
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
 
   // Add a new row in the same process as the selection. The selected tab should
   // not change.
@@ -290,7 +293,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, SelectionConsistency) {
   EXPECT_EQ(GetTable()->FirstSelectedRow(), FindRowForTab(tabs[1]));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows((rows += 1), pattern));
   EXPECT_EQ(GetTable()->FirstSelectedRow(), FindRowForTab(tabs[1]));
-  EXPECT_EQ(1, GetTable()->SelectedRowCount());
+  EXPECT_EQ(1UL, GetTable()->selection_model().size());
 
   // Press the button, which kills the process of the selected row.
   PressKillButton();
@@ -310,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerViewTest, SelectionConsistency) {
   // Focus and reload one of the sad tabs. It should reappear in the TM. The
   // other sad tab should not reappear.
   tabs[1]->GetDelegate()->ActivateContents(tabs[1]);
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows((rows += 1), pattern));
 
   // tabs[2] should still be selected.

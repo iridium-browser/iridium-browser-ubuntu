@@ -13,7 +13,9 @@
 
 #include "base/macros.h"
 #include "services/ui/common/types.h"
-#include "services/ui/public/interfaces/event_matcher.mojom.h"
+#include "services/ui/public/interfaces/cursor.mojom.h"
+#include "services/ui/public/interfaces/window_manager.mojom.h"
+#include "services/ui/ws/drag_cursor_updater.h"
 #include "services/ui/ws/modal_window_controller.h"
 #include "services/ui/ws/server_window_observer.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -26,6 +28,9 @@ class LocatedEvent;
 namespace ws {
 
 class Accelerator;
+class DragController;
+class DragSource;
+class DragTargetConnection;
 class EventDispatcherDelegate;
 class ServerWindow;
 
@@ -34,7 +39,7 @@ class EventDispatcherTestApi;
 }
 
 // Handles dispatching events to the right location as well as updating focus.
-class EventDispatcher : public ServerWindowObserver {
+class EventDispatcher : public ServerWindowObserver, public DragCursorUpdater {
  public:
   enum class AcceleratorMatchPhase {
     // Both pre and post should be considered.
@@ -59,7 +64,7 @@ class EventDispatcher : public ServerWindowObserver {
 
   // If we still have the window of the last mouse move, returns true and sets
   // the current cursor to use to |cursor_out|.
-  bool GetCurrentMouseCursor(int32_t* cursor_out);
+  bool GetCurrentMouseCursor(ui::mojom::Cursor* cursor_out);
 
   // |capture_window_| will receive all input. See window_tree.mojom for
   // details.
@@ -75,6 +80,18 @@ class EventDispatcher : public ServerWindowObserver {
     return capture_window_client_id_;
   }
 
+  void SetDragDropSourceWindow(
+      DragSource* drag_source,
+      ServerWindow* window,
+      DragTargetConnection* source_connection,
+      int32_t drag_pointer,
+      const std::unordered_map<std::string, std::vector<uint8_t>>& mime_data,
+      uint32_t drag_operations);
+  void CancelDragDrop();
+  void EndDragDrop();
+
+  void OnWillDestroyDragTargetConnection(DragTargetConnection* connection);
+
   // Adds a system modal window. The window remains modal to system until it is
   // destroyed. There can exist multiple system modal windows, in which case the
   // one that is visible and added most recently or shown most recently would be
@@ -89,7 +106,9 @@ class EventDispatcher : public ServerWindowObserver {
   // and if that's the case, releases the capture.
   void ReleaseCaptureBlockedByAnyModalWindow();
 
-  // Retrieves the ServerWindow of the last mouse move.
+  // Retrieves the ServerWindow of the last mouse move. If there is no valid
+  // window event target this falls back to the root of the display. In general
+  // this is not null, but may be null during shutdown.
   ServerWindow* mouse_cursor_source_window() const {
     return mouse_cursor_source_window_;
   }
@@ -108,6 +127,7 @@ class EventDispatcher : public ServerWindowObserver {
   // already exists with the same id or the same matcher, then the accelerator
   // is not added. Returns whether adding the accelerator was successful or not.
   bool AddAccelerator(uint32_t id, mojom::EventMatcherPtr event_matcher);
+
   void RemoveAccelerator(uint32_t id);
 
   // Processes the supplied event, informing the delegate as approriate. This
@@ -128,8 +148,9 @@ class EventDispatcher : public ServerWindowObserver {
           in_nonclient_area(false),
           is_pointer_down(false) {}
 
-    // NOTE: this is set to null if the window is destroyed before a
-    // corresponding release/cancel.
+    // The target window, which may be null. null is used in two situations:
+    // when there is no valid window target, or there was a target but the
+    // window is destroyed before a corresponding release/cancel.
     ServerWindow* window;
 
     bool is_mouse_event;
@@ -156,7 +177,7 @@ class EventDispatcher : public ServerWindowObserver {
   //   when no buttons on the mouse are down.
   // This also generates exit events as appropriate. For example, if the mouse
   // moves between one window to another an exit is generated on the first.
-  void ProcessLocatedEvent(const ui::LocatedEvent& event);
+  void ProcessPointerEvent(const ui::PointerEvent& event);
 
   // Adds |pointer_target| to |pointer_targets_|.
   void StartTrackingPointer(int32_t pointer_id,
@@ -171,7 +192,9 @@ class EventDispatcher : public ServerWindowObserver {
   void UpdateTargetForPointer(int32_t pointer_id,
                               const ui::LocatedEvent& event);
 
-  // Returns a PointerTarget from the supplied event.
+  // Returns a PointerTarget for the supplied event. If there is no valid
+  // event target for the specified location |window| in the returned value is
+  // null.
   PointerTarget PointerTargetForEvent(const ui::LocatedEvent& event);
 
   // Returns true if any pointers are in the pressed/down state.
@@ -204,6 +227,12 @@ class EventDispatcher : public ServerWindowObserver {
 
   ServerWindow* FindDeepestVisibleWindowForEvents(gfx::Point* location);
 
+  // Clears the implicit captures in |pointer_targets_|, with the exception of
+  // |window|. |window| may be null. |client_id| is the target client of
+  // |window|.
+  void CancelImplicitCaptureExcept(ServerWindow* window,
+                                   ClientSpecificId client_id);
+
   // ServerWindowObserver:
   void OnWillChangeWindowHierarchy(ServerWindow* window,
                                    ServerWindow* new_parent,
@@ -211,10 +240,15 @@ class EventDispatcher : public ServerWindowObserver {
   void OnWindowVisibilityChanged(ServerWindow* window) override;
   void OnWindowDestroyed(ServerWindow* window) override;
 
+  // DragCursorUpdater:
+  void OnDragCursorUpdated() override;
+
   EventDispatcherDelegate* delegate_;
 
   ServerWindow* capture_window_;
   ClientSpecificId capture_window_client_id_;
+
+  std::unique_ptr<DragController> drag_controller_;
 
   ModalWindowController modal_window_controller_;
 

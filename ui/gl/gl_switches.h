@@ -25,12 +25,15 @@ GL_EXPORT extern const char kANGLEImplementationD3D9Name[];
 GL_EXPORT extern const char kANGLEImplementationD3D11Name[];
 GL_EXPORT extern const char kANGLEImplementationOpenGLName[];
 GL_EXPORT extern const char kANGLEImplementationOpenGLESName[];
+GL_EXPORT extern const char kANGLEImplementationNullName[];
 
 }  // namespace gl
 
 namespace switches {
 
+GL_EXPORT extern const char kCreateDefaultGLContext[];
 GL_EXPORT extern const char kDisableD3D11[];
+GL_EXPORT extern const char kDisableES3GLContext[];
 GL_EXPORT extern const char kDisableGpuVsync[];
 GL_EXPORT extern const char kEnableGPUServiceLogging[];
 GL_EXPORT extern const char kEnableGPUServiceTracing[];
@@ -44,9 +47,11 @@ GL_EXPORT extern const char kUseGL[];
 GL_EXPORT extern const char kSwiftShaderPath[];
 GL_EXPORT extern const char kTestGLLib[];
 GL_EXPORT extern const char kUseGpuInTests[];
-GL_EXPORT extern const char kEnableUnsafeES3APIs[];
+GL_EXPORT extern const char kEnableES3APIs[];
+GL_EXPORT extern const char kDisableES3APIs[];
 GL_EXPORT extern const char kEnableSgiVideoSync[];
 GL_EXPORT extern const char kDisableGLExtensions[];
+GL_EXPORT extern const char kEnableSwapBuffersWithDamage[];
 
 // These flags are used by the test harness code, not passed in by users.
 GL_EXPORT extern const char kDisableGLDrawingForTests[];

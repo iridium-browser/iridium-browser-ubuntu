@@ -6,81 +6,87 @@
  */
 
 #include "Test.h"
+#include "SkHalf.h"
 #include "SkRasterPipeline.h"
 
-// load needs two variants, one to load 4 values...
-SK_RASTER_STAGE(load) {
-    auto ptr = (const float*)ctx + x;
-    r = Sk4f{ptr[0]};
-    g = Sk4f{ptr[1]};
-    b = Sk4f{ptr[2]};
-    a = Sk4f{ptr[3]};
-}
-
-// ...and one to load a single value.
-SK_RASTER_STAGE(load_tail) {
-    auto ptr = (const float*)ctx + x;
-    r = Sk4f{*ptr};
-}
-
-// square doesn't really care how many of its inputs are active, nor does it need a context.
-SK_RASTER_STAGE(square) {
-    r *= r;
-    g *= g;
-    b *= b;
-    a *= a;
-}
-
-// Like load, store has a _tail variant.
-SK_RASTER_STAGE(store) {
-    auto ptr = (float*)ctx + x;
-    ptr[0] = r[0];
-    ptr[1] = g[0];
-    ptr[2] = b[0];
-    ptr[3] = a[0];
-}
-
-SK_RASTER_STAGE(store_tail) {
-    auto ptr = (float*)ctx + x;
-    *ptr = r[0];
-}
-
 DEF_TEST(SkRasterPipeline, r) {
-    // We'll build up and run a simple pipeline that exercises the salient
-    // mechanics of SkRasterPipeline:
-    //    - context pointers
-    //    - stages sensitive to the number of pixels
-    //    - stages insensitive to the number of pixels
-    //
-    // This pipeline loads up some values, squares them, then writes them back to memory.
+    // Build and run a simple pipeline to exercise SkRasterPipeline,
+    // drawing 50% transparent blue over opaque red in half-floats.
+    uint64_t red  = 0x3c00000000003c00ull,
+             blue = 0x3800380000000000ull,
+             result;
 
-    const float src_vals[] = { 1,2,3,4,5 };
-    float       dst_vals[] = { 0,0,0,0,0 };
+    void* load_s_ctx = &blue;
+    void* load_d_ctx = &red;
+    void* store_ctx  = &result;
 
     SkRasterPipeline p;
-    p.append<load, load_tail>(src_vals);
-    p.append<square>();
-    p.append<store, store_tail>(dst_vals);
+    p.append(SkRasterPipeline::load_f16, &load_s_ctx);
+    p.append(SkRasterPipeline::move_src_dst);
+    p.append(SkRasterPipeline::load_f16, &load_d_ctx);
+    p.append(SkRasterPipeline::swap);
+    p.append(SkRasterPipeline::srcover);
+    p.append(SkRasterPipeline::store_f16, &store_ctx);
+    p.run(0,0, 1);
 
-    p.run(5);
+    // We should see half-intensity magenta.
+    REPORTER_ASSERT(r, ((result >>  0) & 0xffff) == 0x3800);
+    REPORTER_ASSERT(r, ((result >> 16) & 0xffff) == 0x0000);
+    REPORTER_ASSERT(r, ((result >> 32) & 0xffff) == 0x3800);
+    REPORTER_ASSERT(r, ((result >> 48) & 0xffff) == 0x3c00);
 
-    REPORTER_ASSERT(r, dst_vals[0] ==  1);
-    REPORTER_ASSERT(r, dst_vals[1] ==  4);
-    REPORTER_ASSERT(r, dst_vals[2] ==  9);
-    REPORTER_ASSERT(r, dst_vals[3] == 16);
-    REPORTER_ASSERT(r, dst_vals[4] == 25);
+    // Run again, this time compiling the pipeline.
+    result = 0;
+
+    auto fn = p.compile();
+    fn(0,0, 1);
+    REPORTER_ASSERT(r, ((result >>  0) & 0xffff) == 0x3800);
+    REPORTER_ASSERT(r, ((result >> 16) & 0xffff) == 0x0000);
+    REPORTER_ASSERT(r, ((result >> 32) & 0xffff) == 0x3800);
+    REPORTER_ASSERT(r, ((result >> 48) & 0xffff) == 0x3c00);
 }
 
 DEF_TEST(SkRasterPipeline_empty, r) {
     // No asserts... just a test that this is safe to run.
     SkRasterPipeline p;
-    p.run(20);
+    p.run(0,0, 20);
 }
 
 DEF_TEST(SkRasterPipeline_nonsense, r) {
     // No asserts... just a test that this is safe to run and terminates.
-    // square() always calls st->next(); this makes sure we've always got something there to call.
+    // srcover() calls st->next(); this makes sure we've always got something there to call.
     SkRasterPipeline p;
-    p.append<square>();
-    p.run(20);
+    p.append(SkRasterPipeline::srcover);
+    p.run(0,0, 20);
+}
+
+DEF_TEST(SkRasterPipeline_JIT, r) {
+    // This tests a couple odd corners that a JIT backend can stumble over.
+
+    uint32_t buf[72] = {
+         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+         1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12,
+        13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+    };
+
+    const uint32_t* src = buf +  0;
+    uint32_t*       dst = buf + 36;
+
+    // Copy buf[x] to buf[x+36] for x in [15,35).
+    SkRasterPipeline p;
+    p.append(SkRasterPipeline:: load_8888, &src);
+    p.append(SkRasterPipeline::store_8888, &dst);
+    auto fn = p.compile();
+    fn(15, 0, 20);
+
+    for (int i = 0; i < 36; i++) {
+        if (i < 15 || i == 35) {
+            REPORTER_ASSERT(r, dst[i] == 0);
+        } else {
+            REPORTER_ASSERT(r, dst[i] == (uint32_t)(i - 11));
+        }
+    }
 }

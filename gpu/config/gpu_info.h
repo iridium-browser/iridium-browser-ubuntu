@@ -20,6 +20,10 @@
 #include "gpu/gpu_export.h"
 #include "ui/gfx/geometry/size.h"
 
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+typedef unsigned long VisualID;
+#endif
+
 namespace gpu {
 
 // Result for the various Collect*Info* functions below.
@@ -220,6 +224,9 @@ struct GPU_EXPORT GPUInfo {
   // True if the GPU is running in the browser process instead of its own.
   bool in_process_gpu;
 
+  // True if the GPU process is using the passthrough command decoder.
+  bool passthrough_cmd_decoder;
+
   // The state of whether the basic/context/DxDiagnostics info is collected and
   // if the collection fails or not.
   CollectInfoResult basic_info_state;
@@ -235,6 +242,11 @@ struct GPU_EXPORT GPUInfo {
   VideoEncodeAcceleratorSupportedProfiles
       video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;
+
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+  VisualID system_visual;
+  VisualID rgba_visual;
+#endif
 
   // Note: when adding new members, please remember to update EnumerateFields
   // in gpu_info.cc.

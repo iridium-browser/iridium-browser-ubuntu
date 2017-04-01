@@ -28,14 +28,14 @@ struct CONTENT_EXPORT ResourceRequestCompletionStatus {
   // A copy of the data requested exists in the cache.
   bool exists_in_cache = false;
 
-  // Serialized security info; see content/common/ssl_status_serialization.h.
-  std::string security_info;
-
   // Time the request completed.
   base::TimeTicks completion_time;
 
   // Total amount of data received from the network.
   int64_t encoded_data_length = 0;
+
+  // The length of the response body before removing any content encodings.
+  int64_t encoded_body_length = 0;
 };
 
 }  // namespace content

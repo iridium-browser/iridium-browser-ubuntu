@@ -128,7 +128,7 @@ class DomSerializerTests : public ContentBrowserTest,
 
   WebFrame* FindSubFrameByURL(const GURL& url) {
     for (WebFrame* frame = GetWebView()->mainFrame(); frame;
-        frame = frame->traverseNext(false)) {
+         frame = frame->traverseNext()) {
       if (GURL(frame->document().url()) == url)
         return frame;
     }
@@ -593,7 +593,7 @@ class DomSerializerTests : public ContentBrowserTest,
     ASSERT_TRUE(doc.isHTMLDocument());
     WebElement head_element = doc.head();
     ASSERT_TRUE(!head_element.isNull());
-    ASSERT_TRUE(!head_element.hasChildNodes());
+    ASSERT_TRUE(head_element.firstChild().isNull());
 
     // Do serialization.
     SerializeDomForURL(file_url);

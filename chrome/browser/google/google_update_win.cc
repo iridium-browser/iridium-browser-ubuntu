@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -17,7 +18,7 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -563,7 +564,7 @@ HRESULT UpdateCheckDriver::BeginUpdateCheckInternal(
   // Get a reference to the Chrome app in the bundle.
   if (!app_) {
     base::string16 app_guid =
-        installer::GetAppGuidForUpdates(system_level_install_);
+        BrowserDistribution::GetDistribution()->GetAppGuid();
     DCHECK(!app_guid.empty());
 
     base::win::ScopedComPtr<IDispatch> dispatch;

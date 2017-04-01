@@ -8,8 +8,8 @@
 #define CONTENT_COMMON_MEDIA_VIDEO_CAPTURE_H_
 
 #include "base/callback.h"
-#include "media/base/video_capture_types.h"
-#include "media/base/video_capturer_source.h"
+#include "media/capture/video_capture_types.h"
+#include "media/capture/video_capturer_source.h"
 
 namespace content {
 
@@ -23,9 +23,9 @@ using VideoCaptureDeliverFrameCB =
 // browser process and renderer process. Browser process sends information about
 // the current capture state and error to the renderer process using this type.
 enum VideoCaptureState {
-  VIDEO_CAPTURE_STATE_STARTING,
   VIDEO_CAPTURE_STATE_STARTED,
   VIDEO_CAPTURE_STATE_PAUSED,
+  VIDEO_CAPTURE_STATE_RESUMED,
   VIDEO_CAPTURE_STATE_STOPPING,
   VIDEO_CAPTURE_STATE_STOPPED,
   VIDEO_CAPTURE_STATE_ERROR,

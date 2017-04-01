@@ -10,7 +10,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/stop_source.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/sync_service.h"
 #include "components/sync/protocol/sync_protocol_error.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -22,12 +22,13 @@ namespace {
 // The set of user-selectable datatypes. This must be in the same order as
 // |SyncSetupService::SyncableDatatype|.
 syncer::ModelType kDataTypes[] = {
-    syncer::BOOKMARKS,  syncer::TYPED_URLS, syncer::PASSWORDS,
-    syncer::PROXY_TABS, syncer::AUTOFILL,   syncer::PREFERENCES,
+    syncer::BOOKMARKS,    syncer::TYPED_URLS, syncer::PASSWORDS,
+    syncer::PROXY_TABS,   syncer::AUTOFILL,   syncer::PREFERENCES,
+    syncer::READING_LIST,
 };
 }  // namespace
 
-SyncSetupService::SyncSetupService(sync_driver::SyncService* sync_service,
+SyncSetupService::SyncSetupService(syncer::SyncService* sync_service,
                                    PrefService* prefs)
     : sync_service_(sync_service), prefs_(prefs) {
   DCHECK(sync_service_);
@@ -92,7 +93,7 @@ bool SyncSetupService::UserActionIsRequiredToHaveSyncWork() {
 }
 
 bool SyncSetupService::IsSyncingAllDataTypes() const {
-  sync_driver::SyncPrefs sync_prefs(prefs_);
+  syncer::SyncPrefs sync_prefs(prefs_);
   return sync_prefs.HasKeepEverythingSynced();
 }
 
@@ -138,7 +139,7 @@ SyncSetupService::SyncServiceState SyncSetupService::GetSyncServiceState() {
     case GoogleServiceAuthError::ACCOUNT_DELETED:
     case GoogleServiceAuthError::ACCOUNT_DISABLED:
     case GoogleServiceAuthError::TWO_FACTOR:
-    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
+    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED_DEPRECATED:
     case GoogleServiceAuthError::SERVICE_ERROR:
     case GoogleServiceAuthError::WEB_LOGIN_REQUIRED:
     // Conventional value for counting the states, never used.
@@ -195,6 +196,6 @@ void SyncSetupService::SetSyncEnabledWithoutChangingDatatypes(
   } else {
     UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", syncer::CHROME_SYNC_SETTINGS,
                               syncer::STOP_SOURCE_LIMIT);
-    sync_service_->RequestStop(sync_driver::SyncService::KEEP_DATA);
+    sync_service_->RequestStop(syncer::SyncService::KEEP_DATA);
   }
 }

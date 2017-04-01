@@ -11,13 +11,16 @@
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "content/public/browser/web_contents.h"
 
+using sync_sessions::SyncedTabDelegate;
+
 namespace browser_sync {
 
 // SyncedWindowDelegateAndroid implementations
 
 SyncedWindowDelegateAndroid::SyncedWindowDelegateAndroid(
-    TabModel* tab_model)
-    : tab_model_(tab_model) {}
+    TabModel* tab_model,
+    bool is_tabbed_activity)
+    : tab_model_(tab_model), is_tabbed_activity_(is_tabbed_activity) {}
 
 SyncedWindowDelegateAndroid::~SyncedWindowDelegateAndroid() {}
 
@@ -42,7 +45,7 @@ bool SyncedWindowDelegateAndroid::IsApp() const {
 }
 
 bool SyncedWindowDelegateAndroid::IsTypeTabbed() const {
-  return true;
+  return is_tabbed_activity_;
 }
 
 bool SyncedWindowDelegateAndroid::IsTypePopup() const {
@@ -57,7 +60,7 @@ bool SyncedWindowDelegateAndroid::IsTabPinned(
 SyncedTabDelegate* SyncedWindowDelegateAndroid::GetTabAt(int index) const {
   // After a restart, it is possible for the Tab to be null during startup.
   TabAndroid* tab = tab_model_->GetTabAt(index);
-  return tab ? tab->GetSyncedTabDelegate() : NULL;
+  return tab ? tab->GetSyncedTabDelegate() : nullptr;
 }
 
 SessionID::id_type SyncedWindowDelegateAndroid::GetTabIdAt(int index) const {

@@ -9,15 +9,16 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.sync.FakeProfileSyncService;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
 import org.chromium.chrome.test.util.ApplicationData;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
-import org.chromium.components.sync.signin.ChromeSigninController;
+import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.content.browser.test.NativeLibraryTestBase;
 
 /**
@@ -50,6 +51,7 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
      */
     @SmallTest
     @Feature({"Sync"})
+    @RetryOnFailure
     public void testCallbackAfterBackgrounded() throws Exception {
         getInstrumentation().waitForIdleSync();
         SigninTestUtil.addAndSignInTestAccount();
@@ -72,7 +74,7 @@ public class PassphraseActivityTest extends NativeLibraryTestBase {
                 getInstrumentation().callActivityOnSaveInstanceState(activity, bundle);
                 // Fake sync's backend finishing its initialization.
                 FakeProfileSyncService pss = (FakeProfileSyncService) ProfileSyncService.get();
-                pss.setSyncInitialized(true);
+                pss.setEngineInitialized(true);
                 pss.syncStateChanged();
             }
         });

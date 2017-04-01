@@ -30,47 +30,44 @@ namespace blink {
 using namespace HTMLNames;
 
 LayoutDetailsMarker::LayoutDetailsMarker(Element* element)
-    : LayoutBlockFlow(element)
-{
+    : LayoutBlockFlow(element) {}
+
+LayoutDetailsMarker::Orientation LayoutDetailsMarker::getOrientation() const {
+  switch (style()->getWritingMode()) {
+    case WritingMode::kHorizontalTb:
+      if (style()->isLeftToRightDirection())
+        return isOpen() ? Down : Right;
+      return isOpen() ? Down : Left;
+    case WritingMode::kVerticalRl:
+      if (style()->isLeftToRightDirection())
+        return isOpen() ? Left : Down;
+      return isOpen() ? Left : Up;
+    case WritingMode::kVerticalLr:
+      if (style()->isLeftToRightDirection())
+        return isOpen() ? Right : Down;
+      return isOpen() ? Right : Up;
+  }
+  ASSERT_NOT_REACHED();
+  return Right;
 }
 
-LayoutDetailsMarker::Orientation LayoutDetailsMarker::getOrientation() const
-{
-    switch (style()->getWritingMode()) {
-    case TopToBottomWritingMode:
-        if (style()->isLeftToRightDirection())
-            return isOpen() ? Down : Right;
-        return isOpen() ? Down : Left;
-    case RightToLeftWritingMode:
-        if (style()->isLeftToRightDirection())
-            return isOpen() ? Left : Down;
-        return isOpen() ? Left : Up;
-    case LeftToRightWritingMode:
-        if (style()->isLeftToRightDirection())
-            return isOpen() ? Right : Down;
-        return isOpen() ? Right : Up;
-    }
-    ASSERT_NOT_REACHED();
-    return Right;
+void LayoutDetailsMarker::paint(const PaintInfo& paintInfo,
+                                const LayoutPoint& paintOffset) const {
+  DetailsMarkerPainter(*this).paint(paintInfo, paintOffset);
 }
 
-void LayoutDetailsMarker::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset) const
-{
-    DetailsMarkerPainter(*this).paint(paintInfo, paintOffset);
+bool LayoutDetailsMarker::isOpen() const {
+  for (LayoutObject* layoutObject = parent(); layoutObject;
+       layoutObject = layoutObject->parent()) {
+    if (!layoutObject->node())
+      continue;
+    if (isHTMLDetailsElement(*layoutObject->node()))
+      return !toElement(layoutObject->node())->getAttribute(openAttr).isNull();
+    if (isHTMLInputElement(*layoutObject->node()))
+      return true;
+  }
+
+  return false;
 }
 
-bool LayoutDetailsMarker::isOpen() const
-{
-    for (LayoutObject* layoutObject = parent(); layoutObject; layoutObject = layoutObject->parent()) {
-        if (!layoutObject->node())
-            continue;
-        if (isHTMLDetailsElement(*layoutObject->node()))
-            return !toElement(layoutObject->node())->getAttribute(openAttr).isNull();
-        if (isHTMLInputElement(*layoutObject->node()))
-            return true;
-    }
-
-    return false;
-}
-
-} // namespace blink
+}  // namespace blink

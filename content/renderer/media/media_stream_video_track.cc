@@ -252,11 +252,12 @@ void MediaStreamVideoTrack::AddSink(MediaStreamVideoSink* sink,
   frame_deliverer_->AddCallback(sink, callback);
   secure_tracker_.Add(sink, is_sink_secure);
   // Request source to deliver a frame because a new sink is added.
-  if (source_) {
-    source_->RequestRefreshFrame();
-    source_->UpdateCapturingLinkSecure(this,
-                                       secure_tracker_.is_capturing_secure());
-  }
+  if (!source_)
+    return;
+  source_->UpdateHasConsumers(this, true);
+  source_->RequestRefreshFrame();
+  source_->UpdateCapturingLinkSecure(this,
+                                     secure_tracker_.is_capturing_secure());
 }
 
 void MediaStreamVideoTrack::RemoveSink(MediaStreamVideoSink* sink) {
@@ -267,9 +268,12 @@ void MediaStreamVideoTrack::RemoveSink(MediaStreamVideoSink* sink) {
   sinks_.erase(it);
   frame_deliverer_->RemoveCallback(sink);
   secure_tracker_.Remove(sink);
-  if (source_)
-    source_->UpdateCapturingLinkSecure(this,
-                                       secure_tracker_.is_capturing_secure());
+  if (!source_)
+    return;
+  if (sinks_.empty())
+    source_->UpdateHasConsumers(this, false);
+  source_->UpdateCapturingLinkSecure(this,
+                                     secure_tracker_.is_capturing_secure());
 }
 
 void MediaStreamVideoTrack::SetEnabled(bool enabled) {
@@ -277,6 +281,13 @@ void MediaStreamVideoTrack::SetEnabled(bool enabled) {
   frame_deliverer_->SetEnabled(enabled);
   for (auto* sink : sinks_)
     sink->OnEnabledChanged(enabled);
+}
+
+void MediaStreamVideoTrack::SetContentHint(
+    blink::WebMediaStreamTrack::ContentHintType content_hint) {
+  DCHECK(main_render_thread_checker_.CalledOnValidThread());
+  for (auto* sink : sinks_)
+    sink->OnContentHintChanged(content_hint);
 }
 
 void MediaStreamVideoTrack::Stop() {
@@ -296,6 +307,21 @@ void MediaStreamVideoTrack::getSettings(
       settings.frameRate = format->frame_rate;
       settings.width = format->frame_size.width();
       settings.height = format->frame_size.height();
+    }
+    switch (source_->device_info().device.video_facing) {
+      case media::MEDIA_VIDEO_FACING_NONE:
+        settings.facingMode = blink::WebMediaStreamTrack::FacingMode::None;
+        break;
+      case media::MEDIA_VIDEO_FACING_USER:
+        settings.facingMode = blink::WebMediaStreamTrack::FacingMode::User;
+        break;
+      case media::MEDIA_VIDEO_FACING_ENVIRONMENT:
+        settings.facingMode =
+            blink::WebMediaStreamTrack::FacingMode::Environment;
+        break;
+      default:
+        settings.facingMode = blink::WebMediaStreamTrack::FacingMode::None;
+        break;
     }
   }
   // TODO(hta): Extract the real value.

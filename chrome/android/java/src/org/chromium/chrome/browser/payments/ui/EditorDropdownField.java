@@ -17,13 +17,15 @@ import android.widget.TextView;
 
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.preferences.autofill.AutofillProfileBridge.DropdownKeyValue;
+import org.chromium.ui.UiUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Helper class for creating a dropdown view with a label.
  */
-class EditorDropdownField implements Validatable {
+class EditorDropdownField implements EditorFieldView {
     private final EditorFieldModel mFieldModel;
     private final View mLayout;
     private final TextView mLabel;
@@ -53,16 +55,31 @@ class EditorDropdownField implements Validatable {
                 : mFieldModel.getLabel());
 
         final List<DropdownKeyValue> dropdownKeyValues = mFieldModel.getDropdownKeyValues();
-        for (int j = 0; j < dropdownKeyValues.size(); j++) {
-            if (dropdownKeyValues.get(j).getKey().equals(mFieldModel.getValue())) {
-                mSelectedIndex = j;
-                break;
-            }
-        }
+        mSelectedIndex = getDropdownIndex(dropdownKeyValues, mFieldModel.getValue());
 
-        ArrayAdapter<DropdownKeyValue> adapter = new ArrayAdapter<DropdownKeyValue>(
-                context, R.layout.multiline_spinner_item, dropdownKeyValues);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        final List<CharSequence> dropdownValues = getDropdownValues(dropdownKeyValues);
+        ArrayAdapter<CharSequence> adapter;
+        if (mFieldModel.getHint() != null) {
+            // Use the BillingAddressAdapter and pass it a hint to be displayed as default.
+            adapter = new BillingAddressAdapter<CharSequence>(context,
+                    R.layout.multiline_spinner_item, R.id.spinner_item, dropdownValues,
+                    mFieldModel.getHint().toString());
+            // Wrap the TextView in the dropdown popup around with a FrameLayout to display the text
+            // in multiple lines.
+            // Note that the TextView in the dropdown popup is displayed in a DropDownListView for
+            // the dropdown style Spinner and the DropDownListView sets to display TextView instance
+            // in a single line.
+            adapter.setDropDownViewResource(R.layout.payment_request_dropdown_item);
+
+            // If no value is selected, select the hint entry which is the last item in the adapter.
+            // Using getCount will not result in an out of bounds index because the hint value is
+            // ommited in the count.
+            if (mFieldModel.getValue() == null) mSelectedIndex = adapter.getCount();
+        } else {
+            adapter = new DropdownFieldAdapter<CharSequence>(
+                    context, R.layout.multiline_spinner_item, dropdownValues);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        }
 
         mDropdown = (Spinner) mLayout.findViewById(R.id.spinner);
         mDropdown.setTag(this);
@@ -74,7 +91,8 @@ class EditorDropdownField implements Validatable {
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 if (mSelectedIndex != position) {
                     mSelectedIndex = position;
-                    mFieldModel.setDropdownKey(dropdownKeyValues.get(position).getKey(),
+                    mFieldModel.setDropdownKey(
+                            mFieldModel.getDropdownKeyValues().get(position).getKey(),
                             changedCallback);
                 }
             }
@@ -119,10 +137,40 @@ class EditorDropdownField implements Validatable {
 
     @Override
     public void scrollToAndFocus() {
+        updateDisplayedError(!isValid());
+        UiUtils.hideKeyboard(mDropdown);
         ViewGroup parent = (ViewGroup) mDropdown.getParent();
         if (parent != null) parent.requestChildFocus(mDropdown, mDropdown);
-        // Open the dropdown to prompt user selection.
-        mDropdown.performClick();
         mDropdown.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED);
+    }
+
+    @Override
+    public void update() {
+        // If the adapter supports a hint and no value was selected, select the hint.
+        if (mFieldModel.getHint() != null && mFieldModel.getValue() == null) {
+            // The hint is hidden right after the last element.
+            mSelectedIndex = mFieldModel.getDropdownKeyValues().size();
+        } else {
+            mSelectedIndex =
+                getDropdownIndex(mFieldModel.getDropdownKeyValues(), mFieldModel.getValue());
+        }
+
+        mDropdown.setSelection(mSelectedIndex);
+    }
+
+    private static List<CharSequence> getDropdownValues(List<DropdownKeyValue> dropdownKeyValues) {
+        List<CharSequence> dropdownValues = new ArrayList<CharSequence>();
+        for (int i = 0; i < dropdownKeyValues.size(); i++) {
+            dropdownValues.add(dropdownKeyValues.get(i).getValue());
+        }
+        return dropdownValues;
+    }
+
+    private static int getDropdownIndex(
+            List<DropdownKeyValue> dropdownKeyValues, CharSequence value) {
+        for (int i = 0; i < dropdownKeyValues.size(); i++) {
+            if (dropdownKeyValues.get(i).getKey().equals(value)) return i;
+        }
+        return 0;
     }
 }

@@ -18,7 +18,6 @@
 #include "webrtc/media/base/fakemediaengine.h"
 #include "webrtc/media/base/fakevideocapturer.h"
 #include "webrtc/media/base/fakevideorenderer.h"
-#include "webrtc/media/engine/webrtcvideoframe.h"
 
 using webrtc::FakeConstraints;
 using webrtc::VideoCapturerTrackSource;
@@ -157,30 +156,6 @@ TEST_F(VideoCapturerTrackSourceTest, CapturerStartStop) {
                  kMaxWaitMs);
 }
 
-// Test that a VideoSource can be stopped and restarted.
-TEST_F(VideoCapturerTrackSourceTest, StopRestart) {
-  // Initialize without constraints.
-  CreateVideoCapturerSource();
-  EXPECT_EQ_WAIT(MediaSourceInterface::kLive, state_observer_->state(),
-                 kMaxWaitMs);
-
-  ASSERT_TRUE(capturer_->CaptureFrame());
-  EXPECT_EQ(1, renderer_.num_rendered_frames());
-
-  source_->Stop();
-  EXPECT_EQ_WAIT(MediaSourceInterface::kEnded, state_observer_->state(),
-                 kMaxWaitMs);
-
-  source_->Restart();
-  EXPECT_EQ_WAIT(MediaSourceInterface::kLive, state_observer_->state(),
-                 kMaxWaitMs);
-
-  ASSERT_TRUE(capturer_->CaptureFrame());
-  EXPECT_EQ(2, renderer_.num_rendered_frames());
-
-  source_->Stop();
-}
-
 // Test that a VideoSource transition to kEnded if the capture device
 // fails.
 TEST_F(VideoCapturerTrackSourceTest, CameraFailed) {
@@ -208,7 +183,7 @@ TEST_F(VideoCapturerTrackSourceTest, MandatoryConstraintCif5Fps) {
   ASSERT_TRUE(format != NULL);
   EXPECT_EQ(352, format->width);
   EXPECT_EQ(288, format->height);
-  EXPECT_EQ(30, format->framerate());
+  EXPECT_EQ(5, format->framerate());
 }
 
 // Test that the capture output is 720P if the camera support it and the
@@ -425,7 +400,7 @@ TEST_F(VideoCapturerTrackSourceTest, MixedOptionsAndConstraints) {
   ASSERT_TRUE(format != NULL);
   EXPECT_EQ(352, format->width);
   EXPECT_EQ(288, format->height);
-  EXPECT_EQ(30, format->framerate());
+  EXPECT_EQ(5, format->framerate());
 
   EXPECT_EQ(rtc::Optional<bool>(false), source_->needs_denoising());
 }
@@ -487,5 +462,5 @@ TEST_F(VideoCapturerTrackSourceTest, OptionalSubOneFpsConstraints) {
                  kMaxWaitMs);
   const cricket::VideoFormat* format = capturer_->GetCaptureFormat();
   ASSERT_TRUE(format != NULL);
-  EXPECT_EQ(30, format->framerate());
+  EXPECT_EQ(1, format->framerate());
 }

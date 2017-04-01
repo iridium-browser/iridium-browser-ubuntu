@@ -110,7 +110,14 @@ class Benchmark(command_line.Command):
     This should only be used by TimelineBasedMeasurement (TBM) benchmarks, but
     not by PageTest based benchmarks.
     """
-    return False
+    return True
+
+  # NOTE: this is a temporary workaround for crbug.com/645329, do not rely on
+  # this as a stable public API as we may remove this without public notice.
+  @classmethod
+  def IsShouldTearDownStateAfterEachStoryRunOverriden(cls):
+    return (cls.ShouldTearDownStateAfterEachStoryRun.__func__ !=
+            Benchmark.ShouldTearDownStateAfterEachStoryRun.__func__)
 
   @classmethod
   def ShouldTearDownStateAfterEachStorySetRun(cls):

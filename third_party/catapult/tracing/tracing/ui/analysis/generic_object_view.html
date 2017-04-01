@@ -31,6 +31,8 @@ found in the LICENSE file.
 <script>
 'use strict';
 
+var URL_REGEX = /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)$/;  // eslint-disable-line max-len
+
 function isTable(object) {
   if (!(object instanceof Array) ||
       (object.length < 2)) return false;
@@ -42,7 +44,7 @@ function isTable(object) {
     for (var colName in object[i]) {
       if (i && (object[0][colName] === undefined)) return false;
       var cellType = typeof object[i][colName];
-      if (cellType !== 'string' && cellType != 'number') return false;
+      if (cellType !== 'string' && cellType !== 'number') return false;
     }
     if (i) {
       for (var colName in object[0]) {
@@ -94,10 +96,10 @@ Polymer({
 
     if (!(object instanceof Object)) {
       var type = typeof object;
-      if (type == 'string') {
+      if (type === 'string') {
         var objectReplaced = false;
-        if ((object[0] == '{' && object[object.length - 1] == '}') ||
-            (object[0] == '[' && object[object.length - 1] == ']')) {
+        if ((object[0] === '{' && object[object.length - 1] === '}') ||
+            (object[0] === '[' && object[object.length - 1] === ']')) {
           try {
             object = JSON.parse(object);
             objectReplaced = true;
@@ -108,8 +110,11 @@ Polymer({
           if (object.indexOf('\n') !== -1) {
             var lines = object.split('\n');
             lines.forEach(function(line, i) {
-              var text, ioff, ll, ss;
-              if (i == 0) {
+              var text;
+              var ioff;
+              var ll;
+              var ss;
+              if (i === 0) {
                 text = '"' + line;
                 ioff = 0;
                 ll = label;
@@ -131,6 +136,12 @@ Polymer({
               el.style.whiteSpace = 'pre';
               return el;
             }, this);
+            return;
+          } else if (object.match(URL_REGEX)) {
+            var link = document.createElement('a');
+            link.href = object;
+            link.textContent = object;
+            this.appendElementWithLabel_(label, indent, link, suffix);
             return;
           } else {
             this.appendSimpleText_(
@@ -168,6 +179,7 @@ Polymer({
     if (object instanceof tr.v.ScalarNumeric) {
       var el = this.ownerDocument.createElement('tr-v-ui-scalar-span');
       el.value = object;
+      el.inline = true;
       this.appendElementWithLabel_(label, indent, el, suffix);
       return;
     }
@@ -184,7 +196,7 @@ Polymer({
 
   appendElementsForArray_: function(
       label, object, indent, depth, maxDepth, suffix) {
-    if (object.length == 0) {
+    if (object.length === 0) {
       this.appendSimpleText_(label, indent, '[]', suffix);
       return;
     }
@@ -246,8 +258,8 @@ Polymer({
 
   appendElementsForObject_: function(
       label, object, indent, depth, maxDepth, suffix) {
-    var keys = tr.b.dictionaryKeys(object);
-    if (keys.length == 0) {
+    var keys = Object.keys(object);
+    if (keys.length === 0) {
       this.appendSimpleText_(label, indent, '{}', suffix);
       return;
     }

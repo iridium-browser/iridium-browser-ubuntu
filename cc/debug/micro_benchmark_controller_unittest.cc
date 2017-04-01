@@ -9,6 +9,7 @@
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "cc/animation/animation_host.h"
 #include "cc/debug/micro_benchmark.h"
 #include "cc/layers/layer.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
@@ -27,26 +28,27 @@ class MicroBenchmarkControllerTest : public testing::Test {
     impl_task_runner_provider_ =
         base::WrapUnique(new FakeImplTaskRunnerProvider);
     layer_tree_host_impl_ = base::MakeUnique<FakeLayerTreeHostImpl>(
-        impl_task_runner_provider_.get(), &shared_bitmap_manager_,
-        &task_graph_runner_);
+        impl_task_runner_provider_.get(), &task_graph_runner_);
 
-    layer_tree_host_ = FakeLayerTreeHost::Create(&layer_tree_host_client_,
-                                                 &task_graph_runner_);
+    animation_host_ = AnimationHost::CreateForTesting(ThreadInstance::MAIN);
+    layer_tree_host_ = FakeLayerTreeHost::Create(
+        &layer_tree_host_client_, &task_graph_runner_, animation_host_.get());
     layer_tree_host_->SetRootLayer(Layer::Create());
     layer_tree_host_->InitializeForTesting(
         TaskRunnerProvider::Create(nullptr, nullptr),
-        std::unique_ptr<Proxy>(new FakeProxy), nullptr);
+        std::unique_ptr<Proxy>(new FakeProxy));
   }
 
   void TearDown() override {
     layer_tree_host_impl_ = nullptr;
     layer_tree_host_ = nullptr;
     impl_task_runner_provider_ = nullptr;
+    animation_host_ = nullptr;
   }
 
   FakeLayerTreeHostClient layer_tree_host_client_;
   TestTaskGraphRunner task_graph_runner_;
-  TestSharedBitmapManager shared_bitmap_manager_;
+  std::unique_ptr<AnimationHost> animation_host_;
   std::unique_ptr<FakeLayerTreeHost> layer_tree_host_;
   std::unique_ptr<FakeLayerTreeHostImpl> layer_tree_host_impl_;
   std::unique_ptr<FakeImplTaskRunnerProvider> impl_task_runner_provider_;
@@ -80,7 +82,6 @@ TEST_F(MicroBenchmarkControllerTest, BenchmarkRan) {
       base::Bind(&IncrementCallCount, base::Unretained(&run_count)));
   EXPECT_GT(id, 0);
 
-  layer_tree_host_->SetOutputSurfaceLostForTesting(false);
   layer_tree_host_->UpdateLayers();
 
   EXPECT_EQ(1, run_count);
@@ -99,7 +100,6 @@ TEST_F(MicroBenchmarkControllerTest, MultipleBenchmarkRan) {
       base::Bind(&IncrementCallCount, base::Unretained(&run_count)));
   EXPECT_GT(id, 0);
 
-  layer_tree_host_->SetOutputSurfaceLostForTesting(false);
   layer_tree_host_->UpdateLayers();
 
   EXPECT_EQ(2, run_count);

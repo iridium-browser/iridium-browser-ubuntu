@@ -46,24 +46,41 @@ class MetadataCallback;
 class VoidCallback;
 
 class MODULES_EXPORT Entry : public EntryBase, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    DOMFileSystem* filesystem() const { return static_cast<DOMFileSystem*>(m_fileSystem.get()); }
-    DOMFileSystem* filesystem(ExecutionContext*) const;
+  DEFINE_WRAPPERTYPEINFO();
 
-    void getMetadata(ExecutionContext*, MetadataCallback* successCallback = nullptr, ErrorCallback* = nullptr);
-    void moveTo(ExecutionContext*, DirectoryEntry* parent, const String& name = String(), EntryCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
-    void copyTo(ExecutionContext*, DirectoryEntry* parent, const String& name = String(), EntryCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
-    void remove(ExecutionContext*, VoidCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
-    void getParent(ExecutionContext*, EntryCallback* successCallback = nullptr, ErrorCallback* = nullptr) const;
-    String toURL(ExecutionContext*) const;
+ public:
+  DOMFileSystem* filesystem() const {
+    return static_cast<DOMFileSystem*>(m_fileSystem.get());
+  }
+  DOMFileSystem* filesystem(ScriptState*) const;
 
-    DECLARE_VIRTUAL_TRACE();
+  void getMetadata(ScriptState*,
+                   MetadataCallback* successCallback = nullptr,
+                   ErrorCallback* = nullptr);
+  void moveTo(ScriptState*,
+              DirectoryEntry* parent,
+              const String& name = String(),
+              EntryCallback* successCallback = nullptr,
+              ErrorCallback* = nullptr) const;
+  void copyTo(ScriptState*,
+              DirectoryEntry* parent,
+              const String& name = String(),
+              EntryCallback* successCallback = nullptr,
+              ErrorCallback* = nullptr) const;
+  void remove(ScriptState*,
+              VoidCallback* successCallback = nullptr,
+              ErrorCallback* = nullptr) const;
+  void getParent(ScriptState*,
+                 EntryCallback* successCallback = nullptr,
+                 ErrorCallback* = nullptr) const;
+  String toURL(ScriptState*) const;
 
-protected:
-    Entry(DOMFileSystemBase*, const String& fullPath);
+  DECLARE_VIRTUAL_TRACE();
+
+ protected:
+  Entry(DOMFileSystemBase*, const String& fullPath);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // Entry_h
+#endif  // Entry_h

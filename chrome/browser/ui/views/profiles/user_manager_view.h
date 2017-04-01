@@ -19,24 +19,28 @@
 class ScopedKeepAlive;
 class UserManagerView;
 
-class ReauthDelegate : public views::DialogDelegateView,
-                       public UserManager::BaseReauthDialogDelegate {
+class UserManagerProfileDialogDelegate
+    : public views::DialogDelegateView,
+      public UserManagerProfileDialog::BaseDialogDelegate {
  public:
-  ReauthDelegate(UserManagerView* parent,
-                 views::WebView* web_view,
-                 const std::string& email_address,
-                 signin_metrics::Reason reason);
-  ~ReauthDelegate() override;
+  UserManagerProfileDialogDelegate(UserManagerView* parent,
+                                   views::WebView* web_view,
+                                   const std::string& email_address,
+                                   const GURL& url);
+  ~UserManagerProfileDialogDelegate() override;
 
-  // UserManager::BaseReauthDialogDelegate:
-  void CloseReauthDialog() override;
+  // UserManagerProfileDialog::BaseDialogDelegate
+  void CloseDialog() override;
+
+  // Display the local error message inside login window.
+  void DisplayErrorMessage();
 
  private:
-  ReauthDelegate();
+  UserManagerProfileDialogDelegate();
 
   // Before its destruction, tells its parent container to reset its reference
-  // to the ReauthDelegate.
-  void OnReauthDialogDestroyed();
+  // to the UserManagerProfileDialogDelegate.
+  void OnDialogDestroyed();
 
   // views::DialogDelegate:
   gfx::Size GetPreferredSize() const override;
@@ -50,11 +54,11 @@ class ReauthDelegate : public views::DialogDelegateView,
   int GetDialogButtons() const override;
   views::View* GetInitiallyFocusedView() override;
 
-  UserManagerView* parent_; // Not owned.
+  UserManagerView* parent_;  // Not owned.
   views::WebView* web_view_;
   const std::string email_address_;
 
-  DISALLOW_COPY_AND_ASSIGN(ReauthDelegate);
+  DISALLOW_COPY_AND_ASSIGN(UserManagerProfileDialogDelegate);
 };
 
 namespace views {
@@ -82,29 +86,32 @@ class UserManagerView : public views::DialogDelegateView {
   // Logs how long it took the UserManager to open.
   void LogTimeToOpen();
 
-  // Shows a dialog where the user can re-authenticate the profile with the
-  // given |email|. This is called in the following scenarios:
-  //  -From the user manager when a profile is locked and the user's password is
-  //   detected to have been changed.
-  //  -From the user manager when a custodian account needs to be
-  //   reauthenticated.
-  // reason| can be REASON_UNLOCK or REASON_REAUTHENTICATION to indicate
-  // whether this is a reauth or unlock scenario.
-  void ShowReauthDialog(content::BrowserContext* browser_context,
-                        const std::string& email,
-                        signin_metrics::Reason reason);
-
   // Hides the reauth dialog if it is showing.
-  void HideReauthDialog();
+  void HideDialog();
+
+  // Show a dialog where the user can auth the profile or see the auth error
+  // message.
+  void ShowDialog(content::BrowserContext* browser_context,
+                  const std::string& email,
+                  const GURL& url);
+
+  // Display sign in error message that is created by Chrome but not GAIA
+  // without browser window.
+  void DisplayErrorMessage();
+
+  // Setter and getter of the path of profile which is selected in user manager
+  // for first time signin.
+  void SetSigninProfilePath(const base::FilePath& profile_path);
+  base::FilePath GetSigninProfilePath();
 
  private:
-  friend class ReauthDelegate;
+  friend class UserManagerProfileDialogDelegate;
   friend std::default_delete<UserManagerView>;
 
   ~UserManagerView() override;
 
   // Resets delegate_ to nullptr when delegate_ is no longer alive.
-  void OnReauthDialogDestroyed();
+  void OnDialogDestroyed();
 
   // Creates dialog and initializes UI.
   void Init(Profile* guest_profile, const GURL& url);
@@ -124,10 +131,12 @@ class UserManagerView : public views::DialogDelegateView {
 
   views::WebView* web_view_;
 
-  ReauthDelegate* delegate_;
+  UserManagerProfileDialogDelegate* delegate_;
 
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
   base::Time user_manager_started_showing_;
+
+  base::FilePath signin_profile_path_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManagerView);
 };

@@ -16,30 +16,36 @@
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
+#include "url/gurl.h"
 
 namespace net {
 
-class BoundNetLog;
 class ClientSocketHandle;
 class GrowableIOBuffer;
 class HttpStreamParser;
 struct HttpRequestInfo;
+class NetLogWithSource;
 
 class NET_EXPORT_PRIVATE HttpBasicState {
  public:
   HttpBasicState(std::unique_ptr<ClientSocketHandle> connection,
-                 bool using_proxy);
+                 bool using_proxy,
+                 bool http_09_on_non_default_ports_enabled);
   ~HttpBasicState();
 
   // Initialize() must be called before using any of the other methods.
   int Initialize(const HttpRequestInfo* request_info,
                  RequestPriority priority,
-                 const BoundNetLog& net_log,
+                 const NetLogWithSource& net_log,
                  const CompletionCallback& callback);
 
   HttpStreamParser* parser() const { return parser_.get(); }
 
   bool using_proxy() const { return using_proxy_; }
+
+  bool http_09_on_non_default_ports_enabled() const {
+    return http_09_on_non_default_ports_enabled_;
+  }
 
   // Deletes |parser_| and sets it to NULL.
   void DeleteParser();
@@ -63,7 +69,10 @@ class NET_EXPORT_PRIVATE HttpBasicState {
 
   const bool using_proxy_;
 
-  const HttpRequestInfo* request_info_;
+  const bool http_09_on_non_default_ports_enabled_;
+
+  GURL url_;
+  std::string request_method_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpBasicState);
 };

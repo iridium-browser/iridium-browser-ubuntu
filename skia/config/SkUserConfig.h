@@ -77,7 +77,7 @@
 /*  Define this to provide font subsetter for font subsetting when generating
     PDF documents.
  */
-#define SK_SFNTLY_SUBSETTER "sample/chromium/font_subsetter.h"
+#define SK_PDF_USE_SFNTLY
 
 /*  To write debug messages to a console, skia will call SkDebugf(...) following
     printf conventions (e.g. const char* format, ...). If you want to redirect
@@ -193,21 +193,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 //
 // Remove these as we update our sites.
 //
-#ifndef    SK_SUPPORT_LEGACY_GETTOPDEVICE
-#   define SK_SUPPORT_LEGACY_GETTOPDEVICE
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_GETDEVICE
-#   define SK_SUPPORT_LEGACY_GETDEVICE
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_PICTUREINSTALLPIXELREF
-#   define SK_SUPPORT_LEGACY_PICTUREINSTALLPIXELREF
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_ACCESSBITMAP
-#   define SK_SUPPORT_LEGACY_ACCESSBITMAP
-#endif
 
 // Workaround for poor anisotropic mipmap quality,
 // pending Skia ripmap support.
@@ -224,8 +209,22 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_IGNORE_GPU_DITHER
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_EVAL_CUBIC
-#   define SK_SUPPORT_LEGACY_EVAL_CUBIC
+#ifndef    SK_DISABLE_COLOR_XFORM_PIPELINE
+#   define SK_DISABLE_COLOR_XFORM_PIPELINE
+#endif
+
+#ifndef    SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF
+#   define SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF
+#endif
+
+// Remove this after we fixed all the issues related to the new SDF algorithm
+// (https://codereview.chromium.org/1643143002)
+#ifndef    SK_USE_LEGACY_DISTANCE_FIELDS
+#   define SK_USE_LEGACY_DISTANCE_FIELDS
+#endif
+
+#ifndef    SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
+#   define SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi
@@ -238,6 +237,9 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 /* This flag forces Skia not to use typographic metrics with GDI.
  */
 #define SK_GDI_ALWAYS_USE_TEXTMETRICS_FOR_FONT_METRICS
+
+/* Restrict formats for Skia font matching to SFNT type fonts. */
+#define SK_FONT_CONFIG_INTERFACE_ONLY_ALLOW_SFNT_FONTS
 
 #define SK_IGNORE_BLURRED_RRECT_OPT
 #define SK_USE_DISCARDABLE_SCALEDIMAGECACHE
@@ -254,6 +256,13 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 
 // Updating to a correct SkPMColor lerp will require layout test rebaselines.
 #define SK_SUPPORT_LEGACY_BROKEN_LERP
+
+// Enabling the screenspace AA tessellating path renderer needs rebaselines.
+#define SK_DISABLE_SCREENSPACE_TESS_AA_PATH_RENDERER
+
+#ifndef    SK_SUPPORT_LEGACY_AAA
+#   define SK_SUPPORT_LEGACY_AAA
+#endif
 
 // ===== End Chrome-specific definitions =====
 

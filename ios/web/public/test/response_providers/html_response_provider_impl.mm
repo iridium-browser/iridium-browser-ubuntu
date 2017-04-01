@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/public/test/response_providers/html_response_provider_impl.h"
+#import "ios/web/public/test/response_providers/html_response_provider_impl.h"
 
-#include "ios/web/public/test/response_providers/response_provider.h"
+#import "ios/web/public/test/response_providers/response_provider.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "url/gurl.h"
@@ -20,6 +20,19 @@ std::map<GURL, HtmlResponseProviderImpl::Response> BuildResponseMap(
   }
   return responses;
 }
+
+std::map<GURL, HtmlResponseProviderImpl::Response> BuildResponseMap(
+    const std::map<GURL, std::pair<std::string, std::string>>& responses,
+    const std::map<GURL, scoped_refptr<net::HttpResponseHeaders>>& headers) {
+  std::map<GURL, HtmlResponseProviderImpl::Response> response_map;
+  for (const auto& pair : responses) {
+    response_map.insert(std::make_pair(
+        pair.first, HtmlResponseProviderImpl::Response(
+                        pair.second.second, headers.at(pair.first))));
+  }
+  return response_map;
+}
+
 }  // namespace
 
 HtmlResponseProviderImpl::Response::Response(
@@ -59,6 +72,12 @@ HtmlResponseProviderImpl::HtmlResponseProviderImpl(
     : responses_(BuildResponseMap(
           responses,
           web::ResponseProvider::GetDefaultResponseHeaders())) {}
+
+HtmlResponseProviderImpl::HtmlResponseProviderImpl(
+    const std::map<GURL, std::pair<std::string, std::string>>& responses)
+    : responses_(BuildResponseMap(
+          responses,
+          web::ResponseProvider::GetDefaultResponseHeaders(responses))) {}
 
 HtmlResponseProviderImpl::HtmlResponseProviderImpl(
     const std::map<GURL, HtmlResponseProviderImpl::Response>& responses)

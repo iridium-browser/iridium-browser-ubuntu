@@ -21,6 +21,7 @@
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_type.h"
+#include "content/public/browser/reload_type.h"
 
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
 
@@ -76,19 +77,13 @@ class CONTENT_EXPORT NavigationControllerImpl
   const SessionStorageNamespaceMap& GetSessionStorageNamespaceMap()
       const override;
   SessionStorageNamespace* GetDefaultSessionStorageNamespace() override;
-  void SetMaxRestoredPageID(int32_t max_id) override;
-  int32_t GetMaxRestoredPageID() const override;
   bool NeedsReload() const override;
   void SetNeedsReload() override;
   void CancelPendingReload() override;
   void ContinuePendingReload() override;
   bool IsInitialNavigation() const override;
   bool IsInitialBlankNavigation() const override;
-  void Reload(bool check_for_repost) override;
-  void ReloadToRefreshContent(bool check_for_repost) override;
-  void ReloadBypassingCache(bool check_for_repost) override;
-  void ReloadOriginalRequestURL(bool check_for_repost) override;
-  void ReloadDisableLoFi(bool check_for_repost) override;
+  void Reload(ReloadType reload_type, bool check_for_repost) override;
   void NotifyEntryChanged(const NavigationEntry* entry) override;
   void CopyStateFrom(const NavigationController& source) override;
   void CopyStateFromAndPrune(NavigationController* source,
@@ -110,17 +105,8 @@ class CONTENT_EXPORT NavigationControllerImpl
   // in this NavigationController.
   int GetIndexOfEntry(const NavigationEntryImpl* entry) const;
 
-  // Return the index of the entry with the corresponding instance and page_id,
-  // or -1 if not found.
-  int GetEntryIndexWithPageID(SiteInstance* instance, int32_t page_id) const;
-
   // Return the index of the entry with the given unique id, or -1 if not found.
   int GetEntryIndexWithUniqueID(int nav_entry_id) const;
-
-  // Return the entry with the corresponding instance and page_id, or null if
-  // not found.
-  NavigationEntryImpl* GetEntryWithPageID(SiteInstance* instance,
-                                          int32_t page_id) const;
 
   // Return the entry with the given unique id, or null if not found.
   NavigationEntryImpl* GetEntryWithUniqueID(int nav_entry_id) const;
@@ -148,7 +134,9 @@ class CONTENT_EXPORT NavigationControllerImpl
   bool RendererDidNavigate(
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
-      LoadCommittedDetails* details);
+      LoadCommittedDetails* details,
+      bool is_navigation_within_page,
+      NavigationHandleImpl* navigation_handle);
 
   // Notifies us that we just became active. This is used by the WebContentsImpl
   // so that we know to load URLs that were pending as "lazy" loads.
@@ -212,6 +200,10 @@ class CONTENT_EXPORT NavigationControllerImpl
   // Discards only the pending entry. |was_failure| should be set if the pending
   // entry is being discarded because it failed to load.
   void DiscardPendingEntry(bool was_failure);
+
+  // Sets a flag on the pending NavigationEntryImpl instance if any that the
+  // navigation failed due to an SSL error.
+  void SetPendingNavigationSSLError(bool error);
 
  private:
   friend class RestoreHelper;
@@ -285,13 +277,17 @@ class CONTENT_EXPORT NavigationControllerImpl
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
       bool is_in_page,
-      bool replace_entry);
+      bool replace_entry,
+      NavigationHandleImpl* handle);
   void RendererDidNavigateToExistingPage(
       RenderFrameHostImpl* rfh,
-      const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
+      const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
+      bool is_in_page,
+      NavigationHandleImpl* handle);
   void RendererDidNavigateToSamePage(
       RenderFrameHostImpl* rfh,
-      const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
+      const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
+      NavigationHandleImpl* handle);
   void RendererDidNavigateNewSubframe(
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
@@ -300,10 +296,6 @@ class CONTENT_EXPORT NavigationControllerImpl
   bool RendererDidNavigateAutoSubframe(
       RenderFrameHostImpl* rfh,
       const FrameHostMsg_DidCommitProvisionalLoad_Params& params);
-
-  // Helper function for code shared between Reload() and
-  // ReloadBypassingCache().
-  void ReloadInternal(bool check_for_repost, ReloadType reload_type);
 
   // Actually issues the navigation held in pending_entry.
   void NavigateToPendingEntry(ReloadType reload_type);
@@ -374,6 +366,10 @@ class CONTENT_EXPORT NavigationControllerImpl
   // the memory management.
   NavigationEntryImpl* pending_entry_;
 
+  // Navigations could occur in succession. This field holds the last pending
+  // entry for which we haven't received a response yet.
+  NavigationEntryImpl* last_pending_entry_;
+
   // If a new entry fails loading, details about it are temporarily held here
   // until the error page is shown (or 0 otherwise).
   //
@@ -398,14 +394,16 @@ class CONTENT_EXPORT NavigationControllerImpl
   // after the transient entry will become invalid if you navigate forward.
   int transient_entry_index_;
 
+  // The index of the last pending entry if it is in entries, or -1 if it was
+  // created by LoadURL.
+  int last_pending_entry_index_;
+
+  // The index of the last transient entry. Defaults to -1.
+  int last_transient_entry_index_;
+
   // The delegate associated with the controller. Possibly NULL during
   // setup.
   NavigationControllerDelegate* delegate_;
-
-  // The max restored page ID in this controller, if it was restored.  We must
-  // store this so that WebContentsImpl can tell any renderer in charge of one
-  // of the restored entries to update its max page ID.
-  int32_t max_restored_page_id_;
 
   // Manages the SSL security UI.
   SSLManager ssl_manager_;
@@ -447,6 +445,13 @@ class CONTENT_EXPORT NavigationControllerImpl
   TimeSmoother time_smoother_;
 
   std::unique_ptr<NavigationEntryScreenshotManager> screenshot_manager_;
+
+  // Used for tracking consecutive reload requests.  If the last user-initiated
+  // navigation (either browser-initiated or renderer-initiated with a user
+  // gesture) was a reload, these hold the ReloadType and timestamp.  Otherwise
+  // these are ReloadType::NONE and a null timestamp, respectively.
+  ReloadType last_committed_reload_type_;
+  base::Time last_committed_reload_time_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationControllerImpl);
 };

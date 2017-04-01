@@ -73,7 +73,9 @@
 }
 
 .tabbed-pane-header-tab-icon {
-    margin-right: 2px;
+    margin-right: 6px;
+    display: flex;
+    align-items: center;
 }
 
 .tabbed-pane-header-tab {
@@ -158,7 +160,7 @@
     width: 24px;
 }
 
-@media (-webkit-min-device-pixel-ratio: 1.5) {
+@media (-webkit-min-device-pixel-ratio: 1.1) {
 .tabbed-pane-header-tabs-drop-down-container > .glyph {
     -webkit-mask-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
@@ -250,7 +252,7 @@
     border-top: 1px solid hsl(218, 82%, 78%);
 }
 
-@media (-webkit-min-device-pixel-ratio: 1.5) {
+@media (-webkit-min-device-pixel-ratio: 1.1) {
     .tabbed-pane-tab-slider {
         border-top: none;
     }
@@ -267,4 +269,23 @@
 
 .tabbed-pane-header.tabbed-pane-no-header-background {
     background-color: transparent;
+}
+
+.tabbed-pane-no-tab-borders .tabbed-pane-header-tab {
+    border: none !important;
+    padding: 2px 0.8em;
+}
+
+.tabbed-pane-no-tab-borders .tabbed-pane-header-contents {
+    margin-left: 0;
+}
+
+.tabbed-pane-left-toolbar {
+    margin-right: -4px;
+    flex: none;
+}
+
+.tabbed-pane-right-toolbar {
+    margin-left: -4px;
+    flex: none;
 }

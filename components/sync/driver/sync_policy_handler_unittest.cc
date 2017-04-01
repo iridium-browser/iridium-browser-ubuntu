@@ -10,10 +10,10 @@
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_value_map.h"
-#include "components/sync/driver/pref_names.h"
+#include "components/sync/base/pref_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace sync_driver {
+namespace syncer {
 
 // Test cases for the Sync policy setting.
 class SyncPolicyHandlerTest : public testing::Test {};
@@ -23,7 +23,7 @@ TEST_F(SyncPolicyHandlerTest, Default) {
   SyncPolicyHandler handler;
   PrefValueMap prefs;
   handler.ApplyPolicySettings(policy, &prefs);
-  EXPECT_FALSE(prefs.GetValue(sync_driver::prefs::kSyncManaged, NULL));
+  EXPECT_FALSE(prefs.GetValue(prefs::kSyncManaged, nullptr));
 }
 
 TEST_F(SyncPolicyHandlerTest, Enabled) {
@@ -36,7 +36,7 @@ TEST_F(SyncPolicyHandlerTest, Enabled) {
   handler.ApplyPolicySettings(policy, &prefs);
 
   // Enabling Sync should not set the pref.
-  EXPECT_FALSE(prefs.GetValue(sync_driver::prefs::kSyncManaged, NULL));
+  EXPECT_FALSE(prefs.GetValue(prefs::kSyncManaged, nullptr));
 }
 
 TEST_F(SyncPolicyHandlerTest, Disabled) {
@@ -49,8 +49,8 @@ TEST_F(SyncPolicyHandlerTest, Disabled) {
   handler.ApplyPolicySettings(policy, &prefs);
 
   // Sync should be flagged as managed.
-  const base::Value* value = NULL;
-  EXPECT_TRUE(prefs.GetValue(sync_driver::prefs::kSyncManaged, &value));
+  const base::Value* value = nullptr;
+  EXPECT_TRUE(prefs.GetValue(prefs::kSyncManaged, &value));
   ASSERT_TRUE(value);
   bool sync_managed = false;
   bool result = value->GetAsBoolean(&sync_managed);
@@ -58,4 +58,4 @@ TEST_F(SyncPolicyHandlerTest, Disabled) {
   EXPECT_TRUE(sync_managed);
 }
 
-}  // namespace sync_driver
+}  // namespace syncer

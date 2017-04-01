@@ -8,10 +8,10 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "components/payments/payment_request.mojom-blink.h"
 #include "modules/ModulesExport.h"
 #include "modules/payments/PaymentCurrencyAmount.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/modules/payments/payment_request.mojom-blink.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
 
@@ -22,35 +22,42 @@ class PaymentAddress;
 class PaymentCompleter;
 class ScriptState;
 
-class MODULES_EXPORT PaymentResponse final : public GarbageCollectedFinalized<PaymentResponse>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-    WTF_MAKE_NONCOPYABLE(PaymentResponse);
+class MODULES_EXPORT PaymentResponse final
+    : public GarbageCollectedFinalized<PaymentResponse>,
+      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
+  WTF_MAKE_NONCOPYABLE(PaymentResponse);
 
-public:
-    PaymentResponse(mojom::blink::PaymentResponsePtr, PaymentCompleter*);
-    virtual ~PaymentResponse();
+ public:
+  PaymentResponse(payments::mojom::blink::PaymentResponsePtr,
+                  PaymentCompleter*);
+  virtual ~PaymentResponse();
 
-    const String& methodName() const { return m_methodName; }
-    ScriptValue details(ScriptState*, ExceptionState&) const;
-    PaymentAddress* shippingAddress() const { return m_shippingAddress.get(); }
-    const String& shippingOption() const { return m_shippingOption; }
-    const String& payerEmail() const { return m_payerEmail; }
-    const String& payerPhone() const { return m_payerPhone; }
+  ScriptValue toJSONForBinding(ScriptState*) const;
 
-    ScriptPromise complete(ScriptState*, const String& result = "");
+  const String& methodName() const { return m_methodName; }
+  ScriptValue details(ScriptState*, ExceptionState&) const;
+  PaymentAddress* shippingAddress() const { return m_shippingAddress.get(); }
+  const String& shippingOption() const { return m_shippingOption; }
+  const String& payerName() const { return m_payerName; }
+  const String& payerEmail() const { return m_payerEmail; }
+  const String& payerPhone() const { return m_payerPhone; }
 
-    DECLARE_TRACE();
+  ScriptPromise complete(ScriptState*, const String& result = "");
 
-private:
-    String m_methodName;
-    String m_stringifiedDetails;
-    Member<PaymentAddress> m_shippingAddress;
-    String m_shippingOption;
-    String m_payerEmail;
-    String m_payerPhone;
-    Member<PaymentCompleter> m_paymentCompleter;
+  DECLARE_TRACE();
+
+ private:
+  String m_methodName;
+  String m_stringifiedDetails;
+  Member<PaymentAddress> m_shippingAddress;
+  String m_shippingOption;
+  String m_payerName;
+  String m_payerEmail;
+  String m_payerPhone;
+  Member<PaymentCompleter> m_paymentCompleter;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PaymentResponse_h
+#endif  // PaymentResponse_h

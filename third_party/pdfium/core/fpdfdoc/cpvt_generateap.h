@@ -7,13 +7,13 @@
 #ifndef CORE_FPDFDOC_CPVT_GENERATEAP_H_
 #define CORE_FPDFDOC_CPVT_GENERATEAP_H_
 
+#include "core/fpdfdoc/cpdf_defaultappearance.h"
+#include "core/fpdfdoc/cpdf_variabletext.h"
 #include "core/fpdfdoc/cpvt_color.h"
 #include "core/fpdfdoc/cpvt_dash.h"
-#include "core/fpdfdoc/include/cpdf_defaultappearance.h"
-#include "core/fpdfdoc/include/cpdf_variabletext.h"
-#include "core/fxcrt/include/fx_coordinates.h"
-#include "core/fxcrt/include/fx_string.h"
-#include "core/fxcrt/include/fx_system.h"
+#include "core/fxcrt/fx_coordinates.h"
+#include "core/fxcrt/fx_string.h"
+#include "core/fxcrt/fx_system.h"
 
 class CPDF_Dictionary;
 class CPDF_Document;
@@ -34,6 +34,7 @@ class CPVT_GenerateAP {
   static bool GenerateInkAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict);
   static bool GenerateListBoxAP(CPDF_Document* pDoc,
                                 CPDF_Dictionary* pAnnotDict);
+  static bool GeneratePopupAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict);
   static bool GenerateSquareAP(CPDF_Document* pDoc,
                                CPDF_Dictionary* pAnnotDict);
   static bool GenerateSquigglyAP(CPDF_Document* pDoc,
@@ -48,7 +49,7 @@ class CPVT_GenerateAP {
   static CFX_ByteString GenerateEditAP(IPVT_FontMap* pFontMap,
                                        CPDF_VariableText::Iterator* pIterator,
                                        const CFX_FloatPoint& ptOffset,
-                                       FX_BOOL bContinuous,
+                                       bool bContinuous,
                                        uint16_t SubWord);
   static CFX_ByteString GenerateBorderAP(const CFX_FloatRect& rect,
                                          FX_FLOAT fWidth,

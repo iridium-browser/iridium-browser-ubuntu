@@ -4,6 +4,8 @@
 
 #include "chrome/test/media_router/media_router_integration_browsertest.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
@@ -19,6 +21,7 @@
 #include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_impl.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
@@ -87,6 +90,17 @@ const char kFindSinkScript[] =
     "    domAutomationController.send(true);"
     "}}"
     "domAutomationController.send(false);";
+const char kCheckDialogLoadedScript[] =
+    "var container = document.getElementById('media-router-container');"
+    "/** Wait until media router container is not undefined and "
+    "*   deviceMissingUrl is not undefined, "
+    "*   once deviceMissingUrl is not undefined, which means "
+    "*   the dialog is fully loaded."
+    "*/"
+    "if (container != undefined && container.deviceMissingUrl != undefined) {"
+    "  domAutomationController.send(true);"
+    "}"
+    "domAutomationController.send(false);";
 
 std::string GetStartedConnectionId(content::WebContents* web_contents) {
   std::string session_id;
@@ -152,7 +166,8 @@ void MediaRouterIntegrationBrowserTest::OpenTestPageInNewTab(
     base::FilePath::StringPieceType file_name) {
   base::FilePath full_path = GetResourceFile(file_name);
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), net::FilePathToFileURL(full_path), NEW_FOREGROUND_TAB,
+      browser(), net::FilePathToFileURL(full_path),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 }
 
@@ -172,7 +187,9 @@ void MediaRouterIntegrationBrowserTest::ChooseSink(
   content::WebContents* dialog_contents = GetMRDialog(web_contents);
   std::string script = base::StringPrintf(
       kChooseSinkScript, sink_name.c_str());
-  ASSERT_TRUE(content::ExecuteScript(dialog_contents, script));
+  // Execute javascript to choose sink, but don't wait until it finishes.
+  dialog_contents->GetMainFrame()->ExecuteJavaScriptWithUserGestureForTests(
+      base::UTF8ToUTF16(script));
 }
 
 void MediaRouterIntegrationBrowserTest::CheckStartFailed(
@@ -197,6 +214,7 @@ content::WebContents* MediaRouterIntegrationBrowserTest::GetMRDialog(
       MediaRouterDialogControllerImpl::GetOrCreateForWebContents(web_contents);
   content::WebContents* dialog_contents = controller->GetMediaRouterDialog();
   CHECK(dialog_contents);
+  WaitUntilDialogFullyLoaded(dialog_contents);
   return dialog_contents;
 }
 
@@ -252,6 +270,7 @@ content::WebContents* MediaRouterIntegrationBrowserTest::OpenMRDialog(
   test_navigation_observer_->StopWatchingNewWebContents();
   content::WebContents* dialog_contents = controller->GetMediaRouterDialog();
   CHECK(dialog_contents);
+  WaitUntilDialogFullyLoaded(dialog_contents);
   return dialog_contents;
 }
 
@@ -390,6 +409,19 @@ void MediaRouterIntegrationBrowserTest::WaitUntilSinkDiscoveredOnUI() {
       base::TimeDelta::FromSeconds(30), base::TimeDelta::FromSeconds(1),
       base::Bind(&MediaRouterIntegrationBrowserTest::IsSinkDiscoveredOnUI,
                  base::Unretained(this))));
+}
+
+bool MediaRouterIntegrationBrowserTest::IsDialogLoaded(
+    content::WebContents* dialog_contents) {
+  return ExecuteScriptAndExtractBool(dialog_contents, kCheckDialogLoadedScript);
+}
+
+void MediaRouterIntegrationBrowserTest::WaitUntilDialogFullyLoaded(
+    content::WebContents* dialog_contents) {
+  ASSERT_TRUE(ConditionalWait(
+      base::TimeDelta::FromSeconds(30), base::TimeDelta::FromSeconds(1),
+      base::Bind(&MediaRouterIntegrationBrowserTest::IsDialogLoaded,
+                 base::Unretained(this), dialog_contents)));
 }
 
 void MediaRouterIntegrationBrowserTest::ParseCommandLine() {
@@ -565,7 +597,7 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
       MediaRouterDialogControllerImpl::GetOrCreateForWebContents(web_contents);
   EXPECT_TRUE(controller->IsShowingMediaRouterDialog());
   controller->HideMediaRouterDialog();
-  CheckStartFailed(web_contents, "AbortError", "Dialog closed.");
+  CheckStartFailed(web_contents, "NotAllowedError", "Dialog closed.");
 }
 
 IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,

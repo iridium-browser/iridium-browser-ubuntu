@@ -4,47 +4,41 @@
 
 #include "components/autofill/core/browser/webdata/autofill_profile_data_type_controller.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/metrics/histogram.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-#include "components/sync/api/sync_error.h"
-#include "components/sync/api/syncable_service.h"
 #include "components/sync/driver/sync_client.h"
+#include "components/sync/model/sync_error.h"
+#include "components/sync/model/syncable_service.h"
 
 using autofill::AutofillWebDataService;
 
 namespace browser_sync {
 
 AutofillProfileDataTypeController::AutofillProfileDataTypeController(
-    const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
-    const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
-    const base::Closure& error_callback,
-    sync_driver::SyncClient* sync_client,
+    scoped_refptr<base::SingleThreadTaskRunner> db_thread,
+    const base::Closure& dump_stack,
+    syncer::SyncClient* sync_client,
     const scoped_refptr<autofill::AutofillWebDataService>& web_data_service)
-    : NonUIDataTypeController(ui_thread, error_callback, sync_client),
-      ui_thread_(ui_thread),
-      db_thread_(db_thread),
+    : AsyncDirectoryTypeController(syncer::AUTOFILL_PROFILE,
+                                   dump_stack,
+                                   sync_client,
+                                   syncer::GROUP_DB,
+                                   std::move(db_thread)),
       sync_client_(sync_client),
       web_data_service_(web_data_service),
       callback_registered_(false) {}
 
-syncer::ModelType AutofillProfileDataTypeController::type() const {
-  return syncer::AUTOFILL_PROFILE;
-}
-
-syncer::ModelSafeGroup AutofillProfileDataTypeController::model_safe_group()
-    const {
-  return syncer::GROUP_DB;
-}
-
 void AutofillProfileDataTypeController::WebDatabaseLoaded() {
-  DCHECK(ui_thread_->BelongsToCurrentThread());
+  DCHECK(CalledOnValidThread());
   OnModelLoaded();
 }
 
 void AutofillProfileDataTypeController::OnPersonalDataChanged() {
-  DCHECK(ui_thread_->BelongsToCurrentThread());
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(state(), MODEL_STARTING);
 
   sync_client_->GetPersonalDataManager()->RemoveObserver(this);
@@ -55,23 +49,17 @@ void AutofillProfileDataTypeController::OnPersonalDataChanged() {
   if (web_data_service_->IsDatabaseLoaded()) {
     OnModelLoaded();
   } else if (!callback_registered_) {
-    web_data_service_->RegisterDBLoadedCallback(base::Bind(
-        &AutofillProfileDataTypeController::WebDatabaseLoaded, this));
+    web_data_service_->RegisterDBLoadedCallback(
+        base::Bind(&AutofillProfileDataTypeController::WebDatabaseLoaded,
+                   base::AsWeakPtr(this)));
     callback_registered_ = true;
   }
 }
 
 AutofillProfileDataTypeController::~AutofillProfileDataTypeController() {}
 
-bool AutofillProfileDataTypeController::PostTaskOnBackendThread(
-    const tracked_objects::Location& from_here,
-    const base::Closure& task) {
-  DCHECK(ui_thread_->BelongsToCurrentThread());
-  return db_thread_->PostTask(from_here, task);
-}
-
 bool AutofillProfileDataTypeController::StartModels() {
-  DCHECK(ui_thread_->BelongsToCurrentThread());
+  DCHECK(CalledOnValidThread());
   DCHECK_EQ(state(), MODEL_STARTING);
   // Waiting for the personal data is subtle:  we do this as the PDM resets
   // its cache of unique IDs once it gets loaded. If we were to proceed with
@@ -90,8 +78,9 @@ bool AutofillProfileDataTypeController::StartModels() {
     return true;
 
   if (!callback_registered_) {
-    web_data_service_->RegisterDBLoadedCallback(base::Bind(
-        &AutofillProfileDataTypeController::WebDatabaseLoaded, this));
+    web_data_service_->RegisterDBLoadedCallback(
+        base::Bind(&AutofillProfileDataTypeController::WebDatabaseLoaded,
+                   base::AsWeakPtr(this)));
     callback_registered_ = true;
   }
 
@@ -99,7 +88,7 @@ bool AutofillProfileDataTypeController::StartModels() {
 }
 
 void AutofillProfileDataTypeController::StopModels() {
-  DCHECK(ui_thread_->BelongsToCurrentThread());
+  DCHECK(CalledOnValidThread());
   sync_client_->GetPersonalDataManager()->RemoveObserver(this);
 }
 

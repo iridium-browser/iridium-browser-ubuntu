@@ -7,7 +7,9 @@
 
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "public/platform/WebCommon.h"
 
 namespace base {
@@ -18,11 +20,7 @@ class BlameContext;
 
 namespace blink {
 namespace scheduler {
-namespace internal {
-class TaskQueueImpl;
-}  // namespace internal
-class FakeWebTaskRunner;
-class LazyNow;
+
 class TimeDomain;
 
 class BLINK_PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
@@ -52,65 +50,43 @@ class BLINK_PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
     FIRST_QUEUE_PRIORITY = CONTROL_PRIORITY,
   };
 
-  // Keep TaskQueue::PumpPolicyToString in sync with this enum.
-  enum class PumpPolicy {
-    // Tasks posted to an incoming queue with an AUTO pump policy will be
-    // automatically scheduled for execution or transferred to the work queue
-    // automatically.
-    AUTO,
-    // Tasks posted to an incoming queue with an AFTER_WAKEUP pump policy
-    // will be scheduled for execution or transferred to the work queue
-    // automatically but only after another queue has executed a task.
-    AFTER_WAKEUP,
-    // Tasks posted to an incoming queue with a MANUAL will not be
-    // automatically scheduled for execution or transferred to the work queue.
-    // Instead, the selector should call PumpQueue() when necessary to bring
-    // in new tasks for execution.
-    MANUAL,
-    // Must be last entry.
-    PUMP_POLICY_COUNT,
-    FIRST_PUMP_POLICY = AUTO,
+  // Can be called on any thread.
+  static const char* PriorityToString(QueuePriority priority);
+
+  enum class QueueType {
+    // Keep TaskQueue::NameForQueueType in sync.
+    // This enum is used for a histogram and it should not be re-numbered.
+    CONTROL = 0,
+    DEFAULT = 1,
+    DEFAULT_LOADING = 2,
+    DEFAULT_TIMER = 3,
+    UNTHROTTLED = 4,
+    FRAME_LOADING = 5,
+    FRAME_TIMER = 6,
+    FRAME_UNTHROTTLED = 7,
+    COMPOSITOR = 8,
+    IDLE = 9,
+    TEST = 10,
+
+    COUNT = 11
   };
 
-  // Keep TaskQueue::WakeupPolicyToString in sync with this enum.
-  enum class WakeupPolicy {
-    // Tasks run on a queue with CAN_WAKE_OTHER_QUEUES wakeup policy can
-    // cause queues with the AFTER_WAKEUP PumpPolicy to be woken up.
-    CAN_WAKE_OTHER_QUEUES,
-    // Tasks run on a queue with DONT_WAKE_OTHER_QUEUES won't cause queues
-    // with the AFTER_WAKEUP PumpPolicy to be woken up.
-    DONT_WAKE_OTHER_QUEUES,
-    // Must be last entry.
-    WAKEUP_POLICY_COUNT,
-    FIRST_WAKEUP_POLICY = CAN_WAKE_OTHER_QUEUES,
-  };
+  // Returns name of the given queue type. Returned string has application
+  // lifetime.
+  static const char* NameForQueueType(QueueType queue_type);
 
-  // Options for constructing a TaskQueue. Once set the |name|,
-  // |should_monitor_quiescence| and |wakeup_policy| are immutable. The
-  // |pump_policy| can be mutated with |SetPumpPolicy()|.
+  // Options for constructing a TaskQueue. Once set the |name| and
+  // |should_monitor_quiescence| are immutable.
   struct Spec {
-    // Note |name| must have application lifetime.
-    explicit Spec(const char* name)
-        : name(name),
+    explicit Spec(QueueType type)
+        : type(type),
           should_monitor_quiescence(false),
-          pump_policy(TaskQueue::PumpPolicy::AUTO),
-          wakeup_policy(TaskQueue::WakeupPolicy::CAN_WAKE_OTHER_QUEUES),
           time_domain(nullptr),
           should_notify_observers(true),
           should_report_when_execution_blocked(false) {}
 
     Spec SetShouldMonitorQuiescence(bool should_monitor) {
       should_monitor_quiescence = should_monitor;
-      return *this;
-    }
-
-    Spec SetPumpPolicy(PumpPolicy policy) {
-      pump_policy = policy;
-      return *this;
-    }
-
-    Spec SetWakeupPolicy(WakeupPolicy policy) {
-      wakeup_policy = policy;
       return *this;
     }
 
@@ -130,61 +106,36 @@ class BLINK_PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
       return *this;
     }
 
-    const char* name;
+    QueueType type;
     bool should_monitor_quiescence;
-    TaskQueue::PumpPolicy pump_policy;
-    TaskQueue::WakeupPolicy wakeup_policy;
     TimeDomain* time_domain;
     bool should_notify_observers;
     bool should_report_when_execution_blocked;
   };
 
-  // Intended to be used as an opaque handle to a task posted by
-  // PostCancellableDelayedTask.
-  class BLINK_PLATFORM_EXPORT TaskHandle {
+  // An interface that lets the owner vote on whether or not the associated
+  // TaskQueue should be enabled.
+  class QueueEnabledVoter {
    public:
-    TaskHandle();
+    QueueEnabledVoter() {}
+    virtual ~QueueEnabledVoter() {}
 
-    // Returns false if the handle is equivalent to TaskHandle(), i.e. the
-    // handle doesn't represent a task that got posted.
-    operator bool() const;
+    // Votes to enable or disable the associated TaskQueue. The TaskQueue will
+    // only be enabled if all the voters agree it should be enabled, or if there
+    // are no voters.
+    // NOTE this must be called on the thread the associated TaskQueue was
+    // created on.
+    virtual void SetQueueEnabled(bool enabled) = 0;
 
    private:
-    friend internal::TaskQueueImpl;
-    friend FakeWebTaskRunner;
-
-    // For immediate tasks.
-    TaskHandle(TaskQueue* task_queue, uint64_t enqueue_order);
-
-    // For delayed tasks.
-    TaskHandle(TaskQueue* task_queue,
-               base::TimeTicks scheduled_run_time,
-               int sequence_number);
-
-    uint64_t enqueue_order_;
-    base::TimeTicks scheduled_run_time_;
-#if DCHECK_IS_ON()
-    TaskQueue* task_queue_;
-#endif
-    int sequence_number_;
+    DISALLOW_COPY_AND_ASSIGN(QueueEnabledVoter);
   };
 
-  // Posts the given task to be run after |delay| has passed. Returns a handle
-  // which can be passed to CancelTask to cancel the task before it has run.
+  // Returns an interface that allows the caller to vote on whether or not this
+  // TaskQueue is enabled. The TaskQueue will be enabled if there are no voters
+  // or if all agree it should be enabled.
   // NOTE this must be called on the thread this TaskQueue was created by.
-  virtual TaskHandle PostCancellableDelayedTask(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task,
-      base::TimeDelta delay) = 0;
-
-  // Attempts to cancel a task posted by PostCancellableDelayedTask. Returns
-  // true on success or false otherwise. NOTE this must be called on the thread
-  // this TaskQueue was created by.
-  virtual bool CancelTask(const TaskHandle& handle) = 0;
-
-  // Enable or disable task execution for this queue. NOTE this must be called
-  // on the thread this TaskQueue was created by.
-  virtual void SetQueueEnabled(bool enabled) = 0;
+  virtual std::unique_ptr<QueueEnabledVoter> CreateQueueEnabledVoter() = 0;
 
   // NOTE this must be called on the thread this TaskQueue was created by.
   virtual bool IsQueueEnabled() const = 0;
@@ -192,13 +143,20 @@ class BLINK_PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
   // Returns true if the queue is completely empty.
   virtual bool IsEmpty() const = 0;
 
-  // Returns true if the queue has work that's ready to execute now, or if it
-  // would have if the queue was pumped. NOTE this must be called on the thread
-  // this TaskQueue was created by.
+  // Returns the number of pending tasks in the queue.
+  virtual size_t GetNumberOfPendingTasks() const = 0;
+
+  // Returns true if the queue has work that's ready to execute now.
+  // NOTE: this must be called on the thread this TaskQueue was created by.
   virtual bool HasPendingImmediateWork() const = 0;
 
-  // Returns true if tasks can't run now but could if the queue was pumped.
-  virtual bool NeedsPumping() const = 0;
+  // Returns requested run time of next delayed task, which is not ready
+  // to run. If there are no such tasks, returns base::nullopt.
+  // NOTE: this must be called on the thread this TaskQueue was created by.
+  virtual base::Optional<base::TimeTicks> GetNextScheduledWakeUp() = 0;
+
+  // Can be called on any thread.
+  virtual QueueType GetQueueType() const = 0;
 
   // Can be called on any thread.
   virtual const char* GetName() const = 0;
@@ -209,28 +167,6 @@ class BLINK_PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
 
   // Returns the current queue priority.
   virtual QueuePriority GetQueuePriority() const = 0;
-
-  // Set the pumping policy of the queue to |pump_policy|. NOTE this must be
-  // called on the thread this TaskQueue was created by.
-  virtual void SetPumpPolicy(PumpPolicy pump_policy) = 0;
-
-  // Returns the current PumpPolicy. NOTE this must be called on the thread this
-  // TaskQueue was created by.
-  virtual PumpPolicy GetPumpPolicy() const = 0;
-
-  // Reloads new tasks from the incoming queue into the work queue, regardless
-  // of whether the work queue is empty or not. After this, the function ensures
-  // that the tasks in the work queue, if any, are scheduled for execution.
-  //
-  // This function only needs to be called if automatic pumping is disabled.
-  // By default automatic pumping is enabled for all queues. NOTE this must be
-  // called on the thread this TaskQueue was created by.
-  //
-  // The |may_post_dowork| parameter controls whether or not PumpQueue calls
-  // TaskQueueManager::MaybeScheduleImmediateWork.
-  // TODO(alexclarke): Add a base::RunLoop observer so we can get rid of
-  // |may_post_dowork|.
-  virtual void PumpQueue(LazyNow* lazy_now, bool may_post_dowork) = 0;
 
   // These functions can only be called on the same thread that the task queue
   // manager executes its tasks on.
@@ -251,6 +187,25 @@ class BLINK_PLATFORM_EXPORT TaskQueue : public base::SingleThreadTaskRunner {
 
   // Returns the queue's current TimeDomain.  Can be called from any thread.
   virtual TimeDomain* GetTimeDomain() const = 0;
+
+  enum class InsertFencePosition {
+    NOW,  // Tasks posted on the queue up till this point further may run.
+          // All further tasks are blocked.
+    BEGINNING_OF_TIME,  // No tasks posted on this queue may run.
+  };
+
+  // Inserts a barrier into the task queue which prevents tasks with an enqueue
+  // order greater than the fence from running until either the fence has been
+  // removed or a subsequent fence has unblocked some tasks within the queue.
+  // Note: delayed tasks get their enqueue order set once their delay has
+  // expired, and non-delayed tasks get their enqueue order set when posted.
+  virtual void InsertFence(InsertFencePosition position) = 0;
+
+  // Removes any previously added fence and unblocks execution of any tasks
+  // blocked by it.
+  virtual void RemoveFence() = 0;
+
+  virtual bool BlockedByFence() const = 0;
 
  protected:
   ~TaskQueue() override {}

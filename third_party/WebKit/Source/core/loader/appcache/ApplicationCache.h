@@ -26,9 +26,9 @@
 #ifndef ApplicationCache_h
 #define ApplicationCache_h
 
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
 #include "core/loader/appcache/ApplicationCacheHost.h"
-#include "core/frame/DOMWindowProperty.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 
@@ -37,51 +37,48 @@ namespace blink {
 class ExceptionState;
 class LocalFrame;
 
-class ApplicationCache final : public EventTargetWithInlineData, public DOMWindowProperty {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(ApplicationCache);
-public:
-    static ApplicationCache* create(LocalFrame* frame)
-    {
-        return new ApplicationCache(frame);
-    }
-    ~ApplicationCache() override
-    {
-    }
+class ApplicationCache final : public EventTargetWithInlineData,
+                               public DOMWindowClient {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(ApplicationCache);
 
-    void willDestroyGlobalObjectInFrame() override;
+ public:
+  static ApplicationCache* create(LocalFrame* frame) {
+    return new ApplicationCache(frame);
+  }
+  ~ApplicationCache() override {}
 
-    unsigned short status() const;
-    void update(ExceptionState&);
-    void swapCache(ExceptionState&);
-    void abort();
+  unsigned short status() const;
+  void update(ExceptionState&);
+  void swapCache(ExceptionState&);
+  void abort();
 
-    // Explicitly named attribute event listener helpers
+  // Explicitly named attribute event listener helpers
 
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(checking);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(noupdate);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(downloading);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(updateready);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(cached);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(obsolete);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(checking);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(noupdate);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(downloading);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(updateready);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(cached);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(obsolete);
 
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override;
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override;
 
-    static const AtomicString& toEventType(ApplicationCacheHost::EventID);
+  static const AtomicString& toEventType(ApplicationCacheHost::EventID);
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    explicit ApplicationCache(LocalFrame*);
+ private:
+  explicit ApplicationCache(LocalFrame*);
 
-    void recordAPIUseType() const;
+  void recordAPIUseType() const;
 
-    ApplicationCacheHost* applicationCacheHost() const;
+  ApplicationCacheHost* applicationCacheHost() const;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ApplicationCache_h
+#endif  // ApplicationCache_h

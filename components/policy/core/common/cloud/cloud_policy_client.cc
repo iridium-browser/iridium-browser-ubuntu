@@ -10,8 +10,10 @@
 #include "base/bind_helpers.h"
 #include "base/guid.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/policy/core/common/cloud/signing_service.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -31,6 +33,8 @@ DeviceMode TranslateProtobufDeviceMode(
       return DEVICE_MODE_ENTERPRISE;
     case em::DeviceRegisterResponse::RETAIL:
       return DEVICE_MODE_LEGACY_RETAIL_MODE;
+    case em::DeviceRegisterResponse::CHROME_AD:
+      return DEVICE_MODE_ENTERPRISE_AD;
   }
   LOG(ERROR) << "Unknown enrollment mode in registration response: " << mode;
   return DEVICE_MODE_NOT_SET;
@@ -51,13 +55,11 @@ void CloudPolicyClient::Observer::OnRobotAuthCodesFetched(
 CloudPolicyClient::CloudPolicyClient(
     const std::string& machine_id,
     const std::string& machine_model,
-    const std::string& verification_key_hash,
     DeviceManagementService* service,
     scoped_refptr<net::URLRequestContextGetter> request_context,
     SigningService* signing_service)
     : machine_id_(machine_id),
       machine_model_(machine_model),
-      verification_key_hash_(verification_key_hash),
       service_(service),                  // Can be null for unit tests.
       signing_service_(signing_service),
       request_context_(request_context),
@@ -65,7 +67,6 @@ CloudPolicyClient::CloudPolicyClient(
 }
 
 CloudPolicyClient::~CloudPolicyClient() {
-  base::STLDeleteValues(&responses_);
 }
 
 void CloudPolicyClient::SetupRegistration(const std::string& dm_token,
@@ -78,7 +79,7 @@ void CloudPolicyClient::SetupRegistration(const std::string& dm_token,
   client_id_ = client_id;
   request_jobs_.clear();
   policy_fetch_request_job_.reset();
-  base::STLDeleteValues(&responses_);
+  responses_.clear();
 
   NotifyRegistrationStateChanged();
 }
@@ -184,7 +185,7 @@ void CloudPolicyClient::OnRegisterWithCertificateRequestSigned(bool success,
           GetRequestContext()));
   policy_fetch_request_job_->SetClientID(client_id_);
   em::SignedData* signed_request = policy_fetch_request_job_->GetRequest()->
-      mutable_cert_based_register_request()->mutable_signed_request();
+      mutable_certificate_based_register_request()->mutable_signed_request();
   signed_request->set_data(signed_data.data());
   signed_request->set_signature(signed_data.signature());
   signed_request->set_extra_data_bytes(signed_data.extra_data_bytes());
@@ -211,6 +212,8 @@ void CloudPolicyClient::FetchPolicy() {
                           GetRequestContext()));
   policy_fetch_request_job_->SetDMToken(dm_token_);
   policy_fetch_request_job_->SetClientID(client_id_);
+  if (!public_key_version_valid_)
+    policy_fetch_request_job_->SetCritical(true);
 
   em::DeviceManagementRequest* request =
       policy_fetch_request_job_->GetRequest();
@@ -228,8 +231,7 @@ void CloudPolicyClient::FetchPolicy() {
     if (public_key_version_valid_)
       fetch_request->set_public_key_version(public_key_version_);
 
-    if (!verification_key_hash_.empty())
-      fetch_request->set_verification_key_hash(verification_key_hash_);
+    fetch_request->set_verification_key_hash(kPolicyVerificationKeyHash);
 
     // These fields are included only in requests for chrome policy.
     if (IsChromePolicy(type_to_fetch.first)) {
@@ -271,13 +273,10 @@ void CloudPolicyClient::FetchPolicy() {
 
 void CloudPolicyClient::FetchRobotAuthCodes(const std::string& auth_token) {
   CHECK(is_registered());
-  DCHECK(!auth_token.empty());
 
   policy_fetch_request_job_.reset(service_->CreateJob(
       DeviceManagementRequestJob::TYPE_API_AUTH_CODE_FETCH,
       GetRequestContext()));
-  // The credentials of a domain user are needed in order to mint a new OAuth2
-  // authorization token for the robot account.
   policy_fetch_request_job_->SetOAuthToken(auth_token);
   policy_fetch_request_job_->SetDMToken(dm_token_);
   policy_fetch_request_job_->SetClientID(client_id_);
@@ -489,9 +488,8 @@ void CloudPolicyClient::SetStateKeysToUpload(
 const em::PolicyFetchResponse* CloudPolicyClient::GetPolicyFor(
     const std::string& policy_type,
     const std::string& settings_entity_id) const {
-  ResponseMap::const_iterator it =
-      responses_.find(std::make_pair(policy_type, settings_entity_id));
-  return it == responses_.end() ? nullptr : it->second;
+  auto it = responses_.find(std::make_pair(policy_type, settings_entity_id));
+  return it == responses_.end() ? nullptr : it->second.get();
 }
 
 scoped_refptr<net::URLRequestContextGetter>
@@ -581,7 +579,7 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
   if (status == DM_STATUS_SUCCESS) {
     const em::DevicePolicyResponse& policy_response =
         response.policy_response();
-    base::STLDeleteValues(&responses_);
+    responses_.clear();
     for (int i = 0; i < policy_response.response_size(); ++i) {
       const em::PolicyFetchResponse& response = policy_response.response(i);
       em::PolicyData policy_data;
@@ -601,7 +599,7 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
             << type << ", entity: " << entity_id << ", ignoring";
         continue;
       }
-      responses_[key] = new em::PolicyFetchResponse(response);
+      responses_[key] = base::MakeUnique<em::PolicyFetchResponse>(response);
     }
     state_keys_to_upload_.clear();
     NotifyPolicyFetched();
@@ -657,7 +655,7 @@ void CloudPolicyClient::OnDeviceAttributeUpdatePermissionCompleted(
     int net_error,
     const em::DeviceManagementResponse& response) {
   // TODO(pbond): remove this LOG once http://crbug.com/586961 is fixed.
-  LOG(WARNING) << "Recieve DeviceAttributeUpdatePermissionResponse status="
+  LOG(WARNING) << "Receive DeviceAttributeUpdatePermissionResponse status="
                << status << " net_error=" << net_error;
   bool success = false;
 
@@ -709,7 +707,7 @@ void CloudPolicyClient::OnDeviceAttributeUpdated(
 
 void CloudPolicyClient::RemoveJob(const DeviceManagementRequestJob* job) {
   for (auto it = request_jobs_.begin(); it != request_jobs_.end(); ++it) {
-    if (*it == job) {
+    if (it->get() == job) {
       request_jobs_.erase(it);
       return;
     }
@@ -769,19 +767,23 @@ void CloudPolicyClient::OnGcmIdUpdated(
 }
 
 void CloudPolicyClient::NotifyPolicyFetched() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnPolicyFetched(this));
+  for (auto& observer : observers_)
+    observer.OnPolicyFetched(this);
 }
 
 void CloudPolicyClient::NotifyRegistrationStateChanged() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnRegistrationStateChanged(this));
+  for (auto& observer : observers_)
+    observer.OnRegistrationStateChanged(this);
 }
 
 void CloudPolicyClient::NotifyRobotAuthCodesFetched() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnRobotAuthCodesFetched(this));
+  for (auto& observer : observers_)
+    observer.OnRobotAuthCodesFetched(this);
 }
 
 void CloudPolicyClient::NotifyClientError() {
-  FOR_EACH_OBSERVER(Observer, observers_, OnClientError(this));
+  for (auto& observer : observers_)
+    observer.OnClientError(this);
 }
 
 }  // namespace policy

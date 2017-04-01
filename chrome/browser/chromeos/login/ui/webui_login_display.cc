@@ -17,10 +17,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/login/user_names.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/user_manager/user_manager.h"
-#include "grit/components_strings.h"
+#include "components/user_manager/user_names.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -115,10 +115,6 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
 
   std::string error_text;
   switch (error_msg_id) {
-    case IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED:
-      error_text = l10n_util::GetStringFUTF8(
-          error_msg_id, l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_OS_NAME));
-      break;
     case IDS_LOGIN_ERROR_CAPTIVE_PORTAL:
       error_text = l10n_util::GetStringFUTF8(
           error_msg_id, delegate()->GetConnectedNetworkName());
@@ -152,15 +148,8 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
   }
 
   std::string help_link;
-  switch (error_msg_id) {
-    case IDS_LOGIN_ERROR_AUTHENTICATING_HOSTED:
-      help_link = l10n_util::GetStringUTF8(IDS_LEARN_MORE);
-      break;
-    default:
-      if (login_attempts > 1)
-        help_link = l10n_util::GetStringUTF8(IDS_LEARN_MORE);
-      break;
-  }
+  if (login_attempts > 1)
+    help_link = l10n_util::GetStringUTF8(IDS_LEARN_MORE);
 
   webui_handler_->ShowError(login_attempts, error_text, help_link,
                             help_topic_id);
@@ -238,7 +227,11 @@ void WebUILoginDisplay::LoadWallpaper(const AccountId& account_id) {
 }
 
 void WebUILoginDisplay::LoadSigninWallpaper() {
-  WallpaperManager::Get()->SetDefaultWallpaperDelayed(login::SignInAccountId());
+  if (!WallpaperManager::Get()->SetDeviceWallpaperIfApplicable(
+          user_manager::SignInAccountId())) {
+    WallpaperManager::Get()->SetDefaultWallpaperDelayed(
+        user_manager::SignInAccountId());
+  }
 }
 
 void WebUILoginDisplay::OnSigninScreenReady() {
@@ -246,6 +239,11 @@ void WebUILoginDisplay::OnSigninScreenReady() {
 
   if (delegate_)
     delegate_->OnSigninScreenReady();
+}
+
+void WebUILoginDisplay::OnGaiaScreenReady() {
+  if (delegate_)
+    delegate_->OnGaiaScreenReady();
 }
 
 void WebUILoginDisplay::RemoveUser(const AccountId& account_id) {
@@ -335,7 +333,7 @@ void WebUILoginDisplay::Signout() {
 
 void WebUILoginDisplay::OnUserActivity(const ui::Event* event) {
   if (delegate_)
-    delegate_->ResetPublicSessionAutoLoginTimer();
+    delegate_->ResetAutoLoginTimer();
 }
 
 bool WebUILoginDisplay::IsUserWhitelisted(const AccountId& account_id) {

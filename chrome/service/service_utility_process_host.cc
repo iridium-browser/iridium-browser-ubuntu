@@ -19,6 +19,7 @@
 #include "base/macros.h"
 #include "base/metrics/histogram.h"
 #include "base/process/launch.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -32,7 +33,6 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/sandbox_init.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
-#include "ipc/ipc_switches.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/named_platform_channel_pair.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
@@ -145,7 +145,7 @@ class ServiceUtilityProcessHost::PdfToEmfState {
 
   base::File CreateTempFile() {
     base::FilePath path;
-    if (!base::CreateTemporaryFileInDir(temp_dir_.path(), &path))
+    if (!base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &path))
       return base::File();
     return base::File(path,
                       base::File::FLAG_CREATE_ALWAYS |

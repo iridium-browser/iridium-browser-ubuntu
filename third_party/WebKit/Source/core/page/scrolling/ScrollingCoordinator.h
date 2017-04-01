@@ -27,9 +27,9 @@
 #define ScrollingCoordinator_h
 
 #include "core/CoreExport.h"
-#include "core/layout/LayoutObject.h"
-#include "platform/PlatformWheelEvent.h"
+#include "core/paint/LayerHitTestRects.h"
 #include "platform/geometry/IntRect.h"
+#include "platform/heap/Handle.h"
 #include "platform/scroll/MainThreadScrollingReason.h"
 #include "platform/scroll/ScrollTypes.h"
 #include "wtf/Noncopyable.h"
@@ -37,131 +37,157 @@
 #include <memory>
 
 namespace blink {
-class WebScrollbarLayer;
-}
-
-namespace blink {
-
 using MainThreadScrollingReasons = uint32_t;
 
+class CompositorAnimationHost;
+class CompositorAnimationTimeline;
+class LayoutBox;
 class LocalFrame;
 class FrameView;
 class GraphicsLayer;
 class Page;
+class PaintLayer;
 class Region;
 class ScrollableArea;
-class CompositorAnimationTimeline;
 class WebLayerTreeView;
+class WebScrollbarLayer;
 
-class CORE_EXPORT ScrollingCoordinator final : public GarbageCollectedFinalized<ScrollingCoordinator> {
-    WTF_MAKE_NONCOPYABLE(ScrollingCoordinator);
-public:
-    static ScrollingCoordinator* create(Page*);
+class CORE_EXPORT ScrollingCoordinator final
+    : public GarbageCollectedFinalized<ScrollingCoordinator> {
+  WTF_MAKE_NONCOPYABLE(ScrollingCoordinator);
 
-    ~ScrollingCoordinator();
-    DECLARE_TRACE();
+ public:
+  static ScrollingCoordinator* create(Page*);
 
-    void layerTreeViewInitialized(WebLayerTreeView&);
-    void willCloseLayerTreeView(WebLayerTreeView&);
+  ~ScrollingCoordinator();
+  DECLARE_TRACE();
 
-    void willBeDestroyed();
+  // The FrameView argument is optional, nullptr causes the the scrolling
+  // animation host and timeline to be owned by the ScrollingCoordinator. When
+  // not null, the host and timeline are attached to the specified FrameView.
+  // A FrameView only needs to own them when it is the view for an OOPIF.
+  void layerTreeViewInitialized(WebLayerTreeView&, FrameView*);
+  void willCloseLayerTreeView(WebLayerTreeView&, FrameView*);
 
-    // Return whether this scrolling coordinator handles scrolling for the given frame view.
-    bool coordinatesScrollingForFrameView(FrameView*) const;
+  void willBeDestroyed();
 
-    // Called when any frame has done its layout or compositing has changed.
-    void notifyGeometryChanged();
-    // Called when any frame recalculates its overflows after style change.
-    void notifyOverflowUpdated();
+  // Return whether this scrolling coordinator handles scrolling for the given
+  // frame view.
+  bool coordinatesScrollingForFrameView(FrameView*) const;
 
-    void updateAfterCompositingChangeIfNeeded();
+  // Called when any frame has done its layout or compositing has changed.
+  void notifyGeometryChanged();
+  // Called when any frame recalculates its overflows after style change.
+  void notifyOverflowUpdated();
+  // Called when any layoutBox has transform changed
+  void notifyTransformChanged(const LayoutBox&);
 
-    // Should be called whenever a scrollable area is added or removed, or gains/loses a composited layer.
-    void scrollableAreasDidChange();
+  void updateAfterCompositingChangeIfNeeded();
 
-    // Should be called whenever the slow repaint objects counter changes between zero and one.
-    void frameViewHasBackgroundAttachmentFixedObjectsDidChange(FrameView*);
+  // Should be called whenever a frameview visibility is changed.
+  void frameViewVisibilityDidChange();
 
-    // Should be called whenever the set of fixed objects changes.
-    void frameViewFixedObjectsDidChange(FrameView*);
+  // Should be called whenever a scrollable area is added or removed, or
+  // gains/loses a composited layer.
+  void scrollableAreasDidChange();
 
-    // Should be called whenever the root layer for the given frame view changes.
-    void frameViewRootLayerDidChange(FrameView*);
+  // Should be called whenever the slow repaint objects counter changes between
+  // zero and one.
+  void frameViewHasBackgroundAttachmentFixedObjectsDidChange(FrameView*);
 
-#if OS(MACOSX)
-    // Dispatched by the scrolling tree during handleWheelEvent. This is required as long as scrollbars are painted on the main thread.
-    void handleWheelEventPhase(PlatformWheelEventPhase);
-#endif
+  // Should be called whenever the set of fixed objects changes.
+  void frameViewFixedObjectsDidChange(FrameView*);
 
-    MainThreadScrollingReasons mainThreadScrollingReasons() const;
-    bool shouldUpdateScrollLayerPositionOnMainThread() const { return mainThreadScrollingReasons() != 0; }
+  // Should be called whenever the root layer for the given frame view changes.
+  void frameViewRootLayerDidChange(FrameView*);
 
-    std::unique_ptr<WebScrollbarLayer> createSolidColorScrollbarLayer(ScrollbarOrientation, int thumbThickness, int trackStart, bool isLeftSideVerticalScrollbar);
+  std::unique_ptr<WebScrollbarLayer> createSolidColorScrollbarLayer(
+      ScrollbarOrientation,
+      int thumbThickness,
+      int trackStart,
+      bool isLeftSideVerticalScrollbar);
 
-    void willDestroyScrollableArea(ScrollableArea*);
-    // Returns true if the coordinator handled this change.
-    bool scrollableAreaScrollLayerDidChange(ScrollableArea*);
-    void scrollableAreaScrollbarLayerDidChange(ScrollableArea*, ScrollbarOrientation);
-    void setLayerIsContainerForFixedPositionLayers(GraphicsLayer*, bool);
-    void updateLayerPositionConstraint(PaintLayer*);
-    void touchEventTargetRectsDidChange();
-    void willDestroyLayer(PaintLayer*);
+  void willDestroyScrollableArea(ScrollableArea*);
+  // Returns true if the coordinator handled this change.
+  bool scrollableAreaScrollLayerDidChange(ScrollableArea*);
+  void scrollableAreaScrollbarLayerDidChange(ScrollableArea*,
+                                             ScrollbarOrientation);
+  void setLayerIsContainerForFixedPositionLayers(GraphicsLayer*, bool);
+  void updateLayerPositionConstraint(PaintLayer*);
+  void touchEventTargetRectsDidChange();
+  void willDestroyLayer(PaintLayer*);
 
-    void updateScrollParentForGraphicsLayer(GraphicsLayer* child, const PaintLayer* parent);
-    void updateClipParentForGraphicsLayer(GraphicsLayer* child, const PaintLayer* parent);
+  void updateScrollParentForGraphicsLayer(GraphicsLayer* child,
+                                          const PaintLayer* parent);
+  void updateClipParentForGraphicsLayer(GraphicsLayer* child,
+                                        const PaintLayer* parent);
+  Region computeShouldHandleScrollGestureOnMainThreadRegion(
+      const LocalFrame*,
+      const IntPoint& frameLocation) const;
 
-    String mainThreadScrollingReasonsAsText() const;
-    Region computeShouldHandleScrollGestureOnMainThreadRegion(const LocalFrame*, const IntPoint& frameLocation) const;
+  void updateTouchEventTargetRectsIfNeeded();
 
-    void updateTouchEventTargetRectsIfNeeded();
+  CompositorAnimationHost* compositorAnimationHost() {
+    return m_animationHost.get();
+  }
+  CompositorAnimationTimeline* compositorAnimationTimeline() {
+    return m_programmaticScrollAnimatorTimeline.get();
+  }
 
-    CompositorAnimationTimeline* compositorAnimationTimeline() { return m_programmaticScrollAnimatorTimeline.get(); }
+  // For testing purposes only. This ScrollingCoordinator is reused between
+  // layout test, and must be reset for the results to be valid.
+  void reset();
 
-    // For testing purposes only. This ScrollingCoordinator is reused between layout test, and must be reset
-    // for the results to be valid.
-    void reset();
+ protected:
+  explicit ScrollingCoordinator(Page*);
 
-protected:
-    explicit ScrollingCoordinator(Page*);
+  bool isForRootLayer(ScrollableArea*) const;
+  bool isForMainFrame(ScrollableArea*) const;
 
-    bool isForRootLayer(ScrollableArea*) const;
-    bool isForMainFrame(ScrollableArea*) const;
+  Member<Page> m_page;
 
-    Member<Page> m_page;
+  // Dirty flags used to idenfity what really needs to be computed after
+  // compositing is updated.
+  bool m_scrollGestureRegionIsDirty;
+  bool m_touchEventTargetRectsAreDirty;
+  bool m_shouldScrollOnMainThreadDirty;
 
-    // Dirty flags used to idenfity what really needs to be computed after compositing is updated.
-    bool m_scrollGestureRegionIsDirty;
-    bool m_touchEventTargetRectsAreDirty;
-    bool m_shouldScrollOnMainThreadDirty;
+ private:
+  bool shouldUpdateAfterCompositingChange() const {
+    return m_scrollGestureRegionIsDirty || m_touchEventTargetRectsAreDirty ||
+           m_shouldScrollOnMainThreadDirty || frameViewIsDirty();
+  }
 
-private:
-    bool shouldUpdateAfterCompositingChange() const { return m_scrollGestureRegionIsDirty || m_touchEventTargetRectsAreDirty || m_shouldScrollOnMainThreadDirty || frameViewIsDirty(); }
+  void setShouldUpdateScrollLayerPositionOnMainThread(
+      MainThreadScrollingReasons);
 
-    void setShouldUpdateScrollLayerPositionOnMainThread(MainThreadScrollingReasons);
+  void setShouldHandleScrollGestureOnMainThreadRegion(const Region&);
+  void setTouchEventTargetRects(LayerHitTestRects&);
+  void computeTouchEventTargetRects(LayerHitTestRects&);
 
-    bool hasVisibleSlowRepaintViewportConstrainedObjects(FrameView*) const;
+  WebScrollbarLayer* addWebScrollbarLayer(ScrollableArea*,
+                                          ScrollbarOrientation,
+                                          std::unique_ptr<WebScrollbarLayer>);
+  WebScrollbarLayer* getWebScrollbarLayer(ScrollableArea*,
+                                          ScrollbarOrientation);
+  void removeWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation);
 
-    void setShouldHandleScrollGestureOnMainThreadRegion(const Region&);
-    void setTouchEventTargetRects(LayerHitTestRects&);
-    void computeTouchEventTargetRects(LayerHitTestRects&);
+  bool frameViewIsDirty() const;
 
-    WebScrollbarLayer* addWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation, std::unique_ptr<WebScrollbarLayer>);
-    WebScrollbarLayer* getWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation);
-    void removeWebScrollbarLayer(ScrollableArea*, ScrollbarOrientation);
+  std::unique_ptr<CompositorAnimationHost> m_animationHost;
+  std::unique_ptr<CompositorAnimationTimeline>
+      m_programmaticScrollAnimatorTimeline;
 
-    bool frameViewIsDirty() const;
+  using ScrollbarMap =
+      HeapHashMap<Member<ScrollableArea>, std::unique_ptr<WebScrollbarLayer>>;
+  ScrollbarMap m_horizontalScrollbars;
+  ScrollbarMap m_verticalScrollbars;
+  HashSet<const PaintLayer*> m_layersWithTouchRects;
+  bool m_wasFrameScrollable;
 
-    std::unique_ptr<CompositorAnimationTimeline> m_programmaticScrollAnimatorTimeline;
-
-    using ScrollbarMap = HeapHashMap<Member<ScrollableArea>, std::unique_ptr<WebScrollbarLayer>>;
-    ScrollbarMap m_horizontalScrollbars;
-    ScrollbarMap m_verticalScrollbars;
-    HashSet<const PaintLayer*> m_layersWithTouchRects;
-    bool m_wasFrameScrollable;
-
-    MainThreadScrollingReasons m_lastMainThreadScrollingReasons;
+  MainThreadScrollingReasons m_lastMainThreadScrollingReasons;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ScrollingCoordinator_h
+#endif  // ScrollingCoordinator_h

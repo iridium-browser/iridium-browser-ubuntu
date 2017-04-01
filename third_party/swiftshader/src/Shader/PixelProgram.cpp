@@ -28,7 +28,7 @@ namespace sw
 	{
 		if(shader->getVersion() >= 0x0300)
 		{
-			if(shader->vPosDeclared)
+			if(shader->isVPosDeclared())
 			{
 				if(!halfIntegerCoordinates)
 				{
@@ -48,7 +48,7 @@ namespace sw
 				}
 			}
 
-			if(shader->vFaceDeclared)
+			if(shader->isVFaceDeclared())
 			{
 				Float4 area = *Pointer<Float>(primitive + OFFSET(Primitive, area));
 				Float4 face = booleanFaceRegister ? Float4(As<Float4>(CmpNLT(area, Float4(0.0f)))) : area;
@@ -320,10 +320,10 @@ namespace sw
 			case Shader::OPCODE_CMP:        cmp(d, s0, s1, control);                       break;
 			case Shader::OPCODE_ALL:        all(d.x, s0);                                  break;
 			case Shader::OPCODE_ANY:        any(d.x, s0);                                  break;
-			case Shader::OPCODE_NOT:        not(d, s0);                                    break;
-			case Shader::OPCODE_OR:         or(d, s0, s1);                                 break;
-			case Shader::OPCODE_XOR:        xor(d, s0, s1);                                break;
-			case Shader::OPCODE_AND:        and(d, s0, s1);                                break;
+			case Shader::OPCODE_NOT:        bitwise_not(d, s0);                            break;
+			case Shader::OPCODE_OR:         bitwise_or(d, s0, s1);                         break;
+			case Shader::OPCODE_XOR:        bitwise_xor(d, s0, s1);                        break;
+			case Shader::OPCODE_AND:        bitwise_and(d, s0, s1);                        break;
 			case Shader::OPCODE_EQ:         equal(d, s0, s1);                              break;
 			case Shader::OPCODE_NE:         notEqual(d, s0, s1);                           break;
 			case Shader::OPCODE_END:                                                       break;
@@ -604,6 +604,7 @@ namespace sw
 			case FORMAT_A8B8G8R8:
 			case FORMAT_SRGB8_X8:
 			case FORMAT_SRGB8_A8:
+			case FORMAT_G8R8:
 			case FORMAT_R8:
 			case FORMAT_A8:
 			case FORMAT_G16R16:
@@ -741,6 +742,7 @@ namespace sw
 			case FORMAT_X8B8G8R8:
 			case FORMAT_SRGB8_X8:
 			case FORMAT_SRGB8_A8:
+			case FORMAT_G8R8:
 			case FORMAT_R8:
 			case FORMAT_A8:
 			case FORMAT_G16R16:
@@ -760,6 +762,18 @@ namespace sw
 			case FORMAT_R32UI:
 			case FORMAT_G32R32UI:
 			case FORMAT_A32B32G32R32UI:
+			case FORMAT_R16I:
+			case FORMAT_G16R16I:
+			case FORMAT_A16B16G16R16I:
+			case FORMAT_R16UI:
+			case FORMAT_G16R16UI:
+			case FORMAT_A16B16G16R16UI:
+			case FORMAT_R8I:
+			case FORMAT_G8R8I:
+			case FORMAT_A8B8G8R8I:
+			case FORMAT_R8UI:
+			case FORMAT_G8R8UI:
+			case FORMAT_A8B8G8R8UI:
 				break;
 			default:
 				ASSERT(false);
@@ -1224,8 +1238,8 @@ namespace sw
 
 	void PixelProgram::BREAK()
 	{
-		llvm::BasicBlock *deadBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *endBlock = loopRepEndBlock[loopRepDepth - 1];
+		BasicBlock *deadBlock = Nucleus::createBasicBlock();
+		BasicBlock *endBlock = loopRepEndBlock[loopRepDepth - 1];
 
 		if(breakDepth == 0)
 		{
@@ -1280,8 +1294,8 @@ namespace sw
 	{
 		condition &= enableStack[enableIndex];
 
-		llvm::BasicBlock *continueBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *endBlock = loopRepEndBlock[loopRepDepth - 1];
+		BasicBlock *continueBlock = Nucleus::createBasicBlock();
+		BasicBlock *endBlock = loopRepEndBlock[loopRepDepth - 1];
 
 		enableBreak = enableBreak & ~condition;
 		Bool allBreak = SignMask(enableBreak) == 0x0;
@@ -1400,8 +1414,8 @@ namespace sw
 	{
 		ifDepth--;
 
-		llvm::BasicBlock *falseBlock = ifFalseBlock[ifDepth];
-		llvm::BasicBlock *endBlock = Nucleus::createBasicBlock();
+		BasicBlock *falseBlock = ifFalseBlock[ifDepth];
+		BasicBlock *endBlock = Nucleus::createBasicBlock();
 
 		if(isConditionalIf[ifDepth])
 		{
@@ -1427,7 +1441,7 @@ namespace sw
 	{
 		ifDepth--;
 
-		llvm::BasicBlock *endBlock = ifFalseBlock[ifDepth];
+		BasicBlock *endBlock = ifFalseBlock[ifDepth];
 
 		Nucleus::createBr(endBlock);
 		Nucleus::setInsertBlock(endBlock);
@@ -1445,8 +1459,8 @@ namespace sw
 
 		aL[loopDepth] = aL[loopDepth] + increment[loopDepth];   // FIXME: +=
 
-		llvm::BasicBlock *testBlock = loopRepTestBlock[loopRepDepth];
-		llvm::BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
+		BasicBlock *testBlock = loopRepTestBlock[loopRepDepth];
+		BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
 
 		Nucleus::createBr(testBlock);
 		Nucleus::setInsertBlock(endBlock);
@@ -1459,8 +1473,8 @@ namespace sw
 	{
 		loopRepDepth--;
 
-		llvm::BasicBlock *testBlock = loopRepTestBlock[loopRepDepth];
-		llvm::BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
+		BasicBlock *testBlock = loopRepTestBlock[loopRepDepth];
+		BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
 
 		Nucleus::createBr(testBlock);
 		Nucleus::setInsertBlock(endBlock);
@@ -1473,8 +1487,8 @@ namespace sw
 	{
 		loopRepDepth--;
 
-		llvm::BasicBlock *testBlock = loopRepTestBlock[loopRepDepth];
-		llvm::BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
+		BasicBlock *testBlock = loopRepTestBlock[loopRepDepth];
+		BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
 
 		Nucleus::createBr(testBlock);
 		Nucleus::setInsertBlock(endBlock);
@@ -1488,7 +1502,7 @@ namespace sw
 	{
 		loopRepDepth--;
 
-		llvm::BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
+		BasicBlock *endBlock = loopRepEndBlock[loopRepDepth];
 
 		Nucleus::createBr(loopRepEndBlock[loopRepDepth]);
 		Nucleus::setInsertBlock(endBlock);
@@ -1525,8 +1539,8 @@ namespace sw
 			condition = !condition;
 		}
 
-		llvm::BasicBlock *trueBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *falseBlock = Nucleus::createBasicBlock();
+		BasicBlock *trueBlock = Nucleus::createBasicBlock();
+		BasicBlock *falseBlock = Nucleus::createBasicBlock();
 
 		branch(condition, trueBlock, falseBlock);
 
@@ -1574,8 +1588,8 @@ namespace sw
 		enableIndex++;
 		enableStack[enableIndex] = condition;
 
-		llvm::BasicBlock *trueBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *falseBlock = Nucleus::createBasicBlock();
+		BasicBlock *trueBlock = Nucleus::createBasicBlock();
+		BasicBlock *falseBlock = Nucleus::createBasicBlock();
 
 		Bool notAllFalse = SignMask(condition) != 0;
 
@@ -1612,9 +1626,9 @@ namespace sw
 		//		increment[loopDepth] = 1;
 		//	}
 
-		llvm::BasicBlock *loopBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *testBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *endBlock = Nucleus::createBasicBlock();
+		BasicBlock *loopBlock = Nucleus::createBasicBlock();
+		BasicBlock *testBlock = Nucleus::createBasicBlock();
+		BasicBlock *endBlock = Nucleus::createBasicBlock();
 
 		loopRepTestBlock[loopRepDepth] = testBlock;
 		loopRepEndBlock[loopRepDepth] = endBlock;
@@ -1639,9 +1653,9 @@ namespace sw
 		iteration[loopDepth] = *Pointer<Int>(data + OFFSET(DrawData, ps.i[integerRegister.index][0]));
 		aL[loopDepth] = aL[loopDepth - 1];
 
-		llvm::BasicBlock *loopBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *testBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *endBlock = Nucleus::createBasicBlock();
+		BasicBlock *loopBlock = Nucleus::createBasicBlock();
+		BasicBlock *testBlock = Nucleus::createBasicBlock();
+		BasicBlock *endBlock = Nucleus::createBasicBlock();
 
 		loopRepTestBlock[loopRepDepth] = testBlock;
 		loopRepEndBlock[loopRepDepth] = endBlock;
@@ -1663,9 +1677,9 @@ namespace sw
 	{
 		enableIndex++;
 
-		llvm::BasicBlock *loopBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *testBlock = Nucleus::createBasicBlock();
-		llvm::BasicBlock *endBlock = Nucleus::createBasicBlock();
+		BasicBlock *loopBlock = Nucleus::createBasicBlock();
+		BasicBlock *testBlock = Nucleus::createBasicBlock();
+		BasicBlock *endBlock = Nucleus::createBasicBlock();
 
 		loopRepTestBlock[loopRepDepth] = testBlock;
 		loopRepEndBlock[loopRepDepth] = endBlock;
@@ -1701,7 +1715,7 @@ namespace sw
 		enableIndex++;
 		enableStack[enableIndex] = Int4(0xFFFFFFFF);
 
-		llvm::BasicBlock *endBlock = Nucleus::createBasicBlock();
+		BasicBlock *endBlock = Nucleus::createBasicBlock();
 
 		loopRepTestBlock[loopRepDepth] = nullptr;
 		loopRepEndBlock[loopRepDepth] = endBlock;
@@ -1719,19 +1733,19 @@ namespace sw
 		}
 		else
 		{
-			llvm::BasicBlock *unreachableBlock = Nucleus::createBasicBlock();
+			BasicBlock *unreachableBlock = Nucleus::createBasicBlock();
 
 			if(callRetBlock[currentLabel].size() > 1)   // Pop the return destination from the call stack
 			{
 				// FIXME: Encapsulate
 				UInt index = callStack[--stackIndex];
 
-				llvm::Value *value = index.loadValue();
-				llvm::Value *switchInst = Nucleus::createSwitch(value, unreachableBlock, (int)callRetBlock[currentLabel].size());
+				Value *value = index.loadValue();
+				SwitchCases *switchCases = Nucleus::createSwitch(value, unreachableBlock, (int)callRetBlock[currentLabel].size());
 
 				for(unsigned int i = 0; i < callRetBlock[currentLabel].size(); i++)
 				{
-					Nucleus::addSwitchCase(switchInst, i, callRetBlock[currentLabel][i]);
+					Nucleus::addSwitchCase(switchCases, i, callRetBlock[currentLabel][i]);
 				}
 			}
 			else if(callRetBlock[currentLabel].size() == 1)   // Jump directly to the unique return destination

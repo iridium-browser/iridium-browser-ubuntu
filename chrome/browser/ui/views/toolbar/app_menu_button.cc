@@ -9,6 +9,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_otr_state.h"
@@ -16,55 +17,43 @@
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
 #include "chrome/browser/ui/views/toolbar/app_menu.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/grit/theme_resources.h"
 #include "extensions/common/feature_switch.h"
-#include "grit/theme_resources.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/menu/menu_listener.h"
 #include "ui/views/metrics.h"
-#include "ui/views/painter.h"
 
 // static
 bool AppMenuButton::g_open_app_immediately_for_testing = false;
 
 AppMenuButton::AppMenuButton(ToolbarView* toolbar_view)
     : views::MenuButton(base::string16(), toolbar_view, false),
-      severity_(AppMenuIconPainter::SEVERITY_NONE),
+      severity_(AppMenuIconController::Severity::NONE),
       type_(AppMenuIconController::IconType::NONE),
       toolbar_view_(toolbar_view),
       allow_extension_dragging_(
           extensions::FeatureSwitch::extension_action_redesign()->IsEnabled()),
       margin_trailing_(0),
       weak_factory_(this) {
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    SetInkDropMode(InkDropMode::ON);
-    SetFocusPainter(nullptr);
-  } else {
-    icon_painter_.reset(new AppMenuIconPainter(this));
-  }
+  SetInkDropMode(InkDropMode::ON);
+  SetFocusPainter(nullptr);
 }
 
 AppMenuButton::~AppMenuButton() {}
 
 void AppMenuButton::SetSeverity(AppMenuIconController::IconType type,
-                                AppMenuIconPainter::Severity severity,
+                                AppMenuIconController::Severity severity,
                                 bool animate) {
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    severity_ = severity;
-    type_ = type;
-    UpdateIcon();
-    return;
-  }
-
-  icon_painter_->SetSeverity(severity, animate);
-  SchedulePaint();
+  type_ = type;
+  severity_ = severity;
+  UpdateIcon();
 }
 
 void AppMenuButton::ShowMenu(bool for_drop) {
@@ -86,7 +75,8 @@ void AppMenuButton::ShowMenu(bool for_drop) {
   menu_model_.reset(new AppMenuModel(toolbar_view_, browser));
   menu_->Init(menu_model_.get());
 
-  FOR_EACH_OBSERVER(views::MenuListener, menu_listeners_, OnMenuOpened());
+  for (views::MenuListener& observer : menu_listeners_)
+    observer.OnMenuOpened();
 
   base::TimeTicks menu_open_time = base::TimeTicks::Now();
   menu_->RunMenu(this);
@@ -119,76 +109,54 @@ void AppMenuButton::RemoveMenuListener(views::MenuListener* listener) {
 }
 
 gfx::Size AppMenuButton::GetPreferredSize() const {
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    gfx::Size size(image()->GetPreferredSize());
-    const ui::ThemeProvider* provider = GetThemeProvider();
-    if (provider) {
-      gfx::Insets insets(GetLayoutInsets(TOOLBAR_BUTTON));
-      size.Enlarge(insets.width(), insets.height());
-    }
-    return size;
-  }
-
-  return ResourceBundle::GetSharedInstance().
-      GetImageSkiaNamed(IDR_TOOLBAR_BEZEL_HOVER)->size();
-}
-
-void AppMenuButton::ScheduleAppMenuIconPaint() {
-  SchedulePaint();
+  gfx::Rect rect(image()->GetPreferredSize());
+  rect.Inset(gfx::Insets(-ToolbarButton::kInteriorPadding));
+  return rect.size();
 }
 
 void AppMenuButton::UpdateIcon() {
-  DCHECK(ui::MaterialDesignController::IsModeMaterial());
   SkColor color = gfx::kPlaceholderColor;
   const ui::NativeTheme* native_theme = GetNativeTheme();
   switch (severity_) {
-    case AppMenuIconPainter::SEVERITY_NONE:
+    case AppMenuIconController::Severity::NONE:
       color = GetThemeProvider()->GetColor(
           ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON);
       break;
-    case AppMenuIconPainter::SEVERITY_LOW:
+    case AppMenuIconController::Severity::LOW:
       color = native_theme->GetSystemColor(
           ui::NativeTheme::kColorId_AlertSeverityLow);
       break;
-    case AppMenuIconPainter::SEVERITY_MEDIUM:
+    case AppMenuIconController::Severity::MEDIUM:
       color = native_theme->GetSystemColor(
           ui::NativeTheme::kColorId_AlertSeverityMedium);
       break;
-    case AppMenuIconPainter::SEVERITY_HIGH:
+    case AppMenuIconController::Severity::HIGH:
       color = native_theme->GetSystemColor(
           ui::NativeTheme::kColorId_AlertSeverityHigh);
       break;
   }
 
-  gfx::VectorIconId icon_id = gfx::VectorIconId::VECTOR_ICON_NONE;
+  const gfx::VectorIcon* icon_id = nullptr;
   switch (type_) {
     case AppMenuIconController::IconType::NONE:
-      icon_id = gfx::VectorIconId::BROWSER_TOOLS;
-      DCHECK_EQ(severity_, AppMenuIconPainter::SEVERITY_NONE);
+      icon_id = &kBrowserToolsIcon;
+      DCHECK_EQ(AppMenuIconController::Severity::NONE, severity_);
       break;
     case AppMenuIconController::IconType::UPGRADE_NOTIFICATION:
-      icon_id = gfx::VectorIconId::BROWSER_TOOLS_UPDATE;
+      icon_id = &kBrowserToolsUpdateIcon;
       break;
     case AppMenuIconController::IconType::GLOBAL_ERROR:
     case AppMenuIconController::IconType::INCOMPATIBILITY_WARNING:
-      icon_id = gfx::VectorIconId::BROWSER_TOOLS_ERROR;
+      icon_id = &kBrowserToolsErrorIcon;
       break;
   }
 
-  SetImage(views::Button::STATE_NORMAL, gfx::CreateVectorIcon(icon_id, color));
+  SetImage(views::Button::STATE_NORMAL, gfx::CreateVectorIcon(*icon_id, color));
 }
 
 void AppMenuButton::SetTrailingMargin(int margin) {
   margin_trailing_ = margin;
-
   UpdateThemedBorder();
-
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    const int inset = LabelButton::kFocusRectInset;
-    SetFocusPainter(views::Painter::CreateDashedFocusPainterWithInsets(
-        gfx::Insets(inset, inset, inset, inset + margin)));
-  }
-
   InvalidateLayout();
 }
 
@@ -264,16 +232,4 @@ void AppMenuButton::OnDragExited() {
 int AppMenuButton::OnPerformDrop(const ui::DropTargetEvent& event) {
   DCHECK(allow_extension_dragging_);
   return ui::DragDropTypes::DRAG_MOVE;
-}
-
-void AppMenuButton::OnPaint(gfx::Canvas* canvas) {
-  views::MenuButton::OnPaint(canvas);
-  if (ui::MaterialDesignController::IsModeMaterial())
-    return;
-  // Use GetPreferredSize() to center the icon inside the visible bounds rather
-  // than the whole size() (which may refer to hit test region extended to the
-  // end of the toolbar in maximized mode).
-  icon_painter_->Paint(canvas, GetThemeProvider(),
-                       gfx::Rect(GetPreferredSize()),
-                       AppMenuIconPainter::BEZEL_NONE);
 }

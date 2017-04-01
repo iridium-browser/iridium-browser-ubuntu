@@ -58,7 +58,7 @@ class GCMEncryptionProviderTest : public ::testing::Test {
     ASSERT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
 
     encryption_provider_.reset(new GCMEncryptionProvider);
-    encryption_provider_->Init(scoped_temp_dir_.path(),
+    encryption_provider_->Init(scoped_temp_dir_.GetPath(),
                                message_loop_.task_runner());
   }
 
@@ -496,8 +496,7 @@ void GCMEncryptionProviderTest::TestEncryptionRoundTrip(
   // Encrypts the |kExampleMessage| using the generated shared key and the
   // random |salt|, storing the result in |record_size| and the message.
   GCMMessageCryptographer cryptographer(
-      GCMMessageCryptographer::Label::P256, pair.public_key(),
-      server_pair.public_key(), auth_secret);
+      pair.public_key(), server_pair.public_key(), auth_secret);
 
   ASSERT_TRUE(cryptographer.Encrypt(kExampleMessage, shared_secret, salt,
                                     &record_size, &message.raw_data));

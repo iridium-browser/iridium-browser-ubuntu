@@ -8,10 +8,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Environment;
 import android.provider.Browser;
-import android.test.suitebuilder.annotation.LargeTest;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.LargeTest;
+import android.support.test.filters.MediumTest;
 import android.text.TextUtils;
 import android.view.ContextMenu;
 import android.view.View;
@@ -24,6 +23,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
@@ -45,6 +45,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * Test the behavior of tabs when opening a URL from an external app.
  */
+@RetryOnFailure
 public class TabsOpenedFromExternalAppTest extends ChromeTabbedActivityTestBase {
     private static final String EXTERNAL_APP_1_ID = "app1";
     private static final String EXTERNAL_APP_2_ID = "app2";
@@ -169,8 +170,7 @@ public class TabsOpenedFromExternalAppTest extends ChromeTabbedActivityTestBase 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 
     @Override
@@ -199,7 +199,7 @@ public class TabsOpenedFromExternalAppTest extends ChromeTabbedActivityTestBase 
         if (firstParty) {
             Context context = getInstrumentation().getTargetContext();
             intent.setPackage(context.getPackageName());
-            IntentHandler.addTrustedIntentExtras(intent, context);
+            IntentHandler.addTrustedIntentExtras(intent);
         }
 
         final Tab originalTab = getActivity().getActivityTab();
@@ -708,7 +708,7 @@ public class TabsOpenedFromExternalAppTest extends ChromeTabbedActivityTestBase 
      */
     @MediumTest
     @CommandLineFlags.Add({"enable-spdy-proxy-auth", "data-reduction-proxy-lo-fi=always-on",
-            "enable-data-reduction-proxy-lo-fi-preview"})
+            "enable-data-reduction-proxy-lite-page"})
     public void testLaunchWebLiteURL() throws InterruptedException {
         startMainActivityFromLauncher();
 

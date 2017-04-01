@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import __main__
 import collections
 import contextlib
 from datetime import datetime
@@ -29,7 +28,7 @@ import time
 import traceback
 import types
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.lib import cros_logging as logging
 from chromite.lib import signals
 
@@ -172,7 +171,7 @@ class CommandResult(object):
   @property
   def cmdstr(self):
     """Return self.cmd as a space-separated string, useful for log messages."""
-    return CmdToStr(self.cmd)
+    return CmdToStr(self.cmd or '')
 
 
 class RunCommandError(Exception):
@@ -396,7 +395,7 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
                redirect_stderr=False, cwd=None, input=None, enter_chroot=False,
                shell=False, env=None, extra_env=None, ignore_sigint=False,
                combine_stdout_stderr=False, log_stdout_to_file=None,
-               chroot_args=None, debug_level=logging.INFO,
+               append_to_file=False, chroot_args=None, debug_level=logging.INFO,
                error_code_ok=False, int_timeout=1, kill_timeout=1,
                log_output=False, stdout_to_pipe=False, capture_output=False,
                quiet=False, mute_output=None):
@@ -433,6 +432,8 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
     log_stdout_to_file: If set, redirects stdout to file specified by this path.
       If |combine_stdout_stderr| is set to True, then stderr will also be logged
       to the specified file.
+    append_to_file: If True, the stdout streams are appended to the end of log
+      stdout_to_file.
     chroot_args: An array of arguments for the chroot environment wrapper.
     debug_level: The debug level of RunCommand's output.
     error_code_ok: Does not raise an exception when command returns a non-zero
@@ -493,7 +494,10 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
   # what a separate process did to that file can result in a bad
   # view of the file.
   if log_stdout_to_file:
-    stdout = open(log_stdout_to_file, 'w+')
+    if append_to_file:
+      stdout = open(log_stdout_to_file, 'a+')
+    else:
+      stdout = open(log_stdout_to_file, 'w+')
   elif stdout_to_pipe:
     stdout = subprocess.PIPE
   elif redirect_stdout or mute_output or log_output:
@@ -611,7 +615,9 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
         logging.log(debug_level, '(stderr):\n%s', cmd_result.error)
 
     if not error_code_ok and proc.returncode:
-      msg = 'cwd=%s' % cwd
+      msg = 'cmd=%s' % cmd
+      if cwd:
+        msg += ', cwd=%s' % cwd
       if extra_env:
         msg += ', extra env=%s' % extra_env
       if error_message:
@@ -774,54 +780,14 @@ def HostIsCIBuilder(fq_hostname=None, golo_only=False, gce_only=False):
   if not fq_hostname:
     fq_hostname = GetHostName(fully_qualified=True)
   in_golo = fq_hostname.endswith('.' + constants.GOLO_DOMAIN)
-  in_gce = fq_hostname.endswith('.' + constants.CHROME_DOMAIN)
+  in_gce = (fq_hostname.endswith('.' + constants.CHROME_DOMAIN) or
+            fq_hostname.endswith('.' + constants.CHROMEOS_BOT_INTERNAL))
   if golo_only:
     return in_golo
   elif gce_only:
     return in_gce
   else:
     return in_golo or in_gce
-
-
-def TimedCommand(functor, *args, **kwargs):
-  """Wrapper for simple log timing of other python functions.
-
-  If you want to log info about how long it took to run an arbitrary command,
-  you would do something like:
-    TimedCommand(RunCommand, ['wget', 'http://foo'])
-
-  Args:
-    functor: The function to run.
-    args: The args to pass to the function.
-    kwargs: Optional args to pass to the function.
-    timed_log_level: The log level to use (defaults to logging.INFO).
-    timed_log_msg: The message to log after the command completes.  It may have
-      keywords: "name" (the function name), "args" (the args passed to the
-      func), "kwargs" (the kwargs passed to the func), "ret" (the return value
-      from the func), and "delta" (the timing delta).
-    timed_log_callback: Function to call upon completion (instead of logging).
-      Will be passed (log_level, log_msg, result, datetime.timedelta).
-  """
-  log_msg = kwargs.pop(
-      'timed_log_msg',
-      '%(name)s(*%(args)r, **%(kwargs)r)=%(ret)s took: %(delta)s')
-  log_level = kwargs.pop('timed_log_level', logging.INFO)
-  log_callback = kwargs.pop('timed_log_callback', None)
-  start = datetime.now()
-  ret = functor(*args, **kwargs)
-  delta = datetime.now() - start
-  log_msg %= {
-      'name': getattr(functor, '__name__', repr(functor)),
-      'args': args,
-      'kwargs': kwargs,
-      'ret': ret,
-      'delta': delta,
-  }
-  if log_callback is None:
-    logging.log(log_level, log_msg)
-  else:
-    log_callback(log_level, log_msg, ret, delta)
-  return ret
 
 
 COMP_NONE = 0
@@ -897,6 +863,27 @@ def CompressionStrToType(s):
     return COMP_NONE
 
 
+def CompressionExtToType(file_name):
+  """Retrieve a compression type constant from a compression file's name.
+
+  Args:
+    file_name: Name of a compression file.
+
+  Returns:
+    A constant, return COMP_NONE if the extension is unknown.
+  """
+  ext = os.path.splitext(file_name)[-1]
+  _COMP_EXT = {
+      '.tgz': COMP_GZIP,
+      '.gz': COMP_GZIP,
+      '.tbz2': COMP_BZIP2,
+      '.bz2': COMP_BZIP2,
+      '.txz': COMP_XZ,
+      '.xz': COMP_XZ,
+  }
+  return _COMP_EXT.get(ext, COMP_NONE)
+
+
 def CompressFile(infile, outfile):
   """Compress a file using compressor specified by |outfile| suffix.
 
@@ -905,8 +892,7 @@ def CompressFile(infile, outfile):
     outfile: Name of output file. Compression used is based on the
              type of suffix of the name specified (e.g.: .bz2).
   """
-  comp_str = outfile.rsplit('.', 1)[-1]
-  comp_type = CompressionStrToType(comp_str)
+  comp_type = CompressionExtToType(outfile)
   assert comp_type and comp_type != COMP_NONE
   comp = FindCompressor(comp_type)
   cmd = [comp, '-c', infile]
@@ -921,16 +907,19 @@ def UncompressFile(infile, outfile):
             type of suffix of the name specified (e.g.: .bz2).
     outfile: Name of output file.
   """
-  comp_str = infile.rsplit('.', 1)[-1]
-  comp_type = CompressionStrToType(comp_str)
+  comp_type = CompressionExtToType(infile)
   assert comp_type and comp_type != COMP_NONE
   comp = FindCompressor(comp_type)
   cmd = [comp, '-dc', infile]
   RunCommand(cmd, log_stdout_to_file=outfile)
 
 
-class TarOfOpenFileError(Exception):
-  """Exception raised when a file being tarred is opened for write."""
+class CreateTarballError(RunCommandError):
+  """Error while running tar.
+
+  We may run tar multiple times because of "soft" errors.  The result is from
+  the last RunCommand instance.
+  """
 
 
 def CreateTarball(target, cwd, sudo=False, compression=COMP_XZ, chroot=None,
@@ -951,40 +940,16 @@ def CreateTarball(target, cwd, sudo=False, compression=COMP_XZ, chroot=None,
 
   Returns:
     The cmd_result object returned by the RunCommand invocation.
+
+  Raises:
+    CreateTarballError: if the tar command failed, possibly after retry.
   """
   if inputs is None:
     inputs = ['.']
 
-  # TODO(dgarrett): Cleanup temp debugging for crbug.com/547055.
-  cmd = ['lsof']
-  # Copy the inputs, with the directories sorted to the beginning. lsof recurses
-  # into directories with +D, you can't use +D after a normal file name. I'm
-  # sure there is a better way to manage this.
-  cmd_files = [os.path.join(cwd, i) for i in inputs]
-  cmd_files.sort(key=os.path.isdir, reverse=True)
-
-  for f in cmd_files:
-    if os.path.isdir(f):
-      cmd.append('+D')
-    cmd.append(f)
-
-  # Build command of the form:
-  #   lsof +D sub +D sub2 file1 file2
-  result = RunCommand(
-      cmd, cwd=cwd,
-      combine_stdout_stderr=True, capture_output=True, error_code_ok=True)
-
-  # Search for any files open for write or update:
-  # cat     117977 dgarrett    1w   REG  252,1        0 1835299 sub2/subfile
-  if re.search(r'^(\S+\s+){3}\d+[uw]', result.output, re.MULTILINE):
-    raise TarOfOpenFileError(
-        'ERROR: Found open file before tar (crbug.com/547055):\n%s' %
-        result.output)
-  # End TODO.
-
   if extra_args is None:
     extra_args = []
-  kwargs.setdefault('debug_level', logging.DEBUG)
+  kwargs.setdefault('debug_level', logging.INFO)
 
   comp = FindCompressor(compression, chroot=chroot)
   cmd = (['tar'] +
@@ -992,25 +957,21 @@ def CreateTarball(target, cwd, sudo=False, compression=COMP_XZ, chroot=None,
          ['--sparse', '-I', comp, '-cf', target] +
          list(inputs))
   rc_func = SudoRunCommand if sudo else RunCommand
-  try:
-    return rc_func(cmd, cwd=cwd, **kwargs)
-  except RunCommandError as e:
-    # TODO(dgarrett): Cleanup temp debugging for crbug.com/547055
-    #
-    # In the condition we are watching for, tar output contains:
-    #  tar: <filename>: file changed as we read it
-    m = re.search(
-        r'tar: (.*): file changed as we read it',
-        e.result.output + e.result.error)
 
-    if m:
-      modified_file = m.group(1)
-      print('ERROR: crbug.com/547055 lsof for file: "%s"' % modified_file)
-      RunCommand(['lsof', modified_file], cwd=cwd, mute_output=False,
-                 error_code_ok=True)
-
-    raise
-    # End TODO.
+  # If tar fails with status 1, retry, but only once.  We think this is
+  # acceptable because we see directories being modified, but not files.  Our
+  # theory is that temporary files are created in those directories, but we
+  # haven't been able to prove it yet.
+  for try_count in range(2):
+    result = rc_func(cmd, cwd=cwd, **dict(kwargs, error_code_ok=True))
+    if result.returncode == 0:
+      return result
+    if result.returncode != 1 or try_count > 0:
+      raise CreateTarballError('CreateTarball', result)
+    assert result.returncode == 1 and try_count == 0
+    logging.warning('CreateTarball: tar: source modification time changed ' +
+                    '(see crbug.com/547055), retrying once')
+    logging.PrintBuildbotStepWarnings()
 
 
 def GroupByKey(input_iter, key):
@@ -1896,6 +1857,35 @@ def Collection(classname, **kwargs):
   return new_class
 
 
+# Structure to hold the values produced by TimedSection.
+#
+#  Attributes:
+#    start: The absolute start time as a datetime.
+#    finish: The absolute finish time as a datetime, or None if in progress.
+#    delta: The runtime as a timedelta, or None if in progress.
+TimedResults = Collection('TimedResults', start=None, finish=None, delta=None)
+
+
+@contextlib.contextmanager
+def TimedSection():
+  """Context manager to time how long a code block takes.
+
+  Example usage:
+    with cros_build_lib.TimedSection() as timer:
+      DoWork()
+    logging.info('DoWork took %s', timer.delta)
+
+  Context manager value will be a TimedResults instance.
+  """
+  # Create our context manager value.
+  times = TimedResults(start=datetime.now())
+  try:
+    yield times
+  finally:
+    times.finish = datetime.now()
+    times.delta = times.finish - times.start
+
+
 PartitionInfo = collections.namedtuple(
     'PartitionInfo',
     ['number', 'start', 'end', 'size', 'file_system', 'name', 'flags']
@@ -2033,7 +2023,7 @@ def MachineDetails():
     A string with content that helps identify this system/process/etc...
   """
   return '\n'.join((
-      'PROG=%s' % __main__.__file__,
+      'PROG=%s' % inspect.stack()[-1][1],
       'USER=%s' % getpass.getuser(),
       'HOSTNAME=%s' % GetHostName(fully_qualified=True),
       'PID=%s' % os.getpid(),

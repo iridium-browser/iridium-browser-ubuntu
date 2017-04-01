@@ -20,9 +20,9 @@
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_image.h"
 #include "ui/gl/gl_implementation.h"
+#include "ui/gl/gl_surface_format.h"
 
 namespace gfx {
-class Transform;
 class VSyncProvider;
 }
 
@@ -40,22 +40,17 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
  public:
   GLSurface();
 
-  // Minimum bit depth of surface.
-  enum Format {
-    SURFACE_ARGB8888,
-    SURFACE_RGB565,
-    SURFACE_OSMESA_BGRA,
-    SURFACE_OSMESA_RGBA,
-    SURFACE_SURFACELESS,
-    SURFACE_DEFAULT = SURFACE_ARGB8888
-  };
+  // Non-virtual initialization, this always calls Initialize with a
+  // default GLSurfaceFormat. Subclasses should override the format-
+  // specific Initialize method below and interpret the default format
+  // as appropriate.
+  bool Initialize();
 
   // (Re)create the surface. TODO(apatrick): This is an ugly hack to allow the
   // EGL surface associated to be recreated without destroying the associated
   // context. The implementation of this function for other GLSurface derived
   // classes is in a pending changelist.
-  virtual bool Initialize();
-  virtual bool Initialize(GLSurface::Format format);
+  virtual bool Initialize(GLSurfaceFormat format);
 
   // Destroys the surface.
   virtual void Destroy() = 0;
@@ -85,6 +80,9 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // Get the underlying platform specific surface "handle".
   virtual void* GetHandle() = 0;
 
+  // Returns whether or not the surface supports SwapBuffersWithDamage
+  virtual bool SupportsSwapBuffersWithDamage();
+
   // Returns whether or not the surface supports PostSubBuffer.
   virtual bool SupportsPostSubBuffer();
 
@@ -105,6 +103,12 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // SwapBufferAck till that data is available. The callback should be run on
   // the calling thread (i.e. same thread SwapBuffersAsync is called)
   virtual void SwapBuffersAsync(const SwapCompletionCallback& callback);
+
+  // Swap buffers with damage rect.
+  virtual gfx::SwapResult SwapBuffersWithDamage(int x,
+                                                int y,
+                                                int width,
+                                                int height);
 
   // Copy part of the backbuffer to the frontbuffer.
   virtual gfx::SwapResult PostSubBuffer(int x, int y, int width, int height);
@@ -151,8 +155,12 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // Get the platfrom specific configuration for this surface, if available.
   virtual void* GetConfig();
 
+  // Get the key corresponding to the set of GLSurfaces that can be made current
+  // with this GLSurface.
+  virtual unsigned long GetCompatibilityKey();
+
   // Get the GL pixel format of the surface, if available.
-  virtual GLSurface::Format GetFormat();
+  virtual GLSurfaceFormat GetFormat();
 
   // Get access to a helper providing time of recent refresh and period
   // of screen refresh. If unavailable, returns NULL.
@@ -222,7 +230,7 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
  public:
   explicit GLSurfaceAdapter(GLSurface* surface);
 
-  bool Initialize(GLSurface::Format format) override;
+  bool Initialize(GLSurfaceFormat format) override;
   void Destroy() override;
   bool Resize(const gfx::Size& size,
               float scale_factor,
@@ -232,6 +240,10 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   bool IsOffscreen() override;
   gfx::SwapResult SwapBuffers() override;
   void SwapBuffersAsync(const SwapCompletionCallback& callback) override;
+  gfx::SwapResult SwapBuffersWithDamage(int x,
+                                        int y,
+                                        int width,
+                                        int height) override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
   void PostSubBufferAsync(int x,
                           int y,
@@ -241,6 +253,7 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   gfx::SwapResult CommitOverlayPlanes() override;
   void CommitOverlayPlanesAsync(
       const SwapCompletionCallback& callback) override;
+  bool SupportsSwapBuffersWithDamage() override;
   bool SupportsPostSubBuffer() override;
   bool SupportsCommitOverlayPlanes() override;
   bool SupportsAsyncSwap() override;
@@ -253,7 +266,8 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   void* GetShareHandle() override;
   void* GetDisplay() override;
   void* GetConfig() override;
-  GLSurface::Format GetFormat() override;
+  unsigned long GetCompatibilityKey() override;
+  GLSurfaceFormat GetFormat() override;
   gfx::VSyncProvider* GetVSyncProvider() override;
   bool ScheduleOverlayPlane(int z_order,
                             gfx::OverlayTransform transform,
@@ -280,6 +294,9 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
 // initialization fails.
 GL_EXPORT scoped_refptr<GLSurface> InitializeGLSurface(
     scoped_refptr<GLSurface> surface);
+
+GL_EXPORT scoped_refptr<GLSurface> InitializeGLSurfaceWithFormat(
+    scoped_refptr<GLSurface> surface, GLSurfaceFormat format);
 
 }  // namespace gl
 

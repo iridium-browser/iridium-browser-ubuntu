@@ -4,7 +4,7 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fpdfdoc/include/cpdf_aaction.h"
+#include "core/fpdfdoc/cpdf_aaction.h"
 
 namespace {
 
@@ -14,11 +14,11 @@ const FX_CHAR* g_sAATypes[] = {"E",  "X",  "D",  "U",  "Fo", "Bl", "PO", "PC",
 
 }  // namespace
 
-FX_BOOL CPDF_AAction::ActionExist(AActionType eType) const {
+bool CPDF_AAction::ActionExist(AActionType eType) const {
   return m_pDict && m_pDict->KeyExist(g_sAATypes[eType]);
 }
 
 CPDF_Action CPDF_AAction::GetAction(AActionType eType) const {
-  return m_pDict ? CPDF_Action(m_pDict->GetDictBy(g_sAATypes[eType]))
+  return m_pDict ? CPDF_Action(m_pDict->GetDictFor(g_sAATypes[eType]))
                  : CPDF_Action();
 }

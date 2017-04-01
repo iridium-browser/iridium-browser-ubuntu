@@ -9,14 +9,12 @@ import android.app.Activity;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.DialogInterface;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Environment;
 import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
-import android.util.Pair;
 import android.view.View;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
@@ -27,8 +25,6 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
-import org.chromium.chrome.browser.infobar.SimpleConfirmInfoBarBuilder;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
@@ -50,86 +46,9 @@ import java.io.File;
 public class ChromeDownloadDelegate {
     private static final String TAG = "Download";
 
-    private class DangerousDownloadListener implements SimpleConfirmInfoBarBuilder.Listener {
-        @Override
-        public boolean onInfoBarButtonClicked(boolean confirm) {
-            assert mTab != null;
-            if (mPendingRequest == null) return false;
-            if (mPendingRequest.getDownloadGuid() != null) {
-                nativeDangerousDownloadValidated(mTab, mPendingRequest.getDownloadGuid(), confirm);
-                if (confirm) {
-                    DownloadUtils.showDownloadStartToast(mContext);
-                }
-                mPendingRequest = null;
-                return closeBlankTab();
-            } else if (confirm) {
-                // User confirmed the download.
-                if (mPendingRequest.isGETRequest()) {
-                    final DownloadInfo info = mPendingRequest;
-                    new AsyncTask<Void, Void, Pair<String, String>>() {
-                        @Override
-                        protected Pair<String, String> doInBackground(Void... params) {
-                            Pair<String, String> result = getDownloadDirectoryNameAndFullPath();
-                            String fullDirPath = result.second;
-                            return doesFileAlreadyExists(fullDirPath, info.getFileName())
-                                    ? result : null;
-                        }
-
-                        @Override
-                        protected void onPostExecute(Pair<String, String> result) {
-                            if (result != null) {
-                                // File already exists.
-                                String dirName = result.first;
-                                String fullDirPath = result.second;
-                                launchDownloadInfoBar(info, dirName, fullDirPath);
-                            } else {
-                                enqueueDownloadManagerRequest(info);
-                            }
-                        }
-                    }.execute();
-                } else {
-                    DownloadInfo newDownloadInfo =
-                            DownloadInfo.Builder.fromDownloadInfo(mPendingRequest).build();
-                    DownloadManagerService.getDownloadManagerService(mContext).onDownloadCompleted(
-                            newDownloadInfo);
-                }
-                mPendingRequest = null;
-                return false;
-            } else {
-                // User did not accept the download, discard the file if it is a POST download.
-                if (!mPendingRequest.isGETRequest()) {
-                    discardFile(mPendingRequest.getFilePath());
-                }
-                mPendingRequest = null;
-                return closeBlankTab();
-            }
-        }
-
-        @Override
-        public void onInfoBarDismissed() {
-            if (mPendingRequest != null) {
-                if (mPendingRequest.getDownloadGuid() != null) {
-                    assert mTab != null;
-                    nativeDangerousDownloadValidated(
-                            mTab, mPendingRequest.getDownloadGuid(), false);
-                } else if (!mPendingRequest.isGETRequest()) {
-                    // Infobar was dismissed, discard the file if a POST download is pending.
-                    discardFile(mPendingRequest.getFilePath());
-                }
-            }
-            // Forget the pending request.
-            mPendingRequest = null;
-        }
-    }
-
-    private final DangerousDownloadListener mDangerousDownloadListener;
-
     // The application context.
     private final Context mContext;
     private Tab mTab;
-
-    // Pending download request for a dangerous file.
-    private DownloadInfo mPendingRequest;
 
     /**
      * Creates ChromeDownloadDelegate.
@@ -146,41 +65,7 @@ public class ChromeDownloadDelegate {
             }
         });
 
-        mPendingRequest = null;
-        mDangerousDownloadListener = new DangerousDownloadListener();
         nativeInit(tab.getWebContents());
-    }
-
-    @CalledByNative
-    private void requestHttpGetDownload(String url, String userAgent, String contentDisposition,
-            String mimeType, String cookie, String referer, boolean hasUserGesture,
-            String filename, long contentLength, boolean mustDownload) {
-        // If we're dealing with A/V content that's not explicitly marked for download, check if it
-        // is streamable.
-        if (!mustDownload) {
-            // Query the package manager to see if there's a registered handler that matches.
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setDataAndType(Uri.parse(url), mimeType);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            // If the intent is resolved to ourselves, we don't want to attempt to load the url
-            // only to try and download it again.
-            if (DownloadManagerService.openIntent(mContext, intent, false)) {
-                return;
-            }
-        }
-        DownloadInfo downloadInfo = new DownloadInfo.Builder()
-                .setUrl(url)
-                .setUserAgent(userAgent)
-                .setContentDisposition(contentDisposition)
-                .setMimeType(mimeType)
-                .setCookie(cookie)
-                .setReferer(referer)
-                .setHasUserGesture(hasUserGesture)
-                .setFileName(filename)
-                .setContentLength(contentLength)
-                .setIsGETRequest(true)
-                .build();
-        onDownloadStartNoStream(downloadInfo);
     }
 
     /**
@@ -199,20 +84,17 @@ public class ChromeDownloadDelegate {
             protected Object[] doInBackground(Void... params) {
                 // Check to see if we have an SDCard.
                 String status = Environment.getExternalStorageState();
-                Pair<String, String> result = getDownloadDirectoryNameAndFullPath();
-                String dirName = result.first;
-                String fullDirPath = result.second;
-                boolean fileExists = doesFileAlreadyExists(fullDirPath, fileName);
+                File fullDirPath = getDownloadDirectoryFullPath();
+                boolean fileExists = checkFileExists(fullDirPath, fileName);
 
-                return new Object[] {status, dirName, fullDirPath, fileExists};
+                return new Object[] {status, fullDirPath, fileExists};
             }
 
             @Override
             protected void onPostExecute(Object[] result) {
                 String externalStorageState = (String) result[0];
-                String dirName = (String) result[1];
-                String fullDirPath = (String) result[2];
-                Boolean fileExists = (Boolean) result[3];
+                File fullDirPath = (File) result[1];
+                Boolean fileExists = (Boolean) result[2];
                 if (!checkExternalStorageAndNotify(
                         fileName, fullDirPath, externalStorageState)) {
                     return;
@@ -232,15 +114,11 @@ public class ChromeDownloadDelegate {
                 // The proper fix would be to let chrome knows which frame originated the request.
                 if ("application/x-shockwave-flash".equals(newInfo.getMimeType())) return;
 
-                if (isDangerousFile(fileName, newMimeType)) {
-                    confirmDangerousDownload(newInfo);
+                // Not a dangerous file, proceed.
+                if (fileExists) {
+                    launchDownloadInfoBar(newInfo, fullDirPath);
                 } else {
-                    // Not a dangerous file, proceed.
-                    if (fileExists) {
-                        launchDownloadInfoBar(newInfo, dirName, fullDirPath);
-                    } else {
-                        enqueueDownloadManagerRequest(newInfo);
-                    }
+                    enqueueDownloadManagerRequest(newInfo);
                 }
             }
         }.execute();
@@ -255,46 +133,9 @@ public class ChromeDownloadDelegate {
         return downloadInfo.getUrl();
     }
 
-    /**
-     * Request user confirmation on a dangerous download.
-     *
-     * @param downloadInfo Information about the download.
-     */
-    private void confirmDangerousDownload(DownloadInfo downloadInfo) {
-        // A Dangerous file is already pending user confirmation, ignore the new download.
-        if (mPendingRequest != null) return;
-        // Tab is already destroyed, no need to add an infobar.
-        if (mTab == null) return;
-
-        mPendingRequest = downloadInfo;
-
-        int drawableId = R.drawable.infobar_warning;
-        final String titleText = nativeGetDownloadWarningText(mPendingRequest.getFileName());
-        final String okButtonText = mContext.getResources().getString(R.string.ok);
-        final String cancelButtonText = mContext.getResources().getString(R.string.cancel);
-        SimpleConfirmInfoBarBuilder.create(mTab, mDangerousDownloadListener,
-                InfoBarIdentifier.CONFIRM_DANGEROUS_DOWNLOAD, drawableId, titleText, okButtonText,
-                cancelButtonText, true);
-    }
-
-    /**
-     * Called when a danagerous download is about to start.
-     *
-     * @param filename File name of the download item.
-     * @param downloadGuid GUID of the download.
-     */
-    @CalledByNative
-    private void onDangerousDownload(String filename, String downloadGuid) {
-        DownloadInfo downloadInfo = new DownloadInfo.Builder()
-                .setFileName(filename)
-                .setDescription(filename)
-                .setDownloadGuid(downloadGuid).build();
-        confirmDangerousDownload(downloadInfo);
-    }
-
     @CalledByNative
     private void requestFileAccess(final long callbackId) {
-        if (mTab == null) {
+        if (mTab == null || mTab.getWindowAndroid() == null) {
             // TODO(tedchoc): Show toast (only when activity is alive).
             DownloadController.getInstance().onRequestFileAccessResult(callbackId, false);
             return;
@@ -351,22 +192,18 @@ public class ChromeDownloadDelegate {
     }
 
     /**
-     * Return a pair of directory name and its full path. Note that we create the directory if
-     * it does not already exist.
+     * Return the full path of the download directory.
      *
-     * @return A pair of directory name and its full path. A pair of <null, null> will be returned
-     * in case of an error.
+     * @return File object containing the path to the download directory.
      */
-    private static Pair<String, String> getDownloadDirectoryNameAndFullPath() {
+    private static File getDownloadDirectoryFullPath() {
         assert !ThreadUtils.runningOnUiThread();
         File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        if (!dir.mkdir() && !dir.isDirectory()) return new Pair<>(null, null);
-        String dirName = dir.getName();
-        String fullDirPath = dir.getPath();
-        return new Pair<>(dirName, fullDirPath);
+        if (!dir.mkdir() && !dir.isDirectory()) return null;
+        return dir;
     }
 
-    private static boolean doesFileAlreadyExists(String dirPath, final String fileName) {
+    private static boolean checkFileExists(File dirPath, final String fileName) {
         assert !ThreadUtils.runningOnUiThread();
         final File file = new File(dirPath, fileName);
         return file != null && file.exists();
@@ -414,10 +251,10 @@ public class ChromeDownloadDelegate {
         return closeBlankTab();
     }
 
-    private void launchDownloadInfoBar(DownloadInfo info, String dirName, String fullDirPath) {
+    private void launchDownloadInfoBar(DownloadInfo info, File fullDirPath) {
         if (mTab == null) return;
-        nativeLaunchDownloadOverwriteInfoBar(
-                ChromeDownloadDelegate.this, mTab, info, info.getFileName(), dirName, fullDirPath);
+        nativeLaunchDuplicateDownloadInfoBar(ChromeDownloadDelegate.this, mTab, info,
+                new File(fullDirPath, info.getFileName()).toString(), mTab.isIncognito());
     }
 
     /**
@@ -440,7 +277,7 @@ public class ChromeDownloadDelegate {
      * @return Whether external storage is ok for downloading.
      */
     private boolean checkExternalStorageAndNotify(
-            String filename, String fullDirPath, String externalStorageStatus) {
+            String filename, File fullDirPath, String externalStorageStatus) {
         if (fullDirPath == null) {
             Log.e(TAG, "Download failed: no SD card");
             alertDownloadFailure(
@@ -480,11 +317,9 @@ public class ChromeDownloadDelegate {
      * @param mimeType MIME type of the content.
      */
     @CalledByNative
-    private void onDownloadStarted(String filename, String mimeType) {
-        if (!isDangerousFile(filename, mimeType)) {
-            DownloadUtils.showDownloadStartToast(mContext);
-            closeBlankTab();
-        }
+    private void onDownloadStarted(String filename) {
+        DownloadUtils.showDownloadStartToast(mContext);
+        closeBlankTab();
     }
 
     /**
@@ -506,6 +341,7 @@ public class ChromeDownloadDelegate {
         // the right MIME type from the file extension (if any):
         if (mimeType == null || mimeType.isEmpty() || "text/plain".equals(mimeType)
                 || "application/octet-stream".equals(mimeType)
+                || "binary/octet-stream".equals(mimeType)
                 || "octet/stream".equals(mimeType)
                 || "application/force-download".equals(mimeType)
                 || "application/unknown".equals(mimeType)) {
@@ -537,28 +373,6 @@ public class ChromeDownloadDelegate {
             if (index > 0) return filename.substring(index + 1);
         }
         return MimeTypeMap.getFileExtensionFromUrl(url);
-    }
-
-    /**
-     * Check whether a file is dangerous.
-     *
-     * @param filename Name of the file.
-     * @param mimeType MIME type of the content.
-     * @return true if the file is dangerous, or false otherwise.
-     */
-    protected boolean isDangerousFile(String filename, String mimeType) {
-        return nativeIsDownloadDangerous(filename) || isDangerousExtension(
-                MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType));
-    }
-
-    /**
-     * Check whether a file extension is dangerous.
-     *
-     * @param ext Extension of the file.
-     * @return true if the file is dangerous, or false otherwise.
-     */
-    private static boolean isDangerousExtension(String ext) {
-        return "apk".equals(ext);
     }
 
     /**
@@ -617,32 +431,30 @@ public class ChromeDownloadDelegate {
         String path = uri.getPath();
         // OMA downloads have extension "dm" or "dd". For the latter, it
         // can be handled when native download completes.
-        if (path != null && (path.endsWith(".dm"))) {
-            if (mTab == null) return true;
-            String fileName = URLUtil.guessFileName(
-                    url, null, OMADownloadHandler.OMA_DRM_MESSAGE_MIME);
-            final DownloadInfo downloadInfo =
-                    new DownloadInfo.Builder().setUrl(url).setFileName(fileName).build();
-            WindowAndroid window = mTab.getWindowAndroid();
-            if (window.hasPermission(permission.WRITE_EXTERNAL_STORAGE)) {
-                onDownloadStartNoStream(downloadInfo);
-            } else if (window.canRequestPermission(permission.WRITE_EXTERNAL_STORAGE)) {
-                PermissionCallback permissionCallback = new PermissionCallback() {
-                    @Override
-                    public void onRequestPermissionsResult(
-                            String[] permissions, int[] grantResults) {
-                        if (grantResults.length > 0
-                                && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                            onDownloadStartNoStream(downloadInfo);
-                        }
+        if (path == null || !path.endsWith(".dm")) return false;
+        if (mTab == null) return true;
+        String fileName = URLUtil.guessFileName(
+                url, null, OMADownloadHandler.OMA_DRM_MESSAGE_MIME);
+        final DownloadInfo downloadInfo =
+                new DownloadInfo.Builder().setUrl(url).setFileName(fileName).build();
+        WindowAndroid window = mTab.getWindowAndroid();
+        if (window.hasPermission(permission.WRITE_EXTERNAL_STORAGE)) {
+            onDownloadStartNoStream(downloadInfo);
+        } else if (window.canRequestPermission(permission.WRITE_EXTERNAL_STORAGE)) {
+            PermissionCallback permissionCallback = new PermissionCallback() {
+                @Override
+                public void onRequestPermissionsResult(
+                        String[] permissions, int[] grantResults) {
+                    if (grantResults.length > 0
+                            && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                        onDownloadStartNoStream(downloadInfo);
                     }
-                };
-                window.requestPermissions(
-                        new String[] {permission.WRITE_EXTERNAL_STORAGE}, permissionCallback);
-            }
-            return true;
+                }
+            };
+            window.requestPermissions(
+                    new String[] {permission.WRITE_EXTERNAL_STORAGE}, permissionCallback);
         }
-        return false;
+        return true;
     }
 
     protected Context getContext() {
@@ -651,12 +463,8 @@ public class ChromeDownloadDelegate {
 
     private native void nativeInit(WebContents webContents);
     private static native String nativeGetDownloadWarningText(String filename);
-    private static native boolean nativeIsDownloadDangerous(String filename);
-    private static native void nativeDangerousDownloadValidated(
-            Object tab, String downloadGuid, boolean accept);
-    private static native void nativeLaunchDownloadOverwriteInfoBar(ChromeDownloadDelegate delegate,
-            Tab tab, DownloadInfo downloadInfo, String fileName, String dirName,
-            String dirFullPath);
+    private static native void nativeLaunchDuplicateDownloadInfoBar(ChromeDownloadDelegate delegate,
+            Tab tab, DownloadInfo downloadInfo, String filePath, boolean isIncognito);
     private static native void nativeLaunchPermissionUpdateInfoBar(
             Tab tab, String permission, long callbackId);
 }

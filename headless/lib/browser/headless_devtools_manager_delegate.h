@@ -16,8 +16,6 @@
 
 namespace headless {
 class HeadlessBrowserImpl;
-class HeadlessBrowserContext;
-class HeadlessWebContentsImpl;
 
 class HeadlessDevToolsManagerDelegate
     : public content::DevToolsManagerDelegate {
@@ -27,30 +25,32 @@ class HeadlessDevToolsManagerDelegate
   ~HeadlessDevToolsManagerDelegate() override;
 
   // DevToolsManagerDelegate implementation:
-  void Inspect(content::BrowserContext* browser_context,
-               content::DevToolsAgentHost* agent_host) override {}
-  void DevToolsAgentStateChanged(content::DevToolsAgentHost* agent_host,
-                                 bool attached) override{};
   base::DictionaryValue* HandleCommand(content::DevToolsAgentHost* agent_host,
                                        base::DictionaryValue* command) override;
+  std::string GetDiscoveryPageHTML() override;
+  std::string GetFrontendResource(const std::string& path) override;
 
  private:
-  std::unique_ptr<base::Value> CreateTarget(
+  std::unique_ptr<base::DictionaryValue> CreateTarget(
+      int command_id,
       const base::DictionaryValue* params);
-  std::unique_ptr<base::Value> CloseTarget(const base::DictionaryValue* params);
-  std::unique_ptr<base::Value> CreateBrowserContext(
+  std::unique_ptr<base::DictionaryValue> CloseTarget(
+      int command_id,
       const base::DictionaryValue* params);
-  std::unique_ptr<base::Value> DisposeBrowserContext(
+  std::unique_ptr<base::DictionaryValue> CreateBrowserContext(
+      int command_id,
+      const base::DictionaryValue* params);
+  std::unique_ptr<base::DictionaryValue> DisposeBrowserContext(
+      int command_id,
       const base::DictionaryValue* params);
 
   base::WeakPtr<HeadlessBrowserImpl> browser_;
 
-  using CommandMemberFnPtr = std::unique_ptr<base::Value> (
-      HeadlessDevToolsManagerDelegate::*)(const base::DictionaryValue* params);
+  using CommandMemberFnPtr = std::unique_ptr<base::DictionaryValue> (
+      HeadlessDevToolsManagerDelegate::*)(int command_id,
+                                          const base::DictionaryValue* params);
 
   std::map<std::string, CommandMemberFnPtr> command_map_;
-
-  HeadlessBrowserContext* default_browser_context_;
 };
 
 }  // namespace headless

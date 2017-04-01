@@ -5,8 +5,10 @@
 #ifndef V8_COMPILER_JS_OPERATOR_H_
 #define V8_COMPILER_JS_OPERATOR_H_
 
-#include "src/compiler/type-hints.h"
+#include "src/base/compiler-specific.h"
+#include "src/globals.h"
 #include "src/runtime/runtime.h"
+#include "src/type-hints.h"
 
 namespace v8 {
 namespace internal {
@@ -19,7 +21,7 @@ struct JSOperatorGlobalCache;
 
 // Defines a pair of {TypeFeedbackVector} and {TypeFeedbackVectorSlot}, which
 // is used to access the type feedback for a certain {Node}.
-class VectorSlotPair {
+class V8_EXPORT_PRIVATE VectorSlotPair {
  public:
   VectorSlotPair();
   VectorSlotPair(Handle<TypeFeedbackVector> vector, FeedbackVectorSlot slot)
@@ -55,14 +57,17 @@ ToBooleanHints ToBooleanHintsOf(Operator const* op);
 // used as a parameter by JSCallConstruct operators.
 class CallConstructParameters final {
  public:
-  CallConstructParameters(size_t arity, VectorSlotPair const& feedback)
-      : arity_(arity), feedback_(feedback) {}
+  CallConstructParameters(uint32_t arity, float frequency,
+                          VectorSlotPair const& feedback)
+      : arity_(arity), frequency_(frequency), feedback_(feedback) {}
 
-  size_t arity() const { return arity_; }
+  uint32_t arity() const { return arity_; }
+  float frequency() const { return frequency_; }
   VectorSlotPair const& feedback() const { return feedback_; }
 
  private:
-  size_t const arity_;
+  uint32_t const arity_;
+  float const frequency_;
   VectorSlotPair const feedback_;
 };
 
@@ -75,20 +80,48 @@ std::ostream& operator<<(std::ostream&, CallConstructParameters const&);
 
 CallConstructParameters const& CallConstructParametersOf(Operator const*);
 
+// Defines the arity for a JavaScript constructor call with a spread as the last
+// parameters. This is used as a parameter by JSCallConstructWithSpread
+// operators.
+class CallConstructWithSpreadParameters final {
+ public:
+  explicit CallConstructWithSpreadParameters(uint32_t arity) : arity_(arity) {}
+
+  uint32_t arity() const { return arity_; }
+
+ private:
+  uint32_t const arity_;
+};
+
+bool operator==(CallConstructWithSpreadParameters const&,
+                CallConstructWithSpreadParameters const&);
+bool operator!=(CallConstructWithSpreadParameters const&,
+                CallConstructWithSpreadParameters const&);
+
+size_t hash_value(CallConstructWithSpreadParameters const&);
+
+std::ostream& operator<<(std::ostream&,
+                         CallConstructWithSpreadParameters const&);
+
+CallConstructWithSpreadParameters const& CallConstructWithSpreadParametersOf(
+    Operator const*);
 
 // Defines the arity and the call flags for a JavaScript function call. This is
 // used as a parameter by JSCallFunction operators.
 class CallFunctionParameters final {
  public:
-  CallFunctionParameters(size_t arity, VectorSlotPair const& feedback,
+  CallFunctionParameters(size_t arity, float frequency,
+                         VectorSlotPair const& feedback,
                          TailCallMode tail_call_mode,
                          ConvertReceiverMode convert_mode)
       : bit_field_(ArityField::encode(arity) |
                    ConvertReceiverModeField::encode(convert_mode) |
                    TailCallModeField::encode(tail_call_mode)),
+        frequency_(frequency),
         feedback_(feedback) {}
 
   size_t arity() const { return ArityField::decode(bit_field_); }
+  float frequency() const { return frequency_; }
   ConvertReceiverMode convert_mode() const {
     return ConvertReceiverModeField::decode(bit_field_);
   }
@@ -99,6 +132,7 @@ class CallFunctionParameters final {
 
   bool operator==(CallFunctionParameters const& that) const {
     return this->bit_field_ == that.bit_field_ &&
+           this->frequency_ == that.frequency_ &&
            this->feedback_ == that.feedback_;
   }
   bool operator!=(CallFunctionParameters const& that) const {
@@ -107,15 +141,16 @@ class CallFunctionParameters final {
 
  private:
   friend size_t hash_value(CallFunctionParameters const& p) {
-    return base::hash_combine(p.bit_field_, p.feedback_);
+    return base::hash_combine(p.bit_field_, p.frequency_, p.feedback_);
   }
 
   typedef BitField<size_t, 0, 29> ArityField;
   typedef BitField<ConvertReceiverMode, 29, 2> ConvertReceiverModeField;
   typedef BitField<TailCallMode, 31, 1> TailCallModeField;
 
-  const uint32_t bit_field_;
-  const VectorSlotPair feedback_;
+  uint32_t const bit_field_;
+  float const frequency_;
+  VectorSlotPair const feedback_;
 };
 
 size_t hash_value(CallFunctionParameters const&);
@@ -174,10 +209,87 @@ bool operator!=(ContextAccess const&, ContextAccess const&);
 
 size_t hash_value(ContextAccess const&);
 
-std::ostream& operator<<(std::ostream&, ContextAccess const&);
+V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, ContextAccess const&);
 
 ContextAccess const& ContextAccessOf(Operator const*);
 
+// Defines the name and ScopeInfo for a new catch context. This is used as a
+// parameter by the JSCreateCatchContext operator.
+class CreateCatchContextParameters final {
+ public:
+  CreateCatchContextParameters(Handle<String> catch_name,
+                               Handle<ScopeInfo> scope_info);
+
+  Handle<String> catch_name() const { return catch_name_; }
+  Handle<ScopeInfo> scope_info() const { return scope_info_; }
+
+ private:
+  Handle<String> const catch_name_;
+  Handle<ScopeInfo> const scope_info_;
+};
+
+bool operator==(CreateCatchContextParameters const& lhs,
+                CreateCatchContextParameters const& rhs);
+bool operator!=(CreateCatchContextParameters const& lhs,
+                CreateCatchContextParameters const& rhs);
+
+size_t hash_value(CreateCatchContextParameters const& parameters);
+
+std::ostream& operator<<(std::ostream& os,
+                         CreateCatchContextParameters const& parameters);
+
+CreateCatchContextParameters const& CreateCatchContextParametersOf(
+    Operator const*);
+
+// Defines the slot count and ScopeType for a new function or eval context. This
+// is used as a parameter by the JSCreateFunctionContext operator.
+class CreateFunctionContextParameters final {
+ public:
+  CreateFunctionContextParameters(int slot_count, ScopeType scope_type);
+
+  int slot_count() const { return slot_count_; }
+  ScopeType scope_type() const { return scope_type_; }
+
+ private:
+  int const slot_count_;
+  ScopeType const scope_type_;
+};
+
+bool operator==(CreateFunctionContextParameters const& lhs,
+                CreateFunctionContextParameters const& rhs);
+bool operator!=(CreateFunctionContextParameters const& lhs,
+                CreateFunctionContextParameters const& rhs);
+
+size_t hash_value(CreateFunctionContextParameters const& parameters);
+
+std::ostream& operator<<(std::ostream& os,
+                         CreateFunctionContextParameters const& parameters);
+
+CreateFunctionContextParameters const& CreateFunctionContextParametersOf(
+    Operator const*);
+
+// Defines the feedback, i.e., vector and index, for storing a data property in
+// an object literal. This is
+// used as a parameter by the JSStoreDataPropertyInLiteral operator.
+class DataPropertyParameters final {
+ public:
+  explicit DataPropertyParameters(VectorSlotPair const& feedback)
+      : feedback_(feedback) {}
+
+  VectorSlotPair const& feedback() const { return feedback_; }
+
+ private:
+  VectorSlotPair const feedback_;
+};
+
+bool operator==(DataPropertyParameters const&, DataPropertyParameters const&);
+bool operator!=(DataPropertyParameters const&, DataPropertyParameters const&);
+
+size_t hash_value(DataPropertyParameters const&);
+
+std::ostream& operator<<(std::ostream&, DataPropertyParameters const&);
+
+const DataPropertyParameters& DataPropertyParametersOf(const Operator* op);
 
 // Defines the property of an object for a named access. This is
 // used as a parameter by the JSLoadNamed and JSStoreNamed operators.
@@ -324,14 +436,17 @@ const CreateArrayParameters& CreateArrayParametersOf(const Operator* op);
 class CreateClosureParameters final {
  public:
   CreateClosureParameters(Handle<SharedFunctionInfo> shared_info,
+                          VectorSlotPair const& feedback,
                           PretenureFlag pretenure)
-      : shared_info_(shared_info), pretenure_(pretenure) {}
+      : shared_info_(shared_info), feedback_(feedback), pretenure_(pretenure) {}
 
   Handle<SharedFunctionInfo> shared_info() const { return shared_info_; }
+  VectorSlotPair const& feedback() const { return feedback_; }
   PretenureFlag pretenure() const { return pretenure_; }
 
  private:
   const Handle<SharedFunctionInfo> shared_info_;
+  VectorSlotPair const feedback_;
   const PretenureFlag pretenure_;
 };
 
@@ -374,14 +489,15 @@ std::ostream& operator<<(std::ostream&, CreateLiteralParameters const&);
 
 const CreateLiteralParameters& CreateLiteralParametersOf(const Operator* op);
 
-const BinaryOperationHint BinaryOperationHintOf(const Operator* op);
+BinaryOperationHint BinaryOperationHintOf(const Operator* op);
 
-const CompareOperationHint CompareOperationHintOf(const Operator* op);
+CompareOperationHint CompareOperationHintOf(const Operator* op);
 
 // Interface for building JavaScript-level operators, e.g. directly from the
 // AST. Most operators have no parameters, thus can be globally shared for all
 // graphs.
-class JSOperatorBuilder final : public ZoneObject {
+class V8_EXPORT_PRIVATE JSOperatorBuilder final
+    : public NON_EXPORTED_BASE(ZoneObject) {
  public:
   explicit JSOperatorBuilder(Zone* zone);
 
@@ -418,9 +534,11 @@ class JSOperatorBuilder final : public ZoneObject {
   const Operator* CreateArguments(CreateArgumentsType type);
   const Operator* CreateArray(size_t arity, Handle<AllocationSite> site);
   const Operator* CreateClosure(Handle<SharedFunctionInfo> shared_info,
+                                VectorSlotPair const& feedback,
                                 PretenureFlag pretenure);
   const Operator* CreateIterResultObject();
-  const Operator* CreateLiteralArray(Handle<FixedArray> constant_elements,
+  const Operator* CreateKeyValueArray();
+  const Operator* CreateLiteralArray(Handle<ConstantElementsPair> constant,
                                      int literal_flags, int literal_index,
                                      int number_of_elements);
   const Operator* CreateLiteralObject(Handle<FixedArray> constant_properties,
@@ -430,13 +548,16 @@ class JSOperatorBuilder final : public ZoneObject {
                                       int literal_flags, int literal_index);
 
   const Operator* CallFunction(
-      size_t arity, VectorSlotPair const& feedback = VectorSlotPair(),
+      size_t arity, float frequency = 0.0f,
+      VectorSlotPair const& feedback = VectorSlotPair(),
       ConvertReceiverMode convert_mode = ConvertReceiverMode::kAny,
       TailCallMode tail_call_mode = TailCallMode::kDisallow);
   const Operator* CallRuntime(Runtime::FunctionId id);
   const Operator* CallRuntime(Runtime::FunctionId id, size_t arity);
   const Operator* CallRuntime(const Runtime::Function* function, size_t arity);
-  const Operator* CallConstruct(size_t arity, VectorSlotPair const& feedback);
+  const Operator* CallConstruct(uint32_t arity, float frequency,
+                                VectorSlotPair const& feedback);
+  const Operator* CallConstructWithSpread(uint32_t arity);
 
   const Operator* ConvertReceiver(ConvertReceiverMode convert_mode);
 
@@ -448,9 +569,13 @@ class JSOperatorBuilder final : public ZoneObject {
   const Operator* StoreNamed(LanguageMode language_mode, Handle<Name> name,
                              VectorSlotPair const& feedback);
 
+  const Operator* StoreDataPropertyInLiteral(const VectorSlotPair& feedback);
+
   const Operator* DeleteProperty(LanguageMode language_mode);
 
   const Operator* HasProperty();
+
+  const Operator* GetSuperConstructor();
 
   const Operator* LoadGlobal(const Handle<Name>& name,
                              const VectorSlotPair& feedback,
@@ -462,13 +587,15 @@ class JSOperatorBuilder final : public ZoneObject {
   const Operator* LoadContext(size_t depth, size_t index, bool immutable);
   const Operator* StoreContext(size_t depth, size_t index);
 
+  const Operator* LoadModule(int32_t cell_index);
+  const Operator* StoreModule(int32_t cell_index);
+
   const Operator* TypeOf();
   const Operator* InstanceOf();
+  const Operator* OrdinaryHasInstance();
 
-  const Operator* ForInDone();
   const Operator* ForInNext();
   const Operator* ForInPrepare();
-  const Operator* ForInStep();
 
   const Operator* LoadMessage();
   const Operator* StoreMessage();
@@ -482,9 +609,10 @@ class JSOperatorBuilder final : public ZoneObject {
 
   const Operator* StackCheck();
 
-  const Operator* CreateFunctionContext(int slot_count);
-  const Operator* CreateCatchContext(const Handle<String>& name);
-  const Operator* CreateWithContext();
+  const Operator* CreateFunctionContext(int slot_count, ScopeType scope_type);
+  const Operator* CreateCatchContext(const Handle<String>& name,
+                                     const Handle<ScopeInfo>& scope_info);
+  const Operator* CreateWithContext(const Handle<ScopeInfo>& scope_info);
   const Operator* CreateBlockContext(const Handle<ScopeInfo>& scpope_info);
   const Operator* CreateModuleContext();
   const Operator* CreateScriptContext(const Handle<ScopeInfo>& scpope_info);

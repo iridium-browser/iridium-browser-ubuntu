@@ -8,8 +8,8 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/CoreExport.h"
-#include "core/dom/ActiveDOMObject.h"
-#include "core/fetch/ScriptResource.h"
+#include "core/dom/ContextLifecycleObserver.h"
+#include "core/loader/resource/ScriptResource.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -19,34 +19,42 @@ class ResourceFetcher;
 class WorkletGlobalScopeProxy;
 class WorkletScriptLoader;
 
-class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>, public ScriptWrappable, public ActiveDOMObject {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(Worklet);
-    WTF_MAKE_NONCOPYABLE(Worklet);
-public:
-    virtual WorkletGlobalScopeProxy* workletGlobalScopeProxy() const = 0;
+class CORE_EXPORT Worklet : public GarbageCollectedFinalized<Worklet>,
+                            public ScriptWrappable,
+                            public ContextLifecycleObserver {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(Worklet);
+  WTF_MAKE_NONCOPYABLE(Worklet);
 
-    // Worklet
-    ScriptPromise import(ScriptState*, const String& url);
+ public:
+  virtual ~Worklet() {}
 
-    void notifyFinished(WorkletScriptLoader*);
+  virtual void initialize() {}
+  virtual bool isInitialized() const { return true; }
 
-    // ActiveDOMObject
-    void stop() final;
+  virtual WorkletGlobalScopeProxy* workletGlobalScopeProxy() const = 0;
 
-    DECLARE_VIRTUAL_TRACE();
+  // Worklet
+  ScriptPromise import(ScriptState*, const String& url);
 
-protected:
-    // The Worklet inherits the url and userAgent from the frame->document().
-    explicit Worklet(LocalFrame*);
+  void notifyFinished(WorkletScriptLoader*);
 
-private:
-    ResourceFetcher* fetcher() const { return m_fetcher.get(); }
+  // ContextLifecycleObserver
+  void contextDestroyed(ExecutionContext*) final;
 
-    Member<ResourceFetcher> m_fetcher;
-    HeapHashSet<Member<WorkletScriptLoader>> m_scriptLoaders;
+  DECLARE_VIRTUAL_TRACE();
+
+ protected:
+  // The Worklet inherits the url and userAgent from the frame->document().
+  explicit Worklet(LocalFrame*);
+
+ private:
+  ResourceFetcher* fetcher() const { return m_fetcher.get(); }
+
+  Member<ResourceFetcher> m_fetcher;
+  HeapHashSet<Member<WorkletScriptLoader>> m_scriptLoaders;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // Worklet_h
+#endif  // Worklet_h

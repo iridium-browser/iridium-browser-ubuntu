@@ -47,4 +47,28 @@ public class ContextualSearchHeuristics {
     void add(ContextualSearchHeuristic heuristicToAdd) {
         mHeuristics.add(heuristicToAdd);
     }
+
+    /**
+     * @return Whether any heuristic that should be considered for aggregate tap suppression logging
+     *         is satisfied regardless of whether the tap was actually suppressed.
+     */
+    public boolean isAnyConditionSatisfiedForAggregrateLogging() {
+        for (ContextualSearchHeuristic heuristic : mHeuristics) {
+            if (heuristic.shouldAggregateLogForTapSuppression()
+                    && heuristic.isConditionSatisfiedForAggregateLogging()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Logs all the heuristics to the given logger.
+     * @param logger The logger to log to.
+     */
+    public void logRankerTapSuppression(ContextualSearchRankerLogger logger) {
+        for (ContextualSearchHeuristic heuristic : mHeuristics) {
+            heuristic.logRankerTapSuppression(logger);
+        }
+    }
 }

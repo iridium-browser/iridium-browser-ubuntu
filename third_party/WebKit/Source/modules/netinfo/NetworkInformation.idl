@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// https://wicg.github.io/netinfo/#the-networkinformation-interface
+
 enum ConnectionType {
     "cellular",
     "bluetooth",
@@ -26,4 +28,3 @@ typedef unrestricted double Megabit;
     [RuntimeEnabled=NetInfoDownlinkMax, MeasureAs=NetInfoOnChange] attribute EventHandler onchange;
     [MeasureAs=NetInfoOnTypeChange] attribute EventHandler ontypechange;
 };
-

@@ -43,9 +43,10 @@ class ProtoDatabaseImpl : public ProtoDatabase<T> {
   // ProtoDatabase implementation.
   // TODO(cjhopman): Perhaps Init() shouldn't be exposed to users and not just
   //     part of the constructor
-  void Init(const char* client_name,
-            const base::FilePath& database_dir,
-            const typename ProtoDatabase<T>::InitCallback& callback) override;
+  void InitWithOptions(
+      const char* client_name,
+      const Options& options,
+      const typename ProtoDatabase<T>::InitCallback& callback) override;
   void UpdateEntries(
       std::unique_ptr<typename ProtoDatabase<T>::KeyEntryVector>
           entries_to_save,
@@ -53,6 +54,8 @@ class ProtoDatabaseImpl : public ProtoDatabase<T> {
       const typename ProtoDatabase<T>::UpdateCallback& callback) override;
   void LoadEntries(
       const typename ProtoDatabase<T>::LoadCallback& callback) override;
+  void LoadKeys(
+      const typename ProtoDatabase<T>::LoadKeysCallback& callback) override;
   void GetEntry(
       const std::string& key,
       const typename ProtoDatabase<T>::GetCallback& callback) override;
@@ -62,7 +65,7 @@ class ProtoDatabaseImpl : public ProtoDatabase<T> {
   // Allow callers to provide their own Database implementation.
   void InitWithDatabase(
       std::unique_ptr<LevelDB> database,
-      const base::FilePath& database_dir,
+      const Options& options,
       const typename ProtoDatabase<T>::InitCallback& callback);
 
  private:
@@ -94,9 +97,17 @@ void RunUpdateCallback(
 
 template <typename T>
 void RunLoadCallback(const typename ProtoDatabase<T>::LoadCallback& callback,
-                     const bool* success,
+                     bool* success,
                      std::unique_ptr<std::vector<T>> entries) {
   callback.Run(*success, std::move(entries));
+}
+
+template <typename T>
+void RunLoadKeysCallback(
+    const typename ProtoDatabase<T>::LoadKeysCallback& callback,
+    std::unique_ptr<bool> success,
+    std::unique_ptr<std::vector<std::string>> keys) {
+  callback.Run(*success, std::move(keys));
 }
 
 template <typename T>
@@ -115,12 +126,12 @@ void RunDestroyCallback(
 }
 
 inline void InitFromTaskRunner(LevelDB* database,
-                               const base::FilePath& database_dir,
+                               const Options& options,
                                bool* success) {
   DCHECK(success);
 
   // TODO(cjhopman): Histogram for database size.
-  *success = database->Init(database_dir);
+  *success = database->Init(options);
 }
 
 inline void DestroyFromTaskRunner(const base::FilePath& database_dir,
@@ -171,6 +182,15 @@ void LoadEntriesFromTaskRunner(LevelDB* database,
   }
 }
 
+inline void LoadKeysFromTaskRunner(LevelDB* database,
+                                   std::vector<std::string>* keys,
+                                   bool* success) {
+  DCHECK(success);
+  DCHECK(keys);
+  keys->clear();
+  *success = database->LoadKeys(keys);
+}
+
 template <typename T>
 void GetEntryFromTaskRunner(LevelDB* database,
                             const std::string& key,
@@ -206,13 +226,13 @@ ProtoDatabaseImpl<T>::~ProtoDatabaseImpl() {
 }
 
 template <typename T>
-void ProtoDatabaseImpl<T>::Init(
+void ProtoDatabaseImpl<T>::InitWithOptions(
     const char* client_name,
-    const base::FilePath& database_dir,
+    const Options& options,
     const typename ProtoDatabase<T>::InitCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  database_dir_ = database_dir;
-  InitWithDatabase(base::WrapUnique(new LevelDB(client_name)), database_dir,
+  database_dir_ = options.database_dir;
+  InitWithDatabase(base::WrapUnique(new LevelDB(client_name)), options,
                    callback);
 }
 
@@ -240,16 +260,16 @@ void ProtoDatabaseImpl<T>::Destroy(
 template <typename T>
 void ProtoDatabaseImpl<T>::InitWithDatabase(
     std::unique_ptr<LevelDB> database,
-    const base::FilePath& database_dir,
+    const Options& options,
     const typename ProtoDatabase<T>::InitCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!db_);
   DCHECK(database);
-  db_.reset(database.release());
+  db_ = std::move(database);
   bool* success = new bool(false);
   task_runner_->PostTaskAndReply(
       FROM_HERE, base::Bind(InitFromTaskRunner, base::Unretained(db_.get()),
-                            database_dir, success),
+                            options, success),
       base::Bind(RunInitCallback<T>, callback, base::Owned(success)));
 }
 
@@ -283,6 +303,21 @@ void ProtoDatabaseImpl<T>::LoadEntries(
                             base::Unretained(db_.get()), entries_ptr, success),
       base::Bind(RunLoadCallback<T>, callback, base::Owned(success),
                  base::Passed(&entries)));
+}
+
+template <typename T>
+void ProtoDatabaseImpl<T>::LoadKeys(
+    const typename ProtoDatabase<T>::LoadKeysCallback& callback) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  auto success = base::MakeUnique<bool>(false);
+  auto keys = base::MakeUnique<std::vector<std::string>>();
+  auto load_task =
+      base::Bind(LoadKeysFromTaskRunner, base::Unretained(db_.get()),
+                 keys.get(), success.get());
+  task_runner_->PostTaskAndReply(
+      FROM_HERE, load_task,
+      base::Bind(RunLoadKeysCallback<T>, callback, base::Passed(&success),
+                 base::Passed(&keys)));
 }
 
 template <typename T>

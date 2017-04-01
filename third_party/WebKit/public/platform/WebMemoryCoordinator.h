@@ -7,20 +7,20 @@
 
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebMemoryPressureLevel.h"
+#include "public/platform/WebMemoryState.h"
 
 namespace blink {
 
 class WebMemoryCoordinator {
-public:
-    // Called when a memory pressure notification is received.
-    // TODO(bashi): Deprecating. Remove this when MemoryPressureListener is
-    // gone.
-    BLINK_PLATFORM_EXPORT static void onMemoryPressure(WebMemoryPressureLevel);
+ public:
+  // Called when a memory pressure notification is received.
+  // TODO(bashi): Deprecating. Remove this when MemoryPressureListener is
+  // gone.
+  BLINK_PLATFORM_EXPORT static void onMemoryPressure(WebMemoryPressureLevel);
 
-    // Called when Blink is going to be suspended.
-    BLINK_PLATFORM_EXPORT static void prepareToSuspend();
+  BLINK_PLATFORM_EXPORT static void onMemoryStateChange(MemoryState);
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

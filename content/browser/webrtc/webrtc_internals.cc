@@ -6,6 +6,9 @@
 
 #include <stddef.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
@@ -16,6 +19,7 @@
 #include "content/public/browser/web_contents.h"
 #include "device/power_save_blocker/power_save_blocker.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/media_features.h"
 
 #if defined(OS_WIN)
 #define IntToStringType base::IntToString16
@@ -47,19 +51,19 @@ static base::ListValue* EnsureLogList(base::DictionaryValue* dict) {
 }  // namespace
 
 WebRTCInternals::PendingUpdate::PendingUpdate(
-    const std::string& command,
+    const char* command,
     std::unique_ptr<base::Value> value)
     : command_(command), value_(std::move(value)) {}
 
 WebRTCInternals::PendingUpdate::PendingUpdate(PendingUpdate&& other)
-    : command_(std::move(other.command_)),
+    : command_(other.command_),
       value_(std::move(other.value_)) {}
 
 WebRTCInternals::PendingUpdate::~PendingUpdate() {
   DCHECK(thread_checker_.CalledOnValidThread());
 }
 
-const std::string& WebRTCInternals::PendingUpdate::command() const {
+const char* WebRTCInternals::PendingUpdate::command() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return command_;
 }
@@ -76,12 +80,13 @@ WebRTCInternals::WebRTCInternals(int aggregate_updates_ms,
     : audio_debug_recordings_(false),
       event_log_recordings_(false),
       selecting_event_log_(false),
+      num_open_connections_(0),
       should_block_power_saving_(should_block_power_saving),
       aggregate_updates_ms_(aggregate_updates_ms),
       weak_factory_(this) {
 // TODO(grunell): Shouldn't all the webrtc_internals* files be excluded from the
 // build if WebRTC is disabled?
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   audio_debug_recordings_file_path_ =
       GetContentClient()->browser()->GetDefaultDownloadDirectory();
   event_log_recordings_file_path_ = audio_debug_recordings_file_path_;
@@ -99,7 +104,7 @@ WebRTCInternals::WebRTCInternals(int aggregate_updates_ms,
     event_log_recordings_file_path_ =
         event_log_recordings_file_path_.Append(FILE_PATH_LITERAL("event_log"));
   }
-#endif  // defined(ENABLE_WEBRTC)
+#endif  // BUILDFLAG(ENABLE_WEBRTC)
 }
 
 WebRTCInternals::~WebRTCInternals() {
@@ -117,18 +122,21 @@ void WebRTCInternals::OnAddPeerConnection(int render_process_id,
                                           const string& constraints) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("rid", render_process_id);
   dict->SetInteger("pid", static_cast<int>(pid));
   dict->SetInteger("lid", lid);
   dict->SetString("rtcConfiguration", rtc_configuration);
   dict->SetString("constraints", constraints);
   dict->SetString("url", url);
-  peer_connection_data_.Append(dict);
-  CreateOrReleasePowerSaveBlocker();
+  dict->SetBoolean("isOpen", true);
 
   if (observers_.might_have_observers())
     SendUpdate("addPeerConnection", dict->CreateDeepCopy());
+
+  peer_connection_data_.Append(std::move(dict));
+  ++num_open_connections_;
+  CreateOrReleasePowerSaveBlocker();
 
   if (render_process_id_set_.insert(render_process_id).second) {
     RenderProcessHost* host = RenderProcessHost::FromID(render_process_id);
@@ -151,8 +159,8 @@ void WebRTCInternals::OnRemovePeerConnection(ProcessId pid, int lid) {
     if (this_pid != static_cast<int>(pid) || this_lid != lid)
       continue;
 
+    MaybeClosePeerConnection(dict);
     peer_connection_data_.Remove(i, NULL);
-    CreateOrReleasePowerSaveBlocker();
 
     if (observers_.might_have_observers()) {
       std::unique_ptr<base::DictionaryValue> id(new base::DictionaryValue());
@@ -179,31 +187,36 @@ void WebRTCInternals::OnUpdatePeerConnection(
     if (this_pid != static_cast<int>(pid) || this_lid != lid)
       continue;
 
+    if (type == "stop") {
+      MaybeClosePeerConnection(record);
+    }
+
     // Append the update to the end of the log.
     base::ListValue* log = EnsureLogList(record);
     if (!log)
       return;
 
-    base::DictionaryValue* log_entry = new base::DictionaryValue();
-    if (!log_entry)
-      return;
+    std::unique_ptr<base::DictionaryValue> log_entry(
+        new base::DictionaryValue());
 
     double epoch_time = base::Time::Now().ToJsTime();
     string time = base::DoubleToString(epoch_time);
     log_entry->SetString("time", time);
     log_entry->SetString("type", type);
     log_entry->SetString("value", value);
-    log->Append(log_entry);
 
     if (observers_.might_have_observers()) {
       std::unique_ptr<base::DictionaryValue> update(
           new base::DictionaryValue());
       update->SetInteger("pid", static_cast<int>(pid));
       update->SetInteger("lid", lid);
-      update->MergeDictionary(log_entry);
+      update->MergeDictionary(log_entry.get());
 
       SendUpdate("updatePeerConnection", std::move(update));
     }
+
+    log->Append(std::move(log_entry));
+
     return;
   }
 }
@@ -231,7 +244,7 @@ void WebRTCInternals::OnGetUserMedia(int rid,
                                      const std::string& video_constraints) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("rid", rid);
   dict->SetInteger("pid", static_cast<int>(pid));
   dict->SetString("origin", origin);
@@ -240,10 +253,10 @@ void WebRTCInternals::OnGetUserMedia(int rid,
   if (video)
     dict->SetString("video", video_constraints);
 
-  get_user_media_requests_.Append(dict);
-
   if (observers_.might_have_observers())
     SendUpdate("addGetUserMedia", dict->CreateDeepCopy());
+
+  get_user_media_requests_.Append(std::move(dict));
 
   if (render_process_id_set_.insert(rid).second) {
     RenderProcessHost* host = RenderProcessHost::FromID(rid);
@@ -283,7 +296,7 @@ void WebRTCInternals::UpdateObserver(WebRTCInternalsUIObserver* observer) {
 void WebRTCInternals::EnableAudioDebugRecordings(
     content::WebContents* web_contents) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
 #if defined(OS_ANDROID)
   EnableAudioDebugRecordingsOnAllRenderProcessHosts();
 #else
@@ -305,7 +318,7 @@ void WebRTCInternals::EnableAudioDebugRecordings(
 
 void WebRTCInternals::DisableAudioDebugRecordings() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   audio_debug_recordings_ = false;
 
   // Tear down the dialog since the user has unchecked the audio debug
@@ -333,7 +346,7 @@ const base::FilePath& WebRTCInternals::GetAudioDebugRecordingsFilePath() const {
 void WebRTCInternals::EnableEventLogRecordings(
     content::WebContents* web_contents) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
 #if defined(OS_ANDROID)
   EnableEventLogRecordingsOnAllRenderProcessHosts();
 #else
@@ -350,7 +363,7 @@ void WebRTCInternals::EnableEventLogRecordings(
 }
 
 void WebRTCInternals::DisableEventLogRecordings() {
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   event_log_recordings_ = false;
   // Tear down the dialog since the user has unchecked the event log checkbox.
   select_file_dialog_ = nullptr;
@@ -371,7 +384,7 @@ const base::FilePath& WebRTCInternals::GetEventLogFilePath() const {
   return event_log_recordings_file_path_;
 }
 
-void WebRTCInternals::SendUpdate(const string& command,
+void WebRTCInternals::SendUpdate(const char* command,
                                  std::unique_ptr<base::Value> value) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(observers_.might_have_observers());
@@ -398,7 +411,7 @@ void WebRTCInternals::RenderProcessHostDestroyed(RenderProcessHost* host) {
 void WebRTCInternals::FileSelected(const base::FilePath& path,
                                    int /* unused_index */,
                                    void* /*unused_params */) {
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (selecting_event_log_) {
     event_log_recordings_file_path_ = path;
@@ -411,7 +424,7 @@ void WebRTCInternals::FileSelected(const base::FilePath& path,
 }
 
 void WebRTCInternals::FileSelectionCanceled(void* params) {
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (selecting_event_log_) {
     SendUpdate("eventLogRecordingsFileSelectionCancelled", nullptr);
@@ -473,7 +486,7 @@ void WebRTCInternals::OnRendererExit(int render_process_id) {
   }
 }
 
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
 void WebRTCInternals::EnableAudioDebugRecordingsOnAllRenderProcessHosts() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -497,16 +510,29 @@ void WebRTCInternals::EnableEventLogRecordingsOnAllRenderProcessHosts() {
 }
 #endif
 
+void WebRTCInternals::MaybeClosePeerConnection(base::DictionaryValue* record) {
+  bool is_open;
+  bool did_read = record->GetBoolean("isOpen", &is_open);
+  DCHECK(did_read);
+  if (!is_open)
+    return;
+
+  record->SetBoolean("isOpen", false);
+  --num_open_connections_;
+  DCHECK_GE(num_open_connections_, 0);
+  CreateOrReleasePowerSaveBlocker();
+}
+
 void WebRTCInternals::CreateOrReleasePowerSaveBlocker() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!should_block_power_saving_)
     return;
 
-  if (peer_connection_data_.empty() && power_save_blocker_) {
+  if (num_open_connections_ == 0 && power_save_blocker_) {
     DVLOG(1) << ("Releasing the block on application suspension since no "
                  "PeerConnections are active anymore.");
     power_save_blocker_.reset();
-  } else if (!peer_connection_data_.empty() && !power_save_blocker_) {
+  } else if (num_open_connections_ != 0 && !power_save_blocker_) {
     DVLOG(1) << ("Preventing the application from being suspended while one or "
                  "more PeerConnections are active.");
     power_save_blocker_.reset(new device::PowerSaveBlocker(
@@ -522,9 +548,8 @@ void WebRTCInternals::ProcessPendingUpdates() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   while (!pending_updates_.empty()) {
     const auto& update = pending_updates_.front();
-    FOR_EACH_OBSERVER(WebRTCInternalsUIObserver,
-                      observers_,
-                      OnUpdate(update.command(), update.value()));
+    for (auto& observer : observers_)
+      observer.OnUpdate(update.command(), update.value());
     pending_updates_.pop();
   }
 }

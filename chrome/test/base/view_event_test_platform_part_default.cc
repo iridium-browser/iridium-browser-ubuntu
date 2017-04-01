@@ -10,18 +10,30 @@
 #include "ui/display/screen.h"
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 
+#if !defined(OS_CHROMEOS) && defined(OS_LINUX)
+#include "ui/views/test/test_desktop_screen_x11.h"
+#endif
+
 namespace {
 
 // ViewEventTestPlatformPart implementation for Views, but non-CrOS.
 class ViewEventTestPlatformPartDefault : public ViewEventTestPlatformPart {
  public:
-  explicit ViewEventTestPlatformPartDefault(
-      ui::ContextFactory* context_factory) {
+  ViewEventTestPlatformPartDefault(
+      ui::ContextFactory* context_factory,
+      ui::ContextFactoryPrivate* context_factory_private) {
 #if defined(USE_AURA)
+    DCHECK(!display::Screen::GetScreen());
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+    display::Screen::SetScreenInstance(
+        views::test::TestDesktopScreenX11::GetInstance());
+#else
     screen_.reset(views::CreateDesktopScreen());
     display::Screen::SetScreenInstance(screen_.get());
+#endif
     env_ = aura::Env::CreateInstance();
     env_->set_context_factory(context_factory);
+    env_->set_context_factory_private(context_factory_private);
 #endif
   }
 
@@ -46,6 +58,8 @@ class ViewEventTestPlatformPartDefault : public ViewEventTestPlatformPart {
 
 // static
 ViewEventTestPlatformPart* ViewEventTestPlatformPart::Create(
-    ui::ContextFactory* context_factory) {
-  return new ViewEventTestPlatformPartDefault(context_factory);
+    ui::ContextFactory* context_factory,
+    ui::ContextFactoryPrivate* context_factory_private) {
+  return new ViewEventTestPlatformPartDefault(context_factory,
+                                              context_factory_private);
 }

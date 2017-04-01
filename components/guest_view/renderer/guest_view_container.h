@@ -8,10 +8,13 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "content/public/renderer/browser_plugin_delegate.h"
 #include "ipc/ipc_message.h"
 #include "v8/include/v8.h"
+
+namespace content {
+class RenderFrame;
+}
 
 namespace guest_view {
 
@@ -26,7 +29,7 @@ class GuestViewContainer : public content::BrowserPluginDelegate {
   // IssueRequest queues up a |request| until the container is ready and
   // the browser process has responded to the last request if it's still
   // pending.
-  void IssueRequest(linked_ptr<GuestViewRequest> request);
+  void IssueRequest(std::unique_ptr<GuestViewRequest> request);
 
   int element_instance_id() const { return element_instance_id_; }
   content::RenderFrame* render_frame() const { return render_frame_; }
@@ -42,6 +45,8 @@ class GuestViewContainer : public content::BrowserPluginDelegate {
 
   void RegisterDestructionCallback(v8::Local<v8::Function> callback,
                                    v8::Isolate* isolate);
+  void RegisterElementResizeCallback(v8::Local<v8::Function> callback,
+                                     v8::Isolate* isolate);
 
   // Called when the embedding RenderFrame is destroyed.
   virtual void OnRenderFrameDestroyed() {}
@@ -60,6 +65,7 @@ class GuestViewContainer : public content::BrowserPluginDelegate {
 
   // BrowserPluginGuestDelegate public implementation.
   void SetElementInstanceID(int element_instance_id) final;
+  void DidResizeElement(const gfx::Size& new_size) override;
 
  protected:
   ~GuestViewContainer() override;
@@ -74,10 +80,11 @@ class GuestViewContainer : public content::BrowserPluginDelegate {
 
   void RenderFrameDestroyed();
 
-  void EnqueueRequest(linked_ptr<GuestViewRequest> request);
+  void EnqueueRequest(std::unique_ptr<GuestViewRequest> request);
   void PerformPendingRequest();
   void HandlePendingResponseCallback(const IPC::Message& message);
   void RunDestructionCallback(bool embedder_frame_destroyed);
+  void CallElementResizeCallback(const gfx::Size& new_size);
 
   // BrowserPluginDelegate implementation.
   void Ready() final;
@@ -90,11 +97,14 @@ class GuestViewContainer : public content::BrowserPluginDelegate {
 
   bool in_destruction_;
 
-  std::deque<linked_ptr<GuestViewRequest> > pending_requests_;
-  linked_ptr<GuestViewRequest> pending_response_;
+  std::deque<std::unique_ptr<GuestViewRequest>> pending_requests_;
+  std::unique_ptr<GuestViewRequest> pending_response_;
 
   v8::Global<v8::Function> destruction_callback_;
   v8::Isolate* destruction_isolate_;
+
+  v8::Global<v8::Function> element_resize_callback_;
+  v8::Isolate* element_resize_isolate_;
 
   base::WeakPtrFactory<GuestViewContainer> weak_ptr_factory_;
 

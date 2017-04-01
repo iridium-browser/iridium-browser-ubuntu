@@ -225,7 +225,8 @@ std::string IdentityAPI::FindAccountKeyByGaiaId(const std::string& gaia_id) {
 }
 
 void IdentityAPI::Shutdown() {
-  FOR_EACH_OBSERVER(ShutdownObserver, shutdown_observer_list_, OnShutdown());
+  for (auto& observer : shutdown_observer_list_)
+    observer.OnShutdown();
   account_tracker_.RemoveObserver(this);
   account_tracker_.Shutdown();
 }
@@ -928,18 +929,17 @@ IdentityRemoveCachedAuthTokenFunction::
     ~IdentityRemoveCachedAuthTokenFunction() {
 }
 
-bool IdentityRemoveCachedAuthTokenFunction::RunSync() {
-  if (GetProfile()->IsOffTheRecord()) {
-    error_ = identity_constants::kOffTheRecord;
-    return false;
-  }
+ExtensionFunction::ResponseAction IdentityRemoveCachedAuthTokenFunction::Run() {
+  if (Profile::FromBrowserContext(browser_context())->IsOffTheRecord())
+    return RespondNow(Error(identity_constants::kOffTheRecord));
 
   std::unique_ptr<identity::RemoveCachedAuthToken::Params> params(
       identity::RemoveCachedAuthToken::Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params.get());
-  IdentityAPI::GetFactoryInstance()->Get(GetProfile())->EraseCachedToken(
-      extension()->id(), params->details.token);
-  return true;
+  IdentityAPI::GetFactoryInstance()
+      ->Get(browser_context())
+      ->EraseCachedToken(extension()->id(), params->details.token);
+  return RespondNow(NoArguments());
 }
 
 IdentityLaunchWebAuthFlowFunction::IdentityLaunchWebAuthFlowFunction() {}

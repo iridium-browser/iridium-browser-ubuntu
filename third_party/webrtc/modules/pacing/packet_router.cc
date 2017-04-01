@@ -48,7 +48,9 @@ bool PacketRouter::TimeToSendPacket(uint32_t ssrc,
   RTC_DCHECK(pacer_thread_checker_.CalledOnValidThread());
   rtc::CritScope cs(&modules_crit_);
   for (auto* rtp_module : rtp_modules_) {
-    if (rtp_module->SendingMedia() && ssrc == rtp_module->SSRC()) {
+    if (!rtp_module->SendingMedia())
+      continue;
+    if (ssrc == rtp_module->SSRC() || ssrc == rtp_module->FlexfecSsrc()) {
       return rtp_module->TimeToSendPacket(ssrc, sequence_number,
                                           capture_timestamp, retransmission,
                                           probe_cluster_id);
@@ -99,7 +101,7 @@ uint16_t PacketRouter::AllocateSequenceNumber() {
 bool PacketRouter::SendFeedback(rtcp::TransportFeedback* packet) {
   rtc::CritScope cs(&modules_crit_);
   for (auto* rtp_module : rtp_modules_) {
-    packet->WithPacketSenderSsrc(rtp_module->SSRC());
+    packet->SetSenderSsrc(rtp_module->SSRC());
     if (rtp_module->SendFeedbackPacket(*packet))
       return true;
   }

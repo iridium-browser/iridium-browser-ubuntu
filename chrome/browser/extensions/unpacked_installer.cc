@@ -18,7 +18,7 @@
 #include "chrome/browser/ui/extensions/extension_install_ui_factory.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
 #include "components/crx_file/id_util.h"
-#include "components/sync/api/string_ordinal.h"
+#include "components/sync/model/string_ordinal.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -368,6 +368,11 @@ void UnpackedInstaller::ReportExtensionLoadError(const std::string &error) {
 
 void UnpackedInstaller::InstallExtension() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (!service_weak_.get()) {
+    callback_.Reset();
+    return;
+  }
 
   PermissionsUpdater perms_updater(service_weak_->profile());
   perms_updater.InitializePermissions(extension());

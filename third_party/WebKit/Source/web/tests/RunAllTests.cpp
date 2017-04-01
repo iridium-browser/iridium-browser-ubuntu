@@ -35,41 +35,38 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "content/test/blink_test_environment.h"
-#include "mojo/edk/embedder/embedder.h"
 #include "platform/heap/ThreadState.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include <v8.h>
 
 namespace {
 
-int runHelper(base::TestSuite* testSuite)
-{
-    content::SetUpBlinkTestEnvironment();
-    blink::SchemeRegistry::initialize();
+int runHelper(base::TestSuite* testSuite) {
+  content::SetUpBlinkTestEnvironment();
+  blink::SchemeRegistry::initialize();
 
-    int result = testSuite->Run();
+  int result = testSuite->Run();
 
-    // Tickle EndOfTaskRunner which among other things will flush the queue
-    // of error messages via V8Initializer::reportRejectedPromisesOnMainThread.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, base::Bind(&base::DoNothing));
-    base::RunLoop().RunUntilIdle();
+  // Tickle EndOfTaskRunner which among other things will flush the queue
+  // of error messages via V8Initializer::reportRejectedPromisesOnMainThread.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                base::Bind(&base::DoNothing));
+  base::RunLoop().RunUntilIdle();
 
-    // Collect garbage (including threadspecific persistent handles) in order
-    // to release mock objects referred from v8 or Oilpan heap. Otherwise false
-    // mock leaks will be reported.
-    blink::V8GCController::collectAllGarbageForTesting(v8::Isolate::GetCurrent());
+  // Collect garbage (including threadspecific persistent handles) in order
+  // to release mock objects referred from v8 or Oilpan heap. Otherwise false
+  // mock leaks will be reported.
+  blink::V8GCController::collectAllGarbageForTesting(v8::Isolate::GetCurrent());
 
-    content::TearDownBlinkTestEnvironment();
+  content::TearDownBlinkTestEnvironment();
 
-    return result;
+  return result;
 }
 
-} // namespace
+}  // namespace
 
-int main(int argc, char** argv)
-{
-    mojo::edk::Init();
-
-    base::TestSuite testSuite(argc, argv);
-    return base::LaunchUnitTests(argc, argv, base::Bind(&runHelper, base::Unretained(&testSuite)));
+int main(int argc, char** argv) {
+  base::TestSuite testSuite(argc, argv);
+  return base::LaunchUnitTests(
+      argc, argv, base::Bind(&runHelper, base::Unretained(&testSuite)));
 }

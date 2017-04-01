@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module device.nfc;
+// TODO(rockot): This should probably be moved to nfc.mojom.
+module device.nfc.mojom;
 
 enum NFCErrorType {
   SECURITY,
@@ -65,6 +66,9 @@ struct NFCMessage {
   // path. It represents Web NFC id, that can be used for matching Web NFC
   // content with the filter specified by |url| field in NFCWatchOptions.
   string? url;
+
+  // Maximum size of NFC message that can be sent over IPC is 32KB.
+  const uint32 kMaxSize = 32768;
 };
 
 struct NFCPushOptions {

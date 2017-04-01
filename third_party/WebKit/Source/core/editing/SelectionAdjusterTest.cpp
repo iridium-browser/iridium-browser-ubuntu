@@ -8,37 +8,40 @@
 
 namespace blink {
 
-class SelectionAdjusterTest : public EditingTestBase  {
-};
+class SelectionAdjusterTest : public EditingTestBase {};
 
-TEST_F(SelectionAdjusterTest, adjustSelectionInFlatTree)
-{
-    setBodyContent("<div id=sample>foo</div>");
-    VisibleSelectionInFlatTree selectionInFlatTree;
+TEST_F(SelectionAdjusterTest, adjustSelectionInFlatTree) {
+  setBodyContent("<div id=sample>foo</div>");
+  VisibleSelectionInFlatTree selectionInFlatTree;
 
-    Node* const sample = document().getElementById("sample");
-    Node* const foo = sample->firstChild();
-    // Select "foo"
-    VisibleSelection selection(Position(foo, 0), Position(foo, 3));
-    SelectionAdjuster::adjustSelectionInFlatTree(&selectionInFlatTree, selection);
-    EXPECT_EQ(PositionInFlatTree(foo, 0), selectionInFlatTree.start());
-    EXPECT_EQ(PositionInFlatTree(foo, 3), selectionInFlatTree.end());
+  Node* const sample = document().getElementById("sample");
+  Node* const foo = sample->firstChild();
+  // Select "foo"
+  VisibleSelection selection =
+      createVisibleSelection(SelectionInDOMTree::Builder()
+                                 .collapse(Position(foo, 0))
+                                 .extend(Position(foo, 3))
+                                 .build());
+  SelectionAdjuster::adjustSelectionInFlatTree(&selectionInFlatTree, selection);
+  EXPECT_EQ(PositionInFlatTree(foo, 0), selectionInFlatTree.start());
+  EXPECT_EQ(PositionInFlatTree(foo, 3), selectionInFlatTree.end());
 }
 
-TEST_F(SelectionAdjusterTest, adjustSelectionInDOMTree)
-{
-    setBodyContent("<div id=sample>foo</div>");
-    VisibleSelection selection;
+TEST_F(SelectionAdjusterTest, adjustSelectionInDOMTree) {
+  setBodyContent("<div id=sample>foo</div>");
+  VisibleSelection selection;
 
-    Node* const sample = document().getElementById("sample");
-    Node* const foo = sample->firstChild();
-    // Select "foo"
-    VisibleSelectionInFlatTree selectionInFlatTree(
-        PositionInFlatTree(foo, 0),
-        PositionInFlatTree(foo, 3));
-    SelectionAdjuster::adjustSelectionInDOMTree(&selection, selectionInFlatTree);
-    EXPECT_EQ(Position(foo, 0), selection.start());
-    EXPECT_EQ(Position(foo, 3), selection.end());
+  Node* const sample = document().getElementById("sample");
+  Node* const foo = sample->firstChild();
+  // Select "foo"
+  VisibleSelectionInFlatTree selectionInFlatTree =
+      createVisibleSelection(SelectionInFlatTree::Builder()
+                                 .collapse(PositionInFlatTree(foo, 0))
+                                 .extend(PositionInFlatTree(foo, 3))
+                                 .build());
+  SelectionAdjuster::adjustSelectionInDOMTree(&selection, selectionInFlatTree);
+  EXPECT_EQ(Position(foo, 0), selection.start());
+  EXPECT_EQ(Position(foo, 3), selection.end());
 }
 
-} // namespace blink
+}  // namespace blink

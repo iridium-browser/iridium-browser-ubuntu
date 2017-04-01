@@ -66,7 +66,7 @@ public:
             fSize.set(SK_Scalar1, SK_Scalar1);
             // 'asPoints' needs to initialize/fill-in 'fClipRect' if it sets
             // the kUseClip flag
-        };
+        }
         ~PointData() {
             delete [] fPoints;
         }
@@ -193,12 +193,6 @@ public:
         return sk_sp<SkPathEffect>(new SkComposePathEffect(outer, inner));
     }
 
-#ifdef SK_SUPPORT_LEGACY_PATHEFFECT_PTR
-    static SkPathEffect* Create(SkPathEffect* outer, SkPathEffect* inner) {
-        return Make(sk_ref_sp(outer), sk_ref_sp(inner)).release();
-    }
-#endif
-
     virtual bool filterPath(SkPath* dst, const SkPath& src,
                             SkStrokeRec*, const SkRect*) const override;
 
@@ -243,11 +237,6 @@ public:
         return sk_sp<SkPathEffect>(new SkSumPathEffect(first, second));
     }
 
-#ifdef SK_SUPPORT_LEGACY_PATHEFFECT_PTR
-    static SkPathEffect* Create(SkPathEffect* first, SkPathEffect* second) {
-        return Make(sk_ref_sp(first), sk_ref_sp(second)).release();
-    }
-#endif
     virtual bool filterPath(SkPath* dst, const SkPath& src,
                             SkStrokeRec*, const SkRect*) const override;
 

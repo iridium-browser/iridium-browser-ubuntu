@@ -13,7 +13,6 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "mojo/public/cpp/bindings/array.h"
 #include "services/ui/public/cpp/window_observer.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -32,6 +31,7 @@ enum class ChangeType {
   BOUNDS,
   CAPTURE,
   DELETE_WINDOW,
+  DRAG_LOOP,
   FOCUS,
   MOVE_LOOP,
   NEW_TOP_LEVEL_WINDOW,
@@ -144,16 +144,16 @@ class InFlightBoundsChange : public InFlightChange {
   DISALLOW_COPY_AND_ASSIGN(InFlightBoundsChange);
 };
 
-class InFlightMoveLoopChange : public InFlightChange {
+class InFlightDragChange : public InFlightChange {
  public:
-  explicit InFlightMoveLoopChange(Window* window);
+  InFlightDragChange(Window* window, ChangeType type);
 
   // InFlightChange:
   void SetRevertValueFrom(const InFlightChange& change) override;
   void Revert() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(InFlightMoveLoopChange);
+  DISALLOW_COPY_AND_ASSIGN(InFlightDragChange);
 };
 
 // Inflight change that crashes on failure. This is useful for changes that are
@@ -231,9 +231,10 @@ class InFlightFocusChange : public InFlightWindowTreeClientChange {
 
 class InFlightPropertyChange : public InFlightChange {
  public:
-  InFlightPropertyChange(Window* window,
-                         const std::string& property_name,
-                         const mojo::Array<uint8_t>& revert_value);
+  InFlightPropertyChange(
+      Window* window,
+      const std::string& property_name,
+      const base::Optional<std::vector<uint8_t>>& revert_value);
   ~InFlightPropertyChange() override;
 
   // InFlightChange:
@@ -243,7 +244,7 @@ class InFlightPropertyChange : public InFlightChange {
 
  private:
   const std::string property_name_;
-  mojo::Array<uint8_t> revert_value_;
+  base::Optional<std::vector<uint8_t>> revert_value_;
 
   DISALLOW_COPY_AND_ASSIGN(InFlightPropertyChange);
 };

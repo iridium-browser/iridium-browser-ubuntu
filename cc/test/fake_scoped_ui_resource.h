@@ -10,20 +10,20 @@
 
 namespace cc {
 
-class LayerTreeHost;
-
 class FakeScopedUIResource : public ScopedUIResource {
  public:
-  static std::unique_ptr<FakeScopedUIResource> Create(LayerTreeHost* host);
+  static std::unique_ptr<FakeScopedUIResource> Create(
+      UIResourceManager* ui_resource_manager);
 
   UIResourceBitmap GetBitmap(UIResourceId uid, bool resource_lost) override;
+  void DeleteResource();
   void ResetCounters();
 
   int resource_create_count;
   int lost_resource_count;
 
  private:
-  explicit FakeScopedUIResource(LayerTreeHost* host);
+  explicit FakeScopedUIResource(UIResourceManager* ui_resource_manager);
 };
 
 }  // namespace cc

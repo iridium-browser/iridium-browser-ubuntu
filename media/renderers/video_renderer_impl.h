@@ -70,13 +70,17 @@ class MEDIA_EXPORT VideoRendererImpl
                   const PipelineStatusCB& init_cb) override;
   void Flush(const base::Closure& callback) override;
   void StartPlayingFrom(base::TimeDelta timestamp) override;
-  void OnTimeStateChanged(bool time_progressing) override;
+  void OnTimeProgressing() override;
+  void OnTimeStopped() override;
 
   void SetTickClockForTesting(std::unique_ptr<base::TickClock> tick_clock);
   void SetGpuMemoryBufferVideoForTesting(
       std::unique_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool);
   size_t frames_queued_for_testing() const {
     return algorithm_->frames_queued();
+  }
+  size_t effective_frames_queued_for_testing() const {
+    return algorithm_->effective_frames_queued();
   }
 
   // VideoRendererSink::RenderCallback implementation.
@@ -284,6 +288,13 @@ class MEDIA_EXPORT VideoRendererImpl
   // Tracks last frame properties to detect and notify client of any changes.
   gfx::Size last_frame_natural_size_;
   bool last_frame_opaque_;
+
+  // Indicates if we've painted the first valid frame after StartPlayingFrom().
+  bool painted_first_frame_;
+
+  // Current maximum for buffered frames, increases up to a limit upon each
+  // call to OnTimeStopped() when we're in the BUFFERING_HAVE_NOTHING state.
+  size_t max_buffered_frames_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<VideoRendererImpl> weak_factory_;

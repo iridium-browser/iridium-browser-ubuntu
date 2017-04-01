@@ -15,10 +15,6 @@
 
 class Profile;
 
-namespace base {
-class RefCountedMemory;
-}
-
 namespace history {
 class TopSites;
 }
@@ -40,12 +36,11 @@ class ThumbnailListSource : public content::URLDataSource {
   // Called on the IO thread.
   void StartDataRequest(
       const std::string& path,
-      int render_process_id,
-      int render_frame_id,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
 
   std::string GetMimeType(const std::string& path) const override;
-  base::MessageLoop* MessageLoopForRequestPath(
+  scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForRequestPath(
       const std::string& path) const override;
   bool ShouldServiceRequest(const net::URLRequest* request) const override;
   bool ShouldReplaceExistingSource() const override;

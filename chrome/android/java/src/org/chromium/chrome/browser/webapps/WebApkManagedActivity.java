@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.webapps;
 
+import org.chromium.webapk.lib.common.WebApkConstants;
+
 /**
  * Type of WebApkActivity and it is targeted on Android versions older than L, similar to
  * WebappManagedActivity for WebappActivity.
@@ -25,8 +27,8 @@ public abstract class WebApkManagedActivity extends WebApkActivity {
     }
 
     @Override
-    protected String getId() {
-        return String.valueOf(mActivityIndex);
+    protected String getActivityId() {
+        return WebApkConstants.WEBAPK_ID_PREFIX + String.valueOf(mActivityIndex);
     }
 
     /**

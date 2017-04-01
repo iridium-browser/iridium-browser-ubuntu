@@ -78,6 +78,15 @@ cr.define('downloads', function() {
       this.content = this.$.content;
     },
 
+    /**
+     * @param {string} url
+     * @return {string} A reasonably long URL.
+     * @private
+     */
+    chopUrl_: function(url) {
+      return url.slice(0, 300);
+    },
+
     /** @private */
     computeClass_: function() {
       var classes = [];
@@ -107,24 +116,12 @@ cr.define('downloads', function() {
 
       var url = 'chrome://extensions#' + this.data.by_ext_id;
       var name = this.data.by_ext_name;
-      return loadTimeData.getStringF('controlledByUrl', url, name);
+      return loadTimeData.getStringF('controlledByUrl', url, HTMLEscape(name));
     },
 
     /** @private */
     computeDangerIcon_: function() {
-      if (!this.isDangerous_)
-        return '';
-
-      switch (this.data.danger_type) {
-        case downloads.DangerType.DANGEROUS_CONTENT:
-        case downloads.DangerType.DANGEROUS_HOST:
-        case downloads.DangerType.DANGEROUS_URL:
-        case downloads.DangerType.POTENTIALLY_UNWANTED:
-        case downloads.DangerType.UNCOMMON_CONTENT:
-          return 'downloads:remove-circle';
-        default:
-          return 'cr:warning';
-      }
+      return this.isDangerous_ ? 'cr:warning' : '';
     },
 
     /** @private */
@@ -144,16 +141,18 @@ cr.define('downloads', function() {
           var fileName = data.file_name;
           switch (data.danger_type) {
             case downloads.DangerType.DANGEROUS_FILE:
-              return loadTimeData.getStringF('dangerFileDesc', fileName);
+             return loadTimeData.getString('dangerFileDesc');
+
             case downloads.DangerType.DANGEROUS_URL:
-              return loadTimeData.getString('dangerUrlDesc');
-            case downloads.DangerType.DANGEROUS_CONTENT:  // Fall through.
+            case downloads.DangerType.DANGEROUS_CONTENT:
             case downloads.DangerType.DANGEROUS_HOST:
-              return loadTimeData.getStringF('dangerContentDesc', fileName);
+             return loadTimeData.getString('dangerDownloadDesc');
+
             case downloads.DangerType.UNCOMMON_CONTENT:
-              return loadTimeData.getStringF('dangerUncommonDesc', fileName);
+             return loadTimeData.getString('dangerUncommonDesc');
+
             case downloads.DangerType.POTENTIALLY_UNWANTED:
-              return loadTimeData.getStringF('dangerSettingsDesc', fileName);
+             return loadTimeData.getString('dangerSettingsDesc');
           }
           break;
 

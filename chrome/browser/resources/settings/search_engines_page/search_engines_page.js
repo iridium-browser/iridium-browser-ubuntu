@@ -40,12 +40,22 @@ Polymer({
     }
   },
 
+  // Since the iron-list for extensions is enclosed in a dom-if, observe both
+  // |extensions| and |showExtensionsList_|.
+  observers: ['extensionsChanged_(extensions, showExtensionsList_)'],
+
   /** @override */
   ready: function() {
     settings.SearchEnginesBrowserProxyImpl.getInstance().
         getSearchEnginesList().then(this.enginesChanged_.bind(this));
     this.addWebUIListener(
         'search-engines-changed', this.enginesChanged_.bind(this));
+  },
+
+  /** @private */
+  extensionsChanged_: function() {
+    if (this.showExtensionsList_ && this.$.extensions)
+      this.$.extensions.notifyResize();
   },
 
   /**
@@ -58,8 +68,12 @@ Polymer({
     this.extensions = searchEnginesInfo['extensions'];
   },
 
-  /** @private */
-  onAddSearchEngineTap_: function() {
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onAddSearchEngineTap_: function(e) {
+    e.preventDefault();
     this.showAddSearchEngineDialog_ = true;
     this.async(function() {
       var dialog = this.$$('settings-search-engine-dialog');

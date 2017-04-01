@@ -37,14 +37,15 @@
 namespace blink {
 
 class HTMLInputElement;
-class ExecutionContext;
+class ScriptState;
 
 class HTMLInputElementFileSystem {
-    STATIC_ONLY(HTMLInputElementFileSystem);
-public:
-    static EntryHeapVector webkitEntries(ExecutionContext*, HTMLInputElement&);
+  STATIC_ONLY(HTMLInputElementFileSystem);
+
+ public:
+  static EntryHeapVector webkitEntries(ScriptState*, HTMLInputElement&);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // HTMLInputElementFileSystem_h
+#endif  // HTMLInputElementFileSystem_h

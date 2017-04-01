@@ -12,7 +12,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/controls/blue_label_button.h"
 #import "ui/base/cocoa/controls/hyperlink_button_cell.h"
@@ -25,7 +25,6 @@
 #include "ui/gfx/mac/nswindow_frame_controls.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/native_theme/native_theme_mac.h"
 
 const CGFloat kMinimumWidth = 460;
 const CGFloat kMaximumWidth = 1000;
@@ -238,8 +237,9 @@ ScreenCaptureNotificationUI::Create(const base::string16& text) {
 @implementation ScreenCaptureNotificationView
 
 - (void)drawRect:(NSRect)dirtyRect {
-  [skia::SkColorToSRGBNSColor(ui::NativeThemeMac::instance()->GetSystemColor(
-      ui::NativeTheme::kColorId_DialogBackground)) set];
+  [skia::SkColorToSRGBNSColor(
+      ui::NativeTheme::GetInstanceForNativeUi()->GetSystemColor(
+          ui::NativeTheme::kColorId_DialogBackground)) set];
   [[NSBezierPath bezierPathWithRoundedRect:[self bounds]
                                    xRadius:kWindowCornerRadius
                                    yRadius:kWindowCornerRadius] fill];

@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/callback_forward.h"
+#include "base/metrics/field_trial.h"
 
 namespace metrics {
 class MetricsServiceClient;
@@ -18,7 +19,7 @@ class URLRequestContextGetter;
 }
 
 namespace rappor {
-class RapporService;
+class RapporServiceImpl;
 }
 
 namespace variations {
@@ -34,11 +35,14 @@ class MetricsServicesManagerClient {
   virtual ~MetricsServicesManagerClient() {}
 
   // Methods that create the various services in the context of the embedder.
-  virtual std::unique_ptr<rappor::RapporService> CreateRapporService() = 0;
+  virtual std::unique_ptr<rappor::RapporServiceImpl>
+  CreateRapporServiceImpl() = 0;
   virtual std::unique_ptr<variations::VariationsService>
   CreateVariationsService() = 0;
   virtual std::unique_ptr<metrics::MetricsServiceClient>
   CreateMetricsServiceClient() = 0;
+  virtual std::unique_ptr<const base::FieldTrial::EntropyProvider>
+  CreateEntropyProvider() = 0;
 
   // Returns the URL request context in which the metrics services should
   // operate.

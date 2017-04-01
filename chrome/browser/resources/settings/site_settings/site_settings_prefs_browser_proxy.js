@@ -8,9 +8,22 @@
  */
 
 /**
+ * The handler will send a policy source that is similar, but not exactly the
+ * same as a ControlledBy value. If the ContentSettingProvider is omitted it
+ * should be treated as 'default'.
+ * @enum {string}
+ */
+var ContentSettingProvider = {
+  EXTENSION: 'extension',
+  PREFERENCE: 'preference',
+};
+
+/**
  * @typedef {{embeddingOrigin: string,
+ *            embeddingDisplayName: string,
+ *            incognito: boolean,
  *            origin: string,
- *            originForDisplay: string,
+ *            displayName: string,
  *            setting: string,
  *            source: string}}
  */
@@ -21,6 +34,12 @@ var SiteException;
  *            notifications: string}}
  */
 var CategoryDefaultsPref;
+
+/**
+ * @typedef {{setting: string,
+ *            source: ContentSettingProvider}}
+ */
+var DefaultContentSetting;
 
 /**
  * @typedef {{location: Array<SiteException>,
@@ -64,6 +83,14 @@ var UsbDeviceDetails;
  */
 var UsbDeviceEntry;
 
+/**
+ * @typedef {{origin: string,
+ *            setting: string,
+ *            source: string,
+ *            zoom: string}}
+ */
+var ZoomLevelEntry;
+
 cr.define('settings', function() {
   /** @interface */
   function SiteSettingsPrefsBrowserProxy() {}
@@ -77,18 +104,32 @@ cr.define('settings', function() {
     setDefaultValueForContentType: function(contentType, defaultValue) {},
 
     /**
+     * Gets the cookie details for a particular site.
+     * @param {string} site The name of the site.
+     * @return {!Promise<!CookieDataSummaryItem>}
+     */
+    getCookieDetails: function(site) {},
+
+    /**
      * Gets the default value for a site settings category.
      * @param {string} contentType The name of the category to query.
-     * @return {Promise<boolean>}
+     * @return {!Promise<!DefaultContentSetting>}
      */
     getDefaultValueForContentType: function(contentType) {},
 
     /**
      * Gets the exceptions (site list) for a particular category.
      * @param {string} contentType The name of the category to query.
-     * @return {Promise<Array<SiteException>>}
+     * @return {!Promise<!Array<!SiteException>>}
      */
     getExceptionList: function(contentType) {},
+
+    /**
+     * Gets the exception details for a particular site.
+     * @param {string} site The name of the site.
+     * @return {!Promise<!SiteException>}
+     */
+    getSiteDetails: function(site) {},
 
     /**
      * Resets the category permission for a given origin (expressed as primary
@@ -97,9 +138,11 @@ cr.define('settings', function() {
      * @param {string} secondaryPattern The embedding origin to change
      *    (secondary pattern).
      * @param {string} contentType The name of the category to reset.
+     * @param {boolean} incognito Whether this applies only to a current
+     *     incognito session exception.
      */
     resetCategoryPermissionForOrigin: function(
-        primaryPattern, secondaryPattern, contentType) {},
+        primaryPattern, secondaryPattern, contentType, incognito) {},
 
     /**
      * Sets the category permission for a given origin (expressed as primary
@@ -109,9 +152,11 @@ cr.define('settings', function() {
      *    (secondary pattern).
      * @param {string} contentType The name of the category to change.
      * @param {string} value The value to change the permission to.
+     * @param {boolean} incognito Whether this rule applies only to the current
+     *     incognito session.
      */
     setCategoryPermissionForOrigin: function(
-        primaryPattern, secondaryPattern, contentType, value) {},
+        primaryPattern, secondaryPattern, contentType, value, incognito) {},
 
     /**
      * Checks whether a pattern is valid.
@@ -136,7 +181,7 @@ cr.define('settings', function() {
 
     /**
      * Reloads all cookies.
-     * @return {!Promise<Array<CookieDataSummaryItem>>} Returns the full cookie
+     * @return {!Promise<!CookieList>} Returns the full cookie
      *     list.
      */
     reloadCookies: function() {},
@@ -144,7 +189,7 @@ cr.define('settings', function() {
     /**
      * Fetches all children of a given cookie.
      * @param {string} path The path to the parent cookie.
-     * @return {!Promise<Array<CookieDataSummaryItem>>} Returns a cookie list
+     * @return {!Promise<!Array<!CookieDataSummaryItem>>} Returns a cookie list
      *     for the given path.
      */
     loadCookieChildren: function(path) {},
@@ -157,16 +202,29 @@ cr.define('settings', function() {
 
     /**
      * Removes all cookies.
-     * @return {!Promise<Array<CookieDataSummaryItem>>} Returns the up to date
+     * @return {!Promise<!CookieList>} Returns the up to date
      *     cookie list once deletion is complete (empty list).
      */
     removeAllCookies: function() {},
 
     /**
-     * Initializes the protocol handler list. List is returned through JS calls
-     * to setHandlersEnabled, setProtocolHandlers & setIgnoredProtocolHandlers.
+     * observes _all_ of the the protocol handler state, which includes a list
+     * that is returned through JS calls to 'setProtocolHandlers' along with
+     * other state sent with the messages 'setIgnoredProtocolHandler' and
+     * 'setHandlersEnabled'.
      */
-    initializeProtocolHandlerList: function() {},
+    observeProtocolHandlers: function() {},
+
+    /**
+     * Observes one aspect of the protocol handler so that updates to the
+     * enabled/disabled state are sent. A 'setHandlersEnabled' will be sent
+     * from C++ immediately after receiving this observe request and updates
+     * may follow via additional 'setHandlersEnabled' messages.
+     *
+     * If |observeProtocolHandlers| is called, there's no need to call this
+     * observe as well.
+     */
+    observeProtocolHandlersEnabledState: function() {},
 
     /**
      * Enables or disables the ability for sites to ask to become the default
@@ -191,7 +249,7 @@ cr.define('settings', function() {
 
     /**
      * Fetches a list of all USB devices and the sites permitted to use them.
-     * @return {!Promise<Array<UsbDeviceEntry>>} The list of USB devices.
+     * @return {!Promise<!Array<!UsbDeviceEntry>>} The list of USB devices.
      */
     fetchUsbDevices: function() {},
 
@@ -200,10 +258,28 @@ cr.define('settings', function() {
      * origin.
      * @param {string} origin The origin to look up the permission for.
      * @param {string} embeddingOrigin the embedding origin to look up.
-     * @param {UsbDeviceDetails} usbDevice The USB device to revoke permission
+     * @param {!UsbDeviceDetails} usbDevice The USB device to revoke permission
      *     for.
      */
     removeUsbDevice: function(origin, embeddingOrigin, usbDevice) {},
+
+    /**
+     * Fetches the incognito status of the current profile (whether an icognito
+     * profile exists). Returns the results via onIncognitoStatusChanged.
+     */
+    updateIncognitoStatus: function() {},
+
+    /**
+     * Fetches the currently defined zoom levels for sites. Returns the results
+     * via onZoomLevelsChanged.
+     */
+    fetchZoomLevels: function() {},
+
+    /**
+     * Removes a zoom levels for a given host.
+     * @param {string} host The host to remove zoom levels for.
+     */
+    removeZoomLevel: function(host) {},
   };
 
   /**
@@ -223,6 +299,11 @@ cr.define('settings', function() {
     },
 
     /** @override */
+    getCookieDetails: function(site) {
+      return cr.sendWithPromise('getCookieDetails', site);
+    },
+
+    /** @override */
     getDefaultValueForContentType: function(contentType) {
       return cr.sendWithPromise('getDefaultValueForContentType', contentType);
     },
@@ -233,17 +314,22 @@ cr.define('settings', function() {
     },
 
     /** @override */
+    getSiteDetails: function(site) {
+      return cr.sendWithPromise('getSiteDetails', site);
+    },
+
+    /** @override */
     resetCategoryPermissionForOrigin: function(
-        primaryPattern, secondaryPattern, contentType) {
+        primaryPattern, secondaryPattern, contentType, incognito) {
       chrome.send('resetCategoryPermissionForOrigin',
-          [primaryPattern, secondaryPattern, contentType]);
+          [primaryPattern, secondaryPattern, contentType, incognito]);
     },
 
     /** @override */
     setCategoryPermissionForOrigin: function(
-        primaryPattern, secondaryPattern, contentType, value) {
+        primaryPattern, secondaryPattern, contentType, value, incognito) {
       chrome.send('setCategoryPermissionForOrigin',
-          [primaryPattern, secondaryPattern, contentType, value]);
+          [primaryPattern, secondaryPattern, contentType, value, incognito]);
     },
 
     /** @override */
@@ -281,9 +367,14 @@ cr.define('settings', function() {
       return cr.sendWithPromise('removeAllCookies');
     },
 
+    /** @override */
+    observeProtocolHandlers: function() {
+      chrome.send('observeProtocolHandlers');
+    },
 
-    initializeProtocolHandlerList: function() {
-      chrome.send('initializeProtocolHandlerList');
+    /** @override */
+    observeProtocolHandlersEnabledState: function() {
+      chrome.send('observeProtocolHandlersEnabledState');
     },
 
     /** @override */
@@ -309,6 +400,21 @@ cr.define('settings', function() {
     /** @override */
     removeUsbDevice: function(origin, embeddingOrigin, usbDevice) {
       chrome.send('removeUsbDevice', [origin, embeddingOrigin, usbDevice]);
+    },
+
+    /** @override */
+    updateIncognitoStatus: function() {
+      chrome.send('updateIncognitoStatus');
+    },
+
+    /** @override */
+    fetchZoomLevels: function() {
+      chrome.send('fetchZoomLevels');
+    },
+
+    /** @override */
+    removeZoomLevel: function(host) {
+      chrome.send('removeZoomLevel', [host]);
     },
   };
 

@@ -4,14 +4,15 @@
 
 #include "content/browser/compositor/gpu_output_surface_mac.h"
 
-#include "cc/output/compositor_frame.h"
+#include "cc/output/output_surface_client.h"
+#include "cc/output/output_surface_frame.h"
 #include "components/display_compositor/compositor_overlay_candidate_validator.h"
-#include "content/browser/gpu/gpu_surface_tracker.h"
-#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/ipc/client/gpu_process_hosted_ca_layer_tree_params.h"
+#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
 #include "ui/base/cocoa/remote_layer_api.h"
+#include "ui/compositor/compositor.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/gfx/mac/io_surface.h"
 
@@ -48,28 +49,28 @@ struct GpuOutputSurfaceMac::RemoteLayers {
 };
 
 GpuOutputSurfaceMac::GpuOutputSurfaceMac(
-    scoped_refptr<ContextProviderCommandBuffer> context,
+    gfx::AcceleratedWidget widget,
+    scoped_refptr<ui::ContextProviderCommandBuffer> context,
     gpu::SurfaceHandle surface_handle,
-    scoped_refptr<ui::CompositorVSyncManager> vsync_manager,
-    cc::SyntheticBeginFrameSource* begin_frame_source,
+    const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
     std::unique_ptr<display_compositor::CompositorOverlayCandidateValidator>
         overlay_candidate_validator,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager)
     : GpuSurfacelessBrowserCompositorOutputSurface(
           std::move(context),
           surface_handle,
-          std::move(vsync_manager),
-          begin_frame_source,
+          update_vsync_parameters_callback,
           std::move(overlay_candidate_validator),
           GL_TEXTURE_RECTANGLE_ARB,
           GL_RGBA,
           gfx::BufferFormat::RGBA_8888,
           gpu_memory_buffer_manager),
+      widget_(widget),
       remote_layers_(new RemoteLayers) {}
 
 GpuOutputSurfaceMac::~GpuOutputSurfaceMac() {}
 
-void GpuOutputSurfaceMac::SwapBuffers(cc::CompositorFrame frame) {
+void GpuOutputSurfaceMac::SwapBuffers(cc::OutputSurfaceFrame frame) {
   GpuSurfacelessBrowserCompositorOutputSurface::SwapBuffers(std::move(frame));
 
   if (should_show_frames_state_ ==
@@ -85,9 +86,7 @@ void GpuOutputSurfaceMac::OnGpuSwapBuffersCompleted(
   remote_layers_->UpdateLayers(params_mac->ca_context_id,
                                params_mac->fullscreen_low_power_ca_context_id);
   if (should_show_frames_state_ == SHOULD_SHOW_FRAMES) {
-    ui::AcceleratedWidgetMac* widget = ui::AcceleratedWidgetMac::Get(
-        content::GpuSurfaceTracker::Get()->AcquireNativeWidget(
-            params_mac->surface_handle));
+    ui::AcceleratedWidgetMac* widget = ui::AcceleratedWidgetMac::Get(widget_);
     if (widget) {
       if (remote_layers_->content_layer) {
         widget->GotCALayerFrame(
@@ -105,7 +104,7 @@ void GpuOutputSurfaceMac::OnGpuSwapBuffersCompleted(
       }
     }
   }
-  DidReceiveTextureInUseResponses(params_mac->responses);
+  client_->DidReceiveTextureInUseResponses(params_mac->responses);
   GpuSurfacelessBrowserCompositorOutputSurface::OnGpuSwapBuffersCompleted(
       latency_info, result, params_mac);
 }

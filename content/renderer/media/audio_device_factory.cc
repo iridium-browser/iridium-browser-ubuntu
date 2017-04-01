@@ -16,7 +16,6 @@
 #include "content/renderer/render_thread_impl.h"
 #include "media/audio/audio_input_device.h"
 #include "media/audio/audio_output_device.h"
-#include "media/base/audio_latency.h"
 #include "media/base/audio_renderer_mixer_input.h"
 #include "media/base/media_switches.h"
 #include "url/origin.h"
@@ -27,35 +26,16 @@ namespace content {
 AudioDeviceFactory* AudioDeviceFactory::factory_ = NULL;
 
 namespace {
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
 // Due to driver deadlock issues on Windows (http://crbug/422522) there is a
 // chance device authorization response is never received from the browser side.
 // In this case we will time out, to avoid renderer hang forever waiting for
 // device authorization (http://crbug/615589). This will result in "no audio".
-const int64_t kMaxAuthorizationTimeoutMs = 1000;
+// There are also cases when authorization takes too long on Mac.
+const int64_t kMaxAuthorizationTimeoutMs = 4000;
 #else
 const int64_t kMaxAuthorizationTimeoutMs = 0;  // No timeout.
-#endif  // defined(OS_WIN)
-
-media::AudioLatency::LatencyType GetSourceLatencyType(
-    AudioDeviceFactory::SourceType source) {
-  switch (source) {
-    case AudioDeviceFactory::kSourceWebAudioInteractive:
-      return media::AudioLatency::LATENCY_INTERACTIVE;
-    case AudioDeviceFactory::kSourceNone:
-    case AudioDeviceFactory::kSourceWebRtc:
-    case AudioDeviceFactory::kSourceNonRtcAudioTrack:
-    case AudioDeviceFactory::kSourceWebAudioBalanced:
-      return media::AudioLatency::LATENCY_RTC;
-    case AudioDeviceFactory::kSourceMediaElement:
-    case AudioDeviceFactory::kSourceWebAudioPlayback:
-      return media::AudioLatency::LATENCY_PLAYBACK;
-    case AudioDeviceFactory::kSourceWebAudioExact:
-      return media::AudioLatency::LATENCY_EXACT_MS;
-  }
-  NOTREACHED();
-  return media::AudioLatency::LATENCY_INTERACTIVE;
-}
+#endif
 
 scoped_refptr<media::AudioOutputDevice> NewOutputDevice(
     int render_frame_id,
@@ -91,13 +71,35 @@ scoped_refptr<media::SwitchableAudioRendererSink> NewMixableSink(
     const std::string& device_id,
     const url::Origin& security_origin) {
   RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  DCHECK(render_thread) << "RenderThreadImpl is not instantiated, or "
+                        << "GetOutputDeviceInfo() is called on a wrong thread ";
   return scoped_refptr<media::AudioRendererMixerInput>(
       render_thread->GetAudioRendererMixerManager()->CreateInput(
           render_frame_id, session_id, device_id, security_origin,
-          GetSourceLatencyType(source_type)));
+          AudioDeviceFactory::GetSourceLatencyType(source_type)));
 }
 
 }  // namespace
+
+media::AudioLatency::LatencyType AudioDeviceFactory::GetSourceLatencyType(
+    AudioDeviceFactory::SourceType source) {
+  switch (source) {
+    case AudioDeviceFactory::kSourceWebAudioInteractive:
+      return media::AudioLatency::LATENCY_INTERACTIVE;
+    case AudioDeviceFactory::kSourceNone:
+    case AudioDeviceFactory::kSourceWebRtc:
+    case AudioDeviceFactory::kSourceNonRtcAudioTrack:
+    case AudioDeviceFactory::kSourceWebAudioBalanced:
+      return media::AudioLatency::LATENCY_RTC;
+    case AudioDeviceFactory::kSourceMediaElement:
+    case AudioDeviceFactory::kSourceWebAudioPlayback:
+      return media::AudioLatency::LATENCY_PLAYBACK;
+    case AudioDeviceFactory::kSourceWebAudioExact:
+      return media::AudioLatency::LATENCY_EXACT_MS;
+  }
+  NOTREACHED();
+  return media::AudioLatency::LATENCY_INTERACTIVE;
+}
 
 scoped_refptr<media::AudioRendererSink>
 AudioDeviceFactory::NewAudioRendererMixerSink(

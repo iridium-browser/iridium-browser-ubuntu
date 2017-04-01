@@ -29,20 +29,34 @@
 #ifndef AudioIOCallback_h
 #define AudioIOCallback_h
 
+#include "base/time/time.h"
+
 namespace blink {
 
 class AudioBus;
 
-// Abstract base-class for isochronous audio I/O client.
-class AudioIOCallback {
-public:
-    // render() is called periodically to get the next render quantum of audio into destinationBus.
-    // Optional audio input is given in sourceBus (if it's not 0).
-    virtual void render(AudioBus* sourceBus, AudioBus* destinationBus, size_t framesToProcess) = 0;
-
-    virtual ~AudioIOCallback() { }
+struct AudioIOPosition {
+  // Audio stream position in seconds.
+  double position;
+  // System timestamp in seconds corresponding to the contained |position|
+  // value.
+  double timestamp;
 };
 
-} // namespace blink
+// Abstract base-class for isochronous audio I/O client.
+class AudioIOCallback {
+ public:
+  // render() is called periodically to get the next render quantum of audio
+  // into destinationBus.  Optional audio input is given in sourceBus (if it's
+  // not 0).
+  virtual void render(AudioBus* sourceBus,
+                      AudioBus* destinationBus,
+                      size_t framesToProcess,
+                      const AudioIOPosition& outputPosition) = 0;
 
-#endif // AudioIOCallback_h
+  virtual ~AudioIOCallback() {}
+};
+
+}  // namespace blink
+
+#endif  // AudioIOCallback_h

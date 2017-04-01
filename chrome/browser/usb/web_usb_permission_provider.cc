@@ -7,19 +7,19 @@
 #include <stddef.h>
 #include <utility>
 
-#include "base/command_line.h"
 #include "base/stl_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/usb/usb_blocklist.h"
 #include "chrome/browser/usb/usb_chooser_context.h"
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/usb/usb_tab_helper.h"
-#include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "device/usb/usb_device.h"
 #include "device/usb/webusb_descriptors.h"
 
+using content::RenderFrameHost;
 using content::WebContents;
 
 namespace {
@@ -28,10 +28,6 @@ bool FindOriginInDescriptorSet(const device::WebUsbAllowedOrigins* set,
                                const GURL& origin,
                                const uint8_t* configuration_value,
                                const uint8_t* first_interface) {
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableWebUsbSecurity))
-    return true;
-
   if (!set)
     return false;
   if (base::ContainsValue(set->origins, origin))
@@ -54,29 +50,20 @@ bool FindOriginInDescriptorSet(const device::WebUsbAllowedOrigins* set,
 
 }  // namespace
 
-WebUSBPermissionProvider::WebUSBPermissionProvider(
-    content::RenderFrameHost* render_frame_host)
-    : render_frame_host_(render_frame_host), weak_factory_(this) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(render_frame_host_);
-}
-
-WebUSBPermissionProvider::~WebUSBPermissionProvider() {}
-
-base::WeakPtr<device::usb::PermissionProvider>
-WebUSBPermissionProvider::GetWeakPtr() {
-  return weak_factory_.GetWeakPtr();
-}
-
+// static
 bool WebUSBPermissionProvider::HasDevicePermission(
-    scoped_refptr<const device::UsbDevice> device) const {
+    RenderFrameHost* render_frame_host,
+    scoped_refptr<const device::UsbDevice> device) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (UsbBlocklist::Get().IsExcluded(device))
+    return false;
+
   WebContents* web_contents =
-      WebContents::FromRenderFrameHost(render_frame_host_);
-  GURL embedding_origin =
-      web_contents->GetMainFrame()->GetLastCommittedURL().GetOrigin();
-  GURL requesting_origin =
-      render_frame_host_->GetLastCommittedURL().GetOrigin();
+      WebContents::FromRenderFrameHost(render_frame_host);
+  RenderFrameHost* main_frame = web_contents->GetMainFrame();
+  GURL embedding_origin = main_frame->GetLastCommittedURL().GetOrigin();
+  GURL requesting_origin = render_frame_host->GetLastCommittedURL().GetOrigin();
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   UsbChooserContext* chooser_context =
@@ -94,18 +81,51 @@ bool WebUSBPermissionProvider::HasDevicePermission(
   if (!device->permission_granted())
     return true;
 
-  return FindOriginInDescriptorSet(device->webusb_allowed_origins(),
-                                   requesting_origin, nullptr, nullptr);
+  // Embedded frames must have their origin in the list provided by the device.
+  if (render_frame_host != main_frame) {
+    return FindOriginInDescriptorSet(device->webusb_allowed_origins(),
+                                     requesting_origin, nullptr, nullptr);
+  }
+
+  return true;
+}
+
+WebUSBPermissionProvider::WebUSBPermissionProvider(
+    RenderFrameHost* render_frame_host)
+    : render_frame_host_(render_frame_host), weak_factory_(this) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK(render_frame_host_);
+}
+
+WebUSBPermissionProvider::~WebUSBPermissionProvider() {}
+
+base::WeakPtr<device::usb::PermissionProvider>
+WebUSBPermissionProvider::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
+bool WebUSBPermissionProvider::HasDevicePermission(
+    scoped_refptr<const device::UsbDevice> device) const {
+  return HasDevicePermission(render_frame_host_, device);
 }
 
 bool WebUSBPermissionProvider::HasConfigurationPermission(
     uint8_t requested_configuration_value,
     scoped_refptr<const device::UsbDevice> device) const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return FindOriginInDescriptorSet(
-      device->webusb_allowed_origins(),
-      render_frame_host_->GetLastCommittedURL().GetOrigin(),
-      &requested_configuration_value, nullptr);
+
+  // Embedded frames may only access configurations if their origin in the list
+  // provided by the device.
+  RenderFrameHost* main_frame =
+      WebContents::FromRenderFrameHost(render_frame_host_)->GetMainFrame();
+  if (render_frame_host_ != main_frame) {
+    return FindOriginInDescriptorSet(
+        device->webusb_allowed_origins(),
+        render_frame_host_->GetLastCommittedURL().GetOrigin(),
+        &requested_configuration_value, nullptr);
+  }
+
+  return true;
 }
 
 bool WebUSBPermissionProvider::HasFunctionPermission(
@@ -113,10 +133,19 @@ bool WebUSBPermissionProvider::HasFunctionPermission(
     uint8_t configuration_value,
     scoped_refptr<const device::UsbDevice> device) const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  return FindOriginInDescriptorSet(
-      device->webusb_allowed_origins(),
-      render_frame_host_->GetLastCommittedURL().GetOrigin(),
-      &configuration_value, &requested_function);
+
+  // Embedded frames may only access configurations if their origin in the list
+  // provided by the device.
+  RenderFrameHost* main_frame =
+      WebContents::FromRenderFrameHost(render_frame_host_)->GetMainFrame();
+  if (render_frame_host_ != main_frame) {
+    return FindOriginInDescriptorSet(
+        device->webusb_allowed_origins(),
+        render_frame_host_->GetLastCommittedURL().GetOrigin(),
+        &configuration_value, &requested_function);
+  }
+
+  return true;
 }
 
 void WebUSBPermissionProvider::IncrementConnectionCount() {

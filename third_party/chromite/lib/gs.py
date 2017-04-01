@@ -10,14 +10,16 @@ import collections
 import contextlib
 import datetime
 import errno
+import fnmatch
 import getpass
 import hashlib
 import os
 import re
+import shutil
 import tempfile
 import urlparse
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.lib import cache
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
@@ -27,9 +29,13 @@ from chromite.lib import retry_stats
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
+# Public path, only really works for files.
+PUBLIC_BASE_HTTPS_URL = 'https://storage.googleapis.com/'
 
-PUBLIC_BASE_HTTPS_URL = 'https://commondatastorage.googleapis.com/'
+# Private path for files.
 PRIVATE_BASE_HTTPS_URL = 'https://storage.cloud.google.com/'
+
+# Private path for directories.
 # TODO(akeshet): this is a workaround for b/27653354. If that is ultimately
 # fixed, revisit this workaround.
 PRIVATE_BASE_HTTPS_DOWNLOAD_URL = (
@@ -59,6 +65,10 @@ LS_LA_RE = re.compile(
 LS_RE = re.compile(r'^\s*(?P<content_length>)(?P<creation_time>)(?P<url>.*)'
                    r'(?P<generation>)(?P<metageneration>)\s*$')
 
+# Format used by ContainsWildCard, which is duplicated from
+# https://github.com/GoogleCloudPlatform/gsutil/blob/v4.21/gslib/storage_url.py#L307.
+WILDCARD_REGEX = re.compile(r'[*?\[\]]')
+
 
 def PathIsGs(path):
   """Determine if a path is a Google Storage URI."""
@@ -72,7 +82,10 @@ def CanonicalizeURL(url, strict=False):
     url: URL to canonicalize.
     strict: Raises exception if URL cannot be canonicalized.
   """
-  for prefix in (PUBLIC_BASE_HTTPS_URL, PRIVATE_BASE_HTTPS_URL):
+  for prefix in (PUBLIC_BASE_HTTPS_URL,
+                 PRIVATE_BASE_HTTPS_URL,
+                 PRIVATE_BASE_HTTPS_DOWNLOAD_URL,
+                 'https://commondatastorage.googleapis.com/'):
     if url.startswith(prefix):
       return url.replace(prefix, BASE_GS_URL, 1)
 
@@ -94,11 +107,49 @@ def GetGsURL(bucket, for_gsutil=False, public=True, suburl=''):
   Returns:
     The fully constructed URL
   """
+  url = 'gs://%s/%s' % (bucket, suburl)
+
   if for_gsutil:
-    urlbase = BASE_GS_URL
+    return url
   else:
-    urlbase = PUBLIC_BASE_HTTPS_URL if public else PRIVATE_BASE_HTTPS_URL
-  return '%s%s/%s' % (urlbase, bucket, suburl)
+    return GsUrlToHttp(url, public=public)
+
+
+def GsUrlToHttp(path, public=True, directory=False):
+  """Convert a GS URL to a HTTP URL for the same resource.
+
+  Because the HTTP Urls are not fixed (and may not always be simple prefix
+  replacements), use this method to centralize the conversion.
+
+  Directories need to have different URLs from files, because the Web UIs for GS
+  are weird and really inconsistent. Also public directories probably
+  don't work, and probably never will (permissions as well as UI).
+
+  e.g. 'gs://chromeos-image-archive/path/file' ->
+       'https://pantheon/path/file'
+
+  Args:
+    path: GS URL to convert.
+    public: Is this URL for Googler access, or publicly visible?
+    directory: Force this URL to be treated as a directory?
+               We try to autodetect on False.
+
+  Returns:
+    https URL as a string.
+  """
+  assert PathIsGs(path)
+  directory = directory or path.endswith('/')
+
+  # Public HTTP URls for directories don't work'
+  # assert not public or not directory,
+
+  if public:
+    return path.replace(BASE_GS_URL, PUBLIC_BASE_HTTPS_URL, 1)
+  else:
+    if directory:
+      return path.replace(BASE_GS_URL, PRIVATE_BASE_HTTPS_DOWNLOAD_URL, 1)
+    else:
+      return path.replace(BASE_GS_URL, PRIVATE_BASE_HTTPS_URL, 1)
 
 
 class GSContextException(Exception):
@@ -282,6 +333,7 @@ class GSContext(object):
         ref = tar_cache.Lookup(key)
         ref.SetDefault(cls.GSUTIL_URL)
         cls.DEFAULT_GSUTIL_BIN = os.path.join(ref.path, 'gsutil', 'gsutil')
+        cls._CompileCrcmod(ref.path)
       else:
         # Check if the default gsutil path for builders exists. If
         # not, try locating gsutil. If none exists, simply use 'gsutil'.
@@ -293,6 +345,76 @@ class GSContext(object):
         cls.DEFAULT_GSUTIL_BIN = gsutil_bin
 
     return cls.DEFAULT_GSUTIL_BIN
+
+  @classmethod
+  def _CompileCrcmod(cls, path):
+    """Try to setup a compiled crcmod for gsutil.
+
+    The native crcmod code is much faster than the python implementation, and
+    enables some more features (otherwise gsutil internally disables them).
+    Try to compile the module on demand in the crcmod tree bundled with gsutil.
+
+    For more details, see:
+    https://cloud.google.com/storage/docs/gsutil/addlhelp/CRC32CandInstallingcrcmod
+    """
+    src_root = os.path.join(path, 'gsutil', 'third_party', 'crcmod')
+
+    # Try to build it once.
+    flag = os.path.join(src_root, '.chromite.tried.build')
+    if os.path.exists(flag):
+      return False
+    # Flag things now regardless of how the attempt below works out.
+    try:
+      osutils.Touch(flag)
+    except IOError as e:
+      # If the gsutil dir was cached previously as root, but now we're
+      # non-root, just flag it and return.
+      if e.errno == errno.EACCES:
+        logging.debug('Skipping gsutil crcmod compile due to permissions')
+        cros_build_lib.SudoRunCommand(['touch', flag],
+                                      debug_level=logging.DEBUG)
+        return False
+      else:
+        raise
+
+    # See if the system includes one in which case we're done.
+    try:
+      import crcmod
+      if (getattr(crcmod, 'crcmod', None) and
+          getattr(crcmod.crcmod, '_usingExtension', None)):
+        return True
+    except ImportError:
+      pass
+
+    # See if the local copy has one.
+    mod_path = os.path.join(src_root, 'python2', 'crcmod', '_crcfunext.so')
+    if os.path.exists(mod_path):
+      return True
+
+    logging.debug('Attempting to compile local crcmod for gsutil')
+    with osutils.TempDir(prefix='chromite.gsutil.crcmod') as tempdir:
+      result = cros_build_lib.RunCommand(
+          ['python', './setup.py', 'build', '--build-base', tempdir,
+           '--build-platlib', tempdir],
+          cwd=src_root, capture_output=True, error_code_ok=True,
+          debug_level=logging.DEBUG)
+      if result.returncode:
+        return False
+
+      # Locate the module in the build dir.
+      temp_mod_path = os.path.join(tempdir, 'crcmod', '_crcfunext.so')
+      # If the module compile failed (missing compiler/headers/whatever),
+      # then the setup.py build command above would have passed, but there
+      # won't actually be a _crcfunext.so module.  Check for it here to
+      # disambiguate other errors from shutil.copy2.
+      if not os.path.exists(temp_mod_path):
+        logging.debug('No crcmod module produced (missing host compiler?)')
+        return False
+      try:
+        shutil.copy2(temp_mod_path, mod_path)
+        return True
+      except shutil.Error:
+        return False
 
   def __init__(self, boto_file=None, cache_dir=None, acl=None,
                dry_run=False, gsutil_bin=None, init_boto=False, retries=None,
@@ -433,7 +555,7 @@ class GSContext(object):
         return osutils.ReadFile(path)
       except Exception as e:
         if getattr(e, 'errno', None) == errno.ENOENT:
-          raise GSNoSuchKey('%s: file does not exist' % path)
+          raise GSNoSuchKey('Cat Error: file %s does not exist' % path)
         else:
           raise GSContextException(str(e))
     elif self.dry_run:
@@ -537,7 +659,7 @@ class GSContext(object):
           'One or more URLs matched no objects' in error):
         raise GSNoSuchKey(e)
 
-      logging.warning('GS_ERROR: %s', error)
+      logging.warning('GS_ERROR: %s ', error)
 
       # TODO: Below is a list of known flaky errors that we should
       # retry. The list needs to be extended.
@@ -552,8 +674,14 @@ class GSContext(object):
           'ResumableUploadAbortException',
           'ResumableDownloadException',
           'ssl.SSLError: The read operation timed out',
+          # TODO: Error messages may change in different library versions,
+          # use regexes to match resumable error messages.
+          'ssl.SSLError: (\'The read operation timed out\',)',
+          'ssl.SSLError: _ssl.c:495: The handshake operation timed out',
           'Unable to find the server',
           'doesn\'t match cloud-supplied digest',
+          'ssl.SSLError: [Errno 8]',
+          'EOF occurred in violation of protocol',
       )
       if any(x in error for x in RESUMABLE_ERROR_MESSAGE):
         # Only remove the tracker files if we try to upload/download a file.
@@ -726,17 +854,23 @@ class GSContext(object):
 
         # Now we parse the output for the current generation number.  Example:
         #   Created: gs://chromeos-throw-away-bucket/foo#1360630664537000.1
-        m = re.search(r'Created: .*#(\d+)([.](\d+))?$', result.error)
+        m = re.search(r'Created: .*#(\d+)([.](\d+))?\n', result.error)
         if m:
           return int(m.group(1))
         else:
           return None
-      except GSNoSuchKey:
+      except GSNoSuchKey as e:
         # If the source was a local file, the error is a quirk of gsutil 4.5
         # and should be ignored. If the source was remote, there might
         # legitimately be no such file. See crbug.com/393419.
         if os.path.isfile(src_path):
           return None
+
+        # Temp log for crbug.com/642986, should be removed when the bug
+        # is fixed.
+        logging.warning('Copy Error: src %s dest %s: %s '
+                        '(Temp log for crbug.com/642986)',
+                        src_path, dest_path, e)
         raise
 
   def CreateWithContents(self, gs_uri, contents, **kwargs):
@@ -969,7 +1103,7 @@ class GSContext(object):
       # Example line:
       # No URLs matched gs://bucket/file
       if e.result.error.startswith('No URLs matched'):
-        raise GSNoSuchKey(path)
+        raise GSNoSuchKey('Stat Error: No URLs matched %s.' % path)
 
       # No idea what this is, so just choke.
       raise
@@ -1057,6 +1191,75 @@ class GSContext(object):
 
     timeout_util.WaitForSuccess(_Retry, _CheckForExistence,
                                 timeout=timeout, period=period)
+
+  def ContainsWildcard(self, url):
+    """Checks whether url_string contains a wildcard.
+
+    Args:
+      url: URL string to check.
+
+    Returns:
+      True if |url| contains a wildcard.
+    """
+    return bool(WILDCARD_REGEX.search(url))
+
+  def GetGsNamesWithWait(self, pattern, url, timeout=600, period=10,
+                         is_regex_pattern=False):
+    """Returns the google storage names specified by the given pattern.
+
+    This method polls Google Storage until the target files specified by the
+    pattern is available or until the timeout occurs. Because we may not know
+    the exact name of the target files, the method accepts a filename pattern,
+    to identify whether a file whose name matches the pattern exists
+    (e.g. use pattern '*_full_*' to search for the full payload
+    'chromeos_R17-1413.0.0-a1_x86-mario_full_dev.bin'). Returns the name only
+    if found before the timeout.
+
+    Warning: GS listing are not perfect, and are eventually consistent. Doing a
+    search for file existence is a 'best effort'. Calling code should be aware
+    and ready to handle that.
+
+    Args:
+      pattern: a path pattern (glob or regex) identifying the files we need.
+      url: URL of the Google Storage bucket.
+      timeout: how many seconds are we allowed to keep trying.
+      period: how many seconds to wait between attempts.
+      is_regex_pattern: Whether the pattern is a regex (otherwise a glob).
+
+    Returns:
+      The list of files matching the pattern in Google Storage bucket or None
+      if the files are not found and hit the timeout_util.TimeoutError.
+    """
+    def _GetGsName():
+      uploaded_list = [os.path.basename(p.url) for p in self.List(url)]
+
+      if is_regex_pattern:
+        filter_re = re.compile(pattern)
+        matching_names = [f for f in uploaded_list
+                          if filter_re.search(f) is not None]
+      else:
+        matching_names = fnmatch.filter(uploaded_list, pattern)
+
+      return matching_names
+
+    try:
+      matching_names = None
+      if not (is_regex_pattern or self.ContainsWildcard(pattern)):
+        try:
+          self.WaitForGsPaths(['%s/%s' % (url, pattern)], timeout)
+          return [os.path.basename(pattern)]
+        except GSCommandError:
+          pass
+
+      if not matching_names:
+        matching_names = timeout_util.WaitForSuccess(
+            lambda x: not x, _GetGsName, timeout=timeout, period=period)
+
+      logging.debug('matching_names=%s, is_regex_pattern=%r',
+                    matching_names, is_regex_pattern)
+      return matching_names
+    except timeout_util.TimeoutError:
+      return None
 
 
 @contextlib.contextmanager

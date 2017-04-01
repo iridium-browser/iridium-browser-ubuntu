@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.util.Pair;
 import android.view.WindowManager;
 
 import org.chromium.base.VisibleForTesting;
@@ -42,16 +43,21 @@ public class ExternalPrerenderHandler {
      * @param bounds The bounds for the content view (render widget host view) for the prerender.
      * @param prerenderOnCellular Whether the prerender should happen if the device has a cellular
      *                            connection.
-     * @return The {@link WebContents} that is linked to this prerender. {@code null} if
-     *         unsuccessful.
+     * @return A Pair containing the dummy {@link WebContents} that is linked to this prerender
+     *         through session storage namespace id and will be replaced soon and the prerendering
+     *         {@link WebContents} that owned by the prerender manager.
+     *         {@code null} if unsuccessful.
      */
-    public WebContents addPrerender(Profile profile, String url, String referrer,
+    public Pair<WebContents, WebContents> addPrerender(Profile profile, String url, String referrer,
             Rect bounds, boolean prerenderOnCellular) {
-        WebContents webContents = WebContentsFactory.createWebContents(false, false);
-        if (addPrerender(profile, webContents, url, referrer, bounds, prerenderOnCellular)) {
-            return webContents;
+        WebContents dummyWebContents = WebContentsFactory.createWebContents(false, false);
+        WebContents prerenderingWebContents =
+                addPrerender(profile, dummyWebContents, url, referrer, bounds, prerenderOnCellular);
+        if (dummyWebContents == null) return null;
+        if (prerenderingWebContents != null) {
+            return Pair.create(dummyWebContents, prerenderingWebContents);
         }
-        if (webContents != null) webContents.destroy();
+        dummyWebContents.destroy();
         return null;
     }
 
@@ -66,9 +72,9 @@ public class ExternalPrerenderHandler {
      * @param bounds The bounds for the content view (render widget host view) for the prerender.
      * @param prerenderOnCellular Whether the prerender should happen if the device has a cellular
      *                            connection.
-     * @return Whether the prerender was successful.
+     * @return The prerendering {@link WebContents} owned by PrerenderManager.
      */
-    public boolean addPrerender(Profile profile, WebContents webContents, String url,
+    public WebContents addPrerender(Profile profile, WebContents webContents, String url,
             String referrer, Rect bounds, boolean prerenderOnCellular) {
         return nativeAddPrerender(mNativeExternalPrerenderHandler, profile, webContents, url,
                 referrer, bounds.top, bounds.left, bounds.bottom, bounds.right,
@@ -119,33 +125,38 @@ public class ExternalPrerenderHandler {
      * @param convertToDp Whether the value should be converted to dp from pixels.
      * @return The estimated prerender size in pixels or dp.
      */
-    public static Point estimateContentSize(Application application, boolean convertToDp) {
+    public static Rect estimateContentSize(Application application, boolean convertToDp) {
         // The size is estimated as:
         // X = screenSizeX
         // Y = screenSizeY - top bar - bottom bar - custom tabs bar
+        // The bounds rectangle includes the bottom bar and the custom tabs bar as well.
+        Rect screenBounds = new Rect();
         Point screenSize = new Point();
         WindowManager wm = (WindowManager) application.getSystemService(Context.WINDOW_SERVICE);
         wm.getDefaultDisplay().getSize(screenSize);
         Resources resources = application.getResources();
         int statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android");
         try {
-            screenSize.y -=
-                    resources.getDimensionPixelSize(R.dimen.custom_tabs_control_container_height);
             screenSize.y -= resources.getDimensionPixelSize(statusBarId);
         } catch (Resources.NotFoundException e) {
             // Nothing, this is just a best effort estimate.
         }
+        screenBounds.set(0,
+                resources.getDimensionPixelSize(R.dimen.custom_tabs_control_container_height),
+                screenSize.x, screenSize.y);
 
         if (convertToDp) {
             float density = resources.getDisplayMetrics().density;
-            screenSize.x = (int) Math.ceil(screenSize.x / density);
-            screenSize.y = (int) Math.ceil(screenSize.y / density);
+            screenBounds.top = (int) Math.ceil(screenBounds.top / density);
+            screenBounds.left = (int) Math.ceil(screenBounds.left / density);
+            screenBounds.right = (int) Math.ceil(screenBounds.right / density);
+            screenBounds.bottom = (int) Math.ceil(screenBounds.bottom / density);
         }
-        return screenSize;
+        return screenBounds;
     }
 
     private static native long nativeInit();
-    private static native boolean nativeAddPrerender(
+    private static native WebContents nativeAddPrerender(
             long nativeExternalPrerenderHandlerAndroid, Profile profile,
             WebContents webContents, String url, String referrer,
             int top, int left, int bottom, int right, boolean prerenderOnCellular);

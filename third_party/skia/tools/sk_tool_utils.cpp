@@ -14,6 +14,7 @@
 #include "SkCommonFlags.h"
 #include "SkFontMgr.h"
 #include "SkFontStyle.h"
+#include "SkPixelRef.h"
 #include "SkPoint3.h"
 #include "SkShader.h"
 #include "SkTestScalerContext.h"
@@ -200,7 +201,7 @@ void write_pixels(SkCanvas* canvas, const SkBitmap& bitmap, int x, int y,
 
 sk_sp<SkShader> create_checkerboard_shader(SkColor c1, SkColor c2, int size) {
     SkBitmap bm;
-    bm.allocN32Pixels(2 * size, 2 * size);
+    bm.allocPixels(SkImageInfo::MakeS32(2 * size, 2 * size, kPremul_SkAlphaType));
     bm.eraseColor(c1);
     bm.eraseArea(SkIRect::MakeLTRB(0, 0, size, size), c2);
     bm.eraseArea(SkIRect::MakeLTRB(size, size, 2 * size, 2 * size), c2);
@@ -210,7 +211,7 @@ sk_sp<SkShader> create_checkerboard_shader(SkColor c1, SkColor c2, int size) {
 
 SkBitmap create_checkerboard_bitmap(int w, int h, SkColor c1, SkColor c2, int checkSize) {
     SkBitmap bitmap;
-    bitmap.allocN32Pixels(w, h);
+    bitmap.allocPixels(SkImageInfo::MakeS32(w, h, kPremul_SkAlphaType));
     SkCanvas canvas(bitmap);
 
     sk_tool_utils::draw_checkerboard(&canvas, c1, c2, checkSize);
@@ -220,7 +221,7 @@ SkBitmap create_checkerboard_bitmap(int w, int h, SkColor c1, SkColor c2, int ch
 void draw_checkerboard(SkCanvas* canvas, SkColor c1, SkColor c2, int size) {
     SkPaint paint;
     paint.setShader(create_checkerboard_shader(c1, c2, size));
-    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+    paint.setBlendMode(SkBlendMode::kSrc);
     canvas->drawPaint(paint);
 }
 
@@ -239,7 +240,12 @@ SkBitmap create_string_bitmap(int w, int h, SkColor c, int x, int y,
     canvas.clear(0x00000000);
     canvas.drawText(str, strlen(str), SkIntToScalar(x), SkIntToScalar(y), paint);
 
-    return bitmap;
+    // Tag data as sRGB (without doing any color space conversion). Color-space aware configs
+    // will process this correctly but legacy configs will render as if this returned N32.
+    SkBitmap result;
+    result.setInfo(SkImageInfo::MakeS32(w, h, kPremul_SkAlphaType));
+    result.setPixelRef(sk_ref_sp(bitmap.pixelRef()), 0, 0);
+    return result;
 }
 
 void add_to_text_blob(SkTextBlobBuilder* builder, const char* text, const SkPaint& origPaint,
@@ -365,6 +371,11 @@ void create_tetra_normal_map(SkBitmap* bm, const SkIRect& dst) {
     }
 }
 
+#if defined(_MSC_VER)
+    // MSVC takes ~2 minutes to compile this function with optimization.
+    // We don't really care to wait that long for this function.
+    #pragma optimize("", off)
+#endif
 void make_big_path(SkPath& path) {
     #include "BigPathBench.inc"
 }
@@ -452,7 +463,7 @@ SkBitmap slow_blur(const SkBitmap& src, float sigma) {
     dst.allocN32Pixels(src.width(), src.height(), true);
 
     int wh;
-    SkAutoTDeleteArray<float> kernel(create_2d_kernel(sigma, &wh));
+    std::unique_ptr<float[]> kernel(create_2d_kernel(sigma, &wh));
 
     for (int y = 0; y < src.height(); ++y) {
         for (int x = 0; x < src.width(); ++x) {

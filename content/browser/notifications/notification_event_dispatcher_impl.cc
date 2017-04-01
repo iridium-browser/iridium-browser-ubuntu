@@ -178,10 +178,10 @@ void FindServiceWorkerRegistration(
                  notification_action_callback, dispatch_error_callback));
 }
 
-// Reads the data associated with the |persistent_notification_id| belonging to
-// |origin| from the notification context.
+// Reads the data associated with the |notification_id| belonging to |origin|
+// from the notification context.
 void ReadNotificationDatabaseData(
-    int64_t persistent_notification_id,
+    const std::string& notification_id,
     const GURL& origin,
     const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context,
     const scoped_refptr<PlatformNotificationContext>& notification_context,
@@ -189,7 +189,7 @@ void ReadNotificationDatabaseData(
     const NotificationDispatchCompleteCallback& dispatch_error_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   notification_context->ReadNotificationData(
-      persistent_notification_id, origin,
+      notification_id, origin,
       base::Bind(&FindServiceWorkerRegistration, origin, service_worker_context,
                  notification_context, notification_read_callback,
                  dispatch_error_callback));
@@ -203,6 +203,7 @@ void DispatchNotificationClickEventOnWorker(
     const scoped_refptr<ServiceWorkerVersion>& service_worker,
     const NotificationDatabaseData& notification_database_data,
     int action_index,
+    const base::NullableString16& reply,
     const ServiceWorkerVersion::StatusCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   int request_id = service_worker->StartRequest(
@@ -212,12 +213,13 @@ void DispatchNotificationClickEventOnWorker(
       request_id,
       ServiceWorkerMsg_NotificationClickEvent(
           request_id, notification_database_data.notification_id,
-          notification_database_data.notification_data, action_index));
+          notification_database_data.notification_data, action_index, reply));
 }
 
 // Dispatches the notification click event on the |service_worker_registration|.
 void DoDispatchNotificationClickEvent(
     int action_index,
+    const base::NullableString16& reply,
     const NotificationDispatchCompleteCallback& dispatch_complete_callback,
     const scoped_refptr<PlatformNotificationContext>& notification_context,
     const ServiceWorkerRegistration* service_worker_registration,
@@ -229,7 +231,7 @@ void DoDispatchNotificationClickEvent(
       base::Bind(
           &DispatchNotificationClickEventOnWorker,
           make_scoped_refptr(service_worker_registration->active_version()),
-          notification_database_data, action_index, status_callback),
+          notification_database_data, action_index, reply, status_callback),
       status_callback);
 }
 
@@ -255,7 +257,7 @@ void OnPersistentNotificationDataDeleted(
 // Called when the persistent notification close event has been handled
 // to remove the notification from the database.
 void DeleteNotificationDataFromDatabase(
-    const int64_t notification_id,
+    const std::string& notification_id,
     const GURL& origin,
     const scoped_refptr<PlatformNotificationContext>& notification_context,
     const NotificationDispatchCompleteCallback& dispatch_complete_callback,
@@ -285,14 +287,14 @@ void DispatchNotificationCloseEventOnWorker(
 // Actually dispatches the notification close event on the service worker
 // registration.
 void DoDispatchNotificationCloseEvent(
+    const std::string& notification_id,
     bool by_user,
     const NotificationDispatchCompleteCallback& dispatch_complete_callback,
     const scoped_refptr<PlatformNotificationContext>& notification_context,
     const ServiceWorkerRegistration* service_worker_registration,
     const NotificationDatabaseData& notification_database_data) {
   const ServiceWorkerVersion::StatusCallback dispatch_event_callback =
-      base::Bind(&DeleteNotificationDataFromDatabase,
-                 notification_database_data.notification_id,
+      base::Bind(&DeleteNotificationDataFromDatabase, notification_id,
                  notification_database_data.origin, notification_context,
                  dispatch_complete_callback);
   if (by_user) {
@@ -312,13 +314,13 @@ void DoDispatchNotificationCloseEvent(
 // be done by the |notification_action_callback|.
 void DispatchNotificationEvent(
     BrowserContext* browser_context,
-    int64_t persistent_notification_id,
+    const std::string& notification_id,
     const GURL& origin,
     const NotificationOperationCallbackWithContext&
         notification_action_callback,
     const NotificationDispatchCompleteCallback& notification_error_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK_GT(persistent_notification_id, 0);
+  DCHECK(!notification_id.empty());
   DCHECK(origin.is_valid());
 
   StoragePartition* partition =
@@ -332,8 +334,8 @@ void DispatchNotificationEvent(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&ReadNotificationDatabaseData, persistent_notification_id,
-                 origin, service_worker_context, notification_context,
+      base::Bind(&ReadNotificationDatabaseData, notification_id, origin,
+                 service_worker_context, notification_context,
                  base::Bind(notification_action_callback, notification_context),
                  notification_error_callback));
 }
@@ -357,27 +359,29 @@ NotificationEventDispatcherImpl::~NotificationEventDispatcherImpl() {}
 
 void NotificationEventDispatcherImpl::DispatchNotificationClickEvent(
     BrowserContext* browser_context,
-    int64_t persistent_notification_id,
+    const std::string& notification_id,
     const GURL& origin,
     int action_index,
+    const base::NullableString16& reply,
     const NotificationDispatchCompleteCallback& dispatch_complete_callback) {
   DispatchNotificationEvent(
-      browser_context, persistent_notification_id, origin,
-      base::Bind(&DoDispatchNotificationClickEvent, action_index,
+      browser_context, notification_id, origin,
+      base::Bind(&DoDispatchNotificationClickEvent, action_index, reply,
                  dispatch_complete_callback),
       dispatch_complete_callback);
 }
 
 void NotificationEventDispatcherImpl::DispatchNotificationCloseEvent(
     BrowserContext* browser_context,
-    int64_t persistent_notification_id,
+    const std::string& notification_id,
     const GURL& origin,
     bool by_user,
     const NotificationDispatchCompleteCallback& dispatch_complete_callback) {
-  DispatchNotificationEvent(browser_context, persistent_notification_id, origin,
-                            base::Bind(&DoDispatchNotificationCloseEvent,
-                                       by_user, dispatch_complete_callback),
-                            dispatch_complete_callback);
+  DispatchNotificationEvent(
+      browser_context, notification_id, origin,
+      base::Bind(&DoDispatchNotificationCloseEvent, notification_id, by_user,
+                 dispatch_complete_callback),
+      dispatch_complete_callback);
 }
 
 }  // namespace content

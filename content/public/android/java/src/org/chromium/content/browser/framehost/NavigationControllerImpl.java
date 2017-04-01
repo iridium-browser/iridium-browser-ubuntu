@@ -115,23 +115,9 @@ import org.chromium.content_public.common.ResourceRequestBody;
     }
 
     @Override
-    public void reloadToRefreshContent(boolean checkForRepost) {
-        if (mNativeNavigationControllerAndroid != 0) {
-            nativeReloadToRefreshContent(mNativeNavigationControllerAndroid, checkForRepost);
-        }
-    }
-
-    @Override
     public void reloadBypassingCache(boolean checkForRepost) {
         if (mNativeNavigationControllerAndroid != 0) {
             nativeReloadBypassingCache(mNativeNavigationControllerAndroid, checkForRepost);
-        }
-    }
-
-    @Override
-    public void reloadDisableLoFi(boolean checkForRepost) {
-        if (mNativeNavigationControllerAndroid != 0) {
-            nativeReloadDisableLoFi(mNativeNavigationControllerAndroid, checkForRepost);
         }
     }
 
@@ -284,6 +270,18 @@ import org.chromium.content_public.common.ResourceRequestBody;
                 replaceEntry);
     }
 
+    @Override
+    public String getEntryExtraData(int index, String key) {
+        if (mNativeNavigationControllerAndroid == 0) return null;
+        return nativeGetEntryExtraData(mNativeNavigationControllerAndroid, index, key);
+    }
+
+    @Override
+    public void setEntryExtraData(int index, String key, String value) {
+        if (mNativeNavigationControllerAndroid == 0) return;
+        nativeSetEntryExtraData(mNativeNavigationControllerAndroid, index, key, value);
+    }
+
     @CalledByNative
     private static void addToNavigationHistory(Object history, Object navigationEntry) {
         ((NavigationHistory) history).addEntry((NavigationEntry) navigationEntry);
@@ -311,11 +309,7 @@ import org.chromium.content_public.common.ResourceRequestBody;
     private native void nativeContinuePendingReload(long nativeNavigationControllerAndroid);
     private native void nativeReload(long nativeNavigationControllerAndroid,
             boolean checkForRepost);
-    private native void nativeReloadToRefreshContent(long nativeNavigationControllerAndroid,
-            boolean checkForRepost);
     private native void nativeReloadBypassingCache(long nativeNavigationControllerAndroid,
-            boolean checkForRepost);
-    private native void nativeReloadDisableLoFi(long nativeNavigationControllerAndroid,
             boolean checkForRepost);
     private native void nativeLoadUrl(long nativeNavigationControllerAndroid, String url,
             int loadUrlType, int transitionType, String referrerUrl, int referrerPolicy,
@@ -347,4 +341,8 @@ import org.chromium.content_public.common.ResourceRequestBody;
             long sourceNavigationControllerAndroid);
     private native void nativeCopyStateFromAndPrune(long nativeNavigationControllerAndroid,
             long sourceNavigationControllerAndroid, boolean replaceEntry);
+    private native String nativeGetEntryExtraData(
+            long nativeNavigationControllerAndroid, int index, String key);
+    private native void nativeSetEntryExtraData(
+            long nativeNavigationControllerAndroid, int index, String key, String value);
 }

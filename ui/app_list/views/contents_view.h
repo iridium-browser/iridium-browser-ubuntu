@@ -11,7 +11,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "ui/app_list/app_list_export.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/pagination_model.h"
@@ -30,10 +29,8 @@ class AppListPage;
 class ApplicationDragAndDropHost;
 class AppListFolderItem;
 class AppListMainView;
-class AppListViewDelegate;
 class AppsContainerView;
 class CustomLauncherPageView;
-class ContentsAnimator;
 class PaginationModel;
 class SearchBoxView;
 class SearchResultPageView;
@@ -50,9 +47,8 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   explicit ContentsView(AppListMainView* app_list_main_view);
   ~ContentsView() override;
 
-  // Initialize the pages of the launcher. In the experimental launcher, should
-  // be called after set_contents_switcher_view(), or switcher buttons will not
-  // be created.
+  // Initialize the pages of the launcher. Should be called after
+  // set_contents_switcher_view().
   void Init(AppListModel* model);
 
   // The app list gets closed and drag and drop operations need to be cancelled.
@@ -179,11 +175,9 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // launcher-page pagination.
   PaginationModel* GetAppsPaginationModel();
 
-  // Special sub views of the ContentsView. All owned by the views hierarchy.
+  // Sub-views of the ContentsView. All owned by the views hierarchy.
   AppsContainerView* apps_container_view_;
   SearchResultPageView* search_results_page_view_;
-
-  // Only used in the experimental app list.
   StartPageView* start_page_view_;
   CustomLauncherPageView* custom_page_view_;
 

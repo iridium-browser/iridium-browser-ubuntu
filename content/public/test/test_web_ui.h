@@ -8,7 +8,6 @@
 #include <memory>
 #include <vector>
 
-#include "base/memory/scoped_vector.h"
 #include "base/values.h"
 #include "content/public/browser/web_ui.h"
 
@@ -33,12 +32,10 @@ class TestWebUI : public WebUI {
   float GetDeviceScaleFactor() const override;
   const base::string16& GetOverriddenTitle() const override;
   void OverrideTitle(const base::string16& title) override {}
-  ui::PageTransition GetLinkTransitionType() const override;
-  void SetLinkTransitionType(ui::PageTransition type) override {}
   int GetBindings() const override;
   void SetBindings(int bindings) override {}
   bool HasRenderFrame() override;
-  void AddMessageHandler(WebUIMessageHandler* handler) override;
+  void AddMessageHandler(std::unique_ptr<WebUIMessageHandler> handler) override;
   void RegisterMessageCallback(const std::string& message,
                                const MessageCallback& callback) override {}
   void ProcessWebUIMessage(const GURL& source_url,
@@ -63,34 +60,40 @@ class TestWebUI : public WebUI {
   void CallJavascriptFunctionUnsafe(
       const std::string& function_name,
       const std::vector<const base::Value*>& args) override;
-  ScopedVector<WebUIMessageHandler>* GetHandlersForTesting() override;
+  std::vector<std::unique_ptr<WebUIMessageHandler>>* GetHandlersForTesting()
+      override;
 
   class CallData {
    public:
     explicit CallData(const std::string& function_name);
     ~CallData();
 
-    void TakeAsArg1(base::Value* arg);
-    void TakeAsArg2(base::Value* arg);
-    void TakeAsArg3(base::Value* arg);
+    void TakeAsArg1(std::unique_ptr<base::Value> arg);
+    void TakeAsArg2(std::unique_ptr<base::Value> arg);
+    void TakeAsArg3(std::unique_ptr<base::Value> arg);
+    void TakeAsArg4(std::unique_ptr<base::Value> arg);
 
     const std::string& function_name() const { return function_name_; }
     const base::Value* arg1() const { return arg1_.get(); }
     const base::Value* arg2() const { return arg2_.get(); }
     const base::Value* arg3() const { return arg3_.get(); }
+    const base::Value* arg4() const { return arg4_.get(); }
 
    private:
     std::string function_name_;
     std::unique_ptr<base::Value> arg1_;
     std::unique_ptr<base::Value> arg2_;
     std::unique_ptr<base::Value> arg3_;
+    std::unique_ptr<base::Value> arg4_;
   };
 
-  const ScopedVector<CallData>& call_data() const { return call_data_; }
+  const std::vector<std::unique_ptr<CallData>>& call_data() const {
+    return call_data_;
+  }
 
  private:
-  ScopedVector<CallData> call_data_;
-  ScopedVector<WebUIMessageHandler> handlers_;
+  std::vector<std::unique_ptr<CallData>> call_data_;
+  std::vector<std::unique_ptr<WebUIMessageHandler>> handlers_;
   base::string16 temp_string_;
   WebContents* web_contents_;
 };

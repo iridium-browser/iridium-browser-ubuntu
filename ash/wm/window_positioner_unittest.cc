@@ -53,9 +53,7 @@ TEST_P(WindowPositionerTest, OpenMaximizedWindowOnSecondDisplay) {
 TEST_P(WindowPositionerTest, OpenDefaultWindowOnSecondDisplay) {
   if (!SupportsMultipleDisplays())
     return;
-#if defined(OS_WIN)
-  ash::WindowPositioner::SetMaximizeFirstWindow(true);
-#endif
+
   UpdateDisplay("400x400,1400x900");
   WmWindow* second_root_window = WmShell::Get()->GetAllRootWindows()[1];
   ScopedRootWindowForNewWindows root_for_new_windows(second_root_window);
@@ -64,21 +62,15 @@ TEST_P(WindowPositionerTest, OpenDefaultWindowOnSecondDisplay) {
   params.can_maximize = true;
   views::Widget* widget = shell::ToplevelWindow::CreateToplevelWindow(params);
   gfx::Rect bounds = widget->GetWindowBoundsInScreen();
-#if defined(OS_WIN)
-  EXPECT_TRUE(widget->IsMaximized());
-#else
+
   // The window should be in the 2nd display with the default size.
   EXPECT_EQ("300x300", bounds.size().ToString());
-#endif
-
   EXPECT_TRUE(
       second_root_window->GetDisplayNearestWindow().bounds().Contains(bounds));
 }
 
 // Tests that second window inherits first window's maximized state as well as
 // its restore bounds.
-// TODO(msw): Broken on Windows. http://crbug.com/584038
-#if defined(OS_CHROMEOS)
 TEST_P(WindowPositionerTest, SecondMaximizedWindowHasProperRestoreSize) {
   const int height_offset = GetMdMaximizedWindowHeightOffset();
   UpdateDisplay("1400x900");
@@ -113,7 +105,6 @@ TEST_P(WindowPositionerTest, SecondMaximizedWindowHasProperRestoreSize) {
   bounds = widget2->GetWindowBoundsInScreen();
   EXPECT_EQ("300x300", bounds.size().ToString());
 }
-#endif  // defined(OS_CHROMEOS)
 
 namespace {
 
@@ -144,9 +135,6 @@ class OutOfDisplayDelegate : public views::WidgetDelegate {
 }  // namespace
 
 TEST_P(WindowPositionerTest, EnsureMinimumVisibility) {
-  if (!SupportsHostWindowResize())
-    return;
-
   UpdateDisplay("400x400");
   views::Widget* widget = new views::Widget();
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
@@ -205,8 +193,6 @@ TEST_P(WindowPositionerTest, FirstRunMaximizeWindowLowResolution) {
 }
 
 TEST_P(WindowPositionerTest, IgnoreFullscreenInAutoRearrange) {
-  if (!SupportsHostWindowResize())
-    return;
   // Set bigger than 1366 so that the new window is opened in normal state.
   UpdateDisplay("1400x800");
 

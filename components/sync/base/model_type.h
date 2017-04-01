@@ -2,10 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Enumerate the various item subtypes that are supported by sync.
-// Each sync object is expected to have an immutable object type.
-// An object's type is inferred from the type of data it holds.
-
 #ifndef COMPONENTS_SYNC_BASE_MODEL_TYPE_H_
 #define COMPONENTS_SYNC_BASE_MODEL_TYPE_H_
 
@@ -31,12 +27,13 @@ class SyncEntity;
 
 namespace syncer {
 
-// TODO(akalin): Move the non-exported functions in this file to a
-// private header.
-
+// Enumerate the various item subtypes that are supported by sync.
+// Each sync object is expected to have an immutable object type.
+// An object's type is inferred from the type of data it holds.
+//
 // A Java counterpart will be generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.sync
-
+//
 // |kModelTypeInfoMap| struct entries are in the same order as their definition
 // in ModelType enum. Don't forget to update the |kModelTypeInfoMap| struct in
 // model_type.cc when you make changes in ModelType enum.
@@ -132,6 +129,10 @@ enum ModelType {
   SUPERVISED_USER_WHITELISTS,
   // Arc Package items.
   ARC_PACKAGE,
+  // Printer device information.
+  PRINTERS,
+  // Reading list items.
+  READING_LIST,
 
   // ---- Proxy types ----
   // Proxy types are excluded from the sync protocol, but are still considered
@@ -166,7 +167,7 @@ enum ModelType {
 typedef EnumSet<ModelType, FIRST_REAL_MODEL_TYPE, LAST_REAL_MODEL_TYPE>
     ModelTypeSet;
 typedef EnumSet<ModelType, UNSPECIFIED, LAST_REAL_MODEL_TYPE> FullModelTypeSet;
-typedef std::map<syncer::ModelType, const char*> ModelTypeNameMap;
+typedef std::map<ModelType, const char*> ModelTypeNameMap;
 
 inline ModelType ModelTypeFromInt(int i) {
   DCHECK_GE(i, 0);

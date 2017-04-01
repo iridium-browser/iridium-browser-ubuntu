@@ -5,20 +5,18 @@
 package org.chromium.chrome.browser.tabmodel;
 
 import android.app.Activity;
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
 import android.test.UiThreadTest;
-import android.test.suitebuilder.annotation.SmallTest;
-import android.test.suitebuilder.annotation.Smoke;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.EmbedContentViewActivity;
+import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabWindowManager.TabModelSelectorFactory;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
-import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Test for {@link TabWindowManager} APIs.  Makes sure the class handles multiple {@link Activity}s
@@ -28,14 +26,14 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
     private final TabModelSelectorFactory mMockTabModelSelectorFactory =
             new TabModelSelectorFactory() {
                 @Override
-                public TabModelSelector buildSelector(ChromeActivity activity,
-                        WindowAndroid windowAndroid, int selectorIndex) {
+                public TabModelSelector buildSelector(Activity activity,
+                        TabCreatorManager tabCreatorManager, int selectorIndex) {
                     return new MockTabModelSelector(0, 0, null);
                 }
     };
 
     private ChromeActivity buildActivity() {
-        ChromeActivity activity = new EmbedContentViewActivity();
+        ChromeActivity activity = new CustomTabActivity();
         ApplicationStatus.onStateChangeForTesting(activity, ActivityState.CREATED);
         return activity;
     }
@@ -43,13 +41,13 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
     private MockTabModelSelector requestSelector(ChromeActivity activity, int requestedIndex) {
         final TabWindowManager manager = TabWindowManager.getInstance();
         manager.setTabModelSelectorFactory(mMockTabModelSelectorFactory);
-        return (MockTabModelSelector) manager.requestSelector(activity, null, requestedIndex);
+        return (MockTabModelSelector) manager.requestSelector(activity, activity, requestedIndex);
     }
 
     /**
      * Test that a single {@link Activity} can request a {@link TabModelSelector}.
      */
-    @Smoke
+    @SmallTest
     @Feature({"Multiwindow"})
     @UiThreadTest
     public void testSingleActivity() {
@@ -255,11 +253,46 @@ public class TabWindowManagerTest extends InstrumentationTestCase {
 
         AsyncTabParamsManager.getAsyncTabParams().clear();
         final int asyncTabId = 123;
-        final TabReparentingParams dummyParams = new TabReparentingParams(null, null, null, false);
+        final TabReparentingParams dummyParams =
+                new TabReparentingParams(new Tab(0, false, null), null, null);
         assertFalse(manager.tabExistsInAnySelector(asyncTabId));
         AsyncTabParamsManager.add(asyncTabId, dummyParams);
         try {
             assertTrue(manager.tabExistsInAnySelector(asyncTabId));
+        } finally {
+            AsyncTabParamsManager.getAsyncTabParams().clear();
+        }
+    }
+
+    /**
+     * Tests that getTabById() functions properly.
+     */
+    @SmallTest
+    @Feature({"Multiwindow"})
+    @UiThreadTest
+    public void testGetTabById() {
+        final TabWindowManager manager = TabWindowManager.getInstance();
+
+        ChromeActivity activity0 = buildActivity();
+        ChromeActivity activity1 = buildActivity();
+        MockTabModelSelector selector0 = requestSelector(activity0, 0);
+        MockTabModelSelector selector1 = requestSelector(activity1, 1);
+        Tab tab1 = selector0.addMockTab();
+        Tab tab2 = selector1.addMockIncognitoTab();
+
+        assertNull(manager.getTabById(tab1.getId() - 1));
+        assertNotNull(manager.getTabById(tab1.getId()));
+        assertNotNull(manager.getTabById(tab2.getId()));
+        assertNull(manager.getTabById(tab2.getId() + 1));
+
+        AsyncTabParamsManager.getAsyncTabParams().clear();
+        final int asyncTabId = 123;
+        final TabReparentingParams dummyParams =
+                new TabReparentingParams(new Tab(0, false, null), null, null);
+        assertNull(manager.getTabById(asyncTabId));
+        AsyncTabParamsManager.add(asyncTabId, dummyParams);
+        try {
+            assertNotNull(manager.getTabById(asyncTabId));
         } finally {
             AsyncTabParamsManager.getAsyncTabParams().clear();
         }

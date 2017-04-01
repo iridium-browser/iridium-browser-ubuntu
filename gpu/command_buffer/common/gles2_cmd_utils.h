@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/numerics/safe_math.h"
 #include "gpu/command_buffer/common/gles2_utils_export.h"
@@ -57,19 +58,19 @@ inline bool SafeAddInt32(int32_t a, int32_t b, int32_t* dst) {
 
 // Returns the address of the first byte after a struct.
 template <typename T>
-const void* AddressAfterStruct(const T& pod) {
-  return reinterpret_cast<const uint8_t*>(&pod) + sizeof(pod);
+const volatile void* AddressAfterStruct(const volatile T& pod) {
+  return reinterpret_cast<const volatile uint8_t*>(&pod) + sizeof(pod);
 }
 
 // Returns the address of the frst byte after the struct or NULL if size >
 // immediate_data_size.
 template <typename RETURN_TYPE, typename COMMAND_TYPE>
-RETURN_TYPE GetImmediateDataAs(const COMMAND_TYPE& pod,
+RETURN_TYPE GetImmediateDataAs(const volatile COMMAND_TYPE& pod,
                                uint32_t size,
                                uint32_t immediate_data_size) {
   return (size <= immediate_data_size)
              ? static_cast<RETURN_TYPE>(
-                   const_cast<void*>(AddressAfterStruct(pod)))
+                   const_cast<volatile void*>(AddressAfterStruct(pod)))
              : NULL;
 }
 
@@ -139,6 +140,7 @@ class GLES2_UTILS_EXPORT GLES2Util {
   // function is called. If 0 is returned the id is invalid.
   int GLGetNumValuesReturned(int id) const;
 
+  static int ElementsPerGroup(int format, int type);
   // Computes the size of a single group of elements from a format and type pair
   static uint32_t ComputeImageGroupSize(int format, int type);
 
@@ -302,6 +304,7 @@ enum ContextType {
   CONTEXT_TYPE_OPENGLES3,
   CONTEXT_TYPE_LAST = CONTEXT_TYPE_OPENGLES3
 };
+GLES2_UTILS_EXPORT bool IsWebGLContextType(ContextType context_type);
 
 struct GLES2_UTILS_EXPORT ContextCreationAttribHelper {
   ContextCreationAttribHelper();

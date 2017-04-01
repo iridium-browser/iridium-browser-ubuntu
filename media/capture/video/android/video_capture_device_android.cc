@@ -40,12 +40,12 @@ mojom::MeteringMode ToMojomMeteringMode(
       return mojom::MeteringMode::SINGLE_SHOT;
     case PhotoCapabilities::AndroidMeteringMode::CONTINUOUS:
       return mojom::MeteringMode::CONTINUOUS;
-    case PhotoCapabilities::AndroidMeteringMode::UNAVAILABLE:
-      return mojom::MeteringMode::UNAVAILABLE;
+    case PhotoCapabilities::AndroidMeteringMode::NONE:
+      return mojom::MeteringMode::NONE;
     case PhotoCapabilities::AndroidMeteringMode::NOT_SET:
       NOTREACHED();
   }
-  return mojom::MeteringMode::UNAVAILABLE;
+  return mojom::MeteringMode::NONE;
 }
 
 PhotoCapabilities::AndroidMeteringMode ToAndroidMeteringMode(
@@ -57,11 +57,48 @@ PhotoCapabilities::AndroidMeteringMode ToAndroidMeteringMode(
       return PhotoCapabilities::AndroidMeteringMode::SINGLE_SHOT;
     case mojom::MeteringMode::CONTINUOUS:
       return PhotoCapabilities::AndroidMeteringMode::CONTINUOUS;
-    case mojom::MeteringMode::UNAVAILABLE:
-      return PhotoCapabilities::AndroidMeteringMode::UNAVAILABLE;
+    case mojom::MeteringMode::NONE:
+      return PhotoCapabilities::AndroidMeteringMode::NONE;
   }
   NOTREACHED();
   return PhotoCapabilities::AndroidMeteringMode::NOT_SET;
+}
+
+mojom::FillLightMode ToMojomFillLightMode(
+    PhotoCapabilities::AndroidFillLightMode android_mode) {
+  switch (android_mode) {
+    case PhotoCapabilities::AndroidFillLightMode::TORCH:
+      return mojom::FillLightMode::TORCH;
+    case PhotoCapabilities::AndroidFillLightMode::FLASH:
+      return mojom::FillLightMode::FLASH;
+    case PhotoCapabilities::AndroidFillLightMode::AUTO:
+      return mojom::FillLightMode::AUTO;
+    case PhotoCapabilities::AndroidFillLightMode::OFF:
+      return mojom::FillLightMode::OFF;
+    case PhotoCapabilities::AndroidFillLightMode::NONE:
+      return mojom::FillLightMode::NONE;
+    case PhotoCapabilities::AndroidFillLightMode::NOT_SET:
+      NOTREACHED();
+  }
+  return mojom::FillLightMode::NONE;
+}
+
+PhotoCapabilities::AndroidFillLightMode ToAndroidFillLightMode(
+    mojom::FillLightMode mojom_mode) {
+  switch (mojom_mode) {
+    case mojom::FillLightMode::TORCH:
+      return PhotoCapabilities::AndroidFillLightMode::TORCH;
+    case mojom::FillLightMode::FLASH:
+      return PhotoCapabilities::AndroidFillLightMode::FLASH;
+    case mojom::FillLightMode::AUTO:
+      return PhotoCapabilities::AndroidFillLightMode::AUTO;
+    case mojom::FillLightMode::OFF:
+      return PhotoCapabilities::AndroidFillLightMode::OFF;
+    case mojom::FillLightMode::NONE:
+      return PhotoCapabilities::AndroidFillLightMode::NONE;
+  }
+  NOTREACHED();
+  return PhotoCapabilities::AndroidFillLightMode::NOT_SET;
 }
 
 }  // anonymous namespace
@@ -134,7 +171,7 @@ void VideoCaptureDeviceAndroid::AllocateAndStart(
         capture_format_.frame_rate);
   }
 
-  DVLOG(1) << __FUNCTION__ << " requested ("
+  DVLOG(1) << __func__ << " requested ("
            << capture_format_.frame_size.ToString() << ")@ "
            << capture_format_.frame_rate << "fps";
 
@@ -252,7 +289,6 @@ void VideoCaptureDeviceAndroid::OnFrameAvailable(
     if (!got_first_frame_) {
       // Set aside one frame allowance for fluctuation.
       expected_next_frame_time_ = current_time - frame_interval_;
-      first_ref_time_ = current_time;
       got_first_frame_ = true;
 
       for (const auto& request : photo_requests_queue_)
@@ -263,6 +299,11 @@ void VideoCaptureDeviceAndroid::OnFrameAvailable(
 
   // Deliver the frame when it doesn't arrive too early.
   if (expected_next_frame_time_ <= current_time) {
+    // Using |expected_next_frame_time_| to estimate a proper capture timestamp
+    // since android.hardware.Camera API doesn't expose a better timestamp.
+    const base::TimeDelta capture_time =
+        expected_next_frame_time_ - base::TimeTicks();
+
     expected_next_frame_time_ += frame_interval_;
 
     // TODO(qiangchen): Investigate how to get raw timestamp for Android,
@@ -272,7 +313,7 @@ void VideoCaptureDeviceAndroid::OnFrameAvailable(
       return;
     client_->OnIncomingCapturedData(reinterpret_cast<uint8_t*>(buffer), length,
                                     capture_format_, rotation, current_time,
-                                    current_time - first_ref_time_);
+                                    capture_time);
   }
 
   env->ReleaseByteArrayElements(data, buffer, JNI_ABORT);
@@ -288,12 +329,17 @@ void VideoCaptureDeviceAndroid::OnI420FrameAvailable(JNIEnv* env,
                                                      jint uv_pixel_stride,
                                                      jint width,
                                                      jint height,
-                                                     jint rotation) {
+                                                     jint rotation,
+                                                     jlong timestamp) {
   {
     base::AutoLock lock(lock_);
     if (state_ != kConfigured || !client_)
       return;
   }
+  const int64_t absolute_micro =
+      timestamp / base::Time::kNanosecondsPerMicrosecond;
+  const base::TimeDelta capture_time =
+      base::TimeDelta::FromMicroseconds(absolute_micro);
 
   const base::TimeTicks current_time = base::TimeTicks::Now();
   {
@@ -301,7 +347,6 @@ void VideoCaptureDeviceAndroid::OnI420FrameAvailable(JNIEnv* env,
     if (!got_first_frame_) {
       // Set aside one frame allowance for fluctuation.
       expected_next_frame_time_ = current_time - frame_interval_;
-      first_ref_time_ = current_time;
       got_first_frame_ = true;
 
       for (const auto& request : photo_requests_queue_)
@@ -342,7 +387,7 @@ void VideoCaptureDeviceAndroid::OnI420FrameAvailable(JNIEnv* env,
       return;
     client_->OnIncomingCapturedData(buffer.get(), buffer_length,
                                     capture_format_, rotation, current_time,
-                                    current_time - first_ref_time_);
+                                    capture_time);
   }
 }
 
@@ -381,6 +426,10 @@ void VideoCaptureDeviceAndroid::OnPhotoTaken(
   cb->Run(std::move(blob));
 
   photo_callbacks_.erase(reference_it);
+}
+
+void VideoCaptureDeviceAndroid::ConfigureForTesting() {
+  Java_VideoCapture_setTestMode(AttachCurrentThread(), j_capture_);
 }
 
 VideoPixelFormat VideoCaptureDeviceAndroid::GetColorspace() {
@@ -459,21 +508,49 @@ void VideoCaptureDeviceAndroid::DoGetPhotoCapabilities(
   photo_capabilities->iso->current = caps.getCurrentIso();
   photo_capabilities->iso->max = caps.getMaxIso();
   photo_capabilities->iso->min = caps.getMinIso();
+  photo_capabilities->iso->step = caps.getStepIso();
   photo_capabilities->height = mojom::Range::New();
   photo_capabilities->height->current = caps.getCurrentHeight();
   photo_capabilities->height->max = caps.getMaxHeight();
   photo_capabilities->height->min = caps.getMinHeight();
+  photo_capabilities->height->step = caps.getStepHeight();
   photo_capabilities->width = mojom::Range::New();
   photo_capabilities->width->current = caps.getCurrentWidth();
   photo_capabilities->width->max = caps.getMaxWidth();
   photo_capabilities->width->min = caps.getMinWidth();
+  photo_capabilities->width->step = caps.getStepWidth();
   photo_capabilities->zoom = mojom::Range::New();
   photo_capabilities->zoom->current = caps.getCurrentZoom();
   photo_capabilities->zoom->max = caps.getMaxZoom();
   photo_capabilities->zoom->min = caps.getMinZoom();
+  photo_capabilities->zoom->step = caps.getStepZoom();
   photo_capabilities->focus_mode = ToMojomMeteringMode(caps.getFocusMode());
   photo_capabilities->exposure_mode =
       ToMojomMeteringMode(caps.getExposureMode());
+  photo_capabilities->exposure_compensation = mojom::Range::New();
+  photo_capabilities->exposure_compensation->current =
+      caps.getCurrentExposureCompensation();
+  photo_capabilities->exposure_compensation->max =
+      caps.getMaxExposureCompensation();
+  photo_capabilities->exposure_compensation->min =
+      caps.getMinExposureCompensation();
+  photo_capabilities->exposure_compensation->step =
+      caps.getStepExposureCompensation();
+  photo_capabilities->white_balance_mode =
+      ToMojomMeteringMode(caps.getWhiteBalanceMode());
+  photo_capabilities->fill_light_mode =
+      ToMojomFillLightMode(caps.getFillLightMode());
+  photo_capabilities->red_eye_reduction = caps.getRedEyeReduction();
+  photo_capabilities->color_temperature = mojom::Range::New();
+  photo_capabilities->color_temperature->current =
+      caps.getCurrentColorTemperature();
+  photo_capabilities->color_temperature->max = caps.getMaxColorTemperature();
+  photo_capabilities->color_temperature->min = caps.getMinColorTemperature();
+  photo_capabilities->color_temperature->step = caps.getStepColorTemperature();
+  photo_capabilities->brightness = media::mojom::Range::New();
+  photo_capabilities->contrast = media::mojom::Range::New();
+  photo_capabilities->saturation = media::mojom::Range::New();
+  photo_capabilities->sharpness = media::mojom::Range::New();
 
   callback.Run(std::move(photo_capabilities));
 }
@@ -491,9 +568,7 @@ void VideoCaptureDeviceAndroid::DoSetPhotoOptions(
 #endif
   JNIEnv* env = AttachCurrentThread();
 
-  const int width = settings->has_width ? settings->width : 0;
-  const int height = settings->has_height ? settings->height : 0;
-  const int zoom = settings->has_zoom ? settings->zoom : 0;
+  const double zoom = settings->has_zoom ? settings->zoom : 0.0;
 
   const PhotoCapabilities::AndroidMeteringMode focus_mode =
       settings->has_focus_mode
@@ -505,6 +580,9 @@ void VideoCaptureDeviceAndroid::DoSetPhotoOptions(
           ? ToAndroidMeteringMode(settings->exposure_mode)
           : PhotoCapabilities::AndroidMeteringMode::NOT_SET;
 
+  const double width = settings->has_width ? settings->width : 0.0;
+  const double height = settings->has_height ? settings->height : 0.0;
+
   std::vector<float> points_of_interest_marshalled;
   for (const auto& point : settings->points_of_interest) {
     points_of_interest_marshalled.push_back(point->x);
@@ -513,9 +591,32 @@ void VideoCaptureDeviceAndroid::DoSetPhotoOptions(
   ScopedJavaLocalRef<jfloatArray> points_of_interest =
       base::android::ToJavaFloatArray(env, points_of_interest_marshalled);
 
+  const double exposure_compensation = settings->has_exposure_compensation
+                                           ? settings->exposure_compensation
+                                           : 0.0;
+
+  const PhotoCapabilities::AndroidMeteringMode white_balance_mode =
+      settings->has_white_balance_mode
+          ? ToAndroidMeteringMode(settings->white_balance_mode)
+          : PhotoCapabilities::AndroidMeteringMode::NOT_SET;
+
+  const double iso = settings->has_iso ? settings->iso : 0.0;
+
+  const PhotoCapabilities::AndroidFillLightMode fill_light_mode =
+      settings->has_fill_light_mode
+          ? ToAndroidFillLightMode(settings->fill_light_mode)
+          : PhotoCapabilities::AndroidFillLightMode::NOT_SET;
+
+  const double color_temperature =
+      settings->has_color_temperature ? settings->color_temperature : 0.0;
+
   Java_VideoCapture_setPhotoOptions(
       env, j_capture_, zoom, static_cast<int>(focus_mode),
-      static_cast<int>(exposure_mode), width, height, points_of_interest);
+      static_cast<int>(exposure_mode), width, height, points_of_interest,
+      settings->has_exposure_compensation, exposure_compensation,
+      static_cast<int>(white_balance_mode), iso,
+      settings->has_red_eye_reduction, settings->red_eye_reduction,
+      static_cast<int>(fill_light_mode), color_temperature);
 
   callback.Run(true);
 }

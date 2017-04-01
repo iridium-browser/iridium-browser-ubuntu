@@ -20,17 +20,12 @@
 #include "third_party/WebKit/public/web/WebViewClient.h"
 
 namespace blink {
-class WebFrameWidget;
 class WebMouseEvent;
 }
 
 namespace content {
 class RenderView;
 struct WebPreferences;
-}
-
-namespace gfx {
-class Size;
 }
 
 // This class implements the WebPlugin interface by forwarding drawing and
@@ -41,8 +36,6 @@ class Size;
 // chrome:// URL as origin.
 
 class WebViewPlugin : public blink::WebPlugin,
-                      public blink::WebViewClient,
-                      public blink::WebFrameClient,
                       public content::RenderViewObserver {
  public:
   class Delegate {
@@ -73,14 +66,14 @@ class WebViewPlugin : public blink::WebPlugin,
                                const std::string& html_data,
                                const GURL& url);
 
-  blink::WebView* web_view() { return web_view_; }
+  blink::WebView* web_view() { return web_view_helper_.web_view(); }
+
+  const blink::WebString& old_title() const { return old_title_; }
 
   // When loading a plugin document (i.e. a full page plugin not embedded in
   // another page), we save all data that has been received, and replay it with
   // this method on the actual plugin.
   void ReplayReceivedData(blink::WebPlugin* plugin);
-
-  void RestoreTitleText();
 
   // WebPlugin methods:
   blink::WebPluginContainer* container() const override;
@@ -108,39 +101,10 @@ class WebViewPlugin : public blink::WebPlugin,
       const blink::WebInputEvent& event,
       blink::WebCursorInfo& cursor_info) override;
 
-  // didReceiveResponse() overrides both WebPlugin and WebFrameClient.
-  // The WebFrameClient variant receives callbacks, but the WebPlugin variant
-  // shouldn't.
-  // TODO(japhet): WebViewPlugin shouldn't be a WebFrameClient, after which
-  // didReceiveResponse() should have a NOTREACHED().
-  void didReceiveResponse(const blink::WebURLResponse& response) override {}
+  void didReceiveResponse(const blink::WebURLResponse& response) override;
   void didReceiveData(const char* data, int data_length) override;
   void didFinishLoading() override;
   void didFailLoading(const blink::WebURLError& error) override;
-
-  // WebViewClient methods:
-  bool acceptsLoadDrops() override;
-
-  void setToolTipText(const blink::WebString&,
-                      blink::WebTextDirection) override;
-
-  void startDragging(blink::WebLocalFrame* frame,
-                     const blink::WebDragData& drag_data,
-                     blink::WebDragOperationsMask mask,
-                     const blink::WebImage& image,
-                     const blink::WebPoint& point) override;
-
-  // TODO(ojan): Remove this override and have this class use a non-null
-  // layerTreeView.
-  bool allowsBrokenNullLayerTreeView() const override;
-
-  // WebWidgetClient methods:
-  void didInvalidateRect(const blink::WebRect&) override;
-  void didChangeCursor(const blink::WebCursorInfo& cursor) override;
-  void scheduleAnimation() override;
-
-  // WebFrameClient methods:
-  void didClearWindowObject(blink::WebLocalFrame* frame) override;
 
  private:
   friend class base::DeleteHelper<WebViewPlugin>;
@@ -150,7 +114,7 @@ class WebViewPlugin : public blink::WebPlugin,
   ~WebViewPlugin() override;
 
   // content::RenderViewObserver methods:
-  void OnDestruct() override;
+  void OnDestruct() override {}
   void OnZoomLevelChanged() override;
 
   void UpdatePluginForNewGeometry(const blink::WebRect& window_rect,
@@ -164,16 +128,9 @@ class WebViewPlugin : public blink::WebPlugin,
   // Owns us.
   blink::WebPluginContainer* container_;
 
-  // Owned by us, deleted via |close()|.
-  blink::WebView* web_view_;
-
-  // Owned by us, deleted via |close()|.
-  blink::WebFrameWidget* web_frame_widget_;
-
-  // Owned by us, deleted via |close()|.
-  blink::WebFrame* web_frame_;
   gfx::Rect rect_;
 
+  blink::WebURLResponse response_;
   std::list<std::string> data_;
   std::unique_ptr<blink::WebURLError> error_;
   blink::WebString old_title_;
@@ -181,6 +138,45 @@ class WebViewPlugin : public blink::WebPlugin,
   bool focused_;
   bool is_painting_;
   bool is_resizing_;
+
+  // A helper that handles interaction from WebViewPlugin's internal WebView.
+  class WebViewHelper : public blink::WebViewClient,
+                        public blink::WebFrameClient {
+   public:
+    WebViewHelper(WebViewPlugin* plugin,
+                  const content::WebPreferences& preferences);
+    ~WebViewHelper() override;
+
+    blink::WebView* web_view() { return web_view_; }
+
+    // WebViewClient methods:
+    bool acceptsLoadDrops() override;
+
+    // WebWidgetClient methods:
+    void setToolTipText(const blink::WebString&,
+                        blink::WebTextDirection) override;
+    void startDragging(blink::WebReferrerPolicy,
+                       const blink::WebDragData&,
+                       blink::WebDragOperationsMask,
+                       const blink::WebImage&,
+                       const blink::WebPoint&) override;
+    // TODO(ojan): Remove this override and have this class use a non-null
+    // layerTreeView.
+    bool allowsBrokenNullLayerTreeView() const override;
+    void didInvalidateRect(const blink::WebRect&) override;
+    void didChangeCursor(const blink::WebCursorInfo& cursor) override;
+    void scheduleAnimation() override;
+
+    // WebFrameClient methods:
+    void didClearWindowObject(blink::WebLocalFrame* frame) override;
+
+   private:
+    WebViewPlugin* plugin_;
+
+    // Owned by us, deleted via |close()|.
+    blink::WebView* web_view_;
+  };
+  WebViewHelper web_view_helper_;
 
   // Should be invalidated when destroy() is called.
   base::WeakPtrFactory<WebViewPlugin> weak_factory_;

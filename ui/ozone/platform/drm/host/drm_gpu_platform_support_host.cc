@@ -100,21 +100,29 @@ void DrmGpuPlatformSupportHost::RemoveGpuThreadObserver(
 }
 
 bool DrmGpuPlatformSupportHost::IsConnected() {
-  return host_id_ >= 0;
+  return host_id_ >= 0 && channel_established_;
 }
 
-void DrmGpuPlatformSupportHost::OnChannelEstablished(
+void DrmGpuPlatformSupportHost::OnGpuProcessLaunched(
     int host_id,
     scoped_refptr<base::SingleThreadTaskRunner> send_runner,
     const base::Callback<void(IPC::Message*)>& send_callback) {
-  TRACE_EVENT1("drm", "DrmGpuPlatformSupportHost::OnChannelEstablished",
+  TRACE_EVENT1("drm", "DrmGpuPlatformSupportHost::OnGpuProcessLaunched",
                "host_id", host_id);
   host_id_ = host_id;
   send_runner_ = send_runner;
   send_callback_ = send_callback;
 
-  FOR_EACH_OBSERVER(GpuThreadObserver, gpu_thread_observers_,
-                    OnGpuThreadReady());
+  for (GpuThreadObserver& observer : gpu_thread_observers_)
+    observer.OnGpuProcessLaunched();
+}
+
+void DrmGpuPlatformSupportHost::OnChannelEstablished() {
+  TRACE_EVENT0("drm", "DrmGpuPlatformSupportHost::OnChannelEstablished");
+  channel_established_ = true;
+
+  for (GpuThreadObserver& observer : gpu_thread_observers_)
+    observer.OnGpuThreadReady();
 
   // The cursor is special since it will process input events on the IO thread
   // and can by-pass the UI thread. This means that we need to special case it
@@ -131,10 +139,11 @@ void DrmGpuPlatformSupportHost::OnChannelDestroyed(int host_id) {
   if (host_id_ == host_id) {
     cursor_->ResetDrmCursorProxy();
     host_id_ = -1;
+    channel_established_ = false;
     send_runner_ = nullptr;
     send_callback_.Reset();
-    FOR_EACH_OBSERVER(GpuThreadObserver, gpu_thread_observers_,
-                      OnGpuThreadRetired());
+    for (GpuThreadObserver& observer : gpu_thread_observers_)
+      observer.OnGpuThreadRetired();
   }
 
 }
@@ -198,7 +207,7 @@ void DrmGpuPlatformSupportHost::OnDisplayConfigured(int64_t display_id,
 
 void DrmGpuPlatformSupportHost::OnHDCPStateReceived(int64_t display_id,
                                                     bool status,
-                                                    HDCPState state) {
+                                                    display::HDCPState state) {
   display_manager_->GpuReceivedHDCPState(display_id, status, state);
 }
 
@@ -230,7 +239,21 @@ bool DrmGpuPlatformSupportHost::GpuRelinquishDisplayControl() {
 bool DrmGpuPlatformSupportHost::GpuAddGraphicsDevice(
     const base::FilePath& path,
     const base::FileDescriptor& fd) {
-  return Send(new OzoneGpuMsg_AddGraphicsDevice(path, fd));
+  IPC::Message* message = new OzoneGpuMsg_AddGraphicsDevice(path, fd);
+
+  // This function may be called from two places:
+  // - DrmDisplayHostManager::OnGpuProcessLaunched() invoked synchronously
+  //   by GpuProcessHost::Init() on IO thread, which is the same thread as
+  //   |send_runner_|. In this case we can synchronously send the IPC;
+  // - DrmDisplayHostManager::OnAddGraphicsDevice() on UI thread. In this
+  //   case we need to post the send task to IO thread.
+  if (send_runner_ && send_runner_->BelongsToCurrentThread()) {
+    DCHECK(!send_callback_.is_null());
+    send_callback_.Run(message);
+    return true;
+  }
+
+  return Send(message);
 }
 
 bool DrmGpuPlatformSupportHost::GpuRemoveGraphicsDevice(
@@ -254,7 +277,8 @@ bool DrmGpuPlatformSupportHost::OnMessageReceivedForDrmOverlayManager(
   IPC_BEGIN_MESSAGE_MAP(DrmGpuPlatformSupportHost, message)
     IPC_MESSAGE_HANDLER(OzoneHostMsg_OverlayCapabilitiesReceived,
                         OnOverlayResult)
-  // TODO(rjk): insert the extra
+    // TODO(rjk): insert the extra
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
@@ -289,14 +313,14 @@ bool DrmGpuPlatformSupportHost::GpuGetHDCPState(int64_t display_id) {
 }
 
 bool DrmGpuPlatformSupportHost::GpuSetHDCPState(int64_t display_id,
-                                                ui::HDCPState state) {
+                                                display::HDCPState state) {
   return Send(new OzoneGpuMsg_SetHDCPState(display_id, state));
 }
 
 bool DrmGpuPlatformSupportHost::GpuSetColorCorrection(
     int64_t display_id,
-    const std::vector<GammaRampRGBEntry>& degamma_lut,
-    const std::vector<GammaRampRGBEntry>& gamma_lut,
+    const std::vector<display::GammaRampRGBEntry>& degamma_lut,
+    const std::vector<display::GammaRampRGBEntry>& gamma_lut,
     const std::vector<float>& correction_matrix) {
   return Send(new OzoneGpuMsg_SetColorCorrection(display_id, degamma_lut,
                                                  gamma_lut, correction_matrix));

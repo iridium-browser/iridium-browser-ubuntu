@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
@@ -15,6 +16,7 @@
 #include "base/trace_event/trace_event.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/update_client/update_client.h"
+#include "components/update_client/utils.h"
 #include "ios/chrome/browser/chrome_constants.h"
 #include "ios/web/public/web_thread.h"
 #include "net/cert/crl_set.h"
@@ -135,12 +137,12 @@ void CRLSetFetcher::RegisterComponent(uint32_t sequence_of_loaded_crl) {
                            kPublicKeySHA256 + sizeof(kPublicKeySHA256));
   component.installer = this;
   component.name = "CRLSet";
-  component.version = Version(base::UintToString(sequence_of_loaded_crl));
+  component.version = base::Version(base::UintToString(sequence_of_loaded_crl));
   component.allows_background_download = false;
   component.requires_network_encryption = false;
   if (!component.version.IsValid()) {
     NOTREACHED();
-    component.version = Version("0");
+    component.version = base::Version("0");
   }
 
   if (!cus_->RegisterComponent(component))
@@ -158,8 +160,16 @@ void CRLSetFetcher::OnUpdateError(int error) {
                << " from component installer";
 }
 
-bool CRLSetFetcher::Install(const base::DictionaryValue& manifest,
-                            const base::FilePath& unpack_path) {
+update_client::CrxInstaller::Result CRLSetFetcher::Install(
+    const base::DictionaryValue& manifest,
+    const base::FilePath& unpack_path) {
+  return update_client::InstallFunctionWrapper(
+      base::Bind(&CRLSetFetcher::DoInstall, base::Unretained(this),
+                 base::ConstRef(manifest), base::ConstRef(unpack_path)));
+}
+
+bool CRLSetFetcher::DoInstall(const base::DictionaryValue& manifest,
+                              const base::FilePath& unpack_path) {
   base::FilePath crl_set_file_path =
       unpack_path.Append(FILE_PATH_LITERAL("crl-set"));
   base::FilePath save_to = GetCRLSetFilePath();

@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_FAILING_HTTP_TRANSACTION_FACTORY_H_
-#define NET_FAILING_HTTP_TRANSACTION_FACTORY_H_
+#ifndef NET_HTTP_FAILING_HTTP_TRANSACTION_FACTORY_H_
+#define NET_HTTP_FAILING_HTTP_TRANSACTION_FACTORY_H_
 
 #include <memory>
 
 #include "net/base/net_errors.h"
+#include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_transaction.h"
 #include "net/http/http_transaction_factory.h"
@@ -39,4 +40,4 @@ class NET_EXPORT FailingHttpTransactionFactory : public HttpTransactionFactory {
 
 }  // namespace net
 
-#endif  // NET_FAILING_HTTP_TRANSACTION_FACTORY_H_
+#endif  // NET_HTTP_FAILING_HTTP_TRANSACTION_FACTORY_H_

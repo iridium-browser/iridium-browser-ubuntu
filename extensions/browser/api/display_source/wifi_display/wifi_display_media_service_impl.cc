@@ -8,8 +8,11 @@
 #include <vector>
 
 #include "base/big_endian.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "net/base/net_errors.h"
+#include "net/log/net_log_source.h"
 
 using content::BrowserThread;
 
@@ -17,7 +20,7 @@ namespace extensions {
 
 class WiFiDisplayMediaServiceImpl::PacketIOBuffer : public net::IOBuffer {
  public:
-  explicit PacketIOBuffer(mojo::Array<uint8_t> array);
+  explicit PacketIOBuffer(std::vector<uint8_t> array);
 
   int size() const { return packet_data_.size(); }
 
@@ -28,7 +31,7 @@ class WiFiDisplayMediaServiceImpl::PacketIOBuffer : public net::IOBuffer {
 };
 
 WiFiDisplayMediaServiceImpl::PacketIOBuffer::PacketIOBuffer(
-    mojo::Array<uint8_t> array) {
+    std::vector<uint8_t> array) {
   array.Swap(&packet_data_);
   data_ = reinterpret_cast<char*>(packet_data_.data());
 }
@@ -39,29 +42,28 @@ WiFiDisplayMediaServiceImpl::PacketIOBuffer::~PacketIOBuffer() {
 
 // static
 void WiFiDisplayMediaServiceImpl::Create(
-    WiFiDisplayMediaServiceRequest request) {
+    mojom::WiFiDisplayMediaServiceRequest request) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  new WiFiDisplayMediaServiceImpl(std::move(request));
+  auto* impl = new WiFiDisplayMediaServiceImpl();
+  impl->binding_ =
+      mojo::MakeStrongBinding(base::WrapUnique(impl), std::move(request));
 }
 
 // static
 void WiFiDisplayMediaServiceImpl::BindToRequest(
-    WiFiDisplayMediaServiceRequest request) {
+    mojom::WiFiDisplayMediaServiceRequest request) {
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(WiFiDisplayMediaServiceImpl::Create,
                                      base::Passed(std::move(request))));
 }
 
-WiFiDisplayMediaServiceImpl::WiFiDisplayMediaServiceImpl(
-    WiFiDisplayMediaServiceRequest request)
-    : binding_(this, std::move(request)),
-      last_send_code_(net::OK),
-      weak_factory_(this) {}
+WiFiDisplayMediaServiceImpl::WiFiDisplayMediaServiceImpl()
+    : last_send_code_(net::OK), weak_factory_(this) {}
 
 WiFiDisplayMediaServiceImpl::~WiFiDisplayMediaServiceImpl() {}
 
 void WiFiDisplayMediaServiceImpl::SetDesinationPoint(
-    const mojo::String& ip_address,
+    const std::string& ip_address,
     int32_t port,
     const SetDesinationPointCallback& callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
@@ -75,7 +77,7 @@ void WiFiDisplayMediaServiceImpl::SetDesinationPoint(
 
   rtp_socket_.reset(new net::UDPSocket(net::DatagramSocket::DEFAULT_BIND,
                                        net::RandIntCallback(), nullptr,
-                                       net::NetLog::Source()));
+                                       net::NetLogSource()));
   if (rtp_socket_->Open(end_point.GetFamily()) != net::OK ||
       rtp_socket_->Connect(end_point) != net::OK) {
     DVLOG(1) << "Could not connect to " << end_point.ToString();
@@ -86,11 +88,19 @@ void WiFiDisplayMediaServiceImpl::SetDesinationPoint(
   callback.Run(true);
 }
 
-void WiFiDisplayMediaServiceImpl::SendMediaPacket(mojo::Array<uint8_t> packet) {
+void WiFiDisplayMediaServiceImpl::SendMediaPacket(
+    mojom::WiFiDisplayMediaPacketPtr packet) {
   DCHECK(rtp_socket_);
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-  if (packet.size() >> 15) {
+  if (!packet) {
+    DVLOG(1) << "Packet missing, skipping.";
+    return;
+  }
+
+  std::vector<uint8_t>* packet_data = &packet->data;
+
+  if (packet_data->size() >> 15) {
     DVLOG(1) << "Packet size limit is exceeded, skipping.";
     return;
   }
@@ -102,7 +112,7 @@ void WiFiDisplayMediaServiceImpl::SendMediaPacket(mojo::Array<uint8_t> packet) {
 
   // Create, queue and send a write buffer.
   scoped_refptr<PacketIOBuffer> write_buffer =
-      new PacketIOBuffer(std::move(packet));
+      new PacketIOBuffer(std::move(*packet_data));
   write_buffers_.push(std::move(write_buffer));
 
   Send();
@@ -122,7 +132,7 @@ void WiFiDisplayMediaServiceImpl::OnSent(int code) {
   last_send_code_ = code;
   if (code < 0) {
     VLOG(1) << "Unrepairable UDP socket error.";
-    delete this;
+    binding_->Close();
     return;
   }
   DCHECK(!write_buffers_.empty());

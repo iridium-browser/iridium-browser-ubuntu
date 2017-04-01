@@ -7,6 +7,7 @@ package org.chromium.components_browsertests_apk;
 import android.content.Context;
 
 import org.chromium.base.BaseChromiumApplication;
+import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
 
 /**
@@ -16,12 +17,14 @@ public class ComponentsBrowserTestsApplication extends BaseChromiumApplication {
     static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "components_shell";
 
     @Override
-    public void onCreate() {
-        super.onCreate();
-        initializeApplicationParameters(this);
+    protected void attachBaseContext(Context base) {
+        super.attachBaseContext(base);
+        ContextUtils.initApplicationContext(this);
     }
 
-    public static void initializeApplicationParameters(Context context) {
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX, context);
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
     }
 }

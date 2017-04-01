@@ -18,7 +18,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_discovery_manager_mac.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_low_energy_device_mac.h"
@@ -71,6 +70,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
                        const base::Closure& callback,
                        const ErrorCallback& error_callback) override;
   bool IsDiscovering() const override;
+  std::unordered_map<BluetoothDevice*, BluetoothDevice::UUIDSet>
+  RetrieveGattConnectedDevicesWithDiscoveryFilter(
+      const BluetoothDiscoveryFilter& discovery_filter) override;
   UUIDList GetUUIDs() const override;
   void CreateRfcommService(
       const BluetoothUUID& uuid,
@@ -82,14 +84,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       const ServiceOptions& options,
       const CreateServiceCallback& callback,
       const CreateServiceErrorCallback& error_callback) override;
-  void RegisterAudioSink(
-      const BluetoothAudioSink::Options& options,
-      const AcquiredCallback& callback,
-      const BluetoothAudioSink::ErrorCallback& error_callback) override;
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) override;
+      const AdvertisementErrorCallback& error_callback) override;
   BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
 
@@ -181,14 +179,36 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   // observers.
   void AddPairedDevices();
 
+  // Returns the list of devices that are connected by other applications than
+  // Chromium, based on a service UUID. If no uuid is given, generic access
+  // service (1800) is used (since CoreBluetooth requires to use a service).
+  std::vector<BluetoothDevice*> RetrieveGattConnectedDevicesWithService(
+      const BluetoothUUID* uuid);
+
   // Returns the BLE device associated with the CoreBluetooth peripheral.
   BluetoothLowEnergyDeviceMac* GetBluetoothLowEnergyDeviceMac(
       CBPeripheral* peripheral);
 
+  // Returns true if a new device collides with an existing device.
+  bool DoesCollideWithKnownDevice(CBPeripheral* peripheral,
+                                  BluetoothLowEnergyDeviceMac* device_mac);
+
   std::string address_;
-  std::string name_;
   bool classic_powered_;
   int num_discovery_sessions_;
+
+  // Cached name. Updated in GetName if should_update_name_ is true.
+  //
+  // For performance reasons, cache the adapter's name. It's not uncommon for
+  // a call to [controller nameAsString] to take tens of milliseconds. Note
+  // that this caching strategy might result in clients receiving a stale
+  // name. If this is a significant issue, then some more sophisticated
+  // workaround for the performance bottleneck will be needed. For additional
+  // context, see http://crbug.com/461181 and http://crbug.com/467316
+  mutable std::string name_;
+  // True if the name hasn't been acquired yet, the last acquired name is empty
+  // or the address has changed indicating the name might have changed.
+  mutable bool should_update_name_;
 
   // Discovery manager for Bluetooth Classic.
   std::unique_ptr<BluetoothDiscoveryManagerMac> classic_discovery_manager_;

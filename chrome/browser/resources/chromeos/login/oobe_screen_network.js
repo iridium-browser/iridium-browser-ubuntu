@@ -47,6 +47,12 @@ login.createScreen('NetworkScreen', 'connect', function() {
 
       var inputMethodsList = loadTimeData.getValue('inputMethodsList');
       welcomeScreen.keyboards = inputMethodsList;
+
+      var timezoneList = loadTimeData.getValue('timezoneList');
+      welcomeScreen.timezones = timezoneList;
+
+      welcomeScreen.highlightStrength =
+          loadTimeData.getValue('highlightStrength');
       // -------------------------
 
       this.dropdown_ = $('networks-list');
@@ -97,6 +103,7 @@ login.createScreen('NetworkScreen', 'connect', function() {
     },
 
     onBeforeShow: function(data) {
+      this.setMDMode_();
       cr.ui.DropDown.show('networks-list', true, -1);
       this.classList.toggle('connect-debugging-view',
         data && 'isDeveloperMode' in data && data['isDeveloperMode']);
@@ -155,7 +162,41 @@ login.createScreen('NetworkScreen', 'connect', function() {
       $('bubble').showContentForElement($('networks-list'),
                                         cr.ui.Bubble.Attachment.BOTTOM,
                                         error);
-    }
+    },
+
+    /**
+     * This is called after resources are updated.
+     */
+    updateLocalizedContent: function() {
+      this.setMDMode_();
+    },
+
+    /**
+     * This method takes care of switching to material-design OOBE.
+     * @private
+     */
+    setMDMode_: function() {
+      var useMDOobe = (loadTimeData.getString('newOobeUI') == 'on');
+
+      $('oobe-connect').hidden = useMDOobe;
+      $('oobe-welcome-md').hidden = !useMDOobe;
+
+      if (useMDOobe) {
+        var welcomeScreen = $('oobe-welcome-md');
+        var languageList = loadTimeData.getValue('languageList');
+        welcomeScreen.currentLanguage = Oobe.getSelectedTitle(languageList);
+        welcomeScreen.languages = languageList;
+
+        welcomeScreen.keyboards = loadTimeData.getValue('inputMethodsList');
+        welcomeScreen.enabled = true;
+
+        var timezoneList = loadTimeData.getValue('timezoneList');
+        welcomeScreen.timezones = timezoneList;
+
+        welcomeScreen.highlightStrength =
+            loadTimeData.getValue('highlightStrength');
+      }
+    },
   };
 });
 

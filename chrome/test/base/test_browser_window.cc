@@ -20,7 +20,7 @@ std::unique_ptr<Browser> CreateBrowserWithTestWindowForParams(
   TestBrowserWindow* window = new TestBrowserWindow;
   new TestBrowserWindowOwner(window);
   params->window = window;
-  return base::WrapUnique(new Browser(*params));
+  return base::MakeUnique<Browser>(*params);
 }
 
 }  // namespace chrome
@@ -34,7 +34,7 @@ GURL TestBrowserWindow::TestLocationBar::GetDestinationURL() const {
 
 WindowOpenDisposition
     TestBrowserWindow::TestLocationBar::GetWindowOpenDisposition() const {
-  return CURRENT_TAB;
+  return WindowOpenDisposition::CURRENT_TAB;
 }
 
 ui::PageTransition
@@ -149,8 +149,12 @@ bool TestBrowserWindow::IsToolbarVisible() const {
   return false;
 }
 
-gfx::Rect TestBrowserWindow::GetRootWindowResizerRect() const {
-  return gfx::Rect();
+ShowTranslateBubbleResult TestBrowserWindow::ShowTranslateBubble(
+    content::WebContents* contents,
+    translate::TranslateStep step,
+    translate::TranslateErrors::Type error_type,
+    bool is_user_gesture) {
+  return ShowTranslateBubbleResult::SUCCESS;
 }
 
 autofill::SaveCardBubbleView* TestBrowserWindow::ShowSaveCreditCardBubble(
@@ -170,7 +174,7 @@ DownloadShelf* TestBrowserWindow::GetDownloadShelf() {
 
 WindowOpenDisposition TestBrowserWindow::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
-  return NEW_POPUP;
+  return WindowOpenDisposition::NEW_POPUP;
 }
 
 FindBar* TestBrowserWindow::CreateFindBar() {

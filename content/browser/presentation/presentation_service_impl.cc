@@ -7,21 +7,19 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <algorithm>
-#include <string>
 #include <utility>
-#include <vector>
 
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "content/browser/presentation/presentation_type_converters.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_details.h"
-#include "content/public/browser/presentation_session_message.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/frame_navigate_params.h"
+#include "content/public/common/presentation_connection_message.h"
 #include "content/public/common/presentation_constants.h"
 
 namespace content {
@@ -35,19 +33,20 @@ int GetNextRequestSessionId() {
   return ++next_request_session_id;
 }
 
-// Converts a PresentationSessionMessage |input| to a SessionMessage.
+// Converts a PresentationConnectionMessage |input| to a ConnectionMessage.
 // |input|: The message to convert.
 // |pass_ownership|: If true, function may reuse strings or buffers from
 //     |input| without copying. |input| can be freely modified.
-blink::mojom::SessionMessagePtr ToMojoSessionMessage(
-    content::PresentationSessionMessage* input,
+blink::mojom::ConnectionMessagePtr ToMojoConnectionMessage(
+    content::PresentationConnectionMessage* input,
     bool pass_ownership) {
   DCHECK(input);
-  blink::mojom::SessionMessagePtr output(blink::mojom::SessionMessage::New());
+  blink::mojom::ConnectionMessagePtr output(
+      blink::mojom::ConnectionMessage::New());
   if (input->is_binary()) {
     // binary data
     DCHECK(input->data);
-    output->type = blink::mojom::PresentationMessageType::ARRAY_BUFFER;
+    output->type = blink::mojom::PresentationMessageType::BINARY;
     if (pass_ownership) {
       output->data = std::move(*(input->data));
     } else {
@@ -65,47 +64,37 @@ blink::mojom::SessionMessagePtr ToMojoSessionMessage(
   return output;
 }
 
-std::unique_ptr<PresentationSessionMessage> GetPresentationSessionMessage(
-    blink::mojom::SessionMessagePtr input) {
-  std::unique_ptr<content::PresentationSessionMessage> output;
+std::unique_ptr<PresentationConnectionMessage> GetPresentationConnectionMessage(
+    blink::mojom::ConnectionMessagePtr input) {
+  std::unique_ptr<content::PresentationConnectionMessage> output;
   if (input.is_null())
     return output;
 
   switch (input->type) {
     case blink::mojom::PresentationMessageType::TEXT: {
-      // Return nullptr PresentationSessionMessage if invalid (unset |message|,
+      // Return nullptr PresentationConnectionMessage if invalid (unset
+      // |message|,
       // set |data|, or size too large).
       if (input->data || !input->message ||
-          input->message->size() > content::kMaxPresentationSessionMessageSize)
+          input->message->size() >
+              content::kMaxPresentationConnectionMessageSize)
         return output;
 
       output.reset(
-          new PresentationSessionMessage(PresentationMessageType::TEXT));
+          new PresentationConnectionMessage(PresentationMessageType::TEXT));
       output->message = std::move(input->message.value());
       return output;
     }
-    case blink::mojom::PresentationMessageType::ARRAY_BUFFER: {
-      // Return nullptr PresentationSessionMessage if invalid (unset |data|, set
+    case blink::mojom::PresentationMessageType::BINARY: {
+      // Return nullptr PresentationConnectionMessage if invalid (unset |data|,
+      // set
       // |message|, or size too large).
       if (!input->data || input->message ||
-          input->data->size() > content::kMaxPresentationSessionMessageSize)
-        return output;
-
-      output.reset(new PresentationSessionMessage(
-          PresentationMessageType::ARRAY_BUFFER));
-      output->data.reset(
-          new std::vector<uint8_t>(std::move(input->data.value())));
-      return output;
-    }
-    case blink::mojom::PresentationMessageType::BLOB: {
-      // Return nullptr PresentationSessionMessage if invalid (unset |data|, set
-      // |message|, or size too large).
-      if (!input->data || input->message ||
-          input->data->size() > content::kMaxPresentationSessionMessageSize)
+          input->data->size() > content::kMaxPresentationConnectionMessageSize)
         return output;
 
       output.reset(
-          new PresentationSessionMessage(PresentationMessageType::BLOB));
+          new PresentationConnectionMessage(PresentationMessageType::BINARY));
       output->data.reset(
           new std::vector<uint8_t>(std::move(input->data.value())));
       return output;
@@ -128,9 +117,11 @@ void InvokeNewSessionCallbackWithError(
 PresentationServiceImpl::PresentationServiceImpl(
     RenderFrameHost* render_frame_host,
     WebContents* web_contents,
-    PresentationServiceDelegate* delegate)
+    ControllerPresentationServiceDelegate* controller_delegate,
+    ReceiverPresentationServiceDelegate* receiver_delegate)
     : WebContentsObserver(web_contents),
-      delegate_(delegate),
+      controller_delegate_(controller_delegate),
+      receiver_delegate_(receiver_delegate),
       start_session_request_id_(kInvalidRequestSessionId),
       weak_factory_(this) {
   DCHECK(render_frame_host);
@@ -141,13 +132,17 @@ PresentationServiceImpl::PresentationServiceImpl(
   render_frame_id_ = render_frame_host->GetRoutingID();
   DVLOG(2) << "PresentationServiceImpl: "
            << render_process_id_ << ", " << render_frame_id_;
-  if (delegate_)
-    delegate_->AddObserver(render_process_id_, render_frame_id_, this);
+
+  if (auto* delegate = GetPresentationServiceDelegate())
+    delegate->AddObserver(render_process_id_, render_frame_id_, this);
 }
 
 PresentationServiceImpl::~PresentationServiceImpl() {
-  if (delegate_)
-    delegate_->RemoveObserver(render_process_id_, render_frame_id_);
+  DVLOG(2) << __FUNCTION__ << ": " << render_process_id_ << ", "
+           << render_frame_id_;
+
+  if (auto* delegate = GetPresentationServiceDelegate())
+    delegate->RemoveObserver(render_process_id_, render_frame_id_);
 }
 
 // static
@@ -159,13 +154,21 @@ void PresentationServiceImpl::CreateMojoService(
       WebContents::FromRenderFrameHost(render_frame_host);
   DCHECK(web_contents);
 
+  auto* browser = GetContentClient()->browser();
+  auto* receiver_delegate =
+      browser->GetReceiverPresentationServiceDelegate(web_contents);
+
+  // In current implementation, web_contents can be controller or receiver
+  // but not both.
+  auto* controller_delegate =
+      receiver_delegate
+          ? nullptr
+          : browser->GetControllerPresentationServiceDelegate(web_contents);
+
   // This object will be deleted when the RenderFrameHost is about to be
   // deleted (RenderFrameDeleted).
   PresentationServiceImpl* impl = new PresentationServiceImpl(
-      render_frame_host,
-      web_contents,
-      GetContentClient()->browser()->GetPresentationServiceDelegate(
-          web_contents));
+      render_frame_host, web_contents, controller_delegate, receiver_delegate);
   impl->Bind(std::move(request));
 }
 
@@ -180,12 +183,17 @@ void PresentationServiceImpl::SetClient(
   DCHECK(!client_.get());
   // TODO(imcheng): Set ErrorHandler to listen for errors.
   client_ = std::move(client);
+
+  if (receiver_delegate_) {
+    receiver_delegate_->RegisterReceiverConnectionAvailableCallback(
+        base::Bind(&PresentationServiceImpl::OnReceiverConnectionAvailable,
+                   weak_factory_.GetWeakPtr()));
+  }
 }
 
-void PresentationServiceImpl::ListenForScreenAvailability(
-    const std::string& url) {
-  DVLOG(2) << "ListenForScreenAvailability " << url;
-  if (!delegate_) {
+void PresentationServiceImpl::ListenForScreenAvailability(const GURL& url) {
+  DVLOG(2) << "ListenForScreenAvailability " << url.spec();
+  if (!controller_delegate_) {
     client_->OnScreenAvailabilityUpdated(url, false);
     return;
   }
@@ -195,10 +203,8 @@ void PresentationServiceImpl::ListenForScreenAvailability(
 
   std::unique_ptr<ScreenAvailabilityListenerImpl> listener(
       new ScreenAvailabilityListenerImpl(url, this));
-  if (delegate_->AddScreenAvailabilityListener(
-      render_process_id_,
-      render_frame_id_,
-      listener.get())) {
+  if (controller_delegate_->AddScreenAvailabilityListener(
+          render_process_id_, render_frame_id_, listener.get())) {
     screen_availability_listeners_[url] = std::move(listener);
   } else {
     DVLOG(1) << "AddScreenAvailabilityListener failed. Ignoring request.";
@@ -206,24 +212,25 @@ void PresentationServiceImpl::ListenForScreenAvailability(
 }
 
 void PresentationServiceImpl::StopListeningForScreenAvailability(
-    const std::string& url) {
-  DVLOG(2) << "StopListeningForScreenAvailability " << url;
-  if (!delegate_)
+    const GURL& url) {
+  DVLOG(2) << "StopListeningForScreenAvailability " << url.spec();
+  if (!controller_delegate_)
     return;
 
   auto listener_it = screen_availability_listeners_.find(url);
   if (listener_it == screen_availability_listeners_.end())
     return;
 
-  delegate_->RemoveScreenAvailabilityListener(
+  controller_delegate_->RemoveScreenAvailabilityListener(
       render_process_id_, render_frame_id_, listener_it->second.get());
   screen_availability_listeners_.erase(listener_it);
 }
 
-void PresentationServiceImpl::StartSession(const std::string& presentation_url,
-                                           const NewSessionCallback& callback) {
+void PresentationServiceImpl::StartSession(
+    const std::vector<GURL>& presentation_urls,
+    const NewSessionCallback& callback) {
   DVLOG(2) << "StartSession";
-  if (!delegate_) {
+  if (!controller_delegate_) {
     callback.Run(
         blink::mojom::PresentationSessionInfoPtr(),
         blink::mojom::PresentationError::From(PresentationError(
@@ -240,8 +247,8 @@ void PresentationServiceImpl::StartSession(const std::string& presentation_url,
 
   start_session_request_id_ = GetNextRequestSessionId();
   pending_start_session_cb_.reset(new NewSessionCallbackWrapper(callback));
-  delegate_->StartSession(
-      render_process_id_, render_frame_id_, presentation_url,
+  controller_delegate_->StartSession(
+      render_process_id_, render_frame_id_, presentation_urls,
       base::Bind(&PresentationServiceImpl::OnStartSessionSucceeded,
                  weak_factory_.GetWeakPtr(), start_session_request_id_),
       base::Bind(&PresentationServiceImpl::OnStartSessionError,
@@ -249,11 +256,11 @@ void PresentationServiceImpl::StartSession(const std::string& presentation_url,
 }
 
 void PresentationServiceImpl::JoinSession(
-    const std::string& presentation_url,
+    const std::vector<GURL>& presentation_urls,
     const base::Optional<std::string>& presentation_id,
     const NewSessionCallback& callback) {
   DVLOG(2) << "JoinSession";
-  if (!delegate_) {
+  if (!controller_delegate_) {
     callback.Run(blink::mojom::PresentationSessionInfoPtr(),
                  blink::mojom::PresentationError::From(PresentationError(
                      PRESENTATION_ERROR_NO_PRESENTATION_FOUND,
@@ -266,8 +273,8 @@ void PresentationServiceImpl::JoinSession(
     InvokeNewSessionCallbackWithError(callback);
     return;
   }
-  delegate_->JoinSession(
-      render_process_id_, render_frame_id_, presentation_url,
+  controller_delegate_->JoinSession(
+      render_process_id_, render_frame_id_, presentation_urls,
       presentation_id.value_or(std::string()),
       base::Bind(&PresentationServiceImpl::OnJoinSessionSucceeded,
                  weak_factory_.GetWeakPtr(), request_session_id),
@@ -288,8 +295,10 @@ int PresentationServiceImpl::RegisterJoinSessionCallback(
 
 void PresentationServiceImpl::ListenForConnectionStateChange(
     const PresentationSessionInfo& connection) {
-  if (delegate_) {
-    delegate_->ListenForConnectionStateChange(
+  // NOTE: Blink will automatically transition the connection's state to
+  // 'connected'.
+  if (controller_delegate_) {
+    controller_delegate_->ListenForConnectionStateChange(
         render_process_id_, render_frame_id_, connection,
         base::Bind(&PresentationServiceImpl::OnConnectionStateChanged,
                    weak_factory_.GetWeakPtr(), connection));
@@ -357,40 +366,41 @@ bool PresentationServiceImpl::RunAndEraseJoinSessionMojoCallback(
   return true;
 }
 
-void PresentationServiceImpl::SetDefaultPresentationURL(
-    const std::string& url) {
-  DVLOG(2) << "SetDefaultPresentationURL";
-  if (!delegate_)
+void PresentationServiceImpl::SetDefaultPresentationUrls(
+    const std::vector<GURL>& presentation_urls) {
+  DVLOG(2) << "SetDefaultPresentationUrls";
+  if (!controller_delegate_)
     return;
 
-  if (default_presentation_url_ == url)
+  if (default_presentation_urls_ == presentation_urls)
     return;
 
-  default_presentation_url_ = url;
-  delegate_->SetDefaultPresentationUrl(
-      render_process_id_, render_frame_id_, url,
+  default_presentation_urls_ = presentation_urls;
+  controller_delegate_->SetDefaultPresentationUrls(
+      render_process_id_, render_frame_id_, presentation_urls,
       base::Bind(&PresentationServiceImpl::OnDefaultPresentationStarted,
                  weak_factory_.GetWeakPtr()));
 }
 
-void PresentationServiceImpl::SendSessionMessage(
+void PresentationServiceImpl::SendConnectionMessage(
     blink::mojom::PresentationSessionInfoPtr session,
-    blink::mojom::SessionMessagePtr session_message,
-    const SendSessionMessageCallback& callback) {
-  DVLOG(2) << "SendSessionMessage";
-  DCHECK(!session_message.is_null());
+    blink::mojom::ConnectionMessagePtr connection_message,
+    const SendConnectionMessageCallback& callback) {
+  DVLOG(2) << "SendConnectionMessage"
+           << " [id]: " << session->id;
+  DCHECK(!connection_message.is_null());
   // send_message_callback_ should be null by now, otherwise resetting of
   // send_message_callback_ with new callback will drop the old callback.
-  if (!delegate_ || send_message_callback_) {
+  if (!controller_delegate_ || send_message_callback_) {
     callback.Run(false);
     return;
   }
 
-  send_message_callback_.reset(new SendSessionMessageCallback(callback));
-  delegate_->SendMessage(
+  send_message_callback_.reset(new SendConnectionMessageCallback(callback));
+  controller_delegate_->SendMessage(
       render_process_id_, render_frame_id_,
       session.To<PresentationSessionInfo>(),
-      GetPresentationSessionMessage(std::move(session_message)),
+      GetPresentationConnectionMessage(std::move(connection_message)),
       base::Bind(&PresentationServiceImpl::OnSendMessageCallback,
                  weak_factory_.GetWeakPtr()));
 }
@@ -405,24 +415,28 @@ void PresentationServiceImpl::OnSendMessageCallback(bool sent) {
 }
 
 void PresentationServiceImpl::CloseConnection(
-    const std::string& presentation_url,
+    const GURL& presentation_url,
     const std::string& presentation_id) {
   DVLOG(2) << "CloseConnection " << presentation_id;
-  if (delegate_)
-    delegate_->CloseConnection(render_process_id_, render_frame_id_,
-                               presentation_id);
+  if (controller_delegate_)
+    controller_delegate_->CloseConnection(render_process_id_, render_frame_id_,
+                                          presentation_id);
 }
 
-void PresentationServiceImpl::Terminate(const std::string& presentation_url,
+void PresentationServiceImpl::Terminate(const GURL& presentation_url,
                                         const std::string& presentation_id) {
   DVLOG(2) << "Terminate " << presentation_id;
-  if (delegate_)
-    delegate_->Terminate(render_process_id_, render_frame_id_, presentation_id);
+  if (controller_delegate_)
+    controller_delegate_->Terminate(render_process_id_, render_frame_id_,
+                                    presentation_id);
 }
 
 void PresentationServiceImpl::OnConnectionStateChanged(
     const PresentationSessionInfo& connection,
     const PresentationConnectionStateChangeInfo& info) {
+  DVLOG(2) << "PresentationServiceImpl::OnConnectionStateChanged "
+           << "[presentation_id]: " << connection.presentation_id
+           << " [state]: " << info.state;
   DCHECK(client_.get());
   if (info.state == PRESENTATION_CONNECTION_STATE_CLOSED) {
     client_->OnConnectionClosed(
@@ -445,35 +459,74 @@ bool PresentationServiceImpl::FrameMatches(
          render_frame_host->GetRoutingID() == render_frame_id_;
 }
 
-void PresentationServiceImpl::ListenForSessionMessages(
+PresentationServiceDelegate*
+PresentationServiceImpl::GetPresentationServiceDelegate() {
+  return receiver_delegate_
+             ? static_cast<PresentationServiceDelegate*>(receiver_delegate_)
+             : static_cast<PresentationServiceDelegate*>(controller_delegate_);
+}
+
+void PresentationServiceImpl::ListenForConnectionMessages(
     blink::mojom::PresentationSessionInfoPtr session) {
-  DVLOG(2) << "ListenForSessionMessages";
-  if (!delegate_)
+  DVLOG(2) << "ListenForConnectionMessages";
+  if (!controller_delegate_)
     return;
 
   PresentationSessionInfo session_info(session.To<PresentationSessionInfo>());
-  delegate_->ListenForSessionMessages(
+  controller_delegate_->ListenForConnectionMessages(
       render_process_id_, render_frame_id_, session_info,
-      base::Bind(&PresentationServiceImpl::OnSessionMessages,
+      base::Bind(&PresentationServiceImpl::OnConnectionMessages,
                  weak_factory_.GetWeakPtr(), session_info));
 }
 
-void PresentationServiceImpl::OnSessionMessages(
+void PresentationServiceImpl::SetPresentationConnection(
+    blink::mojom::PresentationSessionInfoPtr session,
+    blink::mojom::PresentationConnectionPtr controller_connection_ptr,
+    blink::mojom::PresentationConnectionRequest receiver_connection_request) {
+  DVLOG(2) << "SetPresentationConnection";
+
+  if (!controller_delegate_)
+    return;
+
+  PresentationSessionInfo session_info(session.To<PresentationSessionInfo>());
+  controller_delegate_->ConnectToOffscreenPresentation(
+      render_process_id_, render_frame_id_, session_info,
+      std::move(controller_connection_ptr),
+      std::move(receiver_connection_request));
+}
+
+void PresentationServiceImpl::OnConnectionMessages(
     const PresentationSessionInfo& session,
-    const ScopedVector<PresentationSessionMessage>& messages,
+    const std::vector<std::unique_ptr<PresentationConnectionMessage>>& messages,
     bool pass_ownership) {
   DCHECK(client_);
 
-  DVLOG(2) << "OnSessionMessages";
-  std::vector<blink::mojom::SessionMessagePtr> mojo_messages(messages.size());
-  std::transform(messages.begin(), messages.end(), mojo_messages.begin(),
-                 [pass_ownership](PresentationSessionMessage* message) {
-                   return ToMojoSessionMessage(message, pass_ownership);
-                 });
+  DVLOG(2) << "OnConnectionMessages"
+           << " [id]: " << session.presentation_id;
+  std::vector<blink::mojom::ConnectionMessagePtr> mojo_messages(
+      messages.size());
+  std::transform(
+      messages.begin(), messages.end(), mojo_messages.begin(),
+      [pass_ownership](
+          const std::unique_ptr<PresentationConnectionMessage>& message) {
+        return ToMojoConnectionMessage(message.get(), pass_ownership);
+      });
 
-  client_->OnSessionMessagesReceived(
+  client_->OnConnectionMessagesReceived(
       blink::mojom::PresentationSessionInfo::From(session),
       std::move(mojo_messages));
+}
+
+void PresentationServiceImpl::OnReceiverConnectionAvailable(
+    const content::PresentationSessionInfo& session_info,
+    PresentationConnectionPtr controller_connection_ptr,
+    PresentationConnectionRequest receiver_connection_request) {
+  DVLOG(2) << "PresentationServiceImpl::OnReceiverConnectionAvailable";
+
+  client_->OnReceiverConnectionAvailable(
+      blink::mojom::PresentationSessionInfo::From(session_info),
+      std::move(controller_connection_ptr),
+      std::move(receiver_connection_request));
 }
 
 void PresentationServiceImpl::DidNavigateAnyFrame(
@@ -521,10 +574,11 @@ void PresentationServiceImpl::WebContentsDestroyed() {
 
 void PresentationServiceImpl::Reset() {
   DVLOG(2) << "PresentationServiceImpl::Reset";
-  if (delegate_)
-    delegate_->Reset(render_process_id_, render_frame_id_);
 
-  default_presentation_url_.clear();
+  if (auto* delegate = GetPresentationServiceDelegate())
+    delegate->Reset(render_process_id_, render_frame_id_);
+
+  default_presentation_urls_.clear();
 
   screen_availability_listeners_.clear();
 
@@ -533,10 +587,10 @@ void PresentationServiceImpl::Reset() {
 
   pending_join_session_cbs_.clear();
 
-  if (on_session_messages_callback_.get()) {
-    on_session_messages_callback_->Run(
-        mojo::Array<blink::mojom::SessionMessagePtr>());
-    on_session_messages_callback_.reset();
+  if (on_connection_messages_callback_.get()) {
+    on_connection_messages_callback_->Run(
+        std::vector<blink::mojom::ConnectionMessagePtr>());
+    on_connection_messages_callback_.reset();
   }
 
   if (send_message_callback_) {
@@ -549,7 +603,8 @@ void PresentationServiceImpl::Reset() {
 
 void PresentationServiceImpl::OnDelegateDestroyed() {
   DVLOG(2) << "PresentationServiceImpl::OnDelegateDestroyed";
-  delegate_ = nullptr;
+  controller_delegate_ = nullptr;
+  receiver_delegate_ = nullptr;
   Reset();
 }
 
@@ -561,12 +616,10 @@ void PresentationServiceImpl::OnDefaultPresentationStarted(
   ListenForConnectionStateChange(connection);
 }
 
-PresentationServiceImpl::ScreenAvailabilityListenerImpl
-::ScreenAvailabilityListenerImpl(
-    const std::string& availability_url,
-    PresentationServiceImpl* service)
-    : availability_url_(availability_url),
-      service_(service) {
+PresentationServiceImpl::ScreenAvailabilityListenerImpl::
+    ScreenAvailabilityListenerImpl(const GURL& availability_url,
+                                   PresentationServiceImpl* service)
+    : availability_url_(availability_url), service_(service) {
   DCHECK(service_);
   DCHECK(service_->client_.get());
 }
@@ -575,8 +628,8 @@ PresentationServiceImpl::ScreenAvailabilityListenerImpl::
 ~ScreenAvailabilityListenerImpl() {
 }
 
-std::string PresentationServiceImpl::ScreenAvailabilityListenerImpl
-    ::GetAvailabilityUrl() const {
+GURL PresentationServiceImpl::ScreenAvailabilityListenerImpl::
+    GetAvailabilityUrl() const {
   return availability_url_;
 }
 

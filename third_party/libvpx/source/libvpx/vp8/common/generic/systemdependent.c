@@ -37,9 +37,9 @@ static int get_cpu_count() {
 
 #if HAVE_UNISTD_H && !defined(__OS2__)
 #if defined(_SC_NPROCESSORS_ONLN)
-  core_count = sysconf(_SC_NPROCESSORS_ONLN);
+  core_count = (int)sysconf(_SC_NPROCESSORS_ONLN);
 #elif defined(_SC_NPROC_ONLN)
-  core_count = sysconf(_SC_NPROC_ONLN);
+  core_count = (int)sysconf(_SC_NPROC_ONLN);
 #endif
 #elif defined(_WIN32)
   {
@@ -61,7 +61,7 @@ static int get_cpu_count() {
       GetSystemInfo(&sysinfo);
 #endif
 
-    core_count = sysinfo.dwNumberOfProcessors;
+    core_count = (int)sysinfo.dwNumberOfProcessors;
   }
 #elif defined(__OS2__)
   {
@@ -82,8 +82,6 @@ static int get_cpu_count() {
   return core_count > 0 ? core_count : 1;
 }
 #endif
-
-void vp8_clear_system_state_c(){};
 
 void vp8_machine_specific_config(VP8_COMMON *ctx) {
 #if CONFIG_MULTITHREAD

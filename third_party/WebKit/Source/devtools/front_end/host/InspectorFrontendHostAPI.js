@@ -1,11 +1,8 @@
 // Copyright (c) 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-
 /** @interface */
-function InspectorFrontendHostAPI()
-{
+function InspectorFrontendHostAPI() {
 }
 window.InspectorFrontendHostAPI = InspectorFrontendHostAPI;
 /** @typedef
@@ -28,271 +25,291 @@ InspectorFrontendHostAPI.LoadNetworkResourceResult;
 
 /** @enum {symbol} */
 InspectorFrontendHostAPI.Events = {
-    AddExtensions: Symbol("addExtensions"),
-    AppendedToURL: Symbol("appendedToURL"),
-    CanceledSaveURL: Symbol("canceledSaveURL"),
-    ContextMenuCleared: Symbol("contextMenuCleared"),
-    ContextMenuItemSelected: Symbol("contextMenuItemSelected"),
-    DeviceCountUpdated: Symbol("deviceCountUpdated"),
-    DevicesDiscoveryConfigChanged: Symbol("devicesDiscoveryConfigChanged"),
-    DevicesPortForwardingStatusChanged: Symbol("devicesPortForwardingStatusChanged"),
-    DevicesUpdated: Symbol("devicesUpdated"),
-    DispatchMessage: Symbol("dispatchMessage"),
-    DispatchMessageChunk: Symbol("dispatchMessageChunk"),
-    EnterInspectElementMode: Symbol("enterInspectElementMode"),
-    EvaluateForTestInFrontend: Symbol("evaluateForTestInFrontend"),
-    FileSystemsLoaded: Symbol("fileSystemsLoaded"),
-    FileSystemRemoved: Symbol("fileSystemRemoved"),
-    FileSystemAdded: Symbol("fileSystemAdded"),
-    FileSystemFilesChanged: Symbol("fileSystemFilesChanged"),
-    IndexingTotalWorkCalculated: Symbol("indexingTotalWorkCalculated"),
-    IndexingWorked: Symbol("indexingWorked"),
-    IndexingDone: Symbol("indexingDone"),
-    KeyEventUnhandled: Symbol("keyEventUnhandled"),
-    ReloadInspectedPage: Symbol("reloadInspectedPage"),
-    RevealSourceLine: Symbol("revealSourceLine"),
-    SavedURL: Symbol("savedURL"),
-    SearchCompleted: Symbol("searchCompleted"),
-    SetInspectedTabId: Symbol("setInspectedTabId"),
-    SetUseSoftMenu: Symbol("setUseSoftMenu"),
-    ShowPanel: Symbol("showPanel")
-}
+  AddExtensions: Symbol('addExtensions'),
+  AppendedToURL: Symbol('appendedToURL'),
+  CanceledSaveURL: Symbol('canceledSaveURL'),
+  ContextMenuCleared: Symbol('contextMenuCleared'),
+  ContextMenuItemSelected: Symbol('contextMenuItemSelected'),
+  DeviceCountUpdated: Symbol('deviceCountUpdated'),
+  DevicesDiscoveryConfigChanged: Symbol('devicesDiscoveryConfigChanged'),
+  DevicesPortForwardingStatusChanged: Symbol('devicesPortForwardingStatusChanged'),
+  DevicesUpdated: Symbol('devicesUpdated'),
+  DispatchMessage: Symbol('dispatchMessage'),
+  DispatchMessageChunk: Symbol('dispatchMessageChunk'),
+  EnterInspectElementMode: Symbol('enterInspectElementMode'),
+  EvaluateForTestInFrontend: Symbol('evaluateForTestInFrontend'),
+  FileSystemsLoaded: Symbol('fileSystemsLoaded'),
+  FileSystemRemoved: Symbol('fileSystemRemoved'),
+  FileSystemAdded: Symbol('fileSystemAdded'),
+  FileSystemFilesChanged: Symbol('fileSystemFilesChanged'),
+  IndexingTotalWorkCalculated: Symbol('indexingTotalWorkCalculated'),
+  IndexingWorked: Symbol('indexingWorked'),
+  IndexingDone: Symbol('indexingDone'),
+  KeyEventUnhandled: Symbol('keyEventUnhandled'),
+  ReloadInspectedPage: Symbol('reloadInspectedPage'),
+  RevealSourceLine: Symbol('revealSourceLine'),
+  SavedURL: Symbol('savedURL'),
+  SearchCompleted: Symbol('searchCompleted'),
+  SetInspectedTabId: Symbol('setInspectedTabId'),
+  SetUseSoftMenu: Symbol('setUseSoftMenu'),
+  ShowPanel: Symbol('showPanel')
+};
 
 InspectorFrontendHostAPI.EventDescriptors = [
-    [InspectorFrontendHostAPI.Events.AddExtensions, "addExtensions", ["extensions"]],
-    [InspectorFrontendHostAPI.Events.AppendedToURL, "appendedToURL", ["url"]],
-    [InspectorFrontendHostAPI.Events.CanceledSaveURL, "canceledSaveURL", ["url"]],
-    [InspectorFrontendHostAPI.Events.ContextMenuCleared, "contextMenuCleared", []],
-    [InspectorFrontendHostAPI.Events.ContextMenuItemSelected, "contextMenuItemSelected", ["id"]],
-    [InspectorFrontendHostAPI.Events.DeviceCountUpdated, "deviceCountUpdated", ["count"]],
-    [InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, "devicesDiscoveryConfigChanged", ["discoverUsbDevices", "portForwardingEnabled", "portForwardingConfig"]],
-    [InspectorFrontendHostAPI.Events.DevicesPortForwardingStatusChanged, "devicesPortForwardingStatusChanged", ["status"]],
-    [InspectorFrontendHostAPI.Events.DevicesUpdated, "devicesUpdated", ["devices"]],
-    [InspectorFrontendHostAPI.Events.DispatchMessage, "dispatchMessage", ["messageObject"]],
-    [InspectorFrontendHostAPI.Events.DispatchMessageChunk, "dispatchMessageChunk", ["messageChunk", "messageSize"]],
-    [InspectorFrontendHostAPI.Events.EnterInspectElementMode, "enterInspectElementMode", []],
-    [InspectorFrontendHostAPI.Events.EvaluateForTestInFrontend, "evaluateForTestInFrontend", ["callId", "script"]],
-    [InspectorFrontendHostAPI.Events.FileSystemsLoaded, "fileSystemsLoaded", ["fileSystems"]],
-    [InspectorFrontendHostAPI.Events.FileSystemRemoved, "fileSystemRemoved", ["fileSystemPath"]],
-    [InspectorFrontendHostAPI.Events.FileSystemAdded, "fileSystemAdded", ["errorMessage", "fileSystem"]],
-    [InspectorFrontendHostAPI.Events.FileSystemFilesChanged, "fileSystemFilesChanged", ["paths"]],
-    [InspectorFrontendHostAPI.Events.IndexingTotalWorkCalculated, "indexingTotalWorkCalculated", ["requestId", "fileSystemPath", "totalWork"]],
-    [InspectorFrontendHostAPI.Events.IndexingWorked, "indexingWorked", ["requestId", "fileSystemPath", "worked"]],
-    [InspectorFrontendHostAPI.Events.IndexingDone, "indexingDone", ["requestId", "fileSystemPath"]],
-    [InspectorFrontendHostAPI.Events.KeyEventUnhandled, "keyEventUnhandled", ["event"]],
-    [InspectorFrontendHostAPI.Events.ReloadInspectedPage, "reloadInspectedPage", ["hard"]],
-    [InspectorFrontendHostAPI.Events.RevealSourceLine, "revealSourceLine", ["url", "lineNumber", "columnNumber"]],
-    [InspectorFrontendHostAPI.Events.SavedURL, "savedURL", ["url"]],
-    [InspectorFrontendHostAPI.Events.SearchCompleted, "searchCompleted", ["requestId", "fileSystemPath", "files"]],
-    [InspectorFrontendHostAPI.Events.SetInspectedTabId, "setInspectedTabId", ["tabId"]],
-    [InspectorFrontendHostAPI.Events.SetUseSoftMenu, "setUseSoftMenu", ["useSoftMenu"]],
-    [InspectorFrontendHostAPI.Events.ShowPanel, "showPanel", ["panelName"]]
+  [InspectorFrontendHostAPI.Events.AddExtensions, 'addExtensions', ['extensions']],
+  [InspectorFrontendHostAPI.Events.AppendedToURL, 'appendedToURL', ['url']],
+  [InspectorFrontendHostAPI.Events.CanceledSaveURL, 'canceledSaveURL', ['url']],
+  [InspectorFrontendHostAPI.Events.ContextMenuCleared, 'contextMenuCleared', []],
+  [InspectorFrontendHostAPI.Events.ContextMenuItemSelected, 'contextMenuItemSelected', ['id']],
+  [InspectorFrontendHostAPI.Events.DeviceCountUpdated, 'deviceCountUpdated', ['count']],
+  [
+    InspectorFrontendHostAPI.Events.DevicesDiscoveryConfigChanged, 'devicesDiscoveryConfigChanged',
+    ['discoverUsbDevices', 'portForwardingEnabled', 'portForwardingConfig']
+  ],
+  [
+    InspectorFrontendHostAPI.Events.DevicesPortForwardingStatusChanged, 'devicesPortForwardingStatusChanged', ['status']
+  ],
+  [InspectorFrontendHostAPI.Events.DevicesUpdated, 'devicesUpdated', ['devices']],
+  [InspectorFrontendHostAPI.Events.DispatchMessage, 'dispatchMessage', ['messageObject']],
+  [InspectorFrontendHostAPI.Events.DispatchMessageChunk, 'dispatchMessageChunk', ['messageChunk', 'messageSize']],
+  [InspectorFrontendHostAPI.Events.EnterInspectElementMode, 'enterInspectElementMode', []],
+  [InspectorFrontendHostAPI.Events.EvaluateForTestInFrontend, 'evaluateForTestInFrontend', ['callId', 'script']],
+  [InspectorFrontendHostAPI.Events.FileSystemsLoaded, 'fileSystemsLoaded', ['fileSystems']],
+  [InspectorFrontendHostAPI.Events.FileSystemRemoved, 'fileSystemRemoved', ['fileSystemPath']],
+  [InspectorFrontendHostAPI.Events.FileSystemAdded, 'fileSystemAdded', ['errorMessage', 'fileSystem']],
+  [InspectorFrontendHostAPI.Events.FileSystemFilesChanged, 'fileSystemFilesChanged', ['paths']],
+  [
+    InspectorFrontendHostAPI.Events.IndexingTotalWorkCalculated, 'indexingTotalWorkCalculated',
+    ['requestId', 'fileSystemPath', 'totalWork']
+  ],
+  [InspectorFrontendHostAPI.Events.IndexingWorked, 'indexingWorked', ['requestId', 'fileSystemPath', 'worked']],
+  [InspectorFrontendHostAPI.Events.IndexingDone, 'indexingDone', ['requestId', 'fileSystemPath']],
+  [InspectorFrontendHostAPI.Events.KeyEventUnhandled, 'keyEventUnhandled', ['event']],
+  [InspectorFrontendHostAPI.Events.ReloadInspectedPage, 'reloadInspectedPage', ['hard']],
+  [InspectorFrontendHostAPI.Events.RevealSourceLine, 'revealSourceLine', ['url', 'lineNumber', 'columnNumber']],
+  [InspectorFrontendHostAPI.Events.SavedURL, 'savedURL', ['url']],
+  [InspectorFrontendHostAPI.Events.SearchCompleted, 'searchCompleted', ['requestId', 'fileSystemPath', 'files']],
+  [InspectorFrontendHostAPI.Events.SetInspectedTabId, 'setInspectedTabId', ['tabId']],
+  [InspectorFrontendHostAPI.Events.SetUseSoftMenu, 'setUseSoftMenu', ['useSoftMenu']],
+  [InspectorFrontendHostAPI.Events.ShowPanel, 'showPanel', ['panelName']]
 ];
 
 InspectorFrontendHostAPI.prototype = {
-    /**
-     * @param {string=} fileSystemPath
-     */
-    addFileSystem: function(fileSystemPath) { },
+  /**
+   * @param {string=} fileSystemPath
+   */
+  addFileSystem(fileSystemPath) {},
 
-    /**
-     * @param {string} url
-     * @param {string} content
-     */
-    append: function(url, content) { },
+  /**
+   * @param {string} url
+   * @param {string} content
+   */
+  append(url, content) {},
 
-    loadCompleted: function() { },
+  loadCompleted() {},
 
-    /**
-     * @param {number} requestId
-     * @param {string} fileSystemPath
-     */
-    indexPath: function(requestId, fileSystemPath) { },
+  /**
+   * @param {number} requestId
+   * @param {string} fileSystemPath
+   */
+  indexPath(requestId, fileSystemPath) {},
 
-    /**
-     * @return {string}
-     */
-    getSelectionBackgroundColor: function() { },
+  /**
+   * @return {string}
+   */
+  getSelectionBackgroundColor() {},
 
-    /**
-     * @return {string}
-     */
-    getSelectionForegroundColor: function() { },
+  /**
+   * @return {string}
+   */
+  getSelectionForegroundColor() {},
 
-    /**
-     * Requests inspected page to be placed atop of the inspector frontend with specified bounds.
-     * @param {{x: number, y: number, width: number, height: number}} bounds
-     */
-    setInspectedPageBounds: function(bounds) { },
+  /**
+   * Requests inspected page to be placed atop of the inspector frontend with specified bounds.
+   * @param {{x: number, y: number, width: number, height: number}} bounds
+   */
+  setInspectedPageBounds(bounds) {},
 
-    /**
-     * @param {string} shortcuts
-     */
-    setWhitelistedShortcuts: function(shortcuts) { },
+  /**
+   * @param {!Array<string>} certChain
+   */
+  showCertificateViewer(certChain) {},
 
-    inspectElementCompleted: function() { },
+  /**
+   * @param {string} shortcuts
+   */
+  setWhitelistedShortcuts(shortcuts) {},
 
-    /**
-     * @param {string} url
-     */
-    openInNewTab: function(url) { },
+  inspectElementCompleted() {},
 
-    /**
-     * @param {string} fileSystemPath
-     */
-    removeFileSystem: function(fileSystemPath) { },
+  /**
+   * @param {string} url
+   */
+  openInNewTab(url) {},
 
-    requestFileSystems: function() { },
+  /**
+   * @param {string} fileSystemPath
+   */
+  removeFileSystem(fileSystemPath) {},
 
-    /**
-     * @param {string} url
-     * @param {string} content
-     * @param {boolean} forceSaveAs
-     */
-    save: function(url, content, forceSaveAs) { },
+  requestFileSystems() {},
 
-    /**
-     * @param {number} requestId
-     * @param {string} fileSystemPath
-     * @param {string} query
-     */
-    searchInPath: function(requestId, fileSystemPath, query) { },
+  /**
+   * @param {string} url
+   * @param {string} content
+   * @param {boolean} forceSaveAs
+   */
+  save(url, content, forceSaveAs) {},
 
-    /**
-     * @param {number} requestId
-     */
-    stopIndexing: function(requestId) { },
+  /**
+   * @param {number} requestId
+   * @param {string} fileSystemPath
+   * @param {string} query
+   */
+  searchInPath(requestId, fileSystemPath, query) {},
 
-    bringToFront: function() { },
+  /**
+   * @param {number} requestId
+   */
+  stopIndexing(requestId) {},
 
-    closeWindow: function() { },
+  bringToFront() {},
 
-    copyText: function(text) { },
+  closeWindow() {},
 
-    /**
-     * @param {string} url
-     */
-    inspectedURLChanged: function(url) { },
+  copyText(text) {},
 
-    /**
-     * @param {string} fileSystemId
-     * @param {string} registeredName
-     * @return {?DOMFileSystem}
-     */
-    isolatedFileSystem: function(fileSystemId, registeredName) { },
+  /**
+   * @param {string} url
+   */
+  inspectedURLChanged(url) {},
 
-    /**
-     * @param {string} url
-     * @param {string} headers
-     * @param {number} streamId
-     * @param {function(!InspectorFrontendHostAPI.LoadNetworkResourceResult)} callback
-     */
-    loadNetworkResource: function(url, headers, streamId, callback) { },
+  /**
+   * @param {string} fileSystemId
+   * @param {string} registeredName
+   * @return {?DOMFileSystem}
+   */
+  isolatedFileSystem(fileSystemId, registeredName) {},
 
-    /**
-     * @param {function(!Object<string, string>)} callback
-     */
-    getPreferences: function(callback) { },
+  /**
+   * @param {string} url
+   * @param {string} headers
+   * @param {number} streamId
+   * @param {function(!InspectorFrontendHostAPI.LoadNetworkResourceResult)} callback
+   */
+  loadNetworkResource(url, headers, streamId, callback) {},
 
-    /**
-     * @param {string} name
-     * @param {string} value
-     */
-    setPreference: function(name, value) { },
+  /**
+   * @param {function(!Object<string, string>)} callback
+   */
+  getPreferences(callback) {},
 
-    /**
-     * @param {string} name
-     */
-    removePreference: function(name) { },
+  /**
+   * @param {string} name
+   * @param {string} value
+   */
+  setPreference(name, value) {},
 
-    clearPreferences: function() { },
+  /**
+   * @param {string} name
+   */
+  removePreference(name) {},
 
-    /**
-     * @param {!FileSystem} fileSystem
-     */
-    upgradeDraggedFileSystemPermissions: function(fileSystem) { },
+  clearPreferences() {},
 
-    /**
-     * @return {string}
-     */
-    platform: function() { },
+  /**
+   * @param {!FileSystem} fileSystem
+   */
+  upgradeDraggedFileSystemPermissions(fileSystem) {},
 
-    /**
-     * @param {string} actionName
-     * @param {number} actionCode
-     * @param {number} bucketSize
-     */
-    recordEnumeratedHistogram: function(actionName, actionCode, bucketSize) { },
+  /**
+   * @return {string}
+   */
+  platform() {},
 
-    /**
-     * @param {string} message
-     */
-    sendMessageToBackend: function(message) { },
+  /**
+   * @param {string} actionName
+   * @param {number} actionCode
+   * @param {number} bucketSize
+   */
+  recordEnumeratedHistogram(actionName, actionCode, bucketSize) {},
 
-    /**
-     * @param {boolean} discoverUsbDevices
-     * @param {boolean} portForwardingEnabled
-     * @param {!Adb.PortForwardingConfig} portForwardingConfig
-     */
-    setDevicesDiscoveryConfig: function(discoverUsbDevices, portForwardingEnabled, portForwardingConfig) { },
+  /**
+   * @param {string} message
+   */
+  sendMessageToBackend(message) {},
 
-    /**
-     * @param {boolean} enabled
-     */
-    setDevicesUpdatesEnabled: function(enabled) { },
+  /**
+   * @param {boolean} discoverUsbDevices
+   * @param {boolean} portForwardingEnabled
+   * @param {!Adb.PortForwardingConfig} portForwardingConfig
+   */
+  setDevicesDiscoveryConfig(discoverUsbDevices, portForwardingEnabled, portForwardingConfig) {},
 
-    /**
-     * @param {string} pageId
-     * @param {string} action
-     */
-    performActionOnRemotePage: function(pageId, action) { },
+  /**
+   * @param {boolean} enabled
+   */
+  setDevicesUpdatesEnabled(enabled) {},
 
-    /**
-     * @param {string} browserId
-     * @param {string} url
-     */
-    openRemotePage: function(browserId, url) { },
+  /**
+   * @param {string} pageId
+   * @param {string} action
+   */
+  performActionOnRemotePage(pageId, action) {},
 
-    /**
-     * @param {string} origin
-     * @param {string} script
-     */
-    setInjectedScriptForOrigin: function(origin, script) { },
+  /**
+   * @param {string} browserId
+   * @param {string} url
+   */
+  openRemotePage(browserId, url) {},
 
-    /**
-     * @param {boolean} isDocked
-     * @param {function()} callback
-     */
-    setIsDocked: function(isDocked, callback) { },
+  openNodeFrontend() {},
 
-    /**
-     * @return {number}
-     */
-    zoomFactor: function() { },
+  /**
+   * @param {string} origin
+   * @param {string} script
+   */
+  setInjectedScriptForOrigin(origin, script) {},
 
-    zoomIn: function() { },
+  /**
+   * @param {boolean} isDocked
+   * @param {function()} callback
+   */
+  setIsDocked(isDocked, callback) {},
 
-    zoomOut: function() { },
+  /**
+   * @return {number}
+   */
+  zoomFactor() {},
 
-    resetZoom: function() { },
+  zoomIn() {},
 
-    /**
-     * @param {number} x
-     * @param {number} y
-     * @param {!Array.<!InspectorFrontendHostAPI.ContextMenuDescriptor>} items
-     * @param {!Document} document
-     */
-    showContextMenuAtPoint: function(x, y, items, document) { },
+  zoomOut() {},
 
-    /**
-     * @return {boolean}
-     */
-    isUnderTest: function() { },
+  resetZoom() {},
 
-    readyForTest: function() { },
+  /**
+   * @param {number} x
+   * @param {number} y
+   * @param {!Array.<!InspectorFrontendHostAPI.ContextMenuDescriptor>} items
+   * @param {!Document} document
+   */
+  showContextMenuAtPoint(x, y, items, document) {},
 
-    /**
-     * @return {boolean}
-     */
-    isHostedMode: function() { }
-}
+  /**
+   * @param {function()} callback
+   */
+  reattach(callback) {},
+
+  /**
+   * @return {boolean}
+   */
+  isUnderTest() {},
+
+  readyForTest() {},
+
+  /**
+   * @return {boolean}
+   */
+  isHostedMode() {}
+};

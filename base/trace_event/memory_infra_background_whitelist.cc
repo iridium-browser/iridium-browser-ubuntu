@@ -17,20 +17,24 @@ namespace {
 // providers can be added here only if the background mode dump has very
 // less performance and memory overhead.
 const char* const kDumpProviderWhitelist[] = {
+    "android::ResourceManagerImpl",
     "BlinkGC",
     "ChildDiscardableSharedMemoryManager",
     "DOMStorage",
     "HostDiscardableSharedMemoryManager",
     "IndexedDBBackingStore",
     "JavaHeap",
+    "LevelDB",
     "LeveldbValueStore",
     "Malloc",
+    "MemoryCache",
     "PartitionAlloc",
     "ProcessMemoryMetrics",
     "Skia",
     "Sql",
     "V8Isolate",
     "WinHeap",
+    "SyncDirectory",
     nullptr  // End of list marker.
 };
 
@@ -46,6 +50,7 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "java_heap",
     "java_heap/allocated_objects",
     "leveldb/index_db/0x?",
+    "leveldb/leveldb_proto/0x?",
     "leveldb/value_store/Extensions.Database.Open.Settings/0x?",
     "leveldb/value_store/Extensions.Database.Open.Rules/0x?",
     "leveldb/value_store/Extensions.Database.Open.State/0x?",
@@ -55,6 +60,12 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "malloc",
     "malloc/allocated_objects",
     "malloc/metadata_fragmentation_caches",
+    "web_cache/Image_resources",
+    "web_cache/CSS stylesheet_resources",
+    "web_cache/Script_resources",
+    "web_cache/XSL stylesheet_resources",
+    "web_cache/Font_resources",
+    "web_cache/Other_resources",
     "partition_alloc/allocated_objects",
     "partition_alloc/partitions",
     "partition_alloc/partitions/buffer",
@@ -63,6 +74,7 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "skia/sk_glyph_cache",
     "skia/sk_resource_cache",
     "sqlite",
+    "ui/resource_manager_0x?",
     "v8/isolate_0x?/heap_spaces",
     "v8/isolate_0x?/heap_spaces/code_space",
     "v8/isolate_0x?/heap_spaces/large_object_space",
@@ -74,6 +86,8 @@ const char* const kAllocatorDumpNameWhitelist[] = {
     "v8/isolate_0x?/zapped_for_debug",
     "winheap",
     "winheap/allocated_objects",
+    "sync/0x?/kernel",
+    "sync/0x?/store",
     nullptr  // End of list marker.
 };
 

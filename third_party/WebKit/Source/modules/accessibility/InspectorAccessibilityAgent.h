@@ -11,25 +11,84 @@
 
 namespace blink {
 
+class AXObject;
+class AXObjectCacheImpl;
 class InspectorDOMAgent;
 class Page;
 
-class MODULES_EXPORT InspectorAccessibilityAgent : public InspectorBaseAgent<protocol::Accessibility::Metainfo> {
-    WTF_MAKE_NONCOPYABLE(InspectorAccessibilityAgent);
-public:
-    InspectorAccessibilityAgent(Page*, InspectorDOMAgent*);
+using protocol::Accessibility::AXNode;
+using protocol::Accessibility::AXNodeId;
 
-    // Base agent methods.
-    DECLARE_VIRTUAL_TRACE();
+class MODULES_EXPORT InspectorAccessibilityAgent
+    : public InspectorBaseAgent<protocol::Accessibility::Metainfo> {
+  WTF_MAKE_NONCOPYABLE(InspectorAccessibilityAgent);
 
-    // Protocol methods.
-    void getAXNode(ErrorString*, int nodeId, Maybe<protocol::Accessibility::AXNode>* accessibilityNode) override;
+ public:
+  InspectorAccessibilityAgent(Page*, InspectorDOMAgent*);
 
-private:
-    Member<Page> m_page;
-    Member<InspectorDOMAgent> m_domAgent;
+  // Base agent methods.
+  DECLARE_VIRTUAL_TRACE();
+
+  // Protocol methods.
+  Response getPartialAXTree(
+      int domNodeId,
+      Maybe<bool> fetchRelatives,
+      std::unique_ptr<protocol::Array<protocol::Accessibility::AXNode>>*)
+      override;
+
+ private:
+  std::unique_ptr<AXNode> buildObjectForIgnoredNode(
+      Node* domNode,
+      AXObject*,
+      bool fetchRelatives,
+      std::unique_ptr<protocol::Array<AXNode>>& nodes,
+      AXObjectCacheImpl&) const;
+  void populateDOMNodeAncestors(Node& inspectedDOMNode,
+                                AXNode&,
+                                std::unique_ptr<protocol::Array<AXNode>>& nodes,
+                                AXObjectCacheImpl&) const;
+  std::unique_ptr<AXNode> buildProtocolAXObject(
+      AXObject&,
+      AXObject* inspectedAXObject,
+      bool fetchRelatives,
+      std::unique_ptr<protocol::Array<AXNode>>& nodes,
+      AXObjectCacheImpl&) const;
+  void fillCoreProperties(AXObject&,
+                          AXObject* inspectedAXObject,
+                          bool fetchRelatives,
+                          AXNode&,
+                          std::unique_ptr<protocol::Array<AXNode>>& nodes,
+                          AXObjectCacheImpl&) const;
+  void addAncestors(AXObject& firstAncestor,
+                    AXObject* inspectedAXObject,
+                    std::unique_ptr<protocol::Array<AXNode>>& nodes,
+                    AXObjectCacheImpl&) const;
+  void populateRelatives(AXObject&,
+                         AXObject* inspectedAXObject,
+                         AXNode&,
+                         std::unique_ptr<protocol::Array<AXNode>>& nodes,
+                         AXObjectCacheImpl&) const;
+  void addSiblingsOfIgnored(
+      std::unique_ptr<protocol::Array<AXNodeId>>& childIds,
+      AXObject& parentAXObject,
+      AXObject* inspectedAXObject,
+      std::unique_ptr<protocol::Array<AXNode>>& nodes,
+      AXObjectCacheImpl&) const;
+  void addChild(std::unique_ptr<protocol::Array<AXNodeId>>& childIds,
+                AXObject& childAXObject,
+                AXObject* inspectedAXObject,
+                std::unique_ptr<protocol::Array<AXNode>>& nodes,
+                AXObjectCacheImpl&) const;
+  void addChildren(AXObject&,
+                   AXObject* inspectedAXObject,
+                   std::unique_ptr<protocol::Array<AXNodeId>>& childIds,
+                   std::unique_ptr<protocol::Array<AXNode>>& nodes,
+                   AXObjectCacheImpl&) const;
+
+  Member<Page> m_page;
+  Member<InspectorDOMAgent> m_domAgent;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // InspectorAccessibilityAgent_h
+#endif  // InspectorAccessibilityAgent_h

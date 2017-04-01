@@ -50,16 +50,18 @@
 #include "content/shell/browser/shell_download_manager_delegate.h"
 #include "content/shell/browser/shell_network_delegate.h"
 #include "device/power_save_blocker/power_save_blocker.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/test/url_request/url_request_slow_download_job.h"
+#include "ppapi/features/features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/browser/plugin_service_impl.h"
 #endif
 
@@ -70,6 +72,10 @@ using ::testing::Property;
 using ::testing::Return;
 using ::testing::StrictMock;
 using ::testing::_;
+
+namespace net {
+class NetLogWithSource;
+}
 
 namespace content {
 
@@ -128,7 +134,7 @@ class DownloadFileWithDelay : public DownloadFileImpl {
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_download_directory,
       std::unique_ptr<ByteStreamReader> stream,
-      const net::BoundNetLog& bound_net_log,
+      const net::NetLogWithSource& net_log,
       std::unique_ptr<device::PowerSaveBlocker> power_save_blocker,
       base::WeakPtr<DownloadDestinationObserver> observer,
       base::WeakPtr<DownloadFileWithDelayFactory> owner);
@@ -174,7 +180,7 @@ class DownloadFileWithDelayFactory : public DownloadFileFactory {
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_download_directory,
       std::unique_ptr<ByteStreamReader> stream,
-      const net::BoundNetLog& bound_net_log,
+      const net::NetLogWithSource& net_log,
       base::WeakPtr<DownloadDestinationObserver> observer) override;
 
   void AddRenameCallback(base::Closure callback);
@@ -195,14 +201,14 @@ DownloadFileWithDelay::DownloadFileWithDelay(
     std::unique_ptr<DownloadSaveInfo> save_info,
     const base::FilePath& default_download_directory,
     std::unique_ptr<ByteStreamReader> stream,
-    const net::BoundNetLog& bound_net_log,
+    const net::NetLogWithSource& net_log,
     std::unique_ptr<device::PowerSaveBlocker> power_save_blocker,
     base::WeakPtr<DownloadDestinationObserver> observer,
     base::WeakPtr<DownloadFileWithDelayFactory> owner)
     : DownloadFileImpl(std::move(save_info),
                        default_download_directory,
                        std::move(stream),
-                       bound_net_log,
+                       net_log,
                        observer),
       owner_(owner) {}
 
@@ -255,7 +261,7 @@ DownloadFile* DownloadFileWithDelayFactory::CreateFile(
     std::unique_ptr<DownloadSaveInfo> save_info,
     const base::FilePath& default_download_directory,
     std::unique_ptr<ByteStreamReader> stream,
-    const net::BoundNetLog& bound_net_log,
+    const net::NetLogWithSource& net_log,
     base::WeakPtr<DownloadDestinationObserver> observer) {
   std::unique_ptr<device::PowerSaveBlocker> psb(new device::PowerSaveBlocker(
       device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
@@ -265,7 +271,7 @@ DownloadFile* DownloadFileWithDelayFactory::CreateFile(
   return new DownloadFileWithDelay(std::move(save_info),
                                    default_download_directory,
                                    std::move(stream),
-                                   bound_net_log,
+                                   net_log,
                                    std::move(psb),
                                    observer,
                                    weak_ptr_factory_.GetWeakPtr());
@@ -300,13 +306,13 @@ class CountingDownloadFile : public DownloadFileImpl {
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_downloads_directory,
       std::unique_ptr<ByteStreamReader> stream,
-      const net::BoundNetLog& bound_net_log,
+      const net::NetLogWithSource& net_log,
       std::unique_ptr<device::PowerSaveBlocker> power_save_blocker,
       base::WeakPtr<DownloadDestinationObserver> observer)
       : DownloadFileImpl(std::move(save_info),
                          default_downloads_directory,
                          std::move(stream),
-                         bound_net_log,
+                         net_log,
                          observer) {}
 
   ~CountingDownloadFile() override {
@@ -354,7 +360,7 @@ class CountingDownloadFileFactory : public DownloadFileFactory {
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_downloads_directory,
       std::unique_ptr<ByteStreamReader> stream,
-      const net::BoundNetLog& bound_net_log,
+      const net::NetLogWithSource& net_log,
       base::WeakPtr<DownloadDestinationObserver> observer) override {
     std::unique_ptr<device::PowerSaveBlocker> psb(new device::PowerSaveBlocker(
         device::PowerSaveBlocker::kPowerSaveBlockPreventAppSuspension,
@@ -364,7 +370,7 @@ class CountingDownloadFileFactory : public DownloadFileFactory {
     return new CountingDownloadFile(std::move(save_info),
                                     default_downloads_directory,
                                     std::move(stream),
-                                    bound_net_log,
+                                    net_log,
                                     std::move(psb),
                                     observer);
   }
@@ -559,7 +565,8 @@ class DownloadContentTest : public ContentBrowserTest {
     ASSERT_TRUE(downloads_directory_.CreateUniqueTempDir());
 
     test_delegate_.reset(new TestShellDownloadManagerDelegate());
-    test_delegate_->SetDownloadBehaviorForTesting(downloads_directory_.path());
+    test_delegate_->SetDownloadBehaviorForTesting(
+        downloads_directory_.GetPath());
     DownloadManager* manager = DownloadManagerForShell(shell());
     manager->GetDelegate()->Shutdown();
     manager->SetDelegate(test_delegate_.get());
@@ -585,7 +592,7 @@ class DownloadContentTest : public ContentBrowserTest {
   }
 
   const base::FilePath& GetDownloadDirectory() const {
-    return downloads_directory_.path();
+    return downloads_directory_.GetPath();
   }
 
   // Create a DownloadTestObserverTerminal that will wait for the
@@ -799,7 +806,7 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, MultiDownload) {
       file2, GetTestFilePath("download", "download-test.lib")));
 }
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
 // Content served with a MIME type of application/octet-stream should be
 // downloaded even when a plugin can be found that handles the file type.
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadOctetStream) {
@@ -1504,7 +1511,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, RecoverFromFinalRenameError) {
   scoped_refptr<TestFileErrorInjector> injector(
       TestFileErrorInjector::Create(DownloadManagerForShell(shell())));
 
-  DownloadManagerForShell(shell())->RemoveAllDownloads();
   TestFileErrorInjector::FileErrorInfo err = {
       TestFileErrorInjector::FILE_OPERATION_RENAME_ANNOTATE, 0,
       DOWNLOAD_INTERRUPT_REASON_FILE_FAILED};
@@ -2265,8 +2271,6 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, ReferrerForPartialResumption) {
 IN_PROC_BROWSER_TEST_F(DownloadContentTest, CookiePolicy) {
   net::EmbeddedTestServer origin_one;
   net::EmbeddedTestServer origin_two;
-  ASSERT_TRUE(origin_one.Start());
-  ASSERT_TRUE(origin_two.Start());
 
   // Block third-party cookies.
   ShellNetworkDelegate::SetBlockThirdPartyCookies(true);
@@ -2278,8 +2282,11 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, CookiePolicy) {
       std::make_pair(std::string("Set-Cookie"), std::string("A=B")));
   origin_one.RegisterRequestHandler(CreateBasicResponseHandler(
       "/foo", cookie_header, "application/octet-stream", "abcd"));
+  ASSERT_TRUE(origin_one.Start());
+
   origin_two.RegisterRequestHandler(
       CreateRedirectHandler("/bar", origin_one.GetURL("/foo")));
+  ASSERT_TRUE(origin_two.Start());
 
   // Download the file.
   SetupEnsureNoPendingDownloads();
@@ -2311,8 +2318,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
                        DownloadAttributeCrossOriginRedirect) {
   net::EmbeddedTestServer origin_one;
   net::EmbeddedTestServer origin_two;
-  ASSERT_TRUE(origin_one.Start());
-  ASSERT_TRUE(origin_two.Start());
+  ASSERT_TRUE(origin_one.InitializeAndListen());
+  ASSERT_TRUE(origin_two.InitializeAndListen());
 
   // The download-attribute.html page contains an anchor element whose href is
   // set to the value of the query parameter (specified as |target| in the URL
@@ -2332,8 +2339,11 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
   origin_one.ServeFilesFromDirectory(GetTestFilePath("download", ""));
   origin_one.RegisterRequestHandler(
       CreateRedirectHandler("/ping", origin_two.GetURL("/download")));
+  origin_one.StartAcceptingConnections();
+
   origin_two.RegisterRequestHandler(CreateBasicResponseHandler(
       "/download", base::StringPairs(), "application/octet-stream", "Hello"));
+  origin_two.StartAcceptingConnections();
 
   NavigateToURLAndWaitForDownload(
       shell(), referrer_url, DownloadItem::COMPLETE);
@@ -2356,8 +2366,8 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
                        DownloadAttributeSameOriginRedirect) {
   net::EmbeddedTestServer origin_one;
   net::EmbeddedTestServer origin_two;
-  ASSERT_TRUE(origin_one.Start());
-  ASSERT_TRUE(origin_two.Start());
+  ASSERT_TRUE(origin_one.InitializeAndListen());
+  ASSERT_TRUE(origin_two.InitializeAndListen());
 
   // The download-attribute.html page contains an anchor element whose href is
   // set to the value of the query parameter (specified as |target| in the URL
@@ -2382,6 +2392,9 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
       CreateRedirectHandler("/pong", origin_one.GetURL("/download")));
   origin_one.RegisterRequestHandler(CreateBasicResponseHandler(
       "/download", base::StringPairs(), "application/octet-stream", "Hello"));
+
+  origin_one.StartAcceptingConnections();
+  origin_two.StartAcceptingConnections();
 
   NavigateToURLAndWaitForDownload(
       shell(), referrer_url, DownloadItem::COMPLETE);
@@ -2471,6 +2484,85 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeBlobURL) {
                download->GetTargetFilePath().BaseName().value().c_str());
 }
 
+IN_PROC_BROWSER_TEST_F(DownloadContentTest, DownloadAttributeSameSiteCookie) {
+  base::ThreadRestrictions::ScopedAllowIO allow_io_during_test;
+
+  const std::string kOriginOne = "one.example";
+  const std::string kOriginTwo = "two.example";
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  const std::string real_host = embedded_test_server()->host_port_pair().host();
+  host_resolver()->AddRule(kOriginOne, real_host);
+  host_resolver()->AddRule(kOriginTwo, real_host);
+
+  GURL echo_cookie_url =
+      embedded_test_server()->GetURL(kOriginOne, "/echoheader?cookie");
+
+  // download-attribute-same-site-cookie sets two cookies. One "A=B" is set with
+  // SameSite=Strict. The other one "B=C" doesn't have this flag. In general
+  // a[download] should behave the same as a top level navigation.
+  //
+  // The page then simulates a click on an <a download> link whose target is the
+  // /echoheader handler on the same origin.
+  DownloadItem* download = StartDownloadAndReturnItem(
+      shell(),
+      embedded_test_server()->GetURL(
+          kOriginOne,
+          std::string(
+              "/download/download-attribute-same-site-cookie.html?target=") +
+              echo_cookie_url.spec()));
+  WaitForCompletion(download);
+
+  std::string file_contents;
+  ASSERT_TRUE(
+      base::ReadFileToString(download->GetTargetFilePath(), &file_contents));
+
+  // Initiator and target are same-origin. Both cookies should have been
+  // included in the request.
+  EXPECT_STREQ("A=B; B=C", file_contents.c_str());
+
+  // The test isn't complete without verifying that the initiator isn't being
+  // incorrectly set to be the same as the resource origin. The
+  // download-attribute test page doesn't set any cookies but creates a download
+  // via a <a download> link to the target URL. In this case:
+  //
+  //  Initiator origin: kOriginTwo
+  //  Resource origin: kOriginOne
+  //  First-party origin: kOriginOne
+  download = StartDownloadAndReturnItem(
+      shell(),
+      embedded_test_server()->GetURL(
+          kOriginTwo, std::string("/download/download-attribute.html?target=") +
+                          echo_cookie_url.spec()));
+  WaitForCompletion(download);
+
+  ASSERT_TRUE(
+      base::ReadFileToString(download->GetTargetFilePath(), &file_contents));
+
+  // The initiator and the target are not same-origin. Only the second cookie
+  // should be sent along with the request.
+  EXPECT_STREQ("B=C", file_contents.c_str());
+
+  // OriginOne redirects through OriginTwo.
+  //
+  //  Initiator origin: kOriginOne
+  //  Resource origin: kOriginOne
+  //  First-party origin: kOriginOne
+  GURL redirect_url = embedded_test_server()->GetURL(
+      kOriginTwo, std::string("/server-redirect?") + echo_cookie_url.spec());
+  download = StartDownloadAndReturnItem(
+      shell(),
+      embedded_test_server()->GetURL(
+          kOriginOne, std::string("/download/download-attribute.html?target=") +
+                          redirect_url.spec()));
+  WaitForCompletion(download);
+
+  ASSERT_TRUE(
+      base::ReadFileToString(download->GetTargetFilePath(), &file_contents));
+  EXPECT_STREQ("A=B; B=C", file_contents.c_str());
+}
+
 // The file empty.bin is served with a MIME type of application/octet-stream.
 // The content body is empty. Make sure this case is handled properly and we
 // don't regress on http://crbug.com/320394.
@@ -2528,11 +2620,12 @@ IN_PROC_BROWSER_TEST_F(DownloadContentTest,
                        DownloadAttributeCrossOriginIFrame) {
   net::EmbeddedTestServer origin_one;
   net::EmbeddedTestServer origin_two;
-  ASSERT_TRUE(origin_one.Start());
-  ASSERT_TRUE(origin_two.Start());
 
   origin_one.ServeFilesFromDirectory(GetTestFilePath("download", ""));
   origin_two.ServeFilesFromDirectory(GetTestFilePath("download", ""));
+
+  ASSERT_TRUE(origin_one.Start());
+  ASSERT_TRUE(origin_two.Start());
 
   GURL frame_url =
       origin_one.GetURL("/download-attribute.html?target=" +

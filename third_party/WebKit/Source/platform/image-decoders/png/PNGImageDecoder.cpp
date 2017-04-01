@@ -19,7 +19,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  *
  * Alternatively, the contents of this file may be used under the terms
  * of either the Mozilla Public License Version 1.1, found at
@@ -38,291 +38,218 @@
 
 #include "platform/image-decoders/png/PNGImageDecoder.h"
 
+#include "platform/image-decoders/png/PNGImageReader.h"
 #include "png.h"
 #include "wtf/PtrUtil.h"
 #include <memory>
 
-#if !defined(PNG_LIBPNG_VER_MAJOR) || !defined(PNG_LIBPNG_VER_MINOR)
-#error version error: compile against a versioned libpng.
-#endif
-#if USE(QCMSLIB)
-#include "qcms.h"
-#endif
-
-#if PNG_LIBPNG_VER_MAJOR > 1 || (PNG_LIBPNG_VER_MAJOR == 1 && PNG_LIBPNG_VER_MINOR >= 4)
-#define JMPBUF(png_ptr) png_jmpbuf(png_ptr)
-#else
-#define JMPBUF(png_ptr) png_ptr->jmpbuf
-#endif
-
-namespace {
-
-inline blink::PNGImageDecoder* imageDecoder(png_structp png)
-{
-    return static_cast<blink::PNGImageDecoder*>(png_get_progressive_ptr(png));
-}
-
-void PNGAPI pngHeaderAvailable(png_structp png, png_infop)
-{
-    imageDecoder(png)->headerAvailable();
-}
-
-void PNGAPI pngRowAvailable(png_structp png, png_bytep row, png_uint_32 rowIndex, int state)
-{
-    imageDecoder(png)->rowAvailable(row, rowIndex, state);
-}
-
-void PNGAPI pngComplete(png_structp png, png_infop)
-{
-    imageDecoder(png)->complete();
-}
-
-void PNGAPI pngFailed(png_structp png, png_const_charp)
-{
-    longjmp(JMPBUF(png), 1);
-}
-
-} // namespace
-
 namespace blink {
 
-class PNGImageReader final {
-    USING_FAST_MALLOC(PNGImageReader);
-    WTF_MAKE_NONCOPYABLE(PNGImageReader);
-public:
-    PNGImageReader(PNGImageDecoder* decoder, size_t readOffset)
-        : m_decoder(decoder)
-        , m_readOffset(readOffset)
-        , m_currentBufferSize(0)
-        , m_decodingSizeOnly(false)
-        , m_hasAlpha(false)
-#if USE(QCMSLIB)
-        , m_rowBuffer()
-#endif
-    {
-        m_png = png_create_read_struct(PNG_LIBPNG_VER_STRING, 0, pngFailed, 0);
-        m_info = png_create_info_struct(m_png);
-        png_set_progressive_read_fn(m_png, m_decoder, pngHeaderAvailable, pngRowAvailable, pngComplete);
-    }
+PNGImageDecoder::PNGImageDecoder(AlphaOption alphaOption,
+                                 const ColorBehavior& colorBehavior,
+                                 size_t maxDecodedBytes,
+                                 size_t offset)
+    : ImageDecoder(alphaOption, colorBehavior, maxDecodedBytes),
+      m_offset(offset) {}
 
-    ~PNGImageReader()
-    {
-        png_destroy_read_struct(m_png ? &m_png : 0, m_info ? &m_info : 0, 0);
-        ASSERT(!m_png && !m_info);
+PNGImageDecoder::~PNGImageDecoder() {}
 
-        m_readOffset = 0;
-    }
-
-    bool decode(const SegmentReader& data, bool sizeOnly)
-    {
-        m_decodingSizeOnly = sizeOnly;
-
-        // We need to do the setjmp here. Otherwise bad things will happen.
-        if (setjmp(JMPBUF(m_png)))
-            return m_decoder->setFailed();
-
-        const char* segment;
-        while (size_t segmentLength = data.getSomeData(segment, m_readOffset)) {
-            m_readOffset += segmentLength;
-            m_currentBufferSize = m_readOffset;
-            png_process_data(m_png, m_info, reinterpret_cast<png_bytep>(const_cast<char*>(segment)), segmentLength);
-            if (sizeOnly ? m_decoder->isDecodedSizeAvailable() : m_decoder->frameIsCompleteAtIndex(0))
-                return true;
-        }
-
-        return false;
-    }
-
-    png_structp pngPtr() const { return m_png; }
-    png_infop infoPtr() const { return m_info; }
-
-    size_t getReadOffset() const { return m_readOffset; }
-    void setReadOffset(size_t offset) { m_readOffset = offset; }
-    size_t currentBufferSize() const { return m_currentBufferSize; }
-    bool decodingSizeOnly() const { return m_decodingSizeOnly; }
-    void setHasAlpha(bool hasAlpha) { m_hasAlpha = hasAlpha; }
-    bool hasAlpha() const { return m_hasAlpha; }
-
-    png_bytep interlaceBuffer() const { return m_interlaceBuffer.get(); }
-    void createInterlaceBuffer(int size) { m_interlaceBuffer = wrapArrayUnique(new png_byte[size]); }
-#if USE(QCMSLIB)
-    png_bytep rowBuffer() const { return m_rowBuffer.get(); }
-    void createRowBuffer(int size) { m_rowBuffer = wrapArrayUnique(new png_byte[size]); }
-#endif
-
-private:
-    png_structp m_png;
-    png_infop m_info;
-    PNGImageDecoder* m_decoder;
-    size_t m_readOffset;
-    size_t m_currentBufferSize;
-    bool m_decodingSizeOnly;
-    bool m_hasAlpha;
-    std::unique_ptr<png_byte[]> m_interlaceBuffer;
-#if USE(QCMSLIB)
-    std::unique_ptr<png_byte[]> m_rowBuffer;
-#endif
-};
-
-PNGImageDecoder::PNGImageDecoder(AlphaOption alphaOption, GammaAndColorProfileOption colorOptions, size_t maxDecodedBytes, size_t offset)
-    : ImageDecoder(alphaOption, colorOptions, maxDecodedBytes)
-    , m_offset(offset)
-{
+inline float pngFixedToFloat(png_fixed_point x) {
+  return ((float)x) * 0.00001f;
 }
 
-PNGImageDecoder::~PNGImageDecoder()
-{
+inline sk_sp<SkColorSpace> readColorSpace(png_structp png, png_infop info) {
+  if (png_get_valid(png, info, PNG_INFO_sRGB)) {
+    return SkColorSpace::MakeNamed(SkColorSpace::kSRGB_Named);
+  }
+
+  png_charp name = nullptr;
+  int compression = 0;
+  png_bytep profile = nullptr;
+  png_uint_32 length = 0;
+  if (png_get_iCCP(png, info, &name, &compression, &profile, &length)) {
+    return SkColorSpace::MakeICC(profile, length);
+  }
+
+  png_fixed_point chrm[8];
+  if (png_get_cHRM_fixed(png, info, &chrm[0], &chrm[1], &chrm[2], &chrm[3],
+                         &chrm[4], &chrm[5], &chrm[6], &chrm[7])) {
+    SkColorSpacePrimaries primaries;
+    primaries.fRX = pngFixedToFloat(chrm[2]);
+    primaries.fRY = pngFixedToFloat(chrm[3]);
+    primaries.fGX = pngFixedToFloat(chrm[4]);
+    primaries.fGY = pngFixedToFloat(chrm[5]);
+    primaries.fBX = pngFixedToFloat(chrm[6]);
+    primaries.fBY = pngFixedToFloat(chrm[7]);
+    primaries.fWX = pngFixedToFloat(chrm[0]);
+    primaries.fWY = pngFixedToFloat(chrm[1]);
+
+    SkMatrix44 toXYZD50(SkMatrix44::kUninitialized_Constructor);
+    if (primaries.toXYZD50(&toXYZD50)) {
+      png_fixed_point gammaFixed;
+      if (PNG_INFO_gAMA == png_get_gAMA_fixed(png, info, &gammaFixed)) {
+        SkColorSpaceTransferFn fn;
+        fn.fA = 1.0f;
+        fn.fB = fn.fC = fn.fD = fn.fE = fn.fF = 0.0f;
+        // This is necessary because the gAMA chunk actually stores 1/gamma.
+        fn.fG = 1.0f / pngFixedToFloat(gammaFixed);
+        return SkColorSpace::MakeRGB(fn, toXYZD50);
+      }
+
+      // Note that we only use the cHRM tag when gAMA is present.  The
+      // specification states that the cHRM is valid even without a gAMA
+      // tag, but we cannot apply the cHRM without guessing a transfer
+      // function.  It's possible that we should guess sRGB transfer
+      // function, given that unmarked PNGs should be treated as sRGB.
+      // However, the current behavior matches Safari and Firefox.
+    }
+  }
+
+  return nullptr;
 }
 
-void PNGImageDecoder::headerAvailable()
-{
+void PNGImageDecoder::headerAvailable() {
+  png_structp png = m_reader->pngPtr();
+  png_infop info = m_reader->infoPtr();
+  png_uint_32 width = png_get_image_width(png, info);
+  png_uint_32 height = png_get_image_height(png, info);
+
+  // Protect against large PNGs. See http://bugzil.la/251381 for more details.
+  const unsigned long maxPNGSize = 1000000UL;
+  if (width > maxPNGSize || height > maxPNGSize) {
+    longjmp(JMPBUF(png), 1);
+    return;
+  }
+
+  // Set the image size now that the image header is available.
+  if (!setSize(width, height)) {
+    longjmp(JMPBUF(png), 1);
+    return;
+  }
+
+  int bitDepth, colorType, interlaceType, compressionType, filterType, channels;
+  png_get_IHDR(png, info, &width, &height, &bitDepth, &colorType,
+               &interlaceType, &compressionType, &filterType);
+
+  // The options we set here match what Mozilla does.
+
+  // Expand to ensure we use 24-bit for RGB and 32-bit for RGBA.
+  if (colorType == PNG_COLOR_TYPE_PALETTE ||
+      (colorType == PNG_COLOR_TYPE_GRAY && bitDepth < 8))
+    png_set_expand(png);
+
+  png_bytep trns = 0;
+  int trnsCount = 0;
+  if (png_get_valid(png, info, PNG_INFO_tRNS)) {
+    png_get_tRNS(png, info, &trns, &trnsCount, 0);
+    png_set_expand(png);
+  }
+
+  if (bitDepth == 16)
+    png_set_strip_16(png);
+
+  if (colorType == PNG_COLOR_TYPE_GRAY ||
+      colorType == PNG_COLOR_TYPE_GRAY_ALPHA)
+    png_set_gray_to_rgb(png);
+
+  if ((colorType & PNG_COLOR_MASK_COLOR) && !ignoresColorSpace()) {
+    // We only support color profiles for color PALETTE and RGB[A] PNG.
+    // Supporting color profiles for gray-scale images is slightly tricky, at
+    // least using the CoreGraphics ICC library, because we expand gray-scale
+    // images to RGB but we do not similarly transform the color profile. We'd
+    // either need to transform the color profile or we'd need to decode into a
+    // gray-scale image buffer and hand that to CoreGraphics.
+    sk_sp<SkColorSpace> colorSpace = readColorSpace(png, info);
+    if (colorSpace) {
+      setEmbeddedColorSpace(colorSpace);
+    }
+  }
+
+  if (!hasEmbeddedColorSpace()) {
+    // TODO (msarett):
+    // Applying the transfer function (gamma) should be handled by
+    // SkColorSpaceXform.  Here we always convert to a transfer function that
+    // is a 2.2 exponential.  This is a little strange given that the dst
+    // transfer function is not necessarily a 2.2 exponential.
+    // TODO (msarett):
+    // Often, PNGs that specify their transfer function with the gAMA tag will
+    // also specify their gamut with the cHRM tag.  We should read this tag
+    // and do a full color space transformation if it is present.
+    const double inverseGamma = 0.45455;
+    const double defaultGamma = 2.2;
+    double gamma;
+    if (!ignoresColorSpace() && png_get_gAMA(png, info, &gamma)) {
+      const double maxGamma = 21474.83;
+      if ((gamma <= 0.0) || (gamma > maxGamma)) {
+        gamma = inverseGamma;
+        png_set_gAMA(png, info, gamma);
+      }
+      png_set_gamma(png, defaultGamma, gamma);
+    } else {
+      png_set_gamma(png, defaultGamma, inverseGamma);
+    }
+  }
+
+  // Tell libpng to send us rows for interlaced pngs.
+  if (interlaceType == PNG_INTERLACE_ADAM7)
+    png_set_interlace_handling(png);
+
+  // Update our info now.
+  png_read_update_info(png, info);
+  channels = png_get_channels(png, info);
+  ASSERT(channels == 3 || channels == 4);
+
+  m_reader->setHasAlpha(channels == 4);
+
+  if (m_reader->decodingSizeOnly()) {
+// If we only needed the size, halt the reader.
+#if PNG_LIBPNG_VER_MAJOR > 1 || \
+    (PNG_LIBPNG_VER_MAJOR == 1 && PNG_LIBPNG_VER_MINOR >= 5)
+    // Passing '0' tells png_process_data_pause() not to cache unprocessed data.
+    m_reader->setReadOffset(m_reader->currentBufferSize() -
+                            png_process_data_pause(png, 0));
+#else
+    m_reader->setReadOffset(m_reader->currentBufferSize() - png->buffer_size);
+    png->buffer_size = 0;
+#endif
+  }
+}
+
+void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer,
+                                   unsigned rowIndex,
+                                   int) {
+  if (m_frameBufferCache.isEmpty())
+    return;
+
+  // Initialize the framebuffer if needed.
+  ImageFrame& buffer = m_frameBufferCache[0];
+  if (buffer.getStatus() == ImageFrame::FrameEmpty) {
     png_structp png = m_reader->pngPtr();
-    png_infop info = m_reader->infoPtr();
-    png_uint_32 width = png_get_image_width(png, info);
-    png_uint_32 height = png_get_image_height(png, info);
+    if (!buffer.setSizeAndColorSpace(size().width(), size().height(),
+                                     colorSpaceForSkImages())) {
+      longjmp(JMPBUF(png), 1);
+      return;
+    }
 
-    // Protect against large PNGs. See http://bugzil.la/251381 for more details.
-    const unsigned long maxPNGSize = 1000000UL;
-    if (width > maxPNGSize || height > maxPNGSize) {
+    unsigned colorChannels = m_reader->hasAlpha() ? 4 : 3;
+    if (PNG_INTERLACE_ADAM7 ==
+        png_get_interlace_type(png, m_reader->infoPtr())) {
+      m_reader->createInterlaceBuffer(colorChannels * size().width() *
+                                      size().height());
+      if (!m_reader->interlaceBuffer()) {
         longjmp(JMPBUF(png), 1);
         return;
+      }
     }
 
-    // Set the image size now that the image header is available.
-    if (!setSize(width, height)) {
-        longjmp(JMPBUF(png), 1);
-        return;
-    }
+    buffer.setStatus(ImageFrame::FramePartial);
+    buffer.setHasAlpha(false);
 
-    int bitDepth, colorType, interlaceType, compressionType, filterType, channels;
-    png_get_IHDR(png, info, &width, &height, &bitDepth, &colorType, &interlaceType, &compressionType, &filterType);
+    // For PNGs, the frame always fills the entire image.
+    buffer.setOriginalFrameRect(IntRect(IntPoint(), size()));
+  }
 
-    // The options we set here match what Mozilla does.
-
-    // Expand to ensure we use 24-bit for RGB and 32-bit for RGBA.
-    if (colorType == PNG_COLOR_TYPE_PALETTE || (colorType == PNG_COLOR_TYPE_GRAY && bitDepth < 8))
-        png_set_expand(png);
-
-    png_bytep trns = 0;
-    int trnsCount = 0;
-    if (png_get_valid(png, info, PNG_INFO_tRNS)) {
-        png_get_tRNS(png, info, &trns, &trnsCount, 0);
-        png_set_expand(png);
-    }
-
-    if (bitDepth == 16)
-        png_set_strip_16(png);
-
-    if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA)
-        png_set_gray_to_rgb(png);
-
-    if ((colorType & PNG_COLOR_MASK_COLOR) && !m_ignoreGammaAndColorProfile) {
-        // We only support color profiles for color PALETTE and RGB[A] PNG. Supporting
-        // color profiles for gray-scale images is slightly tricky, at least using the
-        // CoreGraphics ICC library, because we expand gray-scale images to RGB but we
-        // do not similarly transform the color profile. We'd either need to transform
-        // the color profile or we'd need to decode into a gray-scale image buffer and
-        // hand that to CoreGraphics.
-        bool imageHasAlpha = (colorType & PNG_COLOR_MASK_ALPHA) || trnsCount;
-#ifdef PNG_iCCP_SUPPORTED
-        if (png_get_valid(png, info, PNG_INFO_sRGB)) {
-            setColorProfileAndComputeTransform(nullptr, 0, imageHasAlpha, true /* useSRGB */);
-        } else {
-            char* profileName = nullptr;
-            int compressionType = 0;
-#if (PNG_LIBPNG_VER < 10500)
-            png_charp profile = nullptr;
-#else
-            png_bytep profile = nullptr;
-#endif
-            png_uint_32 profileLength = 0;
-            if (png_get_iCCP(png, info, &profileName, &compressionType, &profile, &profileLength)) {
-                setColorProfileAndComputeTransform(reinterpret_cast<char*>(profile), profileLength, imageHasAlpha, false /* useSRGB */);
-            }
-        }
-#endif // PNG_iCCP_SUPPORTED
-    }
-
-    if (!hasColorProfile()) {
-        // Deal with gamma and keep it under our control.
-        const double inverseGamma = 0.45455;
-        const double defaultGamma = 2.2;
-        double gamma;
-        if (!m_ignoreGammaAndColorProfile && png_get_gAMA(png, info, &gamma)) {
-            const double maxGamma = 21474.83;
-            if ((gamma <= 0.0) || (gamma > maxGamma)) {
-                gamma = inverseGamma;
-                png_set_gAMA(png, info, gamma);
-            }
-            png_set_gamma(png, defaultGamma, gamma);
-        } else {
-            png_set_gamma(png, defaultGamma, inverseGamma);
-        }
-    }
-
-    // Tell libpng to send us rows for interlaced pngs.
-    if (interlaceType == PNG_INTERLACE_ADAM7)
-        png_set_interlace_handling(png);
-
-    // Update our info now.
-    png_read_update_info(png, info);
-    channels = png_get_channels(png, info);
-    ASSERT(channels == 3 || channels == 4);
-
-    m_reader->setHasAlpha(channels == 4);
-
-    if (m_reader->decodingSizeOnly()) {
-        // If we only needed the size, halt the reader.
-#if PNG_LIBPNG_VER_MAJOR > 1 || (PNG_LIBPNG_VER_MAJOR == 1 && PNG_LIBPNG_VER_MINOR >= 5)
-        // '0' argument to png_process_data_pause means: Do not cache unprocessed data.
-        m_reader->setReadOffset(m_reader->currentBufferSize() - png_process_data_pause(png, 0));
-#else
-        m_reader->setReadOffset(m_reader->currentBufferSize() - png->buffer_size);
-        png->buffer_size = 0;
-#endif
-    }
-}
-
-void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, int)
-{
-    if (m_frameBufferCache.isEmpty())
-        return;
-
-    // Initialize the framebuffer if needed.
-    ImageFrame& buffer = m_frameBufferCache[0];
-    if (buffer.getStatus() == ImageFrame::FrameEmpty) {
-        png_structp png = m_reader->pngPtr();
-        if (!buffer.setSizeAndColorProfile(size().width(), size().height(), colorProfile())) {
-            longjmp(JMPBUF(png), 1);
-            return;
-        }
-
-        unsigned colorChannels = m_reader->hasAlpha() ? 4 : 3;
-        if (PNG_INTERLACE_ADAM7 == png_get_interlace_type(png, m_reader->infoPtr())) {
-            m_reader->createInterlaceBuffer(colorChannels * size().width() * size().height());
-            if (!m_reader->interlaceBuffer()) {
-                longjmp(JMPBUF(png), 1);
-                return;
-            }
-        }
-
-#if USE(QCMSLIB)
-        if (colorTransform()) {
-            m_reader->createRowBuffer(colorChannels * size().width());
-            if (!m_reader->rowBuffer()) {
-                longjmp(JMPBUF(png), 1);
-                return;
-            }
-        }
-#endif
-        buffer.setStatus(ImageFrame::FramePartial);
-        buffer.setHasAlpha(false);
-
-        // For PNGs, the frame always fills the entire image.
-        buffer.setOriginalFrameRect(IntRect(IntPoint(), size()));
-    }
-
-    /* libpng comments (here to explain what follows).
+  /* libpng comments (here to explain what follows).
      *
      * this function is called for every row in the image. If the
      * image is interlacing, and you turned on the interlace handler,
@@ -334,16 +261,16 @@ void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, 
      * may make your life easier.
      */
 
-    // Nothing to do if the row is unchanged, or the row is outside
-    // the image bounds: libpng may send extra rows, ignore them to
-    // make our lives easier.
-    if (!rowBuffer)
-        return;
-    int y = rowIndex;
-    if (y < 0 || y >= size().height())
-        return;
+  // Nothing to do if the row is unchanged, or the row is outside
+  // the image bounds: libpng may send extra rows, ignore them to
+  // make our lives easier.
+  if (!rowBuffer)
+    return;
+  int y = rowIndex;
+  if (y < 0 || y >= size().height())
+    return;
 
-    /* libpng comments (continued).
+  /* libpng comments (continued).
      *
      * For the non-NULL rows of interlaced images, you must call
      * png_progressive_combine_row() passing in the row and the
@@ -362,82 +289,102 @@ void PNGImageDecoder::rowAvailable(unsigned char* rowBuffer, unsigned rowIndex, 
      * old row and the new row.
      */
 
-    bool hasAlpha = m_reader->hasAlpha();
-    png_bytep row = rowBuffer;
+  bool hasAlpha = m_reader->hasAlpha();
+  png_bytep row = rowBuffer;
 
-    if (png_bytep interlaceBuffer = m_reader->interlaceBuffer()) {
-        unsigned colorChannels = hasAlpha ? 4 : 3;
-        row = interlaceBuffer + (rowIndex * colorChannels * size().width());
-        png_progressive_combine_row(m_reader->pngPtr(), row, rowBuffer);
+  if (png_bytep interlaceBuffer = m_reader->interlaceBuffer()) {
+    unsigned colorChannels = hasAlpha ? 4 : 3;
+    row = interlaceBuffer + (rowIndex * colorChannels * size().width());
+    png_progressive_combine_row(m_reader->pngPtr(), row, rowBuffer);
+  }
+
+  // Write the decoded row pixels to the frame buffer. The repetitive
+  // form of the row write loops is for speed.
+  ImageFrame::PixelData* const dstRow = buffer.getAddr(0, y);
+  unsigned alphaMask = 255;
+  int width = size().width();
+
+  png_bytep srcPtr = row;
+  if (hasAlpha) {
+    // Here we apply the color space transformation to the dst space.
+    // It does not really make sense to transform to a gamma-encoded
+    // space and then immediately after, perform a linear premultiply.
+    // Ideally we would pass kPremul_SkAlphaType to xform->apply(),
+    // instructing SkColorSpaceXform to perform the linear premultiply
+    // while the pixels are a linear space.
+    // We cannot do this because when we apply the gamma encoding after
+    // the premultiply, we will very likely end up with valid pixels
+    // where R, G, and/or B are greater than A.  The legacy drawing
+    // pipeline does not know how to handle this.
+    if (SkColorSpaceXform* xform = colorTransform()) {
+      SkColorSpaceXform::ColorFormat colorFormat =
+          SkColorSpaceXform::kRGBA_8888_ColorFormat;
+      xform->apply(colorFormat, dstRow, colorFormat, srcPtr, size().width(),
+                   kUnpremul_SkAlphaType);
+      srcPtr = (png_bytep)dstRow;
     }
 
-#if USE(QCMSLIB)
-    if (qcms_transform* transform = colorTransform()) {
-        qcms_transform_data(transform, row, m_reader->rowBuffer(), size().width());
-        row = m_reader->rowBuffer();
-    }
-#endif
-
-    // Write the decoded row pixels to the frame buffer. The repetitive
-    // form of the row write loops is for speed.
-    ImageFrame::PixelData* address = buffer.getAddr(0, y);
-    unsigned alphaMask = 255;
-    int width = size().width();
-
-    png_bytep pixel = row;
-    if (hasAlpha) {
-        if (buffer.premultiplyAlpha()) {
-            for (int x = 0; x < width; ++x, pixel += 4) {
-                buffer.setRGBAPremultiply(address++, pixel[0], pixel[1], pixel[2], pixel[3]);
-                alphaMask &= pixel[3];
-            }
-        } else {
-            for (int x = 0; x < width; ++x, pixel += 4) {
-                buffer.setRGBARaw(address++, pixel[0], pixel[1], pixel[2], pixel[3]);
-                alphaMask &= pixel[3];
-            }
-        }
+    if (buffer.premultiplyAlpha()) {
+      for (auto *dstPixel = dstRow; dstPixel < dstRow + width;
+           dstPixel++, srcPtr += 4) {
+        buffer.setRGBAPremultiply(dstPixel, srcPtr[0], srcPtr[1], srcPtr[2],
+                                  srcPtr[3]);
+        alphaMask &= srcPtr[3];
+      }
     } else {
-        for (int x = 0; x < width; ++x, pixel += 3) {
-            buffer.setRGBARaw(address++, pixel[0], pixel[1], pixel[2], 255);
-        }
+      for (auto *dstPixel = dstRow; dstPixel < dstRow + width;
+           dstPixel++, srcPtr += 4) {
+        buffer.setRGBARaw(dstPixel, srcPtr[0], srcPtr[1], srcPtr[2], srcPtr[3]);
+        alphaMask &= srcPtr[3];
+      }
+    }
+  } else {
+    for (auto *dstPixel = dstRow; dstPixel < dstRow + width;
+         dstPixel++, srcPtr += 3) {
+      buffer.setRGBARaw(dstPixel, srcPtr[0], srcPtr[1], srcPtr[2], 255);
     }
 
-    if (alphaMask != 255 && !buffer.hasAlpha())
-        buffer.setHasAlpha(true);
+    // We'll apply the color space xform to opaque pixels after they have been
+    // written to the ImageFrame, purely because SkColorSpaceXform supports
+    // RGBA (and not RGB).
+    if (SkColorSpaceXform* xform = colorTransform()) {
+      xform->apply(xformColorFormat(), dstRow, xformColorFormat(), dstRow,
+                   size().width(), kOpaque_SkAlphaType);
+    }
+  }
 
-    buffer.setPixelsChanged(true);
+  if (alphaMask != 255 && !buffer.hasAlpha())
+    buffer.setHasAlpha(true);
+
+  buffer.setPixelsChanged(true);
 }
 
-void PNGImageDecoder::complete()
-{
-    if (m_frameBufferCache.isEmpty())
-        return;
+void PNGImageDecoder::complete() {
+  if (m_frameBufferCache.isEmpty())
+    return;
 
-    m_frameBufferCache[0].setStatus(ImageFrame::FrameComplete);
+  m_frameBufferCache[0].setStatus(ImageFrame::FrameComplete);
 }
 
-inline bool isComplete(const PNGImageDecoder* decoder)
-{
-    return decoder->frameIsCompleteAtIndex(0);
+inline bool isComplete(const PNGImageDecoder* decoder) {
+  return decoder->frameIsCompleteAtIndex(0);
 }
 
-void PNGImageDecoder::decode(bool onlySize)
-{
-    if (failed())
-        return;
+void PNGImageDecoder::decode(bool onlySize) {
+  if (failed())
+    return;
 
-    if (!m_reader)
-        m_reader = wrapUnique(new PNGImageReader(this, m_offset));
+  if (!m_reader)
+    m_reader = WTF::makeUnique<PNGImageReader>(this, m_offset);
 
-    // If we couldn't decode the image but have received all the data, decoding
-    // has failed.
-    if (!m_reader->decode(*m_data, onlySize) && isAllDataReceived())
-        setFailed();
+  // If we couldn't decode the image but have received all the data, decoding
+  // has failed.
+  if (!m_reader->decode(*m_data, onlySize) && isAllDataReceived())
+    setFailed();
 
-    // If decoding is done or failed, we don't need the PNGImageReader anymore.
-    if (isComplete(this) || failed())
-        m_reader.reset();
+  // If decoding is done or failed, we don't need the PNGImageReader anymore.
+  if (isComplete(this) || failed())
+    m_reader.reset();
 }
 
-} // namespace blink
+}  // namespace blink

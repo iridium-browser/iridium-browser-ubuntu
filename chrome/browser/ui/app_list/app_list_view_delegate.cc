@@ -8,7 +8,6 @@
 
 #include <vector>
 
-#include "apps/custom_launcher_page_contents.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -29,6 +28,7 @@
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
+#include "chrome/browser/ui/app_list/custom_launcher_page_contents.h"
 #include "chrome/browser/ui/app_list/launcher_page_event_dispatcher.h"
 #include "chrome/browser/ui/app_list/search/search_controller_factory.h"
 #include "chrome/browser/ui/app_list/search/search_resource_manager.h"
@@ -42,6 +42,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_prefs/user_prefs.h"
@@ -59,9 +60,7 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/launcher_page_info.h"
-#include "grit/theme_resources.h"
 #include "ui/app_list/app_list_switches.h"
-#include "ui/app_list/app_list_view_delegate_observer.h"
 #include "ui/app_list/search_box_model.h"
 #include "ui/app_list/search_controller.h"
 #include "ui/app_list/speech_ui_model.h"
@@ -74,12 +73,6 @@
 
 #if defined(USE_ASH)
 #include "chrome/browser/ui/ash/app_list/app_sync_ui_state_watcher.h"
-#endif
-
-#if !defined(OS_CHROMEOS)
-#include "chrome/grit/chromium_strings.h"
-#include "chrome/grit/generated_resources.h"
-#include "ui/base/l10n/l10n_util.h"
 #endif
 
 namespace chrome {
@@ -113,8 +106,7 @@ void GetCustomLauncherPageUrls(content::BrowserContext* browser_context,
                                std::vector<GURL>* urls) {
   // First, check the command line.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (app_list::switches::IsExperimentalAppListEnabled() &&
-      command_line->HasSwitch(app_list::switches::kCustomLauncherPage)) {
+  if (command_line->HasSwitch(app_list::switches::kCustomLauncherPage)) {
     GURL custom_launcher_page_url(command_line->GetSwitchValueASCII(
         app_list::switches::kCustomLauncherPage));
 
@@ -259,11 +251,9 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
     tracked_objects::ScopedTracker tracking_profile(
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "431326 AppListViewDelegate TemplateURL etc."));
-    if (app_list::switches::IsExperimentalAppListEnabled()) {
-      TemplateURLService* template_url_service =
-          TemplateURLServiceFactory::GetForProfile(profile_);
-      template_url_service_observer_.Add(template_url_service);
-    }
+    TemplateURLService* template_url_service =
+        TemplateURLServiceFactory::GetForProfile(profile_);
+    template_url_service_observer_.Add(template_url_service);
 
     model_ = app_list::AppListSyncableServiceFactory::GetForProfile(profile_)
                  ->GetModel();
@@ -315,9 +305,6 @@ void AppListViewDelegate::SetUpProfileSwitcher() {
 
   // Populate the app list users.
   PopulateUsers(profile_->GetPath(), &users_);
-
-  FOR_EACH_OBSERVER(
-      app_list::AppListViewDelegateObserver, observers_, OnProfilesChanged());
 }
 
 void AppListViewDelegate::SetUpCustomLauncherPages() {
@@ -326,17 +313,13 @@ void AppListViewDelegate::SetUpCustomLauncherPages() {
   if (custom_launcher_page_urls.empty())
     return;
 
-  for (std::vector<GURL>::const_iterator it = custom_launcher_page_urls.begin();
-       it != custom_launcher_page_urls.end();
-       ++it) {
+  for (auto it = custom_launcher_page_urls.begin();
+       it != custom_launcher_page_urls.end(); ++it) {
     std::string extension_id = it->host();
-    apps::CustomLauncherPageContents* page_contents =
-        new apps::CustomLauncherPageContents(
-            std::unique_ptr<extensions::AppDelegate>(
-                new ChromeAppDelegate(false)),
-            extension_id);
+    auto page_contents = base::MakeUnique<app_list::CustomLauncherPageContents>(
+        base::MakeUnique<ChromeAppDelegate>(false), extension_id);
     page_contents->Initialize(profile_, *it);
-    custom_page_contents_.push_back(page_contents);
+    custom_page_contents_.push_back(std::move(page_contents));
   }
 
   std::string first_launcher_page_app_id = custom_launcher_page_urls[0].host();
@@ -528,9 +511,8 @@ void AppListViewDelegate::OpenHelp() {
   chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
   content::OpenURLParams params(GURL(chrome::kAppLauncherHelpURL),
                                 content::Referrer(),
-                                NEW_FOREGROUND_TAB,
-                                ui::PAGE_TRANSITION_LINK,
-                                false);
+                                WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                                ui::PAGE_TRANSITION_LINK, false);
   displayer.browser()->OpenURL(params);
 }
 
@@ -651,11 +633,8 @@ std::vector<views::View*> AppListViewDelegate::CreateCustomPageWebViews(
     const gfx::Size& size) {
   std::vector<views::View*> web_views;
 
-  for (ScopedVector<apps::CustomLauncherPageContents>::const_iterator it =
-           custom_page_contents_.begin();
-       it != custom_page_contents_.end();
-       ++it) {
-    content::WebContents* web_contents = (*it)->web_contents();
+  for (const auto& contents : custom_page_contents_) {
+    content::WebContents* web_contents = contents->web_contents();
 
     // The web contents should belong to the current profile.
     DCHECK_EQ(profile_, web_contents->GetBrowserContext());
@@ -700,75 +679,7 @@ AppListViewDelegate::GetUsers() const {
   return users_;
 }
 
-bool AppListViewDelegate::ShouldCenterWindow() const {
-  // Some ChromeOS devices (those that support TouchView mode) turn this flag on
-  // by default, which ensures that the app list is consistently centered on
-  // those devices. This avoids having the app list change shape and position as
-  // the user enters and exits TouchView mode.
-  if (app_list::switches::IsCenteredAppListEnabled())
-    return true;
-
-  // keyboard depends upon Aura.
-#if defined(USE_AURA)
-  // If the virtual keyboard is enabled, use the new app list position. The old
-  // position is too tall, and doesn't fit in the left-over screen space.
-  if (keyboard::IsKeyboardEnabled())
-    return true;
-#endif
-
-  return false;
-}
-
-void AppListViewDelegate::AddObserver(
-    app_list::AppListViewDelegateObserver* observer) {
-  observers_.AddObserver(observer);
-}
-
-void AppListViewDelegate::RemoveObserver(
-    app_list::AppListViewDelegateObserver* observer) {
-  observers_.RemoveObserver(observer);
-}
-
-#if !defined(OS_CHROMEOS)
-base::string16 AppListViewDelegate::GetMessageTitle() const {
-  return l10n_util::GetStringUTF16(IDS_APP_LIST_MESSAGE_TITLE);
-}
-
-base::string16 AppListViewDelegate::GetMessageText(
-    size_t* message_break) const {
-  return l10n_util::GetStringFUTF16(IDS_APP_LIST_MESSAGE_TEXT, base::string16(),
-                                    message_break);
-}
-
-base::string16 AppListViewDelegate::GetAppsShortcutName() const {
-  return l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_APPS_SHORTCUT_NAME);
-}
-
-base::string16 AppListViewDelegate::GetLearnMoreText() const {
-  return l10n_util::GetStringUTF16(IDS_APP_LIST_MESSAGE_LEARN_MORE_TEXT);
-}
-
-base::string16 AppListViewDelegate::GetLearnMoreLink() const {
-  return l10n_util::GetStringUTF16(IDS_APP_LIST_MESSAGE_LEARN_MORE_LINK);
-}
-
-gfx::ImageSkia* AppListViewDelegate::GetAppsIcon() const {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  // Ensure it's backed by a native image type in the ResourceBundle cache.
-  rb.GetNativeImageNamed(IDR_BOOKMARK_BAR_APPS_SHORTCUT);
-  return rb.GetImageSkiaNamed(IDR_BOOKMARK_BAR_APPS_SHORTCUT);
-}
-
-void AppListViewDelegate::OpenLearnMoreLink() {
-  controller_->OpenURL(profile_, GURL(GetLearnMoreLink()),
-                       ui::PAGE_TRANSITION_LINK, CURRENT_TAB);
-}
-#endif  // !defined(OS_CHROMEOS)
-
 void AppListViewDelegate::OnTemplateURLServiceChanged() {
-  if (!app_list::switches::IsExperimentalAppListEnabled())
-    return;
-
   TemplateURLService* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
   const TemplateURL* default_provider =
@@ -790,9 +701,6 @@ void AppListViewDelegate::Observe(int type,
                                   const content::NotificationSource& source,
                                   const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
-
-  FOR_EACH_OBSERVER(app_list::AppListViewDelegateObserver, observers_,
-                    OnShutdown());
 
   SetProfile(nullptr);  // Ensures launcher page web contents are torn down.
 

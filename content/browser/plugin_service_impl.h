@@ -8,7 +8,9 @@
 #ifndef CONTENT_BROWSER_PLUGIN_SERVICE_IMPL_H_
 #define CONTENT_BROWSER_PLUGIN_SERVICE_IMPL_H_
 
-#if !defined(ENABLE_PLUGINS)
+#include "ppapi/features/features.h"
+
+#if !BUILDFLAG(ENABLE_PLUGINS)
 #error "Plugins should be enabled"
 #endif
 
@@ -19,10 +21,12 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
+#include "base/sequence_checker.h"
+#include "base/sequenced_task_runner.h"
 #include "base/synchronization/waitable_event_watcher.h"
-#include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/browser/ppapi_plugin_process_host.h"
@@ -46,7 +50,6 @@ class SingleThreadTaskRunner;
 
 namespace content {
 class BrowserContext;
-class PluginDirWatcherDelegate;
 class PluginServiceFilter;
 class ResourceContext;
 struct PepperPluginInfo;
@@ -68,7 +71,7 @@ class CONTENT_EXPORT PluginServiceImpl
                      int render_frame_id,
                      ResourceContext* context,
                      const GURL& url,
-                     const GURL& page_url,
+                     const url::Origin& main_frame_origin,
                      const std::string& mime_type,
                      bool allow_wildcard,
                      bool* is_stale,
@@ -149,8 +152,11 @@ class CONTENT_EXPORT PluginServiceImpl
   // Weak pointer; outlives us.
   PluginServiceFilter* filter_;
 
-  // Used to sequentialize loading plugins from disk.
-  base::SequencedWorkerPool::SequenceToken plugin_list_token_;
+  // Used to load plugins from disk.
+  scoped_refptr<base::SequencedTaskRunner> plugin_list_task_runner_;
+
+  // Used to verify that loading plugins from disk is done sequentially.
+  base::SequenceChecker plugin_list_sequence_checker_;
 
   // Used to detect if a given plugin is crashing over and over.
   std::map<base::FilePath, std::vector<base::Time> > crash_times_;

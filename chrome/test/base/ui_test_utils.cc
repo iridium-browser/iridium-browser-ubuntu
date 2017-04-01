@@ -17,7 +17,6 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "base/time/time.h"
@@ -166,7 +165,7 @@ void NavigateToURLWithPost(Browser* browser, const GURL& url) {
 }
 
 void NavigateToURL(Browser* browser, const GURL& url) {
-  NavigateToURLWithDisposition(browser, url, CURRENT_TAB,
+  NavigateToURLWithDisposition(browser, url, WindowOpenDisposition::CURRENT_TAB,
                                BROWSER_TEST_WAIT_FOR_NAVIGATION);
 }
 
@@ -177,8 +176,9 @@ void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     WindowOpenDisposition disposition,
     int browser_test_flags) {
   TabStripModel* tab_strip = browser->tab_strip_model();
-  if (disposition == CURRENT_TAB && tab_strip->GetActiveWebContents())
-      content::WaitForLoadStop(tab_strip->GetActiveWebContents());
+  if (disposition == WindowOpenDisposition::CURRENT_TAB &&
+      tab_strip->GetActiveWebContents())
+    content::WaitForLoadStop(tab_strip->GetActiveWebContents());
   content::TestNavigationObserver same_tab_observer(
       tab_strip->GetActiveWebContents(),
       number_of_navigations);
@@ -202,7 +202,7 @@ void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
     return;
   }
   WebContents* web_contents = NULL;
-  if (disposition == NEW_BACKGROUND_TAB) {
+  if (disposition == WindowOpenDisposition::NEW_BACKGROUND_TAB) {
     // We've opened up a new tab, but not selected it.
     TabStripModel* tab_strip = browser->tab_strip_model();
     web_contents = tab_strip->GetWebContentsAt(tab_strip->active_index() + 1);
@@ -211,13 +211,13 @@ void NavigateToURLWithDispositionBlockUntilNavigationsComplete(
         << "\" because the new tab is not available yet";
     if (!web_contents)
       return;
-  } else if ((disposition == CURRENT_TAB) ||
-      (disposition == NEW_FOREGROUND_TAB) ||
-      (disposition == SINGLETON_TAB)) {
+  } else if ((disposition == WindowOpenDisposition::CURRENT_TAB) ||
+             (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB) ||
+             (disposition == WindowOpenDisposition::SINGLETON_TAB)) {
     // The currently selected tab is the right one.
     web_contents = browser->tab_strip_model()->GetActiveWebContents();
   }
-  if (disposition == CURRENT_TAB) {
+  if (disposition == WindowOpenDisposition::CURRENT_TAB) {
     same_tab_observer.Wait();
     return;
   } else if (web_contents) {
@@ -247,10 +247,7 @@ void NavigateToURLBlockUntilNavigationsComplete(Browser* browser,
                                                 const GURL& url,
                                                 int number_of_navigations) {
   NavigateToURLWithDispositionBlockUntilNavigationsComplete(
-      browser,
-      url,
-      number_of_navigations,
-      CURRENT_TAB,
+      browser, url, number_of_navigations, WindowOpenDisposition::CURRENT_TAB,
       BROWSER_TEST_WAIT_FOR_NAVIGATION);
 }
 
@@ -337,8 +334,8 @@ int FindInPage(WebContents* tab,
 void DownloadURL(Browser* browser, const GURL& download_url) {
   base::ScopedTempDir downloads_directory;
   ASSERT_TRUE(downloads_directory.CreateUniqueTempDir());
-  browser->profile()->GetPrefs()->SetFilePath(
-      prefs::kDownloadDefaultDirectory, downloads_directory.path());
+  browser->profile()->GetPrefs()->SetFilePath(prefs::kDownloadDefaultDirectory,
+                                              downloads_directory.GetPath());
 
   content::DownloadManager* download_manager =
       content::BrowserContext::GetDownloadManager(browser->profile());
@@ -540,6 +537,34 @@ void WaitForHistoryToLoad(history::HistoryService* history_service) {
     scoped_observer.Add(history_service);
     runner->Run();
   }
+}
+
+BrowserActivationWaiter::BrowserActivationWaiter(const Browser* browser)
+    : browser_(browser), observed_(false) {
+  if (chrome::FindLastActive() == browser_) {
+    observed_ = true;
+    return;
+  }
+  BrowserList::AddObserver(this);
+}
+
+BrowserActivationWaiter::~BrowserActivationWaiter() {}
+
+void BrowserActivationWaiter::WaitForActivation() {
+  if (observed_)
+    return;
+  message_loop_runner_ = new content::MessageLoopRunner;
+  message_loop_runner_->Run();
+}
+
+void BrowserActivationWaiter::OnBrowserSetLastActive(Browser* browser) {
+  if (browser != browser_)
+    return;
+
+  observed_ = true;
+  BrowserList::RemoveObserver(this);
+  if (message_loop_runner_.get() && message_loop_runner_->loop_running())
+    message_loop_runner_->Quit();
 }
 
 }  // namespace ui_test_utils

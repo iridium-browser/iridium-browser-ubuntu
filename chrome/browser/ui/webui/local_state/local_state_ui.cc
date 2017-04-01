@@ -6,18 +6,19 @@
 
 #include "base/json/json_string_value_serializer.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "grit/browser_resources.h"
 
 namespace {
 
@@ -116,9 +117,7 @@ LocalStateUI::LocalStateUI(content::WebUI* web_ui) : WebUIController(web_ui) {
   html_source->SetDefaultResource(IDR_LOCAL_STATE_HTML);
   html_source->AddResourcePath("local_state.js", IDR_LOCAL_STATE_JS);
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), html_source);
-
-  // AddMessageHandler takes ownership of LocalStateUIHandler.
-  web_ui->AddMessageHandler(new LocalStateUIHandler);
+  web_ui->AddMessageHandler(base::MakeUnique<LocalStateUIHandler>());
 }
 
 LocalStateUI::~LocalStateUI() {

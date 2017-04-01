@@ -22,7 +22,7 @@
 // access a Bluetooth device. It is owned by ChooserBubbleDelegate.
 class BluetoothChooserController : public ChooserController {
  public:
-  explicit BluetoothChooserController(
+  BluetoothChooserController(
       content::RenderFrameHost* owner,
       const content::BluetoothChooser::EventHandler& event_handler);
   ~BluetoothChooserController() override;
@@ -33,10 +33,13 @@ class BluetoothChooserController : public ChooserController {
   base::string16 GetOkButtonLabel() const override;
   size_t NumOptions() const override;
   int GetSignalStrengthLevel(size_t index) const override;
+  bool IsConnected(size_t index) const override;
+  bool IsPaired(size_t index) const override;
   base::string16 GetOption(size_t index) const override;
   void RefreshOptions() override;
+  void OpenAdapterOffHelpUrl() const override;
   base::string16 GetStatus() const override;
-  void Select(size_t index) override;
+  void Select(const std::vector<size_t>& indices) override;
   void Cancel() override;
   void Close() override;
   void OpenHelpCenterUrl() const override;
@@ -69,6 +72,8 @@ class BluetoothChooserController : public ChooserController {
   struct BluetoothDeviceInfo {
     std::string id;
     int signal_strength_level;
+    bool is_connected;
+    bool is_paired;
   };
 
   // Clears |device_names_and_ids_| and |device_name_counts_|. Called when
@@ -81,7 +86,6 @@ class BluetoothChooserController : public ChooserController {
   std::unordered_map<base::string16, int> device_name_counts_;
 
   content::BluetoothChooser::EventHandler event_handler_;
-  base::string16 no_devices_text_;
   base::string16 status_text_;
 
   DISALLOW_COPY_AND_ASSIGN(BluetoothChooserController);

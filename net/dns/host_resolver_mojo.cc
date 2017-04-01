@@ -7,11 +7,10 @@
 #include <utility>
 
 #include "base/callback_helpers.h"
+#include "base/memory/ptr_util.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/address_list.h"
 #include "net/base/net_errors.h"
-#include "net/dns/mojo_host_type_converters.h"
-#include "net/log/net_log.h"
 
 namespace net {
 namespace {
@@ -39,8 +38,7 @@ class HostResolverMojo::Job : public interfaces::HostResolverRequestClient {
 
  private:
   // interfaces::HostResolverRequestClient override.
-  void ReportResult(int32_t error,
-                    interfaces::AddressListPtr address_list) override;
+  void ReportResult(int32_t error, const AddressList& address_list) override;
 
   // Mojo error handler.
   void OnConnectionError();
@@ -77,7 +75,7 @@ int HostResolverMojo::Resolve(const RequestInfo& info,
                               AddressList* addresses,
                               const CompletionCallback& callback,
                               std::unique_ptr<Request>* request,
-                              const BoundNetLog& source_net_log) {
+                              const NetLogWithSource& source_net_log) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(request);
   DVLOG(1) << "Resolve " << info.host_port_pair().ToString();
@@ -92,18 +90,18 @@ int HostResolverMojo::Resolve(const RequestInfo& info,
 
   interfaces::HostResolverRequestClientPtr handle;
   std::unique_ptr<Job> job(new Job(key, addresses, callback,
-                                   mojo::GetProxy(&handle),
+                                   mojo::MakeRequest(&handle),
                                    host_cache_weak_factory_.GetWeakPtr()));
   request->reset(new RequestImpl(std::move(job)));
 
-  impl_->ResolveDns(interfaces::HostResolverRequestInfo::From(info),
+  impl_->ResolveDns(base::MakeUnique<HostResolver::RequestInfo>(info),
                     std::move(handle));
   return ERR_IO_PENDING;
 }
 
 int HostResolverMojo::ResolveFromCache(const RequestInfo& info,
                                        AddressList* addresses,
-                                       const BoundNetLog& source_net_log) {
+                                       const NetLogWithSource& source_net_log) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "ResolveFromCache " << info.host_port_pair().ToString();
   return ResolveFromCacheInternal(info, CacheKeyForRequest(info), addresses);
@@ -143,11 +141,10 @@ HostResolverMojo::Job::Job(
       &HostResolverMojo::Job::OnConnectionError, base::Unretained(this)));
 }
 
-void HostResolverMojo::Job::ReportResult(
-    int32_t error,
-    interfaces::AddressListPtr address_list) {
-  if (error == OK && address_list)
-    *addresses_ = address_list->To<AddressList>();
+void HostResolverMojo::Job::ReportResult(int32_t error,
+                                         const AddressList& address_list) {
+  if (error == OK)
+    *addresses_ = address_list;
   if (host_cache_) {
     base::TimeDelta ttl = base::TimeDelta::FromSeconds(
         error == OK ? kCacheEntryTTLSeconds : kNegativeCacheEntryTTLSeconds);
@@ -160,7 +157,7 @@ void HostResolverMojo::Job::ReportResult(
 }
 
 void HostResolverMojo::Job::OnConnectionError() {
-  ReportResult(ERR_FAILED, interfaces::AddressListPtr());
+  ReportResult(ERR_FAILED, AddressList());
 }
 
 }  // namespace net

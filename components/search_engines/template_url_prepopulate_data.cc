@@ -10,7 +10,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -22,6 +21,7 @@
 #include "components/search_engines/prepopulated_engines.h"
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_data.h"
+#include "components/search_engines/template_url_data_util.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "url/gurl.h"
 
@@ -537,6 +537,16 @@ int CountryCharsToCountryIDWithUpdate(char c1, char c2) {
   return CountryCharsToCountryID(c1, c2);
 }
 
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
+
+int CountryStringToCountryID(const std::string& country) {
+  return (country.length() == 2)
+             ? CountryCharsToCountryIDWithUpdate(country[0], country[1])
+             : kCountryIDUnknown;
+}
+
+#endif
+
 #if defined(OS_WIN)
 
 // For reference, a list of GeoIDs can be found at
@@ -610,14 +620,12 @@ int GetCountryIDFromPrefs(PrefService* prefs) {
   return prefs->GetInteger(prefs::kCountryIDAtInstall);
 }
 
-void GetPrepopulationSetFromCountryID(PrefService* prefs,
-                                      const PrepopulatedEngine*** engines,
-                                      size_t* num_engines) {
-  // NOTE: This function should ALWAYS set its outparams.
-
+std::vector<std::unique_ptr<TemplateURLData>> GetPrepopulationSetFromCountryID(
+    int country_id) {
+  const PrepopulatedEngine** engines;
+  size_t num_engines;
   // If you add a new country make sure to update the unit test for coverage.
-  switch (GetCountryIDFromPrefs(prefs)) {
-
+  switch (country_id) {
 #define CHAR_A 'A'
 #define CHAR_B 'B'
 #define CHAR_C 'C'
@@ -651,9 +659,9 @@ void GetPrepopulationSetFromCountryID(PrefService* prefs,
 #define UNHANDLED_COUNTRY(code1, code2)\
     case CODE_TO_ID(code1, code2):
 #define END_UNHANDLED_COUNTRIES(code1, code2)\
-      *engines = engines_##code1##code2;\
-      *num_engines = arraysize(engines_##code1##code2);\
-      return;
+      engines = engines_##code1##code2;\
+      num_engines = arraysize(engines_##code1##code2);\
+      break;
 #define DECLARE_COUNTRY(code1, code2)\
     UNHANDLED_COUNTRY(code1, code2)\
     END_UNHANDLED_COUNTRIES(code1, code2)
@@ -966,60 +974,16 @@ void GetPrepopulationSetFromCountryID(PrefService* prefs,
     default:                // Unhandled location
     END_UNHANDLED_COUNTRIES(def, ault)
   }
+
+  std::vector<std::unique_ptr<TemplateURLData>> t_urls;
+  for (size_t i = 0; i < num_engines; ++i)
+    t_urls.push_back(TemplateURLDataFromPrepopulatedEngine(*engines[i]));
+  return t_urls;
 }
 
-std::unique_ptr<TemplateURLData> MakePrepopulatedTemplateURLData(
-    const base::string16& name,
-    const base::string16& keyword,
-    const base::StringPiece& search_url,
-    const base::StringPiece& suggest_url,
-    const base::StringPiece& instant_url,
-    const base::StringPiece& image_url,
-    const base::StringPiece& new_tab_url,
-    const base::StringPiece& contextual_search_url,
-    const base::StringPiece& search_url_post_params,
-    const base::StringPiece& suggest_url_post_params,
-    const base::StringPiece& instant_url_post_params,
-    const base::StringPiece& image_url_post_params,
-    const base::StringPiece& favicon_url,
-    const base::StringPiece& encoding,
-    const base::ListValue& alternate_urls,
-    const base::StringPiece& search_terms_replacement_key,
-    int id) {
-  std::unique_ptr<TemplateURLData> data(new TemplateURLData);
-
-  data->SetShortName(name);
-  data->SetKeyword(keyword);
-  data->SetURL(search_url.as_string());
-  data->suggestions_url = suggest_url.as_string();
-  data->instant_url = instant_url.as_string();
-  data->image_url = image_url.as_string();
-  data->new_tab_url = new_tab_url.as_string();
-  data->contextual_search_url = contextual_search_url.as_string();
-  data->search_url_post_params = search_url_post_params.as_string();
-  data->suggestions_url_post_params = suggest_url_post_params.as_string();
-  data->instant_url_post_params = instant_url_post_params.as_string();
-  data->image_url_post_params = image_url_post_params.as_string();
-  data->favicon_url = GURL(favicon_url.as_string());
-  data->show_in_default_list = true;
-  data->safe_for_autoreplace = true;
-  data->input_encodings.push_back(encoding.as_string());
-  data->date_created = base::Time();
-  data->last_modified = base::Time();
-  data->prepopulate_id = id;
-  for (size_t i = 0; i < alternate_urls.GetSize(); ++i) {
-    std::string alternate_url;
-    alternate_urls.GetString(i, &alternate_url);
-    DCHECK(!alternate_url.empty());
-    data->alternate_urls.push_back(alternate_url);
-  }
-  data->search_terms_replacement_key = search_terms_replacement_key.as_string();
-  return data;
-}
-
-ScopedVector<TemplateURLData> GetPrepopulatedTemplateURLData(
+std::vector<std::unique_ptr<TemplateURLData>> GetPrepopulatedTemplateURLData(
     PrefService* prefs) {
-  ScopedVector<TemplateURLData> t_urls;
+  std::vector<std::unique_ptr<TemplateURLData>> t_urls;
   if (!prefs)
     return t_urls;
 
@@ -1030,52 +994,10 @@ ScopedVector<TemplateURLData> GetPrepopulatedTemplateURLData(
   size_t num_engines = list->GetSize();
   for (size_t i = 0; i != num_engines; ++i) {
     const base::DictionaryValue* engine;
-    base::string16 name;
-    base::string16 keyword;
-    std::string search_url;
-    std::string favicon_url;
-    std::string encoding;
-    int id = -1;
-    // The following fields are required for each search engine configuration.
-    if (list->GetDictionary(i, &engine) &&
-        engine->GetString("name", &name) && !name.empty() &&
-        engine->GetString("keyword", &keyword) && !keyword.empty() &&
-        engine->GetString("search_url", &search_url) && !search_url.empty() &&
-        engine->GetString("favicon_url", &favicon_url) &&
-        !favicon_url.empty() &&
-        engine->GetString("encoding", &encoding) && !encoding.empty() &&
-        engine->GetInteger("id", &id)) {
-      // These fields are optional.
-      std::string suggest_url;
-      std::string instant_url;
-      std::string image_url;
-      std::string new_tab_url;
-      std::string contextual_search_url;
-      std::string search_url_post_params;
-      std::string suggest_url_post_params;
-      std::string instant_url_post_params;
-      std::string image_url_post_params;
-      base::ListValue empty_list;
-      const base::ListValue* alternate_urls = &empty_list;
-      std::string search_terms_replacement_key;
-      engine->GetString("suggest_url", &suggest_url);
-      engine->GetString("instant_url", &instant_url);
-      engine->GetString("image_url", &image_url);
-      engine->GetString("new_tab_url", &new_tab_url);
-      engine->GetString("contextual_search_url", &contextual_search_url);
-      engine->GetString("search_url_post_params", &search_url_post_params);
-      engine->GetString("suggest_url_post_params", &suggest_url_post_params);
-      engine->GetString("instant_url_post_params", &instant_url_post_params);
-      engine->GetString("image_url_post_params", &image_url_post_params);
-      engine->GetList("alternate_urls", &alternate_urls);
-      engine->GetString("search_terms_replacement_key",
-          &search_terms_replacement_key);
-      t_urls.push_back(MakePrepopulatedTemplateURLData(name, keyword,
-          search_url, suggest_url, instant_url, image_url, new_tab_url,
-          contextual_search_url, search_url_post_params,
-          suggest_url_post_params, instant_url_post_params,
-          image_url_post_params, favicon_url, encoding, *alternate_urls,
-          search_terms_replacement_key, id).release());
+    if (list->GetDictionary(i, &engine)) {
+      auto t_url = TemplateURLDataFromOverrideDictionary(*engine);
+      if (t_url)
+        t_urls.push_back(std::move(t_url));
     }
   }
   return t_urls;
@@ -1105,47 +1027,40 @@ int GetDataVersion(PrefService* prefs) {
       kCurrentDataVersion;
 }
 
-ScopedVector<TemplateURLData> GetPrepopulatedEngines(
+std::vector<std::unique_ptr<TemplateURLData>> GetPrepopulatedEngines(
     PrefService* prefs,
     size_t* default_search_provider_index) {
   // If there is a set of search engines in the preferences file, it overrides
   // the built-in set.
-  *default_search_provider_index = 0;
-  ScopedVector<TemplateURLData> t_urls = GetPrepopulatedTemplateURLData(prefs);
+  if (default_search_provider_index)
+    *default_search_provider_index = 0;
+  std::vector<std::unique_ptr<TemplateURLData>> t_urls =
+      GetPrepopulatedTemplateURLData(prefs);
   if (!t_urls.empty())
     return t_urls;
 
-  const PrepopulatedEngine** engines;
-  size_t num_engines;
-  GetPrepopulationSetFromCountryID(prefs, &engines, &num_engines);
-  for (size_t i = 0; i != num_engines; ++i) {
-    t_urls.push_back(
-        MakeTemplateURLDataFromPrepopulatedEngine(*engines[i]).release());
-  }
-  return t_urls;
+  return GetPrepopulationSetFromCountryID(GetCountryIDFromPrefs(prefs));
 }
+
+#if defined(OS_ANDROID)
+
+std::vector<std::unique_ptr<TemplateURLData>> GetLocalPrepopulatedEngines(
+    const std::string& locale,
+    PrefService* prefs) {
+  int country_id = CountryStringToCountryID(locale);
+  if (country_id == kCountryIDUnknown ||
+      country_id == GetCountryIDFromPrefs(prefs)) {
+    return std::vector<std::unique_ptr<TemplateURLData>>();
+  }
+
+  return GetPrepopulationSetFromCountryID(country_id);
+}
+
+#endif
 
 std::vector<const PrepopulatedEngine*> GetAllPrepopulatedEngines() {
   return std::vector<const PrepopulatedEngine*>(std::begin(kAllEngines),
                                                 std::end(kAllEngines));
-}
-
-std::unique_ptr<TemplateURLData> MakeTemplateURLDataFromPrepopulatedEngine(
-    const PrepopulatedEngine& engine) {
-  base::ListValue alternate_urls;
-  if (engine.alternate_urls) {
-    for (size_t i = 0; i < engine.alternate_urls_size; ++i)
-      alternate_urls.AppendString(std::string(engine.alternate_urls[i]));
-  }
-
-  return MakePrepopulatedTemplateURLData(
-      base::WideToUTF16(engine.name), base::WideToUTF16(engine.keyword),
-      engine.search_url, engine.suggest_url, engine.instant_url,
-      engine.image_url, engine.new_tab_url, engine.contextual_search_url,
-      engine.search_url_post_params, engine.suggest_url_post_params,
-      engine.instant_url_post_params, engine.image_url_post_params,
-      engine.favicon_url, engine.encoding, alternate_urls,
-      engine.search_terms_replacement_key, engine.id);
 }
 
 void ClearPrepopulatedEnginesInPrefs(PrefService* prefs) {
@@ -1158,17 +1073,15 @@ void ClearPrepopulatedEnginesInPrefs(PrefService* prefs) {
 
 std::unique_ptr<TemplateURLData> GetPrepopulatedDefaultSearch(
     PrefService* prefs) {
-  std::unique_ptr<TemplateURLData> default_search_provider;
   size_t default_search_index;
   // This could be more efficient.  We are loading all the URLs to only keep
   // the first one.
-  ScopedVector<TemplateURLData> loaded_urls =
+  std::vector<std::unique_ptr<TemplateURLData>> loaded_urls =
       GetPrepopulatedEngines(prefs, &default_search_index);
-  if (default_search_index < loaded_urls.size()) {
-    default_search_provider.reset(loaded_urls[default_search_index]);
-    loaded_urls.weak_erase(loaded_urls.begin() + default_search_index);
-  }
-  return default_search_provider;
+
+  return (default_search_index < loaded_urls.size())
+             ? std::move(loaded_urls[default_search_index])
+             : nullptr;
 }
 
 SearchEngineType GetEngineType(const GURL& url) {
@@ -1203,9 +1116,7 @@ SearchEngineType GetEngineType(const GURL& url) {
 #if defined(OS_WIN)
 
 int GetCurrentCountryID() {
-  GEOID geo_id = GetUserGeoID(GEOCLASS_NATION);
-
-  return GeoIDToCountryID(geo_id);
+  return GeoIDToCountryID(GetUserGeoID(GEOCLASS_NATION));
 }
 
 #elif defined(OS_MACOSX)
@@ -1228,41 +1139,30 @@ int GetCurrentCountryID() {
 #elif defined(OS_ANDROID)
 
 int GetCurrentCountryID() {
-  const std::string& country_code = base::android::GetDefaultCountryCode();
-  return (country_code.size() == 2) ?
-      CountryCharsToCountryIDWithUpdate(country_code[0], country_code[1]) :
-      kCountryIDUnknown;
+  return CountryStringToCountryID(base::android::GetDefaultCountryCode());
 }
 
 #elif defined(OS_POSIX)
 
 int GetCurrentCountryID() {
   const char* locale = setlocale(LC_MESSAGES, NULL);
-
   if (!locale)
     return kCountryIDUnknown;
 
   // The format of a locale name is:
   // language[_territory][.codeset][@modifier], where territory is an ISO 3166
   // country code, which is what we want.
+
+  // First remove the language portion.
   std::string locale_str(locale);
-  size_t begin = locale_str.find('_');
-  if (begin == std::string::npos || locale_str.size() - begin < 3)
+  size_t territory_delim = locale_str.find('_');
+  if (territory_delim == std::string::npos)
     return kCountryIDUnknown;
+  locale_str.erase(0, territory_delim + 1);
 
-  ++begin;
-  size_t end = locale_str.find_first_of(".@", begin);
-  if (end == std::string::npos)
-    end = locale_str.size();
-
-  // The territory part must contain exactly two characters.
-  if (end - begin == 2) {
-    return CountryCharsToCountryIDWithUpdate(
-        base::ToUpperASCII(locale_str[begin]),
-        base::ToUpperASCII(locale_str[begin + 1]));
-  }
-
-  return kCountryIDUnknown;
+  // Next remove any codeset/modifier portion and uppercase.
+  return CountryStringToCountryID(
+      base::ToUpperASCII(locale_str.substr(0, locale_str.find_first_of(".@"))));
 }
 
 #endif  // OS_*

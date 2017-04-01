@@ -5,8 +5,8 @@
 import unittest
 
 from dashboard import add_point_queue
-from dashboard import testing_common
-from dashboard import utils
+from dashboard.common import testing_common
+from dashboard.common import utils
 from dashboard.models import graph_data
 from dashboard.models import stoppage_alert
 
@@ -72,6 +72,7 @@ class GetOrCreateAncestorsTest(testing_common.TestCase):
     add_point_queue._GetOrCreateAncestors('M', 'b', 'suite/foo')
     self.assertIsNone(test.key.get().stoppage_alert)
     self.assertTrue(alert_key.get().recovered)
+    self.assertIsNotNone(alert_key.get().last_row_timestamp)
 
 
 if __name__ == '__main__':

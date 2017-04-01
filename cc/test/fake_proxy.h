@@ -19,8 +19,9 @@ class FakeProxy : public Proxy {
 
   bool IsStarted() const override;
   bool CommitToActiveTree() const override;
-  void SetOutputSurface(OutputSurface* output_surface) override {}
-  void ReleaseOutputSurface() override;
+  void SetCompositorFrameSink(
+      CompositorFrameSink* compositor_frame_sink) override {}
+  void ReleaseCompositorFrameSink() override;
   void SetVisible(bool visible) override {}
   void SetNeedsAnimate() override {}
   void SetNeedsUpdateLayers() override {}
@@ -32,15 +33,14 @@ class FakeProxy : public Proxy {
   void MainThreadHasStoppedFlinging() override {}
   bool BeginMainFrameRequested() const override;
   bool CommitRequested() const override;
-  void Start(
-      std::unique_ptr<BeginFrameSource> external_begin_frame_source) override {}
+  void Start() override {}
   void Stop() override {}
   void SetMutator(std::unique_ptr<LayerTreeMutator> mutator) override;
   bool SupportsImplScrolling() const override;
   bool MainFrameWillHappenForTesting() override;
-  void UpdateTopControlsState(TopControlsState constraints,
-                              TopControlsState current,
-                              bool animate) override {}
+  void UpdateBrowserControlsState(BrowserControlsState constraints,
+                                  BrowserControlsState current,
+                                  bool animate) override {}
 
  private:
   LayerTreeHost* layer_tree_host_;

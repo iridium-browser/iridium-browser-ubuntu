@@ -57,7 +57,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void AddObserver(GpuDataManagerObserver* observer);
   void RemoveObserver(GpuDataManagerObserver* observer);
   void UnblockDomainFrom3DAPIs(const GURL& url);
-  void DisableGpuWatchdog();
   void SetGLStrings(const std::string& gl_vendor,
                     const std::string& gl_renderer,
                     const std::string& gl_version);
@@ -269,6 +268,9 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   // True if all future Initialize calls should be ignored.
   bool finalized_;
+
+  // True if --single-process or --in-process-gpu is passed in.
+  bool in_process_gpu_;
 
   std::string disabled_extensions_;
 

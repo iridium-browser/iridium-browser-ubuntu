@@ -5,6 +5,7 @@
 #include "base/process/memory.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#import <Foundation/Foundation.h>
 #include <errno.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
@@ -248,7 +249,7 @@ void oom_killer_new() {
 // === Core Foundation CFAllocators ===
 
 bool CanGetContextForCFAllocator() {
-  return !base::mac::IsOSLaterThanSierra_DontCallThis();
+  return !base::mac::IsOSLaterThan10_12_DontCallThis();
 }
 
 CFAllocatorContext* ContextForCFAllocator(CFAllocatorRef allocator) {

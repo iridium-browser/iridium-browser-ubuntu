@@ -33,8 +33,9 @@ const int kTimestampGraceIntervalHours = 2;
 const char kMetricPolicyKeyVerification[] = "Enterprise.PolicyKeyVerification";
 
 enum MetricPolicyKeyVerification {
+  // Obsolete. Kept to avoid reuse, as this is used in histograms.
   // UMA metric recorded when the client has no verification key.
-  METRIC_POLICY_KEY_VERIFICATION_KEY_MISSING,
+  METRIC_POLICY_KEY_VERIFICATION_KEY_MISSING_DEPRECATED,
   // Recorded when the policy being verified has no key signature (e.g. policy
   // fetched before the server supported the verification key).
   METRIC_POLICY_KEY_VERIFICATION_SIGNATURE_MISSING,
@@ -86,6 +87,14 @@ void CloudPolicyValidatorBase::ValidateDMToken(
   dm_token_option_ = dm_token_option;
 }
 
+void CloudPolicyValidatorBase::ValidateDeviceId(
+    const std::string& expected_device_id,
+    ValidateDeviceIdOption device_id_option) {
+  validation_flags_ |= VALIDATE_DEVICE_ID;
+  device_id_ = expected_device_id;
+  device_id_option_ = device_id_option;
+}
+
 void CloudPolicyValidatorBase::ValidatePolicyType(
     const std::string& policy_type) {
   validation_flags_ |= VALIDATE_POLICY_TYPE;
@@ -106,47 +115,54 @@ void CloudPolicyValidatorBase::ValidatePayload() {
 void CloudPolicyValidatorBase::ValidateCachedKey(
     const std::string& cached_key,
     const std::string& cached_key_signature,
-    const std::string& verification_key,
     const std::string& owning_domain) {
   validation_flags_ |= VALIDATE_CACHED_KEY;
-  set_verification_key_and_domain(verification_key, owning_domain);
+  set_owning_domain(owning_domain);
   cached_key_ = cached_key;
   cached_key_signature_ = cached_key_signature;
 }
 
-void CloudPolicyValidatorBase::ValidateSignature(
-    const std::string& key,
-    const std::string& verification_key,
-    const std::string& owning_domain,
-    bool allow_key_rotation) {
+void CloudPolicyValidatorBase::ValidateSignature(const std::string& key) {
   validation_flags_ |= VALIDATE_SIGNATURE;
-  set_verification_key_and_domain(verification_key, owning_domain);
+  DCHECK(key_.empty() || key_ == key);
   key_ = key;
-  allow_key_rotation_ = allow_key_rotation;
+}
+
+void CloudPolicyValidatorBase::ValidateSignatureAllowingRotation(
+    const std::string& key,
+    const std::string& owning_domain) {
+  validation_flags_ |= VALIDATE_SIGNATURE;
+  DCHECK(key_.empty() || key_ == key);
+  key_ = key;
+  set_owning_domain(owning_domain);
+  allow_key_rotation_ = true;
 }
 
 void CloudPolicyValidatorBase::ValidateInitialKey(
-    const std::string& verification_key,
     const std::string& owning_domain) {
   validation_flags_ |= VALIDATE_INITIAL_KEY;
-  set_verification_key_and_domain(verification_key, owning_domain);
+  set_owning_domain(owning_domain);
 }
 
 void CloudPolicyValidatorBase::ValidateAgainstCurrentPolicy(
     const em::PolicyData* policy_data,
     ValidateTimestampOption timestamp_option,
-    ValidateDMTokenOption dm_token_option) {
+    ValidateDMTokenOption dm_token_option,
+    ValidateDeviceIdOption device_id_option) {
   base::Time last_policy_timestamp;
   std::string expected_dm_token;
+  std::string expected_device_id;
   if (policy_data) {
     last_policy_timestamp =
         base::Time::UnixEpoch() +
         base::TimeDelta::FromMilliseconds(policy_data->timestamp());
     expected_dm_token = policy_data->request_token();
+    expected_device_id = policy_data->device_id();
   }
   ValidateTimestamp(last_policy_timestamp, base::Time::NowFromSystemTime(),
                     timestamp_option);
   ValidateDMToken(expected_dm_token, dm_token_option);
+  ValidateDeviceId(expected_device_id, device_id_option);
 }
 
 CloudPolicyValidatorBase::CloudPolicyValidatorBase(
@@ -161,9 +177,13 @@ CloudPolicyValidatorBase::CloudPolicyValidatorBase(
       timestamp_not_after_(0),
       timestamp_option_(TIMESTAMP_FULLY_VALIDATED),
       dm_token_option_(DM_TOKEN_REQUIRED),
+      device_id_option_(DEVICE_ID_REQUIRED),
       canonicalize_user_(false),
+      verification_key_(GetPolicyVerificationKey()),
       allow_key_rotation_(false),
-      background_task_runner_(background_task_runner) {}
+      background_task_runner_(background_task_runner) {
+  DCHECK(!verification_key_.empty());
+}
 
 void CloudPolicyValidatorBase::PostValidationTask(
     const base::Closure& completion_callback) {
@@ -233,6 +253,7 @@ void CloudPolicyValidatorBase::RunChecks() {
       { VALIDATE_POLICY_TYPE, &CloudPolicyValidatorBase::CheckPolicyType },
       { VALIDATE_ENTITY_ID,   &CloudPolicyValidatorBase::CheckEntityId },
       { VALIDATE_DM_TOKEN,    &CloudPolicyValidatorBase::CheckDMToken },
+      { VALIDATE_DEVICE_ID,   &CloudPolicyValidatorBase::CheckDeviceId },
       { VALIDATE_USERNAME,    &CloudPolicyValidatorBase::CheckUsername },
       { VALIDATE_DOMAIN,      &CloudPolicyValidatorBase::CheckDomain },
       { VALIDATE_TIMESTAMP,   &CloudPolicyValidatorBase::CheckTimestamp },
@@ -248,19 +269,10 @@ void CloudPolicyValidatorBase::RunChecks() {
   }
 }
 
-// Verifies the |new_public_key_verification_signature| for the |new_public_key|
-// in the policy blob.
+// Verifies the |new_public_key_verification_signature_deprecated| for the
+// |new_public_key| in the policy blob.
 bool CloudPolicyValidatorBase::CheckNewPublicKeyVerificationSignature() {
-  // If there's no local verification key, then just return true (no
-  // validation possible).
-  if (verification_key_.empty()) {
-    UMA_HISTOGRAM_ENUMERATION(kMetricPolicyKeyVerification,
-                              METRIC_POLICY_KEY_VERIFICATION_KEY_MISSING,
-                              METRIC_POLICY_KEY_VERIFICATION_SIZE);
-    return true;
-  }
-
-  if (!policy_->has_new_public_key_verification_signature()) {
+  if (!policy_->has_new_public_key_verification_signature_deprecated()) {
     // Policy does not contain a verification signature, so log an error.
     LOG(ERROR) << "Policy is missing public_key_verification_signature";
     UMA_HISTOGRAM_ENUMERATION(kMetricPolicyKeyVerification,
@@ -272,7 +284,7 @@ bool CloudPolicyValidatorBase::CheckNewPublicKeyVerificationSignature() {
   if (!CheckVerificationKeySignature(
           policy_->new_public_key(),
           verification_key_,
-          policy_->new_public_key_verification_signature())) {
+          policy_->new_public_key_verification_signature_deprecated())) {
     LOG(ERROR) << "Signature verification failed";
     UMA_HISTOGRAM_ENUMERATION(kMetricPolicyKeyVerification,
                               METRIC_POLICY_KEY_VERIFICATION_FAILED,
@@ -292,7 +304,7 @@ bool CloudPolicyValidatorBase::CheckVerificationKeySignature(
     const std::string& verification_key,
     const std::string& signature) {
   DCHECK(!verification_key.empty());
-  em::PolicyPublicKeyAndDomain signed_data;
+  em::DEPRECATEDPolicyPublicKeyAndDomain signed_data;
   signed_data.set_new_public_key(key);
 
   // If no owning_domain_ supplied, try extracting the domain from the policy
@@ -324,12 +336,10 @@ std::string CloudPolicyValidatorBase::ExtractDomainFromPolicy() {
   return domain;
 }
 
-void CloudPolicyValidatorBase::set_verification_key_and_domain(
-    const std::string& verification_key, const std::string& owning_domain) {
-  // Make sure we aren't overwriting the verification key with a different key.
-  DCHECK(verification_key_.empty() || verification_key_ == verification_key);
+void CloudPolicyValidatorBase::set_owning_domain(
+    const std::string& owning_domain) {
+  // Make sure we aren't overwriting the owning domain with a different one.
   DCHECK(owning_domain_.empty() || owning_domain_ == owning_domain);
-  verification_key_ = verification_key;
   owning_domain_ = owning_domain;
 }
 
@@ -377,8 +387,7 @@ CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckInitialKey() {
 }
 
 CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckCachedKey() {
-  if (!verification_key_.empty() &&
-      !CheckVerificationKeySignature(cached_key_, verification_key_,
+  if (!CheckVerificationKeySignature(cached_key_, verification_key_,
                                      cached_key_signature_)) {
     LOG(ERROR) << "Cached key signature verification failed";
     return VALIDATION_BAD_KEY_VERIFICATION_SIGNATURE;
@@ -450,6 +459,21 @@ CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckDMToken() {
     return VALIDATION_BAD_DM_TOKEN;
   }
 
+  return VALIDATION_OK;
+}
+
+CloudPolicyValidatorBase::Status CloudPolicyValidatorBase::CheckDeviceId() {
+  if (device_id_option_ == DEVICE_ID_REQUIRED &&
+      (!policy_data_->has_device_id() ||
+       policy_data_->device_id().empty())) {
+    LOG(ERROR) << "Empty device id encountered - expected: " << device_id_;
+    return VALIDATION_BAD_DEVICE_ID;
+  }
+  if (!device_id_.empty() && policy_data_->device_id() != device_id_) {
+    LOG(ERROR) << "Invalid device id: " << policy_data_->device_id()
+               << " - expected: " << device_id_;
+    return VALIDATION_BAD_DEVICE_ID;
+  }
   return VALIDATION_OK;
 }
 

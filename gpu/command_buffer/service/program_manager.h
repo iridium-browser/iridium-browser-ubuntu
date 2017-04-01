@@ -31,6 +31,7 @@ namespace gles2 {
 class FeatureInfo;
 class ProgramCache;
 class ProgramManager;
+class ProgressReporter;
 class Shader;
 class ShaderManager;
 
@@ -98,8 +99,28 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
                 const std::vector<GLint>& service_locations);
     ~UniformInfo();
     bool IsSampler() const {
-      return type == GL_SAMPLER_2D || type == GL_SAMPLER_2D_RECT_ARB ||
-             type == GL_SAMPLER_CUBE || type == GL_SAMPLER_EXTERNAL_OES;
+      switch (type) {
+        case GL_SAMPLER_2D:
+        case GL_SAMPLER_2D_RECT_ARB:
+        case GL_SAMPLER_CUBE:
+        case GL_SAMPLER_EXTERNAL_OES:
+        case GL_SAMPLER_3D:
+        case GL_SAMPLER_2D_SHADOW:
+        case GL_SAMPLER_2D_ARRAY:
+        case GL_SAMPLER_2D_ARRAY_SHADOW:
+        case GL_SAMPLER_CUBE_SHADOW:
+        case GL_INT_SAMPLER_2D:
+        case GL_INT_SAMPLER_3D:
+        case GL_INT_SAMPLER_CUBE:
+        case GL_INT_SAMPLER_2D_ARRAY:
+        case GL_UNSIGNED_INT_SAMPLER_2D:
+        case GL_UNSIGNED_INT_SAMPLER_3D:
+        case GL_UNSIGNED_INT_SAMPLER_CUBE:
+        case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+          return true;
+        default:
+          return false;
+      }
     }
 
     GLsizei size;
@@ -386,12 +407,13 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
     return bind_attrib_location_map_;
   }
 
-  const std::vector<std::string>& transform_feedback_varyings() const {
-    return transform_feedback_varyings_;
+  const std::vector<std::string>& effective_transform_feedback_varyings()
+      const {
+    return effective_transform_feedback_varyings_;
   }
 
-  GLenum transform_feedback_buffer_mode() const {
-    return transform_feedback_buffer_mode_;
+  GLenum effective_transform_feedback_buffer_mode() const {
+    return effective_transform_feedback_buffer_mode_;
   }
 
   // See member declaration for details.
@@ -416,6 +438,13 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
 
   const std::vector<UniformBlockSizeInfo>& uniform_block_size_info() const {
     return uniform_block_size_info_;
+  }
+
+  // Return the transform feedback varying sizes (per vertex).
+  // Note that if the bufferMode is GL_INTERLEAVED_ATTRIBS, then there is only
+  // one entry and it is the sum of all varying sizes.
+  const std::vector<GLsizeiptr>& GetTransformFeedbackVaryingSizes() const {
+    return transform_feedback_data_size_per_vertex_;
   }
 
  private:
@@ -457,6 +486,7 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
   void UpdateFragmentOutputBaseTypes();
   void UpdateVertexInputBaseTypes();
   void UpdateUniformBlockSizeInfo();
+  void UpdateTransformFeedbackInfo();
 
   // Process the program log, replacing the hashed names with original names.
   std::string ProcessLogInfo(const std::string& log);
@@ -553,9 +583,18 @@ class GPU_EXPORT Program : public base::RefCounted<Program> {
   // uniform-location binding map from glBindUniformLocationCHROMIUM() calls.
   LocationMap bind_uniform_location_map_;
 
+  // Set by glTransformFeedbackVaryings().
   std::vector<std::string> transform_feedback_varyings_;
-
   GLenum transform_feedback_buffer_mode_;
+
+  // After a successful link.
+  std::vector<std::string> effective_transform_feedback_varyings_;
+  GLenum effective_transform_feedback_buffer_mode_;
+  // If buffer mode is INTERLEVED, there is only one entry; otherwise there
+  // might be multiple entries, one per transform feedback varying.
+  // The size requirement is per vertex. Total minimum buffer size requirment
+  // is calculated at DrawArrays{Instanced} time by multiplying vertex count.
+  std::vector<GLsizeiptr> transform_feedback_data_size_per_vertex_;
 
   // Fragment input-location binding map from
   // glBindFragmentInputLocationCHROMIUM() calls.
@@ -598,7 +637,8 @@ class GPU_EXPORT ProgramManager {
                  uint32_t max_dual_source_draw_buffers,
                  uint32_t max_vertex_attribs,
                  const GpuPreferences& gpu_preferences,
-                 FeatureInfo* feature_info);
+                 FeatureInfo* feature_info,
+                 ProgressReporter* progress_reporter);
   ~ProgramManager();
 
   // Must call before destruction.
@@ -679,6 +719,11 @@ class GPU_EXPORT ProgramManager {
 
   const GpuPreferences& gpu_preferences_;
   scoped_refptr<FeatureInfo> feature_info_;
+
+  // Used to notify the watchdog thread of progress during destruction,
+  // preventing time-outs when destruction takes a long time. May be null when
+  // using in-process command buffer.
+  ProgressReporter* progress_reporter_;
 
   DISALLOW_COPY_AND_ASSIGN(ProgramManager);
 };

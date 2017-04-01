@@ -27,24 +27,27 @@
 #ifndef HTMLAudioElement_h
 #define HTMLAudioElement_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLMediaElement.h"
 
 namespace blink {
 
 class Document;
 
-class HTMLAudioElement final : public HTMLMediaElement {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static HTMLAudioElement* create(Document&);
-    static HTMLAudioElement* createForJSConstructor(Document&, const AtomicString& src);
+class CORE_EXPORT HTMLAudioElement final : public HTMLMediaElement {
+  DEFINE_WRAPPERTYPEINFO();
 
-    bool isHTMLAudioElement() const override { return true; }
+ public:
+  static HTMLAudioElement* create(Document&);
+  static HTMLAudioElement* createForJSConstructor(Document&,
+                                                  const AtomicString& src);
 
-private:
-    HTMLAudioElement(Document&);
+  bool isHTMLAudioElement() const override { return true; }
+
+ private:
+  HTMLAudioElement(Document&);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // HTMLAudioElement_h
+#endif  // HTMLAudioElement_h

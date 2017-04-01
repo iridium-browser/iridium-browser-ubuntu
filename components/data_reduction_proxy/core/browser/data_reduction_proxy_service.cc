@@ -11,6 +11,7 @@
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
 #include "base/task_runner_util.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
@@ -68,8 +69,8 @@ void DataReductionProxyService::SetIOData(
   DCHECK(CalledOnValidThread());
   io_data_ = io_data;
   initialized_ = true;
-  FOR_EACH_OBSERVER(DataReductionProxyServiceObserver,
-                    observer_list_, OnServiceInitialized());
+  for (DataReductionProxyServiceObserver& observer : observer_list_)
+    observer.OnServiceInitialized();
 
   // Load the Data Reduction Proxy configuration from |prefs_| and apply it.
   if (prefs_) {
@@ -88,18 +89,6 @@ void DataReductionProxyService::SetIOData(
 void DataReductionProxyService::Shutdown() {
   DCHECK(CalledOnValidThread());
   weak_factory_.InvalidateWeakPtrs();
-}
-
-void DataReductionProxyService::EnableCompressionStatisticsLogging(
-    PrefService* prefs,
-    const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
-    const base::TimeDelta& commit_delay) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(!compression_stats_);
-  DCHECK(!prefs_);
-  prefs_ = prefs;
-  compression_stats_.reset(
-      new DataReductionProxyCompressionStats(this, prefs_, commit_delay));
 }
 
 void DataReductionProxyService::UpdateContentLengths(
@@ -223,15 +212,16 @@ void DataReductionProxyService::InitializeLoFiPrefs() {
     SetLoFiModeOff();
   } else if (prefs_->GetInteger(prefs::kLoFiLoadImagesPerSession) <
                  lo_fi_user_requests_for_images_per_session &&
-             prefs_->GetInteger(prefs::kLoFiSnackbarsShownPerSession) >=
+             prefs_->GetInteger(prefs::kLoFiUIShownPerSession) >=
                  lo_fi_user_requests_for_images_per_session) {
     // If the last session didn't have
     // |lo_fi_user_requests_for_images_per_session|, but the user saw at least
-    // that many "Load image" snackbars, reset the consecutive sessions count.
+    // that many "Load image" UI notifications, reset the consecutive sessions
+    // count.
     prefs_->SetInteger(prefs::kLoFiConsecutiveSessionDisables, 0);
   }
   prefs_->SetInteger(prefs::kLoFiLoadImagesPerSession, 0);
-  prefs_->SetInteger(prefs::kLoFiSnackbarsShownPerSession, 0);
+  prefs_->SetInteger(prefs::kLoFiUIShownPerSession, 0);
   prefs_->SetBoolean(prefs::kLoFiWasUsedThisSession, false);
 }
 

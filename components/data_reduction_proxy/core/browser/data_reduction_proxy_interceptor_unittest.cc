@@ -21,6 +21,8 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
+#include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "components/prefs/pref_service.h"
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
@@ -111,11 +113,15 @@ class DataReductionProxyInterceptorTest : public testing::Test {
   DataReductionProxyInterceptorTest() {
     test_context_ =
         DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(DataReductionProxyParams::kAllowed)
+            .WithParamsFlags(0)
             .WithParamsDefinitions(TestDataReductionProxyParams::HAS_EVERYTHING)
             .Build();
     default_context_.reset(new TestURLRequestContextWithDataReductionProxy(
-        test_context_->config()->test_params()->proxies_for_http().front(),
+        test_context_->config()
+            ->test_params()
+            ->proxies_for_http()
+            .front()
+            .proxy_server(),
         &default_network_delegate_));
     default_context_->set_network_delegate(&default_network_delegate_);
     default_context_->set_net_log(test_context_->net_log());
@@ -204,17 +210,17 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
     ASSERT_TRUE(proxy_.Start());
     ASSERT_TRUE(direct_.Start());
 
-    test_context_ =
-        DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(DataReductionProxyParams::kAllowed)
-            .WithURLRequestContext(&context_)
-            .Build();
+    test_context_ = DataReductionProxyTestContext::Builder()
+                        .WithParamsFlags(0)
+                        .WithURLRequestContext(&context_)
+                        .Build();
     std::string spec;
     base::TrimString(proxy_.GetURL("/").spec(), "/", &spec);
     net::ProxyServer origin =
         net::ProxyServer::FromURI(spec, net::ProxyServer::SCHEME_HTTP);
-    std::vector<net::ProxyServer> proxies_for_http;
-    proxies_for_http.push_back(origin);
+    std::vector<DataReductionProxyServer> proxies_for_http;
+    proxies_for_http.push_back(
+        DataReductionProxyServer(origin, ProxyServer::UNSPECIFIED_TYPE));
     test_context_->config()->test_params()->SetProxiesForHttp(proxies_for_http);
     std::string proxy_name = origin.ToURI();
     proxy_service_ = net::ProxyService::CreateFixedFromPacResult(
@@ -260,8 +266,7 @@ TEST_F(DataReductionProxyInterceptorWithServerTest, TestBypass) {
   EXPECT_TRUE(request->is_pending());
   base::RunLoop().Run();
 
-  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
-  EXPECT_EQ(net::OK, request->status().error());
+  EXPECT_EQ(net::OK, delegate.request_status());
   EXPECT_EQ("hello", delegate.data_received());
 }
 
@@ -273,8 +278,7 @@ TEST_F(DataReductionProxyInterceptorWithServerTest, TestNoBypass) {
   EXPECT_TRUE(request->is_pending());
   base::RunLoop().Run();
 
-  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
-  EXPECT_EQ(net::OK, request->status().error());
+  EXPECT_EQ(net::OK, delegate.request_status());
   EXPECT_EQ("hello", delegate.data_received());
 }
 
@@ -314,9 +318,7 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
     return request;
   }
 
-  const net::TestDelegate& delegate() const {
-    return delegate_;
-  }
+  const net::TestDelegate& delegate() const { return delegate_; }
 
   net::MockClientSocketFactory* mock_socket_factory() {
     return &mock_socket_factory_;
@@ -327,7 +329,7 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
   }
 
   net::ProxyServer origin() const {
-    return config()->test_params()->proxies_for_http().front();
+    return config()->test_params()->proxies_for_http().front().proxy_server();
   }
 
  private:
@@ -356,11 +358,10 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, ResponseWithoutRetry) {
   std::unique_ptr<net::URLRequest> request =
       CreateAndExecuteRequest(GURL("http://foo.com"));
 
-  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
+  EXPECT_EQ(net::OK, delegate().request_status());
   EXPECT_EQ(200, request->GetResponseCode());
   EXPECT_EQ(kBody, delegate().data_received());
-  EXPECT_EQ(origin().host_port_pair().ToString(),
-            request->proxy_server().ToString());
+  EXPECT_EQ(origin(), request->proxy_server());
 }
 
 TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithoutRetry) {
@@ -390,11 +391,10 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithoutRetry) {
   std::unique_ptr<net::URLRequest> request =
       CreateAndExecuteRequest(GURL("http://foo.com"));
 
-  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
+  EXPECT_EQ(net::OK, delegate().request_status());
   EXPECT_EQ(200, request->GetResponseCode());
   EXPECT_EQ(kBody, delegate().data_received());
-  EXPECT_EQ(origin().host_port_pair().ToString(),
-            request->proxy_server().ToString());
+  EXPECT_EQ(origin(), request->proxy_server());
   // The redirect should have been processed and followed normally.
   EXPECT_EQ(1, delegate().received_redirect_count());
 }
@@ -425,7 +425,7 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, ResponseWithBypassAndRetry) {
   std::unique_ptr<net::URLRequest> request =
       CreateAndExecuteRequest(GURL("http://foo.com"));
 
-  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
+  EXPECT_EQ(net::OK, delegate().request_status());
   EXPECT_EQ(200, request->GetResponseCode());
   EXPECT_EQ(kBody, delegate().data_received());
   EXPECT_FALSE(request->was_fetched_via_proxy());
@@ -472,7 +472,7 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithBypassAndRetry) {
   std::unique_ptr<net::URLRequest> request =
       CreateAndExecuteRequest(GURL("http://foo.com"));
 
-  EXPECT_EQ(net::URLRequestStatus::SUCCESS, request->status().status());
+  EXPECT_EQ(net::OK, delegate().request_status());
   EXPECT_EQ(200, request->GetResponseCode());
   EXPECT_EQ(kBody, delegate().data_received());
   EXPECT_FALSE(request->was_fetched_via_proxy());
@@ -482,7 +482,13 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithBypassAndRetry) {
   EXPECT_EQ(std::vector<GURL>(1, GURL("http://foo.com")), request->url_chain());
 }
 
-TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectChainToHttps) {
+// https://crbug.com/668197: Flaky on android_n5x_swarming_rel bot.
+#if defined(OS_ANDROID)
+#define MAYBE_RedirectChainToHttps DISABLED_RedirectChainToHttps
+#else
+#define MAYBE_RedirectChainToHttps RedirectChainToHttps
+#endif
+TEST_F(DataReductionProxyInterceptorEndToEndTest, MAYBE_RedirectChainToHttps) {
   // First, a redirect is successfully received through the Data Reduction
   // Proxy. HSTS is forced for play.google.com and prebaked into Chrome, so
   // http://play.google.com will automatically be redirected to

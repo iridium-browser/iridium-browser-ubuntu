@@ -11,13 +11,14 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/browser_sync/browser/signin_confirmation_helper.h"
+#include "components/browser_sync/signin_confirmation_helper.h"
 #include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/features/features.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/native_theme/native_theme.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "extensions/browser/extension_registry.h"
@@ -60,7 +61,7 @@ bool HasBeenShutdown(Profile* profile) {
 }
 
 bool HasSyncedExtensions(Profile* profile) {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(profile);
   if (registry) {
@@ -96,8 +97,8 @@ void CheckShouldPromptForNewProfile(
   history::HistoryService* service =
       HistoryServiceFactory::GetForProfileWithoutCreating(profile);
   // Fire asynchronous queries for profile data.
-  sync_driver::SigninConfirmationHelper* helper =
-      new sync_driver::SigninConfirmationHelper(service, return_result);
+  browser_sync::SigninConfirmationHelper* helper =
+      new browser_sync::SigninConfirmationHelper(service, return_result);
   helper->CheckHasHistory(kHistoryEntriesBeforeNewProfilePrompt);
   helper->CheckHasTypedURLs();
 }

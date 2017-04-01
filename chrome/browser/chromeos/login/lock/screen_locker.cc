@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "ash/common/ash_switches.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
-#include "ash/desktop_background/desktop_background_controller.h"
+#include "ash/common/wm_shell.h"
 #include "ash/shell.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/window_state_aura.h"
@@ -22,7 +22,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -51,6 +51,7 @@
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/extended_authenticator.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
+#include "components/session_manager/core/session_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
@@ -105,10 +106,19 @@ class ScreenLockObserver : public SessionManagerClient::StubDelegate,
   void Observe(int type,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override {
-    if (type == chrome::NOTIFICATION_SESSION_STARTED)
+    if (type == chrome::NOTIFICATION_SESSION_STARTED) {
       session_started_ = true;
-    else
+
+      // The user session has just started, so the user has logged in. Mark a
+      // strong authentication to allow them to use PIN to unlock the device.
+      user_manager::User* user =
+          content::Details<user_manager::User>(details).ptr();
+      PinStorage* pin_storage = PinStorageFactory::GetForUser(user);
+      if (pin_storage)
+        pin_storage->MarkStrongAuth();
+    } else {
       NOTREACHED() << "Unexpected notification " << type;
+    }
   }
 
   // UserAddingScreen::Observer overrides:
@@ -163,16 +173,15 @@ void ScreenLocker::Init() {
 
   authenticator_ = UserSessionManager::GetInstance()->CreateAuthenticator(this);
   extended_authenticator_ = ExtendedAuthenticator::Create(this);
-  delegate_.reset(new WebUIScreenLocker(this));
-  delegate_->LockScreen();
+  web_ui_.reset(new WebUIScreenLocker(this));
+  web_ui()->LockScreen();
 
   // Ownership of |icon_image_source| is passed.
   screenlock_icon_provider_.reset(new ScreenlockIconProvider);
   ScreenlockIconSource* screenlock_icon_source =
       new ScreenlockIconSource(screenlock_icon_provider_->AsWeakPtr());
-  content::URLDataSource::Add(
-      GetAssociatedWebUI()->GetWebContents()->GetBrowserContext(),
-      screenlock_icon_source);
+  content::URLDataSource::Add(web_ui()->GetWebContents()->GetBrowserContext(),
+                              screenlock_icon_source);
 }
 
 void ScreenLocker::OnAuthFailure(const AuthFailure& error) {
@@ -194,10 +203,10 @@ void ScreenLocker::OnAuthFailure(const AuthFailure& error) {
   // Don't enable signout button here as we're showing
   // MessageBubble.
 
-  delegate_->ShowErrorMessage(incorrect_passwords_count_++ ?
-                                  IDS_LOGIN_ERROR_AUTHENTICATING_2ND_TIME :
-                                  IDS_LOGIN_ERROR_AUTHENTICATING,
-                              HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
+  web_ui()->ShowErrorMessage(incorrect_passwords_count_++
+                                 ? IDS_LOGIN_ERROR_AUTHENTICATING_2ND_TIME
+                                 : IDS_LOGIN_ERROR_AUTHENTICATING,
+                             HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT);
 
   if (auth_status_consumer_)
     auth_status_consumer_->OnAuthFailure(error);
@@ -253,7 +262,7 @@ void ScreenLocker::OnAuthSuccess(const UserContext& user_context) {
       FROM_HERE, base::Bind(&ScreenLocker::UnlockOnLoginSuccess,
                             weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromMilliseconds(kUnlockGuardTimeoutMs));
-  delegate_->AnimateAuthenticationSuccess();
+  web_ui()->AnimateAuthenticationSuccess();
 }
 
 void ScreenLocker::OnPasswordAuthSuccess(const UserContext& user_context) {
@@ -287,8 +296,7 @@ void ScreenLocker::Authenticate(const UserContext& user_context) {
       << "Invalid user trying to unlock.";
 
   authentication_start_time_ = base::Time::Now();
-  delegate_->SetInputEnabled(false);
-  delegate_->OnAuthenticate();
+  web_ui()->SetInputEnabled(false);
   is_pin_attempt_ = user_context.IsUsingPin();
 
   const user_manager::User* user = FindUnlockUser(user_context.GetAccountId());
@@ -343,11 +351,11 @@ const user_manager::User* ScreenLocker::FindUnlockUser(
 }
 
 void ScreenLocker::ClearErrors() {
-  delegate_->ClearErrors();
+  web_ui()->ClearErrors();
 }
 
 void ScreenLocker::Signout() {
-  delegate_->ClearErrors();
+  web_ui()->ClearErrors();
   content::RecordAction(UserMetricsAction("ScreenLocker_Signout"));
   // We expect that this call will not wait for any user input.
   // If it changes at some point, we will need to force exit.
@@ -358,14 +366,14 @@ void ScreenLocker::Signout() {
 }
 
 void ScreenLocker::EnableInput() {
-  delegate_->SetInputEnabled(true);
+  web_ui()->SetInputEnabled(true);
 }
 
 void ScreenLocker::ShowErrorMessage(int error_msg_id,
                                     HelpAppLauncher::HelpTopic help_topic_id,
                                     bool sign_out_only) {
-  delegate_->SetInputEnabled(!sign_out_only);
-  delegate_->ShowErrorMessage(error_msg_id, help_topic_id);
+  web_ui()->SetInputEnabled(!sign_out_only);
+  web_ui()->ShowErrorMessage(error_msg_id, help_topic_id);
 }
 
 void ScreenLocker::SetLoginStatusConsumer(
@@ -430,10 +438,8 @@ void ScreenLocker::Show() {
   // visible while in fullscreen because the shelf makes it harder for a web
   // page or app to mimick the lock screen.
   ash::wm::WindowState* active_window_state = ash::wm::GetActiveWindowState();
-
   if (active_window_state && active_window_state->IsFullscreen() &&
-      active_window_state->shelf_mode_in_fullscreen() !=
-          ash::wm::WindowState::SHELF_AUTO_HIDE_VISIBLE) {
+      active_window_state->hide_shelf_when_fullscreen()) {
     const ash::wm::WMEvent event(ash::wm::WM_EVENT_TOGGLE_FULLSCREEN);
     active_window_state->OnWMEvent(&event);
   }
@@ -491,9 +497,8 @@ ScreenLocker::~ScreenLocker() {
     authenticator_->SetConsumer(NULL);
   ClearErrors();
 
-  VLOG(1) << "Moving desktop background to unlocked container";
-  ash::Shell::GetInstance()->
-      desktop_background_controller()->MoveDesktopToUnlockedContainer();
+  VLOG(1) << "Moving wallpaper to unlocked container";
+  ash::WmShell::Get()->wallpaper_controller()->MoveToUnlockedContainer();
 
   screen_locker_ = NULL;
   bool state = false;
@@ -506,6 +511,9 @@ ScreenLocker::~ScreenLocker() {
   VLOG(1) << "Calling session manager's HandleLockScreenDismissed D-Bus method";
   DBusThreadManager::Get()->GetSessionManagerClient()->
       NotifyLockScreenDismissed();
+
+  session_manager::SessionManager::Get()->SetSessionState(
+      session_manager::SessionState::ACTIVE);
 
   if (saved_ime_state_.get()) {
     input_method::InputMethodManager::Get()->SetState(saved_ime_state_);
@@ -523,9 +531,8 @@ void ScreenLocker::ScreenLockReady() {
           << delta.InSecondsF() << " second(s)";
   UMA_HISTOGRAM_TIMES("ScreenLocker.ScreenLockTime", delta);
 
-  VLOG(1) << "Moving desktop background to locked container";
-  ash::Shell::GetInstance()->
-      desktop_background_controller()->MoveDesktopToLockedContainer();
+  VLOG(1) << "Moving wallpaper to locked container";
+  ash::WmShell::Get()->wallpaper_controller()->MoveToLockedContainer();
 
   bool state = true;
   VLOG(1) << "Emitting SCREEN_LOCK_STATE_CHANGED with state=" << state;
@@ -536,13 +543,12 @@ void ScreenLocker::ScreenLockReady() {
   VLOG(1) << "Calling session manager's HandleLockScreenShown D-Bus method";
   DBusThreadManager::Get()->GetSessionManagerClient()->NotifyLockScreenShown();
 
+  session_manager::SessionManager::Get()->SetSessionState(
+      session_manager::SessionState::LOCKED);
+
   input_method::InputMethodManager::Get()
       ->GetActiveIMEState()
       ->EnableLockScreenLayouts();
-}
-
-content::WebUI* ScreenLocker::GetAssociatedWebUI() {
-  return delegate_->GetAssociatedWebUI();
 }
 
 bool ScreenLocker::IsUserLoggedIn(const AccountId& account_id) const {

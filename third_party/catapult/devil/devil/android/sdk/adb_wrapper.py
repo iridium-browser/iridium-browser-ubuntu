@@ -27,6 +27,8 @@ from devil.utils import timeout_retry
 with devil_env.SysPath(devil_env.DEPENDENCY_MANAGER_PATH):
   import dependency_manager  # pylint: disable=import-error
 
+logger = logging.getLogger(__name__)
+
 
 ADB_KEYS_FILE = '/data/misc/adb/adb_keys'
 
@@ -131,7 +133,7 @@ class AdbWrapper(object):
     up a new ADB shell for each command.
 
     Example of use:
-    with pshell as PersistentShell('123456789'):
+    with PersistentShell('123456789') as pshell:
         pshell.RunCommand('which ls')
         pshell.RunCommandAndClose('echo TEST')
     '''
@@ -319,7 +321,7 @@ class AdbWrapper(object):
   def IsServerOnline(cls):
     status, output = cmd_helper.GetCmdStatusAndOutput(['pgrep', 'adb'])
     output = [int(x) for x in output.split()]
-    logging.info('PIDs for adb found: %r', output)
+    logger.info('PIDs for adb found: %r', output)
     return status == 0
   # pylint: enable=unused-argument
 
@@ -485,7 +487,7 @@ class AdbWrapper(object):
       try:
         status = int(output[output_end + 1:])
       except ValueError:
-        logging.warning('exit status of shell command %r missing.', command)
+        logger.warning('exit status of shell command %r missing.', command)
         raise device_errors.AdbShellCommandFailedError(
             command, output, status=None, device_serial=self._device_serial)
       output = output[:output_end]
@@ -635,7 +637,20 @@ class AdbWrapper(object):
     Args:
       timeout: (optional) Timeout per try in seconds.
       retries: (optional) Number of retries to attempt.
+    Returns:
+      The output of adb forward --list as a string.
     """
+    if (distutils.version.LooseVersion(self.Version()) >=
+        distutils.version.LooseVersion('1.0.36')):
+      # Starting in 1.0.36, this can occasionally fail with a protocol fault.
+      # As this interrupts all connections with all devices, we instead just
+      # return an empty list. This may give clients an inaccurate result, but
+      # that's usually better than crashing the adb server.
+
+      # TODO(jbudorick): Determine an appropriate upper version bound for this
+      # once b/31811775 is fixed.
+      return ''
+
     return self._RunDeviceAdbCmd(['forward', '--list'], timeout, retries)
 
   def JDWP(self, timeout=DEFAULT_TIMEOUT, retries=DEFAULT_RETRIES):

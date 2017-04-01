@@ -33,54 +33,56 @@
 
 #include "core/CoreExport.h"
 #include "core/inspector/InspectorBaseAgent.h"
-#include "core/inspector/protocol/Worker.h"
+#include "core/inspector/protocol/Target.h"
 #include "core/workers/WorkerInspectorProxy.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 
 namespace blink {
 class InspectedFrames;
-class KURL;
 class WorkerInspectorProxy;
 
 class CORE_EXPORT InspectorWorkerAgent final
-    : public InspectorBaseAgent<protocol::Worker::Metainfo>
-    , public WorkerInspectorProxy::PageInspector {
-    WTF_MAKE_NONCOPYABLE(InspectorWorkerAgent);
-public:
-    explicit InspectorWorkerAgent(InspectedFrames*);
-    ~InspectorWorkerAgent() override;
-    DECLARE_VIRTUAL_TRACE();
+    : public InspectorBaseAgent<protocol::Target::Metainfo>,
+      public WorkerInspectorProxy::PageInspector {
+  WTF_MAKE_NONCOPYABLE(InspectorWorkerAgent);
 
-    void disable(ErrorString*) override;
-    void restore() override;
-    void didCommitLoadForLocalFrame(LocalFrame*) override;
+ public:
+  explicit InspectorWorkerAgent(InspectedFrames*);
+  ~InspectorWorkerAgent() override;
+  DECLARE_VIRTUAL_TRACE();
 
-    // Called from InspectorInstrumentation
-    bool shouldWaitForDebuggerOnWorkerStart();
-    void didStartWorker(WorkerInspectorProxy*, bool waitingForDebugger);
-    void workerTerminated(WorkerInspectorProxy*);
+  Response disable() override;
+  void restore() override;
+  void didCommitLoadForLocalFrame(LocalFrame*) override;
 
-    // Called from Dispatcher
-    void enable(ErrorString*) override;
-    void sendMessageToWorker(ErrorString*, const String& workerId, const String& message) override;
-    void setWaitForDebuggerOnStart(ErrorString*, bool value) override;
+  // Called from InspectorInstrumentation
+  bool shouldWaitForDebuggerOnWorkerStart();
+  void didStartWorker(WorkerInspectorProxy*, bool waitingForDebugger);
+  void workerTerminated(WorkerInspectorProxy*);
 
-    void setTracingSessionId(const String&);
+  // Called from Dispatcher
+  Response setAutoAttach(bool autoAttach, bool waitForDebuggerOnStart) override;
+  Response sendMessageToTarget(const String& targetId,
+                               const String& message) override;
 
-private:
-    bool enabled();
-    void connectToAllProxies();
-    void connectToProxy(WorkerInspectorProxy*, bool waitingForDebugger);
+  void setTracingSessionId(const String&);
 
-    // WorkerInspectorProxy::PageInspector implementation.
-    void dispatchMessageFromWorker(WorkerInspectorProxy*, const String& message) override;
+ private:
+  bool autoAttachEnabled();
+  void connectToAllProxies();
+  void disconnectFromAllProxies();
+  void connectToProxy(WorkerInspectorProxy*, bool waitingForDebugger);
 
-    Member<InspectedFrames> m_inspectedFrames;
-    HeapHashMap<String, Member<WorkerInspectorProxy>> m_connectedProxies;
-    String m_tracingSessionId;
+  // WorkerInspectorProxy::PageInspector implementation.
+  void dispatchMessageFromWorker(WorkerInspectorProxy*,
+                                 const String& message) override;
+
+  Member<InspectedFrames> m_inspectedFrames;
+  HeapHashMap<String, Member<WorkerInspectorProxy>> m_connectedProxies;
+  String m_tracingSessionId;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // !defined(InspectorWorkerAgent_h)
+#endif  // !defined(InspectorWorkerAgent_h)

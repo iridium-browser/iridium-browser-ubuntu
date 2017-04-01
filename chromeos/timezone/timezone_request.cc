@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/json/json_reader.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -188,10 +188,12 @@ bool ParseServerResponse(const GURL& server_url,
 
   const base::DictionaryValue* response_object = NULL;
   if (!response_value->GetAsDictionary(&response_object)) {
-    PrintTimeZoneError(server_url,
-                       "Unexpected response type : " +
-                           base::StringPrintf("%u", response_value->GetType()),
-                       timezone);
+    PrintTimeZoneError(
+        server_url,
+        "Unexpected response type : " +
+            base::StringPrintf(
+                "%u", static_cast<unsigned int>(response_value->GetType())),
+        timezone);
     RecordUmaEvent(TIMEZONE_REQUEST_EVENT_RESPONSE_MALFORMED);
     return false;
   }

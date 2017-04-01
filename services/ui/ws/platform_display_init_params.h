@@ -8,33 +8,22 @@
 #include <stdint.h>
 
 #include "base/memory/ref_counted.h"
-#include "ui/gfx/geometry/rect.h"
-
-namespace display {
-class PlatformScreen;
-}
-
-namespace shell {
-class Connector;
-}
+#include "services/ui/display/viewport_metrics.h"
 
 namespace ui {
 
-class GpuState;
-class SurfacesState;
-
 namespace ws {
+
+class ServerWindow;
 
 struct PlatformDisplayInitParams {
   PlatformDisplayInitParams();
   PlatformDisplayInitParams(const PlatformDisplayInitParams& other);
   ~PlatformDisplayInitParams();
 
-  scoped_refptr<SurfacesState> surfaces_state;
-
-  gfx::Rect display_bounds;
   int64_t display_id;
-  display::PlatformScreen* platform_screen = nullptr;
+  ServerWindow* root_window = nullptr;
+  display::ViewportMetrics metrics;
 };
 
 }  // namespace ws

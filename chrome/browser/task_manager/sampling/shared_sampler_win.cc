@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/bit_cast.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/time/time.h"
@@ -219,6 +220,9 @@ struct ProcessData {
   ProcessData() = default;
   ProcessData(ProcessData&&) = default;
 
+  int64_t physical_bytes;
+  base::Time start_time;
+  base::TimeDelta cpu_time;
   std::vector<ThreadData> threads;
 
  private:
@@ -283,6 +287,17 @@ const ProcessData* SeekInPreviousSnapshot(
   return nullptr;
 }
 
+// A wrapper function converting ticks (in units of 100 ns) to Time.
+base::Time ConvertTicksToTime(uint64_t ticks) {
+  FILETIME ft = bit_cast<FILETIME, uint64_t>(ticks);
+  return base::Time::FromFileTime(ft);
+}
+
+// A wrapper function converting ticks (in units of 100 ns) to TimeDelta.
+base::TimeDelta ConvertTicksToTimeDelta(uint64_t ticks) {
+  return base::TimeDelta::FromMicroseconds(ticks / 10);
+}
+
 }  // namespace
 
 // ProcessDataSnapshot gets created and accessed only on the worker thread.
@@ -312,7 +327,8 @@ SharedSampler::SharedSampler(
 SharedSampler::~SharedSampler() {}
 
 int64_t SharedSampler::GetSupportedFlags() const {
-  return REFRESH_TYPE_IDLE_WAKEUPS;
+  return REFRESH_TYPE_IDLE_WAKEUPS | REFRESH_TYPE_PHYSICAL_MEMORY |
+         REFRESH_TYPE_START_TIME | REFRESH_TYPE_CPU_TIME;
 }
 
 SharedSampler::Callbacks::Callbacks() {}
@@ -321,11 +337,17 @@ SharedSampler::Callbacks::~Callbacks() {}
 
 SharedSampler::Callbacks::Callbacks(Callbacks&& other) {
   on_idle_wakeups = std::move(other.on_idle_wakeups);
+  on_physical_memory = std::move(other.on_physical_memory);
+  on_start_time = std::move(other.on_start_time);
+  on_cpu_time = std::move(other.on_cpu_time);
 }
 
 void SharedSampler::RegisterCallbacks(
     base::ProcessId process_id,
-    const OnIdleWakeupsCallback& on_idle_wakeups) {
+    const OnIdleWakeupsCallback& on_idle_wakeups,
+    const OnPhysicalMemoryCallback& on_physical_memory,
+    const OnStartTimeCallback& on_start_time,
+    const OnCpuTimeCallback& on_cpu_time) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   if (process_id == 0)
@@ -333,6 +355,9 @@ void SharedSampler::RegisterCallbacks(
 
   Callbacks callbacks;
   callbacks.on_idle_wakeups = on_idle_wakeups;
+  callbacks.on_physical_memory = on_physical_memory;
+  callbacks.on_start_time = on_start_time;
+  callbacks.on_cpu_time = on_cpu_time;
   bool result = callbacks_map_.insert(
       std::make_pair(process_id, std::move(callbacks))).second;
   DCHECK(result);
@@ -352,11 +377,12 @@ void SharedSampler::UnregisterCallbacks(base::ProcessId process_id) {
 
 void SharedSampler::Refresh(base::ProcessId process_id, int64_t refresh_flags) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  DCHECK(callbacks_map_.find(process_id) != callbacks_map_.end());
   DCHECK_NE(0, refresh_flags & GetSupportedFlags());
 
   if (process_id == 0)
     return;
+
+  DCHECK(callbacks_map_.find(process_id) != callbacks_map_.end());
 
   if (refresh_flags_ == 0) {
     base::PostTaskAndReplyWithResult(
@@ -364,9 +390,15 @@ void SharedSampler::Refresh(base::ProcessId process_id, int64_t refresh_flags) {
         base::Bind(&SharedSampler::RefreshOnWorkerThread, this),
         base::Bind(&SharedSampler::OnRefreshDone, this));
   } else {
+    // http://crbug.com/678471
     // A group of consecutive Refresh calls should all specify the same refresh
-    // flags.
-    DCHECK_EQ(refresh_flags, refresh_flags_);
+    // flags. Rarely RefreshOnWorkerThread could take a long time (> 1 sec),
+    // long enough for a next refresh cycle to start before results are ready
+    // from a previous cycle. In that case refresh_flags_ would still remain
+    // set to the previous cycle refresh flags which might be different than
+    // this cycle refresh flags if a column was added or removed between the two
+    // cycles. The worst that could happen in that condition is that results for
+    // a newly added column would be missing for one extra refresh cycle.
   }
 
   refresh_flags_ |= refresh_flags;
@@ -452,10 +484,12 @@ std::unique_ptr<ProcessDataSnapshot> SharedSampler::CaptureSnapshot() {
     // the buffer boundary.
     if (offset + sizeof(SYSTEM_PROCESS_INFORMATION) > data_buffer.size())
       break;
-    if (offset + sizeof(SYSTEM_PROCESS_INFORMATION) +
-            (pi->NumberOfThreads - 1) * sizeof(SYSTEM_THREAD_INFORMATION) >
-      data_buffer.size())
+    if (pi->NumberOfThreads > 0 &&
+        (offset + sizeof(SYSTEM_PROCESS_INFORMATION) +
+             (pi->NumberOfThreads - 1) * sizeof(SYSTEM_THREAD_INFORMATION) >
+         data_buffer.size())) {
       break;
+    }
 
     if (pi->ImageName.Buffer) {
       // Validate that the image name is within the buffer boundary.
@@ -476,6 +510,14 @@ std::unique_ptr<ProcessDataSnapshot> SharedSampler::CaptureSnapshot() {
         // not count context switches for threads that are missing in the most
         // recent snapshot.
         ProcessData process_data;
+
+        process_data.physical_bytes =
+            static_cast<int64_t>(pi->WorkingSetPrivateSize);
+
+        process_data.start_time = ConvertTicksToTime(pi->CreateTime);
+
+        process_data.cpu_time =
+            ConvertTicksToTimeDelta(pi->KernelTime + pi->UserTime);
 
         // Iterate over threads and store each thread's ID and number of context
         // switches.
@@ -553,6 +595,9 @@ void SharedSampler::MakeResultsFromTwoSnapshots(
     result.process_id = process_id;
     result.idle_wakeups_per_second =
         static_cast<int>(round(idle_wakeups_delta / time_delta));
+    result.physical_bytes = process.physical_bytes;
+    result.start_time = process.start_time;
+    result.cpu_time = process.cpu_time;
     results->push_back(result);
   }
 }
@@ -565,6 +610,9 @@ void SharedSampler::MakeResultsFromSnapshot(const ProcessDataSnapshot& snapshot,
     // Use 0 for Idle Wakeups / sec in this case. This is consistent with
     // ProcessMetrics::CalculateIdleWakeupsPerSecond implementation.
     result.idle_wakeups_per_second = 0;
+    result.physical_bytes = pair.second.physical_bytes;
+    result.start_time = pair.second.start_time;
+    result.cpu_time = pair.second.cpu_time;
     results->push_back(result);
   }
 }
@@ -579,8 +627,11 @@ void SharedSampler::OnRefreshDone(
   for (const auto& callback_entry : callbacks_map_) {
     base::ProcessId process_id = callback_entry.first;
     // A sentinel value of -1 is used when the result isn't available.
-    // Task manager will use this to display 'N/A'.
+    // Task manager will use this to display '-'.
     int idle_wakeups_per_second = -1;
+    int64_t physical_bytes = -1;
+    base::Time start_time;
+    base::TimeDelta cpu_time;
 
     // Match refresh result by |process_id|.
     // This relies on refresh results being ordered by Process ID.
@@ -594,6 +645,9 @@ void SharedSampler::OnRefreshDone(
       if (result.process_id == process_id) {
         // Data matched in |refresh_results|.
         idle_wakeups_per_second = result.idle_wakeups_per_second;
+        physical_bytes = result.physical_bytes;
+        start_time = result.start_time;
+        cpu_time = result.cpu_time;
         ++result_index;
         break;
       }
@@ -606,7 +660,26 @@ void SharedSampler::OnRefreshDone(
 
     if (TaskManagerObserver::IsResourceRefreshEnabled(REFRESH_TYPE_IDLE_WAKEUPS,
                                                       refresh_flags_)) {
+      DCHECK(callback_entry.second.on_idle_wakeups);
       callback_entry.second.on_idle_wakeups.Run(idle_wakeups_per_second);
+    }
+
+    if (TaskManagerObserver::IsResourceRefreshEnabled(
+        REFRESH_TYPE_PHYSICAL_MEMORY, refresh_flags_)) {
+      DCHECK(callback_entry.second.on_physical_memory);
+      callback_entry.second.on_physical_memory.Run(physical_bytes);
+    }
+
+    if (TaskManagerObserver::IsResourceRefreshEnabled(REFRESH_TYPE_START_TIME,
+                                                      refresh_flags_)) {
+      DCHECK(callback_entry.second.on_start_time);
+      callback_entry.second.on_start_time.Run(start_time);
+    }
+
+    if (TaskManagerObserver::IsResourceRefreshEnabled(REFRESH_TYPE_CPU_TIME,
+                                                      refresh_flags_)) {
+      DCHECK(callback_entry.second.on_cpu_time);
+      callback_entry.second.on_cpu_time.Run(cpu_time);
     }
   }
 

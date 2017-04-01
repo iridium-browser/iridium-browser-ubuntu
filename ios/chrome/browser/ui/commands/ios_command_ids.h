@@ -54,7 +54,6 @@
 #define IDC_REQUEST_DESKTOP_SITE                       40921
 #define IDC_CLEAR_BROWSING_DATA_IOS                    40924
 #define IDC_SHOW_MAIL_COMPOSER                         40926
-#define IDC_BACK_TO_CALLING_APP                        40927
 #define IDC_RESET_ALL_WEBVIEWS                         40928
 #define IDC_SHARE_PAGE                                 40929
 #define IDC_BACK_FORWARD_IN_TAB_HISTORY                40930
@@ -76,6 +75,7 @@
 #define IDC_SHOW_CLEAR_BROWSING_DATA_SETTINGS          40951
 #define IDC_SHOW_SYNC_PASSPHRASE_SETTINGS              40952
 #define IDC_SHOW_QR_SCANNER                            40953
+#define IDC_SHOW_PHYSICAL_WEB_SETTINGS                 40954
 // clang-format on
 
 #endif  // IOS_CHROME_BROWSER_UI_COMMANDS_IOS_COMMAND_IDS_H_

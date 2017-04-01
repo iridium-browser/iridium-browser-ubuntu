@@ -5,15 +5,15 @@
 #include "components/sync/syncable/directory_backing_store.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include <limits>
 #include <unordered_set>
+#include <utility>
 
 #include "base/base64.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
@@ -22,16 +22,14 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "components/sync/base/hash_util.h"
 #include "components/sync/base/node_ordinal.h"
 #include "components/sync/base/time.h"
 #include "components/sync/protocol/bookmark_specifics.pb.h"
 #include "components/sync/protocol/sync.pb.h"
-#include "components/sync/syncable/syncable-inl.h"
 #include "components/sync/syncable/syncable_columns.h"
-#include "components/sync/syncable/syncable_util.h"
-#include "sql/connection.h"
+#include "components/sync/syncable/syncable_id.h"
 #include "sql/error_delegate_util.h"
-#include "sql/statement.h"
 #include "sql/transaction.h"
 
 using std::string;
@@ -126,7 +124,7 @@ void UnpackProtoFields(sql::Statement* statement,
 }
 
 // The caller owns the returned EntryKernel*.  Assumes the statement currently
-// points to a valid row in the metas table. Returns NULL to indicate that
+// points to a valid row in the metas table. Returns null to indicate that
 // it detected a corruption in the data on unpacking.
 std::unique_ptr<EntryKernel> UnpackEntry(sql::Statement* statement,
                                          int* total_specifics_copies) {
@@ -239,7 +237,7 @@ bool SaveEntryToDB(sql::Statement* save_statement, const EntryKernel& entry) {
 // copy for some entries which create by copy-on-write mechanism.
 // entries_counts : entry counts for each model type.
 void UploadModelTypeEntryCount(const int total_specifics_copies,
-                               const int(&entries_counts)[MODEL_TYPE_COUNT]) {
+                               const int (&entries_counts)[MODEL_TYPE_COUNT]) {
   int total_entry_counts = 0;
   for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
     std::string model_type;
@@ -331,8 +329,8 @@ bool DirectoryBackingStore::SaveChanges(
     return false;
 
   PrepareSaveEntryStatement(METAS_TABLE, &save_meta_statement_);
-  for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
-       i != snapshot.dirty_metas.end(); ++i) {
+  for (auto i = snapshot.dirty_metas.begin(); i != snapshot.dirty_metas.end();
+       ++i) {
     DCHECK((*i)->is_dirty());
     if (!SaveEntryToDB(&save_meta_statement_, **i))
       return false;
@@ -343,7 +341,7 @@ bool DirectoryBackingStore::SaveChanges(
 
   PrepareSaveEntryStatement(DELETE_JOURNAL_TABLE,
                             &save_delete_journal_statement_);
-  for (EntryKernelSet::const_iterator i = snapshot.delete_journals.begin();
+  for (auto i = snapshot.delete_journals.begin();
        i != snapshot.delete_journals.end(); ++i) {
     if (!SaveEntryToDB(&save_delete_journal_statement_, **i))
       return false;
@@ -681,7 +679,7 @@ bool DirectoryBackingStore::LoadEntries(Directory::MetahandlesMap* handles_map,
         model_type = kernel->GetServerModelType();
       }
       ++model_type_entry_count[model_type];
-      (*handles_map)[handle] = kernel.release();
+      (*handles_map)[handle] = std::move(kernel);
     }
   }
 
@@ -701,8 +699,7 @@ bool DirectoryBackingStore::SafeToPurgeOnLoading(
   return false;
 }
 
-bool DirectoryBackingStore::LoadDeleteJournals(
-    JournalIndex* delete_journals) {
+bool DirectoryBackingStore::LoadDeleteJournals(JournalIndex* delete_journals) {
   string select;
   select.reserve(kUpdateStatementBufferSize);
   select.append("SELECT ");
@@ -713,11 +710,13 @@ bool DirectoryBackingStore::LoadDeleteJournals(
 
   while (s.Step()) {
     int total_entry_copies;
-    std::unique_ptr<EntryKernel> kernel = UnpackEntry(&s, &total_entry_copies);
+    std::unique_ptr<EntryKernel> kernel_ptr =
+        UnpackEntry(&s, &total_entry_copies);
     // A null kernel is evidence of external data corruption.
-    if (!kernel)
+    if (!kernel_ptr)
       return false;
-    delete_journals->insert(kernel.release());
+    EntryKernel* kernel = kernel_ptr.get();
+    (*delete_journals)[kernel] = std::move(kernel_ptr);
   }
   return s.Succeeded();
 }
@@ -1214,7 +1213,7 @@ bool DirectoryBackingStore::MigrateVersion79To80() {
   sql::Statement update(db_->GetUniqueStatement(
           "UPDATE share_info SET bag_of_chips = ?"));
   // An empty message is serialized to an empty string.
-  update.BindBlob(0, NULL, 0);
+  update.BindBlob(0, nullptr, 0);
   if (!update.Run())
     return false;
   SetVersion(80);
@@ -1385,9 +1384,8 @@ bool DirectoryBackingStore::MigrateVersion85To86() {
         // means we can set the bookmark tag according to the originator client
         // item ID and originator cache guid, because (unlike the other case) we
         // know that this client is the originator.
-        unique_bookmark_tag = syncable::GenerateSyncableBookmarkHash(
-            cache_guid,
-            id_string.substr(1));
+        unique_bookmark_tag =
+            GenerateSyncableBookmarkHash(cache_guid, id_string.substr(1));
       } else {
         // If we've already committed the item, then we don't know who the
         // originator was.  We do not have access to the originator client item
@@ -1401,7 +1399,7 @@ bool DirectoryBackingStore::MigrateVersion85To86() {
         // tag according to the originator_cache_guid and originator_item_id
         // when we see updates for this item.  That should ensure that commonly
         // modified items will end up with the proper tag values eventually.
-        unique_bookmark_tag = syncable::GenerateSyncableBookmarkHash(
+        unique_bookmark_tag = GenerateSyncableBookmarkHash(
             std::string(),  // cache_guid left intentionally blank.
             id_string.substr(1));
       }
@@ -1511,7 +1509,7 @@ bool DirectoryBackingStore::CreateTables() {
     s.BindString(1, dir_name_);                   // name
     s.BindString(2, std::string());               // store_birthday
     s.BindString(3, GenerateCacheGUID());         // cache_guid
-    s.BindBlob(4, NULL, 0);                       // bag_of_chips
+    s.BindBlob(4, nullptr, 0);                    // bag_of_chips
     if (!s.Run())
       return false;
   }
@@ -1642,6 +1640,8 @@ bool DirectoryBackingStore::CreateShareInfoTableVersion71(
 
 // This function checks to see if the given list of Metahandles has any nodes
 // whose PARENT_ID values refer to ID values that do not actually exist.
+// This function also checks that a root node with the correct id exists in the
+// set.
 // Returns true on success.
 bool DirectoryBackingStore::VerifyReferenceIntegrity(
     const Directory::MetahandlesMap* handles_map) {
@@ -1651,23 +1651,24 @@ bool DirectoryBackingStore::VerifyReferenceIntegrity(
   IdsSet ids_set;
   bool is_ok = true;
 
-  for (Directory::MetahandlesMap::const_iterator it = handles_map->begin();
-       it != handles_map->end(); ++it) {
-    EntryKernel* entry = it->second;
+  for (auto it = handles_map->begin(); it != handles_map->end(); ++it) {
+    EntryKernel* entry = it->second.get();
     bool is_duplicate_id = !(ids_set.insert(entry->ref(ID).value()).second);
     is_ok = is_ok && !is_duplicate_id;
   }
 
   IdsSet::iterator end = ids_set.end();
-  for (Directory::MetahandlesMap::const_iterator it = handles_map->begin();
-       it != handles_map->end(); ++it) {
-    EntryKernel* entry = it->second;
+  for (auto it = handles_map->begin(); it != handles_map->end(); ++it) {
+    EntryKernel* entry = it->second.get();
     if (!entry->ref(PARENT_ID).IsNull()) {
       bool parent_exists = (ids_set.find(entry->ref(PARENT_ID).value()) != end);
       if (!parent_exists) {
         return false;
       }
     }
+  }
+  if (ids_set.find(Id::GetRoot().value()) == ids_set.end()) {
+    return false;
   }
   return is_ok;
 }
@@ -1716,6 +1717,12 @@ bool DirectoryBackingStore::GetDatabasePageSize(int* page_size) {
   return true;
 }
 
+bool DirectoryBackingStore::ReportMemoryUsage(
+    base::trace_event::ProcessMemoryDump* pmd,
+    const std::string& dump_name) {
+  return db_ && db_->ReportMemoryUsage(pmd, dump_name);
+}
+
 bool DirectoryBackingStore::UpdatePageSizeIfNecessary() {
   int page_size;
   if (!GetDatabasePageSize(&page_size))
@@ -1742,15 +1749,13 @@ bool DirectoryBackingStore::needs_column_refresh() const {
 }
 
 void DirectoryBackingStore::ResetAndCreateConnection() {
-  db_.reset(new sql::Connection());
+  db_ = base::MakeUnique<sql::Connection>();
   db_->set_histogram_tag("SyncDirectory");
-  db_->set_exclusive_locking();
   db_->set_cache_size(32);
   db_->set_page_size(database_page_size_);
 
-  // TODO(shess): The current mitigation for http://crbug.com/537742 stores
-  // state in the meta table, which this database does not use.
-  db_->set_mmap_disabled();
+  // This db does not use [meta] table, store mmap status data elsewhere.
+  db_->set_mmap_alt_status();
 
   if (!catastrophic_error_handler_.is_null())
     SetCatastrophicErrorHandler(catastrophic_error_handler_);

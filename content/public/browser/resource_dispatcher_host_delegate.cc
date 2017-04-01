@@ -24,18 +24,15 @@ void ResourceDispatcherHostDelegate::RequestBeginning(
     ResourceContext* resource_context,
     AppCacheService* appcache_service,
     ResourceType resource_type,
-    ScopedVector<ResourceThrottle>* throttles) {
-}
+    std::vector<std::unique_ptr<ResourceThrottle>>* throttles) {}
 
 void ResourceDispatcherHostDelegate::DownloadStarting(
     net::URLRequest* request,
     ResourceContext* resource_context,
-    int child_id,
-    int route_id,
     bool is_content_initiated,
     bool must_download,
-    ScopedVector<ResourceThrottle>* throttles) {
-}
+    bool is_new_request,
+    std::vector<std::unique_ptr<ResourceThrottle>>* throttles) {}
 
 ResourceDispatcherHostLoginDelegate*
     ResourceDispatcherHostDelegate::CreateLoginDelegate(
@@ -46,12 +43,7 @@ ResourceDispatcherHostLoginDelegate*
 
 bool ResourceDispatcherHostDelegate::HandleExternalProtocol(
     const GURL& url,
-    int child_id,
-    const ResourceRequestInfo::WebContentsGetter& web_contents_getter,
-    bool is_main_frame,
-    ui::PageTransition page_transition,
-    bool has_user_gesture,
-    ResourceContext* resource_context) {
+    ResourceRequestInfo* info) {
   return true;
 }
 
@@ -87,13 +79,17 @@ void ResourceDispatcherHostDelegate::OnRequestRedirected(
 }
 
 void ResourceDispatcherHostDelegate::RequestComplete(
-    net::URLRequest* url_request) {
-}
+    net::URLRequest* url_request,
+    int net_error) {}
 
-bool ResourceDispatcherHostDelegate::ShouldEnableLoFiMode(
+// Deprecated.
+void ResourceDispatcherHostDelegate::RequestComplete(
+    net::URLRequest* url_request) {}
+
+PreviewsState ResourceDispatcherHostDelegate::GetPreviewsState(
     const net::URLRequest& url_request,
     content::ResourceContext* resource_context) {
-  return false;
+  return PREVIEWS_UNSPECIFIED;
 }
 
 NavigationData* ResourceDispatcherHostDelegate::GetNavigationData(

@@ -31,6 +31,8 @@ class AXWidgetObjWrapper : public AXAuraObjWrapper,
 
   // WidgetObserver overrides.
   void OnWidgetDestroying(Widget* widget) override;
+  void OnWidgetClosing(Widget* widget) override;
+  void OnWidgetVisibilityChanged(Widget*, bool) override;
 
   // WidgetRemovalsObserver overrides.
   void OnWillRemoveView(Widget* widget, View* view) override;

@@ -58,7 +58,7 @@ private:
     static bool PaintHasBitmap(const SkPaint* paint) {
         if (paint) {
             const SkShader* shader = paint->getShader();
-            if (shader && shader->isABitmap()) {
+            if (shader && shader->isAImage()) {
                 return true;
             }
         }
@@ -119,7 +119,7 @@ struct SkPathCounter {
 
     void operator()(const SkRecords::ClipPath& op) {
         // TODO: does the SkRegion op matter?
-        if (op.opAA.aa && !op.path.isConvex()) {
+        if (op.opAA.aa() && !op.path.isConvex()) {
             fNumSlowPathsAndDashEffects++;
         }
     }

@@ -6,7 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "cc/input/top_controls_manager.h"
+#include "cc/input/browser_controls_offset_manager.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/scroll_node.h"
@@ -36,14 +36,15 @@ void Viewport::Pan(const gfx::Vector2dF& delta) {
 Viewport::ScrollResult Viewport::ScrollBy(const gfx::Vector2dF& delta,
                                           const gfx::Point& viewport_point,
                                           bool is_direct_manipulation,
-                                          bool affect_top_controls) {
+                                          bool affect_browser_controls,
+                                          bool scroll_outer_viewport) {
   if (!OuterScrollLayer())
     return ScrollResult();
 
   gfx::Vector2dF content_delta = delta;
 
-  if (affect_top_controls && ShouldTopControlsConsumeScroll(delta))
-    content_delta -= ScrollTopControls(delta);
+  if (affect_browser_controls && ShouldBrowserControlsConsumeScroll(delta))
+    content_delta -= ScrollBrowserControls(delta);
 
   gfx::Vector2dF pending_content_delta = content_delta;
 
@@ -57,15 +58,26 @@ Viewport::ScrollResult Viewport::ScrollBy(const gfx::Vector2dF& delta,
 
   ScrollResult result;
 
-  ScrollNode* outer_node =
-      scroll_tree.Node(OuterScrollLayer()->scroll_tree_index());
-  pending_content_delta -= host_impl_->ScrollSingleNode(
-      outer_node, pending_content_delta, viewport_point, is_direct_manipulation,
-      &scroll_tree);
+  if (scroll_outer_viewport) {
+    ScrollNode* outer_node =
+        scroll_tree.Node(OuterScrollLayer()->scroll_tree_index());
+    pending_content_delta -= host_impl_->ScrollSingleNode(
+        outer_node, pending_content_delta, viewport_point,
+        is_direct_manipulation, &scroll_tree);
+  }
+
   result.consumed_delta = delta - AdjustOverscroll(pending_content_delta);
 
   result.content_scrolled_delta = content_delta - pending_content_delta;
   return result;
+}
+
+void Viewport::ScrollByInnerFirst(const gfx::Vector2dF& delta) {
+  LayerImpl* scroll_layer = InnerScrollLayer();
+
+  gfx::Vector2dF unused_delta = scroll_layer->ScrollBy(delta);
+  if (!unused_delta.IsZero() && OuterScrollLayer())
+    OuterScrollLayer()->ScrollBy(unused_delta);
 }
 
 bool Viewport::ShouldAnimateViewport(const gfx::Vector2dF& viewport_delta,
@@ -77,7 +89,8 @@ bool Viewport::ShouldAnimateViewport(const gfx::Vector2dF& viewport_delta,
   return max_dim_viewport_delta > max_dim_pending_delta;
 }
 
-gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta) {
+gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta,
+                                        base::TimeDelta delayed_by) {
   if (!OuterScrollLayer())
     return gfx::Vector2dF(0, 0);
 
@@ -111,10 +124,12 @@ gfx::Vector2dF Viewport::ScrollAnimated(const gfx::Vector2dF& delta) {
   bool will_animate = false;
   if (ShouldAnimateViewport(inner_delta, outer_delta)) {
     scroll_tree.ScrollBy(outer_node, outer_delta, host_impl_->active_tree());
-    will_animate = host_impl_->ScrollAnimationCreate(inner_node, inner_delta);
+    will_animate =
+        host_impl_->ScrollAnimationCreate(inner_node, inner_delta, delayed_by);
   } else {
     scroll_tree.ScrollBy(inner_node, inner_delta, host_impl_->active_tree());
-    will_animate = host_impl_->ScrollAnimationCreate(outer_node, outer_delta);
+    will_animate =
+        host_impl_->ScrollAnimationCreate(outer_node, outer_delta, delayed_by);
   }
 
   if (will_animate) {
@@ -183,16 +198,20 @@ void Viewport::PinchEnd() {
   pinch_zoom_active_ = false;
 }
 
-gfx::Vector2dF Viewport::ScrollTopControls(const gfx::Vector2dF& delta) {
+LayerImpl* Viewport::MainScrollLayer() const {
+  return OuterScrollLayer();
+}
+
+gfx::Vector2dF Viewport::ScrollBrowserControls(const gfx::Vector2dF& delta) {
   gfx::Vector2dF excess_delta =
-      host_impl_->top_controls_manager()->ScrollBy(delta);
+      host_impl_->browser_controls_manager()->ScrollBy(delta);
 
   return delta - excess_delta;
 }
 
-bool Viewport::ShouldTopControlsConsumeScroll(
+bool Viewport::ShouldBrowserControlsConsumeScroll(
     const gfx::Vector2dF& scroll_delta) const {
-  // Always consume if it's in the direction to show the top controls.
+  // Always consume if it's in the direction to show the browser controls.
   if (scroll_delta.y() < 0)
     return true;
 

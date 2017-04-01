@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <stdint.h>
+#include <memory>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -12,6 +13,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/frame_messages.h"
@@ -94,10 +96,10 @@ class MHTMLGenerationTest : public ContentBrowserTest {
   MHTMLGenerationTest() : has_mhtml_callback_run_(false), file_size_(0) {}
 
  protected:
-  void SetUp() override {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     ASSERT_TRUE(embedded_test_server()->Start());
-    ContentBrowserTest::SetUp();
+    ContentBrowserTest::SetUpOnMainThread();
   }
 
   void GenerateMHTML(const base::FilePath& path, const GURL& url) {
@@ -111,6 +113,7 @@ class MHTMLGenerationTest : public ContentBrowserTest {
 
   void GenerateMHTMLForCurrentPage(const MHTMLGenerationParams& params) {
     base::RunLoop run_loop;
+    histogram_tester_.reset(new base::HistogramTester());
 
     shell()->web_contents()->GenerateMHTML(
         params, base::Bind(&MHTMLGenerationTest::MHTMLGenerated,
@@ -194,6 +197,7 @@ class MHTMLGenerationTest : public ContentBrowserTest {
 
   bool has_mhtml_callback_run() const { return has_mhtml_callback_run_; }
   int64_t file_size() const { return file_size_; }
+  base::HistogramTester* histogram_tester() { return histogram_tester_.get(); }
 
   base::ScopedTempDir temp_dir_;
 
@@ -206,6 +210,7 @@ class MHTMLGenerationTest : public ContentBrowserTest {
 
   bool has_mhtml_callback_run_;
   int64_t file_size_;
+  std::unique_ptr<base::HistogramTester> histogram_tester_;
 };
 
 // Tests that generating a MHTML does create contents.
@@ -213,7 +218,7 @@ class MHTMLGenerationTest : public ContentBrowserTest {
 // test is to ensure we were successful in creating the MHTML data from the
 // renderer.
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTML) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
   GenerateMHTML(path, embedded_test_server()->GetURL("/simple_page.html"));
@@ -230,6 +235,11 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTML) {
     EXPECT_THAT(mhtml,
                 HasSubstr("Content-Transfer-Encoding: quoted-printable"));
   }
+
+  // Checks that the final status reported to UMA is correct.
+  histogram_tester()->ExpectUniqueSample(
+      "PageSerialization.MhtmlGeneration.FinalSaveStatus",
+      static_cast<int>(MhtmlSaveStatus::SUCCESS), 1);
 }
 
 class GenerateMHTMLAndExitRendererMessageFilter : public BrowserMessageFilter {
@@ -340,7 +350,7 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLAndExitRenderer) {
       new GenerateMHTMLAndExitRendererMessageFilter(render_process_host);
   render_process_host->AddFilter(filter.get());
 
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
   GenerateMHTMLForCurrentPage(MHTMLGenerationParams(path));
 
@@ -355,13 +365,18 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, InvalidPath) {
   ASSERT_FALSE(HasFailure());  // No failures with the invocation itself?
 
   EXPECT_EQ(file_size(), -1);  // Expecting that the callback reported failure.
+
+  // Checks that the final status reported to UMA is correct.
+  histogram_tester()->ExpectUniqueSample(
+      "PageSerialization.MhtmlGeneration.FinalSaveStatus",
+      static_cast<int>(MhtmlSaveStatus::FILE_CREATION_ERROR), 1);
 }
 
 // Tests that MHTML generated using the default 'quoted-printable' encoding does
 // not contain the 'binary' Content-Transfer-Encoding header, and generates
 // base64 encoding for the image part.
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateNonBinaryMHTMLWithImage) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test_binary.mht"));
 
   GURL url(embedded_test_server()->GetURL("/page_with_image.html"));
@@ -384,7 +399,7 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateNonBinaryMHTMLWithImage) {
 // Content-Transfer-Encoding header, and does not contain any base64 encoded
 // parts.
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateBinaryMHTMLWithImage) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test_binary.mht"));
 
   GURL url(embedded_test_server()->GetURL("/page_with_image.html"));
@@ -407,7 +422,7 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateBinaryMHTMLWithImage) {
 }
 
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLIgnoreNoStore) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
   GURL url(embedded_test_server()->GetURL("/nostore.html"));
@@ -432,7 +447,7 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLIgnoreNoStore) {
 }
 
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLObeyNoStoreMainFrame) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
   GURL url(embedded_test_server()->GetURL("/nostore.html"));
@@ -454,11 +469,16 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLObeyNoStoreMainFrame) {
 
   // Make sure the contents are missing.
   EXPECT_THAT(mhtml, Not(HasSubstr("test body")));
+
+  // Checks that the final status reported to UMA is correct.
+  histogram_tester()->ExpectUniqueSample(
+      "PageSerialization.MhtmlGeneration.FinalSaveStatus",
+      static_cast<int>(MhtmlSaveStatus::FRAME_SERIALIZATION_FORBIDDEN), 1);
 }
 
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest,
                        GenerateMHTMLIgnoreNoStoreSubFrame) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
   GURL url(embedded_test_server()->GetURL("/page_with_nostore_iframe.html"));
@@ -485,7 +505,7 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest,
 }
 
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, GenerateMHTMLObeyNoStoreSubFrame) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
   GURL url(embedded_test_server()->GetURL("/page_with_nostore_iframe.html"));
@@ -529,7 +549,7 @@ IN_PROC_BROWSER_TEST_F(
     MHTMLGenerationTest,
     MAYBE_ViewedMHTMLContainsNoStoreContentIfNoCacheControlPolicy) {
   // Generate MHTML, specifying the FailForNoStoreMainFrame policy.
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
   MHTMLGenerationParams params(path);
 
@@ -552,7 +572,7 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest,
                        MAYBE_ViewedMHTMLDoesNotContainNoStoreContent) {
   // Generate MHTML, specifying the FailForNoStoreMainFrame policy.
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
   MHTMLGenerationParams params(path);
   params.cache_control_policy = blink::WebFrameSerializerCacheControlPolicy::
@@ -591,11 +611,10 @@ class MHTMLGenerationSitePerProcessTest : public MHTMLGenerationTest {
   }
 
   void SetUpOnMainThread() override {
-    MHTMLGenerationTest::SetUpOnMainThread();
-
     host_resolver()->AddRule("*", "127.0.0.1");
-    ASSERT_TRUE(embedded_test_server()->Started());
     content::SetupCrossSiteRedirector(embedded_test_server());
+
+    MHTMLGenerationTest::SetUpOnMainThread();
   }
 
  private:
@@ -604,7 +623,7 @@ class MHTMLGenerationSitePerProcessTest : public MHTMLGenerationTest {
 
 // Test for crbug.com/538766.
 IN_PROC_BROWSER_TEST_F(MHTMLGenerationSitePerProcessTest, GenerateMHTML) {
-  base::FilePath path(temp_dir_.path());
+  base::FilePath path(temp_dir_.GetPath());
   path = path.Append(FILE_PATH_LITERAL("test.mht"));
 
   GURL url(embedded_test_server()->GetURL(
@@ -628,6 +647,29 @@ IN_PROC_BROWSER_TEST_F(MHTMLGenerationSitePerProcessTest, GenerateMHTML) {
       mhtml,
       ContainsRegex("Content-Location:.*/frame_tree/page_with_one_frame.html"));
   EXPECT_THAT(mhtml, ContainsRegex("Content-Location:.*/title1.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(MHTMLGenerationTest, RemovePopupOverlay) {
+  base::FilePath path(temp_dir_.GetPath());
+  path = path.Append(FILE_PATH_LITERAL("test.mht"));
+
+  GURL url(embedded_test_server()->GetURL("/popup.html"));
+
+  MHTMLGenerationParams params(path);
+  params.remove_popup_overlay = true;
+
+  GenerateMHTML(params, url);
+  ASSERT_FALSE(HasFailure());
+
+  std::string mhtml;
+  {
+    base::ThreadRestrictions::ScopedAllowIO allow_io_for_content_verification;
+    ASSERT_TRUE(base::ReadFileToString(path, &mhtml));
+  }
+
+  // Make sure the overlay is removed.
+  EXPECT_THAT(mhtml, Not(HasSubstr("class=3D\"overlay")));
+  EXPECT_THAT(mhtml, Not(HasSubstr("class=3D\"modal")));
 }
 
 }  // namespace content

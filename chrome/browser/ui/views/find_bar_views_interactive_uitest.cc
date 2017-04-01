@@ -227,15 +227,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, ButtonsDisabledWithoutText) {
   EXPECT_TRUE(IsViewFocused(browser(), VIEW_ID_FIND_IN_PAGE_CLOSE_BUTTON));
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
-// TODO(erg): linux_aura bringup: http://crbug.com/163931
-#define MAYBE_FocusRestore DISABLED_FocusRestore
-#else
-#define MAYBE_FocusRestore FocusRestore
-#endif
-
-// Flaky because the test server fails to start? See: http://crbug.com/96594.
-IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_FocusRestore) {
+IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url = embedded_test_server()->GetURL("/title1.html");
@@ -351,15 +343,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, DISABLED_SelectionRestoreOnTabSwitch) {
   EXPECT_EQ(ASCIIToUTF16("de"), GetFindBarSelectedText());
 }
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
-// TODO(erg): linux_aura bringup: http://crbug.com/163931
-#define MAYBE_FocusRestoreOnTabSwitch DISABLED_FocusRestoreOnTabSwitch
-#else
-#define MAYBE_FocusRestoreOnTabSwitch FocusRestoreOnTabSwitch
-#endif
-
-// Flaky because the test server fails to start? See: http://crbug.com/96594.
-IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_FocusRestoreOnTabSwitch) {
+IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   // First we navigate to our test page (tab A).
@@ -498,7 +482,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_PasteWithoutTextChange) {
   EXPECT_EQ(ASCIIToUTF16("a"), GetFindBarText());
 
   // Reload the page to clear the matching result.
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
 
   // Focus the Find bar again to make sure the text is selected.
   browser()->GetFindBarController()->Show();
@@ -527,11 +511,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_PasteWithoutTextChange) {
   EXPECT_TRUE(details.number_of_matches() > 0);
 }
 
-#if defined(OS_WIN)
-// TODO(phajdan.jr): Disabling due to possible timing issues on XP
-// interactive_ui_tests.
-// http://crbug.com/311363
-IN_PROC_BROWSER_TEST_F(FindInPageTest, DISABLED_CtrlEnter) {
+IN_PROC_BROWSER_TEST_F(FindInPageTest, CtrlEnter) {
   ui_test_utils::NavigateToURL(browser(),
                                GURL("data:text/html,This is some text with a "
                                     "<a href=\"about:blank\">link</a>."));
@@ -558,4 +538,3 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, DISABLED_CtrlEnter) {
 
   observer.Wait();
 }
-#endif

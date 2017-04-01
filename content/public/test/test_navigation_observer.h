@@ -65,8 +65,7 @@ class TestNavigationObserver {
   void OnDidStopLoading(WebContents* web_contents);
   void OnDidStartProvisionalLoad(RenderFrameHost* render_frame_host,
                                  const GURL& validated_url,
-                                 bool is_error_page,
-                                 bool is_iframe_srcdoc);
+                                 bool is_error_page);
   void OnDidFailProvisionalLoad(RenderFrameHost* render_frame_host,
                                 const GURL& validated_url,
                                 int error_code,
@@ -97,7 +96,7 @@ class TestNavigationObserver {
   base::Callback<void(WebContents*)> web_contents_created_callback_;
 
   // Living TestWebContentsObservers created by this observer.
-  std::set<TestWebContentsObserver*> web_contents_observers_;
+  std::set<std::unique_ptr<TestWebContentsObserver>> web_contents_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(TestNavigationObserver);
 };

@@ -17,7 +17,7 @@ namespace extension_urls {
 
 // This returns the compile-time constant webstore update url specific to
 // Chrome. Usually you should prefer using GetWebstoreUpdateUrl.
-GURL GetDefaultWebstoreUpdateUrl();
+const char* GetDefaultWebstoreUpdateUrl();
 
 // Field to use with webstore URL for tracking launch source.
 extern const char kWebstoreSourceField[];
@@ -198,6 +198,11 @@ extern const char kChromeVoxExtensionId[];
 // Path to preinstalled ChromeVox screen reader extension (relative to
 // |chrome::DIR_RESOURCES|).
 extern const char kChromeVoxExtensionPath[];
+// The extension id of the Select-to-speak extension.
+extern const char kSelectToSpeakExtensionId[];
+// Path to preinstalled Select-to-speak extension (relative to
+// |chrome::DIR_RESOURCES|).
+extern const char kSelectToSpeakExtensionPath[];
 // Name of the manifest file in an extension when a special manifest is used
 // for guest mode.
 extern const char kGuestManifestFilename[];
@@ -245,12 +250,6 @@ extern const char kAppStateReadyToRun[];
 
 // The path part of the file system url used for media file systems.
 extern const char kMediaFileSystemPathPart[];
-
-#if defined(OS_CHROMEOS)
-// Returns true if |extension_id| is one of the IME extensions that will create
-// IME menu.
-bool IsImeMenuExtensionId(const std::string& extension_id);
-#endif
 }  // namespace extension_misc
 
 #endif  // CHROME_COMMON_EXTENSIONS_EXTENSION_CONSTANTS_H_

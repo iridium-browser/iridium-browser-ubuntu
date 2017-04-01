@@ -20,6 +20,8 @@
 #include "content/common/child_process_messages.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
+#include "content/common/input/synthetic_pointer_action_list_params.h"
+#include "content/common/input/synthetic_pointer_action_params.h"
 #include "content/common/input/synthetic_smooth_drag_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_tap_gesture_params.h"
@@ -27,6 +29,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/chrome_object_extensions_utils.h"
 #include "content/public/renderer/render_thread.h"
+#include "content/renderer/gpu/actions_parser.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
@@ -35,10 +38,12 @@
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gpu/ipc/common/gpu_messages.h"
+#include "third_party/WebKit/public/platform/WebMouseEvent.h"
 #include "third_party/WebKit/public/web/WebImageCache.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPrintParams.h"
+#include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkGraphics.h"
@@ -50,6 +55,7 @@
 // Note that headers in third_party/skia/src are fragile.  This is
 // an experimental, fragile, and diagnostic-only document type.
 #include "third_party/skia/src/utils/SkMultiPictureDocument.h"
+#include "ui/events/base_event_utils.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "v8/include/v8.h"
 
@@ -343,8 +349,9 @@ bool BeginSmoothScroll(v8::Isolate* isolate,
     context.web_view()->setIsActive(true);
     blink::WebRect contentRect =
         context.web_view()->mainFrame()->visibleContentRect();
-    blink::WebMouseEvent mouseMove;
-    mouseMove.type = blink::WebInputEvent::MouseMove;
+    blink::WebMouseEvent mouseMove(
+        blink::WebInputEvent::MouseMove, blink::WebInputEvent::NoModifiers,
+        ui::EventTimeStampToSeconds(ui::EventTimeForNow()));
     mouseMove.x = (contentRect.x + contentRect.width / 2) * page_scale_factor;
     mouseMove.y = (contentRect.y + contentRect.height / 2) * page_scale_factor;
     context.web_view()->handleInputEvent(mouseMove);
@@ -399,9 +406,9 @@ bool BeginSmoothScroll(v8::Isolate* isolate,
   }
   gesture_params->distances.push_back(distance);
 
-  // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+  // TODO(678879): If the render_view_impl is destroyed while the gesture is in
   // progress, we will leak the callback and context. This needs to be fixed,
-  // somehow.
+  // somehow, see https://crbug.com/678879.
   context.render_view_impl()->GetWidget()->QueueSyntheticGesture(
       std::move(gesture_params),
       base::Bind(&OnSyntheticGestureCompleted,
@@ -442,9 +449,9 @@ bool BeginSmoothDrag(v8::Isolate* isolate,
       static_cast<SyntheticGestureParams::GestureSourceType>(
           gesture_source_type);
 
-  // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+  // TODO(678879): If the render_view_impl is destroyed while the gesture is in
   // progress, we will leak the callback and context. This needs to be fixed,
-  // somehow.
+  // somehow, see https://crbug.com/678879.
   context.render_view_impl()->GetWidget()->QueueSyntheticGesture(
       std::move(gesture_params),
       base::Bind(&OnSyntheticGestureCompleted,
@@ -453,6 +460,55 @@ bool BeginSmoothDrag(v8::Isolate* isolate,
   return true;
 }
 
+static void PrintDocument(blink::WebFrame* frame, SkDocument* doc) {
+  const float kPageWidth = 612.0f;   // 8.5 inch
+  const float kPageHeight = 792.0f;  // 11 inch
+  const float kMarginTop = 29.0f;    // 0.40 inch
+  const float kMarginLeft = 29.0f;   // 0.40 inch
+  const int kContentWidth = 555;     // 7.71 inch
+  const int kContentHeight = 735;    // 10.21 inch
+  blink::WebPrintParams params(blink::WebSize(kContentWidth, kContentHeight));
+  params.printerDPI = 300;
+  int page_count = frame->printBegin(params);
+  for (int i = 0; i < page_count; ++i) {
+    SkCanvas* canvas = doc->beginPage(kPageWidth, kPageHeight);
+    SkAutoCanvasRestore auto_restore(canvas, true);
+    canvas->translate(kMarginLeft, kMarginTop);
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    float page_shrink = frame->getPrintPageShrink(i);
+    DCHECK(page_shrink > 0);
+    canvas->scale(page_shrink, page_shrink);
+#endif
+
+    frame->printPage(i, canvas);
+  }
+  frame->printEnd();
+}
+
+static void PrintDocumentTofile(v8::Isolate* isolate,
+                                const std::string& filename,
+                                sk_sp<SkDocument> (*make_doc)(SkWStream*)) {
+  GpuBenchmarkingContext context;
+  if (!context.Init(true))
+    return;
+
+  base::FilePath path = base::FilePath::FromUTF8Unsafe(filename);
+  if (!base::PathIsWritable(path.DirName())) {
+    std::string msg("Path is not writable: ");
+    msg.append(path.DirName().MaybeAsASCII());
+    isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(
+        isolate, msg.c_str(), v8::String::kNormalString, msg.length())));
+    return;
+  }
+  SkFILEWStream wStream(path.MaybeAsASCII().c_str());
+  sk_sp<SkDocument> doc = make_doc(&wStream);
+  if (doc) {
+    context.web_frame()->view()->settings()->setShouldPrintBackgrounds(true);
+    PrintDocument(context.web_frame(), doc.get());
+    doc->close();
+  }
+}
 }  // namespace
 
 gin::WrapperInfo GpuBenchmarking::kWrapperInfo = {gin::kEmbedderNativeGin};
@@ -493,6 +549,7 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
       .SetMethod("printToSkPicture", &GpuBenchmarking::PrintToSkPicture)
       .SetMethod("printPagesToSkPictures",
                  &GpuBenchmarking::PrintPagesToSkPictures)
+      .SetMethod("printPagesToXPS", &GpuBenchmarking::PrintPagesToXPS)
       .SetValue("DEFAULT_INPUT", 0)
       .SetValue("TOUCH_INPUT", 1)
       .SetValue("MOUSE_INPUT", 2)
@@ -504,11 +561,13 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
       .SetMethod("scrollBounce", &GpuBenchmarking::ScrollBounce)
       .SetMethod("pinchBy", &GpuBenchmarking::PinchBy)
       .SetMethod("pageScaleFactor", &GpuBenchmarking::PageScaleFactor)
+      .SetMethod("tap", &GpuBenchmarking::Tap)
+      .SetMethod("pointerActionSequence",
+                 &GpuBenchmarking::PointerActionSequence)
       .SetMethod("visualViewportX", &GpuBenchmarking::VisualViewportX)
       .SetMethod("visualViewportY", &GpuBenchmarking::VisualViewportY)
       .SetMethod("visualViewportHeight", &GpuBenchmarking::VisualViewportHeight)
       .SetMethod("visualViewportWidth", &GpuBenchmarking::VisualViewportWidth)
-      .SetMethod("tap", &GpuBenchmarking::Tap)
       .SetMethod("clearImageCache", &GpuBenchmarking::ClearImageCache)
       .SetMethod("runMicroBenchmark", &GpuBenchmarking::RunMicroBenchmark)
       .SetMethod("sendMessageToMicroBenchmark",
@@ -537,41 +596,13 @@ void GpuBenchmarking::SetRasterizeOnlyVisibleContent() {
 
 void GpuBenchmarking::PrintPagesToSkPictures(v8::Isolate* isolate,
                                              const std::string& filename) {
-  GpuBenchmarkingContext context;
-  if (!context.Init(true))
-    return;
+    PrintDocumentTofile(isolate, filename, &SkMakeMultiPictureDocument);
+}
 
-  base::FilePath path = base::FilePath::FromUTF8Unsafe(filename);
-  if (!base::PathIsWritable(path.DirName())) {
-    std::string msg("Path is not writable: ");
-    msg.append(path.DirName().MaybeAsASCII());
-    isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(
-        isolate, msg.c_str(), v8::String::kNormalString, msg.length())));
-    return;
-  }
-  const int kWidth = 612;          // 8.5 inch
-  const int kHeight = 792;         // 11 inch
-  const int kMarginTop = 29;       // 0.40 inch
-  const int kMarginLeft = 29;      // 0.40 inch
-  const int kContentWidth = 555;   // 7.71 inch
-  const int kContentHeight = 735;  // 10.21 inch
-  blink::WebPrintParams params(blink::WebSize(kWidth, kHeight));
-  params.printerDPI = 72;
-  params.printScalingOption = blink::WebPrintScalingOptionSourceSize;
-  params.printContentArea =
-      blink::WebRect(kMarginLeft, kMarginTop, kContentWidth, kContentHeight);
-  SkFILEWStream wStream(path.MaybeAsASCII().c_str());
-  sk_sp<SkDocument> doc = SkMakeMultiPictureDocument(&wStream);
-  int page_count = context.web_frame()->printBegin(params);
-  for (int i = 0; i < page_count; ++i) {
-    SkCanvas* canvas =
-        doc->beginPage(SkIntToScalar(kWidth), SkIntToScalar(kHeight));
-    SkAutoCanvasRestore auto_restore(canvas, true);
-    canvas->translate(SkIntToScalar(kMarginLeft), SkIntToScalar(kMarginTop));
-    context.web_frame()->printPage(i, canvas);
-  }
-  context.web_frame()->printEnd();
-  doc->close();
+void GpuBenchmarking::PrintPagesToXPS(v8::Isolate* isolate,
+                                      const std::string& filename) {
+    PrintDocumentTofile(isolate, filename,
+                        [](SkWStream* s) { return SkDocument::MakeXPS(s); });
 }
 
 void GpuBenchmarking::PrintToSkPicture(v8::Isolate* isolate,
@@ -780,9 +811,9 @@ bool GpuBenchmarking::ScrollBounce(gin::Arguments* args) {
     gesture_params->distances.push_back(-distance + overscroll);
   }
 
-  // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+  // TODO(678879): If the render_view_impl is destroyed while the gesture is in
   // progress, we will leak the callback and context. This needs to be fixed,
-  // somehow.
+  // somehow, see https://crbug.com/678879.
   context.render_view_impl()->GetWidget()->QueueSyntheticGesture(
       std::move(gesture_params),
       base::Bind(&OnSyntheticGestureCompleted,
@@ -830,9 +861,9 @@ bool GpuBenchmarking::PinchBy(gin::Arguments* args) {
                              context.web_frame()->mainWorldScriptContext());
 
 
-  // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+  // TODO(678879): If the render_view_impl is destroyed while the gesture is in
   // progress, we will leak the callback and context. This needs to be fixed,
-  // somehow.
+  // somehow, see https://crbug.com/678879.
   context.render_view_impl()->GetWidget()->QueueSyntheticGesture(
       std::move(gesture_params),
       base::Bind(&OnSyntheticGestureCompleted,
@@ -852,28 +883,40 @@ float GpuBenchmarking::VisualViewportY() {
   GpuBenchmarkingContext context;
   if (!context.Init(false))
     return 0.0;
-  return context.web_view()->visualViewportOffset().y;
+  float y = context.web_view()->visualViewportOffset().y;
+  blink::WebRect rect(0, y, 0, 0);
+  context.render_view_impl()->convertViewportToWindow(&rect);
+  return rect.y;
 }
 
 float GpuBenchmarking::VisualViewportX() {
   GpuBenchmarkingContext context;
   if (!context.Init(false))
     return 0.0;
-  return context.web_view()->visualViewportOffset().x;
+  float x = context.web_view()->visualViewportOffset().x;
+  blink::WebRect rect(x, 0, 0, 0);
+  context.render_view_impl()->convertViewportToWindow(&rect);
+  return rect.x;
 }
 
 float GpuBenchmarking::VisualViewportHeight() {
   GpuBenchmarkingContext context;
   if (!context.Init(false))
     return 0.0;
-  return context.web_view()->visualViewportSize().height;
+  float height = context.web_view()->visualViewportSize().height;
+  blink::WebRect rect(0, 0, 0, height);
+  context.render_view_impl()->convertViewportToWindow(&rect);
+  return rect.height;
 }
 
 float GpuBenchmarking::VisualViewportWidth() {
   GpuBenchmarkingContext context;
   if (!context.Init(false))
     return 0.0;
-  return context.web_view()->visualViewportSize().width;
+  float width = context.web_view()->visualViewportSize().width;
+  blink::WebRect rect(0, 0, width, 0);
+  context.render_view_impl()->convertViewportToWindow(&rect);
+  return rect.width;
 }
 
 bool GpuBenchmarking::Tap(gin::Arguments* args) {
@@ -918,14 +961,61 @@ bool GpuBenchmarking::Tap(gin::Arguments* args) {
                              callback,
                              context.web_frame()->mainWorldScriptContext());
 
-  // TODO(nduca): If the render_view_impl is destroyed while the gesture is in
+  // TODO(678879): If the render_view_impl is destroyed while the gesture is in
   // progress, we will leak the callback and context. This needs to be fixed,
-  // somehow.
+  // somehow, see https://crbug.com/678879.
   context.render_view_impl()->GetWidget()->QueueSyntheticGesture(
       std::move(gesture_params),
       base::Bind(&OnSyntheticGestureCompleted,
                  base::RetainedRef(callback_and_context)));
 
+  return true;
+}
+
+bool GpuBenchmarking::PointerActionSequence(gin::Arguments* args) {
+  GpuBenchmarkingContext context;
+  if (!context.Init(false))
+    return false;
+
+  v8::Local<v8::Function> callback;
+
+  v8::Local<v8::Object> obj;
+  if (!args->GetNext(&obj)) {
+    args->ThrowError();
+    return false;
+  }
+
+  std::unique_ptr<V8ValueConverter> converter =
+      base::WrapUnique(V8ValueConverter::create());
+  v8::Local<v8::Context> v8_context =
+      context.web_frame()->mainWorldScriptContext();
+  std::unique_ptr<base::Value> value = converter->FromV8Value(obj, v8_context);
+
+  // Get all the pointer actions from the user input and wrap them into a
+  // SyntheticPointerActionListParams object.
+  ActionsParser actions_parser(value.get());
+  if (!actions_parser.ParsePointerActionSequence())
+    return false;
+
+  std::unique_ptr<SyntheticPointerActionListParams> gesture_params =
+      actions_parser.gesture_params();
+
+  if (!GetOptionalArg(args, &callback)) {
+    args->ThrowError();
+    return false;
+  }
+
+  // At the end, we will send a 'FINISH' action and need a callback.
+  scoped_refptr<CallbackAndContext> callback_and_context =
+      new CallbackAndContext(args->isolate(), callback,
+                             context.web_frame()->mainWorldScriptContext());
+  // TODO(678879): If the render_view_impl is destroyed while the gesture is in
+  // progress, we will leak the callback and context. This needs to be fixed,
+  // somehow, see https://crbug.com/678879.
+  context.render_view_impl()->GetWidget()->QueueSyntheticGesture(
+      std::move(gesture_params),
+      base::Bind(&OnSyntheticGestureCompleted,
+                 base::RetainedRef(callback_and_context)));
   return true;
 }
 

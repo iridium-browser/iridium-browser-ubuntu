@@ -12,22 +12,26 @@
 #include "compiler/translator/OutputESSL.h"
 #include "angle_gl.h"
 
+namespace sh
+{
+
 TranslatorESSL::TranslatorESSL(sh::GLenum type, ShShaderSpec spec)
     : TCompiler(type, spec, SH_ESSL_OUTPUT)
 {
 }
 
-void TranslatorESSL::initBuiltInFunctionEmulator(BuiltInFunctionEmulator *emu, int compileOptions)
+void TranslatorESSL::initBuiltInFunctionEmulator(BuiltInFunctionEmulator *emu,
+                                                 ShCompileOptions compileOptions)
 {
-    if (compileOptions & SH_EMULATE_BUILT_IN_FUNCTIONS)
+    if (compileOptions & SH_EMULATE_ATAN2_FLOAT_FUNCTION)
     {
-        InitBuiltInFunctionEmulatorForGLSLWorkarounds(emu, getShaderType());
+        InitBuiltInAtanFunctionEmulatorForGLSLWorkarounds(emu);
     }
 }
 
-void TranslatorESSL::translate(TIntermNode *root, int compileOptions)
+void TranslatorESSL::translate(TIntermNode *root, ShCompileOptions compileOptions)
 {
-    TInfoSinkBase& sink = getInfoSink().obj;
+    TInfoSinkBase &sink = getInfoSink().obj;
 
     int shaderVer = getShaderVersion();
     if (shaderVer > 100)
@@ -36,13 +40,14 @@ void TranslatorESSL::translate(TIntermNode *root, int compileOptions)
     }
 
     // Write built-in extension behaviors.
-    writeExtensionBehavior();
+    writeExtensionBehavior(compileOptions);
 
     // Write pragmas after extensions because some drivers consider pragmas
     // like non-preprocessor tokens.
     writePragma(compileOptions);
 
-    bool precisionEmulation = getResources().WEBGL_debug_shader_precision && getPragma().debugShaderPrecision;
+    bool precisionEmulation =
+        getResources().WEBGL_debug_shader_precision && getPragma().debugShaderPrecision;
 
     if (precisionEmulation)
     {
@@ -80,14 +85,23 @@ void TranslatorESSL::translate(TIntermNode *root, int compileOptions)
 
     if (getShaderType() == GL_COMPUTE_SHADER && isComputeShaderLocalSizeDeclared())
     {
-        const TLocalSize &localSize = getComputeShaderLocalSize();
+        const sh::WorkGroupSize &localSize = getComputeShaderLocalSize();
         sink << "layout (local_size_x=" << localSize[0] << ", local_size_y=" << localSize[1]
              << ", local_size_z=" << localSize[2] << ") in;\n";
     }
 
     // Write translated shader.
     TOutputESSL outputESSL(sink, getArrayIndexClampingStrategy(), getHashFunction(), getNameMap(),
-                           getSymbolTable(), shaderVer, precisionEmulation);
+                           getSymbolTable(), getShaderType(), shaderVer, precisionEmulation,
+                           compileOptions);
+
+    if (compileOptions & SH_TRANSLATE_VIEWID_OVR_TO_UNIFORM)
+    {
+        TName uniformName(TString("ViewID_OVR"));
+        uniformName.setInternal(true);
+        sink << "highp uniform int " << outputESSL.hashName(uniformName) << ";\n";
+    }
+
     root->traverse(&outputESSL);
 }
 
@@ -97,22 +111,39 @@ bool TranslatorESSL::shouldFlattenPragmaStdglInvariantAll()
     return false;
 }
 
-void TranslatorESSL::writeExtensionBehavior() {
-    TInfoSinkBase& sink = getInfoSink().obj;
-    const TExtensionBehavior& extBehavior = getExtensionBehavior();
-    for (TExtensionBehavior::const_iterator iter = extBehavior.begin();
-         iter != extBehavior.end(); ++iter) {
-        if (iter->second != EBhUndefined) {
-            if (getResources().NV_shader_framebuffer_fetch && iter->first == "GL_EXT_shader_framebuffer_fetch") {
+void TranslatorESSL::writeExtensionBehavior(ShCompileOptions compileOptions)
+{
+    TInfoSinkBase &sink                   = getInfoSink().obj;
+    const TExtensionBehavior &extBehavior = getExtensionBehavior();
+    for (TExtensionBehavior::const_iterator iter = extBehavior.begin(); iter != extBehavior.end();
+         ++iter)
+    {
+        if (iter->second != EBhUndefined)
+        {
+            if (getResources().NV_shader_framebuffer_fetch &&
+                iter->first == "GL_EXT_shader_framebuffer_fetch")
+            {
                 sink << "#extension GL_NV_shader_framebuffer_fetch : "
                      << getBehaviorString(iter->second) << "\n";
-            } else if (getResources().NV_draw_buffers && iter->first == "GL_EXT_draw_buffers") {
-                sink << "#extension GL_NV_draw_buffers : "
-                     << getBehaviorString(iter->second) << "\n";
-            } else {
-                sink << "#extension " << iter->first << " : "
-                     << getBehaviorString(iter->second) << "\n";
+            }
+            else if (getResources().NV_draw_buffers && iter->first == "GL_EXT_draw_buffers")
+            {
+                sink << "#extension GL_NV_draw_buffers : " << getBehaviorString(iter->second)
+                     << "\n";
+            }
+            else if (compileOptions & SH_TRANSLATE_VIEWID_OVR_TO_UNIFORM &&
+                     (iter->first == "GL_OVR_multiview" || iter->first == "GL_OVR_multiview2"))
+            {
+                // No output
+                continue;
+            }
+            else
+            {
+                sink << "#extension " << iter->first << " : " << getBehaviorString(iter->second)
+                     << "\n";
             }
         }
     }
 }
+
+}  // namespace sh

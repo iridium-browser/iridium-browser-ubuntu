@@ -43,7 +43,8 @@ class EvdevThread : public base::Thread {
         new InputDeviceFactoryEvdevProxy(base::ThreadTaskRunnerHandle::Get(),
                                          input_device_factory_->GetWeakPtr()));
 
-    cursor_->InitializeOnEvdev();
+    if (cursor_)
+      cursor_->InitializeOnEvdev();
 
     init_runner_->PostTask(FROM_HERE,
                            base::Bind(init_callback_, base::Passed(&proxy)));
@@ -79,8 +80,10 @@ void EventThreadEvdev::Start(
     const EventThreadStartCallback& callback) {
   TRACE_EVENT0("evdev", "EventThreadEvdev::Start");
   thread_.reset(new EvdevThread(std::move(dispatcher), cursor, callback));
-  if (!thread_->StartWithOptions(
-          base::Thread::Options(base::MessageLoop::TYPE_UI, 0)))
+  base::Thread::Options thread_options;
+  thread_options.message_loop_type = base::MessageLoop::TYPE_UI;
+  thread_options.priority = base::ThreadPriority::DISPLAY;
+  if (!thread_->StartWithOptions(thread_options))
     LOG(FATAL) << "Failed to create input thread";
 }
 

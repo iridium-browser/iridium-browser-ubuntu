@@ -10,13 +10,14 @@
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 #include "chrome/browser/ui/views/content_setting_bubble_contents.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
+#include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/widget/widget.h"
@@ -26,36 +27,24 @@ namespace {
 const int kStayOpenTimeMS = 3200;
 }
 
-
 // static
-const int ContentSettingImageView::kOpenTimeMS = 150;
 const int ContentSettingImageView::kAnimationDurationMS =
-    (kOpenTimeMS * 2) + kStayOpenTimeMS;
+    (IconLabelBubbleView::kOpenTimeMS * 2) + kStayOpenTimeMS;
 
 ContentSettingImageView::ContentSettingImageView(
-    ContentSettingImageModel* image_model,
+    std::unique_ptr<ContentSettingImageModel> image_model,
     LocationBarView* parent,
-    const gfx::FontList& font_list,
-    SkColor parent_background_color)
-    : IconLabelBubbleView(0, font_list, parent_background_color, false),
+    const gfx::FontList& font_list)
+    : IconLabelBubbleView(font_list, false),
       parent_(parent),
-      content_setting_image_model_(image_model),
+      content_setting_image_model_(std::move(image_model)),
       slide_animator_(this),
       pause_animation_(false),
       pause_animation_state_(0.0),
       bubble_view_(nullptr),
       suppress_mouse_released_action_(false) {
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    SetInkDropMode(InkDropMode::ON);
-    SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-  } else {
-    static const int kBackgroundImages[] =
-        IMAGE_GRID(IDR_OMNIBOX_CONTENT_SETTING_BUBBLE);
-    SetBackgroundImageGrid(kBackgroundImages);
-    image()->set_interactive(true);
-    image()->SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-  }
-
+  SetInkDropMode(InkDropMode::ON);
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   image()->SetHorizontalAlignment(base::i18n::IsRTL()
                                       ? views::ImageView::TRAILING
                                       : views::ImageView::LEADING);
@@ -148,16 +137,22 @@ void ContentSettingImageView::OnGestureEvent(ui::GestureEvent* event) {
     event->SetHandled();
 }
 
+bool ContentSettingImageView::GetTooltipText(const gfx::Point& p,
+                                             base::string16* tooltip) const {
+  *tooltip = content_setting_image_model_->get_tooltip();
+  return !tooltip->empty();
+}
+
 void ContentSettingImageView::OnNativeThemeChanged(
     const ui::NativeTheme* native_theme) {
-  if (ui::MaterialDesignController::IsModeMaterial())
-    UpdateImage();
-
+  UpdateImage();
   IconLabelBubbleView::OnNativeThemeChanged(native_theme);
 }
 
-bool ContentSettingImageView::ShouldShowInkDropForFocus() const {
-  return true;
+std::unique_ptr<views::InkDrop> ContentSettingImageView::CreateInkDrop() {
+  std::unique_ptr<views::InkDropImpl> ink_drop = CreateDefaultInkDropImpl();
+  ink_drop->SetShowHighlightOnFocus(true);
+  return std::move(ink_drop);
 }
 
 SkColor ContentSettingImageView::GetTextColor() const {
@@ -165,13 +160,10 @@ SkColor ContentSettingImageView::GetTextColor() const {
       ui::NativeTheme::kColorId_TextfieldDefaultColor);
 }
 
-SkColor ContentSettingImageView::GetBorderColor() const {
-  return gfx::kGoogleYellow700;
-}
-
-bool ContentSettingImageView::ShouldShowBackground() const {
+bool ContentSettingImageView::ShouldShowLabel() const {
   return (!IsShrinking() ||
-          (width() >= MinimumWidthForImageWithBackgroundShown())) &&
+          (width() > (image()->GetPreferredSize().width() +
+                      2 * LocationBarView::kHorizontalPadding))) &&
          (slide_animator_.is_animating() || pause_animation_);
 }
 
@@ -209,8 +201,7 @@ bool ContentSettingImageView::OnActivate(const ui::Event& event) {
     // closes. The former looks more jerky, so we avoid it unless the animation
     // hasn't even fully exposed the image yet, in which case pausing with half
     // an image visible will look broken.
-    if (!pause_animation_ && ShouldShowBackground() &&
-        (width() > MinimumWidthForImageWithBackgroundShown())) {
+    if (!pause_animation_ && ShouldShowLabel()) {
       pause_animation_ = true;
       pause_animation_state_ = slide_animator_.GetCurrentValue();
     }
@@ -219,11 +210,14 @@ bool ContentSettingImageView::OnActivate(const ui::Event& event) {
 
   content::WebContents* web_contents = parent_->GetWebContents();
   if (web_contents && !bubble_view_) {
+    views::View* anchor = this;
+    if (ui::MaterialDesignController::IsSecondaryUiMaterial())
+      anchor = parent_;
     bubble_view_ = new ContentSettingBubbleContents(
                 content_setting_image_model_->CreateBubbleModel(
                     parent_->delegate()->GetContentSettingBubbleModelDelegate(),
                     web_contents, parent_->profile()),
-                web_contents, this, views::BubbleBorder::TOP_RIGHT);
+                web_contents, anchor, views::BubbleBorder::TOP_RIGHT);
     views::Widget* bubble_widget =
         views::BubbleDialogDelegateView::CreateBubble(bubble_view_);
     bubble_widget->AddObserver(this);
@@ -232,7 +226,7 @@ bool ContentSettingImageView::OnActivate(const ui::Event& event) {
     // bubble doesn't need an arrow. If the user clicks during an animation,
     // the animation simply pauses and no other visible state change occurs, so
     // show the arrow in this case.
-    if (ui::MaterialDesignController::IsModeMaterial() && !pause_animation_) {
+    if (!pause_animation_) {
       AnimateInkDrop(views::InkDropState::ACTIVATED,
                      ui::LocatedEvent::FromIfValid(&event));
       bubble_view_->SetArrowPaintType(views::BubbleBorder::PAINT_TRANSPARENT);
@@ -287,5 +281,4 @@ void ContentSettingImageView::OnWidgetVisibilityChanged(views::Widget* widget,
 
 void ContentSettingImageView::UpdateImage() {
   SetImage(content_setting_image_model_->GetIcon(GetTextColor()).AsImageSkia());
-  image()->SetTooltipText(content_setting_image_model_->get_tooltip());
 }

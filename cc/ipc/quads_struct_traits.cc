@@ -8,39 +8,39 @@
 namespace mojo {
 
 cc::DrawQuad* AllocateAndConstruct(
-    cc::mojom::DrawQuadState::DataView::Tag material,
+    cc::mojom::DrawQuadStateDataView::Tag material,
     cc::QuadList* list) {
   cc::DrawQuad* quad = nullptr;
   switch (material) {
-    case cc::mojom::DrawQuadState::DataView::Tag::DEBUG_BORDER_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::DEBUG_BORDER_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::DebugBorderDrawQuad>();
       quad->material = cc::DrawQuad::DEBUG_BORDER;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::RENDER_PASS_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::RENDER_PASS_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::RenderPassDrawQuad>();
       quad->material = cc::DrawQuad::RENDER_PASS;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::SOLID_COLOR_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::SOLID_COLOR_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::SolidColorDrawQuad>();
       quad->material = cc::DrawQuad::SOLID_COLOR;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::STREAM_VIDEO_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::STREAM_VIDEO_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::StreamVideoDrawQuad>();
       quad->material = cc::DrawQuad::STREAM_VIDEO_CONTENT;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::SURFACE_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::SURFACE_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::SurfaceDrawQuad>();
       quad->material = cc::DrawQuad::SURFACE_CONTENT;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::TEXTURE_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::TEXTURE_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::TextureDrawQuad>();
       quad->material = cc::DrawQuad::TEXTURE_CONTENT;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::TILE_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::TILE_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::TileDrawQuad>();
       quad->material = cc::DrawQuad::TILED_CONTENT;
       return quad;
-    case cc::mojom::DrawQuadState::DataView::Tag::YUV_VIDEO_QUAD_STATE:
+    case cc::mojom::DrawQuadStateDataView::Tag::YUV_VIDEO_QUAD_STATE:
       quad = list->AllocateAndConstruct<cc::YUVVideoDrawQuad>();
       quad->material = cc::DrawQuad::YUV_VIDEO_CONTENT;
       return quad;
@@ -67,13 +67,14 @@ bool StructTraits<cc::mojom::RenderPassQuadStateDataView, cc::DrawQuad>::Read(
   quad->resources.ids[cc::RenderPassDrawQuad::kMaskResourceIdIndex] =
       data.mask_resource_id();
   quad->resources.count = data.mask_resource_id() ? 1 : 0;
-  return data.ReadRenderPassId(&quad->render_pass_id) &&
-         data.ReadMaskUvScale(&quad->mask_uv_scale) &&
+  quad->render_pass_id = data.render_pass_id();
+  // RenderPass ids are never zero.
+  if (!quad->render_pass_id)
+    return false;
+  return data.ReadMaskUvScale(&quad->mask_uv_scale) &&
          data.ReadMaskTextureSize(&quad->mask_texture_size) &&
-         data.ReadFilters(&quad->filters) &&
          data.ReadFiltersScale(&quad->filters_scale) &&
-         data.ReadFiltersOrigin(&quad->filters_origin) &&
-         data.ReadBackgroundFilters(&quad->background_filters);
+         data.ReadFiltersOrigin(&quad->filters_origin);
 }
 
 // static
@@ -113,8 +114,15 @@ bool StructTraits<cc::mojom::TextureQuadStateDataView, cc::DrawQuad>::Read(
     cc::mojom::TextureQuadStateDataView data,
     cc::DrawQuad* out) {
   cc::TextureDrawQuad* quad = static_cast<cc::TextureDrawQuad*>(out);
+
   quad->resources.ids[cc::TextureDrawQuad::kResourceIdIndex] =
       data.resource_id();
+  if (!data.ReadResourceSizeInPixels(
+          &quad->overlay_resources
+               .size_in_pixels[cc::TextureDrawQuad::kResourceIdIndex])) {
+    return false;
+  }
+
   quad->resources.count = 1;
   quad->premultiplied_alpha = data.premultiplied_alpha();
   if (!data.ReadUvTopLeft(&quad->uv_top_left) ||

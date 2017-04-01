@@ -13,12 +13,12 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "device/geolocation/geoposition.h"
-#include "device/geolocation/location_arbitrator_impl.h"
+#include "device/geolocation/location_arbitrator.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -183,7 +183,7 @@ struct AccessPointLess {
 };
 
 GURL FormRequestURL(const GURL& url) {
-  if (url == LocationArbitratorImpl::DefaultNetworkProviderURL()) {
+  if (url == LocationArbitrator::DefaultNetworkProviderURL()) {
     std::string api_key = google_apis::GetAPIKey();
     if (!api_key.empty()) {
       std::string query(url.query());
@@ -250,13 +250,16 @@ void AddWifiData(const WifiData& wifi_data,
 
   base::ListValue* wifi_access_point_list = new base::ListValue();
   for (auto* ap_data : access_points_by_signal_strength) {
-    base::DictionaryValue* wifi_dict = new base::DictionaryValue();
-    AddString("macAddress", base::UTF16ToUTF8(ap_data->mac_address), wifi_dict);
-    AddInteger("signalStrength", ap_data->radio_signal_strength, wifi_dict);
-    AddInteger("age", age_milliseconds, wifi_dict);
-    AddInteger("channel", ap_data->channel, wifi_dict);
-    AddInteger("signalToNoiseRatio", ap_data->signal_to_noise, wifi_dict);
-    wifi_access_point_list->Append(wifi_dict);
+    std::unique_ptr<base::DictionaryValue> wifi_dict(
+        new base::DictionaryValue());
+    AddString("macAddress", base::UTF16ToUTF8(ap_data->mac_address),
+              wifi_dict.get());
+    AddInteger("signalStrength", ap_data->radio_signal_strength,
+               wifi_dict.get());
+    AddInteger("age", age_milliseconds, wifi_dict.get());
+    AddInteger("channel", ap_data->channel, wifi_dict.get());
+    AddInteger("signalToNoiseRatio", ap_data->signal_to_noise, wifi_dict.get());
+    wifi_access_point_list->Append(std::move(wifi_dict));
   }
   request->Set("wifiAccessPoints", wifi_access_point_list);
 }
@@ -364,7 +367,7 @@ bool ParseServerResponse(const std::string& response_body,
     return false;
   }
 
-  if (!response_value->IsType(base::Value::TYPE_DICTIONARY)) {
+  if (!response_value->IsType(base::Value::Type::DICTIONARY)) {
     VLOG(1) << "ParseServerResponse() : Unexpected response type "
             << response_value->GetType();
     return false;
@@ -385,8 +388,8 @@ bool ParseServerResponse(const std::string& response_body,
   }
   DCHECK(location_value);
 
-  if (!location_value->IsType(base::Value::TYPE_DICTIONARY)) {
-    if (!location_value->IsType(base::Value::TYPE_NULL)) {
+  if (!location_value->IsType(base::Value::Type::DICTIONARY)) {
+    if (!location_value->IsType(base::Value::Type::NONE)) {
       VLOG(1) << "ParseServerResponse() : Unexpected location type "
               << location_value->GetType();
       // If the network provider was unable to provide a position fix, it should

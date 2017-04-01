@@ -8,33 +8,34 @@
 #include "core/dom/DOMException.h"
 #include "modules/presentation/PresentationAvailability.h"
 #include "modules/presentation/PresentationError.h"
+#include "modules/presentation/PresentationRequest.h"
 #include "public/platform/modules/presentation/WebPresentationError.h"
 
 namespace blink {
 
-PresentationAvailabilityCallbacks::PresentationAvailabilityCallbacks(ScriptPromiseResolver* resolver, const KURL& url)
-    : m_resolver(resolver)
-    , m_url(url)
-{
-    ASSERT(m_resolver);
+PresentationAvailabilityCallbacks::PresentationAvailabilityCallbacks(
+    PresentationAvailabilityProperty* resolver,
+    const Vector<KURL>& urls)
+    : m_resolver(resolver), m_urls(urls) {
+  ASSERT(m_resolver);
 }
 
-PresentationAvailabilityCallbacks::~PresentationAvailabilityCallbacks()
-{
+PresentationAvailabilityCallbacks::~PresentationAvailabilityCallbacks() {}
+
+void PresentationAvailabilityCallbacks::onSuccess(bool value) {
+  if (!m_resolver->getExecutionContext() ||
+      m_resolver->getExecutionContext()->isContextDestroyed())
+    return;
+  m_resolver->resolve(
+      PresentationAvailability::take(m_resolver.get(), m_urls, value));
 }
 
-void PresentationAvailabilityCallbacks::onSuccess(bool value)
-{
-    if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-        return;
-    m_resolver->resolve(PresentationAvailability::take(m_resolver.get(), m_url, value));
+void PresentationAvailabilityCallbacks::onError(
+    const WebPresentationError& error) {
+  if (!m_resolver->getExecutionContext() ||
+      m_resolver->getExecutionContext()->isContextDestroyed())
+    return;
+  m_resolver->reject(PresentationError::take(error));
 }
 
-void PresentationAvailabilityCallbacks::onError(const WebPresentationError& error)
-{
-    if (!m_resolver->getExecutionContext() || m_resolver->getExecutionContext()->activeDOMObjectsAreStopped())
-        return;
-    m_resolver->reject(PresentationError::take(m_resolver.get(), error));
-}
-
-} // namespace blink
+}  // namespace blink

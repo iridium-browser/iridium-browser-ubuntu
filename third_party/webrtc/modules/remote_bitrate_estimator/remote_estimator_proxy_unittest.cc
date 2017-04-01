@@ -8,13 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest/include/gtest/gtest.h"
-
 #include "webrtc/modules/pacing/packet_router.h"
 #include "webrtc/modules/remote_bitrate_estimator/remote_estimator_proxy.h"
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet/transport_feedback.h"
 #include "webrtc/system_wrappers/include/clock.h"
+#include "webrtc/test/gmock.h"
+#include "webrtc/test/gtest.h"
 
 using ::testing::_;
 using ::testing::InSequence;
@@ -43,7 +42,7 @@ class RemoteEstimatorProxyTest : public ::testing::Test {
 
   void Process() {
     clock_.AdvanceTimeMilliseconds(
-        RemoteEstimatorProxy::kDefaultProcessIntervalMs);
+        RemoteEstimatorProxy::kDefaultSendIntervalMs);
     proxy_.Process();
   }
 
@@ -67,7 +66,7 @@ TEST_F(RemoteEstimatorProxyTest, SendsSinglePacketFeedback) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<rtcp::TransportFeedback::StatusSymbol> status_vec =
             packet->GetStatusVector();
@@ -92,7 +91,7 @@ TEST_F(RemoteEstimatorProxyTest, DuplicatedPackets) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<rtcp::TransportFeedback::StatusSymbol> status_vec =
             packet->GetStatusVector();
@@ -123,7 +122,7 @@ TEST_F(RemoteEstimatorProxyTest, FeedbackWithMissingStart) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq + 2, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<rtcp::TransportFeedback::StatusSymbol> status_vec =
             packet->GetStatusVector();
@@ -152,7 +151,7 @@ TEST_F(RemoteEstimatorProxyTest, SendsFeedbackWithVaryingDeltas) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<rtcp::TransportFeedback::StatusSymbol> status_vec =
             packet->GetStatusVector();
@@ -188,7 +187,7 @@ TEST_F(RemoteEstimatorProxyTest, SendsFragmentedFeedback) {
       .WillOnce(Invoke([kTooLargeDelta, this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<rtcp::TransportFeedback::StatusSymbol> status_vec =
             packet->GetStatusVector();
@@ -207,7 +206,7 @@ TEST_F(RemoteEstimatorProxyTest, SendsFragmentedFeedback) {
       .WillOnce(Invoke([kTooLargeDelta, this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq + 1, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<rtcp::TransportFeedback::StatusSymbol> status_vec =
             packet->GetStatusVector();
@@ -236,7 +235,7 @@ TEST_F(RemoteEstimatorProxyTest, GracefullyHandlesReorderingAndWrap) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<int64_t> delta_vec = packet->GetReceiveDeltasUs();
         EXPECT_EQ(1u, delta_vec.size());
@@ -256,7 +255,7 @@ TEST_F(RemoteEstimatorProxyTest, ResendsTimestampsOnReordering) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<int64_t> delta_vec = packet->GetReceiveDeltasUs();
         EXPECT_EQ(2u, delta_vec.size());
@@ -274,7 +273,7 @@ TEST_F(RemoteEstimatorProxyTest, ResendsTimestampsOnReordering) {
       .WillOnce(Invoke([this](rtcp::TransportFeedback* packet) {
         packet->Build();
         EXPECT_EQ(kBaseSeq + 1, packet->GetBaseSequence());
-        EXPECT_EQ(kMediaSsrc, packet->GetMediaSourceSsrc());
+        EXPECT_EQ(kMediaSsrc, packet->media_ssrc());
 
         std::vector<int64_t> delta_vec = packet->GetReceiveDeltasUs();
         EXPECT_EQ(2u, delta_vec.size());
@@ -349,6 +348,47 @@ TEST_F(RemoteEstimatorProxyTest, RemovesTimestampsOutOfScope) {
       }));
 
   Process();
+}
+
+TEST_F(RemoteEstimatorProxyTest, TimeUntilNextProcessIsZeroBeforeFirstProcess) {
+  EXPECT_EQ(0, proxy_.TimeUntilNextProcess());
+}
+
+TEST_F(RemoteEstimatorProxyTest, TimeUntilNextProcessIsDefaultOnUnkownBitrate) {
+  Process();
+  EXPECT_EQ(RemoteEstimatorProxy::kDefaultSendIntervalMs,
+            proxy_.TimeUntilNextProcess());
+}
+
+TEST_F(RemoteEstimatorProxyTest, TimeUntilNextProcessIsMinIntervalOn300kbps) {
+  Process();
+  proxy_.OnBitrateChanged(300000);
+  EXPECT_EQ(RemoteEstimatorProxy::kMinSendIntervalMs,
+            proxy_.TimeUntilNextProcess());
+}
+
+TEST_F(RemoteEstimatorProxyTest, TimeUntilNextProcessIsMaxIntervalOn0kbps) {
+  Process();
+  // TimeUntilNextProcess should be limited by |kMaxSendIntervalMs| when
+  // bitrate is small. We choose 0 bps as a special case, which also tests
+  // erroneous behaviors like division-by-zero.
+  proxy_.OnBitrateChanged(0);
+  EXPECT_EQ(RemoteEstimatorProxy::kMaxSendIntervalMs,
+            proxy_.TimeUntilNextProcess());
+}
+
+TEST_F(RemoteEstimatorProxyTest, TimeUntilNextProcessIsMaxIntervalOn20kbps) {
+  Process();
+  proxy_.OnBitrateChanged(20000);
+  EXPECT_EQ(RemoteEstimatorProxy::kMaxSendIntervalMs,
+            proxy_.TimeUntilNextProcess());
+}
+
+TEST_F(RemoteEstimatorProxyTest, TwccReportsUse5PercentOfAvailableBandwidth) {
+  Process();
+  proxy_.OnBitrateChanged(80000);
+  // 80kbps * 0.05 = TwccReportSize(68B * 8b/B) * 1000ms / SendInterval(136ms)
+  EXPECT_EQ(136, proxy_.TimeUntilNextProcess());
 }
 
 }  // namespace webrtc

@@ -14,7 +14,7 @@
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
-#include "media/audio/audio_device_name.h"
+#include "media/audio/audio_device_description.h"
 #include "media/audio/audio_logging.h"
 #include "media/base/audio_parameters.h"
 
@@ -117,21 +117,23 @@ class MEDIA_EXPORT AudioManager {
   // threads to avoid blocking the rest of the application.
   virtual void ShowAudioInputSettings() = 0;
 
-  // Appends a list of available input devices to |device_names|,
+  // Appends a list of available input devices to |device_descriptions|,
   // which must initially be empty. It is not guaranteed that all the
   // devices in the list support all formats and sample rates for
   // recording.
   //
   // Not threadsafe; in production this should only be called from the
-  // Audio worker thread (see GetWorkerTaskRunner()).
-  virtual void GetAudioInputDeviceNames(AudioDeviceNames* device_names) = 0;
+  // Audio worker thread (see GetTaskRunner()).
+  virtual void GetAudioInputDeviceDescriptions(
+      AudioDeviceDescriptions* device_descriptions) = 0;
 
-  // Appends a list of available output devices to |device_names|,
+  // Appends a list of available output devices to |device_descriptions|,
   // which must initially be empty.
   //
   // Not threadsafe; in production this should only be called from the
-  // Audio worker thread (see GetWorkerTaskRunner()).
-  virtual void GetAudioOutputDeviceNames(AudioDeviceNames* device_names) = 0;
+  // Audio worker thread (see GetTaskRunner()).
+  virtual void GetAudioOutputDeviceDescriptions(
+      AudioDeviceDescriptions* device_descriptions) = 0;
 
   // Log callback used for sending log messages from a stream to the object
   // that manages the stream.
@@ -237,7 +239,7 @@ class MEDIA_EXPORT AudioManager {
   // will be empty (which the caller can then interpret to be the default output
   // device).  Implementations that don't yet support this feature, must return
   // an empty string. Must be called on the audio worker thread (see
-  // GetWorkerTaskRunner()).
+  // GetTaskRunner()).
   virtual std::string GetAssociatedOutputDeviceID(
       const std::string& input_device_id) = 0;
 
@@ -245,6 +247,12 @@ class MEDIA_EXPORT AudioManager {
   // instances of the given component.  See AudioLogFactory for more details.
   virtual std::unique_ptr<AudioLog> CreateAudioLog(
       AudioLogFactory::AudioComponent component) = 0;
+
+  // Gets the name of the audio manager (e.g., Windows, Mac, PulseAudio).
+  virtual const char* GetName() = 0;
+
+  // Limits the number of streams that can be created for testing purposes.
+  virtual void SetMaxStreamCountForTesting(int max_input, int max_output);
 
  protected:
   AudioManager(scoped_refptr<base::SingleThreadTaskRunner> task_runner,

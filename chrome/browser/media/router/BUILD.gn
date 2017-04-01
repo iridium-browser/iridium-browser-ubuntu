@@ -13,6 +13,8 @@ static_library("router") {
     "//components/keyed_service/content",
     "//components/keyed_service/core",
     "//content/public/browser",
+    "//content/public/common",
+    "//third_party/icu",
     "//url",
   ]
   sources = [
@@ -45,12 +47,20 @@ static_library("router") {
     "media_source.h",
     "media_source_helper.cc",
     "media_source_helper.h",
+    "offscreen_presentation_manager.cc",
+    "offscreen_presentation_manager.h",
+    "offscreen_presentation_manager_factory.cc",
+    "offscreen_presentation_manager_factory.h",
     "presentation_media_sinks_observer.cc",
     "presentation_media_sinks_observer.h",
     "presentation_request.cc",
     "presentation_request.h",
     "presentation_service_delegate_impl.cc",
     "presentation_service_delegate_impl.h",
+    "presentation_service_delegate_observers.cc",
+    "presentation_service_delegate_observers.h",
+    "receiver_presentation_service_delegate_impl.cc",
+    "receiver_presentation_service_delegate_impl.h",
     "render_frame_host_id.h",
     "route_message.cc",
     "route_message.h",
@@ -67,6 +77,12 @@ static_library("router") {
       "//mojo/public/cpp/bindings",
     ]
     sources += [
+      # TODO(crbug.com/646627): Move media_router_ui_service* to
+      # chrome/browser/ui/.
+      "media_router_ui_service.cc",
+      "media_router_ui_service.h",
+      "media_router_ui_service_factory.cc",
+      "media_router_ui_service_factory.h",
       "mojo/media_route_provider_util_win.cc",
       "mojo/media_route_provider_util_win.h",
       "mojo/media_router_mojo_impl.cc",
@@ -82,6 +98,10 @@ static_library("router") {
 mojom("mojo_bindings") {
   sources = [
     "mojo/media_router.mojom",
+  ]
+
+  public_deps = [
+    "//mojo/common:common_custom_types",
   ]
 }
 

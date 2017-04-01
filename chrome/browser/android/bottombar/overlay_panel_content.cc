@@ -100,6 +100,8 @@ void OverlayPanelContent::SetWebContents(
   // TODO(pedrosimonetti): Confirm with dtrainor@ if the comment above
   // is accurate.
   web_contents_.reset(web_contents);
+
+  web_contents_->SetIsOverlayContent(true);
   // TODO(pedrosimonetti): confirm if we need this after promoting it
   // to a real tab.
   TabAndroid::AttachTabHelpers(web_contents_.get());
@@ -130,8 +132,8 @@ void OverlayPanelContent::SetInterceptNavigationDelegate(
   DCHECK(web_contents);
   navigation_interception::InterceptNavigationDelegate::Associate(
       web_contents,
-      base::WrapUnique(new navigation_interception::InterceptNavigationDelegate(
-          env, delegate)));
+      base::MakeUnique<navigation_interception::InterceptNavigationDelegate>(
+          env, delegate));
 }
 
 bool RegisterOverlayPanelContent(JNIEnv* env) {

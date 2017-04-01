@@ -29,6 +29,7 @@
 #include "content/public/test/test_browser_context.h"
 #include "content/test/test_render_view_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/compositor/compositor.h"
 
 #if defined(OS_ANDROID)
 #include "content/browser/renderer_host/context_provider_factory_impl_android.h"
@@ -96,7 +97,7 @@ class RenderWidgetHostViewChildFrameTest : public testing::Test {
     int32_t routing_id = process_host->GetNextRoutingID();
     widget_host_ =
         new RenderWidgetHostImpl(&delegate_, process_host, routing_id, false);
-    view_ = new RenderWidgetHostViewChildFrame(widget_host_);
+    view_ = RenderWidgetHostViewChildFrame::Create(widget_host_);
 
     test_frame_connector_ = new MockCrossProcessFrameConnector();
     view_->SetCrossProcessFrameConnector(test_frame_connector_);
@@ -121,7 +122,9 @@ class RenderWidgetHostViewChildFrameTest : public testing::Test {
 #endif
   }
 
-  cc::SurfaceId surface_id() { return view_->surface_id_; }
+  cc::SurfaceId GetSurfaceId() const {
+    return cc::SurfaceId(view_->frame_sink_id_, view_->local_frame_id_);
+  }
 
  protected:
   base::MessageLoopForUI message_loop_;
@@ -147,12 +150,10 @@ cc::CompositorFrame CreateDelegatedFrame(float scale_factor,
                                          const gfx::Rect& damage) {
   cc::CompositorFrame frame;
   frame.metadata.device_scale_factor = scale_factor;
-  frame.delegated_frame_data.reset(new cc::DelegatedFrameData);
 
   std::unique_ptr<cc::RenderPass> pass = cc::RenderPass::Create();
-  pass->SetNew(cc::RenderPassId(1, 1), gfx::Rect(size), damage,
-               gfx::Transform());
-  frame.delegated_frame_data->render_pass_list.push_back(std::move(pass));
+  pass->SetNew(1, gfx::Rect(size), damage, gfx::Transform());
+  frame.render_pass_list.push_back(std::move(pass));
   return frame;
 }
 
@@ -177,11 +178,12 @@ TEST_F(RenderWidgetHostViewChildFrameTest, SwapCompositorFrame) {
   view_->OnSwapCompositorFrame(
       0, CreateDelegatedFrame(scale_factor, view_size, view_rect));
 
-  cc::SurfaceId id = surface_id();
-  if (!id.is_null()) {
+  cc::SurfaceId id = GetSurfaceId();
+  if (id.is_valid()) {
 #if !defined(OS_ANDROID)
     ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-    cc::SurfaceManager* manager = factory->GetSurfaceManager();
+    cc::SurfaceManager* manager =
+        factory->GetContextFactoryPrivate()->GetSurfaceManager();
     cc::Surface* surface = manager->GetSurfaceForId(id);
     EXPECT_TRUE(surface);
     // There should be a SurfaceSequence created by the RWHVChildFrame.

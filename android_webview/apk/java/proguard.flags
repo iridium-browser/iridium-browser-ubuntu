@@ -12,6 +12,15 @@
     public *;
 }
 
+-keep class com.android.webview.chromium.WebViewChromiumFactoryProviderFor* {
+    public *;
+}
+
+
+-keep class com.android.webview.chromium.WebViewDatabaseAdapter {
+  public *;
+}
+
 # This is the main entry point for APIs. It is kept to make developing with
 # unreleased Android easier.
 -keep class com.android.webview.chromium.WebViewChromium {
@@ -43,20 +52,26 @@
   void onHideCustomView();
 }
 
+-keep class org.chromium.android_webview.AwBrowserProcess {
+    java.nio.channels.FileLock sExclusiveFileLock;
+}
+
 # Accessed via reflection but not present in all builds
 -keep class com.android.webview.chromium.PlatformServiceBridgeGoogle {
   void setMetricsSettingListener(...);
   PlatformServiceBridgeGoogle(...);
 }
 -dontnote com.android.webview.chromium.PlatformServiceBridgeGoogle
-
-# AwDebug is accessed by reflection.
--keep class org.chromium.android_webview.AwDebug {
-  public static boolean dumpWithoutCrashing(...);
+-keep class com.android.webview.chromium.AwSafeBrowsingApiHandler {
+  AwSafeBrowsingApiHandler(...);
 }
+-dontnote com.android.webview.chromium.AwSafeBrowsingApiHandler
 
 #TODO(hush): remove after N release. crbug.com/546762
 -keep class com.android.webview.chromium.ContentSettingsAdapter {
   public void setDisabledActionModeMenuItems(int);
   public int getDisabledActionModeMenuItems();
 }
+
+# We strip some unused resources when preprocessing the GMS client libs.
+-dontwarn com.google.android.gms.R**

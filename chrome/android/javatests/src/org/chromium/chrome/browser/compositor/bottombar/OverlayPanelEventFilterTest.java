@@ -5,8 +5,8 @@
 package org.chromium.chrome.browser.compositor.bottombar;
 
 import android.content.Context;
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
-import android.test.suitebuilder.annotation.SmallTest;
 import android.view.MotionEvent;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
@@ -95,7 +95,7 @@ public class OverlayPanelEventFilterTest extends InstrumentationTestCase {
 
     private final class StubbedContentViewCore extends ContentViewCore {
         public StubbedContentViewCore(Context context) {
-            super(context);
+            super(context, "");
         }
 
         @Override

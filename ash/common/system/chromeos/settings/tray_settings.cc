@@ -4,13 +4,16 @@
 
 #include "ash/common/system/chromeos/settings/tray_settings.h"
 
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/system/chromeos/power/power_status.h"
 #include "ash/common/system/chromeos/power/power_status_view.h"
 #include "ash/common/system/tray/actionable_view.h"
 #include "ash/common/system/tray/fixed_sized_image_view.h"
+#include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_constants.h"
+#include "ash/common/system/tray/tray_popup_utils.h"
 #include "ash/common/wm_shell.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
@@ -28,11 +31,13 @@
 namespace ash {
 namespace tray {
 
+// TODO(tdanderson): Remove this class once material design is enabled by
+// default. See crbug.com/614453.
 class SettingsDefaultView : public ActionableView,
                             public PowerStatus::Observer {
  public:
   SettingsDefaultView(SystemTrayItem* owner, LoginStatus status)
-      : ActionableView(owner),
+      : ActionableView(owner, TrayPopupInkDropStyle::FILL_BOUNDS),
         login_status_(status),
         label_(nullptr),
         power_status_view_(nullptr) {
@@ -48,15 +53,16 @@ class SettingsDefaultView : public ActionableView,
              ->GetSessionStateDelegate()
              ->IsInSecondaryLoginScreen()) {
       ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-      views::ImageView* icon = new ash::FixedSizedImageView(
-          0, GetTrayConstant(TRAY_POPUP_ITEM_HEIGHT));
+      views::ImageView* icon = TrayPopupUtils::CreateMainImageView();
+
       icon->SetImage(
           rb.GetImageNamed(IDR_AURA_UBER_TRAY_SETTINGS).ToImageSkia());
       icon->set_id(test::kSettingsTrayItemViewId);
       AddChildView(icon);
 
       base::string16 text = rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_SETTINGS);
-      label_ = new views::Label(text);
+      label_ = TrayPopupUtils::CreateDefaultLabel();
+      label_->SetText(text);
       AddChildView(label_);
       SetAccessibleName(text);
 
@@ -68,6 +74,9 @@ class SettingsDefaultView : public ActionableView,
       AddChildView(power_status_view_);
       OnPowerStatusChanged();
     }
+
+    if (MaterialDesignController::IsSystemTrayMenuMaterial())
+      SetInkDropMode(InkDropHostView::InkDropMode::ON);
   }
 
   ~SettingsDefaultView() override { PowerStatus::Get()->RemoveObserver(this); }
@@ -80,7 +89,7 @@ class SettingsDefaultView : public ActionableView,
       return false;
     }
 
-    WmShell::Get()->system_tray_delegate()->ShowSettings();
+    WmShell::Get()->system_tray_controller()->ShowSettings();
     CloseSystemBubble();
     return true;
   }

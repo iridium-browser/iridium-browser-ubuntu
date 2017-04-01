@@ -5,13 +5,13 @@
 #ifndef COMPONENTS_TEST_RUNNER_WEB_TEST_DELEGATE_H_
 #define COMPONENTS_TEST_RUNNER_WEB_TEST_DELEGATE_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
 #include "third_party/WebKit/public/platform/WebString.h"
-#include "third_party/WebKit/public/platform/WebTaskRunner.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationType.h"
@@ -26,34 +26,25 @@ namespace blink {
 class WebDeviceMotionData;
 class WebDeviceOrientationData;
 class WebFrame;
-class WebGamepad;
-class WebGamepads;
-class WebHistoryItem;
-class WebLayer;
+class WebInputEvent;
 class WebLocalFrame;
 class WebMediaStream;
 class WebPlugin;
 struct WebPluginParams;
-struct WebPoint;
-struct WebRect;
 struct WebSize;
-struct WebURLError;
 class WebURLResponse;
 class WebView;
 }
 
 namespace cc {
-class TextureLayer;
-class TextureLayerClient;
 class SharedBitmapManager;
 }
 
 namespace test_runner {
 
-class DeviceLightData;
 class GamepadController;
 class WebTask;
-class WebViewTestProxyBase;
+class WebWidgetTestProxyBase;
 struct TestPreferences;
 
 class WebTestDelegate {
@@ -83,9 +74,8 @@ class WebTestDelegate {
 
   // The delegate takes ownership of the WebTask objects and is responsible
   // for deleting them.
-  virtual void PostTask(blink::WebTaskRunner::Task* task) = 0;
-  virtual void PostDelayedTask(blink::WebTaskRunner::Task* task,
-                               long long ms) = 0;
+  virtual void PostTask(const base::Closure& task) = 0;
+  virtual void PostDelayedTask(const base::Closure& task, long long ms) = 0;
 
   // Register a new isolated filesystem with the given files, and return the
   // new filesystem id.
@@ -150,8 +140,10 @@ class WebTestDelegate {
   virtual void SetDatabaseQuota(int quota) = 0;
 
   // Controls Web Notifications.
-  virtual void SimulateWebNotificationClick(const std::string& title,
-                                            int action_index) = 0;
+  virtual void SimulateWebNotificationClick(
+      const std::string& title,
+      int action_index,
+      const base::NullableString16& reply) = 0;
   virtual void SimulateWebNotificationClose(const std::string& title,
                                             bool by_user) = 0;
 
@@ -162,6 +154,21 @@ class WebTestDelegate {
   // convert from window coordinates to viewport coordinates. When
   // use-zoom-for-dsf is disabled, this return always 1.0f.
   virtual float GetWindowToViewportScale() = 0;
+
+  // Converts |event| from screen coordinates used by test_runner::EventSender
+  // into coordinates that are understood by the widget associated with
+  // |web_widget_test_proxy_base|.  Returns nullptr if no transformation was
+  // necessary (e.g. for a keyboard event OR if widget requires no scaling
+  // and has coordinates starting at (0,0)).
+  virtual std::unique_ptr<blink::WebInputEvent>
+  TransformScreenToWidgetCoordinates(
+      test_runner::WebWidgetTestProxyBase* web_widget_test_proxy_base,
+      const blink::WebInputEvent& event) = 0;
+
+  // Gets WebWidgetTestProxyBase associated with |frame| (associated with either
+  // a RenderView or a RenderWidget for the local root).
+  virtual test_runner::WebWidgetTestProxyBase* GetWebWidgetTestProxyBase(
+      blink::WebLocalFrame* frame) = 0;
 
   // Enable zoom-for-dsf option.
   virtual void EnableUseZoomForDSF() = 0;
@@ -258,15 +265,19 @@ class WebTestDelegate {
 
   virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
 
-  // Causes the beforeinstallprompt event to be sent to the renderer with a
-  // request id of |request_id|. |event_platforms| are the platforms to be sent
-  // with the event. Once the event listener completes, |callback| will be
-  // called with a boolean argument. This argument will be true if the event is
-  // canceled, and false otherwise.
+  // Causes the beforeinstallprompt event to be sent to the renderer.
+  // |event_platforms| are the platforms to be sent with the event. Once the
+  // event listener completes, |callback| will be called with a boolean
+  // argument. This argument will be true if the event is canceled, and false
+  // otherwise.
   virtual void DispatchBeforeInstallPromptEvent(
-      int request_id,
       const std::vector<std::string>& event_platforms,
       const base::Callback<void(bool)>& callback) = 0;
+
+  // Resolves the in-flight beforeinstallprompt event userChoice promise with a
+  // platform of |platform|.
+  virtual void ResolveBeforeInstallPromptPromise(
+      const std::string& platform) = 0;
 
   virtual blink::WebPlugin* CreatePluginPlaceholder(
     blink::WebLocalFrame* frame,
@@ -276,6 +287,10 @@ class WebTestDelegate {
 
   // Run all pending idle tasks, and then run callback.
   virtual void RunIdleTasks(const base::Closure& callback) = 0;
+
+  // Forces a text input state update for the client of WebFrameWidget
+  // associated with |frame|.
+  virtual void ForceTextInputStateUpdate(blink::WebFrame* frame) = 0;
 };
 
 }  // namespace test_runner

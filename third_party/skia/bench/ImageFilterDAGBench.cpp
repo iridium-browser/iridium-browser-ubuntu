@@ -6,6 +6,7 @@
  */
 
 #include "Benchmark.h"
+#include "Resources.h"
 #include "SkBlurImageFilter.h"
 #include "SkDisplacementMapEffect.h"
 #include "SkCanvas.h"
@@ -30,17 +31,60 @@ protected:
         for (int j = 0; j < loops; j++) {
             sk_sp<SkImageFilter> blur(SkBlurImageFilter::Make(20.0f, 20.0f, nullptr));
             sk_sp<SkImageFilter> inputs[kNumInputs];
+            SkBlendMode modes[kNumInputs];
             for (int i = 0; i < kNumInputs; ++i) {
                 inputs[i] = blur;
+                modes[i] = SkBlendMode::kSrcOver;
             }
             SkPaint paint;
-            paint.setImageFilter(SkMergeImageFilter::Make(inputs, kNumInputs));
+            paint.setImageFilter(SkMergeImageFilter::MakeN(inputs, kNumInputs, modes));
             canvas->drawRect(rect, paint);
         }
     }
 
 private:
     static const int kNumInputs = 5;
+
+    typedef Benchmark INHERITED;
+};
+
+class ImageMakeWithFilterDAGBench : public Benchmark {
+public:
+    ImageMakeWithFilterDAGBench() {}
+
+protected:
+    const char* onGetName() override {
+        return "image_make_with_filter_dag";
+    }
+
+    void onDelayedSetup() override {
+        fImage = GetResourceAsImage("mandrill_512.png");
+    }
+
+    void onDraw(int loops, SkCanvas* canvas) override {
+        SkIRect subset = SkIRect::MakeSize(fImage->dimensions());
+        SkIPoint offset = SkIPoint::Make(0, 0);
+        SkIRect discardSubset;
+        sk_sp<SkImage> image = fImage;
+
+        for (int j = 0; j < loops; j++) {
+            sk_sp<SkImageFilter> blur(SkBlurImageFilter::Make(20.0f, 20.0f, nullptr));
+            sk_sp<SkImageFilter> inputs[kNumInputs];
+            SkBlendMode modes[kNumInputs];
+            for (int i = 0; i < kNumInputs; ++i) {
+                inputs[i] = blur;
+                modes[i] = SkBlendMode::kSrcOver;
+            }
+            sk_sp<SkImageFilter> mergeFilter = SkMergeImageFilter::MakeN(inputs, kNumInputs, modes);
+            image = image->makeWithFilter(mergeFilter.get(), subset, subset, &discardSubset,
+                                          &offset);
+            SkASSERT(image && image->dimensions() == fImage->dimensions());
+        }
+    }
+
+private:
+    static const int kNumInputs = 5;
+    sk_sp<SkImage> fImage;
 
     typedef Benchmark INHERITED;
 };
@@ -77,4 +121,5 @@ private:
 };
 
 DEF_BENCH(return new ImageFilterDAGBench;)
+DEF_BENCH(return new ImageMakeWithFilterDAGBench;)
 DEF_BENCH(return new ImageFilterDisplacedBlur;)

@@ -12,10 +12,13 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/sys_info.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/attestation/attestation_policy_observer.h"
@@ -23,25 +26,28 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_status_collector.h"
-#include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/policy/heartbeat_scheduler.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_commands_factory_chromeos.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "chrome/browser/chromeos/policy/status_uploader.h"
 #include "chrome/browser/chromeos/policy/system_log_uploader.h"
+#include "chrome/browser/chromeos/settings/install_attributes.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_constants.h"
+#include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/system/statistics_provider.h"
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
 #include "components/policy/core/common/cloud/cloud_policy_service.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/policy/core/common/remote_commands/remote_commands_factory.h"
+#include "components/policy/core/common/schema_registry.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/sha2.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
 
 using content::BrowserThread;
@@ -59,27 +65,9 @@ const char kSharkRequisition[] = "shark";
 const char kRialtoRequisition[] = "rialto";
 
 // Zero-touch enrollment flag values.
-const char kZeroTouchEnrollmentForced[] = "forced";
 
-// These are the machine serial number keys that we check in order until we
-// find a non-empty serial number. The VPD spec says the serial number should be
-// in the "serial_number" key for v2+ VPDs. However, legacy devices used a
-// different key to report their serial number, which we fall back to if
-// "serial_number" is not present.
-//
-// Product_S/N is still special-cased due to inconsistencies with serial
-// numbers on Lumpy devices: On these devices, serial_number is identical to
-// Product_S/N with an appended checksum. Unfortunately, the sticker on the
-// packaging doesn't include that checksum either (the sticker on the device
-// does though!). The former sticker is the source of the serial number used by
-// device management service, so we prefer Product_S/N over serial number to
-// match the server.
-const char* const kMachineInfoSerialNumberKeys[] = {
-  "Product_S/N",    // Lumpy/Alex devices
-  "serial_number",  // VPD v2+ devices
-  "Product_SN",     // Mario
-  "sn",             // old ZGB devices (more recent ones use serial_number)
-};
+const char kZeroTouchEnrollmentForced[] = "forced";
+const char kZeroTouchEnrollmentHandsOff[] = "hands-off";
 
 // Fetches a machine statistic value from StatisticsProvider, returns an empty
 // string on failure.
@@ -207,6 +195,7 @@ void DeviceCloudPolicyManagerChromeOS::Shutdown() {
   heartbeat_scheduler_.reset();
   state_keys_update_subscription_.reset();
   CloudPolicyManager::Shutdown();
+  signin_profile_forwarding_schema_registry_.reset();
 }
 
 // static
@@ -217,34 +206,6 @@ void DeviceCloudPolicyManagerChromeOS::RegisterPrefs(
   registry->RegisterBooleanPref(prefs::kDeviceEnrollmentAutoStart, false);
   registry->RegisterBooleanPref(prefs::kDeviceEnrollmentCanExit, true);
   registry->RegisterDictionaryPref(prefs::kServerBackedDeviceState);
-}
-
-// static
-std::string DeviceCloudPolicyManagerChromeOS::GetMachineID() {
-  std::string machine_id;
-  chromeos::system::StatisticsProvider* provider =
-      chromeos::system::StatisticsProvider::GetInstance();
-  for (size_t i = 0; i < arraysize(kMachineInfoSerialNumberKeys); i++) {
-    if (provider->HasMachineStatistic(kMachineInfoSerialNumberKeys[i]) &&
-        provider->GetMachineStatistic(kMachineInfoSerialNumberKeys[i],
-                                      &machine_id) &&
-        !machine_id.empty()) {
-      break;
-    }
-  }
-
-  if (machine_id.empty()) {
-    LOG(WARNING) << "Failed to get machine id. This is only an error if the "
-                    "device has not yet been enrolled or claimed by a local "
-                    "user.";
-  }
-
-  return machine_id;
-}
-
-// static
-std::string DeviceCloudPolicyManagerChromeOS::GetMachineModel() {
-  return GetMachineStatistic(chromeos::system::kHardwareClassKey);
 }
 
 // static
@@ -261,6 +222,9 @@ DeviceCloudPolicyManagerChromeOS::GetZeroTouchEnrollmentMode() {
   if (value == kZeroTouchEnrollmentForced) {
     return ZeroTouchEnrollmentMode::FORCED;
   }
+  if (value == kZeroTouchEnrollmentHandsOff) {
+    return ZeroTouchEnrollmentMode::HANDS_OFF;
+  }
   if (value.empty()) {
     return ZeroTouchEnrollmentMode::ENABLED;
   }
@@ -272,15 +236,28 @@ DeviceCloudPolicyManagerChromeOS::GetZeroTouchEnrollmentMode() {
 
 void DeviceCloudPolicyManagerChromeOS::StartConnection(
     std::unique_ptr<CloudPolicyClient> client_to_connect,
-    EnterpriseInstallAttributes* install_attributes) {
+    chromeos::InstallAttributes* install_attributes) {
   CHECK(!service());
 
   // Set state keys here so the first policy fetch submits them to the server.
   if (ForcedReEnrollmentEnabled())
     client_to_connect->SetStateKeysToUpload(state_keys_broker_->state_keys());
 
+  if (is_component_policy_enabled_) {
+    base::FilePath component_policy_cache_dir;
+    CHECK(PathService::Get(chromeos::DIR_SIGNIN_PROFILE_COMPONENT_POLICY,
+                           &component_policy_cache_dir));
+    CHECK(signin_profile_forwarding_schema_registry_);
+    CreateComponentCloudPolicyService(
+        dm_protocol::kChromeSigninExtensionPolicyType,
+        component_policy_cache_dir, g_browser_process->system_request_context(),
+        client_to_connect.get(),
+        signin_profile_forwarding_schema_registry_.get());
+  }
+
   core()->Connect(std::move(client_to_connect));
   core()->StartRefreshScheduler();
+  core()->RefreshSoon();
   core()->StartRemoteCommandsService(std::unique_ptr<RemoteCommandsFactory>(
       new DeviceCommandsFactoryChromeOS()));
   core()->TrackRefreshDelayPref(local_state_,
@@ -288,12 +265,12 @@ void DeviceCloudPolicyManagerChromeOS::StartConnection(
   attestation_policy_observer_.reset(
       new chromeos::attestation::AttestationPolicyObserver(client()));
 
-  // Enable device reporting and status monitoring for enterprise enrolled
-  // devices. We want to create these objects for enrolled devices, even if
-  // monitoring is currently inactive, in case monitoring is turned back on in
-  // a future policy fetch - the classes themselves track the current state of
-  // the monitoring settings and only perform monitoring if it is active.
-  if (install_attributes->IsEnterpriseDevice()) {
+  // Enable device reporting and status monitoring for cloud managed devices. We
+  // want to create these objects even if monitoring is currently inactive, in
+  // case monitoring is turned back on in a future policy fetch - the classes
+  // themselves track the current state of the monitoring settings and only
+  // perform monitoring if it is active.
+  if (install_attributes->IsCloudManaged()) {
     CreateStatusUploader();
     syslog_uploader_.reset(new SystemLogUploader(nullptr, task_runner_));
     heartbeat_scheduler_.reset(new HeartbeatScheduler(
@@ -324,6 +301,13 @@ void DeviceCloudPolicyManagerChromeOS::Disconnect() {
   core()->Disconnect();
 
   NotifyDisconnected();
+}
+
+void DeviceCloudPolicyManagerChromeOS::SetSigninProfileSchemaRegistry(
+    SchemaRegistry* schema_registry) {
+  DCHECK(!signin_profile_forwarding_schema_registry_);
+  signin_profile_forwarding_schema_registry_.reset(
+      new ForwardingSchemaRegistry(schema_registry));
 }
 
 void DeviceCloudPolicyManagerChromeOS::OnStateKeysUpdated() {
@@ -364,13 +348,13 @@ void DeviceCloudPolicyManagerChromeOS::InitializeRequisition() {
 }
 
 void DeviceCloudPolicyManagerChromeOS::NotifyConnected() {
-  FOR_EACH_OBSERVER(
-      Observer, observers_, OnDeviceCloudPolicyManagerConnected());
+  for (auto& observer : observers_)
+    observer.OnDeviceCloudPolicyManagerConnected();
 }
 
 void DeviceCloudPolicyManagerChromeOS::NotifyDisconnected() {
-  FOR_EACH_OBSERVER(
-      Observer, observers_, OnDeviceCloudPolicyManagerDisconnected());
+  for (auto& observer : observers_)
+    observer.OnDeviceCloudPolicyManagerDisconnected();
 }
 
 void DeviceCloudPolicyManagerChromeOS::CreateStatusUploader() {
@@ -378,10 +362,10 @@ void DeviceCloudPolicyManagerChromeOS::CreateStatusUploader() {
       client(),
       base::MakeUnique<DeviceStatusCollector>(
           local_state_, chromeos::system::StatisticsProvider::GetInstance(),
-          DeviceStatusCollector::LocationUpdateRequester(),
           DeviceStatusCollector::VolumeInfoFetcher(),
           DeviceStatusCollector::CPUStatisticsFetcher(),
-          DeviceStatusCollector::CPUTempFetcher()),
+          DeviceStatusCollector::CPUTempFetcher(),
+          DeviceStatusCollector::AndroidStatusFetcher()),
       task_runner_));
 }
 

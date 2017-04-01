@@ -5,6 +5,7 @@
 #ifndef InterpolationEnvironment_h
 #define InterpolationEnvironment_h
 
+#include "core/animation/InterpolationTypesMap.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Allocator.h"
 
@@ -15,34 +16,58 @@ class SVGPropertyBase;
 class SVGElement;
 
 class InterpolationEnvironment {
-    STACK_ALLOCATED();
-public:
-    explicit InterpolationEnvironment(StyleResolverState& state)
-        : m_state(&state)
-        , m_svgElement(nullptr)
-        , m_svgBaseValue(nullptr)
-    { }
+  STACK_ALLOCATED();
 
-    explicit InterpolationEnvironment(SVGElement& svgElement, const SVGPropertyBase& svgBaseValue)
-        : m_state(nullptr)
-        , m_svgElement(&svgElement)
-        , m_svgBaseValue(&svgBaseValue)
-    { }
+ public:
+  explicit InterpolationEnvironment(const InterpolationTypesMap& map,
+                                    StyleResolverState& state)
+      : m_interpolationTypesMap(map),
+        m_state(&state),
+        m_svgElement(nullptr),
+        m_svgBaseValue(nullptr) {}
 
-    StyleResolverState& state() { DCHECK(m_state); return *m_state; }
-    const StyleResolverState& state() const { DCHECK(m_state); return *m_state; }
+  explicit InterpolationEnvironment(const InterpolationTypesMap& map,
+                                    SVGElement& svgElement,
+                                    const SVGPropertyBase& svgBaseValue)
+      : m_interpolationTypesMap(map),
+        m_state(nullptr),
+        m_svgElement(&svgElement),
+        m_svgBaseValue(&svgBaseValue) {}
 
-    SVGElement& svgElement() { DCHECK(m_svgElement); return *m_svgElement; }
-    const SVGElement& svgElement() const { DCHECK(m_svgElement); return *m_svgElement; }
+  const InterpolationTypesMap& interpolationTypesMap() const {
+    return m_interpolationTypesMap;
+  }
 
-    const SVGPropertyBase& svgBaseValue() const { DCHECK(m_svgBaseValue); return *m_svgBaseValue; }
+  StyleResolverState& state() {
+    DCHECK(m_state);
+    return *m_state;
+  }
+  const StyleResolverState& state() const {
+    DCHECK(m_state);
+    return *m_state;
+  }
 
-private:
-    StyleResolverState* m_state;
-    Member<SVGElement> m_svgElement;
-    Member<const SVGPropertyBase> m_svgBaseValue;
+  SVGElement& svgElement() {
+    DCHECK(m_svgElement);
+    return *m_svgElement;
+  }
+  const SVGElement& svgElement() const {
+    DCHECK(m_svgElement);
+    return *m_svgElement;
+  }
+
+  const SVGPropertyBase& svgBaseValue() const {
+    DCHECK(m_svgBaseValue);
+    return *m_svgBaseValue;
+  }
+
+ private:
+  const InterpolationTypesMap& m_interpolationTypesMap;
+  StyleResolverState* m_state;
+  Member<SVGElement> m_svgElement;
+  Member<const SVGPropertyBase> m_svgBaseValue;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // InterpolationEnvironment_h
+#endif  // InterpolationEnvironment_h

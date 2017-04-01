@@ -308,9 +308,9 @@ uint32_t DisplayOzone::Buffer::getDRMFB()
 
 FramebufferGL *DisplayOzone::Buffer::framebufferGL(const gl::FramebufferState &state)
 {
-    return new FramebufferGL(mGLFB, state, mDisplay->mFunctionsGL,
-                             mDisplay->getRenderer()->getWorkarounds(),
-                             mDisplay->getRenderer()->getStateManager());
+    return new FramebufferGL(
+        mGLFB, state, mDisplay->mFunctionsGL, mDisplay->getRenderer()->getWorkarounds(),
+        mDisplay->getRenderer()->getBlitter(), mDisplay->getRenderer()->getStateManager());
 }
 
 void DisplayOzone::Buffer::present()
@@ -325,8 +325,8 @@ void DisplayOzone::Buffer::present()
     }
 }
 
-DisplayOzone::DisplayOzone()
-    : DisplayEGL(),
+DisplayOzone::DisplayOzone(const egl::DisplayState &state)
+    : DisplayEGL(state),
       mSwapControl(SwapControl::ABSENT),
       mMinSwapInterval(0),
       mMaxSwapInterval(0),
@@ -829,7 +829,6 @@ void DisplayOzone::terminate()
 }
 
 SurfaceImpl *DisplayOzone::createWindowSurface(const egl::SurfaceState &state,
-                                               const egl::Config *configuration,
                                                EGLNativeWindowType window,
                                                const egl::AttributeMap &attribs)
 {
@@ -843,7 +842,6 @@ SurfaceImpl *DisplayOzone::createWindowSurface(const egl::SurfaceState &state,
 }
 
 SurfaceImpl *DisplayOzone::createPbufferSurface(const egl::SurfaceState &state,
-                                                const egl::Config *configuration,
                                                 const egl::AttributeMap &attribs)
 {
     EGLAttrib width  = attribs.get(EGL_WIDTH, 0);
@@ -858,8 +856,8 @@ SurfaceImpl *DisplayOzone::createPbufferSurface(const egl::SurfaceState &state,
 }
 
 SurfaceImpl *DisplayOzone::createPbufferFromClientBuffer(const egl::SurfaceState &state,
-                                                         const egl::Config *configuration,
-                                                         EGLClientBuffer shareHandle,
+                                                         EGLenum buftype,
+                                                         EGLClientBuffer clientBuffer,
                                                          const egl::AttributeMap &attribs)
 {
     UNIMPLEMENTED();
@@ -867,7 +865,6 @@ SurfaceImpl *DisplayOzone::createPbufferFromClientBuffer(const egl::SurfaceState
 }
 
 SurfaceImpl *DisplayOzone::createPixmapSurface(const egl::SurfaceState &state,
-                                               const egl::Config *configuration,
                                                NativePixmapType nativePixmap,
                                                const egl::AttributeMap &attribs)
 {

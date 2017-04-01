@@ -6,7 +6,7 @@
  */
 
 #include "SkBitmap.h"
-#include "SkErrorInternals.h"
+#include "SkDeduper.h"
 #include "SkImage.h"
 #include "SkImageDeserializer.h"
 #include "SkImageGenerator.h"
@@ -30,7 +30,7 @@ namespace {
         return SkImage::MakeFromGenerator(
             new EmptyImageGenerator(SkImageInfo::MakeN32Premul(width, height)));
     }
-    
+
 } // anonymous namespace
 
 
@@ -141,6 +141,10 @@ void SkReadBuffer::readString(SkString* string) {
     string->set(strContents, len);
 }
 
+void SkReadBuffer::readColor4f(SkColor4f* color) {
+    memcpy(color, fReader.skip(sizeof(SkColor4f)), sizeof(SkColor4f));
+}
+
 void SkReadBuffer::readPoint(SkPoint* point) {
     point->fX = fReader.readScalar();
     point->fY = fReader.readScalar();
@@ -191,6 +195,10 @@ bool SkReadBuffer::readColorArray(SkColor* colors, size_t size) {
     return readArray(colors, size, sizeof(SkColor));
 }
 
+bool SkReadBuffer::readColor4fArray(SkColor4f* colors, size_t size) {
+    return readArray(colors, size, sizeof(SkColor4f));
+}
+
 bool SkReadBuffer::readIntArray(int32_t* values, size_t size) {
     return readArray(values, size, sizeof(int32_t));
 }
@@ -216,9 +224,7 @@ sk_sp<SkImage> SkReadBuffer::readBitmapAsImage() {
     if (this->readBool()) {
         this->readUInt(); // Bitmap index
         this->readUInt(); // Bitmap generation ID
-        SkErrorInternals::SetError(kParseError_SkError, "SkWriteBuffer::writeBitmap "
-                                   "stored the SkBitmap in an SkBitmapHeap, but "
-                                   "that feature is no longer supported.");
+        // Old unsupported SkBitmapHeap format.  No longer supported.
     } else {
         // The writer stored false, meaning the SkBitmap was not stored in an SkBitmapHeap.
         const size_t length = this->readUInt();
@@ -237,13 +243,11 @@ sk_sp<SkImage> SkReadBuffer::readBitmapAsImage() {
                 return image;
             }
 
-            // This bitmap was encoded when written, but we are unable to decode, possibly due to
-            // not having a decoder.
-            SkErrorInternals::SetError(kParseError_SkError,
-                                       "Could not decode bitmap. Resulting bitmap will be empty.");
-            // Even though we weren't able to decode the pixels, the readbuffer should still be
-            // intact, so we return true with an empty bitmap, so we don't force an abort of the
-            // larger deserialize.
+            // This bitmap was encoded when written, but we are unable to
+            // decode, possibly due to not having a decoder.  Even though we
+            // weren't able to decode the pixels, the readbuffer should still
+            // be intact, so we return true with an empty bitmap, so we don't
+            // force an abort of the larger deserialize.
             return MakeEmptyImage(width, height);
         } else {
             SkBitmap bitmap;
@@ -258,6 +262,11 @@ sk_sp<SkImage> SkReadBuffer::readBitmapAsImage() {
 }
 
 sk_sp<SkImage> SkReadBuffer::readImage() {
+    if (fInflator) {
+        SkImage* img = fInflator->getImage(this->read32());
+        return img ? sk_ref_sp(img) : nullptr;
+    }
+
     int width = this->read32();
     int height = this->read32();
     if (width <= 0 || height <= 0) {    // SkImage never has a zero dimension
@@ -297,14 +306,17 @@ sk_sp<SkImage> SkReadBuffer::readImage() {
     return image ? image : MakeEmptyImage(width, height);
 }
 
-SkTypeface* SkReadBuffer::readTypeface() {
+sk_sp<SkTypeface> SkReadBuffer::readTypeface() {
+    if (fInflator) {
+        return sk_ref_sp(fInflator->getTypeface(this->read32()));
+    }
 
-    uint32_t index = fReader.readU32();
+    uint32_t index = this->readUInt();
     if (0 == index || index > (unsigned)fTFCount) {
         return nullptr;
     } else {
         SkASSERT(fTFArray);
-        return fTFArray[index - 1];
+        return sk_ref_sp(fTFArray[index - 1]);
     }
 }
 
@@ -315,7 +327,12 @@ SkFlattenable* SkReadBuffer::readFlattenable(SkFlattenable::Type ft) {
 
     SkFlattenable::Factory factory = nullptr;
 
-    if (fFactoryCount > 0) {
+    if (fInflator) {
+        factory = fInflator->getFactory(this->read32());
+        if (!factory) {
+            return nullptr;
+        }
+    } else if (fFactoryCount > 0) {
         int32_t index = fReader.readU32();
         if (0 == index) {
             return nullptr; // writer failed to give us the flattenable

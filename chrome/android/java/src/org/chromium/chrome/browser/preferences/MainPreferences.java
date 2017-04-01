@@ -11,20 +11,17 @@ import android.os.Handler;
 import android.preference.Preference;
 import android.preference.PreferenceFragment;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.blimp_public.BlimpClientContext;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.PasswordUIView;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
-import org.chromium.chrome.browser.blimp.BlimpClientContextFactory;
-import org.chromium.chrome.browser.blimp.BlimpSettingsCallbacksImpl;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionPreferences;
 import org.chromium.chrome.browser.preferences.password.SavePasswordsPreferences;
-import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService;
+import org.chromium.chrome.browser.search_engines.TemplateUrlService.LoadListener;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
@@ -33,13 +30,12 @@ import org.chromium.components.sync.AndroidSyncSettings;
 /**
  * The main settings screen, shown when the user first opens Settings.
  */
-public class MainPreferences extends PreferenceFragment implements SignInStateObserver,
-        Preference.OnPreferenceClickListener {
-
+public class MainPreferences extends PreferenceFragment
+        implements SignInStateObserver, Preference.OnPreferenceClickListener, LoadListener {
     public static final String PREF_SIGN_IN = "sign_in";
-    public static final String PREF_SEARCH_ENGINE = "search_engine";
     public static final String PREF_DOCUMENT_MODE = "document_mode";
     public static final String PREF_AUTOFILL_SETTINGS = "autofill_settings";
+    public static final String PREF_SEARCH_ENGINE = "search_engine";
     public static final String PREF_SAVED_PASSWORDS = "saved_passwords";
     public static final String PREF_HOMEPAGE = "homepage";
     public static final String PREF_DATA_REDUCTION = "data_reduction";
@@ -55,9 +51,6 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
     private SignInPreference mSignInPreference;
     private ManagedPreferenceDelegate mManagedPreferenceDelegate;
 
-    private boolean mShowSearchEnginePicker;
-    private boolean mIsDemoUser;
-
     public MainPreferences() {
         setHasOptionsMenu(true);
         mManagedPreferenceDelegate = createManagedPreferenceDelegate();
@@ -66,13 +59,6 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        if (savedInstanceState == null && getArguments() != null
-                && getArguments().getBoolean(EXTRA_SHOW_SEARCH_ENGINE_PICKER, false)) {
-            mShowSearchEnginePicker = true;
-        }
-
-        mIsDemoUser = ApiCompatibilityUtils.isDemoUser(getActivity());
     }
 
     @Override
@@ -82,21 +68,16 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
         // the SignInPreference.
         updatePreferences();
 
-        if (!mIsDemoUser) {
+        if (SigninManager.get(getActivity()).isSigninSupported()) {
             SigninManager.get(getActivity()).addSignInStateObserver(this);
             setupSignInPref();
-        }
-
-        if (mShowSearchEnginePicker) {
-            mShowSearchEnginePicker = false;
-            ((SearchEnginePreference) findPreference(PREF_SEARCH_ENGINE)).showDialog();
         }
     }
 
     @Override
     public void onPause() {
         super.onPause();
-        if (!mIsDemoUser) {
+        if (SigninManager.get(getActivity()).isSigninSupported()) {
             SigninManager.get(getActivity()).removeSignInStateObserver(this);
             clearSignInPref();
         }
@@ -116,7 +97,15 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
         if (getPreferenceScreen() != null) getPreferenceScreen().removeAll();
         addPreferencesFromResource(R.xml.main_preferences);
 
-        addBlimpPreferences();
+        if (TemplateUrlService.getInstance().isLoaded()) {
+            updateSummary();
+        } else {
+            TemplateUrlService.getInstance().registerLoadListener(this);
+            TemplateUrlService.getInstance().load();
+            ChromeBasePreference searchEnginePref =
+                    (ChromeBasePreference) findPreference(PREF_SEARCH_ENGINE);
+            searchEnginePref.setEnabled(false);
+        }
 
         ChromeBasePreference autofillPref =
                 (ChromeBasePreference) findPreference(PREF_AUTOFILL_SETTINGS);
@@ -129,22 +118,15 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
         ProfileSyncService syncService = ProfileSyncService.get();
 
         if (AndroidSyncSettings.isSyncEnabled(getActivity().getApplicationContext())
-                  && syncService.isBackendInitialized()
-                  && !syncService.isUsingSecondaryPassphrase()
-                  && ChromeFeatureList.isEnabled(VIEW_PASSWORDS)) {
+                && syncService.isEngineInitialized() && !syncService.isUsingSecondaryPassphrase()
+                && ChromeFeatureList.isEnabled(VIEW_PASSWORDS)) {
             passwordsPref.setKey(PREF_MANAGE_ACCOUNT_LINK);
             passwordsPref.setTitle(R.string.redirect_to_passwords_text);
             passwordsPref.setSummary(R.string.redirect_to_passwords_link);
             passwordsPref.setOnPreferenceClickListener(this);
             passwordsPref.setManagedPreferenceDelegate(null);
         } else {
-            if (PasswordUIView.shouldUseSmartLockBranding()) {
-                passwordsPref.setTitle(getResources().getString(
-                         R.string.prefs_smart_lock_for_passwords));
-            } else {
-                passwordsPref.setTitle(getResources().getString(
-                          R.string.prefs_saved_passwords));
-            }
+            passwordsPref.setTitle(getResources().getString(R.string.prefs_saved_passwords));
             passwordsPref.setFragment(SavePasswordsPreferences.class.getCanonicalName());
             setOnOffSummary(passwordsPref,
                     PrefServiceBridge.getInstance().isRememberPasswordsEnabled());
@@ -161,17 +143,27 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
 
         ChromeBasePreference dataReduction =
                 (ChromeBasePreference) findPreference(PREF_DATA_REDUCTION);
-        if (DataReductionProxySettings.getInstance().isDataReductionProxyAllowed()) {
-            dataReduction.setSummary(
-                    DataReductionPreferences.generateSummary(getResources()));
-            dataReduction.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
-        } else {
-            getPreferenceScreen().removePreference(dataReduction);
-        }
+        dataReduction.setSummary(DataReductionPreferences.generateSummary(getResources()));
+        dataReduction.setManagedPreferenceDelegate(mManagedPreferenceDelegate);
 
-        if (mIsDemoUser) {
+        if (!SigninManager.get(getActivity()).isSigninSupported()) {
             getPreferenceScreen().removePreference(findPreference(PREF_SIGN_IN));
         }
+    }
+
+    @Override
+    public void onTemplateUrlServiceLoaded() {
+        TemplateUrlService.getInstance().unregisterLoadListener(this);
+        updateSummary();
+    }
+
+    private void updateSummary() {
+        ChromeBasePreference searchEnginePref =
+                (ChromeBasePreference) findPreference(PREF_SEARCH_ENGINE);
+        searchEnginePref.setEnabled(true);
+        searchEnginePref.setSummary(TemplateUrlService.getInstance()
+                                            .getDefaultSearchEngineTemplateUrl()
+                                            .getShortName());
     }
 
     private void setOnOffSummary(Preference pref, boolean isOn) {
@@ -245,11 +237,5 @@ public class MainPreferences extends PreferenceFragment implements SignInStateOb
                 return super.isPreferenceClickDisabledByPolicy(preference);
             }
         };
-    }
-
-    private void addBlimpPreferences() {
-        BlimpClientContext blimpClientContext = BlimpClientContextFactory
-                .getBlimpClientContextForProfile(Profile.getLastUsedProfile().getOriginalProfile());
-        blimpClientContext.attachBlimpPreferences(this, new BlimpSettingsCallbacksImpl());
     }
 }

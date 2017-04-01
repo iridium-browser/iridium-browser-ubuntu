@@ -27,85 +27,124 @@
 #define PlatformMouseEvent_h
 
 #include "platform/PlatformEvent.h"
+#include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/IntPoint.h"
+#include "public/platform/WebGestureEvent.h"
 #include "public/platform/WebPointerProperties.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class PlatformMouseEvent : public PlatformEvent {
-public:
-    enum SyntheticEventType {
-        // Real mouse input events or synthetic events that behave just like real events
-        RealOrIndistinguishable,
-        // Synthetic mouse events derived from touch input
-        FromTouch,
-        // Synthetic mouse events generated without a position, for example those generated
-        // from keyboard input.
-        Positionless,
-    };
+ public:
+  enum SyntheticEventType {
+    // Real mouse input events or synthetic events that behave just like real
+    // events
+    RealOrIndistinguishable,
+    // Synthetic mouse events derived from touch input
+    FromTouch,
+    // Synthetic mouse events generated without a position, for example those
+    // generated from keyboard input.
+    Positionless,
+  };
 
-    PlatformMouseEvent()
-        : PlatformEvent(PlatformEvent::MouseMoved)
-        , m_clickCount(0)
-        , m_synthesized(RealOrIndistinguishable)
-    {
-    }
+  PlatformMouseEvent() : PlatformMouseEvent(PlatformEvent::MouseMoved) {}
 
-    PlatformMouseEvent(const IntPoint& position, const IntPoint& globalPosition, WebPointerProperties::Button button, EventType type, int clickCount, Modifiers modifiers, double timestamp)
-        : PlatformEvent(type, modifiers, timestamp)
-        , m_position(position)
-        , m_globalPosition(globalPosition)
-        , m_clickCount(clickCount)
-        , m_synthesized(RealOrIndistinguishable)
-    {
-        m_pointerProperties.button = button;
-    }
+  explicit PlatformMouseEvent(EventType type)
+      : PlatformEvent(type),
+        m_clickCount(0),
+        m_synthesized(RealOrIndistinguishable) {}
 
-    PlatformMouseEvent(const IntPoint& position, const IntPoint& globalPosition, WebPointerProperties::Button button, EventType type, int clickCount, Modifiers modifiers, SyntheticEventType synthesized, double timestamp, WebPointerProperties::PointerType pointerType = WebPointerProperties::PointerType::Unknown)
-        : PlatformEvent(type, modifiers, timestamp)
-        , m_position(position)
-        , m_globalPosition(globalPosition)
-        , m_clickCount(clickCount)
-        , m_synthesized(synthesized)
-    {
-        m_pointerProperties.pointerType = pointerType;
-        m_pointerProperties.button = button;
-    }
+  PlatformMouseEvent(const IntPoint& position,
+                     const IntPoint& globalPosition,
+                     WebPointerProperties::Button button,
+                     EventType type,
+                     int clickCount,
+                     Modifiers modifiers,
+                     TimeTicks timestamp)
+      : PlatformEvent(type, modifiers, timestamp),
+        m_position(position),
+        m_globalPosition(globalPosition),
+        m_clickCount(clickCount),
+        m_synthesized(RealOrIndistinguishable) {
+    m_pointerProperties.button = button;
+  }
 
-    const WebPointerProperties& pointerProperties() const { return m_pointerProperties; }
-    const IntPoint& position() const { return m_position; }
-    const IntPoint& globalPosition() const { return m_globalPosition; }
-    const IntPoint& movementDelta() const { return m_movementDelta; }
+  PlatformMouseEvent(const IntPoint& position,
+                     const IntPoint& globalPosition,
+                     WebPointerProperties::Button button,
+                     EventType type,
+                     int clickCount,
+                     Modifiers modifiers,
+                     SyntheticEventType synthesized,
+                     TimeTicks timestamp,
+                     WebPointerProperties::PointerType pointerType =
+                         WebPointerProperties::PointerType::Unknown)
+      : PlatformEvent(type, modifiers, timestamp),
+        m_position(position),
+        m_globalPosition(globalPosition),
+        m_clickCount(clickCount),
+        m_synthesized(synthesized) {
+    m_pointerProperties.pointerType = pointerType;
+    m_pointerProperties.button = button;
+  }
 
-    int clickCount() const { return m_clickCount; }
-    bool fromTouch() const { return m_synthesized == FromTouch; }
-    SyntheticEventType getSyntheticEventType() const { return m_synthesized; }
+#if INSIDE_BLINK
+  PlatformMouseEvent(const WebGestureEvent& gestureEvent,
+                     WebPointerProperties::Button button,
+                     EventType type,
+                     int clickCount,
+                     Modifiers modifiers,
+                     SyntheticEventType synthesized,
+                     TimeTicks timestamp,
+                     WebPointerProperties::PointerType pointerType =
+                         WebPointerProperties::PointerType::Unknown)
+      : PlatformMouseEvent(flooredIntPoint(gestureEvent.positionInRootFrame()),
+                           IntPoint(gestureEvent.globalX, gestureEvent.globalY),
+                           button,
+                           type,
+                           clickCount,
+                           modifiers,
+                           synthesized,
+                           timestamp,
+                           pointerType) {}
+#endif
 
-    const String& region() const { return m_region; }
-    void setRegion(const String& region) { m_region = region; }
+  const WebPointerProperties& pointerProperties() const {
+    return m_pointerProperties;
+  }
+  const IntPoint& position() const { return m_position; }
+  const IntPoint& globalPosition() const { return m_globalPosition; }
+  const IntPoint& movementDelta() const { return m_movementDelta; }
 
-protected:
-    WebPointerProperties m_pointerProperties;
+  int clickCount() const { return m_clickCount; }
+  bool fromTouch() const { return m_synthesized == FromTouch; }
+  SyntheticEventType getSyntheticEventType() const { return m_synthesized; }
 
-    // In local root frame coordinates. (Except possibly if the Widget under
-    // the mouse is a popup, see FIXME in PlatformMouseEventBuilder).
-    IntPoint m_position;
+  const String& region() const { return m_region; }
+  void setRegion(const String& region) { m_region = region; }
 
-    // In screen coordinates.
-    IntPoint m_globalPosition;
+ protected:
+  WebPointerProperties m_pointerProperties;
 
-    IntPoint m_movementDelta;
-    int m_clickCount;
-    SyntheticEventType m_synthesized;
+  // In local root frame coordinates. (Except possibly if the Widget under
+  // the mouse is a popup, see FIXME in PlatformMouseEventBuilder).
+  IntPoint m_position;
 
-    // For canvas hit region.
-    // TODO(zino): This might make more sense to put in HitTestResults or
-    // some other part of MouseEventWithHitTestResults, but for now it's
-    // most convenient to stash it here. Please see: http://crbug.com/592947.
-    String m_region;
+  // In screen coordinates.
+  IntPoint m_globalPosition;
+
+  IntPoint m_movementDelta;
+  int m_clickCount;
+  SyntheticEventType m_synthesized;
+
+  // For canvas hit region.
+  // TODO(zino): This might make more sense to put in HitTestResults or
+  // some other part of MouseEventWithHitTestResults, but for now it's
+  // most convenient to stash it here. Please see: http://crbug.com/592947.
+  String m_region;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PlatformMouseEvent_h
+#endif  // PlatformMouseEvent_h

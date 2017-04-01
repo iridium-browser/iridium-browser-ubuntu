@@ -7,7 +7,6 @@
 #include <set>
 
 #include "base/bind.h"
-#include "base/environment.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
@@ -46,11 +45,6 @@
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#endif
-
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
-#include "ui/base/x/x11_util_internal.h"  // nogncheck
-#include "ui/gfx/x/x11_switches.h"        // nogncheck
 #endif
 
 namespace views {
@@ -316,13 +310,18 @@ TEST_F(WidgetTest, ChildStackedRelativeToParent) {
   popover->SetBounds(gfx::Rect(150, 90, 340, 240));
   popover->Show();
 
-  EXPECT_TRUE(IsWindowStackedAbove(popover.get(), child));
+  // NOTE: for aura-mus-client stacking of top-levels is not maintained in the
+  // client, so z-order of top-levels can't be determined.
+  const bool check_toplevel_z_order = !IsMus();
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(popover.get(), child));
   EXPECT_TRUE(IsWindowStackedAbove(child, parent.get()));
 
   // Showing the parent again should raise it and its child above the popover.
   parent->Show();
   EXPECT_TRUE(IsWindowStackedAbove(child, parent.get()));
-  EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
 
   // Test grandchildren.
   Widget* grandchild = CreateChildPlatformWidget(child->GetNativeView());
@@ -330,15 +329,18 @@ TEST_F(WidgetTest, ChildStackedRelativeToParent) {
   grandchild->ShowInactive();
   EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
   EXPECT_TRUE(IsWindowStackedAbove(child, parent.get()));
-  EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
 
   popover->Show();
-  EXPECT_TRUE(IsWindowStackedAbove(popover.get(), grandchild));
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(popover.get(), grandchild));
   EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
 
   parent->Show();
   EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
-  EXPECT_TRUE(IsWindowStackedAbove(child, popover.get()));
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(child, popover.get()));
 
   // Test hiding and reshowing.
   parent->Hide();
@@ -347,7 +349,8 @@ TEST_F(WidgetTest, ChildStackedRelativeToParent) {
 
   EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
   EXPECT_TRUE(IsWindowStackedAbove(child, parent.get()));
-  EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
 
   grandchild->Hide();
   EXPECT_FALSE(grandchild->IsVisible());
@@ -355,7 +358,8 @@ TEST_F(WidgetTest, ChildStackedRelativeToParent) {
 
   EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
   EXPECT_TRUE(IsWindowStackedAbove(child, parent.get()));
-  EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
+  if (check_toplevel_z_order)
+    EXPECT_TRUE(IsWindowStackedAbove(parent.get(), popover.get()));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -853,6 +857,10 @@ TEST_F(WidgetObserverTest, DISABLED_VisibilityChange) {
 }
 
 TEST_F(WidgetObserverTest, DestroyBubble) {
+  // This test expect NativeWidgetAura, force its creation.
+  ViewsDelegate::GetInstance()->set_native_widget_factory(
+      ViewsDelegate::NativeWidgetFactory());
+
   WidgetAutoclosePtr anchor(CreateTopLevelPlatformWidget());
   anchor->Show();
 
@@ -975,10 +983,10 @@ TEST_F(WidgetObserverTest, ClosingOnHiddenParent) {
 
 // Test behavior of NativeWidget*::GetWindowPlacement on the native desktop.
 TEST_F(WidgetTest, GetWindowPlacement) {
-  if (IsMus()) {
-    NOTIMPLEMENTED();
-    return;
-  }
+#if defined(OS_MACOSX)
+  if (base::mac::IsOS10_10())
+    return;  // Fails when swarmed. http://crbug.com/660582
+#endif
 
   WidgetAutoclosePtr widget;
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -1090,7 +1098,7 @@ TEST_F(WidgetTest, MinimumSizeConstraints) {
   widget->SetSize(smaller_size);
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // TODO(tapted): Desktop Linux ignores size constraints for SetSize. Fix it.
-  const bool use_small_size = IsMus() ? false : true;
+  const bool use_small_size = true;
 #else
   const bool use_small_size = false;
 #endif
@@ -1166,11 +1174,6 @@ TEST_F(WidgetTest, GetWindowBoundsInScreen) {
 
 // Test that GetRestoredBounds() returns the original bounds of the window.
 TEST_F(WidgetTest, MAYBE_GetRestoredBounds) {
-  if (IsMus()) {
-    NOTIMPLEMENTED();
-    return;
-  }
-
   WidgetAutoclosePtr toplevel(CreateNativeDesktopWidget());
   toplevel->Show();
   // Initial restored bounds have non-zero size.
@@ -1292,10 +1295,6 @@ TEST_F(WidgetTest, BubbleControlsResetOnInit) {
 // the case for desktop widgets on Windows. Other platforms retain the window
 // size while minimized.
 TEST_F(WidgetTest, TestViewWidthAfterMinimizingWidget) {
-  if (IsMus()) {
-    // This test is testing behavior specific to DesktopWindowTreeHostWin.
-    return;
-  }
   // Create a widget.
   Widget widget;
   Widget::InitParams init_params =
@@ -1405,9 +1404,6 @@ void DesktopAuraTestValidPaintWidget::InitForTest(InitParams init_params) {
 }
 
 TEST_F(WidgetTest, DesktopNativeWidgetNoPaintAfterCloseTest) {
-  // TODO(sad): Desktop widgets do not work well in mus https://crbug.com/616551
-  if (IsMus())
-    return;
   DesktopAuraTestValidPaintWidget widget;
   widget.InitForTest(CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS));
   widget.WaitUntilPaint();
@@ -1420,9 +1416,6 @@ TEST_F(WidgetTest, DesktopNativeWidgetNoPaintAfterCloseTest) {
 }
 
 TEST_F(WidgetTest, DesktopNativeWidgetNoPaintAfterHideTest) {
-  // TODO(sad): Desktop widgets do not work well in mus https://crbug.com/616551
-  if (IsMus())
-    return;
   DesktopAuraTestValidPaintWidget widget;
   widget.InitForTest(CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS));
   widget.WaitUntilPaint();
@@ -1746,12 +1739,11 @@ TEST_F(WidgetTest, MouseEventDispatchWhileTouchIsDown) {
   MousePressEventConsumer consumer;
   event_count_view->AddPostTargetHandler(&consumer);
 
-  std::unique_ptr<ui::test::EventGenerator> generator(
-      new ui::test::EventGenerator(
-          IsMus() ? widget->GetNativeWindow() : GetContext(),
-          widget->GetNativeWindow()));
-  generator->PressTouch();
-  generator->ClickLeftButton();
+  ui::test::EventGenerator generator(
+      IsMus() ? widget->GetNativeWindow() : GetContext(),
+      widget->GetNativeWindow());
+  generator.PressTouch();
+  generator.ClickLeftButton();
 
   EXPECT_EQ(1, event_count_view->GetEventCount(ui::ET_MOUSE_PRESSED));
   EXPECT_EQ(1, event_count_view->GetEventCount(ui::ET_MOUSE_RELEASED));
@@ -1779,11 +1771,10 @@ TEST_F(WidgetTest, MousePressCausesCapture) {
 
   MousePressEventConsumer consumer;
   event_count_view->AddPostTargetHandler(&consumer);
-  std::unique_ptr<ui::test::EventGenerator> generator(
-      new ui::test::EventGenerator(
-          IsMus() ? widget->GetNativeWindow() : GetContext(),
-          widget->GetNativeWindow()));
-  generator->PressLeftButton();
+  ui::test::EventGenerator generator(
+      IsMus() ? widget->GetNativeWindow() : GetContext(),
+      widget->GetNativeWindow());
+  generator.PressLeftButton();
 
   EXPECT_EQ(1, event_count_view->GetEventCount(ui::ET_MOUSE_PRESSED));
   EXPECT_EQ(
@@ -1843,13 +1834,12 @@ TEST_F(WidgetTest, CaptureDuringMousePressNotOverridden) {
   // Gives explicit capture to |widget2|
   CaptureEventConsumer consumer(widget2);
   event_count_view->AddPostTargetHandler(&consumer);
-  std::unique_ptr<ui::test::EventGenerator> generator(
-      new ui::test::EventGenerator(
-          IsMus() ? widget->GetNativeWindow() : GetContext(),
-          widget->GetNativeWindow()));
+  ui::test::EventGenerator generator(
+      IsMus() ? widget->GetNativeWindow() : GetContext(),
+      widget->GetNativeWindow());
   // This event should implicitly give capture to |widget|, except that
   // |consumer| will explicitly set capture on |widget2|.
-  generator->PressLeftButton();
+  generator.PressLeftButton();
 
   EXPECT_EQ(1, event_count_view->GetEventCount(ui::ET_MOUSE_PRESSED));
   EXPECT_NE(
@@ -1930,14 +1920,11 @@ TEST_F(WidgetWindowTitleTest, SetWindowTitleChanged_DesktopNativeWidget) {
 #endif  // !OS_CHROMEOS
 
 TEST_F(WidgetTest, WidgetDeleted_InOnMousePressed) {
-  // This test doesn't work in mus as it assumes widget and GetContext()
-  // share an aura hierarchy. Test coverage of deletion from mouse pressed is
-  // important though and should be added, hence the NOTIMPLEMENTED().
-  // http://crbug.com/594260.
-  if (IsMus()) {
-    NOTIMPLEMENTED();
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsMus())
     return;
-  }
+
   Widget* widget = new Widget;
   Widget::InitParams params =
       CreateParams(views::Widget::InitParams::TYPE_POPUP);
@@ -1961,7 +1948,8 @@ TEST_F(WidgetTest, WidgetDeleted_InOnMousePressed) {
 #if !defined(OS_MACOSX) || defined(USE_AURA)
 
 TEST_F(WidgetTest, WidgetDeleted_InDispatchGestureEvent) {
-  // This test doesn't make sense for mus.
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
   if (IsMus())
     return;
 
@@ -1991,8 +1979,6 @@ class GetNativeThemeFromDestructorView : public WidgetDelegateView {
  public:
   GetNativeThemeFromDestructorView() {}
   ~GetNativeThemeFromDestructorView() override { VerifyNativeTheme(); }
-
-  View* GetContentsView() override { return this; }
 
  private:
   void VerifyNativeTheme() {
@@ -2084,6 +2070,7 @@ class WidgetBoundsObserver : public WidgetObserver {
   // WidgetObserver:
   void OnWidgetDestroying(Widget* widget) override {
     EXPECT_TRUE(widget->GetNativeWindow());
+    EXPECT_TRUE(Widget::GetWidgetForNativeWindow(widget->GetNativeWindow()));
     bounds_ = widget->GetWindowBoundsInScreen();
   }
 
@@ -2192,6 +2179,11 @@ TEST_F(WidgetTest, NoCrashOnWidgetDelete) {
 // Tests that we do not crash when a Widget is destroyed before it finishes
 // processing of pending input events in the message loop.
 TEST_F(WidgetTest, NoCrashOnWidgetDeleteWithPendingEvents) {
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsMus())
+    return;
+
   std::unique_ptr<Widget> widget(new Widget);
   Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
   params.bounds = gfx::Rect(0, 0, 200, 200);
@@ -2985,11 +2977,24 @@ TEST_F(WidgetTest, GetAllChildWidgets) {
   expected.insert(w21);
   expected.insert(w22);
 
-  std::set<Widget*> widgets;
-  Widget::GetAllChildWidgets(toplevel->GetNativeView(), &widgets);
+  std::set<Widget*> child_widgets;
+  Widget::GetAllChildWidgets(toplevel->GetNativeView(), &child_widgets);
 
-  EXPECT_EQ(expected.size(), widgets.size());
-  EXPECT_TRUE(std::equal(expected.begin(), expected.end(), widgets.begin()));
+  EXPECT_EQ(expected.size(), child_widgets.size());
+  EXPECT_TRUE(
+      std::equal(expected.begin(), expected.end(), child_widgets.begin()));
+
+  // Check GetAllOwnedWidgets(). On Aura, this includes "transient" children.
+  // Otherwise (on all platforms), it should be the same as GetAllChildWidgets()
+  // except the root Widget is not included.
+  EXPECT_EQ(1u, expected.erase(toplevel.get()));
+
+  std::set<Widget*> owned_widgets;
+  Widget::GetAllOwnedWidgets(toplevel->GetNativeView(), &owned_widgets);
+
+  EXPECT_EQ(expected.size(), owned_widgets.size());
+  EXPECT_TRUE(
+      std::equal(expected.begin(), expected.end(), owned_widgets.begin()));
 }
 
 // Used by DestroyChildWidgetsInOrder. On destruction adds the supplied name to
@@ -3232,6 +3237,11 @@ TEST_F(WidgetTest, IsActiveFromDestroy) {
 // Tests that events propagate through from the dispatcher with the correct
 // event type, and that the different platforms behave the same.
 TEST_F(WidgetTest, MouseEventTypesViaGenerator) {
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsMus())
+    return;
+
   EventCountView* view = new EventCountView;
   view->set_handle_mode(EventCountView::CONSUME_EVENTS);
   view->SetBounds(10, 10, 50, 40);
@@ -3506,11 +3516,6 @@ TEST_F(WidgetTest, DISABLED_DestroyInSysCommandNCLButtonDownOnCaption) {
 
 // Test that SetAlwaysOnTop and IsAlwaysOnTop are consistent.
 TEST_F(WidgetTest, AlwaysOnTop) {
-  if (IsMus()) {
-    NOTIMPLEMENTED();
-    return;
-  }
-
   WidgetAutoclosePtr widget(CreateTopLevelNativeWidget());
   EXPECT_FALSE(widget->IsAlwaysOnTop());
   widget->SetAlwaysOnTop(true);
@@ -3543,6 +3548,11 @@ class ScaleFactorView : public View {
 
 // Ensure scale factor changes are propagated from the native Widget.
 TEST_F(WidgetTest, OnDeviceScaleFactorChanged) {
+  // This relies on the NativeWidget being the WindowDelegate, which is not the
+  // case for aura-mus-client.
+  if (IsMus())
+    return;
+
   // Automatically close the widget, but not delete it.
   WidgetAutoclosePtr widget(CreateTopLevelPlatformWidget());
   ScaleFactorView* view = new ScaleFactorView;
@@ -3608,6 +3618,18 @@ TEST_F(WidgetTest, WidgetRemovalsObserverCalled) {
   widget->RemoveRemovalsObserver(&removals_observer);
 }
 
+// Test that WidgetRemovalsObserver::OnWillRemoveView is called when deleting
+// the root view.
+TEST_F(WidgetTest, WidgetRemovalsObserverCalledWhenRemovingRootView) {
+  WidgetAutoclosePtr widget(CreateTopLevelPlatformWidget());
+  TestWidgetRemovalsObserver removals_observer;
+  widget->AddRemovalsObserver(&removals_observer);
+  views::View* root_view = widget->GetRootView();
+
+  widget.reset();
+  EXPECT_TRUE(removals_observer.DidRemoveView(root_view));
+}
+
 // Test that WidgetRemovalsObserver::OnWillRemoveView is called when moving
 // a view from one widget to another, but not when moving a view within
 // the same widget.
@@ -3632,6 +3654,27 @@ TEST_F(WidgetTest, WidgetRemovalsObserverCalledWhenMovingBetweenWidgets) {
   EXPECT_TRUE(removals_observer.DidRemoveView(child));
 
   widget->RemoveRemovalsObserver(&removals_observer);
+}
+
+// Test dispatch of ui::ET_MOUSEWHEEL.
+TEST_F(WidgetTest, MouseWheelEvent) {
+  // TODO: test uses GetContext(), which is not applicable to aura-mus.
+  // http://crbug.com/663809.
+  if (IsMus())
+    return;
+
+  WidgetAutoclosePtr widget(CreateTopLevelPlatformWidget());
+  widget->SetBounds(gfx::Rect(0, 0, 600, 600));
+  EventCountView* event_count_view = new EventCountView();
+  widget->GetContentsView()->AddChildView(event_count_view);
+  event_count_view->SetBounds(0, 0, 600, 600);
+  widget->Show();
+
+  ui::test::EventGenerator event_generator(GetContext(),
+                                           widget->GetNativeWindow());
+
+  event_generator.MoveMouseWheel(1, 1);
+  EXPECT_EQ(1, event_count_view->GetEventCount(ui::ET_MOUSEWHEEL));
 }
 
 #if defined(OS_WIN)
@@ -3659,9 +3702,6 @@ private:
 // under the currently active modal top-level window. In this instance, the
 // remaining top-level windows should be re-enabled.
 TEST_F(WidgetTest, WindowModalOwnerDestroyedEnabledTest) {
-  // Modality etc. are controlled by mus.
-  if (IsMus())
-    return;
   // top_level_widget owns owner_dialog_widget which owns owned_dialog_widget.
   Widget top_level_widget;
   Widget owner_dialog_widget;
@@ -3743,17 +3783,6 @@ void InitializeWidgetForOpacity(
     Widget& widget,
     Widget::InitParams init_params,
     const Widget::InitParams::WindowOpacity opacity) {
-#if defined(USE_X11)
-  // testing/xvfb.py runs xvfb and xcompmgr.
-  std::unique_ptr<base::Environment> env(base::Environment::Create());
-  bool has_compositing_manager = env->HasVar("_CHROMIUM_INSIDE_XVFB");
-  int depth = 0;
-  ui::ChooseVisualForWindow(has_compositing_manager, NULL, &depth);
-
-  if (has_compositing_manager)
-    EXPECT_EQ(depth, 32);
-#endif
-
   init_params.opacity = opacity;
   init_params.show_state = ui::SHOW_STATE_NORMAL;
   init_params.bounds = gfx::Rect(0, 0, 500, 500);
@@ -3761,49 +3790,89 @@ void InitializeWidgetForOpacity(
   init_params.native_widget =
       CreatePlatformDesktopNativeWidgetImpl(init_params, &widget, nullptr);
   widget.Init(init_params);
+}
+
+class CompositingWidgetTest : public views::test::WidgetTest {
+ public:
+  CompositingWidgetTest()
+      : widget_types_{Widget::InitParams::TYPE_WINDOW,
+                      Widget::InitParams::TYPE_PANEL,
+                      Widget::InitParams::TYPE_WINDOW_FRAMELESS,
+                      Widget::InitParams::TYPE_CONTROL,
+                      Widget::InitParams::TYPE_POPUP,
+                      Widget::InitParams::TYPE_MENU,
+                      Widget::InitParams::TYPE_TOOLTIP,
+                      Widget::InitParams::TYPE_BUBBLE,
+                      Widget::InitParams::TYPE_DRAG} {}
+  ~CompositingWidgetTest() override {}
+
+  void CheckAllWidgetsForOpacity(
+      const Widget::InitParams::WindowOpacity opacity) {
+    for (const auto& widget_type : widget_types_) {
+#if defined(OS_MACOSX)
+      // Tooltips are native on Mac. See BridgedNativeWidget::Init.
+      if (widget_type == Widget::InitParams::TYPE_TOOLTIP)
+        continue;
+#elif defined(OS_WIN)
+      // Other widget types would require to create a parent window and the
+      // the purpose of this test is mainly X11 in the first place.
+      if (widget_type != Widget::InitParams::TYPE_WINDOW)
+        continue;
+#endif
+      Widget widget;
+      InitializeWidgetForOpacity(widget, CreateParams(widget_type), opacity);
+
+      // Use NativeWidgetAura directly.
+      if (widget_type == Widget::InitParams::TYPE_WINDOW_FRAMELESS ||
+          widget_type == Widget::InitParams::TYPE_CONTROL)
+        continue;
+
+#if defined(OS_MACOSX)
+      // Mac always always has a compositing window manager, but doesn't have
+      // transparent titlebars which is what ShouldWindowContentsBeTransparent()
+      // is currently used for. Asking for transparency should get it. Note that
+      // TestViewsDelegate::use_transparent_windows_ determines the result of
+      // INFER_OPACITY: assume it is false.
+      bool should_be_transparent =
+          opacity == Widget::InitParams::TRANSLUCENT_WINDOW;
+#else
+      bool should_be_transparent = widget.ShouldWindowContentsBeTransparent();
+#endif
+
+      EXPECT_EQ(IsNativeWindowTransparent(widget.GetNativeWindow()),
+                should_be_transparent);
 
 #if defined(USE_X11)
-  if (has_compositing_manager)
-    EXPECT_TRUE(widget.IsTranslucentWindowOpacitySupported());
+      if (HasCompositingManager() &&
+          (widget_type == Widget::InitParams::TYPE_DRAG ||
+           widget_type == Widget::InitParams::TYPE_WINDOW)) {
+        EXPECT_TRUE(widget.IsTranslucentWindowOpacitySupported());
+      } else {
+        EXPECT_FALSE(widget.IsTranslucentWindowOpacitySupported());
+      }
 #endif
-}
+    }
+  }
+
+ protected:
+  const std::vector<Widget::InitParams::Type> widget_types_;
+
+  DISALLOW_COPY_AND_ASSIGN(CompositingWidgetTest);
+};
 
 }  // namespace
 
 // Test opacity when compositing is enabled.
-TEST_F(WidgetTest, Transparency_DesktopWidgetInferOpacity) {
-  Widget widget;
-  InitializeWidgetForOpacity(widget,
-                             CreateParams(Widget::InitParams::TYPE_WINDOW),
-                             Widget::InitParams::INFER_OPACITY);
-  EXPECT_EQ(IsNativeWindowTransparent(widget.GetNativeWindow()),
-            widget.ShouldWindowContentsBeTransparent());
+TEST_F(CompositingWidgetTest, Transparency_DesktopWidgetInferOpacity) {
+  CheckAllWidgetsForOpacity(Widget::InitParams::INFER_OPACITY);
 }
 
-TEST_F(WidgetTest, Transparency_DesktopWidgetOpaque) {
-  Widget widget;
-  InitializeWidgetForOpacity(widget,
-                             CreateParams(Widget::InitParams::TYPE_WINDOW),
-                             Widget::InitParams::OPAQUE_WINDOW);
-  EXPECT_EQ(IsNativeWindowTransparent(widget.GetNativeWindow()),
-            widget.ShouldWindowContentsBeTransparent());
+TEST_F(CompositingWidgetTest, Transparency_DesktopWidgetOpaque) {
+  CheckAllWidgetsForOpacity(Widget::InitParams::OPAQUE_WINDOW);
 }
 
-// Failing on Mac. http://cbrug.com/623421
-#if defined(OS_MACOSX)
-#define MAYBE_Transparency_DesktopWidgetTranslucent \
-    DISABLED_Transparency_DesktopWidgetTranslucent
-#else
-#define MAYBE_Transparency_DesktopWidgetTranslucent \
-    Transparency_DesktopWidgetTranslucent
-#endif
-TEST_F(WidgetTest, MAYBE_Transparency_DesktopWidgetTranslucent) {
-  Widget widget;
-  InitializeWidgetForOpacity(widget,
-                             CreateParams(Widget::InitParams::TYPE_WINDOW),
-                             Widget::InitParams::TRANSLUCENT_WINDOW);
-  EXPECT_EQ(IsNativeWindowTransparent(widget.GetNativeWindow()),
-            widget.ShouldWindowContentsBeTransparent());
+TEST_F(CompositingWidgetTest, Transparency_DesktopWidgetTranslucent) {
+  CheckAllWidgetsForOpacity(Widget::InitParams::TRANSLUCENT_WINDOW);
 }
 
 #endif  // !defined(OS_CHROMEOS)

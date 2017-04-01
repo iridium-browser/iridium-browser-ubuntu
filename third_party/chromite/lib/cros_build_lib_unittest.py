@@ -21,7 +21,7 @@ import sys
 import time
 import __builtin__
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.cbuildbot import repository
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
@@ -621,6 +621,31 @@ class TestRunCommandOutput(cros_test_lib.TempDirTestCase,
     self.assertIs(ret.error, None)
     self.assertEqual(osutils.ReadFile(log), 'monkeys4\nmonkeys5\n')
 
+
+  @_ForceLoggingLevel
+  def testLogStdoutToFileWithOrWithoutAppend(self):
+    log = os.path.join(self.tempdir, 'output')
+    ret = cros_build_lib.RunCommand(
+        ['echo', 'monkeys'], log_stdout_to_file=log)
+    self.assertEqual(osutils.ReadFile(log), 'monkeys\n')
+    self.assertIs(ret.output, None)
+    self.assertIs(ret.error, None)
+
+    # Without append
+    ret = cros_build_lib.RunCommand(
+        ['echo', 'monkeys2'], log_stdout_to_file=log)
+    self.assertEqual(osutils.ReadFile(log), 'monkeys2\n')
+    self.assertIs(ret.output, None)
+    self.assertIs(ret.error, None)
+
+    # With append
+    ret = cros_build_lib.RunCommand(
+        ['echo', 'monkeys3'], append_to_file=True, log_stdout_to_file=log)
+    self.assertEqual(osutils.ReadFile(log), 'monkeys2\nmonkeys3\n')
+    self.assertIs(ret.output, None)
+    self.assertIs(ret.error, None)
+
+
   def _CaptureRunCommand(self, command, mute_output):
     """Capture a RunCommand() output with the specified |mute_output|.
 
@@ -817,53 +842,21 @@ class TestRetries(cros_test_lib.MockTempDirTestCase):
     _check_counters(3, 2)
 
 
-class TestTimedCommand(cros_test_lib.MockTestCase):
-  """Tests for TimedCommand()"""
+class TestTimedSection(cros_test_lib.TestCase):
+  """Tests for TimedSection context manager."""
 
-  # TODO: Would be nice to insert a hook into the logging system so we verify
-  # the message actually gets passed down.  The logging module swallows the
-  # exceptions it throws internally when not all args get converted.
-
-  def setUp(self):
-    self.cmd = mock.MagicMock(return_value=1234)
-    self.cmd.__name__ = 'name'
-
-  def testBasic(self):
+  def testTimerValues(self):
     """Make sure simple stuff works."""
-    cros_build_lib.TimedCommand(self.cmd)
-    self.cmd.assert_called_once_with()
+    with cros_build_lib.TimedSection() as timer:
+      # While running, we have access to the start time.
+      self.assertIsInstance(timer.start, datetime.datetime)
+      self.assertIsNone(timer.finish)
+      self.assertIsNone(timer.delta)
 
-  def testArgs(self):
-    """Verify passing of optional args to the destination function."""
-    cros_build_lib.TimedCommand(self.cmd, 'arg', 1, kw=True, alist=[])
-    self.cmd.assert_called_once_with('arg', 1, kw=True, alist=[])
-
-  def testReturn(self):
-    """Verify return values get passed back."""
-    ret = cros_build_lib.TimedCommand(self.cmd)
-    self.assertEqual(ret, 1234)
-
-  def testCallback(self):
-    """Verify log callback does the right thing."""
-    def cb(lvl, msg, ret, delta):
-      self.assertEqual(lvl, 10)
-      self.assertEqual(msg, 'msg!')
-      self.assertEqual(ret, 1234)
-      self.assertTrue(isinstance(delta, datetime.timedelta))
-    cros_build_lib.TimedCommand(self.cmd, timed_log_level=10,
-                                timed_log_msg='msg!', timed_log_callback=cb)
-
-  def testLog(self):
-    """Verify the logger module gets called."""
-    m = self.PatchObject(logging, 'log')
-    cros_build_lib.TimedCommand(self.cmd, timed_log_level=logging.WARNING,
-                                timed_log_msg='msg!')
-    self.assertEqual(m.call_count, 1)
-
-  def testLogStraight(self):
-    """Verify logging messages does the right thing."""
-    cros_build_lib.TimedCommand(self.cmd, timed_log_level=logging.WARNING,
-                                timed_log_msg='msg!')
+    # After finishing, all values should be set.
+    self.assertIsInstance(timer.start, datetime.datetime)
+    self.assertIsInstance(timer.finish, datetime.datetime)
+    self.assertIsInstance(timer.delta, datetime.timedelta)
 
 
 class TestListFiles(cros_test_lib.TempDirTestCase):
@@ -1617,6 +1610,21 @@ class TestGetHostname(cros_test_lib.MockTestCase):
     """Verify basic behavior"""
     self.assertEqual(cros_build_lib.GetHostDomain(), 'google.com')
 
+  def testHostIsCIBuilder(self):
+    """Test HostIsCIBuilder."""
+    fq_hostname_golo = 'test.golo.chromium.org'
+    fq_hostname_gce_1 = 'test.chromeos-bot.internal'
+    fq_hostname_gce_2 = 'test.chrome.corp.google.com'
+    fq_hostname_invalid = 'test'
+    self.assertTrue(cros_build_lib.HostIsCIBuilder(fq_hostname_golo))
+    self.assertTrue(cros_build_lib.HostIsCIBuilder(fq_hostname_gce_1))
+    self.assertTrue(cros_build_lib.HostIsCIBuilder(fq_hostname_gce_2))
+    self.assertFalse(cros_build_lib.HostIsCIBuilder(fq_hostname_invalid))
+    self.assertFalse(cros_build_lib.HostIsCIBuilder(
+        fq_hostname=fq_hostname_golo, gce_only=True))
+    self.assertFalse(cros_build_lib.HostIsCIBuilder(
+        fq_hostname=fq_hostname_gce_1, golo_only=True))
+
 
 class TestGetChrootVersion(cros_test_lib.MockTestCase):
   """Tests GetChrootVersion functionality."""
@@ -1870,16 +1878,53 @@ class CreateTarballTests(cros_test_lib.TempDirTestCase):
     cros_build_lib.CreateTarball(self.target, self.inputDir,
                                  inputs=self.inputsWithDirs)
 
-  def testWriting(self):
-    """Create a tarfile."""
-    with self.assertRaises(cros_build_lib.TarOfOpenFileError):
-      with open(os.path.join(self.inputDir, self.inputs[0]), 'a'):
-        cros_build_lib.CreateTarball(self.target, self.inputDir,
-                                     inputs=self.inputs)
+# Tests for tar failure retry logic.
 
-  def testWritingWithDirs(self):
-    """Create a tarfile."""
-    with self.assertRaises(cros_build_lib.TarOfOpenFileError):
-      with open(os.path.join(self.inputDir, self.inputs[3]), 'w'):
-        cros_build_lib.CreateTarball(self.target, self.inputDir,
-                                     inputs=self.inputsWithDirs)
+class FailedCreateTarballTests(cros_test_lib.MockTestCase):
+  """Tests special case error handling for CreateTarBall."""
+
+  def setUp(self):
+    """Mock RunCommand mock."""
+    # Each test can change this value as needed.  Each element is the return
+    # code in the CommandResult for subsequent calls to RunCommand().
+    self.tarResults = []
+
+    def Result(*_args, **_kwargs):
+      """Creates CommandResult objects for each tarResults value in turn."""
+      return cros_build_lib.CommandResult(returncode=self.tarResults.pop(0))
+
+    self.mockRun = self.PatchObject(cros_build_lib, 'RunCommand',
+                                    autospec=True,
+                                    side_effect=Result)
+
+  def testSuccess(self):
+    """CreateTarball works the first time."""
+    self.tarResults = [0]
+    cros_build_lib.CreateTarball('foo', 'bar', inputs=['a', 'b'])
+
+    self.assertEqual(self.mockRun.call_count, 1)
+
+  def testFailedOnceSoft(self):
+    """Force a single retry for CreateTarball."""
+    self.tarResults = [1, 0]
+    cros_build_lib.CreateTarball('foo', 'bar', inputs=['a', 'b'])
+
+    self.assertEqual(self.mockRun.call_count, 2)
+
+  def testFailedOnceHard(self):
+    """Test unrecoverable error."""
+    self.tarResults = [2]
+    with self.assertRaises(cros_build_lib.RunCommandError) as cm:
+      cros_build_lib.CreateTarball('foo', 'bar', inputs=['a', 'b'])
+
+    self.assertEqual(self.mockRun.call_count, 1)
+    self.assertEqual(cm.exception.args[1].returncode, 2)
+
+  def testFailedTwiceSoft(self):
+    """Exhaust retries for recoverable errors."""
+    self.tarResults = [1, 1]
+    with self.assertRaises(cros_build_lib.RunCommandError) as cm:
+      cros_build_lib.CreateTarball('foo', 'bar', inputs=['a', 'b'])
+
+    self.assertEqual(self.mockRun.call_count, 2)
+    self.assertEqual(cm.exception.args[1].returncode, 1)

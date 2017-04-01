@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
@@ -29,10 +29,10 @@ const char kBTPairingState[] = "pairing";
 // Standard length of pincode for pairing BT keyboards.
 const int kPincodeLength = 6;
 
-bool DeviceIsPointing(device::BluetoothDevice::DeviceType device_type) {
-  return device_type == device::BluetoothDevice::DEVICE_MOUSE ||
-         device_type == device::BluetoothDevice::DEVICE_KEYBOARD_MOUSE_COMBO ||
-         device_type == device::BluetoothDevice::DEVICE_TABLET;
+bool DeviceIsPointing(device::BluetoothDeviceType device_type) {
+  return device_type == device::BluetoothDeviceType::MOUSE ||
+         device_type == device::BluetoothDeviceType::KEYBOARD_MOUSE_COMBO ||
+         device_type == device::BluetoothDeviceType::TABLET;
 }
 
 bool DeviceIsPointing(const device::InputServiceLinux::InputDeviceInfo& info) {
@@ -40,9 +40,9 @@ bool DeviceIsPointing(const device::InputServiceLinux::InputDeviceInfo& info) {
          info.is_tablet;
 }
 
-bool DeviceIsKeyboard(device::BluetoothDevice::DeviceType device_type) {
-  return device_type == device::BluetoothDevice::DEVICE_KEYBOARD ||
-         device_type == device::BluetoothDevice::DEVICE_KEYBOARD_MOUSE_COMBO;
+bool DeviceIsKeyboard(device::BluetoothDeviceType device_type) {
+  return device_type == device::BluetoothDeviceType::KEYBOARD ||
+         device_type == device::BluetoothDeviceType::KEYBOARD_MOUSE_COMBO;
 }
 
 }  // namespace
@@ -53,17 +53,13 @@ HIDDetectionScreen::HIDDetectionScreen(BaseScreenDelegate* base_screen_delegate,
                                        HIDDetectionView* view)
     : HIDDetectionModel(base_screen_delegate),
       view_(view),
-      mouse_is_pairing_(false),
-      pointing_device_connect_type_(InputDeviceInfo::TYPE_UNKNOWN),
-      keyboard_is_pairing_(false),
-      keyboard_device_connect_type_(InputDeviceInfo::TYPE_UNKNOWN),
-      switch_on_adapter_when_ready_(false),
-      showing_(false),
       weak_ptr_factory_(this) {
   DCHECK(view_);
   if (view_)
     view_->Bind(*this);
 
+  device::BluetoothAdapterFactory::GetAdapter(base::Bind(
+      &HIDDetectionScreen::InitializeAdapter, weak_ptr_factory_.GetWeakPtr()));
 }
 
 HIDDetectionScreen::~HIDDetectionScreen() {
@@ -76,11 +72,6 @@ HIDDetectionScreen::~HIDDetectionScreen() {
                              base::Bind(&base::DoNothing));
   if (adapter_.get())
     adapter_->RemoveObserver(this);
-}
-
-void HIDDetectionScreen::PrepareToShow() {
-  if (view_)
-    view_->PrepareToShow();
 }
 
 void HIDDetectionScreen::Show() {
@@ -106,14 +97,6 @@ void HIDDetectionScreen::Hide() {
     view_->Hide();
 }
 
-void HIDDetectionScreen::Initialize(::login::ScreenContext* context) {
-  HIDDetectionModel::Initialize(context);
-
-  device::BluetoothAdapterFactory::GetAdapter(
-      base::Bind(&HIDDetectionScreen::InitializeAdapter,
-                 weak_ptr_factory_.GetWeakPtr()));
-}
-
 void HIDDetectionScreen::OnContinueButtonClicked() {
 
   ContinueScenarioType scenario_type;
@@ -131,19 +114,13 @@ void HIDDetectionScreen::OnContinueButtonClicked() {
 
   // Switch off BT adapter if it was off before the screen and no BT device
   // connected.
-  bool adapter_is_powered =
+  const bool adapter_is_powered =
       adapter_.get() && adapter_->IsPresent() && adapter_->IsPowered();
-  bool use_bluetooth =
-      pointing_device_connect_type_ == InputDeviceInfo::TYPE_BLUETOOTH ||
-      keyboard_device_connect_type_ == InputDeviceInfo::TYPE_BLUETOOTH;
-  bool need_switching_off = adapter_initially_powered_ &&
-                            !(*adapter_initially_powered_);
-  if (adapter_is_powered && !use_bluetooth && need_switching_off) {
-    VLOG(1) << "Switching off BT adapter after HID OOBE screen as unused.";
-    adapter_->SetPowered(
-        false,
-        base::Bind(&base::DoNothing),
-        base::Bind(&HIDDetectionScreen::SetPoweredOffError,
+  const bool need_switching_off =
+      adapter_initially_powered_ && !(*adapter_initially_powered_);
+  if (adapter_is_powered && need_switching_off) {
+    input_service_proxy_.GetDevices(
+        base::Bind(&HIDDetectionScreen::OnGetInputDevicesForPowerOff,
                    weak_ptr_factory_.GetWeakPtr()));
   }
 
@@ -258,19 +235,18 @@ void HIDDetectionScreen::ConnectBTDevice(device::BluetoothDevice* device) {
                       device->IsConnecting();
   if (!device->IsPairable() || device_busy)
     return;
-  device::BluetoothDevice::DeviceType device_type = device->GetDeviceType();
+  device::BluetoothDeviceType device_type = device->GetDeviceType();
 
-  if (device_type == device::BluetoothDevice::DEVICE_MOUSE ||
-      device_type == device::BluetoothDevice::DEVICE_TABLET) {
+  if (device_type == device::BluetoothDeviceType::MOUSE ||
+      device_type == device::BluetoothDeviceType::TABLET) {
     if (mouse_is_pairing_)
       return;
     mouse_is_pairing_ = true;
-  } else if (device_type == device::BluetoothDevice::DEVICE_KEYBOARD) {
+  } else if (device_type == device::BluetoothDeviceType::KEYBOARD) {
     if (keyboard_is_pairing_)
       return;
     keyboard_is_pairing_ = true;
-  } else if (device_type ==
-      device::BluetoothDevice::DEVICE_KEYBOARD_MOUSE_COMBO) {
+  } else if (device_type == device::BluetoothDeviceType::KEYBOARD_MOUSE_COMBO) {
     if (mouse_is_pairing_ && keyboard_is_pairing_)
       return;
     mouse_is_pairing_ = true;
@@ -284,8 +260,7 @@ void HIDDetectionScreen::ConnectBTDevice(device::BluetoothDevice* device) {
                        device->GetAddress(), device_type));
 }
 
-void HIDDetectionScreen::BTConnected(
-    device::BluetoothDevice::DeviceType device_type) {
+void HIDDetectionScreen::BTConnected(device::BluetoothDeviceType device_type) {
   if (DeviceIsPointing(device_type))
     mouse_is_pairing_ = false;
   if (DeviceIsKeyboard(device_type)) {
@@ -299,7 +274,7 @@ void HIDDetectionScreen::BTConnected(
 
 void HIDDetectionScreen::BTConnectError(
     const std::string& address,
-    device::BluetoothDevice::DeviceType device_type,
+    device::BluetoothDeviceType device_type,
     device::BluetoothDevice::ConnectErrorCode error_code) {
   LOG(WARNING) << "BTConnectError while connecting " << address
                << " error code = " << error_code;
@@ -539,6 +514,23 @@ void HIDDetectionScreen::OnStartDiscoverySession(
   UpdateDevices();
 }
 
+void HIDDetectionScreen::OnGetInputDevicesForPowerOff(
+    const std::vector<InputDeviceInfo>& devices) {
+  bool use_bluetooth = false;
+  for (const auto& device : devices) {
+    if (device.type == InputDeviceInfo::TYPE_BLUETOOTH) {
+      use_bluetooth = true;
+      break;
+    }
+  }
+  if (!use_bluetooth) {
+    VLOG(1) << "Switching off BT adapter after HID OOBE screen as unused.";
+    adapter_->SetPowered(false, base::Bind(&base::DoNothing),
+                         base::Bind(&HIDDetectionScreen::SetPoweredOffError,
+                                    weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
 void HIDDetectionScreen::SetPoweredError() {
   LOG(ERROR) << "Failed to power BT adapter";
 }
@@ -551,5 +543,13 @@ void HIDDetectionScreen::FindDevicesError() {
   VLOG(1) << "Failed to start Bluetooth discovery.";
 }
 
+scoped_refptr<device::BluetoothAdapter>
+HIDDetectionScreen::GetAdapterForTesting() {
+  return adapter_;
+}
+
+void HIDDetectionScreen::SetAdapterInitialPoweredForTesting(bool powered) {
+  adapter_initially_powered_.reset(new bool(powered));
+}
 
 }  // namespace chromeos

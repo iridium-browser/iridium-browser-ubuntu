@@ -2,17 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_CERT_CT_POLICY_ENFORCER_H
-#define NET_CERT_CT_POLICY_ENFORCER_H
+#ifndef NET_CERT_CT_POLICY_ENFORCER_H_
+#define NET_CERT_CT_POLICY_ENFORCER_H_
 
 #include <stddef.h>
 #include <vector>
 
 #include "net/base/net_export.h"
 #include "net/cert/signed_certificate_timestamp.h"
-#include "net/log/net_log.h"
 
 namespace net {
+
+class NetLogWithSource;
 
 namespace ct {
 
@@ -85,7 +86,7 @@ class NET_EXPORT CTPolicyEnforcer {
   virtual ct::CertPolicyCompliance DoesConformToCertPolicy(
       X509Certificate* cert,
       const SCTList& verified_scts,
-      const BoundNetLog& net_log);
+      const NetLogWithSource& net_log);
 
   // Returns the CT/EV policy compliance status for a given certificate
   // and collection of SCTs.
@@ -99,9 +100,9 @@ class NET_EXPORT CTPolicyEnforcer {
       X509Certificate* cert,
       const ct::EVCertsWhitelist* ev_whitelist,
       const SCTList& verified_scts,
-      const BoundNetLog& net_log);
+      const NetLogWithSource& net_log);
 };
 
 }  // namespace net
 
-#endif  // NET_CERT_CT_POLICY_ENFORCER_H
+#endif  // NET_CERT_CT_POLICY_ENFORCER_H_

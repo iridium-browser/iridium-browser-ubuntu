@@ -5,14 +5,14 @@
 #include "chrome/browser/ui/views/location_bar/bubble_icon_view.h"
 
 #include "chrome/browser/command_updater.h"
-#include "ui/accessibility/ax_view_state.h"
-#include "ui/base/material_design/material_design_controller.h"
+#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/events/event.h"
-#include "ui/gfx/color_palette.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/animation/ink_drop_highlight.h"
+#include "ui/views/animation/ink_drop_impl.h"
 #include "ui/views/bubble/bubble_dialog_delegate.h"
 
 BubbleIconView::BubbleIconView(CommandUpdater* command_updater, int command_id)
@@ -24,12 +24,8 @@ BubbleIconView::BubbleIconView(CommandUpdater* command_updater, int command_id)
   AddChildView(image_);
   image_->set_interactive(false);
   image_->EnableCanvasFlippingForRTLUI(true);
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    SetInkDropMode(InkDropMode::ON);
-    SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-  } else {
-    image_->SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
-  }
+  SetInkDropMode(InkDropMode::ON);
+  SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
 }
 
 BubbleIconView::~BubbleIconView() {}
@@ -52,9 +48,9 @@ void BubbleIconView::SetTooltipText(const base::string16& tooltip) {
   image_->SetTooltipText(tooltip);
 }
 
-void BubbleIconView::GetAccessibleState(ui::AXViewState* state) {
-  image_->GetAccessibleState(state);
-  state->role = ui::AX_ROLE_BUTTON;
+void BubbleIconView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  image_->GetAccessibleNodeData(node_data);
+  node_data->role = ui::AX_ROLE_BUTTON;
 }
 
 bool BubbleIconView::GetTooltipText(const gfx::Point& p,
@@ -145,13 +141,15 @@ void BubbleIconView::RemoveInkDropLayer(ui::Layer* ink_drop_layer) {
   image_->SetPaintToLayer(false);
 }
 
+std::unique_ptr<views::InkDrop> BubbleIconView::CreateInkDrop() {
+  std::unique_ptr<views::InkDropImpl> ink_drop = CreateDefaultInkDropImpl();
+  ink_drop->SetShowHighlightOnFocus(true);
+  return std::move(ink_drop);
+}
+
 SkColor BubbleIconView::GetInkDropBaseColor() const {
   return color_utils::DeriveDefaultIconColor(GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldDefaultColor));
-}
-
-bool BubbleIconView::ShouldShowInkDropForFocus() const {
-  return true;
 }
 
 void BubbleIconView::OnGestureEvent(ui::GestureEvent* event) {
@@ -183,10 +181,6 @@ gfx::VectorIconId BubbleIconView::GetVectorIcon() const {
   return gfx::VectorIconId::VECTOR_ICON_NONE;
 }
 
-bool BubbleIconView::SetRasterIcon() {
-  return false;
-}
-
 void BubbleIconView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   views::BubbleDialogDelegateView* bubble = GetBubble();
   if (bubble)
@@ -194,18 +188,14 @@ void BubbleIconView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 }
 
 void BubbleIconView::UpdateIcon() {
-  if (SetRasterIcon())
-    return;
-
-  const int icon_size =
-      ui::MaterialDesignController::IsModeMaterial() ? 16 : 18;
   const ui::NativeTheme* theme = GetNativeTheme();
   SkColor icon_color =
       active_
-          ? theme->GetSystemColor(ui::NativeTheme::kColorId_CallToActionColor)
+          ? theme->GetSystemColor(
+              ui::NativeTheme::kColorId_ProminentButtonColor)
           : GetInkDropBaseColor();
-  image_->SetImage(
-      gfx::CreateVectorIcon(GetVectorIcon(), icon_size, icon_color));
+  image_->SetImage(gfx::CreateVectorIcon(
+      GetVectorIcon(), LocationBarView::kIconWidth, icon_color));
 }
 
 void BubbleIconView::SetActiveInternal(bool active) {

@@ -16,18 +16,15 @@
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "device/bluetooth/bluetooth_adapter.h"
-#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_task_manager_win.h"
 
 namespace base {
 class SequencedTaskRunner;
-class Thread;
 }  // namespace base
 
 namespace device {
@@ -71,14 +68,10 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
       const ServiceOptions& options,
       const CreateServiceCallback& callback,
       const CreateServiceErrorCallback& error_callback) override;
-  void RegisterAudioSink(
-      const BluetoothAudioSink::Options& options,
-      const AcquiredCallback& callback,
-      const BluetoothAudioSink::ErrorCallback& error_callback) override;
   void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) override;
+      const AdvertisementErrorCallback& error_callback) override;
   BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
 
@@ -87,8 +80,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
       const BluetoothTaskManagerWin::AdapterState& state) override;
   void DiscoveryStarted(bool success) override;
   void DiscoveryStopped() override;
-  void DevicesPolled(const ScopedVector<BluetoothTaskManagerWin::DeviceState>&
-                         devices) override;
+  void DevicesPolled(
+      const std::vector<std::unique_ptr<BluetoothTaskManagerWin::DeviceState>>&
+          devices) override;
 
   const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner() const {
     return ui_task_runner_;

@@ -13,7 +13,7 @@
 #include "base/compiler_specific.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_parameters_callback.h"
 
 struct addrinfo;
 
@@ -55,7 +55,7 @@ class NET_EXPORT AddressList {
   // Creates a callback for use with the NetLog that returns a Value
   // representation of the address list.  The callback must be destroyed before
   // |this| is.
-  NetLog::ParametersCallback CreateNetLogCallback() const;
+  NetLogParametersCallback CreateNetLogCallback() const;
 
   using iterator = std::vector<IPEndPoint>::iterator;
   using const_iterator = std::vector<IPEndPoint>::const_iterator;
@@ -81,6 +81,9 @@ class NET_EXPORT AddressList {
   const_iterator begin() const { return endpoints_.begin(); }
   iterator end() { return endpoints_.end(); }
   const_iterator end() const { return endpoints_.end(); }
+
+  const std::vector<net::IPEndPoint>& endpoints() const { return endpoints_; }
+  std::vector<net::IPEndPoint>& endpoints() { return endpoints_; }
 
  private:
   std::vector<IPEndPoint> endpoints_;

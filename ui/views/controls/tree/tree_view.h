@@ -24,9 +24,9 @@ class Rect;
 
 namespace views {
 
+class PrefixSelector;
 class Textfield;
 class TreeViewController;
-class PrefixSelector;
 
 // TreeView displays hierarchical data as returned from a TreeModel. The user
 // can expand, collapse and edit the items. A Controller may be attached to
@@ -35,7 +35,8 @@ class PrefixSelector;
 // Note on implementation. This implementation doesn't scale well. In particular
 // it does not store any row information, but instead calculates it as
 // necessary. But it's more than adequate for current uses.
-class VIEWS_EXPORT TreeView : public ui::TreeModelObserver,
+class VIEWS_EXPORT TreeView : public View,
+                              public ui::TreeModelObserver,
                               public TextfieldController,
                               public FocusChangeListener,
                               public PrefixDelegate {
@@ -127,7 +128,7 @@ class VIEWS_EXPORT TreeView : public ui::TreeModelObserver,
   void OnGestureEvent(ui::GestureEvent* event) override;
   void ShowContextMenu(const gfx::Point& p,
                        ui::MenuSourceType source_type) override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   const char* GetClassName() const override;
 
   // TreeModelObserver overrides:
@@ -335,7 +336,7 @@ class VIEWS_EXPORT TreeView : public ui::TreeModelObserver,
   void CollapseOrSelectParent();
 
   // If the selected node is collapsed, it's expanded. Otherwise the first child
-  // is seleected.
+  // is selected.
   void ExpandOrSelectChild();
 
   // Implementation of Expand(). Returns true if at least one node was expanded
@@ -347,6 +348,11 @@ class VIEWS_EXPORT TreeView : public ui::TreeModelObserver,
   // Returns whether |point| is in the bounds of |node|'s expand/collapse
   // control.
   bool IsPointInExpandControl(InternalNode* node, const gfx::Point& point);
+
+  // Sets whether a focus ring is visible on this control or not. This function
+  // does nothing if focus rings aren't enabled in general or if the platform's
+  // style does not use focus rings on TreeViews.
+  void SetHasFocusRing(bool);
 
   // The model, may be null.
   ui::TreeModel* model_;

@@ -24,9 +24,17 @@ namespace media {
 
 TestMojoMediaClient::TestMojoMediaClient() {}
 
-TestMojoMediaClient::~TestMojoMediaClient() {}
+TestMojoMediaClient::~TestMojoMediaClient() {
+  DVLOG(1) << __func__;
+  // AudioManager destructor requires MessageLoop.
+  // Destroy it before the message loop goes away.
+  audio_manager_.reset();
+  // Flush the message loop to ensure that the audio manager is destroyed.
+  base::RunLoop().RunUntilIdle();
+}
 
-void TestMojoMediaClient::Initialize() {
+void TestMojoMediaClient::Initialize(
+    service_manager::Connector* /* connector */) {
   InitializeMediaLibrary();
   // TODO(dalecurtis): We should find a single owner per process for the audio
   // manager or make it a lazy instance.  It's not safe to call Get()/Create()
@@ -39,69 +47,30 @@ void TestMojoMediaClient::Initialize() {
     // Flush the message loop to ensure that the audio manager is initialized.
     base::RunLoop().RunUntilIdle();
   }
-
 }
 
-void TestMojoMediaClient::WillQuit() {
-  DVLOG(1) << __FUNCTION__;
-  // AudioManager destructor requires MessageLoop.
-  // Destroy it before the message loop goes away.
-  audio_manager_.reset();
-  // Flush the message loop to ensure that the audio manager is destroyed.
-  base::RunLoop().RunUntilIdle();
+scoped_refptr<AudioRendererSink> TestMojoMediaClient::CreateAudioRendererSink(
+    const std::string& /* audio_device_id */) {
+  return new AudioOutputStreamSink();
 }
 
-std::unique_ptr<Renderer> TestMojoMediaClient::CreateRenderer(
-    scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
-    scoped_refptr<MediaLog> media_log,
-    const std::string& audio_device_id) {
-  DVLOG(1) << __FUNCTION__;
-  AudioRendererSink* audio_renderer_sink = GetAudioRendererSink();
-  VideoRendererSink* video_renderer_sink =
-      GetVideoRendererSink(media_task_runner);
-
-  RendererFactory* renderer_factory = GetRendererFactory(std::move(media_log));
-  if (!renderer_factory)
-    return nullptr;
-
-  return renderer_factory->CreateRenderer(
-      media_task_runner, media_task_runner, audio_renderer_sink,
-      video_renderer_sink, RequestSurfaceCB());
-}
-
-RendererFactory* TestMojoMediaClient::GetRendererFactory(
-    scoped_refptr<MediaLog> media_log) {
-  DVLOG(1) << __FUNCTION__;
-  if (!renderer_factory_) {
-    renderer_factory_ = base::MakeUnique<DefaultRendererFactory>(
-        std::move(media_log), nullptr,
-        DefaultRendererFactory::GetGpuFactoriesCB());
-  }
-
-  return renderer_factory_.get();
-}
-
-AudioRendererSink* TestMojoMediaClient::GetAudioRendererSink() {
-  if (!audio_renderer_sink_)
-    audio_renderer_sink_ = new AudioOutputStreamSink();
-
-  return audio_renderer_sink_.get();
-}
-
-VideoRendererSink* TestMojoMediaClient::GetVideoRendererSink(
+std::unique_ptr<VideoRendererSink> TestMojoMediaClient::CreateVideoRendererSink(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner) {
-  if (!video_renderer_sink_) {
-    video_renderer_sink_ = base::MakeUnique<NullVideoSink>(
-        false, base::TimeDelta::FromSecondsD(1.0 / 60),
-        NullVideoSink::NewFrameCB(), task_runner);
-  }
+  return base::MakeUnique<NullVideoSink>(
+      false, base::TimeDelta::FromSecondsD(1.0 / 60),
+      NullVideoSink::NewFrameCB(), task_runner);
+}
 
-  return video_renderer_sink_.get();
+std::unique_ptr<RendererFactory> TestMojoMediaClient::CreateRendererFactory(
+    const scoped_refptr<MediaLog>& media_log) {
+  return base::MakeUnique<DefaultRendererFactory>(
+      std::move(media_log), nullptr,
+      DefaultRendererFactory::GetGpuFactoriesCB());
 }
 
 std::unique_ptr<CdmFactory> TestMojoMediaClient::CreateCdmFactory(
-    shell::mojom::InterfaceProvider* /* interface_provider */) {
-  DVLOG(1) << __FUNCTION__;
+    service_manager::mojom::InterfaceProvider* /* host_interfaces */) {
+  DVLOG(1) << __func__;
   return base::MakeUnique<DefaultCdmFactory>();
 }
 

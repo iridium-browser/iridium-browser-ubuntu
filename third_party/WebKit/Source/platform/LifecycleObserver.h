@@ -31,48 +31,46 @@
 
 namespace blink {
 
-template<typename Context, typename Observer>
+template <typename Context, typename Observer>
+class LifecycleNotifier;
+
+template <typename Context, typename Observer>
 class LifecycleObserver : public GarbageCollectedMixin {
-public:
-    DEFINE_INLINE_VIRTUAL_TRACE()
-    {
-        visitor->trace(m_lifecycleContext);
-    }
+ public:
+  DEFINE_INLINE_VIRTUAL_TRACE() { visitor->trace(m_lifecycleContext); }
 
-    virtual void contextDestroyed() { }
+  Context* lifecycleContext() const { return m_lifecycleContext; }
 
-    Context* lifecycleContext() const { return m_lifecycleContext; }
+  void clearContext() { setContext(nullptr); }
 
-protected:
-    explicit LifecycleObserver(Context* context)
-        : m_lifecycleContext(nullptr)
-    {
-        setContext(context);
-    }
+ protected:
+  explicit LifecycleObserver(Context* context) : m_lifecycleContext(nullptr) {
+    setContext(context);
+  }
 
-    void setContext(Context*);
+  void setContext(Context*);
 
-    void clearContext()
-    {
-        setContext(nullptr);
-    }
-
-private:
-    WeakMember<Context> m_lifecycleContext;
+ private:
+  WeakMember<Context> m_lifecycleContext;
 };
 
-template<typename Context, typename Observer>
-inline void LifecycleObserver<Context, Observer>::setContext(Context* context)
-{
-    if (m_lifecycleContext)
-        m_lifecycleContext->removeObserver(static_cast<Observer*>(this));
+template <typename Context, typename Observer>
+inline void LifecycleObserver<Context, Observer>::setContext(Context* context) {
+  using Notifier = LifecycleNotifier<Context, Observer>;
 
-    m_lifecycleContext = context;
+  if (m_lifecycleContext) {
+    static_cast<Notifier*>(m_lifecycleContext)
+        ->removeObserver(static_cast<Observer*>(this));
+  }
 
-    if (m_lifecycleContext)
-        m_lifecycleContext->addObserver(static_cast<Observer*>(this));
+  m_lifecycleContext = context;
+
+  if (m_lifecycleContext) {
+    static_cast<Notifier*>(m_lifecycleContext)
+        ->addObserver(static_cast<Observer*>(this));
+  }
 }
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LifecycleObserver_h
+#endif  // LifecycleObserver_h

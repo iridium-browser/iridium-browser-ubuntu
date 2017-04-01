@@ -8,12 +8,19 @@
 #include <string>
 
 #include "base/macros.h"
-#include "components/arc/arc_bridge_service.h"
+#include "base/memory/ref_counted.h"
 #include "components/arc/arc_service.h"
+#include "components/arc/common/crash_collector.mojom.h"
 #include "components/arc/instance_holder.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
+namespace base {
+class TaskRunner;
+}  // namespace base
+
 namespace arc {
+
+class ArcBridgeService;
 
 // Relays dumps for non-native ARC crashes to the crash reporter in Chrome OS.
 class ArcCrashCollectorBridge
@@ -21,20 +28,23 @@ class ArcCrashCollectorBridge
       public InstanceHolder<mojom::CrashCollectorInstance>::Observer,
       public mojom::CrashCollectorHost {
  public:
-  explicit ArcCrashCollectorBridge(ArcBridgeService* bridge);
+  ArcCrashCollectorBridge(ArcBridgeService* bridge,
+                          scoped_refptr<base::TaskRunner> blocking_task_runner);
   ~ArcCrashCollectorBridge() override;
 
   // InstanceHolder<mojom::CrashCollectorInstance>::Observer overrides.
   void OnInstanceReady() override;
 
   // mojom::CrashCollectorHost overrides.
-  void DumpCrash(const mojo::String& type, mojo::ScopedHandle pipe) override;
+  void DumpCrash(const std::string& type, mojo::ScopedHandle pipe) override;
 
-  void SetBuildProperties(const mojo::String& device,
-                          const mojo::String& board,
-                          const mojo::String& cpu_abi) override;
+  void SetBuildProperties(const std::string& device,
+                          const std::string& board,
+                          const std::string& cpu_abi) override;
 
  private:
+  scoped_refptr<base::TaskRunner> blocking_task_runner_;
+
   mojo::Binding<mojom::CrashCollectorHost> binding_;
 
   std::string device_;

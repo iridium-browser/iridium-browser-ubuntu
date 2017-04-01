@@ -15,19 +15,17 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/path_service.h"
 #include "base/strings/string16.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
 #include "base/test/test_shortcut_win.h"
 #include "base/version.h"
 #include "base/win/shortcut.h"
 #include "chrome/installer/setup/install_worker.h"
+#include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/installer_state.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/product.h"
@@ -37,12 +35,6 @@
 
 namespace {
 
-base::FilePath GetNormalizedFilePath(const base::FilePath& path) {
-  base::FilePath normalized_path;
-  EXPECT_TRUE(base::NormalizeFilePath(path, &normalized_path));
-  return normalized_path;
-}
-
 class CreateVisualElementsManifestTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -51,11 +43,11 @@ class CreateVisualElementsManifestTest : public testing::Test {
 
     version_ = base::Version("0.0.0.0");
 
-    version_dir_ = test_dir_.path().AppendASCII(version_.GetString());
+    version_dir_ = test_dir_.GetPath().AppendASCII(version_.GetString());
     ASSERT_TRUE(base::CreateDirectory(version_dir_));
 
     manifest_path_ =
-        test_dir_.path().Append(installer::kVisualElementsManifest);
+        test_dir_.GetPath().Append(installer::kVisualElementsManifest);
   }
 
   void TearDown() override {
@@ -78,19 +70,6 @@ class CreateVisualElementsManifestTest : public testing::Test {
 
 class InstallShortcutTest : public testing::Test {
  protected:
-  struct UpdateShortcutsTestCase {
-    // Shortcut target path, relative to |temp_dir_|.
-    const base::FilePath::CharType* target_path;
-
-    // Shortcut icon path, relative to |temp_dir_|. Can be null to create a
-    // shortcut without an icon.
-    const base::FilePath::CharType* icon_path;
-
-    // Whether the shortcut's target path should be updated by
-    // UpdatePerUserShortcutsInLocation().
-    bool should_update;
-  };
-
   void SetUp() override {
     EXPECT_EQ(S_OK, CoInitialize(NULL));
 
@@ -99,7 +78,7 @@ class InstallShortcutTest : public testing::Test {
     product_.reset(new installer::Product(dist_));
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    chrome_exe_ = temp_dir_.path().Append(installer::kChromeExe);
+    chrome_exe_ = temp_dir_.GetPath().Append(installer::kChromeExe);
     EXPECT_EQ(0, base::WriteFile(chrome_exe_, "", 0));
 
     ShellUtil::ShortcutProperties chrome_properties(ShellUtil::CURRENT_USER);
@@ -121,40 +100,35 @@ class InstallShortcutTest : public testing::Test {
     ASSERT_TRUE(fake_user_quick_launch_.CreateUniqueTempDir());
     ASSERT_TRUE(fake_start_menu_.CreateUniqueTempDir());
     ASSERT_TRUE(fake_common_start_menu_.CreateUniqueTempDir());
-    user_desktop_override_.reset(
-        new base::ScopedPathOverride(base::DIR_USER_DESKTOP,
-                                     fake_user_desktop_.path()));
-    common_desktop_override_.reset(
-        new base::ScopedPathOverride(base::DIR_COMMON_DESKTOP,
-                                     fake_common_desktop_.path()));
-    user_quick_launch_override_.reset(
-        new base::ScopedPathOverride(base::DIR_USER_QUICK_LAUNCH,
-                                     fake_user_quick_launch_.path()));
-    start_menu_override_.reset(
-        new base::ScopedPathOverride(base::DIR_START_MENU,
-                                     fake_start_menu_.path()));
-    common_start_menu_override_.reset(
-        new base::ScopedPathOverride(base::DIR_COMMON_START_MENU,
-                                     fake_common_start_menu_.path()));
+    user_desktop_override_.reset(new base::ScopedPathOverride(
+        base::DIR_USER_DESKTOP, fake_user_desktop_.GetPath()));
+    common_desktop_override_.reset(new base::ScopedPathOverride(
+        base::DIR_COMMON_DESKTOP, fake_common_desktop_.GetPath()));
+    user_quick_launch_override_.reset(new base::ScopedPathOverride(
+        base::DIR_USER_QUICK_LAUNCH, fake_user_quick_launch_.GetPath()));
+    start_menu_override_.reset(new base::ScopedPathOverride(
+        base::DIR_START_MENU, fake_start_menu_.GetPath()));
+    common_start_menu_override_.reset(new base::ScopedPathOverride(
+        base::DIR_COMMON_START_MENU, fake_common_start_menu_.GetPath()));
 
     base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
 
-    user_desktop_shortcut_ =
-        fake_user_desktop_.path().Append(shortcut_name);
+    user_desktop_shortcut_ = fake_user_desktop_.GetPath().Append(shortcut_name);
     user_quick_launch_shortcut_ =
-        fake_user_quick_launch_.path().Append(shortcut_name);
-    user_start_menu_shortcut_ = fake_start_menu_.path().Append(shortcut_name);
+        fake_user_quick_launch_.GetPath().Append(shortcut_name);
+    user_start_menu_shortcut_ =
+        fake_start_menu_.GetPath().Append(shortcut_name);
     user_start_menu_subdir_shortcut_ =
-        fake_start_menu_.path()
+        fake_start_menu_.GetPath()
             .Append(dist_->GetStartMenuShortcutSubfolder(
                 BrowserDistribution::SUBFOLDER_CHROME))
             .Append(shortcut_name);
     system_desktop_shortcut_ =
-        fake_common_desktop_.path().Append(shortcut_name);
+        fake_common_desktop_.GetPath().Append(shortcut_name);
     system_start_menu_shortcut_ =
-        fake_common_start_menu_.path().Append(shortcut_name);
+        fake_common_start_menu_.GetPath().Append(shortcut_name);
     system_start_menu_subdir_shortcut_ =
-        fake_common_start_menu_.path()
+        fake_common_start_menu_.GetPath()
             .Append(dist_->GetStartMenuShortcutSubfolder(
                 BrowserDistribution::SUBFOLDER_CHROME))
             .Append(shortcut_name);
@@ -195,66 +169,6 @@ class InstallShortcutTest : public testing::Test {
     return new installer::MasterPreferences(master_prefs);
   }
 
-  // Creates the shortcuts defined by |test_cases|. Tries to update the target
-  // path of these shortcuts to |new_target_path_relative| using
-  // UpdatePerUserShortcutsInLocation(). Verifies that the right shortcuts have
-  // been updated.
-  void TestUpdateShortcuts(const UpdateShortcutsTestCase* test_cases,
-                           size_t num_test_cases,
-                           const base::FilePath& new_target_path_relative) {
-    // Create shortcuts.
-    for (size_t i = 0; i < num_test_cases; ++i) {
-      // Make sure that the target exists.
-      const base::FilePath target_path =
-          temp_dir_.path().Append(test_cases[i].target_path);
-      if (!base::PathExists(target_path)) {
-        ASSERT_TRUE(base::CreateDirectory(target_path.DirName()));
-        base::File file(target_path, base::File::FLAG_CREATE_ALWAYS |
-                                         base::File::FLAG_WRITE);
-        ASSERT_TRUE(file.IsValid());
-        static const char kDummyData[] = "dummy";
-        ASSERT_EQ(arraysize(kDummyData),
-                  static_cast<size_t>(file.WriteAtCurrentPos(
-                      kDummyData, arraysize(kDummyData))));
-      }
-
-      // Create the shortcut.
-      base::win::ShortcutProperties properties;
-      properties.set_target(target_path);
-      properties.set_icon(temp_dir_.path().Append(test_cases[i].icon_path), 1);
-      ASSERT_TRUE(base::win::CreateOrUpdateShortcutLink(
-          user_desktop_shortcut_.InsertBeforeExtension(
-              base::SizeTToString16(i)),
-          properties, base::win::SHORTCUT_CREATE_ALWAYS));
-    }
-
-    // Update shortcuts.
-    const base::FilePath new_target_path =
-        temp_dir_.path().Append(new_target_path_relative);
-    installer::UpdatePerUserShortcutsInLocation(
-        ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist_,
-        new_target_path.DirName().DirName(), new_target_path.BaseName(),
-        new_target_path);
-
-    // Verify that shortcuts were updated correctly.
-    for (size_t i = 0; i < num_test_cases; ++i) {
-      base::FilePath target_path;
-      ASSERT_TRUE(base::win::ResolveShortcut(
-          user_desktop_shortcut_.InsertBeforeExtension(
-              base::SizeTToString16(i)),
-          &target_path, nullptr));
-
-      if (test_cases[i].should_update) {
-        EXPECT_EQ(GetNormalizedFilePath(new_target_path),
-                  GetNormalizedFilePath(target_path));
-      } else {
-        EXPECT_EQ(GetNormalizedFilePath(
-                      temp_dir_.path().Append(test_cases[i].target_path)),
-                  GetNormalizedFilePath(target_path));
-      }
-    }
-  }
-
   base::win::ShortcutProperties expected_properties_;
   base::win::ShortcutProperties expected_start_menu_properties_;
 
@@ -290,7 +204,7 @@ class InstallShortcutTest : public testing::Test {
 // not present.
 TEST_F(CreateVisualElementsManifestTest, VisualElementsManifestNotCreated) {
   ASSERT_TRUE(
-      installer::CreateVisualElementsManifest(test_dir_.path(), version_));
+      installer::CreateVisualElementsManifest(test_dir_.GetPath(), version_));
   ASSERT_FALSE(base::PathExists(manifest_path_));
 }
 
@@ -300,7 +214,7 @@ TEST_F(CreateVisualElementsManifestTest, VisualElementsManifestCreated) {
   ASSERT_TRUE(base::CreateDirectory(
       version_dir_.Append(installer::kVisualElements)));
   ASSERT_TRUE(
-      installer::CreateVisualElementsManifest(test_dir_.path(), version_));
+      installer::CreateVisualElementsManifest(test_dir_.GetPath(), version_));
   ASSERT_TRUE(base::PathExists(manifest_path_));
 
   std::string read_manifest;
@@ -372,9 +286,10 @@ TEST_F(InstallShortcutTest, CreateAllShortcutsButQuickLaunchShortcut) {
 TEST_F(InstallShortcutTest, ReplaceAll) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
-  dummy_properties.set_working_dir(fake_user_desktop_.path());
+  dummy_properties.set_working_dir(fake_user_desktop_.GetPath());
   dummy_properties.set_arguments(L"--dummy --args");
   dummy_properties.set_app_id(L"El.Dummiest");
 
@@ -402,9 +317,10 @@ TEST_F(InstallShortcutTest, ReplaceAll) {
 TEST_F(InstallShortcutTest, ReplaceExisting) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
-  dummy_properties.set_working_dir(fake_user_desktop_.path());
+  dummy_properties.set_working_dir(fake_user_desktop_.GetPath());
   dummy_properties.set_arguments(L"--dummy --args");
   dummy_properties.set_app_id(L"El.Dummiest");
 
@@ -441,9 +357,10 @@ class MigrateShortcutTest : public InstallShortcutTest,
 TEST_P(MigrateShortcutTest, MigrateAwayFromDeprecatedStartMenuTest) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(expected_properties_.target);
-  dummy_properties.set_working_dir(fake_user_desktop_.path());
+  dummy_properties.set_working_dir(fake_user_desktop_.GetPath());
   dummy_properties.set_arguments(L"--dummy --args");
   dummy_properties.set_app_id(L"El.Dummiest");
 
@@ -487,7 +404,8 @@ INSTANTIATE_TEST_CASE_P(
 TEST_F(InstallShortcutTest, CreateIfNoSystemLevelAllSystemShortcutsExist) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
 
   ASSERT_TRUE(base::win::CreateOrUpdateShortcutLink(
@@ -523,7 +441,8 @@ TEST_F(InstallShortcutTest, CreateIfNoSystemLevelNoSystemShortcutsExist) {
 TEST_F(InstallShortcutTest, CreateIfNoSystemLevelSomeSystemShortcutsExist) {
   base::win::ShortcutProperties dummy_properties;
   base::FilePath dummy_target;
-  ASSERT_TRUE(base::CreateTemporaryFileInDir(temp_dir_.path(), &dummy_target));
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(temp_dir_.GetPath(), &dummy_target));
   dummy_properties.set_target(dummy_target);
 
   ASSERT_TRUE(base::win::CreateOrUpdateShortcutLink(
@@ -538,273 +457,6 @@ TEST_F(InstallShortcutTest, CreateIfNoSystemLevelSomeSystemShortcutsExist) {
                               expected_properties_);
   base::win::ValidateShortcut(user_start_menu_shortcut_,
                               expected_start_menu_properties_);
-}
-
-TEST_F(InstallShortcutTest, UpdatePerUserChromeUserLevelShortcuts) {
-  static const UpdateShortcutsTestCase kTestCases[] = {
-      // Shortcut target in the Chrome Canary install directory. No icon.
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Temp\\scoped_dir\\new_chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Temp\\scoped_dir\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\something_else.exe"),
-       nullptr, false},
-
-      // Shortcut target in the user-level Chrome install directory. No icon.
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Temp\\scope"
-                         "d_dir\\new_chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Temp\\scope"
-                         "d_dir\\chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Application"
-                         "\\something_else.exe"),
-       nullptr, false},
-
-      // Shortcut target in the system-level Chrome install directory. No icon.
-      {FILE_PATH_LITERAL("Program Files "
-                         "(x86)\\Google\\Chrome\\Temp\\scoped_dir\\new_chrome."
-                         "exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Temp\\scoped_dir\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Program Files "
-                         "(x86)\\Google\\Chrome\\Application\\something_else."
-                         "exe"),
-       nullptr, false},
-
-      // Dummy shortcut target. Icon in the Chrome Canary install directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\chrome.exe"),
-       false},
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\User Data\\Profile 1\\Google "
-                         "Profile.ico"),
-       false},
-
-      // Dummy shortcut target. Icon in the user-level Chrome install directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
-       true},
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\User "
-           "Data\\Profile 1\\Google Profile.ico"),
-       true},
-
-      // Dummy shortcut target. Icon in the system-level Chrome install
-      // directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"),
-       false},
-
-      // Shortcuts that don't belong to Chrome.
-      {FILE_PATH_LITERAL("something_else.exe"), nullptr, false},
-      {FILE_PATH_LITERAL("something_else.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Something Else.ico"),
-       false},
-  };
-
-  TestUpdateShortcuts(
-      kTestCases, arraysize(kTestCases),
-      base::FilePath(FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrom"
-                                       "e\\Application\\chrome.exe")));
-}
-
-TEST_F(InstallShortcutTest, UpdatePerUserCanaryShortcuts) {
-  static const UpdateShortcutsTestCase kTestCases[] = {
-      // Shortcut target in the Chrome Canary install directory. No icon.
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Temp\\scoped_dir\\new_chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Temp\\scoped_dir\\chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\something_else.exe"),
-       nullptr, false},
-
-      // Shortcut target in the user-level Chrome install directory. No icon.
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Temp\\scope"
-                         "d_dir\\new_chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Temp\\scope"
-                         "d_dir\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Application"
-                         "\\something_else.exe"),
-       nullptr, false},
-
-      // Shortcut target in the system-level Chrome install directory. No icon.
-      {FILE_PATH_LITERAL("Program Files "
-                         "(x86)\\Google\\Chrome\\Temp\\scoped_dir\\new_chrome."
-                         "exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Temp\\scoped_dir\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Program Files "
-                         "(x86)\\Google\\Chrome\\Application\\something_else."
-                         "exe"),
-       nullptr, false},
-
-      // Dummy shortcut target. Icon in the Chrome Canary install directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\chrome.exe"),
-       true},
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\User Data\\Profile 1\\Google "
-                         "Profile.ico"),
-       true},
-
-      // Dummy shortcut target. Icon in the user-level Chrome install directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
-       false},
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\User "
-           "Data\\Profile 1\\Google Profile.ico"),
-       false},
-
-      // Dummy shortcut target. Icon in the system-level Chrome install
-      // directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"),
-       false},
-
-      // Shortcuts that don't belong to Chrome.
-      {FILE_PATH_LITERAL("something_else.exe"), nullptr, false},
-      {FILE_PATH_LITERAL("something_else.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Something Else.ico"),
-       false},
-  };
-
-  TestUpdateShortcuts(
-      kTestCases, arraysize(kTestCases),
-      base::FilePath(FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrom"
-                                       "e SxS\\Application\\chrome.exe")));
-}
-
-TEST_F(InstallShortcutTest, UpdatePerUserChromeSystemLevelShortcuts) {
-  static const UpdateShortcutsTestCase kTestCases[] = {
-      // Shortcut target in the Chrome Canary install directory. No icon.
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Temp\\scoped_dir\\new_chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Temp\\scoped_dir\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\something_else.exe"),
-       nullptr, false},
-
-      // Shortcut target in the user-level Chrome install directory. No icon.
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Temp\\scope"
-                         "d_dir\\new_chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Temp\\scope"
-                         "d_dir\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
-       nullptr, false},
-      {FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome\\Application"
-                         "\\something_else.exe"),
-       nullptr, false},
-
-      // Shortcut target in the system-level Chrome install directory. No icon.
-      {FILE_PATH_LITERAL("Program Files "
-                         "(x86)\\Google\\Chrome\\Temp\\scoped_dir\\new_chrome."
-                         "exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Temp\\scoped_dir\\chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"),
-       nullptr, true},
-      {FILE_PATH_LITERAL("Program Files "
-                         "(x86)\\Google\\Chrome\\Application\\something_else."
-                         "exe"),
-       nullptr, false},
-
-      // Dummy shortcut target. Icon in the Chrome Canary install directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\chrome.exe"),
-       false},
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL("Users\\x\\AppData\\Local\\Google\\Chrome "
-                         "SxS\\Application\\User Data\\Profile 1\\Google "
-                         "Profile.ico"),
-       false},
-
-      // Dummy shortcut target. Icon in the user-level Chrome install directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe"),
-       false},
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Chrome\\Application\\User "
-           "Data\\Profile 1\\Google Profile.ico"),
-       false},
-
-      // Dummy shortcut target. Icon in the system-level Chrome install
-      // directory.
-      {FILE_PATH_LITERAL("dummy.exe"),
-       FILE_PATH_LITERAL(
-           "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe"),
-       true},
-
-      // Shortcuts that don't belong to Chrome.
-      {FILE_PATH_LITERAL("something_else.exe"), nullptr, false},
-      {FILE_PATH_LITERAL("something_else.exe"),
-       FILE_PATH_LITERAL(
-           "Users\\x\\AppData\\Local\\Google\\Something Else.ico"),
-       false},
-  };
-
-  TestUpdateShortcuts(
-      kTestCases, arraysize(kTestCases),
-      base::FilePath(FILE_PATH_LITERAL(
-          "Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe")));
 }
 
 TEST(EscapeXmlAttributeValueTest, EscapeCrazyValue) {

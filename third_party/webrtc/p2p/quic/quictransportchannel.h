@@ -142,13 +142,11 @@ class QuicTransportChannel : public TransportChannelImpl,
   void SetIceTiebreaker(uint64_t tiebreaker) override {
     channel_->SetIceTiebreaker(tiebreaker);
   }
-  void SetIceCredentials(const std::string& ice_ufrag,
-                         const std::string& ice_pwd) override {
-    channel_->SetIceCredentials(ice_ufrag, ice_pwd);
+  void SetIceParameters(const IceParameters& ice_params) override {
+    channel_->SetIceParameters(ice_params);
   }
-  void SetRemoteIceCredentials(const std::string& ice_ufrag,
-                               const std::string& ice_pwd) override {
-    channel_->SetRemoteIceCredentials(ice_ufrag, ice_pwd);
+  void SetRemoteIceParameters(const IceParameters& ice_params) override {
+    channel_->SetRemoteIceParameters(ice_params);
   }
   void SetRemoteIceMode(IceMode mode) override {
     channel_->SetRemoteIceMode(mode);
@@ -200,6 +198,10 @@ class QuicTransportChannel : public TransportChannelImpl,
   // cached details are used.
   void OnProofVerifyDetailsAvailable(
       const net::ProofVerifyDetails& verify_details) override;
+
+  void SetMetricsObserver(webrtc::MetricsObserverInterface* observer) override {
+    channel_->SetMetricsObserver(observer);
+  }
 
   // Returns true if |quic_| has queued data which wasn't written due
   // to |channel_| being write blocked.
@@ -269,7 +271,7 @@ class QuicTransportChannel : public TransportChannelImpl,
   void set_quic_state(QuicTransportState state);
 
   // Everything should occur on this thread.
-  rtc::Thread* worker_thread_;
+  rtc::Thread* network_thread_;
   // Underlying channel which is responsible for connecting with the remote peer
   // and sending/receiving packets across the network.
   std::unique_ptr<TransportChannelImpl> channel_;

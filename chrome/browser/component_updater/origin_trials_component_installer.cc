@@ -39,11 +39,16 @@ namespace component_updater {
 
 namespace {
 
-// Extension id is kfoklmclfodeliojeaekpoflbkkhojea
-const uint8_t kSha256Hash[] = {0xa5, 0xea, 0xbc, 0x2b, 0x5e, 0x34, 0xb8, 0xe9,
-                               0x40, 0x4a, 0xfe, 0x5b, 0x1a, 0xa7, 0xe9, 0x40,
-                               0xa8, 0xc5, 0xef, 0xa1, 0x9e, 0x20, 0x5a, 0x39,
-                               0x73, 0x98, 0x98, 0x0f, 0x7a, 0x76, 0x62, 0xfa};
+static const char kManifestOriginTrialsKey[] = "origin-trials";
+static const char kManifestPublicKeyPath[] = "origin-trials.public-key";
+static const char kManifestDisabledFeaturesPath[] =
+    "origin-trials.disabled-features";
+
+// Extension id is llkgjffcdpffmhiakmfcdcblohccpfmo
+const uint8_t kSha256Hash[] = {0xbb, 0xa6, 0x95, 0x52, 0x3f, 0x55, 0xc7, 0x80,
+                               0xac, 0x52, 0x32, 0x1b, 0xe7, 0x22, 0xf5, 0xce,
+                               0x6a, 0xfd, 0x9c, 0x9e, 0xa9, 0x2a, 0x0b, 0x50,
+                               0x60, 0x2b, 0x7f, 0x6c, 0x64, 0x80, 0x09, 0x04};
 
 }  // namespace
 
@@ -51,7 +56,7 @@ bool OriginTrialsComponentInstallerTraits::VerifyInstallation(
     const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) const {
   // Test if the "origin-trials" key is present in the manifest.
-  return manifest.HasKey("origin-trials");
+  return manifest.HasKey(kManifestOriginTrialsKey);
 }
 
 bool OriginTrialsComponentInstallerTraits::
@@ -63,29 +68,38 @@ bool OriginTrialsComponentInstallerTraits::RequiresNetworkEncryption() const {
   return false;
 }
 
-bool OriginTrialsComponentInstallerTraits::OnCustomInstall(
+update_client::CrxInstaller::Result
+OriginTrialsComponentInstallerTraits::OnCustomInstall(
     const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) {
-  return true;
+  return update_client::CrxInstaller::Result(0);
 }
 
 void OriginTrialsComponentInstallerTraits::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
     std::unique_ptr<base::DictionaryValue> manifest) {
-  // Read the public key from the manifest and set values in browser
+  // Read the configuration from the manifest and set values in browser
   // local_state. These will be used on the next browser restart.
+  // If an individual configuration value is missing, treat as a reset to the
+  // browser defaults.
   PrefService* local_state = g_browser_process->local_state();
   std::string override_public_key;
-  if (manifest->GetString("origin-trials.public-key", &override_public_key)) {
+  if (manifest->GetString(kManifestPublicKeyPath, &override_public_key)) {
     local_state->Set(prefs::kOriginTrialPublicKey,
                      base::StringValue(override_public_key));
+  } else {
+    local_state->ClearPref(prefs::kOriginTrialPublicKey);
   }
   base::ListValue* override_disabled_feature_list = nullptr;
-  if (manifest->GetList("origin-trials.disabled-features",
-                        &override_disabled_feature_list)) {
+  const bool manifest_has_disabled_features = manifest->GetList(
+      kManifestDisabledFeaturesPath, &override_disabled_feature_list);
+  if (manifest_has_disabled_features &&
+      !override_disabled_feature_list->empty()) {
     ListPrefUpdate update(local_state, prefs::kOriginTrialDisabledFeatures);
     update->Swap(override_disabled_feature_list);
+  } else {
+    local_state->ClearPref(prefs::kOriginTrialDisabledFeatures);
   }
 }
 

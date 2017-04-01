@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/strings/nullable_string16.h"
+#include "base/strings/string16.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/modules/screen_orientation/WebScreenOrientationLockType.h"
@@ -26,6 +27,11 @@ struct CONTENT_EXPORT Manifest {
   // Structure representing an icon as per the Manifest specification, see:
   // http://w3c.github.io/manifest/#dfn-icon-object
   struct CONTENT_EXPORT Icon {
+    enum IconPurpose {
+      ANY = 0,
+      BADGE,
+    };
+
     Icon();
     Icon(const Icon& other);
     ~Icon();
@@ -36,15 +42,20 @@ struct CONTENT_EXPORT Manifest {
     // successfully parsed, thus will not be represented in the Manifest.
     GURL src;
 
-    // Null if the parsing failed or the field was not present. The type can be
+    // Empty if the parsing failed or the field was not present. The type can be
     // any string and doesn't have to be a valid image MIME type at this point.
     // It is up to the consumer of the object to check if the type matches a
     // supported type.
-    base::NullableString16 type;
+    base::string16 type;
 
     // Empty if the parsing failed, the field was not present or empty.
     // The special value "any" is represented by gfx::Size(0, 0).
     std::vector<gfx::Size> sizes;
+
+    // Empty if the field was not present or not of type "string". Defaults to
+    // a vector with a single value, IconPurpose::ANY, for all other parsing
+    // exceptions.
+    std::vector<IconPurpose> purpose;
   };
 
   // Structure representing a related application.

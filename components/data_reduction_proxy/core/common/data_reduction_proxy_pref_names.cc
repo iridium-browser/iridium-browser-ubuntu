@@ -185,6 +185,17 @@ const char kDataUsageReportingEnabled[] = "data_usage_reporting.enabled";
 const char kDataReductionProxyWasEnabledBefore[] =
     "spdy_proxy.was_enabled_before";
 
+// An integer pref that contains the time when the data reduction proxy was last
+// enabled. Recorded only if the data reduction proxy was last enabled since
+// this pref was added.
+const char kDataReductionProxyLastEnabledTime[] =
+    "data_reduction.last_enabled_time";
+
+// An integer pref that contains the time when the data reduction proxy savings
+// were last cleared because the system clock was moved back by more than 1 day.
+const char kDataReductionProxySavingsClearedNegativeSystemClock[] =
+    "data_reduction.savings_cleared_negative_system_clock";
+
 // An int64_t pref that contains the total size of all HTTP content received
 // from the network.
 const char kHttpReceivedContentLength[] = "http_received_content_length";
@@ -199,13 +210,15 @@ const char kHttpOriginalContentLength[] = "http_original_content_length";
 const char kLoFiImplicitOptOutEpoch[] =
     "data_reduction_lo_fi.implicit_opt_out_epoch";
 
-// An integer pref that contains the number of times that "Load images" Lo-Fi
-// snackbar has been shown for the current session.
-const char kLoFiSnackbarsShownPerSession[] =
+// An integer pref that contains the number of times that "Load original" Lo-Fi
+// UI has been shown for the current session. Note the naming of the pref is due
+// to the fact that this UI was originally a snackbar, and has since been
+// changed.
+const char kLoFiUIShownPerSession[] =
     "data_reduction_lo_fi.load_images_snackbars_shown_per_session";
 
-// An integer pref that contains the number of times that "Load images" has been
-// requested on the Lo-Fi snackbar for the current session.
+// An integer pref that contains the number of times that loading the images has
+// been requested from the Lo-Fi UI for the current session.
 const char kLoFiLoadImagesPerSession[] =
     "data_reduction_lo_fi.load_images_requests_per_session";
 
@@ -224,11 +237,6 @@ const char kLoFiWasUsedThisSession[] =
 // or not available.
 const char kSimulatedConfigRetrieveTime[] =
     "data_reduction.simulated_config_retrieve_time";
-
-// A boolean specifying whether the data reduction proxy statistics preferences
-// have migrated from local state to the profile.
-const char kStatisticsPrefsMigrated[] =
-    "data_reduction.statistics_prefs_migrated";
 
 }  // namespace prefs
 }  // namespace data_reduction_proxy

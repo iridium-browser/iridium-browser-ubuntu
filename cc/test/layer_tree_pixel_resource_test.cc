@@ -4,14 +4,15 @@
 
 #include "cc/test/layer_tree_pixel_resource_test.h"
 
+#include "base/memory/ptr_util.h"
 #include "cc/layers/layer.h"
+#include "cc/output/compositor_frame_sink.h"
 #include "cc/raster/bitmap_raster_buffer_provider.h"
 #include "cc/raster/gpu_raster_buffer_provider.h"
 #include "cc/raster/one_copy_raster_buffer_provider.h"
 #include "cc/raster/raster_buffer_provider.h"
 #include "cc/raster/zero_copy_raster_buffer_provider.h"
 #include "cc/resources/resource_pool.h"
-#include "cc/test/fake_output_surface.h"
 #include "gpu/GLES2/gl2extchromium.h"
 
 namespace cc {
@@ -44,6 +45,7 @@ LayerTreeHostPixelResourceTest::LayerTreeHostPixelResourceTest(
     PixelResourceTestCase test_case)
     : draw_texture_target_(GL_INVALID_VALUE),
       raster_buffer_provider_type_(RASTER_BUFFER_PROVIDER_TYPE_BITMAP),
+      texture_hint_(ResourceProvider::TEXTURE_HINT_IMMUTABLE),
       initialized_(false),
       test_case_(test_case) {
   InitializeFromTestCase(test_case);
@@ -64,41 +66,49 @@ void LayerTreeHostPixelResourceTest::InitializeFromTestCase(
       test_type_ = PIXEL_TEST_SOFTWARE;
       draw_texture_target_ = GL_INVALID_VALUE;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_BITMAP;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
     case GL_GPU_RASTER_2D_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_2D;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_GPU;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE_FRAMEBUFFER;
       return;
     case GL_ONE_COPY_2D_STAGING_2D_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_2D;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_ONE_COPY;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
     case GL_ONE_COPY_RECT_STAGING_2D_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_2D;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_ONE_COPY;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
     case GL_ONE_COPY_EXTERNAL_STAGING_2D_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_2D;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_ONE_COPY;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
     case GL_ZERO_COPY_2D_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_2D;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_ZERO_COPY;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
     case GL_ZERO_COPY_RECT_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_RECTANGLE_ARB;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_ZERO_COPY;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
     case GL_ZERO_COPY_EXTERNAL_DRAW:
       test_type_ = PIXEL_TEST_GL;
       draw_texture_target_ = GL_TEXTURE_EXTERNAL_OES;
       raster_buffer_provider_type_ = RASTER_BUFFER_PROVIDER_TYPE_ZERO_COPY;
+      texture_hint_ = ResourceProvider::TEXTURE_HINT_IMMUTABLE;
       return;
   }
   NOTREACHED();
@@ -116,16 +126,17 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndRasterBufferProvider(
   DCHECK(initialized_);
 
   ContextProvider* compositor_context_provider =
-      host_impl->output_surface()->context_provider();
+      host_impl->compositor_frame_sink()->context_provider();
   ContextProvider* worker_context_provider =
-      host_impl->output_surface()->worker_context_provider();
+      host_impl->compositor_frame_sink()->worker_context_provider();
   ResourceProvider* resource_provider = host_impl->resource_provider();
   int max_bytes_per_copy_operation = 1024 * 1024;
   int max_staging_buffer_usage_in_bytes = 32 * 1024 * 1024;
 
   // Create resource pool.
-  *resource_pool = ResourcePool::Create(resource_provider, task_runner,
-                                        ResourcePool::kDefaultExpirationDelay);
+  *resource_pool =
+      ResourcePool::Create(resource_provider, task_runner, texture_hint_,
+                           ResourcePool::kDefaultExpirationDelay);
 
   switch (raster_buffer_provider_type_) {
     case RASTER_BUFFER_PROVIDER_TYPE_BITMAP:

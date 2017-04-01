@@ -8,11 +8,13 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/filesystem/directory_impl.h"
 #include "components/filesystem/lock_table.h"
 #include "components/filesystem/public/interfaces/types.mojom.h"
-#include "services/shell/public/cpp/connection.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "services/service_manager/public/cpp/connection.h"
 
 namespace file {
 
@@ -26,9 +28,10 @@ FileSystem::~FileSystem() {}
 
 void FileSystem::GetDirectory(filesystem::mojom::DirectoryRequest request,
                               const GetDirectoryCallback& callback) {
-  new filesystem::DirectoryImpl(std::move(request), path_,
-                                scoped_refptr<filesystem::SharedTempDir>(),
-                                lock_table_);
+  mojo::MakeStrongBinding(
+      base::MakeUnique<filesystem::DirectoryImpl>(
+          path_, scoped_refptr<filesystem::SharedTempDir>(), lock_table_),
+      std::move(request));
   callback.Run();
 }
 
@@ -48,9 +51,10 @@ void FileSystem::GetSubDirectory(const std::string& sub_directory_path,
     return;
   }
 
-  new filesystem::DirectoryImpl(std::move(request), subdir,
-                                scoped_refptr<filesystem::SharedTempDir>(),
-                                lock_table_);
+  mojo::MakeStrongBinding(
+      base::MakeUnique<filesystem::DirectoryImpl>(
+          subdir, scoped_refptr<filesystem::SharedTempDir>(), lock_table_),
+      std::move(request));
   callback.Run(filesystem::mojom::FileError::OK);
 }
 

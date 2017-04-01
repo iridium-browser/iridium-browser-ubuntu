@@ -44,10 +44,10 @@ def _CheckWprShaFiles(input_api, output_api):
   old_sys_path = sys.path
   try:
     perf_dir = input_api.PresubmitLocalPath()
-    catapult_path = os.path.abspath(os.path.join(
-        perf_dir, '..', '..', 'third_party', 'catapult', 'catapult_base'))
-    sys.path.insert(1, catapult_path)
-    from catapult_base import cloud_storage  # pylint: disable=import-error
+    py_utils_path = os.path.abspath(os.path.join(
+        perf_dir, '..', '..', 'third_party', 'catapult', 'common', 'py_utils'))
+    sys.path.insert(1, py_utils_path)
+    from py_utils import cloud_storage  # pylint: disable=import-error
   finally:
     sys.path = old_sys_path
 
@@ -128,7 +128,6 @@ def PostUploadHook(cl, change, output_api):
 
   results = []
   bots = [
-    'android_s5_perf_cq',
     'linux_perf_cq',
     'mac_retina_perf_cq',
     'winx64_10_perf_cq'

@@ -4,7 +4,7 @@
 
 #include "chrome/browser/memory/tab_manager_web_contents_data.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/time/tick_clock.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
@@ -20,7 +20,11 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(memory::TabManager::WebContentsData);
 namespace memory {
 
 TabManager::WebContentsData::WebContentsData(content::WebContents* web_contents)
-    : WebContentsObserver(web_contents), test_tick_clock_(nullptr) {}
+    : WebContentsObserver(web_contents),
+      test_tick_clock_(nullptr),
+      last_purge_and_suspend_modified_time_(
+          base::TimeTicks::FromInternalValue(0)),
+      purge_and_suspend_state_(RUNNING) {}
 
 TabManager::WebContentsData::~WebContentsData() {}
 
@@ -196,6 +200,27 @@ void TabManager::WebContentsData::SetAutoDiscardableState(bool state) {
 
 bool TabManager::WebContentsData::IsAutoDiscardable() {
   return tab_data_.is_auto_discardable;
+}
+
+void TabManager::WebContentsData::SetPurgeAndSuspendState(
+    PurgeAndSuspendState state) {
+  last_purge_and_suspend_modified_time_ = NowTicks();
+  purge_and_suspend_state_ = state;
+}
+
+base::TimeTicks TabManager::WebContentsData::LastPurgeAndSuspendModifiedTime()
+    const {
+  return last_purge_and_suspend_modified_time_;
+}
+
+void TabManager::WebContentsData::SetLastPurgeAndSuspendModifiedTimeForTesting(
+    base::TimeTicks timestamp) {
+  last_purge_and_suspend_modified_time_ = timestamp;
+}
+
+TabManager::PurgeAndSuspendState
+TabManager::WebContentsData::GetPurgeAndSuspendState() const {
+  return purge_and_suspend_state_;
 }
 
 }  // namespace memory

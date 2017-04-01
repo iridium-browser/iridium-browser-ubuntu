@@ -4,22 +4,24 @@
 
 package org.chromium.chrome.browser.compositor.scene_layer;
 
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchBarControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchIconSpriteControl;
+import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchImageControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPanel;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPeekPromoControl;
 import org.chromium.chrome.browser.compositor.bottombar.contextualsearch.ContextualSearchPromoControl;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.resources.ResourceManager;
 
 /**
  * A SceneLayer to render layers for ContextualSearchLayout.
  */
-@JNINamespace("chrome::android")
+@JNINamespace("android")
 public class ContextualSearchSceneLayer extends SceneOverlayLayer {
-
     // NOTE: If you use SceneLayer's native pointer here, the JNI generator will try to
     // downcast using reinterpret_cast<>. We keep a separate pointer to avoid it.
     private long mNativePtr;
@@ -28,6 +30,8 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
     private boolean mIsInitialized;
 
     private final float mDpToPx;
+
+    private ContextualSearchImageControl mImageControl;
 
     public ContextualSearchSceneLayer(float dpToPx) {
         mDpToPx = dpToPx;
@@ -39,14 +43,14 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
      * @param panel The OverlayPanel to render.
      * @param searchBarControl The Search Bar control.
      * @param peekPromoControl The peeking promotion for Contextual Search.
-     * @param spriteControl The object controlling the "G" animation for Contextual Search.
+     * @param imageControl The object controlling the image displayed in the Bar.
      */
     public void update(ResourceManager resourceManager,
             ContextualSearchPanel panel,
             ContextualSearchBarControl searchBarControl,
             ContextualSearchPeekPromoControl peekPromoControl,
             ContextualSearchPromoControl promoControl,
-            ContextualSearchIconSpriteControl spriteControl) {
+            ContextualSearchImageControl imageControl) {
         // Don't try to update the layer if not initialized or showing.
         if (resourceManager == null || !panel.isShowing()) return;
 
@@ -54,6 +58,7 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
             nativeCreateContextualSearchLayer(mNativePtr, resourceManager);
             mIsInitialized = true;
         }
+        mImageControl = imageControl;
 
         int searchContextViewId = searchBarControl.getSearchContextViewId();
         int searchTermViewId = searchBarControl.getSearchTermViewId();
@@ -72,6 +77,16 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
         float searchPeekPromoRippleOpacity = peekPromoControl.getRippleOpacity();
         float searchPeekPromoTextOpacity = peekPromoControl.getTextOpacity();
 
+        float staticImageVisibilityPercentage = imageControl.getStaticImageVisibilityPercentage();
+        int staticImageSize = imageControl.getStaticImageSize();
+
+        boolean quickActionIconVisible = imageControl.getQuickActionIconVisible();
+        int quickActionIconResId = imageControl.getQuickActionIconResourceId();
+
+        boolean thumbnailVisible = imageControl.getThumbnailVisible();
+        String thumbnailUrl = imageControl.getThumbnailUrl();
+
+        ContextualSearchIconSpriteControl spriteControl = imageControl.getIconSpriteControl();
         boolean searchProviderIconSpriteVisible = spriteControl.isVisible();
         float searchProviderIconCompletionPercentage = spriteControl.getCompletionPercentage();
 
@@ -106,6 +121,17 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
         float progressBarOpacity = panel.getProgressBarOpacity();
         int progressBarCompletion = panel.getProgressBarCompletion();
 
+        float dividerLineVisibilityPercentage =
+                searchBarControl.getDividerLineVisibilityPercentage();
+        float dividerLineWidth = searchBarControl.getDividerLineWidth();
+        float dividerLineHeight = searchBarControl.getDividerLineHeight();
+        int dividerLineColor = searchBarControl.getDividerLineColor();
+        float dividerLineXOffset = searchBarControl.getDividerLineXOffset();
+
+        boolean touchHighlightVisible = searchBarControl.getTouchHighlightVisible();
+        float touchHighlightXOffset = searchBarControl.getTouchHighlightXOffsetPx();
+        float touchHighlightWidth = searchBarControl.getTouchHighlightWidthPx();
+
         WebContents panelWebContents = panel.getContentViewCore() != null
                 ? panel.getContentViewCore().getWebContents() : null;
 
@@ -117,6 +143,7 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
                 R.drawable.contextual_search_bar_shadow,
                 R.drawable.google_icon_sprite,
                 R.raw.google_icon_sprite,
+                quickActionIconResId,
                 R.drawable.breadcrumb_arrow,
                 ContextualSearchPanel.CLOSE_ICON_DRAWABLE_ID,
                 R.drawable.progress_bar_background,
@@ -144,7 +171,9 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
                 searchBarMarginSide * mDpToPx,
                 searchBarHeight * mDpToPx,
                 searchContextOpacity,
+                searchBarControl.getTextLayerMinHeight(),
                 searchTermOpacity,
+                searchBarControl.getSearchTermCaptionSpacing(),
                 searchCaptionAnimationPercentage,
                 searchCaptionVisible,
                 searchBarBorderVisible,
@@ -153,13 +182,32 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
                 searchBarShadowOpacity,
                 searchProviderIconSpriteVisible,
                 searchProviderIconCompletionPercentage,
+                quickActionIconVisible,
+                thumbnailVisible,
+                thumbnailUrl,
+                staticImageVisibilityPercentage,
+                staticImageSize,
                 arrowIconOpacity,
                 arrowIconRotation,
                 closeIconOpacity,
                 isProgressBarVisible,
                 progressBarHeight * mDpToPx,
                 progressBarOpacity,
-                progressBarCompletion);
+                progressBarCompletion,
+                dividerLineVisibilityPercentage,
+                dividerLineWidth,
+                dividerLineHeight,
+                dividerLineColor,
+                dividerLineXOffset,
+                touchHighlightVisible,
+                touchHighlightXOffset,
+                touchHighlightWidth,
+                Profile.getLastUsedProfile());
+    }
+
+    @CalledByNative
+    public void onThumbnailFetched(boolean success) {
+        if (mImageControl != null) mImageControl.onThumbnailFetched(success);
     }
 
     @Override
@@ -209,8 +257,9 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
             int searchTermResourceId,
             int searchCaptionResourceId,
             int searchBarShadowResourceId,
-            int panelIconResourceId,
+            int spriteResourceId,
             int searchProviderIconSpriteMetadataResourceId,
+            int quickActionIconResourceId,
             int arrowUpResourceId,
             int closeIconResourceId,
             int progressBarBackgroundResourceId,
@@ -238,7 +287,9 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
             float searchBarMarginSide,
             float searchBarHeight,
             float searchContextOpacity,
+            float searchTextLayerMinHeight,
             float searchTermOpacity,
+            float searchTermCaptionSpacing,
             float searchCaptionAnimationPercentage,
             boolean searchCaptionVisible,
             boolean searchBarBorderVisible,
@@ -247,11 +298,25 @@ public class ContextualSearchSceneLayer extends SceneOverlayLayer {
             float searchBarShadowOpacity,
             boolean searchProviderIconSpriteVisible,
             float searchProviderIconCompletionPercentage,
+            boolean quickActionIconVisible,
+            boolean thumbnailVisible,
+            String thumbnailUrl,
+            float staticImageVisibilityPercentage,
+            int staticImageSize,
             float arrowIconOpacity,
             float arrowIconRotation,
             float closeIconOpacity,
             boolean isProgressBarVisible,
             float progressBarHeight,
             float progressBarOpacity,
-            int progressBarCompletion);
+            int progressBarCompletion,
+            float dividerLineVisibilityPercentage,
+            float dividerLineWidth,
+            float dividerLineHeight,
+            int dividerLineColor,
+            float dividerLineXOffset,
+            boolean touchHighlightVisible,
+            float touchHighlightXOffset,
+            float toucHighlightWidth,
+            Profile profile);
 }

@@ -16,7 +16,6 @@ struct Size;
 
 namespace media {
 class CastDecoderBuffer;
-class DecryptContext;
 
 // Interface for platform-specific output of media.
 // A new MediaPipelineBackend will be instantiated for each media player
@@ -57,7 +56,7 @@ class MediaPipelineBackend {
       virtual void OnEndOfStream() = 0;
 
       // May be called if a decoder error occurs. No more calls to PushBuffer()
-      // will be made after this is called.
+      // should be made after this is called.
       virtual void OnDecoderError() = 0;
 
       // Must be called when a decryption key status changes.
@@ -205,7 +204,7 @@ class MediaPipelineBackend {
 
   // Returns pipeline to 'Initialized' state.  May be called while playing or
   // paused.  Buffers cannot be pushed in Initialized state.
-  virtual bool Stop() = 0;
+  virtual void Stop() = 0;
 
   // Pauses media playback.  Called only when in playing state.
   virtual bool Pause() = 0;

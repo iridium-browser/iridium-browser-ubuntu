@@ -5,7 +5,7 @@
 import logging
 import sys
 
-from catapult_base import cloud_storage  # pylint: disable=import-error
+from py_utils import cloud_storage  # pylint: disable=import-error
 
 from telemetry.core import exceptions
 from telemetry.core import profiling_controller
@@ -48,8 +48,11 @@ class Browser(app.App):
               self._browser_backend.profile_directory)
           self.platform.FlushSystemCacheForDirectory(
               self._browser_backend.browser_directory)
-        else:
+        elif self.platform.SupportFlushEntireSystemCache():
           self.platform.FlushEntireSystemCache()
+        else:
+          logging.warning('Flush system cache is not supported. ' +
+              'Did not flush system cache.')
 
       self._browser_backend.SetBrowser(self)
       self._browser_backend.Start()
@@ -268,6 +271,10 @@ class Browser(app.App):
   def Foreground(self):
     """Ensure the browser application is moved to the foreground."""
     return self._browser_backend.Foreground()
+
+  def Background(self):
+    """Ensure the browser application is moved to the background."""
+    return self._browser_backend.Background()
 
   def GetStandardOutput(self):
     return self._browser_backend.GetStandardOutput()

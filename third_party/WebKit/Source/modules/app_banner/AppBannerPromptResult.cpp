@@ -4,32 +4,25 @@
 
 #include "modules/app_banner/AppBannerPromptResult.h"
 
-#include "public/platform/modules/app_banner/WebAppBannerPromptResult.h"
-
 namespace blink {
 
-AppBannerPromptResult::~AppBannerPromptResult()
-{
+AppBannerPromptResult::~AppBannerPromptResult() {}
+
+String AppBannerPromptResult::outcome() const {
+  switch (m_outcome) {
+    case Outcome::Accepted:
+      return "accepted";
+
+    case Outcome::Dismissed:
+      return "dismissed";
+  }
+
+  ASSERT_NOT_REACHED();
+  return "";
 }
 
-String AppBannerPromptResult::outcome() const
-{
-    switch (m_outcome) {
-    case WebAppBannerPromptResult::Outcome::Accepted:
-        return "accepted";
+AppBannerPromptResult::AppBannerPromptResult(const String& platform,
+                                             Outcome outcome)
+    : m_platform(platform), m_outcome(outcome) {}
 
-    case WebAppBannerPromptResult::Outcome::Dismissed:
-        return "dismissed";
-    }
-
-    ASSERT_NOT_REACHED();
-    return "";
-}
-
-AppBannerPromptResult::AppBannerPromptResult(const AtomicString& platform, WebAppBannerPromptResult::Outcome outcome)
-    : m_platform(platform)
-    , m_outcome(outcome)
-{
-}
-
-} // namespace blink
+}  // namespace blink

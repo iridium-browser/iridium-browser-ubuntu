@@ -4,21 +4,30 @@
 
 #include "chrome/browser/ui/webui/devtools_ui.h"
 
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "chrome/browser/devtools/url_constants.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_frontend_host.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/user_agent.h"
+#include "net/base/filename_util.h"
+#include "net/base/load_flags.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "storage/browser/fileapi/file_system_context.h"
+#include "third_party/WebKit/public/public_features.h"
 
 using content::BrowserThread;
 using content::WebContents;
@@ -30,13 +39,9 @@ std::string PathWithoutParams(const std::string& path) {
       .path().substr(1);
 }
 
-const char kRemoteFrontendDomain[] = "chrome-devtools-frontend.appspot.com";
-const char kRemoteFrontendBase[] =
-    "https://chrome-devtools-frontend.appspot.com/";
-const char kRemoteFrontendPath[] = "serve_file";
 const char kHttpNotFound[] = "HTTP/1.1 404 Not Found\n\n";
 
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
 // Local frontend url provided by InspectUI.
 const char kFallbackFrontendURL[] =
     "chrome-devtools://devtools/bundled/inspector.html";
@@ -44,7 +49,8 @@ const char kFallbackFrontendURL[] =
 // URL causing the DevTools window to display a plain text warning.
 const char kFallbackFrontendURL[] =
     "data:text/plain,Cannot load DevTools frontend from an untrusted origin";
-#endif  // defined(DEBUG_DEVTOOLS)
+#endif  // BUILDFLAG(DEBUG_DEVTOOLS)
+
 
 // DevToolsDataSource ---------------------------------------------------------
 
@@ -88,10 +94,10 @@ class DevToolsDataSource : public content::URLDataSource,
   // content::URLDataSource implementation.
   std::string GetSource() const override;
 
-  void StartDataRequest(const std::string& path,
-                        int render_process_id,
-                        int render_frame_id,
-                        const GotDataCallback& callback) override;
+  void StartDataRequest(
+      const std::string& path,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+      const GotDataCallback& callback) override;
 
  private:
   // content::URLDataSource overrides.
@@ -105,14 +111,15 @@ class DevToolsDataSource : public content::URLDataSource,
 
   // Serves bundled DevTools frontend from ResourceBundle.
   void StartBundledDataRequest(const std::string& path,
-                               int render_process_id,
-                               int render_frame_id,
                                const GotDataCallback& callback);
 
   // Serves remote DevTools frontend from hard-coded App Engine domain.
   void StartRemoteDataRequest(const std::string& path,
-                              int render_process_id,
-                              int render_frame_id,
+                              const GotDataCallback& callback);
+
+  // Serves remote DevTools frontend from any endpoint, passed through
+  // command-line flag.
+  void StartCustomDataRequest(const GURL& url,
                               const GotDataCallback& callback);
 
   ~DevToolsDataSource() override;
@@ -144,8 +151,7 @@ std::string DevToolsDataSource::GetSource() const {
 
 void DevToolsDataSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   // Serve request from local bundle.
   std::string bundled_path_prefix(chrome::kChromeUIDevToolsBundledPath);
@@ -153,7 +159,7 @@ void DevToolsDataSource::StartDataRequest(
   if (base::StartsWith(path, bundled_path_prefix,
                        base::CompareCase::INSENSITIVE_ASCII)) {
     StartBundledDataRequest(path.substr(bundled_path_prefix.length()),
-                            render_process_id, render_frame_id, callback);
+                            callback);
     return;
   }
 
@@ -163,7 +169,28 @@ void DevToolsDataSource::StartDataRequest(
   if (base::StartsWith(path, remote_path_prefix,
                        base::CompareCase::INSENSITIVE_ASCII)) {
     StartRemoteDataRequest(path.substr(remote_path_prefix.length()),
-                           render_process_id, render_frame_id, callback);
+                           callback);
+    return;
+  }
+
+  std::string custom_frontend_url =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kCustomDevtoolsFrontend);
+
+  if (custom_frontend_url.empty()) {
+    callback.Run(NULL);
+    return;
+  }
+
+  // Serve request from custom location.
+  std::string custom_path_prefix(chrome::kChromeUIDevToolsCustomPath);
+  custom_path_prefix += "/";
+
+  if (base::StartsWith(path, custom_path_prefix,
+                       base::CompareCase::INSENSITIVE_ASCII)) {
+    GURL url = GURL(custom_frontend_url +
+                    path.substr(custom_path_prefix.length()));
+    StartCustomDataRequest(url, callback);
     return;
   }
 
@@ -188,8 +215,6 @@ bool DevToolsDataSource::ShouldServeMimeTypeAsContentTypeHeader() const {
 
 void DevToolsDataSource::StartBundledDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
   std::string filename = PathWithoutParams(path);
   base::StringPiece resource =
@@ -206,8 +231,6 @@ void DevToolsDataSource::StartBundledDataRequest(
 
 void DevToolsDataSource::StartRemoteDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
   GURL url = GURL(kRemoteFrontendBase + path);
   CHECK_EQ(url.host(), kRemoteFrontendDomain);
@@ -220,6 +243,22 @@ void DevToolsDataSource::StartRemoteDataRequest(
       net::URLFetcher::Create(url, net::URLFetcher::GET, this).release();
   pending_[fetcher] = callback;
   fetcher->SetRequestContext(request_context_.get());
+  fetcher->Start();
+}
+
+void DevToolsDataSource::StartCustomDataRequest(
+    const GURL& url,
+    const content::URLDataSource::GotDataCallback& callback) {
+  if (!url.is_valid()) {
+    callback.Run(
+        new base::RefCountedStaticMemory(kHttpNotFound, strlen(kHttpNotFound)));
+    return;
+  }
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(url, net::URLFetcher::GET, this).release();
+  pending_[fetcher] = callback;
+  fetcher->SetRequestContext(request_context_.get());
+  fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   fetcher->Start();
 }
 
@@ -260,13 +299,19 @@ GURL DevToolsUI::GetRemoteBaseURL() {
 }
 
 DevToolsUI::DevToolsUI(content::WebUI* web_ui)
-    : WebUIController(web_ui),
-      bindings_(web_ui->GetWebContents()) {
+    : WebUIController(web_ui), bindings_(web_ui->GetWebContents()) {
   web_ui->SetBindings(0);
   Profile* profile = Profile::FromWebUI(web_ui);
   content::URLDataSource::Add(
       profile,
       new DevToolsDataSource(profile->GetRequestContext()));
+
+  if (!profile->IsOffTheRecord())
+    return;
+  GURL url = web_ui->GetWebContents()->GetVisibleURL();
+  GURL site = content::SiteInstance::GetSiteForURL(profile, url);
+  content::BrowserContext::GetStoragePartitionForSite(profile, site)->
+      GetFileSystemContext()->EnableTemporaryFileSystemInIncognito();
 }
 
 DevToolsUI::~DevToolsUI() {

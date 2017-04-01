@@ -15,18 +15,24 @@
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/common/three_d_api_types.h"
 #include "net/cookies/canonical_cookie.h"
+#include "ppapi/features/features.h"
 #include "third_party/WebKit/public/web/WebTreeScopeType.h"
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
 #include "content/common/pepper_renderer_instance_data.h"
 #endif
 
 struct FrameHostMsg_CreateChildFrame_Params;
+struct FrameHostMsg_DownloadUrl_Params;
 class GURL;
 
 namespace net {
 class URLRequestContext;
 class URLRequestContextGetter;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace content {
@@ -66,6 +72,7 @@ class CONTENT_EXPORT RenderFrameMessageFilter
                            int render_frame_id,
                            const GURL& url,
                            const Referrer& referrer,
+                           const url::Origin& initiator,
                            const base::string16& suggested_name,
                            const bool use_prompt) const;
 
@@ -92,11 +99,8 @@ class CONTENT_EXPORT RenderFrameMessageFilter
                              const GetCookiesCallback& callback,
                              const net::CookieList& cookie_list);
 
-  void OnDownloadUrl(int render_view_id,
-                     int render_frame_id,
-                     const GURL& url,
-                     const Referrer& referrer,
-                     const base::string16& suggested_name);
+  void OnDownloadUrl(const FrameHostMsg_DownloadUrl_Params& params);
+
   void OnSaveImageFromDataURL(int render_view_id,
                               int render_frame_id,
                               const std::string& url_str);
@@ -119,13 +123,16 @@ class CONTENT_EXPORT RenderFrameMessageFilter
                   const GetCookiesCallback& callback) override;
 
 
-#if defined(ENABLE_PLUGINS)
-  void OnGetPlugins(bool refresh, IPC::Message* reply_msg);
+#if BUILDFLAG(ENABLE_PLUGINS)
+  void OnGetPlugins(bool refresh,
+                    const url::Origin& main_frame_origin,
+                    IPC::Message* reply_msg);
   void GetPluginsCallback(IPC::Message* reply_msg,
+                          const url::Origin& main_frame_origin,
                           const std::vector<WebPluginInfo>& plugins);
   void OnGetPluginInfo(int render_frame_id,
                        const GURL& url,
-                       const GURL& policy_url,
+                       const url::Origin& main_frame_origin,
                        const std::string& mime_type,
                        bool* found,
                        WebPluginInfo* info,
@@ -152,7 +159,7 @@ class CONTENT_EXPORT RenderFrameMessageFilter
   // Only call on the IO thread.
   net::URLRequestContext* GetRequestContextForURL(const GURL& url);
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   PluginServiceImpl* plugin_service_;
   base::FilePath profile_data_directory_;
 

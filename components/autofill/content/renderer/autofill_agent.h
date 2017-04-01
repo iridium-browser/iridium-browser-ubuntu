@@ -13,8 +13,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
-#include "components/autofill/content/public/interfaces/autofill_agent.mojom.h"
-#include "components/autofill/content/public/interfaces/autofill_driver.mojom.h"
+#include "components/autofill/content/common/autofill_agent.mojom.h"
+#include "components/autofill/content/common/autofill_driver.mojom.h"
 #include "components/autofill/content/renderer/form_cache.h"
 #include "components/autofill/content/renderer/page_click_listener.h"
 #include "content/public/renderer/render_frame_observer.h"
@@ -62,6 +62,8 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   const mojom::AutofillDriverPtr& GetAutofillDriver();
 
+  const mojom::PasswordManagerDriverPtr& GetPasswordManagerDriver();
+
   // mojom::AutofillAgent:
   void FirstUserGestureObservedInTab() override;
   void FillForm(int32_t id, const FormData& form) override;
@@ -80,6 +82,8 @@ class AutofillAgent : public content::RenderFrameObserver,
   void ShowInitialPasswordAccountSuggestions(
       int32_t key,
       const PasswordFormFillData& form_data) override;
+
+  void ShowNotSecureWarning(const blink::WebInputElement& element);
 
  protected:
   // blink::WebAutofillClient:
@@ -185,8 +189,6 @@ class AutofillAgent : public content::RenderFrameObserver,
   void dataListOptionsChanged(const blink::WebInputElement& element) override;
   void firstUserGestureObserved() override;
   void ajaxSucceeded() override;
-
-  void OnPing();
 
   // Called when a same-page navigation is detected.
   void OnSamePageNavigationCompleted();
@@ -300,7 +302,7 @@ class AutofillAgent : public content::RenderFrameObserver,
 
   mojo::Binding<mojom::AutofillAgent> binding_;
 
-  mojom::AutofillDriverPtr mojo_autofill_driver_;
+  mojom::AutofillDriverPtr autofill_driver_;
 
   base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_;
 

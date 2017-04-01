@@ -11,26 +11,29 @@
 #include "services/ui/public/interfaces/window_tree.mojom.h"
 #include "services/ui/public/interfaces/window_tree_host.mojom.h"
 
-namespace shell {
+namespace service_manager {
 class Connector;
 }
 
 namespace ui {
 
 class WindowManagerDelegate;
+class WindowTreeClient;
 class WindowTreeClientDelegate;
 
 // The following create a new window tree host. Supply a |factory| if you have
 // already connected to mus, otherwise supply |shell|, which contacts mus and
 // obtains a WindowTreeHostFactory.
-void CreateWindowTreeHost(mojom::WindowTreeHostFactory* factory,
-                          WindowTreeClientDelegate* delegate,
-                          mojom::WindowTreeHostPtr* host,
-                          WindowManagerDelegate* window_manager_delegate);
-void CreateWindowTreeHost(shell::Connector* connector,
-                          WindowTreeClientDelegate* delegate,
-                          mojom::WindowTreeHostPtr* host,
-                          WindowManagerDelegate* window_manager_delegate);
+std::unique_ptr<WindowTreeClient> CreateWindowTreeHost(
+    mojom::WindowTreeHostFactory* factory,
+    WindowTreeClientDelegate* delegate,
+    mojom::WindowTreeHostPtr* host,
+    WindowManagerDelegate* window_manager_delegate);
+std::unique_ptr<WindowTreeClient> CreateWindowTreeHost(
+    service_manager::Connector* connector,
+    WindowTreeClientDelegate* delegate,
+    mojom::WindowTreeHostPtr* host,
+    WindowManagerDelegate* window_manager_delegate);
 
 }  // namespace ui
 

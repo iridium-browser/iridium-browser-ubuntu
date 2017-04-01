@@ -1,13 +1,15 @@
 {
-  "manifest_version":  1,
-  "name": "mojo:video_capture",
+  "name": "video_capture",
   "display_name": "Video Capture",
-  "capabilities": {
-    "provided": {
-      "tests": ["*"]
-    },
-    "required": {
-      "mojo:shell": { "classes": [ "shell:all_users" ] }
+  "interface_provider_specs": {
+    "service_manager:connector": {
+      "provides": {
+        "production": [ "*" ],
+        "tests": [ "*" ]
+      },
+      "requires": {
+        "service_manager": [ "service_manager:all_users" ]
+      }
     }
   }
 }

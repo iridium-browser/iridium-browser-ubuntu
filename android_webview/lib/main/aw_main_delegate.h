@@ -17,6 +17,10 @@ namespace content {
 class BrowserMainRunner;
 }
 
+namespace safe_browsing {
+class SafeBrowsingApiHandler;
+}
+
 namespace android_webview {
 
 class AwContentBrowserClient;
@@ -51,18 +55,15 @@ class AwMainDelegate : public content::ContentMainDelegate,
   content::WebContentsViewDelegate* CreateViewDelegate(
       content::WebContents* web_contents) override;
   AwWebPreferencesPopulater* CreateWebPreferencesPopulater() override;
-  AwMessagePortService* CreateAwMessagePortService() override;
   AwLocaleManager* CreateAwLocaleManager() override;
-#if defined(VIDEO_HOLE)
-  content::ExternalVideoSurfaceContainer* CreateExternalVideoSurfaceContainer(
-      content::WebContents* web_contents) override;
-#endif
 
   std::unique_ptr<content::BrowserMainRunner> browser_runner_;
   AwContentClient content_client_;
   std::unique_ptr<AwContentBrowserClient> content_browser_client_;
   std::unique_ptr<AwContentGpuClient> content_gpu_client_;
   std::unique_ptr<AwContentRendererClient> content_renderer_client_;
+  std::unique_ptr<safe_browsing::SafeBrowsingApiHandler>
+      safe_browsing_api_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(AwMainDelegate);
 };

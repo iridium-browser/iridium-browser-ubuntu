@@ -10,6 +10,7 @@
 #include "base/macros.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
+#include "mojo/edk/embedder/named_platform_handle.h"
 #include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/edk/system/system_impl_export.h"
 
@@ -27,7 +28,16 @@ namespace edk {
 // resolve it into a client handle.
 class MOJO_SYSTEM_IMPL_EXPORT NamedPlatformChannelPair {
  public:
-  NamedPlatformChannelPair();
+  struct Options {
+#if defined(OS_WIN)
+    // If non-empty, a security descriptor to use when creating the pipe. If
+    // empty, a default security descriptor will be used. See
+    // kDefaultSecurityDescriptor in named_platform_handle_utils_win.cc.
+    base::string16 security_descriptor;
+#endif
+  };
+
+  NamedPlatformChannelPair(const Options& options = {});
   ~NamedPlatformChannelPair();
 
   // Note: It is NOT acceptable to use this handle as a generic pipe channel. It
@@ -48,12 +58,11 @@ class MOJO_SYSTEM_IMPL_EXPORT NamedPlatformChannelPair {
   void PrepareToPassClientHandleToChildProcess(
       base::CommandLine* command_line) const;
 
- private:
-  ScopedPlatformHandle server_handle_;
+  const NamedPlatformHandle& handle() const { return pipe_handle_; }
 
-#if defined(OS_WIN)
-  base::string16 pipe_name_;
-#endif
+ private:
+  NamedPlatformHandle pipe_handle_;
+  ScopedPlatformHandle server_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(NamedPlatformChannelPair);
 };

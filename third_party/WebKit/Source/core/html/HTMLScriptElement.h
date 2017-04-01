@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
- * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
+ * Copyright (C) 2003, 2004, 2005, 2006, 2007, 2008 Apple Inc. All rights
+ * reserved.
  * Copyright (C) 2008 Nikolas Zimmermann <zimmermann@kde.org>
  *
  * This library is free software; you can redistribute it and/or
@@ -31,53 +32,67 @@
 
 namespace blink {
 
-class CORE_EXPORT HTMLScriptElement final : public HTMLElement, public ScriptLoaderClient {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static HTMLScriptElement* create(Document&, bool wasInsertedByParser, bool alreadyStarted = false, bool createdDuringDocumentWrite = false);
+class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
+                                            public ScriptLoaderClient {
+  DEFINE_WRAPPERTYPEINFO();
 
-    String text() { return textFromChildren(); }
-    void setText(const String&);
+ public:
+  static HTMLScriptElement* create(Document&,
+                                   bool wasInsertedByParser,
+                                   bool alreadyStarted = false,
+                                   bool createdDuringDocumentWrite = false);
 
-    KURL src() const;
+  String text() { return textFromChildren(); }
+  void setText(const String&);
 
-    void setAsync(bool);
-    bool async() const;
+  KURL src() const;
 
-    ScriptLoader* loader() const { return m_loader.get(); }
+  void setAsync(bool);
+  bool async() const;
 
-    DECLARE_VIRTUAL_TRACE();
+  ScriptLoader* loader() const { return m_loader.get(); }
 
-private:
-    HTMLScriptElement(Document&, bool wasInsertedByParser, bool alreadyStarted, bool createdDuringDocumentWrite);
+  // ScriptLoaderClient
+  AtomicString nonce() const override { return m_nonce; }
+  void setNonce(const String& nonce) override { m_nonce = AtomicString(nonce); }
+  void clearNonce() override { m_nonce = emptyAtom; }
 
-    void parseAttribute(const QualifiedName&, const AtomicString&, const AtomicString&) override;
-    InsertionNotificationRequest insertedInto(ContainerNode*) override;
-    void didNotifySubtreeInsertionsToDocument() override;
-    void childrenChanged(const ChildrenChange&) override;
-    void didMoveToNewDocument(Document& oldDocument) override;
+  DECLARE_VIRTUAL_TRACE();
 
-    bool isURLAttribute(const Attribute&) const override;
-    bool hasLegalLinkAttribute(const QualifiedName&) const override;
-    const QualifiedName& subResourceAttributeName() const override;
+ private:
+  HTMLScriptElement(Document&,
+                    bool wasInsertedByParser,
+                    bool alreadyStarted,
+                    bool createdDuringDocumentWrite);
 
-    String sourceAttributeValue() const override;
-    String charsetAttributeValue() const override;
-    String typeAttributeValue() const override;
-    String languageAttributeValue() const override;
-    String forAttributeValue() const override;
-    String eventAttributeValue() const override;
-    bool asyncAttributeValue() const override;
-    bool deferAttributeValue() const override;
-    bool hasSourceAttribute() const override;
+  void parseAttribute(const AttributeModificationParams&) override;
+  InsertionNotificationRequest insertedInto(ContainerNode*) override;
+  void didNotifySubtreeInsertionsToDocument() override;
+  void childrenChanged(const ChildrenChange&) override;
+  void didMoveToNewDocument(Document& oldDocument) override;
 
-    void dispatchLoadEvent() override;
+  bool isURLAttribute(const Attribute&) const override;
+  bool hasLegalLinkAttribute(const QualifiedName&) const override;
+  const QualifiedName& subResourceAttributeName() const override;
 
-    Element* cloneElementWithoutAttributesAndChildren() override;
+  String sourceAttributeValue() const override;
+  String charsetAttributeValue() const override;
+  String typeAttributeValue() const override;
+  String languageAttributeValue() const override;
+  String forAttributeValue() const override;
+  String eventAttributeValue() const override;
+  bool asyncAttributeValue() const override;
+  bool deferAttributeValue() const override;
+  bool hasSourceAttribute() const override;
 
-    Member<ScriptLoader> m_loader;
+  void dispatchLoadEvent() override;
+
+  Element* cloneElementWithoutAttributesAndChildren() override;
+
+  Member<ScriptLoader> m_loader;
+  AtomicString m_nonce;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // HTMLScriptElement_h
+#endif  // HTMLScriptElement_h

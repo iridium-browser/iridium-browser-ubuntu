@@ -9,7 +9,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_checker.h"
@@ -58,7 +57,6 @@ class CONTENT_EXPORT MediaRecorderHandler final
                   const blink::WebString& codecs,
                   int32_t audio_bits_per_second,
                   int32_t video_bits_per_second) override;
-  bool start() override;
   bool start(int timeslice) override;
   void stop() override;
   void pause() override;
@@ -67,7 +65,7 @@ class CONTENT_EXPORT MediaRecorderHandler final
  private:
   friend class MediaRecorderHandlerTest;
 
-  void OnEncodedVideo(const scoped_refptr<media::VideoFrame>& video_frame,
+  void OnEncodedVideo(const media::WebmMuxer::VideoParameters& params,
                       std::unique_ptr<std::string> encoded_data,
                       base::TimeTicks timestamp,
                       bool is_key_frame);
@@ -104,8 +102,8 @@ class CONTENT_EXPORT MediaRecorderHandler final
   // |client_| is a weak pointer, and is valid for the lifetime of this object.
   blink::WebMediaRecorderHandlerClient* client_;
 
-  ScopedVector<VideoTrackRecorder> video_recorders_;
-  ScopedVector<AudioTrackRecorder> audio_recorders_;
+  std::vector<std::unique_ptr<VideoTrackRecorder>> video_recorders_;
+  std::vector<std::unique_ptr<AudioTrackRecorder>> audio_recorders_;
 
   // Worker class doing the actual Webm Muxing work.
   std::unique_ptr<media::WebmMuxer> webm_muxer_;

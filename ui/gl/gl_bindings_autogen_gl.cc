@@ -111,6 +111,9 @@ void DriverGL::InitializeStaticBindings() {
       reinterpret_cast<glCreateShaderProc>(GetGLProcAddress("glCreateShader"));
   fn.glCullFaceFn =
       reinterpret_cast<glCullFaceProc>(GetGLProcAddress("glCullFace"));
+  fn.glDebugMessageCallbackFn = 0;
+  fn.glDebugMessageControlFn = 0;
+  fn.glDebugMessageInsertFn = 0;
   fn.glDeleteBuffersARBFn = reinterpret_cast<glDeleteBuffersARBProc>(
       GetGLProcAddress("glDeleteBuffers"));
   fn.glDeleteFencesAPPLEFn = 0;
@@ -193,52 +196,88 @@ void DriverGL::InitializeStaticBindings() {
   fn.glGetActiveUniformFn = reinterpret_cast<glGetActiveUniformProc>(
       GetGLProcAddress("glGetActiveUniform"));
   fn.glGetActiveUniformBlockivFn = 0;
+  fn.glGetActiveUniformBlockivRobustANGLEFn = 0;
   fn.glGetActiveUniformBlockNameFn = 0;
   fn.glGetActiveUniformsivFn = 0;
   fn.glGetAttachedShadersFn = reinterpret_cast<glGetAttachedShadersProc>(
       GetGLProcAddress("glGetAttachedShaders"));
   fn.glGetAttribLocationFn = reinterpret_cast<glGetAttribLocationProc>(
       GetGLProcAddress("glGetAttribLocation"));
+  fn.glGetBooleani_vRobustANGLEFn = 0;
   fn.glGetBooleanvFn =
       reinterpret_cast<glGetBooleanvProc>(GetGLProcAddress("glGetBooleanv"));
+  fn.glGetBooleanvRobustANGLEFn = 0;
+  fn.glGetBufferParameteri64vRobustANGLEFn = 0;
   fn.glGetBufferParameterivFn = reinterpret_cast<glGetBufferParameterivProc>(
       GetGLProcAddress("glGetBufferParameteriv"));
+  fn.glGetBufferParameterivRobustANGLEFn = 0;
+  fn.glGetBufferPointervRobustANGLEFn = 0;
+  fn.glGetDebugMessageLogFn = 0;
   fn.glGetErrorFn =
       reinterpret_cast<glGetErrorProc>(GetGLProcAddress("glGetError"));
   fn.glGetFenceivNVFn = 0;
   fn.glGetFloatvFn =
       reinterpret_cast<glGetFloatvProc>(GetGLProcAddress("glGetFloatv"));
+  fn.glGetFloatvRobustANGLEFn = 0;
   fn.glGetFragDataIndexFn = 0;
   fn.glGetFragDataLocationFn = 0;
   fn.glGetFramebufferAttachmentParameterivEXTFn = 0;
+  fn.glGetFramebufferAttachmentParameterivRobustANGLEFn = 0;
+  fn.glGetFramebufferParameterivRobustANGLEFn = 0;
   fn.glGetGraphicsResetStatusARBFn = 0;
   fn.glGetInteger64i_vFn = 0;
+  fn.glGetInteger64i_vRobustANGLEFn = 0;
   fn.glGetInteger64vFn = 0;
+  fn.glGetInteger64vRobustANGLEFn = 0;
   fn.glGetIntegeri_vFn = 0;
+  fn.glGetIntegeri_vRobustANGLEFn = 0;
   fn.glGetIntegervFn =
       reinterpret_cast<glGetIntegervProc>(GetGLProcAddress("glGetIntegerv"));
+  fn.glGetIntegervRobustANGLEFn = 0;
   fn.glGetInternalformativFn = 0;
+  fn.glGetInternalformativRobustANGLEFn = 0;
+  fn.glGetMultisamplefvRobustANGLEFn = 0;
+  fn.glGetnUniformfvRobustANGLEFn = 0;
+  fn.glGetnUniformivRobustANGLEFn = 0;
+  fn.glGetnUniformuivRobustANGLEFn = 0;
+  fn.glGetObjectLabelFn = 0;
+  fn.glGetObjectPtrLabelFn = 0;
+  fn.glGetPointervFn = 0;
+  fn.glGetPointervRobustANGLERobustANGLEFn = 0;
   fn.glGetProgramBinaryFn = 0;
   fn.glGetProgramInfoLogFn = reinterpret_cast<glGetProgramInfoLogProc>(
       GetGLProcAddress("glGetProgramInfoLog"));
   fn.glGetProgramInterfaceivFn = 0;
+  fn.glGetProgramInterfaceivRobustANGLEFn = 0;
   fn.glGetProgramivFn =
       reinterpret_cast<glGetProgramivProc>(GetGLProcAddress("glGetProgramiv"));
+  fn.glGetProgramivRobustANGLEFn = 0;
   fn.glGetProgramResourceivFn = 0;
   fn.glGetProgramResourceLocationFn = 0;
   fn.glGetProgramResourceNameFn = 0;
   fn.glGetQueryivFn = 0;
+  fn.glGetQueryivRobustANGLEFn = 0;
   fn.glGetQueryObjecti64vFn = 0;
+  fn.glGetQueryObjecti64vRobustANGLEFn = 0;
   fn.glGetQueryObjectivFn = 0;
+  fn.glGetQueryObjectivRobustANGLEFn = 0;
   fn.glGetQueryObjectui64vFn = 0;
+  fn.glGetQueryObjectui64vRobustANGLEFn = 0;
   fn.glGetQueryObjectuivFn = 0;
+  fn.glGetQueryObjectuivRobustANGLEFn = 0;
   fn.glGetRenderbufferParameterivEXTFn = 0;
+  fn.glGetRenderbufferParameterivRobustANGLEFn = 0;
   fn.glGetSamplerParameterfvFn = 0;
+  fn.glGetSamplerParameterfvRobustANGLEFn = 0;
+  fn.glGetSamplerParameterIivRobustANGLEFn = 0;
+  fn.glGetSamplerParameterIuivRobustANGLEFn = 0;
   fn.glGetSamplerParameterivFn = 0;
+  fn.glGetSamplerParameterivRobustANGLEFn = 0;
   fn.glGetShaderInfoLogFn = reinterpret_cast<glGetShaderInfoLogProc>(
       GetGLProcAddress("glGetShaderInfoLog"));
   fn.glGetShaderivFn =
       reinterpret_cast<glGetShaderivProc>(GetGLProcAddress("glGetShaderiv"));
+  fn.glGetShaderivRobustANGLEFn = 0;
   fn.glGetShaderPrecisionFormatFn = 0;
   fn.glGetShaderSourceFn = reinterpret_cast<glGetShaderSourceProc>(
       GetGLProcAddress("glGetShaderSource"));
@@ -248,29 +287,43 @@ void DriverGL::InitializeStaticBindings() {
       reinterpret_cast<glGetStringiProc>(GetGLProcAddress("glGetStringi"));
   fn.glGetSyncivFn = 0;
   fn.glGetTexLevelParameterfvFn = 0;
+  fn.glGetTexLevelParameterfvRobustANGLEFn = 0;
   fn.glGetTexLevelParameterivFn = 0;
+  fn.glGetTexLevelParameterivRobustANGLEFn = 0;
   fn.glGetTexParameterfvFn = reinterpret_cast<glGetTexParameterfvProc>(
       GetGLProcAddress("glGetTexParameterfv"));
+  fn.glGetTexParameterfvRobustANGLEFn = 0;
+  fn.glGetTexParameterIivRobustANGLEFn = 0;
+  fn.glGetTexParameterIuivRobustANGLEFn = 0;
   fn.glGetTexParameterivFn = reinterpret_cast<glGetTexParameterivProc>(
       GetGLProcAddress("glGetTexParameteriv"));
+  fn.glGetTexParameterivRobustANGLEFn = 0;
   fn.glGetTransformFeedbackVaryingFn = 0;
   fn.glGetTranslatedShaderSourceANGLEFn = 0;
   fn.glGetUniformBlockIndexFn = 0;
   fn.glGetUniformfvFn =
       reinterpret_cast<glGetUniformfvProc>(GetGLProcAddress("glGetUniformfv"));
+  fn.glGetUniformfvRobustANGLEFn = 0;
   fn.glGetUniformIndicesFn = 0;
   fn.glGetUniformivFn =
       reinterpret_cast<glGetUniformivProc>(GetGLProcAddress("glGetUniformiv"));
+  fn.glGetUniformivRobustANGLEFn = 0;
   fn.glGetUniformLocationFn = reinterpret_cast<glGetUniformLocationProc>(
       GetGLProcAddress("glGetUniformLocation"));
   fn.glGetUniformuivFn = 0;
+  fn.glGetUniformuivRobustANGLEFn = 0;
   fn.glGetVertexAttribfvFn = reinterpret_cast<glGetVertexAttribfvProc>(
       GetGLProcAddress("glGetVertexAttribfv"));
+  fn.glGetVertexAttribfvRobustANGLEFn = 0;
+  fn.glGetVertexAttribIivRobustANGLEFn = 0;
+  fn.glGetVertexAttribIuivRobustANGLEFn = 0;
   fn.glGetVertexAttribivFn = reinterpret_cast<glGetVertexAttribivProc>(
       GetGLProcAddress("glGetVertexAttribiv"));
+  fn.glGetVertexAttribivRobustANGLEFn = 0;
   fn.glGetVertexAttribPointervFn =
       reinterpret_cast<glGetVertexAttribPointervProc>(
           GetGLProcAddress("glGetVertexAttribPointerv"));
+  fn.glGetVertexAttribPointervRobustANGLEFn = 0;
   fn.glHintFn = reinterpret_cast<glHintProc>(GetGLProcAddress("glHint"));
   fn.glInsertEventMarkerEXTFn = 0;
   fn.glInvalidateFramebufferFn = 0;
@@ -304,6 +357,8 @@ void DriverGL::InitializeStaticBindings() {
   fn.glMatrixLoadfEXTFn = 0;
   fn.glMatrixLoadIdentityEXTFn = 0;
   fn.glMemoryBarrierEXTFn = 0;
+  fn.glObjectLabelFn = 0;
+  fn.glObjectPtrLabelFn = 0;
   fn.glPathCommandsNVFn = 0;
   fn.glPathParameterfNVFn = 0;
   fn.glPathParameteriNVFn = 0;
@@ -314,16 +369,20 @@ void DriverGL::InitializeStaticBindings() {
   fn.glPointParameteriFn = 0;
   fn.glPolygonOffsetFn = reinterpret_cast<glPolygonOffsetProc>(
       GetGLProcAddress("glPolygonOffset"));
+  fn.glPopDebugGroupFn = 0;
   fn.glPopGroupMarkerEXTFn = 0;
   fn.glPrimitiveRestartIndexFn = 0;
   fn.glProgramBinaryFn = 0;
   fn.glProgramParameteriFn = 0;
   fn.glProgramPathFragmentInputGenNVFn = 0;
+  fn.glPushDebugGroupFn = 0;
   fn.glPushGroupMarkerEXTFn = 0;
   fn.glQueryCounterFn = 0;
   fn.glReadBufferFn = 0;
+  fn.glReadnPixelsRobustANGLEFn = 0;
   fn.glReadPixelsFn =
       reinterpret_cast<glReadPixelsProc>(GetGLProcAddress("glReadPixels"));
+  fn.glReadPixelsRobustANGLEFn = 0;
   fn.glReleaseShaderCompilerFn = 0;
   fn.glRenderbufferStorageEXTFn = 0;
   fn.glRenderbufferStorageMultisampleFn = 0;
@@ -335,8 +394,12 @@ void DriverGL::InitializeStaticBindings() {
       GetGLProcAddress("glSampleCoverage"));
   fn.glSamplerParameterfFn = 0;
   fn.glSamplerParameterfvFn = 0;
+  fn.glSamplerParameterfvRobustANGLEFn = 0;
   fn.glSamplerParameteriFn = 0;
+  fn.glSamplerParameterIivRobustANGLEFn = 0;
+  fn.glSamplerParameterIuivRobustANGLEFn = 0;
   fn.glSamplerParameterivFn = 0;
+  fn.glSamplerParameterivRobustANGLEFn = 0;
   fn.glScissorFn =
       reinterpret_cast<glScissorProc>(GetGLProcAddress("glScissor"));
   fn.glSetFenceAPPLEFn = 0;
@@ -368,20 +431,28 @@ void DriverGL::InitializeStaticBindings() {
   fn.glTestFenceNVFn = 0;
   fn.glTexImage2DFn =
       reinterpret_cast<glTexImage2DProc>(GetGLProcAddress("glTexImage2D"));
+  fn.glTexImage2DRobustANGLEFn = 0;
   fn.glTexImage3DFn = 0;
+  fn.glTexImage3DRobustANGLEFn = 0;
   fn.glTexParameterfFn = reinterpret_cast<glTexParameterfProc>(
       GetGLProcAddress("glTexParameterf"));
   fn.glTexParameterfvFn = reinterpret_cast<glTexParameterfvProc>(
       GetGLProcAddress("glTexParameterfv"));
+  fn.glTexParameterfvRobustANGLEFn = 0;
   fn.glTexParameteriFn = reinterpret_cast<glTexParameteriProc>(
       GetGLProcAddress("glTexParameteri"));
+  fn.glTexParameterIivRobustANGLEFn = 0;
+  fn.glTexParameterIuivRobustANGLEFn = 0;
   fn.glTexParameterivFn = reinterpret_cast<glTexParameterivProc>(
       GetGLProcAddress("glTexParameteriv"));
+  fn.glTexParameterivRobustANGLEFn = 0;
   fn.glTexStorage2DEXTFn = 0;
   fn.glTexStorage3DFn = 0;
   fn.glTexSubImage2DFn = reinterpret_cast<glTexSubImage2DProc>(
       GetGLProcAddress("glTexSubImage2D"));
+  fn.glTexSubImage2DRobustANGLEFn = 0;
   fn.glTexSubImage3DFn = 0;
+  fn.glTexSubImage3DRobustANGLEFn = 0;
   fn.glTransformFeedbackVaryingsFn = 0;
   fn.glUniform1fFn =
       reinterpret_cast<glUniform1fProc>(GetGLProcAddress("glUniform1f"));
@@ -483,6 +554,8 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
       extensions.find("GL_ANGLE_framebuffer_multisample ") != std::string::npos;
   ext.b_GL_ANGLE_instanced_arrays =
       extensions.find("GL_ANGLE_instanced_arrays ") != std::string::npos;
+  ext.b_GL_ANGLE_robust_client_memory =
+      extensions.find("GL_ANGLE_robust_client_memory ") != std::string::npos;
   ext.b_GL_ANGLE_translated_shader_source =
       extensions.find("GL_ANGLE_translated_shader_source ") !=
       std::string::npos;
@@ -583,6 +656,7 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
       extensions.find("GL_INTEL_framebuffer_CMAA ") != std::string::npos;
   ext.b_GL_KHR_blend_equation_advanced =
       extensions.find("GL_KHR_blend_equation_advanced ") != std::string::npos;
+  ext.b_GL_KHR_debug = extensions.find("GL_KHR_debug ") != std::string::npos;
   ext.b_GL_KHR_robustness =
       extensions.find("GL_KHR_robustness ") != std::string::npos;
   ext.b_GL_NV_blend_equation_advanced =
@@ -890,6 +964,33 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
   if (ext.b_GL_NV_path_rendering) {
     fn.glCoverStrokePathNVFn = reinterpret_cast<glCoverStrokePathNVProc>(
         GetGLProcAddress("glCoverStrokePathNV"));
+  }
+
+  debug_fn.glDebugMessageCallbackFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glDebugMessageCallbackFn = reinterpret_cast<glDebugMessageCallbackProc>(
+        GetGLProcAddress("glDebugMessageCallback"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glDebugMessageCallbackFn = reinterpret_cast<glDebugMessageCallbackProc>(
+        GetGLProcAddress("glDebugMessageCallbackKHR"));
+  }
+
+  debug_fn.glDebugMessageControlFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glDebugMessageControlFn = reinterpret_cast<glDebugMessageControlProc>(
+        GetGLProcAddress("glDebugMessageControl"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glDebugMessageControlFn = reinterpret_cast<glDebugMessageControlProc>(
+        GetGLProcAddress("glDebugMessageControlKHR"));
+  }
+
+  debug_fn.glDebugMessageInsertFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glDebugMessageInsertFn = reinterpret_cast<glDebugMessageInsertProc>(
+        GetGLProcAddress("glDebugMessageInsert"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glDebugMessageInsertFn = reinterpret_cast<glDebugMessageInsertProc>(
+        GetGLProcAddress("glDebugMessageInsertKHR"));
   }
 
   debug_fn.glDeleteFencesAPPLEFn = 0;
@@ -1248,6 +1349,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
             GetGLProcAddress("glGetActiveUniformBlockiv"));
   }
 
+  debug_fn.glGetActiveUniformBlockivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetActiveUniformBlockivRobustANGLEFn =
+        reinterpret_cast<glGetActiveUniformBlockivRobustANGLEProc>(
+            GetGLProcAddress("glGetActiveUniformBlockivRobustANGLE"));
+  }
+
   debug_fn.glGetActiveUniformBlockNameFn = 0;
   if (ver->IsAtLeastGLES(3u, 0u) || ver->IsAtLeastGL(3u, 1u)) {
     fn.glGetActiveUniformBlockNameFn =
@@ -1261,10 +1369,60 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glGetActiveUniformsiv"));
   }
 
+  debug_fn.glGetBooleani_vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetBooleani_vRobustANGLEFn =
+        reinterpret_cast<glGetBooleani_vRobustANGLEProc>(
+            GetGLProcAddress("glGetBooleani_vRobustANGLE"));
+  }
+
+  debug_fn.glGetBooleanvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetBooleanvRobustANGLEFn =
+        reinterpret_cast<glGetBooleanvRobustANGLEProc>(
+            GetGLProcAddress("glGetBooleanvRobustANGLE"));
+  }
+
+  debug_fn.glGetBufferParameteri64vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetBufferParameteri64vRobustANGLEFn =
+        reinterpret_cast<glGetBufferParameteri64vRobustANGLEProc>(
+            GetGLProcAddress("glGetBufferParameteri64vRobustANGLE"));
+  }
+
+  debug_fn.glGetBufferParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetBufferParameterivRobustANGLEFn =
+        reinterpret_cast<glGetBufferParameterivRobustANGLEProc>(
+            GetGLProcAddress("glGetBufferParameterivRobustANGLE"));
+  }
+
+  debug_fn.glGetBufferPointervRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetBufferPointervRobustANGLEFn =
+        reinterpret_cast<glGetBufferPointervRobustANGLEProc>(
+            GetGLProcAddress("glGetBufferPointervRobustANGLE"));
+  }
+
+  debug_fn.glGetDebugMessageLogFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glGetDebugMessageLogFn = reinterpret_cast<glGetDebugMessageLogProc>(
+        GetGLProcAddress("glGetDebugMessageLog"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glGetDebugMessageLogFn = reinterpret_cast<glGetDebugMessageLogProc>(
+        GetGLProcAddress("glGetDebugMessageLogKHR"));
+  }
+
   debug_fn.glGetFenceivNVFn = 0;
   if (ext.b_GL_NV_fence) {
     fn.glGetFenceivNVFn = reinterpret_cast<glGetFenceivNVProc>(
         GetGLProcAddress("glGetFenceivNV"));
+  }
+
+  debug_fn.glGetFloatvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetFloatvRobustANGLEFn = reinterpret_cast<glGetFloatvRobustANGLEProc>(
+        GetGLProcAddress("glGetFloatvRobustANGLE"));
   }
 
   debug_fn.glGetFragDataIndexFn = 0;
@@ -1293,8 +1451,23 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
             GetGLProcAddress("glGetFramebufferAttachmentParameterivEXT"));
   }
 
+  debug_fn.glGetFramebufferAttachmentParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetFramebufferAttachmentParameterivRobustANGLEFn =
+        reinterpret_cast<glGetFramebufferAttachmentParameterivRobustANGLEProc>(
+            GetGLProcAddress(
+                "glGetFramebufferAttachmentParameterivRobustANGLE"));
+  }
+
+  debug_fn.glGetFramebufferParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetFramebufferParameterivRobustANGLEFn =
+        reinterpret_cast<glGetFramebufferParameterivRobustANGLEProc>(
+            GetGLProcAddress("glGetFramebufferParameterivRobustANGLE"));
+  }
+
   debug_fn.glGetGraphicsResetStatusARBFn = 0;
-  if (ver->IsAtLeastGL(4u, 5u)) {
+  if (ver->IsAtLeastGL(4u, 5u) || ver->IsAtLeastGLES(3u, 2u)) {
     fn.glGetGraphicsResetStatusARBFn =
         reinterpret_cast<glGetGraphicsResetStatusARBProc>(
             GetGLProcAddress("glGetGraphicsResetStatus"));
@@ -1318,10 +1491,24 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glGetInteger64i_v"));
   }
 
+  debug_fn.glGetInteger64i_vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetInteger64i_vRobustANGLEFn =
+        reinterpret_cast<glGetInteger64i_vRobustANGLEProc>(
+            GetGLProcAddress("glGetInteger64i_vRobustANGLE"));
+  }
+
   debug_fn.glGetInteger64vFn = 0;
   if (ver->IsAtLeastGL(3u, 2u) || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glGetInteger64vFn = reinterpret_cast<glGetInteger64vProc>(
         GetGLProcAddress("glGetInteger64v"));
+  }
+
+  debug_fn.glGetInteger64vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetInteger64vRobustANGLEFn =
+        reinterpret_cast<glGetInteger64vRobustANGLEProc>(
+            GetGLProcAddress("glGetInteger64vRobustANGLE"));
   }
 
   debug_fn.glGetIntegeri_vFn = 0;
@@ -1330,10 +1517,93 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glGetIntegeri_v"));
   }
 
+  debug_fn.glGetIntegeri_vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetIntegeri_vRobustANGLEFn =
+        reinterpret_cast<glGetIntegeri_vRobustANGLEProc>(
+            GetGLProcAddress("glGetIntegeri_vRobustANGLE"));
+  }
+
+  debug_fn.glGetIntegervRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetIntegervRobustANGLEFn =
+        reinterpret_cast<glGetIntegervRobustANGLEProc>(
+            GetGLProcAddress("glGetIntegervRobustANGLE"));
+  }
+
   debug_fn.glGetInternalformativFn = 0;
   if (ver->IsAtLeastGL(4u, 2u) || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glGetInternalformativFn = reinterpret_cast<glGetInternalformativProc>(
         GetGLProcAddress("glGetInternalformativ"));
+  }
+
+  debug_fn.glGetInternalformativRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetInternalformativRobustANGLEFn =
+        reinterpret_cast<glGetInternalformativRobustANGLEProc>(
+            GetGLProcAddress("glGetInternalformativRobustANGLE"));
+  }
+
+  debug_fn.glGetMultisamplefvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetMultisamplefvRobustANGLEFn =
+        reinterpret_cast<glGetMultisamplefvRobustANGLEProc>(
+            GetGLProcAddress("glGetMultisamplefvRobustANGLE"));
+  }
+
+  debug_fn.glGetnUniformfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetnUniformfvRobustANGLEFn =
+        reinterpret_cast<glGetnUniformfvRobustANGLEProc>(
+            GetGLProcAddress("glGetnUniformfvRobustANGLE"));
+  }
+
+  debug_fn.glGetnUniformivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetnUniformivRobustANGLEFn =
+        reinterpret_cast<glGetnUniformivRobustANGLEProc>(
+            GetGLProcAddress("glGetnUniformivRobustANGLE"));
+  }
+
+  debug_fn.glGetnUniformuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetnUniformuivRobustANGLEFn =
+        reinterpret_cast<glGetnUniformuivRobustANGLEProc>(
+            GetGLProcAddress("glGetnUniformuivRobustANGLE"));
+  }
+
+  debug_fn.glGetObjectLabelFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glGetObjectLabelFn = reinterpret_cast<glGetObjectLabelProc>(
+        GetGLProcAddress("glGetObjectLabel"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glGetObjectLabelFn = reinterpret_cast<glGetObjectLabelProc>(
+        GetGLProcAddress("glGetObjectLabelKHR"));
+  }
+
+  debug_fn.glGetObjectPtrLabelFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glGetObjectPtrLabelFn = reinterpret_cast<glGetObjectPtrLabelProc>(
+        GetGLProcAddress("glGetObjectPtrLabel"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glGetObjectPtrLabelFn = reinterpret_cast<glGetObjectPtrLabelProc>(
+        GetGLProcAddress("glGetObjectPtrLabelKHR"));
+  }
+
+  debug_fn.glGetPointervFn = 0;
+  if (!ver->is_es || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glGetPointervFn =
+        reinterpret_cast<glGetPointervProc>(GetGLProcAddress("glGetPointerv"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glGetPointervFn = reinterpret_cast<glGetPointervProc>(
+        GetGLProcAddress("glGetPointervKHR"));
+  }
+
+  debug_fn.glGetPointervRobustANGLERobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetPointervRobustANGLERobustANGLEFn =
+        reinterpret_cast<glGetPointervRobustANGLERobustANGLEProc>(
+            GetGLProcAddress("glGetPointervRobustANGLERobustANGLE"));
   }
 
   debug_fn.glGetProgramBinaryFn = 0;
@@ -1352,6 +1622,20 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
     fn.glGetProgramInterfaceivFn =
         reinterpret_cast<glGetProgramInterfaceivProc>(
             GetGLProcAddress("glGetProgramInterfaceiv"));
+  }
+
+  debug_fn.glGetProgramInterfaceivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetProgramInterfaceivRobustANGLEFn =
+        reinterpret_cast<glGetProgramInterfaceivRobustANGLEProc>(
+            GetGLProcAddress("glGetProgramInterfaceivRobustANGLE"));
+  }
+
+  debug_fn.glGetProgramivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetProgramivRobustANGLEFn =
+        reinterpret_cast<glGetProgramivRobustANGLEProc>(
+            GetGLProcAddress("glGetProgramivRobustANGLE"));
   }
 
   debug_fn.glGetProgramResourceivFn = 0;
@@ -1389,6 +1673,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         reinterpret_cast<glGetQueryivProc>(GetGLProcAddress("glGetQueryivEXT"));
   }
 
+  debug_fn.glGetQueryivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetQueryivRobustANGLEFn =
+        reinterpret_cast<glGetQueryivRobustANGLEProc>(
+            GetGLProcAddress("glGetQueryivRobustANGLE"));
+  }
+
   debug_fn.glGetQueryObjecti64vFn = 0;
   if (ver->IsAtLeastGL(3u, 3u) || ext.b_GL_ARB_timer_query) {
     fn.glGetQueryObjecti64vFn = reinterpret_cast<glGetQueryObjecti64vProc>(
@@ -1396,6 +1687,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
   } else if (ext.b_GL_EXT_timer_query || ext.b_GL_EXT_disjoint_timer_query) {
     fn.glGetQueryObjecti64vFn = reinterpret_cast<glGetQueryObjecti64vProc>(
         GetGLProcAddress("glGetQueryObjecti64vEXT"));
+  }
+
+  debug_fn.glGetQueryObjecti64vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetQueryObjecti64vRobustANGLEFn =
+        reinterpret_cast<glGetQueryObjecti64vRobustANGLEProc>(
+            GetGLProcAddress("glGetQueryObjecti64vRobustANGLE"));
   }
 
   debug_fn.glGetQueryObjectivFn = 0;
@@ -1410,6 +1708,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glGetQueryObjectivEXT"));
   }
 
+  debug_fn.glGetQueryObjectivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetQueryObjectivRobustANGLEFn =
+        reinterpret_cast<glGetQueryObjectivRobustANGLEProc>(
+            GetGLProcAddress("glGetQueryObjectivRobustANGLE"));
+  }
+
   debug_fn.glGetQueryObjectui64vFn = 0;
   if (ver->IsAtLeastGL(3u, 3u) || ext.b_GL_ARB_timer_query) {
     fn.glGetQueryObjectui64vFn = reinterpret_cast<glGetQueryObjectui64vProc>(
@@ -1417,6 +1722,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
   } else if (ext.b_GL_EXT_timer_query || ext.b_GL_EXT_disjoint_timer_query) {
     fn.glGetQueryObjectui64vFn = reinterpret_cast<glGetQueryObjectui64vProc>(
         GetGLProcAddress("glGetQueryObjectui64vEXT"));
+  }
+
+  debug_fn.glGetQueryObjectui64vRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetQueryObjectui64vRobustANGLEFn =
+        reinterpret_cast<glGetQueryObjectui64vRobustANGLEProc>(
+            GetGLProcAddress("glGetQueryObjectui64vRobustANGLE"));
   }
 
   debug_fn.glGetQueryObjectuivFn = 0;
@@ -1432,6 +1744,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glGetQueryObjectuivEXT"));
   }
 
+  debug_fn.glGetQueryObjectuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetQueryObjectuivRobustANGLEFn =
+        reinterpret_cast<glGetQueryObjectuivRobustANGLEProc>(
+            GetGLProcAddress("glGetQueryObjectuivRobustANGLE"));
+  }
+
   debug_fn.glGetRenderbufferParameterivEXTFn = 0;
   if (ver->IsAtLeastGL(3u, 0u) || ver->is_es) {
     fn.glGetRenderbufferParameterivEXTFn =
@@ -1443,6 +1762,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
             GetGLProcAddress("glGetRenderbufferParameterivEXT"));
   }
 
+  debug_fn.glGetRenderbufferParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetRenderbufferParameterivRobustANGLEFn =
+        reinterpret_cast<glGetRenderbufferParameterivRobustANGLEProc>(
+            GetGLProcAddress("glGetRenderbufferParameterivRobustANGLE"));
+  }
+
   debug_fn.glGetSamplerParameterfvFn = 0;
   if (ver->IsAtLeastGL(3u, 3u) || ver->IsAtLeastGLES(3u, 0u) ||
       ext.b_GL_ARB_sampler_objects) {
@@ -1451,12 +1777,47 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
             GetGLProcAddress("glGetSamplerParameterfv"));
   }
 
+  debug_fn.glGetSamplerParameterfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetSamplerParameterfvRobustANGLEFn =
+        reinterpret_cast<glGetSamplerParameterfvRobustANGLEProc>(
+            GetGLProcAddress("glGetSamplerParameterfvRobustANGLE"));
+  }
+
+  debug_fn.glGetSamplerParameterIivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetSamplerParameterIivRobustANGLEFn =
+        reinterpret_cast<glGetSamplerParameterIivRobustANGLEProc>(
+            GetGLProcAddress("glGetSamplerParameterIivRobustANGLE"));
+  }
+
+  debug_fn.glGetSamplerParameterIuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetSamplerParameterIuivRobustANGLEFn =
+        reinterpret_cast<glGetSamplerParameterIuivRobustANGLEProc>(
+            GetGLProcAddress("glGetSamplerParameterIuivRobustANGLE"));
+  }
+
   debug_fn.glGetSamplerParameterivFn = 0;
   if (ver->IsAtLeastGL(3u, 3u) || ver->IsAtLeastGLES(3u, 0u) ||
       ext.b_GL_ARB_sampler_objects) {
     fn.glGetSamplerParameterivFn =
         reinterpret_cast<glGetSamplerParameterivProc>(
             GetGLProcAddress("glGetSamplerParameteriv"));
+  }
+
+  debug_fn.glGetSamplerParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetSamplerParameterivRobustANGLEFn =
+        reinterpret_cast<glGetSamplerParameterivRobustANGLEProc>(
+            GetGLProcAddress("glGetSamplerParameterivRobustANGLE"));
+  }
+
+  debug_fn.glGetShaderivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetShaderivRobustANGLEFn =
+        reinterpret_cast<glGetShaderivRobustANGLEProc>(
+            GetGLProcAddress("glGetShaderivRobustANGLE"));
   }
 
   debug_fn.glGetShaderPrecisionFormatFn = 0;
@@ -1480,11 +1841,53 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
             GetGLProcAddress("glGetTexLevelParameterfv"));
   }
 
+  debug_fn.glGetTexLevelParameterfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetTexLevelParameterfvRobustANGLEFn =
+        reinterpret_cast<glGetTexLevelParameterfvRobustANGLEProc>(
+            GetGLProcAddress("glGetTexLevelParameterfvRobustANGLE"));
+  }
+
   debug_fn.glGetTexLevelParameterivFn = 0;
   if (!ver->is_es || ver->IsAtLeastGLES(3u, 1u)) {
     fn.glGetTexLevelParameterivFn =
         reinterpret_cast<glGetTexLevelParameterivProc>(
             GetGLProcAddress("glGetTexLevelParameteriv"));
+  }
+
+  debug_fn.glGetTexLevelParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetTexLevelParameterivRobustANGLEFn =
+        reinterpret_cast<glGetTexLevelParameterivRobustANGLEProc>(
+            GetGLProcAddress("glGetTexLevelParameterivRobustANGLE"));
+  }
+
+  debug_fn.glGetTexParameterfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetTexParameterfvRobustANGLEFn =
+        reinterpret_cast<glGetTexParameterfvRobustANGLEProc>(
+            GetGLProcAddress("glGetTexParameterfvRobustANGLE"));
+  }
+
+  debug_fn.glGetTexParameterIivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetTexParameterIivRobustANGLEFn =
+        reinterpret_cast<glGetTexParameterIivRobustANGLEProc>(
+            GetGLProcAddress("glGetTexParameterIivRobustANGLE"));
+  }
+
+  debug_fn.glGetTexParameterIuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetTexParameterIuivRobustANGLEFn =
+        reinterpret_cast<glGetTexParameterIuivRobustANGLEProc>(
+            GetGLProcAddress("glGetTexParameterIuivRobustANGLE"));
+  }
+
+  debug_fn.glGetTexParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetTexParameterivRobustANGLEFn =
+        reinterpret_cast<glGetTexParameterivRobustANGLEProc>(
+            GetGLProcAddress("glGetTexParameterivRobustANGLE"));
   }
 
   debug_fn.glGetTransformFeedbackVaryingFn = 0;
@@ -1511,16 +1914,72 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glGetUniformBlockIndex"));
   }
 
+  debug_fn.glGetUniformfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetUniformfvRobustANGLEFn =
+        reinterpret_cast<glGetUniformfvRobustANGLEProc>(
+            GetGLProcAddress("glGetUniformfvRobustANGLE"));
+  }
+
   debug_fn.glGetUniformIndicesFn = 0;
   if (ver->IsAtLeastGLES(3u, 0u) || ver->IsAtLeastGL(3u, 1u)) {
     fn.glGetUniformIndicesFn = reinterpret_cast<glGetUniformIndicesProc>(
         GetGLProcAddress("glGetUniformIndices"));
   }
 
+  debug_fn.glGetUniformivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetUniformivRobustANGLEFn =
+        reinterpret_cast<glGetUniformivRobustANGLEProc>(
+            GetGLProcAddress("glGetUniformivRobustANGLE"));
+  }
+
   debug_fn.glGetUniformuivFn = 0;
   if (ver->IsAtLeastGL(3u, 0u) || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glGetUniformuivFn = reinterpret_cast<glGetUniformuivProc>(
         GetGLProcAddress("glGetUniformuiv"));
+  }
+
+  debug_fn.glGetUniformuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetUniformuivRobustANGLEFn =
+        reinterpret_cast<glGetUniformuivRobustANGLEProc>(
+            GetGLProcAddress("glGetUniformuivRobustANGLE"));
+  }
+
+  debug_fn.glGetVertexAttribfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetVertexAttribfvRobustANGLEFn =
+        reinterpret_cast<glGetVertexAttribfvRobustANGLEProc>(
+            GetGLProcAddress("glGetVertexAttribfvRobustANGLE"));
+  }
+
+  debug_fn.glGetVertexAttribIivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetVertexAttribIivRobustANGLEFn =
+        reinterpret_cast<glGetVertexAttribIivRobustANGLEProc>(
+            GetGLProcAddress("glGetVertexAttribIivRobustANGLE"));
+  }
+
+  debug_fn.glGetVertexAttribIuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetVertexAttribIuivRobustANGLEFn =
+        reinterpret_cast<glGetVertexAttribIuivRobustANGLEProc>(
+            GetGLProcAddress("glGetVertexAttribIuivRobustANGLE"));
+  }
+
+  debug_fn.glGetVertexAttribivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetVertexAttribivRobustANGLEFn =
+        reinterpret_cast<glGetVertexAttribivRobustANGLEProc>(
+            GetGLProcAddress("glGetVertexAttribivRobustANGLE"));
+  }
+
+  debug_fn.glGetVertexAttribPointervRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glGetVertexAttribPointervRobustANGLEFn =
+        reinterpret_cast<glGetVertexAttribPointervRobustANGLEProc>(
+            GetGLProcAddress("glGetVertexAttribPointervRobustANGLE"));
   }
 
   debug_fn.glInsertEventMarkerEXTFn = 0;
@@ -1668,6 +2127,24 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glMemoryBarrierEXT"));
   }
 
+  debug_fn.glObjectLabelFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glObjectLabelFn =
+        reinterpret_cast<glObjectLabelProc>(GetGLProcAddress("glObjectLabel"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glObjectLabelFn = reinterpret_cast<glObjectLabelProc>(
+        GetGLProcAddress("glObjectLabelKHR"));
+  }
+
+  debug_fn.glObjectPtrLabelFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glObjectPtrLabelFn = reinterpret_cast<glObjectPtrLabelProc>(
+        GetGLProcAddress("glObjectPtrLabel"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glObjectPtrLabelFn = reinterpret_cast<glObjectPtrLabelProc>(
+        GetGLProcAddress("glObjectPtrLabelKHR"));
+  }
+
   debug_fn.glPathCommandsNVFn = 0;
   if (ext.b_GL_NV_path_rendering) {
     fn.glPathCommandsNVFn = reinterpret_cast<glPathCommandsNVProc>(
@@ -1704,6 +2181,15 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
   if (!ver->is_es) {
     fn.glPointParameteriFn = reinterpret_cast<glPointParameteriProc>(
         GetGLProcAddress("glPointParameteri"));
+  }
+
+  debug_fn.glPopDebugGroupFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glPopDebugGroupFn = reinterpret_cast<glPopDebugGroupProc>(
+        GetGLProcAddress("glPopDebugGroup"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glPopDebugGroupFn = reinterpret_cast<glPopDebugGroupProc>(
+        GetGLProcAddress("glPopDebugGroupKHR"));
   }
 
   debug_fn.glPopGroupMarkerEXTFn = 0;
@@ -1743,6 +2229,15 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
             GetGLProcAddress("glProgramPathFragmentInputGenNV"));
   }
 
+  debug_fn.glPushDebugGroupFn = 0;
+  if (ver->IsAtLeastGL(4u, 3u) || ver->IsAtLeastGLES(3u, 2u)) {
+    fn.glPushDebugGroupFn = reinterpret_cast<glPushDebugGroupProc>(
+        GetGLProcAddress("glPushDebugGroup"));
+  } else if (ext.b_GL_KHR_debug) {
+    fn.glPushDebugGroupFn = reinterpret_cast<glPushDebugGroupProc>(
+        GetGLProcAddress("glPushDebugGroupKHR"));
+  }
+
   debug_fn.glPushGroupMarkerEXTFn = 0;
   if (ext.b_GL_EXT_debug_marker) {
     fn.glPushGroupMarkerEXTFn = reinterpret_cast<glPushGroupMarkerEXTProc>(
@@ -1762,6 +2257,20 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
   if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glReadBufferFn =
         reinterpret_cast<glReadBufferProc>(GetGLProcAddress("glReadBuffer"));
+  }
+
+  debug_fn.glReadnPixelsRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glReadnPixelsRobustANGLEFn =
+        reinterpret_cast<glReadnPixelsRobustANGLEProc>(
+            GetGLProcAddress("glReadnPixelsRobustANGLE"));
+  }
+
+  debug_fn.glReadPixelsRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glReadPixelsRobustANGLEFn =
+        reinterpret_cast<glReadPixelsRobustANGLEProc>(
+            GetGLProcAddress("glReadPixelsRobustANGLE"));
   }
 
   debug_fn.glReleaseShaderCompilerFn = 0;
@@ -1833,6 +2342,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glSamplerParameterfv"));
   }
 
+  debug_fn.glSamplerParameterfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glSamplerParameterfvRobustANGLEFn =
+        reinterpret_cast<glSamplerParameterfvRobustANGLEProc>(
+            GetGLProcAddress("glSamplerParameterfvRobustANGLE"));
+  }
+
   debug_fn.glSamplerParameteriFn = 0;
   if (ver->IsAtLeastGL(3u, 3u) || ver->IsAtLeastGLES(3u, 0u) ||
       ext.b_GL_ARB_sampler_objects) {
@@ -1840,11 +2356,32 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glSamplerParameteri"));
   }
 
+  debug_fn.glSamplerParameterIivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glSamplerParameterIivRobustANGLEFn =
+        reinterpret_cast<glSamplerParameterIivRobustANGLEProc>(
+            GetGLProcAddress("glSamplerParameterIivRobustANGLE"));
+  }
+
+  debug_fn.glSamplerParameterIuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glSamplerParameterIuivRobustANGLEFn =
+        reinterpret_cast<glSamplerParameterIuivRobustANGLEProc>(
+            GetGLProcAddress("glSamplerParameterIuivRobustANGLE"));
+  }
+
   debug_fn.glSamplerParameterivFn = 0;
   if (ver->IsAtLeastGL(3u, 3u) || ver->IsAtLeastGLES(3u, 0u) ||
       ext.b_GL_ARB_sampler_objects) {
     fn.glSamplerParameterivFn = reinterpret_cast<glSamplerParameterivProc>(
         GetGLProcAddress("glSamplerParameteriv"));
+  }
+
+  debug_fn.glSamplerParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glSamplerParameterivRobustANGLEFn =
+        reinterpret_cast<glSamplerParameterivRobustANGLEProc>(
+            GetGLProcAddress("glSamplerParameterivRobustANGLE"));
   }
 
   debug_fn.glSetFenceAPPLEFn = 0;
@@ -1931,10 +2468,52 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         reinterpret_cast<glTestFenceNVProc>(GetGLProcAddress("glTestFenceNV"));
   }
 
+  debug_fn.glTexImage2DRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexImage2DRobustANGLEFn =
+        reinterpret_cast<glTexImage2DRobustANGLEProc>(
+            GetGLProcAddress("glTexImage2DRobustANGLE"));
+  }
+
   debug_fn.glTexImage3DFn = 0;
   if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glTexImage3DFn =
         reinterpret_cast<glTexImage3DProc>(GetGLProcAddress("glTexImage3D"));
+  }
+
+  debug_fn.glTexImage3DRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexImage3DRobustANGLEFn =
+        reinterpret_cast<glTexImage3DRobustANGLEProc>(
+            GetGLProcAddress("glTexImage3DRobustANGLE"));
+  }
+
+  debug_fn.glTexParameterfvRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexParameterfvRobustANGLEFn =
+        reinterpret_cast<glTexParameterfvRobustANGLEProc>(
+            GetGLProcAddress("glTexParameterfvRobustANGLE"));
+  }
+
+  debug_fn.glTexParameterIivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexParameterIivRobustANGLEFn =
+        reinterpret_cast<glTexParameterIivRobustANGLEProc>(
+            GetGLProcAddress("glTexParameterIivRobustANGLE"));
+  }
+
+  debug_fn.glTexParameterIuivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexParameterIuivRobustANGLEFn =
+        reinterpret_cast<glTexParameterIuivRobustANGLEProc>(
+            GetGLProcAddress("glTexParameterIuivRobustANGLE"));
+  }
+
+  debug_fn.glTexParameterivRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexParameterivRobustANGLEFn =
+        reinterpret_cast<glTexParameterivRobustANGLEProc>(
+            GetGLProcAddress("glTexParameterivRobustANGLE"));
   }
 
   debug_fn.glTexStorage2DEXTFn = 0;
@@ -1954,10 +2533,24 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
         GetGLProcAddress("glTexStorage3D"));
   }
 
+  debug_fn.glTexSubImage2DRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexSubImage2DRobustANGLEFn =
+        reinterpret_cast<glTexSubImage2DRobustANGLEProc>(
+            GetGLProcAddress("glTexSubImage2DRobustANGLE"));
+  }
+
   debug_fn.glTexSubImage3DFn = 0;
   if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
     fn.glTexSubImage3DFn = reinterpret_cast<glTexSubImage3DProc>(
         GetGLProcAddress("glTexSubImage3D"));
+  }
+
+  debug_fn.glTexSubImage3DRobustANGLEFn = 0;
+  if (ext.b_GL_ANGLE_robust_client_memory) {
+    fn.glTexSubImage3DRobustANGLEFn =
+        reinterpret_cast<glTexSubImage3DRobustANGLEProc>(
+            GetGLProcAddress("glTexSubImage3DRobustANGLE"));
   }
 
   debug_fn.glTransformFeedbackVaryingsFn = 0;
@@ -2861,6 +3454,48 @@ static void GL_BINDING_CALL Debug_glCullFace(GLenum mode) {
   g_driver_gl.debug_fn.glCullFaceFn(mode);
 }
 
+static void GL_BINDING_CALL
+Debug_glDebugMessageCallback(GLDEBUGPROC callback, const void* userParam) {
+  GL_SERVICE_LOG("glDebugMessageCallback"
+                 << "(" << callback << ", "
+                 << static_cast<const void*>(userParam) << ")");
+  DCHECK(g_driver_gl.debug_fn.glDebugMessageCallbackFn != nullptr);
+  g_driver_gl.debug_fn.glDebugMessageCallbackFn(callback, userParam);
+}
+
+static void GL_BINDING_CALL Debug_glDebugMessageControl(GLenum source,
+                                                        GLenum type,
+                                                        GLenum severity,
+                                                        GLsizei count,
+                                                        const GLuint* ids,
+                                                        GLboolean enabled) {
+  GL_SERVICE_LOG("glDebugMessageControl"
+                 << "(" << GLEnums::GetStringEnum(source) << ", "
+                 << GLEnums::GetStringEnum(type) << ", "
+                 << GLEnums::GetStringEnum(severity) << ", " << count << ", "
+                 << static_cast<const void*>(ids) << ", "
+                 << GLEnums::GetStringBool(enabled) << ")");
+  DCHECK(g_driver_gl.debug_fn.glDebugMessageControlFn != nullptr);
+  g_driver_gl.debug_fn.glDebugMessageControlFn(source, type, severity, count,
+                                               ids, enabled);
+}
+
+static void GL_BINDING_CALL Debug_glDebugMessageInsert(GLenum source,
+                                                       GLenum type,
+                                                       GLuint id,
+                                                       GLenum severity,
+                                                       GLsizei length,
+                                                       const char* buf) {
+  GL_SERVICE_LOG("glDebugMessageInsert"
+                 << "(" << GLEnums::GetStringEnum(source) << ", "
+                 << GLEnums::GetStringEnum(type) << ", " << id << ", "
+                 << GLEnums::GetStringEnum(severity) << ", " << length << ", "
+                 << buf << ")");
+  DCHECK(g_driver_gl.debug_fn.glDebugMessageInsertFn != nullptr);
+  g_driver_gl.debug_fn.glDebugMessageInsertFn(source, type, id, severity,
+                                              length, buf);
+}
+
 static void GL_BINDING_CALL Debug_glDeleteBuffersARB(GLsizei n,
                                                      const GLuint* buffers) {
   GL_SERVICE_LOG("glDeleteBuffersARB"
@@ -3457,6 +4092,24 @@ Debug_glGetActiveUniformBlockiv(GLuint program,
 }
 
 static void GL_BINDING_CALL
+Debug_glGetActiveUniformBlockivRobustANGLE(GLuint program,
+                                           GLuint uniformBlockIndex,
+                                           GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           GLint* params) {
+  GL_SERVICE_LOG("glGetActiveUniformBlockivRobustANGLE"
+                 << "(" << program << ", " << uniformBlockIndex << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetActiveUniformBlockivRobustANGLEFn !=
+         nullptr);
+  g_driver_gl.debug_fn.glGetActiveUniformBlockivRobustANGLEFn(
+      program, uniformBlockIndex, pname, bufSize, length, params);
+}
+
+static void GL_BINDING_CALL
 Debug_glGetActiveUniformBlockName(GLuint program,
                                   GLuint uniformBlockIndex,
                                   GLsizei bufSize,
@@ -3510,6 +4163,20 @@ static GLint GL_BINDING_CALL Debug_glGetAttribLocation(GLuint program,
   return result;
 }
 
+static void GL_BINDING_CALL Debug_glGetBooleani_vRobustANGLE(GLenum target,
+                                                             GLuint index,
+                                                             GLsizei bufSize,
+                                                             GLsizei* length,
+                                                             GLboolean* data) {
+  GL_SERVICE_LOG("glGetBooleani_vRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << index
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetBooleani_vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetBooleani_vRobustANGLEFn(target, index, bufSize,
+                                                    length, data);
+}
+
 static void GL_BINDING_CALL Debug_glGetBooleanv(GLenum pname,
                                                 GLboolean* params) {
   GL_SERVICE_LOG("glGetBooleanv"
@@ -3517,6 +4184,34 @@ static void GL_BINDING_CALL Debug_glGetBooleanv(GLenum pname,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetBooleanvFn != nullptr);
   g_driver_gl.debug_fn.glGetBooleanvFn(pname, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetBooleanvRobustANGLE(GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLboolean* data) {
+  GL_SERVICE_LOG("glGetBooleanvRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetBooleanvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetBooleanvRobustANGLEFn(pname, bufSize, length, data);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetBufferParameteri64vRobustANGLE(GLenum target,
+                                          GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          GLint64* params) {
+  GL_SERVICE_LOG("glGetBufferParameteri64vRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetBufferParameteri64vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetBufferParameteri64vRobustANGLEFn(
+      target, pname, bufSize, length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetBufferParameteriv(GLenum target,
@@ -3528,6 +4223,58 @@ static void GL_BINDING_CALL Debug_glGetBufferParameteriv(GLenum target,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetBufferParameterivFn != nullptr);
   g_driver_gl.debug_fn.glGetBufferParameterivFn(target, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetBufferParameterivRobustANGLE(GLenum target,
+                                        GLenum pname,
+                                        GLsizei bufSize,
+                                        GLsizei* length,
+                                        GLint* params) {
+  GL_SERVICE_LOG("glGetBufferParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetBufferParameterivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetBufferParameterivRobustANGLEFn(
+      target, pname, bufSize, length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetBufferPointervRobustANGLE(GLenum target,
+                                     GLenum pname,
+                                     GLsizei bufSize,
+                                     GLsizei* length,
+                                     void** params) {
+  GL_SERVICE_LOG("glGetBufferPointervRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", " << params << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetBufferPointervRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetBufferPointervRobustANGLEFn(target, pname, bufSize,
+                                                        length, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetDebugMessageLog(GLuint count,
+                                                       GLsizei bufSize,
+                                                       GLenum* sources,
+                                                       GLenum* types,
+                                                       GLuint* ids,
+                                                       GLenum* severities,
+                                                       GLsizei* lengths,
+                                                       char* messageLog) {
+  GL_SERVICE_LOG("glGetDebugMessageLog"
+                 << "(" << count << ", " << bufSize << ", "
+                 << static_cast<const void*>(sources) << ", "
+                 << static_cast<const void*>(types) << ", "
+                 << static_cast<const void*>(ids) << ", "
+                 << static_cast<const void*>(severities) << ", "
+                 << static_cast<const void*>(lengths) << ", "
+                 << static_cast<const void*>(messageLog) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetDebugMessageLogFn != nullptr);
+  g_driver_gl.debug_fn.glGetDebugMessageLogFn(
+      count, bufSize, sources, types, ids, severities, lengths, messageLog);
 }
 
 static GLenum GL_BINDING_CALL Debug_glGetError(void) {
@@ -3558,6 +4305,18 @@ static void GL_BINDING_CALL Debug_glGetFloatv(GLenum pname, GLfloat* params) {
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetFloatvFn != nullptr);
   g_driver_gl.debug_fn.glGetFloatvFn(pname, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetFloatvRobustANGLE(GLenum pname,
+                                                         GLsizei bufSize,
+                                                         GLsizei* length,
+                                                         GLfloat* data) {
+  GL_SERVICE_LOG("glGetFloatvRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetFloatvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetFloatvRobustANGLEFn(pname, bufSize, length, data);
 }
 
 static GLint GL_BINDING_CALL Debug_glGetFragDataIndex(GLuint program,
@@ -3596,6 +4355,43 @@ Debug_glGetFramebufferAttachmentParameterivEXT(GLenum target,
       target, attachment, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetFramebufferAttachmentParameterivRobustANGLE(GLenum target,
+                                                       GLenum attachment,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint* params) {
+  GL_SERVICE_LOG("glGetFramebufferAttachmentParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(attachment) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(
+      g_driver_gl.debug_fn.glGetFramebufferAttachmentParameterivRobustANGLEFn !=
+      nullptr);
+  g_driver_gl.debug_fn.glGetFramebufferAttachmentParameterivRobustANGLEFn(
+      target, attachment, pname, bufSize, length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetFramebufferParameterivRobustANGLE(GLenum target,
+                                             GLenum pname,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLint* params) {
+  GL_SERVICE_LOG("glGetFramebufferParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetFramebufferParameterivRobustANGLEFn !=
+         nullptr);
+  g_driver_gl.debug_fn.glGetFramebufferParameterivRobustANGLEFn(
+      target, pname, bufSize, length, params);
+}
+
 static GLenum GL_BINDING_CALL Debug_glGetGraphicsResetStatusARB(void) {
   GL_SERVICE_LOG("glGetGraphicsResetStatusARB"
                  << "("
@@ -3616,6 +4412,20 @@ static void GL_BINDING_CALL Debug_glGetInteger64i_v(GLenum target,
   g_driver_gl.debug_fn.glGetInteger64i_vFn(target, index, data);
 }
 
+static void GL_BINDING_CALL Debug_glGetInteger64i_vRobustANGLE(GLenum target,
+                                                               GLuint index,
+                                                               GLsizei bufSize,
+                                                               GLsizei* length,
+                                                               GLint64* data) {
+  GL_SERVICE_LOG("glGetInteger64i_vRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << index
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetInteger64i_vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetInteger64i_vRobustANGLEFn(target, index, bufSize,
+                                                      length, data);
+}
+
 static void GL_BINDING_CALL Debug_glGetInteger64v(GLenum pname,
                                                   GLint64* params) {
   GL_SERVICE_LOG("glGetInteger64v"
@@ -3623,6 +4433,19 @@ static void GL_BINDING_CALL Debug_glGetInteger64v(GLenum pname,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetInteger64vFn != nullptr);
   g_driver_gl.debug_fn.glGetInteger64vFn(pname, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetInteger64vRobustANGLE(GLenum pname,
+                                                             GLsizei bufSize,
+                                                             GLsizei* length,
+                                                             GLint64* data) {
+  GL_SERVICE_LOG("glGetInteger64vRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetInteger64vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetInteger64vRobustANGLEFn(pname, bufSize, length,
+                                                    data);
 }
 
 static void GL_BINDING_CALL Debug_glGetIntegeri_v(GLenum target,
@@ -3635,12 +4458,38 @@ static void GL_BINDING_CALL Debug_glGetIntegeri_v(GLenum target,
   g_driver_gl.debug_fn.glGetIntegeri_vFn(target, index, data);
 }
 
+static void GL_BINDING_CALL Debug_glGetIntegeri_vRobustANGLE(GLenum target,
+                                                             GLuint index,
+                                                             GLsizei bufSize,
+                                                             GLsizei* length,
+                                                             GLint* data) {
+  GL_SERVICE_LOG("glGetIntegeri_vRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << index
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetIntegeri_vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetIntegeri_vRobustANGLEFn(target, index, bufSize,
+                                                    length, data);
+}
+
 static void GL_BINDING_CALL Debug_glGetIntegerv(GLenum pname, GLint* params) {
   GL_SERVICE_LOG("glGetIntegerv"
                  << "(" << GLEnums::GetStringEnum(pname) << ", "
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetIntegervFn != nullptr);
   g_driver_gl.debug_fn.glGetIntegervFn(pname, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetIntegervRobustANGLE(GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLint* data) {
+  GL_SERVICE_LOG("glGetIntegervRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetIntegervRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetIntegervRobustANGLEFn(pname, bufSize, length, data);
 }
 
 static void GL_BINDING_CALL Debug_glGetInternalformativ(GLenum target,
@@ -3656,6 +4505,128 @@ static void GL_BINDING_CALL Debug_glGetInternalformativ(GLenum target,
   DCHECK(g_driver_gl.debug_fn.glGetInternalformativFn != nullptr);
   g_driver_gl.debug_fn.glGetInternalformativFn(target, internalformat, pname,
                                                bufSize, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetInternalformativRobustANGLE(GLenum target,
+                                       GLenum internalformat,
+                                       GLenum pname,
+                                       GLsizei bufSize,
+                                       GLsizei* length,
+                                       GLint* params) {
+  GL_SERVICE_LOG("glGetInternalformativRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(internalformat) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetInternalformativRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetInternalformativRobustANGLEFn(
+      target, internalformat, pname, bufSize, length, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetMultisamplefvRobustANGLE(GLenum pname,
+                                                                GLuint index,
+                                                                GLsizei bufSize,
+                                                                GLsizei* length,
+                                                                GLfloat* val) {
+  GL_SERVICE_LOG("glGetMultisamplefvRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << index
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(val) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetMultisamplefvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetMultisamplefvRobustANGLEFn(pname, index, bufSize,
+                                                       length, val);
+}
+
+static void GL_BINDING_CALL Debug_glGetnUniformfvRobustANGLE(GLuint program,
+                                                             GLint location,
+                                                             GLsizei bufSize,
+                                                             GLsizei* length,
+                                                             GLfloat* params) {
+  GL_SERVICE_LOG("glGetnUniformfvRobustANGLE"
+                 << "(" << program << ", " << location << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetnUniformfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetnUniformfvRobustANGLEFn(program, location, bufSize,
+                                                    length, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetnUniformivRobustANGLE(GLuint program,
+                                                             GLint location,
+                                                             GLsizei bufSize,
+                                                             GLsizei* length,
+                                                             GLint* params) {
+  GL_SERVICE_LOG("glGetnUniformivRobustANGLE"
+                 << "(" << program << ", " << location << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetnUniformivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetnUniformivRobustANGLEFn(program, location, bufSize,
+                                                    length, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetnUniformuivRobustANGLE(GLuint program,
+                                                              GLint location,
+                                                              GLsizei bufSize,
+                                                              GLsizei* length,
+                                                              GLuint* params) {
+  GL_SERVICE_LOG("glGetnUniformuivRobustANGLE"
+                 << "(" << program << ", " << location << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetnUniformuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetnUniformuivRobustANGLEFn(program, location, bufSize,
+                                                     length, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetObjectLabel(GLenum identifier,
+                                                   GLuint name,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   char* label) {
+  GL_SERVICE_LOG("glGetObjectLabel"
+                 << "(" << GLEnums::GetStringEnum(identifier) << ", " << name
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(label) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetObjectLabelFn != nullptr);
+  g_driver_gl.debug_fn.glGetObjectLabelFn(identifier, name, bufSize, length,
+                                          label);
+}
+
+static void GL_BINDING_CALL Debug_glGetObjectPtrLabel(void* ptr,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      char* label) {
+  GL_SERVICE_LOG("glGetObjectPtrLabel"
+                 << "(" << static_cast<const void*>(ptr) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(label) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetObjectPtrLabelFn != nullptr);
+  g_driver_gl.debug_fn.glGetObjectPtrLabelFn(ptr, bufSize, length, label);
+}
+
+static void GL_BINDING_CALL Debug_glGetPointerv(GLenum pname, void** params) {
+  GL_SERVICE_LOG("glGetPointerv"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << params
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetPointervFn != nullptr);
+  g_driver_gl.debug_fn.glGetPointervFn(pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetPointervRobustANGLERobustANGLE(GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          void** params) {
+  GL_SERVICE_LOG("glGetPointervRobustANGLERobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", " << params
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetPointervRobustANGLERobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetPointervRobustANGLERobustANGLEFn(pname, bufSize,
+                                                             length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetProgramBinary(GLuint program,
@@ -3700,6 +4671,24 @@ Debug_glGetProgramInterfaceiv(GLuint program,
                                                  pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetProgramInterfaceivRobustANGLE(GLuint program,
+                                         GLenum programInterface,
+                                         GLenum pname,
+                                         GLsizei bufSize,
+                                         GLsizei* length,
+                                         GLint* params) {
+  GL_SERVICE_LOG("glGetProgramInterfaceivRobustANGLE"
+                 << "(" << program << ", "
+                 << GLEnums::GetStringEnum(programInterface) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetProgramInterfaceivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetProgramInterfaceivRobustANGLEFn(
+      program, programInterface, pname, bufSize, length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetProgramiv(GLuint program,
                                                  GLenum pname,
                                                  GLint* params) {
@@ -3708,6 +4697,20 @@ static void GL_BINDING_CALL Debug_glGetProgramiv(GLuint program,
                  << ", " << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetProgramivFn != nullptr);
   g_driver_gl.debug_fn.glGetProgramivFn(program, pname, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetProgramivRobustANGLE(GLuint program,
+                                                            GLenum pname,
+                                                            GLsizei bufSize,
+                                                            GLsizei* length,
+                                                            GLint* params) {
+  GL_SERVICE_LOG("glGetProgramivRobustANGLE"
+                 << "(" << program << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetProgramivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetProgramivRobustANGLEFn(program, pname, bufSize,
+                                                   length, params);
 }
 
 static void GL_BINDING_CALL
@@ -3774,6 +4777,21 @@ static void GL_BINDING_CALL Debug_glGetQueryiv(GLenum target,
   g_driver_gl.debug_fn.glGetQueryivFn(target, pname, params);
 }
 
+static void GL_BINDING_CALL Debug_glGetQueryivRobustANGLE(GLenum target,
+                                                          GLenum pname,
+                                                          GLsizei bufSize,
+                                                          GLsizei* length,
+                                                          GLint* params) {
+  GL_SERVICE_LOG("glGetQueryivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetQueryivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetQueryivRobustANGLEFn(target, pname, bufSize, length,
+                                                 params);
+}
+
 static void GL_BINDING_CALL Debug_glGetQueryObjecti64v(GLuint id,
                                                        GLenum pname,
                                                        GLint64* params) {
@@ -3782,6 +4800,21 @@ static void GL_BINDING_CALL Debug_glGetQueryObjecti64v(GLuint id,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetQueryObjecti64vFn != nullptr);
   g_driver_gl.debug_fn.glGetQueryObjecti64vFn(id, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetQueryObjecti64vRobustANGLE(GLuint id,
+                                      GLenum pname,
+                                      GLsizei bufSize,
+                                      GLsizei* length,
+                                      GLint64* params) {
+  GL_SERVICE_LOG("glGetQueryObjecti64vRobustANGLE"
+                 << "(" << id << ", " << GLEnums::GetStringEnum(pname) << ", "
+                 << bufSize << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetQueryObjecti64vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetQueryObjecti64vRobustANGLEFn(id, pname, bufSize,
+                                                         length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetQueryObjectiv(GLuint id,
@@ -3794,6 +4827,20 @@ static void GL_BINDING_CALL Debug_glGetQueryObjectiv(GLuint id,
   g_driver_gl.debug_fn.glGetQueryObjectivFn(id, pname, params);
 }
 
+static void GL_BINDING_CALL Debug_glGetQueryObjectivRobustANGLE(GLuint id,
+                                                                GLenum pname,
+                                                                GLsizei bufSize,
+                                                                GLsizei* length,
+                                                                GLint* params) {
+  GL_SERVICE_LOG("glGetQueryObjectivRobustANGLE"
+                 << "(" << id << ", " << GLEnums::GetStringEnum(pname) << ", "
+                 << bufSize << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetQueryObjectivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetQueryObjectivRobustANGLEFn(id, pname, bufSize,
+                                                       length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetQueryObjectui64v(GLuint id,
                                                         GLenum pname,
                                                         GLuint64* params) {
@@ -3804,6 +4851,21 @@ static void GL_BINDING_CALL Debug_glGetQueryObjectui64v(GLuint id,
   g_driver_gl.debug_fn.glGetQueryObjectui64vFn(id, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetQueryObjectui64vRobustANGLE(GLuint id,
+                                       GLenum pname,
+                                       GLsizei bufSize,
+                                       GLsizei* length,
+                                       GLuint64* params) {
+  GL_SERVICE_LOG("glGetQueryObjectui64vRobustANGLE"
+                 << "(" << id << ", " << GLEnums::GetStringEnum(pname) << ", "
+                 << bufSize << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetQueryObjectui64vRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetQueryObjectui64vRobustANGLEFn(id, pname, bufSize,
+                                                          length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetQueryObjectuiv(GLuint id,
                                                       GLenum pname,
                                                       GLuint* params) {
@@ -3812,6 +4874,21 @@ static void GL_BINDING_CALL Debug_glGetQueryObjectuiv(GLuint id,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetQueryObjectuivFn != nullptr);
   g_driver_gl.debug_fn.glGetQueryObjectuivFn(id, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetQueryObjectuivRobustANGLE(GLuint id,
+                                     GLenum pname,
+                                     GLsizei bufSize,
+                                     GLsizei* length,
+                                     GLuint* params) {
+  GL_SERVICE_LOG("glGetQueryObjectuivRobustANGLE"
+                 << "(" << id << ", " << GLEnums::GetStringEnum(pname) << ", "
+                 << bufSize << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetQueryObjectuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetQueryObjectuivRobustANGLEFn(id, pname, bufSize,
+                                                        length, params);
 }
 
 static void GL_BINDING_CALL
@@ -3826,6 +4903,23 @@ Debug_glGetRenderbufferParameterivEXT(GLenum target,
   g_driver_gl.debug_fn.glGetRenderbufferParameterivEXTFn(target, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetRenderbufferParameterivRobustANGLE(GLenum target,
+                                              GLenum pname,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLint* params) {
+  GL_SERVICE_LOG("glGetRenderbufferParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetRenderbufferParameterivRobustANGLEFn !=
+         nullptr);
+  g_driver_gl.debug_fn.glGetRenderbufferParameterivRobustANGLEFn(
+      target, pname, bufSize, length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetSamplerParameterfv(GLuint sampler,
                                                           GLenum pname,
                                                           GLfloat* params) {
@@ -3836,6 +4930,52 @@ static void GL_BINDING_CALL Debug_glGetSamplerParameterfv(GLuint sampler,
   g_driver_gl.debug_fn.glGetSamplerParameterfvFn(sampler, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetSamplerParameterfvRobustANGLE(GLuint sampler,
+                                         GLenum pname,
+                                         GLsizei bufSize,
+                                         GLsizei* length,
+                                         GLfloat* params) {
+  GL_SERVICE_LOG("glGetSamplerParameterfvRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetSamplerParameterfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetSamplerParameterfvRobustANGLEFn(
+      sampler, pname, bufSize, length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetSamplerParameterIivRobustANGLE(GLuint sampler,
+                                          GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          GLint* params) {
+  GL_SERVICE_LOG("glGetSamplerParameterIivRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetSamplerParameterIivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetSamplerParameterIivRobustANGLEFn(
+      sampler, pname, bufSize, length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetSamplerParameterIuivRobustANGLE(GLuint sampler,
+                                           GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           GLuint* params) {
+  GL_SERVICE_LOG("glGetSamplerParameterIuivRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetSamplerParameterIuivRobustANGLEFn !=
+         nullptr);
+  g_driver_gl.debug_fn.glGetSamplerParameterIuivRobustANGLEFn(
+      sampler, pname, bufSize, length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetSamplerParameteriv(GLuint sampler,
                                                           GLenum pname,
                                                           GLint* params) {
@@ -3844,6 +4984,21 @@ static void GL_BINDING_CALL Debug_glGetSamplerParameteriv(GLuint sampler,
                  << ", " << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetSamplerParameterivFn != nullptr);
   g_driver_gl.debug_fn.glGetSamplerParameterivFn(sampler, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetSamplerParameterivRobustANGLE(GLuint sampler,
+                                         GLenum pname,
+                                         GLsizei bufSize,
+                                         GLsizei* length,
+                                         GLint* params) {
+  GL_SERVICE_LOG("glGetSamplerParameterivRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetSamplerParameterivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetSamplerParameterivRobustANGLEFn(
+      sampler, pname, bufSize, length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetShaderInfoLog(GLuint shader,
@@ -3866,6 +5021,20 @@ static void GL_BINDING_CALL Debug_glGetShaderiv(GLuint shader,
                  << ", " << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetShaderivFn != nullptr);
   g_driver_gl.debug_fn.glGetShaderivFn(shader, pname, params);
+}
+
+static void GL_BINDING_CALL Debug_glGetShaderivRobustANGLE(GLuint shader,
+                                                           GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLint* params) {
+  GL_SERVICE_LOG("glGetShaderivRobustANGLE"
+                 << "(" << shader << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetShaderivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetShaderivRobustANGLEFn(shader, pname, bufSize,
+                                                  length, params);
 }
 
 static void GL_BINDING_CALL
@@ -3940,6 +5109,23 @@ static void GL_BINDING_CALL Debug_glGetTexLevelParameterfv(GLenum target,
   g_driver_gl.debug_fn.glGetTexLevelParameterfvFn(target, level, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetTexLevelParameterfvRobustANGLE(GLenum target,
+                                          GLint level,
+                                          GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          GLfloat* params) {
+  GL_SERVICE_LOG("glGetTexLevelParameterfvRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetTexLevelParameterfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetTexLevelParameterfvRobustANGLEFn(
+      target, level, pname, bufSize, length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetTexLevelParameteriv(GLenum target,
                                                            GLint level,
                                                            GLenum pname,
@@ -3950,6 +5136,23 @@ static void GL_BINDING_CALL Debug_glGetTexLevelParameteriv(GLenum target,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetTexLevelParameterivFn != nullptr);
   g_driver_gl.debug_fn.glGetTexLevelParameterivFn(target, level, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetTexLevelParameterivRobustANGLE(GLenum target,
+                                          GLint level,
+                                          GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          GLint* params) {
+  GL_SERVICE_LOG("glGetTexLevelParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << GLEnums::GetStringEnum(pname) << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetTexLevelParameterivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetTexLevelParameterivRobustANGLEFn(
+      target, level, pname, bufSize, length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetTexParameterfv(GLenum target,
@@ -3963,6 +5166,54 @@ static void GL_BINDING_CALL Debug_glGetTexParameterfv(GLenum target,
   g_driver_gl.debug_fn.glGetTexParameterfvFn(target, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetTexParameterfvRobustANGLE(GLenum target,
+                                     GLenum pname,
+                                     GLsizei bufSize,
+                                     GLsizei* length,
+                                     GLfloat* params) {
+  GL_SERVICE_LOG("glGetTexParameterfvRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetTexParameterfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetTexParameterfvRobustANGLEFn(target, pname, bufSize,
+                                                        length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetTexParameterIivRobustANGLE(GLenum target,
+                                      GLenum pname,
+                                      GLsizei bufSize,
+                                      GLsizei* length,
+                                      GLint* params) {
+  GL_SERVICE_LOG("glGetTexParameterIivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetTexParameterIivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetTexParameterIivRobustANGLEFn(target, pname, bufSize,
+                                                         length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetTexParameterIuivRobustANGLE(GLenum target,
+                                       GLenum pname,
+                                       GLsizei bufSize,
+                                       GLsizei* length,
+                                       GLuint* params) {
+  GL_SERVICE_LOG("glGetTexParameterIuivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetTexParameterIuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetTexParameterIuivRobustANGLEFn(
+      target, pname, bufSize, length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetTexParameteriv(GLenum target,
                                                       GLenum pname,
                                                       GLint* params) {
@@ -3972,6 +5223,22 @@ static void GL_BINDING_CALL Debug_glGetTexParameteriv(GLenum target,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetTexParameterivFn != nullptr);
   g_driver_gl.debug_fn.glGetTexParameterivFn(target, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetTexParameterivRobustANGLE(GLenum target,
+                                     GLenum pname,
+                                     GLsizei bufSize,
+                                     GLsizei* length,
+                                     GLint* params) {
+  GL_SERVICE_LOG("glGetTexParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetTexParameterivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetTexParameterivRobustANGLEFn(target, pname, bufSize,
+                                                        length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetTransformFeedbackVarying(GLuint program,
@@ -4027,6 +5294,20 @@ static void GL_BINDING_CALL Debug_glGetUniformfv(GLuint program,
   g_driver_gl.debug_fn.glGetUniformfvFn(program, location, params);
 }
 
+static void GL_BINDING_CALL Debug_glGetUniformfvRobustANGLE(GLuint program,
+                                                            GLint location,
+                                                            GLsizei bufSize,
+                                                            GLsizei* length,
+                                                            GLfloat* params) {
+  GL_SERVICE_LOG("glGetUniformfvRobustANGLE"
+                 << "(" << program << ", " << location << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetUniformfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetUniformfvRobustANGLEFn(program, location, bufSize,
+                                                   length, params);
+}
+
 static void GL_BINDING_CALL
 Debug_glGetUniformIndices(GLuint program,
                           GLsizei uniformCount,
@@ -4051,6 +5332,20 @@ static void GL_BINDING_CALL Debug_glGetUniformiv(GLuint program,
   g_driver_gl.debug_fn.glGetUniformivFn(program, location, params);
 }
 
+static void GL_BINDING_CALL Debug_glGetUniformivRobustANGLE(GLuint program,
+                                                            GLint location,
+                                                            GLsizei bufSize,
+                                                            GLsizei* length,
+                                                            GLint* params) {
+  GL_SERVICE_LOG("glGetUniformivRobustANGLE"
+                 << "(" << program << ", " << location << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetUniformivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetUniformivRobustANGLEFn(program, location, bufSize,
+                                                   length, params);
+}
+
 static GLint GL_BINDING_CALL Debug_glGetUniformLocation(GLuint program,
                                                         const char* name) {
   GL_SERVICE_LOG("glGetUniformLocation"
@@ -4071,6 +5366,20 @@ static void GL_BINDING_CALL Debug_glGetUniformuiv(GLuint program,
   g_driver_gl.debug_fn.glGetUniformuivFn(program, location, params);
 }
 
+static void GL_BINDING_CALL Debug_glGetUniformuivRobustANGLE(GLuint program,
+                                                             GLint location,
+                                                             GLsizei bufSize,
+                                                             GLsizei* length,
+                                                             GLuint* params) {
+  GL_SERVICE_LOG("glGetUniformuivRobustANGLE"
+                 << "(" << program << ", " << location << ", " << bufSize
+                 << ", " << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetUniformuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetUniformuivRobustANGLEFn(program, location, bufSize,
+                                                    length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetVertexAttribfv(GLuint index,
                                                       GLenum pname,
                                                       GLfloat* params) {
@@ -4079,6 +5388,51 @@ static void GL_BINDING_CALL Debug_glGetVertexAttribfv(GLuint index,
                  << ", " << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glGetVertexAttribfvFn != nullptr);
   g_driver_gl.debug_fn.glGetVertexAttribfvFn(index, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetVertexAttribfvRobustANGLE(GLuint index,
+                                     GLenum pname,
+                                     GLsizei bufSize,
+                                     GLsizei* length,
+                                     GLfloat* params) {
+  GL_SERVICE_LOG("glGetVertexAttribfvRobustANGLE"
+                 << "(" << index << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetVertexAttribfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetVertexAttribfvRobustANGLEFn(index, pname, bufSize,
+                                                        length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetVertexAttribIivRobustANGLE(GLuint index,
+                                      GLenum pname,
+                                      GLsizei bufSize,
+                                      GLsizei* length,
+                                      GLint* params) {
+  GL_SERVICE_LOG("glGetVertexAttribIivRobustANGLE"
+                 << "(" << index << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetVertexAttribIivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetVertexAttribIivRobustANGLEFn(index, pname, bufSize,
+                                                         length, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetVertexAttribIuivRobustANGLE(GLuint index,
+                                       GLenum pname,
+                                       GLsizei bufSize,
+                                       GLsizei* length,
+                                       GLuint* params) {
+  GL_SERVICE_LOG("glGetVertexAttribIuivRobustANGLE"
+                 << "(" << index << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetVertexAttribIuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetVertexAttribIuivRobustANGLEFn(index, pname, bufSize,
+                                                          length, params);
 }
 
 static void GL_BINDING_CALL Debug_glGetVertexAttribiv(GLuint index,
@@ -4091,6 +5445,21 @@ static void GL_BINDING_CALL Debug_glGetVertexAttribiv(GLuint index,
   g_driver_gl.debug_fn.glGetVertexAttribivFn(index, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glGetVertexAttribivRobustANGLE(GLuint index,
+                                     GLenum pname,
+                                     GLsizei bufSize,
+                                     GLsizei* length,
+                                     GLint* params) {
+  GL_SERVICE_LOG("glGetVertexAttribivRobustANGLE"
+                 << "(" << index << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetVertexAttribivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glGetVertexAttribivRobustANGLEFn(index, pname, bufSize,
+                                                        length, params);
+}
+
 static void GL_BINDING_CALL Debug_glGetVertexAttribPointerv(GLuint index,
                                                             GLenum pname,
                                                             void** pointer) {
@@ -4099,6 +5468,22 @@ static void GL_BINDING_CALL Debug_glGetVertexAttribPointerv(GLuint index,
                  << ", " << pointer << ")");
   DCHECK(g_driver_gl.debug_fn.glGetVertexAttribPointervFn != nullptr);
   g_driver_gl.debug_fn.glGetVertexAttribPointervFn(index, pname, pointer);
+}
+
+static void GL_BINDING_CALL
+Debug_glGetVertexAttribPointervRobustANGLE(GLuint index,
+                                           GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           void** pointer) {
+  GL_SERVICE_LOG("glGetVertexAttribPointervRobustANGLE"
+                 << "(" << index << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(length)
+                 << ", " << pointer << ")");
+  DCHECK(g_driver_gl.debug_fn.glGetVertexAttribPointervRobustANGLEFn !=
+         nullptr);
+  g_driver_gl.debug_fn.glGetVertexAttribPointervRobustANGLEFn(
+      index, pname, bufSize, length, pointer);
 }
 
 static void GL_BINDING_CALL Debug_glHint(GLenum target, GLenum mode) {
@@ -4345,6 +5730,27 @@ static void GL_BINDING_CALL Debug_glMemoryBarrierEXT(GLbitfield barriers) {
   g_driver_gl.debug_fn.glMemoryBarrierEXTFn(barriers);
 }
 
+static void GL_BINDING_CALL Debug_glObjectLabel(GLenum identifier,
+                                                GLuint name,
+                                                GLsizei length,
+                                                const char* label) {
+  GL_SERVICE_LOG("glObjectLabel"
+                 << "(" << GLEnums::GetStringEnum(identifier) << ", " << name
+                 << ", " << length << ", " << label << ")");
+  DCHECK(g_driver_gl.debug_fn.glObjectLabelFn != nullptr);
+  g_driver_gl.debug_fn.glObjectLabelFn(identifier, name, length, label);
+}
+
+static void GL_BINDING_CALL Debug_glObjectPtrLabel(void* ptr,
+                                                   GLsizei length,
+                                                   const char* label) {
+  GL_SERVICE_LOG("glObjectPtrLabel"
+                 << "(" << static_cast<const void*>(ptr) << ", " << length
+                 << ", " << label << ")");
+  DCHECK(g_driver_gl.debug_fn.glObjectPtrLabelFn != nullptr);
+  g_driver_gl.debug_fn.glObjectPtrLabelFn(ptr, length, label);
+}
+
 static void GL_BINDING_CALL Debug_glPathCommandsNV(GLuint path,
                                                    GLsizei numCommands,
                                                    const GLubyte* commands,
@@ -4423,6 +5829,14 @@ static void GL_BINDING_CALL Debug_glPolygonOffset(GLfloat factor,
   g_driver_gl.debug_fn.glPolygonOffsetFn(factor, units);
 }
 
+static void GL_BINDING_CALL Debug_glPopDebugGroup() {
+  GL_SERVICE_LOG("glPopDebugGroup"
+                 << "("
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glPopDebugGroupFn != nullptr);
+  g_driver_gl.debug_fn.glPopDebugGroupFn();
+}
+
 static void GL_BINDING_CALL Debug_glPopGroupMarkerEXT(void) {
   GL_SERVICE_LOG("glPopGroupMarkerEXT"
                  << "("
@@ -4475,6 +5889,17 @@ Debug_glProgramPathFragmentInputGenNV(GLuint program,
       program, location, genMode, components, coeffs);
 }
 
+static void GL_BINDING_CALL Debug_glPushDebugGroup(GLenum source,
+                                                   GLuint id,
+                                                   GLsizei length,
+                                                   const char* message) {
+  GL_SERVICE_LOG("glPushDebugGroup"
+                 << "(" << GLEnums::GetStringEnum(source) << ", " << id << ", "
+                 << length << ", " << message << ")");
+  DCHECK(g_driver_gl.debug_fn.glPushDebugGroupFn != nullptr);
+  g_driver_gl.debug_fn.glPushDebugGroupFn(source, id, length, message);
+}
+
 static void GL_BINDING_CALL Debug_glPushGroupMarkerEXT(GLsizei length,
                                                        const char* marker) {
   GL_SERVICE_LOG("glPushGroupMarkerEXT"
@@ -4497,6 +5922,26 @@ static void GL_BINDING_CALL Debug_glReadBuffer(GLenum src) {
   g_driver_gl.debug_fn.glReadBufferFn(src);
 }
 
+static void GL_BINDING_CALL Debug_glReadnPixelsRobustANGLE(GLint x,
+                                                           GLint y,
+                                                           GLsizei width,
+                                                           GLsizei height,
+                                                           GLenum format,
+                                                           GLenum type,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           void* data) {
+  GL_SERVICE_LOG("glReadnPixelsRobustANGLE"
+                 << "(" << x << ", " << y << ", " << width << ", " << height
+                 << ", " << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(data) << ")");
+  DCHECK(g_driver_gl.debug_fn.glReadnPixelsRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glReadnPixelsRobustANGLEFn(x, y, width, height, format,
+                                                  type, bufSize, length, data);
+}
+
 static void GL_BINDING_CALL Debug_glReadPixels(GLint x,
                                                GLint y,
                                                GLsizei width,
@@ -4512,6 +5957,26 @@ static void GL_BINDING_CALL Debug_glReadPixels(GLint x,
   DCHECK(g_driver_gl.debug_fn.glReadPixelsFn != nullptr);
   g_driver_gl.debug_fn.glReadPixelsFn(x, y, width, height, format, type,
                                       pixels);
+}
+
+static void GL_BINDING_CALL Debug_glReadPixelsRobustANGLE(GLint x,
+                                                          GLint y,
+                                                          GLsizei width,
+                                                          GLsizei height,
+                                                          GLenum format,
+                                                          GLenum type,
+                                                          GLsizei bufSize,
+                                                          GLsizei* length,
+                                                          void* pixels) {
+  GL_SERVICE_LOG("glReadPixelsRobustANGLE"
+                 << "(" << x << ", " << y << ", " << width << ", " << height
+                 << ", " << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
+                 << static_cast<const void*>(length) << ", "
+                 << static_cast<const void*>(pixels) << ")");
+  DCHECK(g_driver_gl.debug_fn.glReadPixelsRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glReadPixelsRobustANGLEFn(x, y, width, height, format,
+                                                 type, bufSize, length, pixels);
 }
 
 static void GL_BINDING_CALL Debug_glReleaseShaderCompiler(void) {
@@ -4634,6 +6099,20 @@ static void GL_BINDING_CALL Debug_glSamplerParameterfv(GLuint sampler,
   g_driver_gl.debug_fn.glSamplerParameterfvFn(sampler, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glSamplerParameterfvRobustANGLE(GLuint sampler,
+                                      GLenum pname,
+                                      GLsizei bufSize,
+                                      const GLfloat* param) {
+  GL_SERVICE_LOG("glSamplerParameterfvRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(param)
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glSamplerParameterfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glSamplerParameterfvRobustANGLEFn(sampler, pname,
+                                                         bufSize, param);
+}
+
 static void GL_BINDING_CALL Debug_glSamplerParameteri(GLuint sampler,
                                                       GLenum pname,
                                                       GLint param) {
@@ -4644,6 +6123,34 @@ static void GL_BINDING_CALL Debug_glSamplerParameteri(GLuint sampler,
   g_driver_gl.debug_fn.glSamplerParameteriFn(sampler, pname, param);
 }
 
+static void GL_BINDING_CALL
+Debug_glSamplerParameterIivRobustANGLE(GLuint sampler,
+                                       GLenum pname,
+                                       GLsizei bufSize,
+                                       const GLint* param) {
+  GL_SERVICE_LOG("glSamplerParameterIivRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(param)
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glSamplerParameterIivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glSamplerParameterIivRobustANGLEFn(sampler, pname,
+                                                          bufSize, param);
+}
+
+static void GL_BINDING_CALL
+Debug_glSamplerParameterIuivRobustANGLE(GLuint sampler,
+                                        GLenum pname,
+                                        GLsizei bufSize,
+                                        const GLuint* param) {
+  GL_SERVICE_LOG("glSamplerParameterIuivRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(param)
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glSamplerParameterIuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glSamplerParameterIuivRobustANGLEFn(sampler, pname,
+                                                           bufSize, param);
+}
+
 static void GL_BINDING_CALL Debug_glSamplerParameteriv(GLuint sampler,
                                                        GLenum pname,
                                                        const GLint* params) {
@@ -4652,6 +6159,20 @@ static void GL_BINDING_CALL Debug_glSamplerParameteriv(GLuint sampler,
                  << ", " << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glSamplerParameterivFn != nullptr);
   g_driver_gl.debug_fn.glSamplerParameterivFn(sampler, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glSamplerParameterivRobustANGLE(GLuint sampler,
+                                      GLenum pname,
+                                      GLsizei bufSize,
+                                      const GLint* param) {
+  GL_SERVICE_LOG("glSamplerParameterivRobustANGLE"
+                 << "(" << sampler << ", " << GLEnums::GetStringEnum(pname)
+                 << ", " << bufSize << ", " << static_cast<const void*>(param)
+                 << ")");
+  DCHECK(g_driver_gl.debug_fn.glSamplerParameterivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glSamplerParameterivRobustANGLEFn(sampler, pname,
+                                                         bufSize, param);
 }
 
 static void GL_BINDING_CALL Debug_glScissor(GLint x,
@@ -4958,6 +6479,28 @@ static void GL_BINDING_CALL Debug_glTexImage2D(GLenum target,
                                       height, border, format, type, pixels);
 }
 
+static void GL_BINDING_CALL Debug_glTexImage2DRobustANGLE(GLenum target,
+                                                          GLint level,
+                                                          GLint internalformat,
+                                                          GLsizei width,
+                                                          GLsizei height,
+                                                          GLint border,
+                                                          GLenum format,
+                                                          GLenum type,
+                                                          GLsizei bufSize,
+                                                          const void* pixels) {
+  GL_SERVICE_LOG("glTexImage2DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << internalformat << ", " << width << ", " << height
+                 << ", " << border << ", " << GLEnums::GetStringEnum(format)
+                 << ", " << GLEnums::GetStringEnum(type) << ", " << bufSize
+                 << ", " << static_cast<const void*>(pixels) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexImage2DRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexImage2DRobustANGLEFn(target, level, internalformat,
+                                                 width, height, border, format,
+                                                 type, bufSize, pixels);
+}
+
 static void GL_BINDING_CALL Debug_glTexImage3D(GLenum target,
                                                GLint level,
                                                GLint internalformat,
@@ -4981,6 +6524,30 @@ static void GL_BINDING_CALL Debug_glTexImage3D(GLenum target,
                                       pixels);
 }
 
+static void GL_BINDING_CALL Debug_glTexImage3DRobustANGLE(GLenum target,
+                                                          GLint level,
+                                                          GLint internalformat,
+                                                          GLsizei width,
+                                                          GLsizei height,
+                                                          GLsizei depth,
+                                                          GLint border,
+                                                          GLenum format,
+                                                          GLenum type,
+                                                          GLsizei bufSize,
+                                                          const void* pixels) {
+  GL_SERVICE_LOG("glTexImage3DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << internalformat << ", " << width << ", " << height
+                 << ", " << depth << ", " << border << ", "
+                 << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
+                 << static_cast<const void*>(pixels) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexImage3DRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexImage3DRobustANGLEFn(target, level, internalformat,
+                                                 width, height, depth, border,
+                                                 format, type, bufSize, pixels);
+}
+
 static void GL_BINDING_CALL Debug_glTexParameterf(GLenum target,
                                                   GLenum pname,
                                                   GLfloat param) {
@@ -5002,6 +6569,20 @@ static void GL_BINDING_CALL Debug_glTexParameterfv(GLenum target,
   g_driver_gl.debug_fn.glTexParameterfvFn(target, pname, params);
 }
 
+static void GL_BINDING_CALL
+Debug_glTexParameterfvRobustANGLE(GLenum target,
+                                  GLenum pname,
+                                  GLsizei bufSize,
+                                  const GLfloat* params) {
+  GL_SERVICE_LOG("glTexParameterfvRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexParameterfvRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexParameterfvRobustANGLEFn(target, pname, bufSize,
+                                                     params);
+}
+
 static void GL_BINDING_CALL Debug_glTexParameteri(GLenum target,
                                                   GLenum pname,
                                                   GLint param) {
@@ -5010,6 +6591,34 @@ static void GL_BINDING_CALL Debug_glTexParameteri(GLenum target,
                  << GLEnums::GetStringEnum(pname) << ", " << param << ")");
   DCHECK(g_driver_gl.debug_fn.glTexParameteriFn != nullptr);
   g_driver_gl.debug_fn.glTexParameteriFn(target, pname, param);
+}
+
+static void GL_BINDING_CALL
+Debug_glTexParameterIivRobustANGLE(GLenum target,
+                                   GLenum pname,
+                                   GLsizei bufSize,
+                                   const GLint* params) {
+  GL_SERVICE_LOG("glTexParameterIivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexParameterIivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexParameterIivRobustANGLEFn(target, pname, bufSize,
+                                                      params);
+}
+
+static void GL_BINDING_CALL
+Debug_glTexParameterIuivRobustANGLE(GLenum target,
+                                    GLenum pname,
+                                    GLsizei bufSize,
+                                    const GLuint* params) {
+  GL_SERVICE_LOG("glTexParameterIuivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexParameterIuivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexParameterIuivRobustANGLEFn(target, pname, bufSize,
+                                                       params);
 }
 
 static void GL_BINDING_CALL Debug_glTexParameteriv(GLenum target,
@@ -5021,6 +6630,20 @@ static void GL_BINDING_CALL Debug_glTexParameteriv(GLenum target,
                  << static_cast<const void*>(params) << ")");
   DCHECK(g_driver_gl.debug_fn.glTexParameterivFn != nullptr);
   g_driver_gl.debug_fn.glTexParameterivFn(target, pname, params);
+}
+
+static void GL_BINDING_CALL
+Debug_glTexParameterivRobustANGLE(GLenum target,
+                                  GLenum pname,
+                                  GLsizei bufSize,
+                                  const GLint* params) {
+  GL_SERVICE_LOG("glTexParameterivRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", "
+                 << GLEnums::GetStringEnum(pname) << ", " << bufSize << ", "
+                 << static_cast<const void*>(params) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexParameterivRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexParameterivRobustANGLEFn(target, pname, bufSize,
+                                                     params);
 }
 
 static void GL_BINDING_CALL Debug_glTexStorage2DEXT(GLenum target,
@@ -5072,6 +6695,29 @@ static void GL_BINDING_CALL Debug_glTexSubImage2D(GLenum target,
                                          height, format, type, pixels);
 }
 
+static void GL_BINDING_CALL
+Debug_glTexSubImage2DRobustANGLE(GLenum target,
+                                 GLint level,
+                                 GLint xoffset,
+                                 GLint yoffset,
+                                 GLsizei width,
+                                 GLsizei height,
+                                 GLenum format,
+                                 GLenum type,
+                                 GLsizei bufSize,
+                                 const void* pixels) {
+  GL_SERVICE_LOG("glTexSubImage2DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << xoffset << ", " << yoffset << ", " << width << ", "
+                 << height << ", " << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
+                 << static_cast<const void*>(pixels) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexSubImage2DRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexSubImage2DRobustANGLEFn(
+      target, level, xoffset, yoffset, width, height, format, type, bufSize,
+      pixels);
+}
+
 static void GL_BINDING_CALL Debug_glTexSubImage3D(GLenum target,
                                                   GLint level,
                                                   GLint xoffset,
@@ -5094,6 +6740,32 @@ static void GL_BINDING_CALL Debug_glTexSubImage3D(GLenum target,
   g_driver_gl.debug_fn.glTexSubImage3DFn(target, level, xoffset, yoffset,
                                          zoffset, width, height, depth, format,
                                          type, pixels);
+}
+
+static void GL_BINDING_CALL
+Debug_glTexSubImage3DRobustANGLE(GLenum target,
+                                 GLint level,
+                                 GLint xoffset,
+                                 GLint yoffset,
+                                 GLint zoffset,
+                                 GLsizei width,
+                                 GLsizei height,
+                                 GLsizei depth,
+                                 GLenum format,
+                                 GLenum type,
+                                 GLsizei bufSize,
+                                 const void* pixels) {
+  GL_SERVICE_LOG("glTexSubImage3DRobustANGLE"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << xoffset << ", " << yoffset << ", " << zoffset
+                 << ", " << width << ", " << height << ", " << depth << ", "
+                 << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", " << bufSize << ", "
+                 << static_cast<const void*>(pixels) << ")");
+  DCHECK(g_driver_gl.debug_fn.glTexSubImage3DRobustANGLEFn != nullptr);
+  g_driver_gl.debug_fn.glTexSubImage3DRobustANGLEFn(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      type, bufSize, pixels);
 }
 
 static void GL_BINDING_CALL
@@ -5912,6 +7584,18 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glCullFaceFn = fn.glCullFaceFn;
     fn.glCullFaceFn = Debug_glCullFace;
   }
+  if (!debug_fn.glDebugMessageCallbackFn) {
+    debug_fn.glDebugMessageCallbackFn = fn.glDebugMessageCallbackFn;
+    fn.glDebugMessageCallbackFn = Debug_glDebugMessageCallback;
+  }
+  if (!debug_fn.glDebugMessageControlFn) {
+    debug_fn.glDebugMessageControlFn = fn.glDebugMessageControlFn;
+    fn.glDebugMessageControlFn = Debug_glDebugMessageControl;
+  }
+  if (!debug_fn.glDebugMessageInsertFn) {
+    debug_fn.glDebugMessageInsertFn = fn.glDebugMessageInsertFn;
+    fn.glDebugMessageInsertFn = Debug_glDebugMessageInsert;
+  }
   if (!debug_fn.glDeleteBuffersARBFn) {
     debug_fn.glDeleteBuffersARBFn = fn.glDeleteBuffersARBFn;
     fn.glDeleteBuffersARBFn = Debug_glDeleteBuffersARB;
@@ -6166,6 +7850,12 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetActiveUniformBlockivFn = fn.glGetActiveUniformBlockivFn;
     fn.glGetActiveUniformBlockivFn = Debug_glGetActiveUniformBlockiv;
   }
+  if (!debug_fn.glGetActiveUniformBlockivRobustANGLEFn) {
+    debug_fn.glGetActiveUniformBlockivRobustANGLEFn =
+        fn.glGetActiveUniformBlockivRobustANGLEFn;
+    fn.glGetActiveUniformBlockivRobustANGLEFn =
+        Debug_glGetActiveUniformBlockivRobustANGLE;
+  }
   if (!debug_fn.glGetActiveUniformBlockNameFn) {
     debug_fn.glGetActiveUniformBlockNameFn = fn.glGetActiveUniformBlockNameFn;
     fn.glGetActiveUniformBlockNameFn = Debug_glGetActiveUniformBlockName;
@@ -6182,13 +7872,42 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetAttribLocationFn = fn.glGetAttribLocationFn;
     fn.glGetAttribLocationFn = Debug_glGetAttribLocation;
   }
+  if (!debug_fn.glGetBooleani_vRobustANGLEFn) {
+    debug_fn.glGetBooleani_vRobustANGLEFn = fn.glGetBooleani_vRobustANGLEFn;
+    fn.glGetBooleani_vRobustANGLEFn = Debug_glGetBooleani_vRobustANGLE;
+  }
   if (!debug_fn.glGetBooleanvFn) {
     debug_fn.glGetBooleanvFn = fn.glGetBooleanvFn;
     fn.glGetBooleanvFn = Debug_glGetBooleanv;
   }
+  if (!debug_fn.glGetBooleanvRobustANGLEFn) {
+    debug_fn.glGetBooleanvRobustANGLEFn = fn.glGetBooleanvRobustANGLEFn;
+    fn.glGetBooleanvRobustANGLEFn = Debug_glGetBooleanvRobustANGLE;
+  }
+  if (!debug_fn.glGetBufferParameteri64vRobustANGLEFn) {
+    debug_fn.glGetBufferParameteri64vRobustANGLEFn =
+        fn.glGetBufferParameteri64vRobustANGLEFn;
+    fn.glGetBufferParameteri64vRobustANGLEFn =
+        Debug_glGetBufferParameteri64vRobustANGLE;
+  }
   if (!debug_fn.glGetBufferParameterivFn) {
     debug_fn.glGetBufferParameterivFn = fn.glGetBufferParameterivFn;
     fn.glGetBufferParameterivFn = Debug_glGetBufferParameteriv;
+  }
+  if (!debug_fn.glGetBufferParameterivRobustANGLEFn) {
+    debug_fn.glGetBufferParameterivRobustANGLEFn =
+        fn.glGetBufferParameterivRobustANGLEFn;
+    fn.glGetBufferParameterivRobustANGLEFn =
+        Debug_glGetBufferParameterivRobustANGLE;
+  }
+  if (!debug_fn.glGetBufferPointervRobustANGLEFn) {
+    debug_fn.glGetBufferPointervRobustANGLEFn =
+        fn.glGetBufferPointervRobustANGLEFn;
+    fn.glGetBufferPointervRobustANGLEFn = Debug_glGetBufferPointervRobustANGLE;
+  }
+  if (!debug_fn.glGetDebugMessageLogFn) {
+    debug_fn.glGetDebugMessageLogFn = fn.glGetDebugMessageLogFn;
+    fn.glGetDebugMessageLogFn = Debug_glGetDebugMessageLog;
   }
   if (!debug_fn.glGetErrorFn) {
     debug_fn.glGetErrorFn = fn.glGetErrorFn;
@@ -6201,6 +7920,10 @@ void DriverGL::InitializeDebugBindings() {
   if (!debug_fn.glGetFloatvFn) {
     debug_fn.glGetFloatvFn = fn.glGetFloatvFn;
     fn.glGetFloatvFn = Debug_glGetFloatv;
+  }
+  if (!debug_fn.glGetFloatvRobustANGLEFn) {
+    debug_fn.glGetFloatvRobustANGLEFn = fn.glGetFloatvRobustANGLEFn;
+    fn.glGetFloatvRobustANGLEFn = Debug_glGetFloatvRobustANGLE;
   }
   if (!debug_fn.glGetFragDataIndexFn) {
     debug_fn.glGetFragDataIndexFn = fn.glGetFragDataIndexFn;
@@ -6216,6 +7939,18 @@ void DriverGL::InitializeDebugBindings() {
     fn.glGetFramebufferAttachmentParameterivEXTFn =
         Debug_glGetFramebufferAttachmentParameterivEXT;
   }
+  if (!debug_fn.glGetFramebufferAttachmentParameterivRobustANGLEFn) {
+    debug_fn.glGetFramebufferAttachmentParameterivRobustANGLEFn =
+        fn.glGetFramebufferAttachmentParameterivRobustANGLEFn;
+    fn.glGetFramebufferAttachmentParameterivRobustANGLEFn =
+        Debug_glGetFramebufferAttachmentParameterivRobustANGLE;
+  }
+  if (!debug_fn.glGetFramebufferParameterivRobustANGLEFn) {
+    debug_fn.glGetFramebufferParameterivRobustANGLEFn =
+        fn.glGetFramebufferParameterivRobustANGLEFn;
+    fn.glGetFramebufferParameterivRobustANGLEFn =
+        Debug_glGetFramebufferParameterivRobustANGLE;
+  }
   if (!debug_fn.glGetGraphicsResetStatusARBFn) {
     debug_fn.glGetGraphicsResetStatusARBFn = fn.glGetGraphicsResetStatusARBFn;
     fn.glGetGraphicsResetStatusARBFn = Debug_glGetGraphicsResetStatusARB;
@@ -6224,21 +7959,78 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetInteger64i_vFn = fn.glGetInteger64i_vFn;
     fn.glGetInteger64i_vFn = Debug_glGetInteger64i_v;
   }
+  if (!debug_fn.glGetInteger64i_vRobustANGLEFn) {
+    debug_fn.glGetInteger64i_vRobustANGLEFn = fn.glGetInteger64i_vRobustANGLEFn;
+    fn.glGetInteger64i_vRobustANGLEFn = Debug_glGetInteger64i_vRobustANGLE;
+  }
   if (!debug_fn.glGetInteger64vFn) {
     debug_fn.glGetInteger64vFn = fn.glGetInteger64vFn;
     fn.glGetInteger64vFn = Debug_glGetInteger64v;
+  }
+  if (!debug_fn.glGetInteger64vRobustANGLEFn) {
+    debug_fn.glGetInteger64vRobustANGLEFn = fn.glGetInteger64vRobustANGLEFn;
+    fn.glGetInteger64vRobustANGLEFn = Debug_glGetInteger64vRobustANGLE;
   }
   if (!debug_fn.glGetIntegeri_vFn) {
     debug_fn.glGetIntegeri_vFn = fn.glGetIntegeri_vFn;
     fn.glGetIntegeri_vFn = Debug_glGetIntegeri_v;
   }
+  if (!debug_fn.glGetIntegeri_vRobustANGLEFn) {
+    debug_fn.glGetIntegeri_vRobustANGLEFn = fn.glGetIntegeri_vRobustANGLEFn;
+    fn.glGetIntegeri_vRobustANGLEFn = Debug_glGetIntegeri_vRobustANGLE;
+  }
   if (!debug_fn.glGetIntegervFn) {
     debug_fn.glGetIntegervFn = fn.glGetIntegervFn;
     fn.glGetIntegervFn = Debug_glGetIntegerv;
   }
+  if (!debug_fn.glGetIntegervRobustANGLEFn) {
+    debug_fn.glGetIntegervRobustANGLEFn = fn.glGetIntegervRobustANGLEFn;
+    fn.glGetIntegervRobustANGLEFn = Debug_glGetIntegervRobustANGLE;
+  }
   if (!debug_fn.glGetInternalformativFn) {
     debug_fn.glGetInternalformativFn = fn.glGetInternalformativFn;
     fn.glGetInternalformativFn = Debug_glGetInternalformativ;
+  }
+  if (!debug_fn.glGetInternalformativRobustANGLEFn) {
+    debug_fn.glGetInternalformativRobustANGLEFn =
+        fn.glGetInternalformativRobustANGLEFn;
+    fn.glGetInternalformativRobustANGLEFn =
+        Debug_glGetInternalformativRobustANGLE;
+  }
+  if (!debug_fn.glGetMultisamplefvRobustANGLEFn) {
+    debug_fn.glGetMultisamplefvRobustANGLEFn =
+        fn.glGetMultisamplefvRobustANGLEFn;
+    fn.glGetMultisamplefvRobustANGLEFn = Debug_glGetMultisamplefvRobustANGLE;
+  }
+  if (!debug_fn.glGetnUniformfvRobustANGLEFn) {
+    debug_fn.glGetnUniformfvRobustANGLEFn = fn.glGetnUniformfvRobustANGLEFn;
+    fn.glGetnUniformfvRobustANGLEFn = Debug_glGetnUniformfvRobustANGLE;
+  }
+  if (!debug_fn.glGetnUniformivRobustANGLEFn) {
+    debug_fn.glGetnUniformivRobustANGLEFn = fn.glGetnUniformivRobustANGLEFn;
+    fn.glGetnUniformivRobustANGLEFn = Debug_glGetnUniformivRobustANGLE;
+  }
+  if (!debug_fn.glGetnUniformuivRobustANGLEFn) {
+    debug_fn.glGetnUniformuivRobustANGLEFn = fn.glGetnUniformuivRobustANGLEFn;
+    fn.glGetnUniformuivRobustANGLEFn = Debug_glGetnUniformuivRobustANGLE;
+  }
+  if (!debug_fn.glGetObjectLabelFn) {
+    debug_fn.glGetObjectLabelFn = fn.glGetObjectLabelFn;
+    fn.glGetObjectLabelFn = Debug_glGetObjectLabel;
+  }
+  if (!debug_fn.glGetObjectPtrLabelFn) {
+    debug_fn.glGetObjectPtrLabelFn = fn.glGetObjectPtrLabelFn;
+    fn.glGetObjectPtrLabelFn = Debug_glGetObjectPtrLabel;
+  }
+  if (!debug_fn.glGetPointervFn) {
+    debug_fn.glGetPointervFn = fn.glGetPointervFn;
+    fn.glGetPointervFn = Debug_glGetPointerv;
+  }
+  if (!debug_fn.glGetPointervRobustANGLERobustANGLEFn) {
+    debug_fn.glGetPointervRobustANGLERobustANGLEFn =
+        fn.glGetPointervRobustANGLERobustANGLEFn;
+    fn.glGetPointervRobustANGLERobustANGLEFn =
+        Debug_glGetPointervRobustANGLERobustANGLE;
   }
   if (!debug_fn.glGetProgramBinaryFn) {
     debug_fn.glGetProgramBinaryFn = fn.glGetProgramBinaryFn;
@@ -6252,9 +8044,19 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetProgramInterfaceivFn = fn.glGetProgramInterfaceivFn;
     fn.glGetProgramInterfaceivFn = Debug_glGetProgramInterfaceiv;
   }
+  if (!debug_fn.glGetProgramInterfaceivRobustANGLEFn) {
+    debug_fn.glGetProgramInterfaceivRobustANGLEFn =
+        fn.glGetProgramInterfaceivRobustANGLEFn;
+    fn.glGetProgramInterfaceivRobustANGLEFn =
+        Debug_glGetProgramInterfaceivRobustANGLE;
+  }
   if (!debug_fn.glGetProgramivFn) {
     debug_fn.glGetProgramivFn = fn.glGetProgramivFn;
     fn.glGetProgramivFn = Debug_glGetProgramiv;
+  }
+  if (!debug_fn.glGetProgramivRobustANGLEFn) {
+    debug_fn.glGetProgramivRobustANGLEFn = fn.glGetProgramivRobustANGLEFn;
+    fn.glGetProgramivRobustANGLEFn = Debug_glGetProgramivRobustANGLE;
   }
   if (!debug_fn.glGetProgramResourceivFn) {
     debug_fn.glGetProgramResourceivFn = fn.glGetProgramResourceivFn;
@@ -6272,21 +8074,47 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetQueryivFn = fn.glGetQueryivFn;
     fn.glGetQueryivFn = Debug_glGetQueryiv;
   }
+  if (!debug_fn.glGetQueryivRobustANGLEFn) {
+    debug_fn.glGetQueryivRobustANGLEFn = fn.glGetQueryivRobustANGLEFn;
+    fn.glGetQueryivRobustANGLEFn = Debug_glGetQueryivRobustANGLE;
+  }
   if (!debug_fn.glGetQueryObjecti64vFn) {
     debug_fn.glGetQueryObjecti64vFn = fn.glGetQueryObjecti64vFn;
     fn.glGetQueryObjecti64vFn = Debug_glGetQueryObjecti64v;
+  }
+  if (!debug_fn.glGetQueryObjecti64vRobustANGLEFn) {
+    debug_fn.glGetQueryObjecti64vRobustANGLEFn =
+        fn.glGetQueryObjecti64vRobustANGLEFn;
+    fn.glGetQueryObjecti64vRobustANGLEFn =
+        Debug_glGetQueryObjecti64vRobustANGLE;
   }
   if (!debug_fn.glGetQueryObjectivFn) {
     debug_fn.glGetQueryObjectivFn = fn.glGetQueryObjectivFn;
     fn.glGetQueryObjectivFn = Debug_glGetQueryObjectiv;
   }
+  if (!debug_fn.glGetQueryObjectivRobustANGLEFn) {
+    debug_fn.glGetQueryObjectivRobustANGLEFn =
+        fn.glGetQueryObjectivRobustANGLEFn;
+    fn.glGetQueryObjectivRobustANGLEFn = Debug_glGetQueryObjectivRobustANGLE;
+  }
   if (!debug_fn.glGetQueryObjectui64vFn) {
     debug_fn.glGetQueryObjectui64vFn = fn.glGetQueryObjectui64vFn;
     fn.glGetQueryObjectui64vFn = Debug_glGetQueryObjectui64v;
   }
+  if (!debug_fn.glGetQueryObjectui64vRobustANGLEFn) {
+    debug_fn.glGetQueryObjectui64vRobustANGLEFn =
+        fn.glGetQueryObjectui64vRobustANGLEFn;
+    fn.glGetQueryObjectui64vRobustANGLEFn =
+        Debug_glGetQueryObjectui64vRobustANGLE;
+  }
   if (!debug_fn.glGetQueryObjectuivFn) {
     debug_fn.glGetQueryObjectuivFn = fn.glGetQueryObjectuivFn;
     fn.glGetQueryObjectuivFn = Debug_glGetQueryObjectuiv;
+  }
+  if (!debug_fn.glGetQueryObjectuivRobustANGLEFn) {
+    debug_fn.glGetQueryObjectuivRobustANGLEFn =
+        fn.glGetQueryObjectuivRobustANGLEFn;
+    fn.glGetQueryObjectuivRobustANGLEFn = Debug_glGetQueryObjectuivRobustANGLE;
   }
   if (!debug_fn.glGetRenderbufferParameterivEXTFn) {
     debug_fn.glGetRenderbufferParameterivEXTFn =
@@ -6294,13 +8122,43 @@ void DriverGL::InitializeDebugBindings() {
     fn.glGetRenderbufferParameterivEXTFn =
         Debug_glGetRenderbufferParameterivEXT;
   }
+  if (!debug_fn.glGetRenderbufferParameterivRobustANGLEFn) {
+    debug_fn.glGetRenderbufferParameterivRobustANGLEFn =
+        fn.glGetRenderbufferParameterivRobustANGLEFn;
+    fn.glGetRenderbufferParameterivRobustANGLEFn =
+        Debug_glGetRenderbufferParameterivRobustANGLE;
+  }
   if (!debug_fn.glGetSamplerParameterfvFn) {
     debug_fn.glGetSamplerParameterfvFn = fn.glGetSamplerParameterfvFn;
     fn.glGetSamplerParameterfvFn = Debug_glGetSamplerParameterfv;
   }
+  if (!debug_fn.glGetSamplerParameterfvRobustANGLEFn) {
+    debug_fn.glGetSamplerParameterfvRobustANGLEFn =
+        fn.glGetSamplerParameterfvRobustANGLEFn;
+    fn.glGetSamplerParameterfvRobustANGLEFn =
+        Debug_glGetSamplerParameterfvRobustANGLE;
+  }
+  if (!debug_fn.glGetSamplerParameterIivRobustANGLEFn) {
+    debug_fn.glGetSamplerParameterIivRobustANGLEFn =
+        fn.glGetSamplerParameterIivRobustANGLEFn;
+    fn.glGetSamplerParameterIivRobustANGLEFn =
+        Debug_glGetSamplerParameterIivRobustANGLE;
+  }
+  if (!debug_fn.glGetSamplerParameterIuivRobustANGLEFn) {
+    debug_fn.glGetSamplerParameterIuivRobustANGLEFn =
+        fn.glGetSamplerParameterIuivRobustANGLEFn;
+    fn.glGetSamplerParameterIuivRobustANGLEFn =
+        Debug_glGetSamplerParameterIuivRobustANGLE;
+  }
   if (!debug_fn.glGetSamplerParameterivFn) {
     debug_fn.glGetSamplerParameterivFn = fn.glGetSamplerParameterivFn;
     fn.glGetSamplerParameterivFn = Debug_glGetSamplerParameteriv;
+  }
+  if (!debug_fn.glGetSamplerParameterivRobustANGLEFn) {
+    debug_fn.glGetSamplerParameterivRobustANGLEFn =
+        fn.glGetSamplerParameterivRobustANGLEFn;
+    fn.glGetSamplerParameterivRobustANGLEFn =
+        Debug_glGetSamplerParameterivRobustANGLE;
   }
   if (!debug_fn.glGetShaderInfoLogFn) {
     debug_fn.glGetShaderInfoLogFn = fn.glGetShaderInfoLogFn;
@@ -6309,6 +8167,10 @@ void DriverGL::InitializeDebugBindings() {
   if (!debug_fn.glGetShaderivFn) {
     debug_fn.glGetShaderivFn = fn.glGetShaderivFn;
     fn.glGetShaderivFn = Debug_glGetShaderiv;
+  }
+  if (!debug_fn.glGetShaderivRobustANGLEFn) {
+    debug_fn.glGetShaderivRobustANGLEFn = fn.glGetShaderivRobustANGLEFn;
+    fn.glGetShaderivRobustANGLEFn = Debug_glGetShaderivRobustANGLE;
   }
   if (!debug_fn.glGetShaderPrecisionFormatFn) {
     debug_fn.glGetShaderPrecisionFormatFn = fn.glGetShaderPrecisionFormatFn;
@@ -6334,17 +8196,51 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetTexLevelParameterfvFn = fn.glGetTexLevelParameterfvFn;
     fn.glGetTexLevelParameterfvFn = Debug_glGetTexLevelParameterfv;
   }
+  if (!debug_fn.glGetTexLevelParameterfvRobustANGLEFn) {
+    debug_fn.glGetTexLevelParameterfvRobustANGLEFn =
+        fn.glGetTexLevelParameterfvRobustANGLEFn;
+    fn.glGetTexLevelParameterfvRobustANGLEFn =
+        Debug_glGetTexLevelParameterfvRobustANGLE;
+  }
   if (!debug_fn.glGetTexLevelParameterivFn) {
     debug_fn.glGetTexLevelParameterivFn = fn.glGetTexLevelParameterivFn;
     fn.glGetTexLevelParameterivFn = Debug_glGetTexLevelParameteriv;
+  }
+  if (!debug_fn.glGetTexLevelParameterivRobustANGLEFn) {
+    debug_fn.glGetTexLevelParameterivRobustANGLEFn =
+        fn.glGetTexLevelParameterivRobustANGLEFn;
+    fn.glGetTexLevelParameterivRobustANGLEFn =
+        Debug_glGetTexLevelParameterivRobustANGLE;
   }
   if (!debug_fn.glGetTexParameterfvFn) {
     debug_fn.glGetTexParameterfvFn = fn.glGetTexParameterfvFn;
     fn.glGetTexParameterfvFn = Debug_glGetTexParameterfv;
   }
+  if (!debug_fn.glGetTexParameterfvRobustANGLEFn) {
+    debug_fn.glGetTexParameterfvRobustANGLEFn =
+        fn.glGetTexParameterfvRobustANGLEFn;
+    fn.glGetTexParameterfvRobustANGLEFn = Debug_glGetTexParameterfvRobustANGLE;
+  }
+  if (!debug_fn.glGetTexParameterIivRobustANGLEFn) {
+    debug_fn.glGetTexParameterIivRobustANGLEFn =
+        fn.glGetTexParameterIivRobustANGLEFn;
+    fn.glGetTexParameterIivRobustANGLEFn =
+        Debug_glGetTexParameterIivRobustANGLE;
+  }
+  if (!debug_fn.glGetTexParameterIuivRobustANGLEFn) {
+    debug_fn.glGetTexParameterIuivRobustANGLEFn =
+        fn.glGetTexParameterIuivRobustANGLEFn;
+    fn.glGetTexParameterIuivRobustANGLEFn =
+        Debug_glGetTexParameterIuivRobustANGLE;
+  }
   if (!debug_fn.glGetTexParameterivFn) {
     debug_fn.glGetTexParameterivFn = fn.glGetTexParameterivFn;
     fn.glGetTexParameterivFn = Debug_glGetTexParameteriv;
+  }
+  if (!debug_fn.glGetTexParameterivRobustANGLEFn) {
+    debug_fn.glGetTexParameterivRobustANGLEFn =
+        fn.glGetTexParameterivRobustANGLEFn;
+    fn.glGetTexParameterivRobustANGLEFn = Debug_glGetTexParameterivRobustANGLE;
   }
   if (!debug_fn.glGetTransformFeedbackVaryingFn) {
     debug_fn.glGetTransformFeedbackVaryingFn =
@@ -6365,6 +8261,10 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetUniformfvFn = fn.glGetUniformfvFn;
     fn.glGetUniformfvFn = Debug_glGetUniformfv;
   }
+  if (!debug_fn.glGetUniformfvRobustANGLEFn) {
+    debug_fn.glGetUniformfvRobustANGLEFn = fn.glGetUniformfvRobustANGLEFn;
+    fn.glGetUniformfvRobustANGLEFn = Debug_glGetUniformfvRobustANGLE;
+  }
   if (!debug_fn.glGetUniformIndicesFn) {
     debug_fn.glGetUniformIndicesFn = fn.glGetUniformIndicesFn;
     fn.glGetUniformIndicesFn = Debug_glGetUniformIndices;
@@ -6372,6 +8272,10 @@ void DriverGL::InitializeDebugBindings() {
   if (!debug_fn.glGetUniformivFn) {
     debug_fn.glGetUniformivFn = fn.glGetUniformivFn;
     fn.glGetUniformivFn = Debug_glGetUniformiv;
+  }
+  if (!debug_fn.glGetUniformivRobustANGLEFn) {
+    debug_fn.glGetUniformivRobustANGLEFn = fn.glGetUniformivRobustANGLEFn;
+    fn.glGetUniformivRobustANGLEFn = Debug_glGetUniformivRobustANGLE;
   }
   if (!debug_fn.glGetUniformLocationFn) {
     debug_fn.glGetUniformLocationFn = fn.glGetUniformLocationFn;
@@ -6381,17 +8285,49 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetUniformuivFn = fn.glGetUniformuivFn;
     fn.glGetUniformuivFn = Debug_glGetUniformuiv;
   }
+  if (!debug_fn.glGetUniformuivRobustANGLEFn) {
+    debug_fn.glGetUniformuivRobustANGLEFn = fn.glGetUniformuivRobustANGLEFn;
+    fn.glGetUniformuivRobustANGLEFn = Debug_glGetUniformuivRobustANGLE;
+  }
   if (!debug_fn.glGetVertexAttribfvFn) {
     debug_fn.glGetVertexAttribfvFn = fn.glGetVertexAttribfvFn;
     fn.glGetVertexAttribfvFn = Debug_glGetVertexAttribfv;
+  }
+  if (!debug_fn.glGetVertexAttribfvRobustANGLEFn) {
+    debug_fn.glGetVertexAttribfvRobustANGLEFn =
+        fn.glGetVertexAttribfvRobustANGLEFn;
+    fn.glGetVertexAttribfvRobustANGLEFn = Debug_glGetVertexAttribfvRobustANGLE;
+  }
+  if (!debug_fn.glGetVertexAttribIivRobustANGLEFn) {
+    debug_fn.glGetVertexAttribIivRobustANGLEFn =
+        fn.glGetVertexAttribIivRobustANGLEFn;
+    fn.glGetVertexAttribIivRobustANGLEFn =
+        Debug_glGetVertexAttribIivRobustANGLE;
+  }
+  if (!debug_fn.glGetVertexAttribIuivRobustANGLEFn) {
+    debug_fn.glGetVertexAttribIuivRobustANGLEFn =
+        fn.glGetVertexAttribIuivRobustANGLEFn;
+    fn.glGetVertexAttribIuivRobustANGLEFn =
+        Debug_glGetVertexAttribIuivRobustANGLE;
   }
   if (!debug_fn.glGetVertexAttribivFn) {
     debug_fn.glGetVertexAttribivFn = fn.glGetVertexAttribivFn;
     fn.glGetVertexAttribivFn = Debug_glGetVertexAttribiv;
   }
+  if (!debug_fn.glGetVertexAttribivRobustANGLEFn) {
+    debug_fn.glGetVertexAttribivRobustANGLEFn =
+        fn.glGetVertexAttribivRobustANGLEFn;
+    fn.glGetVertexAttribivRobustANGLEFn = Debug_glGetVertexAttribivRobustANGLE;
+  }
   if (!debug_fn.glGetVertexAttribPointervFn) {
     debug_fn.glGetVertexAttribPointervFn = fn.glGetVertexAttribPointervFn;
     fn.glGetVertexAttribPointervFn = Debug_glGetVertexAttribPointerv;
+  }
+  if (!debug_fn.glGetVertexAttribPointervRobustANGLEFn) {
+    debug_fn.glGetVertexAttribPointervRobustANGLEFn =
+        fn.glGetVertexAttribPointervRobustANGLEFn;
+    fn.glGetVertexAttribPointervRobustANGLEFn =
+        Debug_glGetVertexAttribPointervRobustANGLE;
   }
   if (!debug_fn.glHintFn) {
     debug_fn.glHintFn = fn.glHintFn;
@@ -6497,6 +8433,14 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glMemoryBarrierEXTFn = fn.glMemoryBarrierEXTFn;
     fn.glMemoryBarrierEXTFn = Debug_glMemoryBarrierEXT;
   }
+  if (!debug_fn.glObjectLabelFn) {
+    debug_fn.glObjectLabelFn = fn.glObjectLabelFn;
+    fn.glObjectLabelFn = Debug_glObjectLabel;
+  }
+  if (!debug_fn.glObjectPtrLabelFn) {
+    debug_fn.glObjectPtrLabelFn = fn.glObjectPtrLabelFn;
+    fn.glObjectPtrLabelFn = Debug_glObjectPtrLabel;
+  }
   if (!debug_fn.glPathCommandsNVFn) {
     debug_fn.glPathCommandsNVFn = fn.glPathCommandsNVFn;
     fn.glPathCommandsNVFn = Debug_glPathCommandsNV;
@@ -6529,6 +8473,10 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glPolygonOffsetFn = fn.glPolygonOffsetFn;
     fn.glPolygonOffsetFn = Debug_glPolygonOffset;
   }
+  if (!debug_fn.glPopDebugGroupFn) {
+    debug_fn.glPopDebugGroupFn = fn.glPopDebugGroupFn;
+    fn.glPopDebugGroupFn = Debug_glPopDebugGroup;
+  }
   if (!debug_fn.glPopGroupMarkerEXTFn) {
     debug_fn.glPopGroupMarkerEXTFn = fn.glPopGroupMarkerEXTFn;
     fn.glPopGroupMarkerEXTFn = Debug_glPopGroupMarkerEXT;
@@ -6551,6 +8499,10 @@ void DriverGL::InitializeDebugBindings() {
     fn.glProgramPathFragmentInputGenNVFn =
         Debug_glProgramPathFragmentInputGenNV;
   }
+  if (!debug_fn.glPushDebugGroupFn) {
+    debug_fn.glPushDebugGroupFn = fn.glPushDebugGroupFn;
+    fn.glPushDebugGroupFn = Debug_glPushDebugGroup;
+  }
   if (!debug_fn.glPushGroupMarkerEXTFn) {
     debug_fn.glPushGroupMarkerEXTFn = fn.glPushGroupMarkerEXTFn;
     fn.glPushGroupMarkerEXTFn = Debug_glPushGroupMarkerEXT;
@@ -6563,9 +8515,17 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glReadBufferFn = fn.glReadBufferFn;
     fn.glReadBufferFn = Debug_glReadBuffer;
   }
+  if (!debug_fn.glReadnPixelsRobustANGLEFn) {
+    debug_fn.glReadnPixelsRobustANGLEFn = fn.glReadnPixelsRobustANGLEFn;
+    fn.glReadnPixelsRobustANGLEFn = Debug_glReadnPixelsRobustANGLE;
+  }
   if (!debug_fn.glReadPixelsFn) {
     debug_fn.glReadPixelsFn = fn.glReadPixelsFn;
     fn.glReadPixelsFn = Debug_glReadPixels;
+  }
+  if (!debug_fn.glReadPixelsRobustANGLEFn) {
+    debug_fn.glReadPixelsRobustANGLEFn = fn.glReadPixelsRobustANGLEFn;
+    fn.glReadPixelsRobustANGLEFn = Debug_glReadPixelsRobustANGLE;
   }
   if (!debug_fn.glReleaseShaderCompilerFn) {
     debug_fn.glReleaseShaderCompilerFn = fn.glReleaseShaderCompilerFn;
@@ -6615,13 +8575,37 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glSamplerParameterfvFn = fn.glSamplerParameterfvFn;
     fn.glSamplerParameterfvFn = Debug_glSamplerParameterfv;
   }
+  if (!debug_fn.glSamplerParameterfvRobustANGLEFn) {
+    debug_fn.glSamplerParameterfvRobustANGLEFn =
+        fn.glSamplerParameterfvRobustANGLEFn;
+    fn.glSamplerParameterfvRobustANGLEFn =
+        Debug_glSamplerParameterfvRobustANGLE;
+  }
   if (!debug_fn.glSamplerParameteriFn) {
     debug_fn.glSamplerParameteriFn = fn.glSamplerParameteriFn;
     fn.glSamplerParameteriFn = Debug_glSamplerParameteri;
   }
+  if (!debug_fn.glSamplerParameterIivRobustANGLEFn) {
+    debug_fn.glSamplerParameterIivRobustANGLEFn =
+        fn.glSamplerParameterIivRobustANGLEFn;
+    fn.glSamplerParameterIivRobustANGLEFn =
+        Debug_glSamplerParameterIivRobustANGLE;
+  }
+  if (!debug_fn.glSamplerParameterIuivRobustANGLEFn) {
+    debug_fn.glSamplerParameterIuivRobustANGLEFn =
+        fn.glSamplerParameterIuivRobustANGLEFn;
+    fn.glSamplerParameterIuivRobustANGLEFn =
+        Debug_glSamplerParameterIuivRobustANGLE;
+  }
   if (!debug_fn.glSamplerParameterivFn) {
     debug_fn.glSamplerParameterivFn = fn.glSamplerParameterivFn;
     fn.glSamplerParameterivFn = Debug_glSamplerParameteriv;
+  }
+  if (!debug_fn.glSamplerParameterivRobustANGLEFn) {
+    debug_fn.glSamplerParameterivRobustANGLEFn =
+        fn.glSamplerParameterivRobustANGLEFn;
+    fn.glSamplerParameterivRobustANGLEFn =
+        Debug_glSamplerParameterivRobustANGLE;
   }
   if (!debug_fn.glScissorFn) {
     debug_fn.glScissorFn = fn.glScissorFn;
@@ -6717,9 +8701,17 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glTexImage2DFn = fn.glTexImage2DFn;
     fn.glTexImage2DFn = Debug_glTexImage2D;
   }
+  if (!debug_fn.glTexImage2DRobustANGLEFn) {
+    debug_fn.glTexImage2DRobustANGLEFn = fn.glTexImage2DRobustANGLEFn;
+    fn.glTexImage2DRobustANGLEFn = Debug_glTexImage2DRobustANGLE;
+  }
   if (!debug_fn.glTexImage3DFn) {
     debug_fn.glTexImage3DFn = fn.glTexImage3DFn;
     fn.glTexImage3DFn = Debug_glTexImage3D;
+  }
+  if (!debug_fn.glTexImage3DRobustANGLEFn) {
+    debug_fn.glTexImage3DRobustANGLEFn = fn.glTexImage3DRobustANGLEFn;
+    fn.glTexImage3DRobustANGLEFn = Debug_glTexImage3DRobustANGLE;
   }
   if (!debug_fn.glTexParameterfFn) {
     debug_fn.glTexParameterfFn = fn.glTexParameterfFn;
@@ -6729,13 +8721,30 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glTexParameterfvFn = fn.glTexParameterfvFn;
     fn.glTexParameterfvFn = Debug_glTexParameterfv;
   }
+  if (!debug_fn.glTexParameterfvRobustANGLEFn) {
+    debug_fn.glTexParameterfvRobustANGLEFn = fn.glTexParameterfvRobustANGLEFn;
+    fn.glTexParameterfvRobustANGLEFn = Debug_glTexParameterfvRobustANGLE;
+  }
   if (!debug_fn.glTexParameteriFn) {
     debug_fn.glTexParameteriFn = fn.glTexParameteriFn;
     fn.glTexParameteriFn = Debug_glTexParameteri;
   }
+  if (!debug_fn.glTexParameterIivRobustANGLEFn) {
+    debug_fn.glTexParameterIivRobustANGLEFn = fn.glTexParameterIivRobustANGLEFn;
+    fn.glTexParameterIivRobustANGLEFn = Debug_glTexParameterIivRobustANGLE;
+  }
+  if (!debug_fn.glTexParameterIuivRobustANGLEFn) {
+    debug_fn.glTexParameterIuivRobustANGLEFn =
+        fn.glTexParameterIuivRobustANGLEFn;
+    fn.glTexParameterIuivRobustANGLEFn = Debug_glTexParameterIuivRobustANGLE;
+  }
   if (!debug_fn.glTexParameterivFn) {
     debug_fn.glTexParameterivFn = fn.glTexParameterivFn;
     fn.glTexParameterivFn = Debug_glTexParameteriv;
+  }
+  if (!debug_fn.glTexParameterivRobustANGLEFn) {
+    debug_fn.glTexParameterivRobustANGLEFn = fn.glTexParameterivRobustANGLEFn;
+    fn.glTexParameterivRobustANGLEFn = Debug_glTexParameterivRobustANGLE;
   }
   if (!debug_fn.glTexStorage2DEXTFn) {
     debug_fn.glTexStorage2DEXTFn = fn.glTexStorage2DEXTFn;
@@ -6749,9 +8758,17 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glTexSubImage2DFn = fn.glTexSubImage2DFn;
     fn.glTexSubImage2DFn = Debug_glTexSubImage2D;
   }
+  if (!debug_fn.glTexSubImage2DRobustANGLEFn) {
+    debug_fn.glTexSubImage2DRobustANGLEFn = fn.glTexSubImage2DRobustANGLEFn;
+    fn.glTexSubImage2DRobustANGLEFn = Debug_glTexSubImage2DRobustANGLE;
+  }
   if (!debug_fn.glTexSubImage3DFn) {
     debug_fn.glTexSubImage3DFn = fn.glTexSubImage3DFn;
     fn.glTexSubImage3DFn = Debug_glTexSubImage3D;
+  }
+  if (!debug_fn.glTexSubImage3DRobustANGLEFn) {
+    debug_fn.glTexSubImage3DRobustANGLEFn = fn.glTexSubImage3DRobustANGLEFn;
+    fn.glTexSubImage3DRobustANGLEFn = Debug_glTexSubImage3DRobustANGLE;
   }
   if (!debug_fn.glTransformFeedbackVaryingsFn) {
     debug_fn.glTransformFeedbackVaryingsFn = fn.glTransformFeedbackVaryingsFn;
@@ -7413,6 +9430,30 @@ void GLApiBase::glCullFaceFn(GLenum mode) {
   driver_->fn.glCullFaceFn(mode);
 }
 
+void GLApiBase::glDebugMessageCallbackFn(GLDEBUGPROC callback,
+                                         const void* userParam) {
+  driver_->fn.glDebugMessageCallbackFn(callback, userParam);
+}
+
+void GLApiBase::glDebugMessageControlFn(GLenum source,
+                                        GLenum type,
+                                        GLenum severity,
+                                        GLsizei count,
+                                        const GLuint* ids,
+                                        GLboolean enabled) {
+  driver_->fn.glDebugMessageControlFn(source, type, severity, count, ids,
+                                      enabled);
+}
+
+void GLApiBase::glDebugMessageInsertFn(GLenum source,
+                                       GLenum type,
+                                       GLuint id,
+                                       GLenum severity,
+                                       GLsizei length,
+                                       const char* buf) {
+  driver_->fn.glDebugMessageInsertFn(source, type, id, severity, length, buf);
+}
+
 void GLApiBase::glDeleteBuffersARBFn(GLsizei n, const GLuint* buffers) {
   driver_->fn.glDeleteBuffersARBFn(n, buffers);
 }
@@ -7729,6 +9770,16 @@ void GLApiBase::glGetActiveUniformBlockivFn(GLuint program,
                                           params);
 }
 
+void GLApiBase::glGetActiveUniformBlockivRobustANGLEFn(GLuint program,
+                                                       GLuint uniformBlockIndex,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint* params) {
+  driver_->fn.glGetActiveUniformBlockivRobustANGLEFn(
+      program, uniformBlockIndex, pname, bufSize, length, params);
+}
+
 void GLApiBase::glGetActiveUniformBlockNameFn(GLuint program,
                                               GLuint uniformBlockIndex,
                                               GLsizei bufSize,
@@ -7758,14 +9809,69 @@ GLint GLApiBase::glGetAttribLocationFn(GLuint program, const char* name) {
   return driver_->fn.glGetAttribLocationFn(program, name);
 }
 
+void GLApiBase::glGetBooleani_vRobustANGLEFn(GLenum target,
+                                             GLuint index,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLboolean* data) {
+  driver_->fn.glGetBooleani_vRobustANGLEFn(target, index, bufSize, length,
+                                           data);
+}
+
 void GLApiBase::glGetBooleanvFn(GLenum pname, GLboolean* params) {
   driver_->fn.glGetBooleanvFn(pname, params);
+}
+
+void GLApiBase::glGetBooleanvRobustANGLEFn(GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           GLboolean* data) {
+  driver_->fn.glGetBooleanvRobustANGLEFn(pname, bufSize, length, data);
+}
+
+void GLApiBase::glGetBufferParameteri64vRobustANGLEFn(GLenum target,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint64* params) {
+  driver_->fn.glGetBufferParameteri64vRobustANGLEFn(target, pname, bufSize,
+                                                    length, params);
 }
 
 void GLApiBase::glGetBufferParameterivFn(GLenum target,
                                          GLenum pname,
                                          GLint* params) {
   driver_->fn.glGetBufferParameterivFn(target, pname, params);
+}
+
+void GLApiBase::glGetBufferParameterivRobustANGLEFn(GLenum target,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    GLsizei* length,
+                                                    GLint* params) {
+  driver_->fn.glGetBufferParameterivRobustANGLEFn(target, pname, bufSize,
+                                                  length, params);
+}
+
+void GLApiBase::glGetBufferPointervRobustANGLEFn(GLenum target,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 void** params) {
+  driver_->fn.glGetBufferPointervRobustANGLEFn(target, pname, bufSize, length,
+                                               params);
+}
+
+void GLApiBase::glGetDebugMessageLogFn(GLuint count,
+                                       GLsizei bufSize,
+                                       GLenum* sources,
+                                       GLenum* types,
+                                       GLuint* ids,
+                                       GLenum* severities,
+                                       GLsizei* lengths,
+                                       char* messageLog) {
+  driver_->fn.glGetDebugMessageLogFn(count, bufSize, sources, types, ids,
+                                     severities, lengths, messageLog);
 }
 
 GLenum GLApiBase::glGetErrorFn(void) {
@@ -7778,6 +9884,13 @@ void GLApiBase::glGetFenceivNVFn(GLuint fence, GLenum pname, GLint* params) {
 
 void GLApiBase::glGetFloatvFn(GLenum pname, GLfloat* params) {
   driver_->fn.glGetFloatvFn(pname, params);
+}
+
+void GLApiBase::glGetFloatvRobustANGLEFn(GLenum pname,
+                                         GLsizei bufSize,
+                                         GLsizei* length,
+                                         GLfloat* data) {
+  driver_->fn.glGetFloatvRobustANGLEFn(pname, bufSize, length, data);
 }
 
 GLint GLApiBase::glGetFragDataIndexFn(GLuint program, const char* name) {
@@ -7796,6 +9909,26 @@ void GLApiBase::glGetFramebufferAttachmentParameterivEXTFn(GLenum target,
                                                          pname, params);
 }
 
+void GLApiBase::glGetFramebufferAttachmentParameterivRobustANGLEFn(
+    GLenum target,
+    GLenum attachment,
+    GLenum pname,
+    GLsizei bufSize,
+    GLsizei* length,
+    GLint* params) {
+  driver_->fn.glGetFramebufferAttachmentParameterivRobustANGLEFn(
+      target, attachment, pname, bufSize, length, params);
+}
+
+void GLApiBase::glGetFramebufferParameterivRobustANGLEFn(GLenum target,
+                                                         GLenum pname,
+                                                         GLsizei bufSize,
+                                                         GLsizei* length,
+                                                         GLint* params) {
+  driver_->fn.glGetFramebufferParameterivRobustANGLEFn(target, pname, bufSize,
+                                                       length, params);
+}
+
 GLenum GLApiBase::glGetGraphicsResetStatusARBFn(void) {
   return driver_->fn.glGetGraphicsResetStatusARBFn();
 }
@@ -7806,16 +9939,48 @@ void GLApiBase::glGetInteger64i_vFn(GLenum target,
   driver_->fn.glGetInteger64i_vFn(target, index, data);
 }
 
+void GLApiBase::glGetInteger64i_vRobustANGLEFn(GLenum target,
+                                               GLuint index,
+                                               GLsizei bufSize,
+                                               GLsizei* length,
+                                               GLint64* data) {
+  driver_->fn.glGetInteger64i_vRobustANGLEFn(target, index, bufSize, length,
+                                             data);
+}
+
 void GLApiBase::glGetInteger64vFn(GLenum pname, GLint64* params) {
   driver_->fn.glGetInteger64vFn(pname, params);
+}
+
+void GLApiBase::glGetInteger64vRobustANGLEFn(GLenum pname,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLint64* data) {
+  driver_->fn.glGetInteger64vRobustANGLEFn(pname, bufSize, length, data);
 }
 
 void GLApiBase::glGetIntegeri_vFn(GLenum target, GLuint index, GLint* data) {
   driver_->fn.glGetIntegeri_vFn(target, index, data);
 }
 
+void GLApiBase::glGetIntegeri_vRobustANGLEFn(GLenum target,
+                                             GLuint index,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLint* data) {
+  driver_->fn.glGetIntegeri_vRobustANGLEFn(target, index, bufSize, length,
+                                           data);
+}
+
 void GLApiBase::glGetIntegervFn(GLenum pname, GLint* params) {
   driver_->fn.glGetIntegervFn(pname, params);
+}
+
+void GLApiBase::glGetIntegervRobustANGLEFn(GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           GLint* data) {
+  driver_->fn.glGetIntegervRobustANGLEFn(pname, bufSize, length, data);
 }
 
 void GLApiBase::glGetInternalformativFn(GLenum target,
@@ -7825,6 +9990,79 @@ void GLApiBase::glGetInternalformativFn(GLenum target,
                                         GLint* params) {
   driver_->fn.glGetInternalformativFn(target, internalformat, pname, bufSize,
                                       params);
+}
+
+void GLApiBase::glGetInternalformativRobustANGLEFn(GLenum target,
+                                                   GLenum internalformat,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLint* params) {
+  driver_->fn.glGetInternalformativRobustANGLEFn(target, internalformat, pname,
+                                                 bufSize, length, params);
+}
+
+void GLApiBase::glGetMultisamplefvRobustANGLEFn(GLenum pname,
+                                                GLuint index,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                GLfloat* val) {
+  driver_->fn.glGetMultisamplefvRobustANGLEFn(pname, index, bufSize, length,
+                                              val);
+}
+
+void GLApiBase::glGetnUniformfvRobustANGLEFn(GLuint program,
+                                             GLint location,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLfloat* params) {
+  driver_->fn.glGetnUniformfvRobustANGLEFn(program, location, bufSize, length,
+                                           params);
+}
+
+void GLApiBase::glGetnUniformivRobustANGLEFn(GLuint program,
+                                             GLint location,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLint* params) {
+  driver_->fn.glGetnUniformivRobustANGLEFn(program, location, bufSize, length,
+                                           params);
+}
+
+void GLApiBase::glGetnUniformuivRobustANGLEFn(GLuint program,
+                                              GLint location,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLuint* params) {
+  driver_->fn.glGetnUniformuivRobustANGLEFn(program, location, bufSize, length,
+                                            params);
+}
+
+void GLApiBase::glGetObjectLabelFn(GLenum identifier,
+                                   GLuint name,
+                                   GLsizei bufSize,
+                                   GLsizei* length,
+                                   char* label) {
+  driver_->fn.glGetObjectLabelFn(identifier, name, bufSize, length, label);
+}
+
+void GLApiBase::glGetObjectPtrLabelFn(void* ptr,
+                                      GLsizei bufSize,
+                                      GLsizei* length,
+                                      char* label) {
+  driver_->fn.glGetObjectPtrLabelFn(ptr, bufSize, length, label);
+}
+
+void GLApiBase::glGetPointervFn(GLenum pname, void** params) {
+  driver_->fn.glGetPointervFn(pname, params);
+}
+
+void GLApiBase::glGetPointervRobustANGLERobustANGLEFn(GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      void** params) {
+  driver_->fn.glGetPointervRobustANGLERobustANGLEFn(pname, bufSize, length,
+                                                    params);
 }
 
 void GLApiBase::glGetProgramBinaryFn(GLuint program,
@@ -7851,8 +10089,27 @@ void GLApiBase::glGetProgramInterfaceivFn(GLuint program,
                                         params);
 }
 
+void GLApiBase::glGetProgramInterfaceivRobustANGLEFn(GLuint program,
+                                                     GLenum programInterface,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     GLsizei* length,
+                                                     GLint* params) {
+  driver_->fn.glGetProgramInterfaceivRobustANGLEFn(
+      program, programInterface, pname, bufSize, length, params);
+}
+
 void GLApiBase::glGetProgramivFn(GLuint program, GLenum pname, GLint* params) {
   driver_->fn.glGetProgramivFn(program, pname, params);
+}
+
+void GLApiBase::glGetProgramivRobustANGLEFn(GLuint program,
+                                            GLenum pname,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            GLint* params) {
+  driver_->fn.glGetProgramivRobustANGLEFn(program, pname, bufSize, length,
+                                          params);
 }
 
 void GLApiBase::glGetProgramResourceivFn(GLuint program,
@@ -7889,14 +10146,40 @@ void GLApiBase::glGetQueryivFn(GLenum target, GLenum pname, GLint* params) {
   driver_->fn.glGetQueryivFn(target, pname, params);
 }
 
+void GLApiBase::glGetQueryivRobustANGLEFn(GLenum target,
+                                          GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          GLint* params) {
+  driver_->fn.glGetQueryivRobustANGLEFn(target, pname, bufSize, length, params);
+}
+
 void GLApiBase::glGetQueryObjecti64vFn(GLuint id,
                                        GLenum pname,
                                        GLint64* params) {
   driver_->fn.glGetQueryObjecti64vFn(id, pname, params);
 }
 
+void GLApiBase::glGetQueryObjecti64vRobustANGLEFn(GLuint id,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint64* params) {
+  driver_->fn.glGetQueryObjecti64vRobustANGLEFn(id, pname, bufSize, length,
+                                                params);
+}
+
 void GLApiBase::glGetQueryObjectivFn(GLuint id, GLenum pname, GLint* params) {
   driver_->fn.glGetQueryObjectivFn(id, pname, params);
+}
+
+void GLApiBase::glGetQueryObjectivRobustANGLEFn(GLuint id,
+                                                GLenum pname,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                GLint* params) {
+  driver_->fn.glGetQueryObjectivRobustANGLEFn(id, pname, bufSize, length,
+                                              params);
 }
 
 void GLApiBase::glGetQueryObjectui64vFn(GLuint id,
@@ -7905,8 +10188,26 @@ void GLApiBase::glGetQueryObjectui64vFn(GLuint id,
   driver_->fn.glGetQueryObjectui64vFn(id, pname, params);
 }
 
+void GLApiBase::glGetQueryObjectui64vRobustANGLEFn(GLuint id,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLuint64* params) {
+  driver_->fn.glGetQueryObjectui64vRobustANGLEFn(id, pname, bufSize, length,
+                                                 params);
+}
+
 void GLApiBase::glGetQueryObjectuivFn(GLuint id, GLenum pname, GLuint* params) {
   driver_->fn.glGetQueryObjectuivFn(id, pname, params);
+}
+
+void GLApiBase::glGetQueryObjectuivRobustANGLEFn(GLuint id,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLuint* params) {
+  driver_->fn.glGetQueryObjectuivRobustANGLEFn(id, pname, bufSize, length,
+                                               params);
 }
 
 void GLApiBase::glGetRenderbufferParameterivEXTFn(GLenum target,
@@ -7915,16 +10216,61 @@ void GLApiBase::glGetRenderbufferParameterivEXTFn(GLenum target,
   driver_->fn.glGetRenderbufferParameterivEXTFn(target, pname, params);
 }
 
+void GLApiBase::glGetRenderbufferParameterivRobustANGLEFn(GLenum target,
+                                                          GLenum pname,
+                                                          GLsizei bufSize,
+                                                          GLsizei* length,
+                                                          GLint* params) {
+  driver_->fn.glGetRenderbufferParameterivRobustANGLEFn(target, pname, bufSize,
+                                                        length, params);
+}
+
 void GLApiBase::glGetSamplerParameterfvFn(GLuint sampler,
                                           GLenum pname,
                                           GLfloat* params) {
   driver_->fn.glGetSamplerParameterfvFn(sampler, pname, params);
 }
 
+void GLApiBase::glGetSamplerParameterfvRobustANGLEFn(GLuint sampler,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     GLsizei* length,
+                                                     GLfloat* params) {
+  driver_->fn.glGetSamplerParameterfvRobustANGLEFn(sampler, pname, bufSize,
+                                                   length, params);
+}
+
+void GLApiBase::glGetSamplerParameterIivRobustANGLEFn(GLuint sampler,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint* params) {
+  driver_->fn.glGetSamplerParameterIivRobustANGLEFn(sampler, pname, bufSize,
+                                                    length, params);
+}
+
+void GLApiBase::glGetSamplerParameterIuivRobustANGLEFn(GLuint sampler,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLuint* params) {
+  driver_->fn.glGetSamplerParameterIuivRobustANGLEFn(sampler, pname, bufSize,
+                                                     length, params);
+}
+
 void GLApiBase::glGetSamplerParameterivFn(GLuint sampler,
                                           GLenum pname,
                                           GLint* params) {
   driver_->fn.glGetSamplerParameterivFn(sampler, pname, params);
+}
+
+void GLApiBase::glGetSamplerParameterivRobustANGLEFn(GLuint sampler,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     GLsizei* length,
+                                                     GLint* params) {
+  driver_->fn.glGetSamplerParameterivRobustANGLEFn(sampler, pname, bufSize,
+                                                   length, params);
 }
 
 void GLApiBase::glGetShaderInfoLogFn(GLuint shader,
@@ -7936,6 +10282,15 @@ void GLApiBase::glGetShaderInfoLogFn(GLuint shader,
 
 void GLApiBase::glGetShaderivFn(GLuint shader, GLenum pname, GLint* params) {
   driver_->fn.glGetShaderivFn(shader, pname, params);
+}
+
+void GLApiBase::glGetShaderivRobustANGLEFn(GLuint shader,
+                                           GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           GLint* params) {
+  driver_->fn.glGetShaderivRobustANGLEFn(shader, pname, bufSize, length,
+                                         params);
 }
 
 void GLApiBase::glGetShaderPrecisionFormatFn(GLenum shadertype,
@@ -7976,11 +10331,31 @@ void GLApiBase::glGetTexLevelParameterfvFn(GLenum target,
   driver_->fn.glGetTexLevelParameterfvFn(target, level, pname, params);
 }
 
+void GLApiBase::glGetTexLevelParameterfvRobustANGLEFn(GLenum target,
+                                                      GLint level,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLfloat* params) {
+  driver_->fn.glGetTexLevelParameterfvRobustANGLEFn(target, level, pname,
+                                                    bufSize, length, params);
+}
+
 void GLApiBase::glGetTexLevelParameterivFn(GLenum target,
                                            GLint level,
                                            GLenum pname,
                                            GLint* params) {
   driver_->fn.glGetTexLevelParameterivFn(target, level, pname, params);
+}
+
+void GLApiBase::glGetTexLevelParameterivRobustANGLEFn(GLenum target,
+                                                      GLint level,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint* params) {
+  driver_->fn.glGetTexLevelParameterivRobustANGLEFn(target, level, pname,
+                                                    bufSize, length, params);
 }
 
 void GLApiBase::glGetTexParameterfvFn(GLenum target,
@@ -7989,10 +10364,46 @@ void GLApiBase::glGetTexParameterfvFn(GLenum target,
   driver_->fn.glGetTexParameterfvFn(target, pname, params);
 }
 
+void GLApiBase::glGetTexParameterfvRobustANGLEFn(GLenum target,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLfloat* params) {
+  driver_->fn.glGetTexParameterfvRobustANGLEFn(target, pname, bufSize, length,
+                                               params);
+}
+
+void GLApiBase::glGetTexParameterIivRobustANGLEFn(GLenum target,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint* params) {
+  driver_->fn.glGetTexParameterIivRobustANGLEFn(target, pname, bufSize, length,
+                                                params);
+}
+
+void GLApiBase::glGetTexParameterIuivRobustANGLEFn(GLenum target,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLuint* params) {
+  driver_->fn.glGetTexParameterIuivRobustANGLEFn(target, pname, bufSize, length,
+                                                 params);
+}
+
 void GLApiBase::glGetTexParameterivFn(GLenum target,
                                       GLenum pname,
                                       GLint* params) {
   driver_->fn.glGetTexParameterivFn(target, pname, params);
+}
+
+void GLApiBase::glGetTexParameterivRobustANGLEFn(GLenum target,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLint* params) {
+  driver_->fn.glGetTexParameterivRobustANGLEFn(target, pname, bufSize, length,
+                                               params);
 }
 
 void GLApiBase::glGetTransformFeedbackVaryingFn(GLuint program,
@@ -8025,6 +10436,15 @@ void GLApiBase::glGetUniformfvFn(GLuint program,
   driver_->fn.glGetUniformfvFn(program, location, params);
 }
 
+void GLApiBase::glGetUniformfvRobustANGLEFn(GLuint program,
+                                            GLint location,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            GLfloat* params) {
+  driver_->fn.glGetUniformfvRobustANGLEFn(program, location, bufSize, length,
+                                          params);
+}
+
 void GLApiBase::glGetUniformIndicesFn(GLuint program,
                                       GLsizei uniformCount,
                                       const char* const* uniformNames,
@@ -8039,6 +10459,15 @@ void GLApiBase::glGetUniformivFn(GLuint program,
   driver_->fn.glGetUniformivFn(program, location, params);
 }
 
+void GLApiBase::glGetUniformivRobustANGLEFn(GLuint program,
+                                            GLint location,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            GLint* params) {
+  driver_->fn.glGetUniformivRobustANGLEFn(program, location, bufSize, length,
+                                          params);
+}
+
 GLint GLApiBase::glGetUniformLocationFn(GLuint program, const char* name) {
   return driver_->fn.glGetUniformLocationFn(program, name);
 }
@@ -8049,10 +10478,46 @@ void GLApiBase::glGetUniformuivFn(GLuint program,
   driver_->fn.glGetUniformuivFn(program, location, params);
 }
 
+void GLApiBase::glGetUniformuivRobustANGLEFn(GLuint program,
+                                             GLint location,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLuint* params) {
+  driver_->fn.glGetUniformuivRobustANGLEFn(program, location, bufSize, length,
+                                           params);
+}
+
 void GLApiBase::glGetVertexAttribfvFn(GLuint index,
                                       GLenum pname,
                                       GLfloat* params) {
   driver_->fn.glGetVertexAttribfvFn(index, pname, params);
+}
+
+void GLApiBase::glGetVertexAttribfvRobustANGLEFn(GLuint index,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLfloat* params) {
+  driver_->fn.glGetVertexAttribfvRobustANGLEFn(index, pname, bufSize, length,
+                                               params);
+}
+
+void GLApiBase::glGetVertexAttribIivRobustANGLEFn(GLuint index,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint* params) {
+  driver_->fn.glGetVertexAttribIivRobustANGLEFn(index, pname, bufSize, length,
+                                                params);
+}
+
+void GLApiBase::glGetVertexAttribIuivRobustANGLEFn(GLuint index,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLuint* params) {
+  driver_->fn.glGetVertexAttribIuivRobustANGLEFn(index, pname, bufSize, length,
+                                                 params);
 }
 
 void GLApiBase::glGetVertexAttribivFn(GLuint index,
@@ -8061,10 +10526,28 @@ void GLApiBase::glGetVertexAttribivFn(GLuint index,
   driver_->fn.glGetVertexAttribivFn(index, pname, params);
 }
 
+void GLApiBase::glGetVertexAttribivRobustANGLEFn(GLuint index,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLint* params) {
+  driver_->fn.glGetVertexAttribivRobustANGLEFn(index, pname, bufSize, length,
+                                               params);
+}
+
 void GLApiBase::glGetVertexAttribPointervFn(GLuint index,
                                             GLenum pname,
                                             void** pointer) {
   driver_->fn.glGetVertexAttribPointervFn(index, pname, pointer);
+}
+
+void GLApiBase::glGetVertexAttribPointervRobustANGLEFn(GLuint index,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       void** pointer) {
+  driver_->fn.glGetVertexAttribPointervRobustANGLEFn(index, pname, bufSize,
+                                                     length, pointer);
 }
 
 void GLApiBase::glHintFn(GLenum target, GLenum mode) {
@@ -8183,6 +10666,19 @@ void GLApiBase::glMemoryBarrierEXTFn(GLbitfield barriers) {
   driver_->fn.glMemoryBarrierEXTFn(barriers);
 }
 
+void GLApiBase::glObjectLabelFn(GLenum identifier,
+                                GLuint name,
+                                GLsizei length,
+                                const char* label) {
+  driver_->fn.glObjectLabelFn(identifier, name, length, label);
+}
+
+void GLApiBase::glObjectPtrLabelFn(void* ptr,
+                                   GLsizei length,
+                                   const char* label) {
+  driver_->fn.glObjectPtrLabelFn(ptr, length, label);
+}
+
 void GLApiBase::glPathCommandsNVFn(GLuint path,
                                    GLsizei numCommands,
                                    const GLubyte* commands,
@@ -8221,6 +10717,10 @@ void GLApiBase::glPolygonOffsetFn(GLfloat factor, GLfloat units) {
   driver_->fn.glPolygonOffsetFn(factor, units);
 }
 
+void GLApiBase::glPopDebugGroupFn() {
+  driver_->fn.glPopDebugGroupFn();
+}
+
 void GLApiBase::glPopGroupMarkerEXTFn(void) {
   driver_->fn.glPopGroupMarkerEXTFn();
 }
@@ -8251,6 +10751,13 @@ void GLApiBase::glProgramPathFragmentInputGenNVFn(GLuint program,
                                                 components, coeffs);
 }
 
+void GLApiBase::glPushDebugGroupFn(GLenum source,
+                                   GLuint id,
+                                   GLsizei length,
+                                   const char* message) {
+  driver_->fn.glPushDebugGroupFn(source, id, length, message);
+}
+
 void GLApiBase::glPushGroupMarkerEXTFn(GLsizei length, const char* marker) {
   driver_->fn.glPushGroupMarkerEXTFn(length, marker);
 }
@@ -8263,6 +10770,19 @@ void GLApiBase::glReadBufferFn(GLenum src) {
   driver_->fn.glReadBufferFn(src);
 }
 
+void GLApiBase::glReadnPixelsRobustANGLEFn(GLint x,
+                                           GLint y,
+                                           GLsizei width,
+                                           GLsizei height,
+                                           GLenum format,
+                                           GLenum type,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           void* data) {
+  driver_->fn.glReadnPixelsRobustANGLEFn(x, y, width, height, format, type,
+                                         bufSize, length, data);
+}
+
 void GLApiBase::glReadPixelsFn(GLint x,
                                GLint y,
                                GLsizei width,
@@ -8271,6 +10791,19 @@ void GLApiBase::glReadPixelsFn(GLint x,
                                GLenum type,
                                void* pixels) {
   driver_->fn.glReadPixelsFn(x, y, width, height, format, type, pixels);
+}
+
+void GLApiBase::glReadPixelsRobustANGLEFn(GLint x,
+                                          GLint y,
+                                          GLsizei width,
+                                          GLsizei height,
+                                          GLenum format,
+                                          GLenum type,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          void* pixels) {
+  driver_->fn.glReadPixelsRobustANGLEFn(x, y, width, height, format, type,
+                                        bufSize, length, pixels);
 }
 
 void GLApiBase::glReleaseShaderCompilerFn(void) {
@@ -8340,16 +10873,46 @@ void GLApiBase::glSamplerParameterfvFn(GLuint sampler,
   driver_->fn.glSamplerParameterfvFn(sampler, pname, params);
 }
 
+void GLApiBase::glSamplerParameterfvRobustANGLEFn(GLuint sampler,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  const GLfloat* param) {
+  driver_->fn.glSamplerParameterfvRobustANGLEFn(sampler, pname, bufSize, param);
+}
+
 void GLApiBase::glSamplerParameteriFn(GLuint sampler,
                                       GLenum pname,
                                       GLint param) {
   driver_->fn.glSamplerParameteriFn(sampler, pname, param);
 }
 
+void GLApiBase::glSamplerParameterIivRobustANGLEFn(GLuint sampler,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   const GLint* param) {
+  driver_->fn.glSamplerParameterIivRobustANGLEFn(sampler, pname, bufSize,
+                                                 param);
+}
+
+void GLApiBase::glSamplerParameterIuivRobustANGLEFn(GLuint sampler,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    const GLuint* param) {
+  driver_->fn.glSamplerParameterIuivRobustANGLEFn(sampler, pname, bufSize,
+                                                  param);
+}
+
 void GLApiBase::glSamplerParameterivFn(GLuint sampler,
                                        GLenum pname,
                                        const GLint* params) {
   driver_->fn.glSamplerParameterivFn(sampler, pname, params);
+}
+
+void GLApiBase::glSamplerParameterivRobustANGLEFn(GLuint sampler,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  const GLint* param) {
+  driver_->fn.glSamplerParameterivRobustANGLEFn(sampler, pname, bufSize, param);
 }
 
 void GLApiBase::glScissorFn(GLint x, GLint y, GLsizei width, GLsizei height) {
@@ -8514,6 +11077,21 @@ void GLApiBase::glTexImage2DFn(GLenum target,
                              border, format, type, pixels);
 }
 
+void GLApiBase::glTexImage2DRobustANGLEFn(GLenum target,
+                                          GLint level,
+                                          GLint internalformat,
+                                          GLsizei width,
+                                          GLsizei height,
+                                          GLint border,
+                                          GLenum format,
+                                          GLenum type,
+                                          GLsizei bufSize,
+                                          const void* pixels) {
+  driver_->fn.glTexImage2DRobustANGLEFn(target, level, internalformat, width,
+                                        height, border, format, type, bufSize,
+                                        pixels);
+}
+
 void GLApiBase::glTexImage3DFn(GLenum target,
                                GLint level,
                                GLint internalformat,
@@ -8528,6 +11106,22 @@ void GLApiBase::glTexImage3DFn(GLenum target,
                              depth, border, format, type, pixels);
 }
 
+void GLApiBase::glTexImage3DRobustANGLEFn(GLenum target,
+                                          GLint level,
+                                          GLint internalformat,
+                                          GLsizei width,
+                                          GLsizei height,
+                                          GLsizei depth,
+                                          GLint border,
+                                          GLenum format,
+                                          GLenum type,
+                                          GLsizei bufSize,
+                                          const void* pixels) {
+  driver_->fn.glTexImage3DRobustANGLEFn(target, level, internalformat, width,
+                                        height, depth, border, format, type,
+                                        bufSize, pixels);
+}
+
 void GLApiBase::glTexParameterfFn(GLenum target, GLenum pname, GLfloat param) {
   driver_->fn.glTexParameterfFn(target, pname, param);
 }
@@ -8538,14 +11132,42 @@ void GLApiBase::glTexParameterfvFn(GLenum target,
   driver_->fn.glTexParameterfvFn(target, pname, params);
 }
 
+void GLApiBase::glTexParameterfvRobustANGLEFn(GLenum target,
+                                              GLenum pname,
+                                              GLsizei bufSize,
+                                              const GLfloat* params) {
+  driver_->fn.glTexParameterfvRobustANGLEFn(target, pname, bufSize, params);
+}
+
 void GLApiBase::glTexParameteriFn(GLenum target, GLenum pname, GLint param) {
   driver_->fn.glTexParameteriFn(target, pname, param);
+}
+
+void GLApiBase::glTexParameterIivRobustANGLEFn(GLenum target,
+                                               GLenum pname,
+                                               GLsizei bufSize,
+                                               const GLint* params) {
+  driver_->fn.glTexParameterIivRobustANGLEFn(target, pname, bufSize, params);
+}
+
+void GLApiBase::glTexParameterIuivRobustANGLEFn(GLenum target,
+                                                GLenum pname,
+                                                GLsizei bufSize,
+                                                const GLuint* params) {
+  driver_->fn.glTexParameterIuivRobustANGLEFn(target, pname, bufSize, params);
 }
 
 void GLApiBase::glTexParameterivFn(GLenum target,
                                    GLenum pname,
                                    const GLint* params) {
   driver_->fn.glTexParameterivFn(target, pname, params);
+}
+
+void GLApiBase::glTexParameterivRobustANGLEFn(GLenum target,
+                                              GLenum pname,
+                                              GLsizei bufSize,
+                                              const GLint* params) {
+  driver_->fn.glTexParameterivRobustANGLEFn(target, pname, bufSize, params);
 }
 
 void GLApiBase::glTexStorage2DEXTFn(GLenum target,
@@ -8580,6 +11202,21 @@ void GLApiBase::glTexSubImage2DFn(GLenum target,
                                 format, type, pixels);
 }
 
+void GLApiBase::glTexSubImage2DRobustANGLEFn(GLenum target,
+                                             GLint level,
+                                             GLint xoffset,
+                                             GLint yoffset,
+                                             GLsizei width,
+                                             GLsizei height,
+                                             GLenum format,
+                                             GLenum type,
+                                             GLsizei bufSize,
+                                             const void* pixels) {
+  driver_->fn.glTexSubImage2DRobustANGLEFn(target, level, xoffset, yoffset,
+                                           width, height, format, type, bufSize,
+                                           pixels);
+}
+
 void GLApiBase::glTexSubImage3DFn(GLenum target,
                                   GLint level,
                                   GLint xoffset,
@@ -8593,6 +11230,23 @@ void GLApiBase::glTexSubImage3DFn(GLenum target,
                                   const void* pixels) {
   driver_->fn.glTexSubImage3DFn(target, level, xoffset, yoffset, zoffset, width,
                                 height, depth, format, type, pixels);
+}
+
+void GLApiBase::glTexSubImage3DRobustANGLEFn(GLenum target,
+                                             GLint level,
+                                             GLint xoffset,
+                                             GLint yoffset,
+                                             GLint zoffset,
+                                             GLsizei width,
+                                             GLsizei height,
+                                             GLsizei depth,
+                                             GLenum format,
+                                             GLenum type,
+                                             GLsizei bufSize,
+                                             const void* pixels) {
+  driver_->fn.glTexSubImage3DRobustANGLEFn(target, level, xoffset, yoffset,
+                                           zoffset, width, height, depth,
+                                           format, type, bufSize, pixels);
 }
 
 void GLApiBase::glTransformFeedbackVaryingsFn(GLuint program,
@@ -9410,6 +12064,32 @@ void TraceGLApi::glCullFaceFn(GLenum mode) {
   gl_api_->glCullFaceFn(mode);
 }
 
+void TraceGLApi::glDebugMessageCallbackFn(GLDEBUGPROC callback,
+                                          const void* userParam) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glDebugMessageCallback")
+  gl_api_->glDebugMessageCallbackFn(callback, userParam);
+}
+
+void TraceGLApi::glDebugMessageControlFn(GLenum source,
+                                         GLenum type,
+                                         GLenum severity,
+                                         GLsizei count,
+                                         const GLuint* ids,
+                                         GLboolean enabled) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glDebugMessageControl")
+  gl_api_->glDebugMessageControlFn(source, type, severity, count, ids, enabled);
+}
+
+void TraceGLApi::glDebugMessageInsertFn(GLenum source,
+                                        GLenum type,
+                                        GLuint id,
+                                        GLenum severity,
+                                        GLsizei length,
+                                        const char* buf) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glDebugMessageInsert")
+  gl_api_->glDebugMessageInsertFn(source, type, id, severity, length, buf);
+}
+
 void TraceGLApi::glDeleteBuffersARBFn(GLsizei n, const GLuint* buffers) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glDeleteBuffersARB")
   gl_api_->glDeleteBuffersARBFn(n, buffers);
@@ -9794,6 +12474,19 @@ void TraceGLApi::glGetActiveUniformBlockivFn(GLuint program,
                                        params);
 }
 
+void TraceGLApi::glGetActiveUniformBlockivRobustANGLEFn(
+    GLuint program,
+    GLuint uniformBlockIndex,
+    GLenum pname,
+    GLsizei bufSize,
+    GLsizei* length,
+    GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetActiveUniformBlockivRobustANGLE")
+  gl_api_->glGetActiveUniformBlockivRobustANGLEFn(
+      program, uniformBlockIndex, pname, bufSize, length, params);
+}
+
 void TraceGLApi::glGetActiveUniformBlockNameFn(GLuint program,
                                                GLuint uniformBlockIndex,
                                                GLsizei bufSize,
@@ -9828,9 +12521,37 @@ GLint TraceGLApi::glGetAttribLocationFn(GLuint program, const char* name) {
   return gl_api_->glGetAttribLocationFn(program, name);
 }
 
+void TraceGLApi::glGetBooleani_vRobustANGLEFn(GLenum target,
+                                              GLuint index,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLboolean* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetBooleani_vRobustANGLE")
+  gl_api_->glGetBooleani_vRobustANGLEFn(target, index, bufSize, length, data);
+}
+
 void TraceGLApi::glGetBooleanvFn(GLenum pname, GLboolean* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetBooleanv")
   gl_api_->glGetBooleanvFn(pname, params);
+}
+
+void TraceGLApi::glGetBooleanvRobustANGLEFn(GLenum pname,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            GLboolean* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetBooleanvRobustANGLE")
+  gl_api_->glGetBooleanvRobustANGLEFn(pname, bufSize, length, data);
+}
+
+void TraceGLApi::glGetBufferParameteri64vRobustANGLEFn(GLenum target,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint64* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetBufferParameteri64vRobustANGLE")
+  gl_api_->glGetBufferParameteri64vRobustANGLEFn(target, pname, bufSize, length,
+                                                 params);
 }
 
 void TraceGLApi::glGetBufferParameterivFn(GLenum target,
@@ -9838,6 +12559,41 @@ void TraceGLApi::glGetBufferParameterivFn(GLenum target,
                                           GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetBufferParameteriv")
   gl_api_->glGetBufferParameterivFn(target, pname, params);
+}
+
+void TraceGLApi::glGetBufferParameterivRobustANGLEFn(GLenum target,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     GLsizei* length,
+                                                     GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetBufferParameterivRobustANGLE")
+  gl_api_->glGetBufferParameterivRobustANGLEFn(target, pname, bufSize, length,
+                                               params);
+}
+
+void TraceGLApi::glGetBufferPointervRobustANGLEFn(GLenum target,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  void** params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetBufferPointervRobustANGLE")
+  gl_api_->glGetBufferPointervRobustANGLEFn(target, pname, bufSize, length,
+                                            params);
+}
+
+void TraceGLApi::glGetDebugMessageLogFn(GLuint count,
+                                        GLsizei bufSize,
+                                        GLenum* sources,
+                                        GLenum* types,
+                                        GLuint* ids,
+                                        GLenum* severities,
+                                        GLsizei* lengths,
+                                        char* messageLog) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetDebugMessageLog")
+  gl_api_->glGetDebugMessageLogFn(count, bufSize, sources, types, ids,
+                                  severities, lengths, messageLog);
 }
 
 GLenum TraceGLApi::glGetErrorFn(void) {
@@ -9853,6 +12609,14 @@ void TraceGLApi::glGetFenceivNVFn(GLuint fence, GLenum pname, GLint* params) {
 void TraceGLApi::glGetFloatvFn(GLenum pname, GLfloat* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetFloatv")
   gl_api_->glGetFloatvFn(pname, params);
+}
+
+void TraceGLApi::glGetFloatvRobustANGLEFn(GLenum pname,
+                                          GLsizei bufSize,
+                                          GLsizei* length,
+                                          GLfloat* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetFloatvRobustANGLE")
+  gl_api_->glGetFloatvRobustANGLEFn(pname, bufSize, length, data);
 }
 
 GLint TraceGLApi::glGetFragDataIndexFn(GLuint program, const char* name) {
@@ -9875,6 +12639,30 @@ void TraceGLApi::glGetFramebufferAttachmentParameterivEXTFn(GLenum target,
                                                       params);
 }
 
+void TraceGLApi::glGetFramebufferAttachmentParameterivRobustANGLEFn(
+    GLenum target,
+    GLenum attachment,
+    GLenum pname,
+    GLsizei bufSize,
+    GLsizei* length,
+    GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetFramebufferAttachmentParameterivRobustANGLE")
+  gl_api_->glGetFramebufferAttachmentParameterivRobustANGLEFn(
+      target, attachment, pname, bufSize, length, params);
+}
+
+void TraceGLApi::glGetFramebufferParameterivRobustANGLEFn(GLenum target,
+                                                          GLenum pname,
+                                                          GLsizei bufSize,
+                                                          GLsizei* length,
+                                                          GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetFramebufferParameterivRobustANGLE")
+  gl_api_->glGetFramebufferParameterivRobustANGLEFn(target, pname, bufSize,
+                                                    length, params);
+}
+
 GLenum TraceGLApi::glGetGraphicsResetStatusARBFn(void) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu",
                                 "TraceGLAPI::glGetGraphicsResetStatusARB")
@@ -9888,9 +12676,27 @@ void TraceGLApi::glGetInteger64i_vFn(GLenum target,
   gl_api_->glGetInteger64i_vFn(target, index, data);
 }
 
+void TraceGLApi::glGetInteger64i_vRobustANGLEFn(GLenum target,
+                                                GLuint index,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                GLint64* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetInteger64i_vRobustANGLE")
+  gl_api_->glGetInteger64i_vRobustANGLEFn(target, index, bufSize, length, data);
+}
+
 void TraceGLApi::glGetInteger64vFn(GLenum pname, GLint64* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetInteger64v")
   gl_api_->glGetInteger64vFn(pname, params);
+}
+
+void TraceGLApi::glGetInteger64vRobustANGLEFn(GLenum pname,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLint64* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetInteger64vRobustANGLE")
+  gl_api_->glGetInteger64vRobustANGLEFn(pname, bufSize, length, data);
 }
 
 void TraceGLApi::glGetIntegeri_vFn(GLenum target, GLuint index, GLint* data) {
@@ -9898,9 +12704,26 @@ void TraceGLApi::glGetIntegeri_vFn(GLenum target, GLuint index, GLint* data) {
   gl_api_->glGetIntegeri_vFn(target, index, data);
 }
 
+void TraceGLApi::glGetIntegeri_vRobustANGLEFn(GLenum target,
+                                              GLuint index,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLint* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetIntegeri_vRobustANGLE")
+  gl_api_->glGetIntegeri_vRobustANGLEFn(target, index, bufSize, length, data);
+}
+
 void TraceGLApi::glGetIntegervFn(GLenum pname, GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetIntegerv")
   gl_api_->glGetIntegervFn(pname, params);
+}
+
+void TraceGLApi::glGetIntegervRobustANGLEFn(GLenum pname,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            GLint* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetIntegervRobustANGLE")
+  gl_api_->glGetIntegervRobustANGLEFn(pname, bufSize, length, data);
 }
 
 void TraceGLApi::glGetInternalformativFn(GLenum target,
@@ -9911,6 +12734,91 @@ void TraceGLApi::glGetInternalformativFn(GLenum target,
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetInternalformativ")
   gl_api_->glGetInternalformativFn(target, internalformat, pname, bufSize,
                                    params);
+}
+
+void TraceGLApi::glGetInternalformativRobustANGLEFn(GLenum target,
+                                                    GLenum internalformat,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    GLsizei* length,
+                                                    GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetInternalformativRobustANGLE")
+  gl_api_->glGetInternalformativRobustANGLEFn(target, internalformat, pname,
+                                              bufSize, length, params);
+}
+
+void TraceGLApi::glGetMultisamplefvRobustANGLEFn(GLenum pname,
+                                                 GLuint index,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLfloat* val) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetMultisamplefvRobustANGLE")
+  gl_api_->glGetMultisamplefvRobustANGLEFn(pname, index, bufSize, length, val);
+}
+
+void TraceGLApi::glGetnUniformfvRobustANGLEFn(GLuint program,
+                                              GLint location,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetnUniformfvRobustANGLE")
+  gl_api_->glGetnUniformfvRobustANGLEFn(program, location, bufSize, length,
+                                        params);
+}
+
+void TraceGLApi::glGetnUniformivRobustANGLEFn(GLuint program,
+                                              GLint location,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetnUniformivRobustANGLE")
+  gl_api_->glGetnUniformivRobustANGLEFn(program, location, bufSize, length,
+                                        params);
+}
+
+void TraceGLApi::glGetnUniformuivRobustANGLEFn(GLuint program,
+                                               GLint location,
+                                               GLsizei bufSize,
+                                               GLsizei* length,
+                                               GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetnUniformuivRobustANGLE")
+  gl_api_->glGetnUniformuivRobustANGLEFn(program, location, bufSize, length,
+                                         params);
+}
+
+void TraceGLApi::glGetObjectLabelFn(GLenum identifier,
+                                    GLuint name,
+                                    GLsizei bufSize,
+                                    GLsizei* length,
+                                    char* label) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetObjectLabel")
+  gl_api_->glGetObjectLabelFn(identifier, name, bufSize, length, label);
+}
+
+void TraceGLApi::glGetObjectPtrLabelFn(void* ptr,
+                                       GLsizei bufSize,
+                                       GLsizei* length,
+                                       char* label) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetObjectPtrLabel")
+  gl_api_->glGetObjectPtrLabelFn(ptr, bufSize, length, label);
+}
+
+void TraceGLApi::glGetPointervFn(GLenum pname, void** params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetPointerv")
+  gl_api_->glGetPointervFn(pname, params);
+}
+
+void TraceGLApi::glGetPointervRobustANGLERobustANGLEFn(GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       void** params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetPointervRobustANGLERobustANGLE")
+  gl_api_->glGetPointervRobustANGLERobustANGLEFn(pname, bufSize, length,
+                                                 params);
 }
 
 void TraceGLApi::glGetProgramBinaryFn(GLuint program,
@@ -9938,9 +12846,30 @@ void TraceGLApi::glGetProgramInterfaceivFn(GLuint program,
   gl_api_->glGetProgramInterfaceivFn(program, programInterface, pname, params);
 }
 
+void TraceGLApi::glGetProgramInterfaceivRobustANGLEFn(GLuint program,
+                                                      GLenum programInterface,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetProgramInterfaceivRobustANGLE")
+  gl_api_->glGetProgramInterfaceivRobustANGLEFn(program, programInterface,
+                                                pname, bufSize, length, params);
+}
+
 void TraceGLApi::glGetProgramivFn(GLuint program, GLenum pname, GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetProgramiv")
   gl_api_->glGetProgramivFn(program, pname, params);
+}
+
+void TraceGLApi::glGetProgramivRobustANGLEFn(GLuint program,
+                                             GLenum pname,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetProgramivRobustANGLE")
+  gl_api_->glGetProgramivRobustANGLEFn(program, pname, bufSize, length, params);
 }
 
 void TraceGLApi::glGetProgramResourceivFn(GLuint program,
@@ -9981,6 +12910,15 @@ void TraceGLApi::glGetQueryivFn(GLenum target, GLenum pname, GLint* params) {
   gl_api_->glGetQueryivFn(target, pname, params);
 }
 
+void TraceGLApi::glGetQueryivRobustANGLEFn(GLenum target,
+                                           GLenum pname,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetQueryivRobustANGLE")
+  gl_api_->glGetQueryivRobustANGLEFn(target, pname, bufSize, length, params);
+}
+
 void TraceGLApi::glGetQueryObjecti64vFn(GLuint id,
                                         GLenum pname,
                                         GLint64* params) {
@@ -9988,9 +12926,30 @@ void TraceGLApi::glGetQueryObjecti64vFn(GLuint id,
   gl_api_->glGetQueryObjecti64vFn(id, pname, params);
 }
 
+void TraceGLApi::glGetQueryObjecti64vRobustANGLEFn(GLuint id,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLint64* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetQueryObjecti64vRobustANGLE")
+  gl_api_->glGetQueryObjecti64vRobustANGLEFn(id, pname, bufSize, length,
+                                             params);
+}
+
 void TraceGLApi::glGetQueryObjectivFn(GLuint id, GLenum pname, GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetQueryObjectiv")
   gl_api_->glGetQueryObjectivFn(id, pname, params);
+}
+
+void TraceGLApi::glGetQueryObjectivRobustANGLEFn(GLuint id,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetQueryObjectivRobustANGLE")
+  gl_api_->glGetQueryObjectivRobustANGLEFn(id, pname, bufSize, length, params);
 }
 
 void TraceGLApi::glGetQueryObjectui64vFn(GLuint id,
@@ -10000,11 +12959,32 @@ void TraceGLApi::glGetQueryObjectui64vFn(GLuint id,
   gl_api_->glGetQueryObjectui64vFn(id, pname, params);
 }
 
+void TraceGLApi::glGetQueryObjectui64vRobustANGLEFn(GLuint id,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    GLsizei* length,
+                                                    GLuint64* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetQueryObjectui64vRobustANGLE")
+  gl_api_->glGetQueryObjectui64vRobustANGLEFn(id, pname, bufSize, length,
+                                              params);
+}
+
 void TraceGLApi::glGetQueryObjectuivFn(GLuint id,
                                        GLenum pname,
                                        GLuint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetQueryObjectuiv")
   gl_api_->glGetQueryObjectuivFn(id, pname, params);
+}
+
+void TraceGLApi::glGetQueryObjectuivRobustANGLEFn(GLuint id,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetQueryObjectuivRobustANGLE")
+  gl_api_->glGetQueryObjectuivRobustANGLEFn(id, pname, bufSize, length, params);
 }
 
 void TraceGLApi::glGetRenderbufferParameterivEXTFn(GLenum target,
@@ -10015,6 +12995,17 @@ void TraceGLApi::glGetRenderbufferParameterivEXTFn(GLenum target,
   gl_api_->glGetRenderbufferParameterivEXTFn(target, pname, params);
 }
 
+void TraceGLApi::glGetRenderbufferParameterivRobustANGLEFn(GLenum target,
+                                                           GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetRenderbufferParameterivRobustANGLE")
+  gl_api_->glGetRenderbufferParameterivRobustANGLEFn(target, pname, bufSize,
+                                                     length, params);
+}
+
 void TraceGLApi::glGetSamplerParameterfvFn(GLuint sampler,
                                            GLenum pname,
                                            GLfloat* params) {
@@ -10022,11 +13013,55 @@ void TraceGLApi::glGetSamplerParameterfvFn(GLuint sampler,
   gl_api_->glGetSamplerParameterfvFn(sampler, pname, params);
 }
 
+void TraceGLApi::glGetSamplerParameterfvRobustANGLEFn(GLuint sampler,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetSamplerParameterfvRobustANGLE")
+  gl_api_->glGetSamplerParameterfvRobustANGLEFn(sampler, pname, bufSize, length,
+                                                params);
+}
+
+void TraceGLApi::glGetSamplerParameterIivRobustANGLEFn(GLuint sampler,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetSamplerParameterIivRobustANGLE")
+  gl_api_->glGetSamplerParameterIivRobustANGLEFn(sampler, pname, bufSize,
+                                                 length, params);
+}
+
+void TraceGLApi::glGetSamplerParameterIuivRobustANGLEFn(GLuint sampler,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        GLsizei* length,
+                                                        GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetSamplerParameterIuivRobustANGLE")
+  gl_api_->glGetSamplerParameterIuivRobustANGLEFn(sampler, pname, bufSize,
+                                                  length, params);
+}
+
 void TraceGLApi::glGetSamplerParameterivFn(GLuint sampler,
                                            GLenum pname,
                                            GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetSamplerParameteriv")
   gl_api_->glGetSamplerParameterivFn(sampler, pname, params);
+}
+
+void TraceGLApi::glGetSamplerParameterivRobustANGLEFn(GLuint sampler,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetSamplerParameterivRobustANGLE")
+  gl_api_->glGetSamplerParameterivRobustANGLEFn(sampler, pname, bufSize, length,
+                                                params);
 }
 
 void TraceGLApi::glGetShaderInfoLogFn(GLuint shader,
@@ -10040,6 +13075,15 @@ void TraceGLApi::glGetShaderInfoLogFn(GLuint shader,
 void TraceGLApi::glGetShaderivFn(GLuint shader, GLenum pname, GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetShaderiv")
   gl_api_->glGetShaderivFn(shader, pname, params);
+}
+
+void TraceGLApi::glGetShaderivRobustANGLEFn(GLuint shader,
+                                            GLenum pname,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetShaderivRobustANGLE")
+  gl_api_->glGetShaderivRobustANGLEFn(shader, pname, bufSize, length, params);
 }
 
 void TraceGLApi::glGetShaderPrecisionFormatFn(GLenum shadertype,
@@ -10086,12 +13130,36 @@ void TraceGLApi::glGetTexLevelParameterfvFn(GLenum target,
   gl_api_->glGetTexLevelParameterfvFn(target, level, pname, params);
 }
 
+void TraceGLApi::glGetTexLevelParameterfvRobustANGLEFn(GLenum target,
+                                                       GLint level,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetTexLevelParameterfvRobustANGLE")
+  gl_api_->glGetTexLevelParameterfvRobustANGLEFn(target, level, pname, bufSize,
+                                                 length, params);
+}
+
 void TraceGLApi::glGetTexLevelParameterivFn(GLenum target,
                                             GLint level,
                                             GLenum pname,
                                             GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetTexLevelParameteriv")
   gl_api_->glGetTexLevelParameterivFn(target, level, pname, params);
+}
+
+void TraceGLApi::glGetTexLevelParameterivRobustANGLEFn(GLenum target,
+                                                       GLint level,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetTexLevelParameterivRobustANGLE")
+  gl_api_->glGetTexLevelParameterivRobustANGLEFn(target, level, pname, bufSize,
+                                                 length, params);
 }
 
 void TraceGLApi::glGetTexParameterfvFn(GLenum target,
@@ -10101,11 +13169,55 @@ void TraceGLApi::glGetTexParameterfvFn(GLenum target,
   gl_api_->glGetTexParameterfvFn(target, pname, params);
 }
 
+void TraceGLApi::glGetTexParameterfvRobustANGLEFn(GLenum target,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetTexParameterfvRobustANGLE")
+  gl_api_->glGetTexParameterfvRobustANGLEFn(target, pname, bufSize, length,
+                                            params);
+}
+
+void TraceGLApi::glGetTexParameterIivRobustANGLEFn(GLenum target,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetTexParameterIivRobustANGLE")
+  gl_api_->glGetTexParameterIivRobustANGLEFn(target, pname, bufSize, length,
+                                             params);
+}
+
+void TraceGLApi::glGetTexParameterIuivRobustANGLEFn(GLenum target,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    GLsizei* length,
+                                                    GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetTexParameterIuivRobustANGLE")
+  gl_api_->glGetTexParameterIuivRobustANGLEFn(target, pname, bufSize, length,
+                                              params);
+}
+
 void TraceGLApi::glGetTexParameterivFn(GLenum target,
                                        GLenum pname,
                                        GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetTexParameteriv")
   gl_api_->glGetTexParameterivFn(target, pname, params);
+}
+
+void TraceGLApi::glGetTexParameterivRobustANGLEFn(GLenum target,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetTexParameterivRobustANGLE")
+  gl_api_->glGetTexParameterivRobustANGLEFn(target, pname, bufSize, length,
+                                            params);
 }
 
 void TraceGLApi::glGetTransformFeedbackVaryingFn(GLuint program,
@@ -10143,6 +13255,16 @@ void TraceGLApi::glGetUniformfvFn(GLuint program,
   gl_api_->glGetUniformfvFn(program, location, params);
 }
 
+void TraceGLApi::glGetUniformfvRobustANGLEFn(GLuint program,
+                                             GLint location,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetUniformfvRobustANGLE")
+  gl_api_->glGetUniformfvRobustANGLEFn(program, location, bufSize, length,
+                                       params);
+}
+
 void TraceGLApi::glGetUniformIndicesFn(GLuint program,
                                        GLsizei uniformCount,
                                        const char* const* uniformNames,
@@ -10159,6 +13281,16 @@ void TraceGLApi::glGetUniformivFn(GLuint program,
   gl_api_->glGetUniformivFn(program, location, params);
 }
 
+void TraceGLApi::glGetUniformivRobustANGLEFn(GLuint program,
+                                             GLint location,
+                                             GLsizei bufSize,
+                                             GLsizei* length,
+                                             GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetUniformivRobustANGLE")
+  gl_api_->glGetUniformivRobustANGLEFn(program, location, bufSize, length,
+                                       params);
+}
+
 GLint TraceGLApi::glGetUniformLocationFn(GLuint program, const char* name) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetUniformLocation")
   return gl_api_->glGetUniformLocationFn(program, name);
@@ -10171,11 +13303,54 @@ void TraceGLApi::glGetUniformuivFn(GLuint program,
   gl_api_->glGetUniformuivFn(program, location, params);
 }
 
+void TraceGLApi::glGetUniformuivRobustANGLEFn(GLuint program,
+                                              GLint location,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetUniformuivRobustANGLE")
+  gl_api_->glGetUniformuivRobustANGLEFn(program, location, bufSize, length,
+                                        params);
+}
+
 void TraceGLApi::glGetVertexAttribfvFn(GLuint index,
                                        GLenum pname,
                                        GLfloat* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetVertexAttribfv")
   gl_api_->glGetVertexAttribfvFn(index, pname, params);
+}
+
+void TraceGLApi::glGetVertexAttribfvRobustANGLEFn(GLuint index,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetVertexAttribfvRobustANGLE")
+  gl_api_->glGetVertexAttribfvRobustANGLEFn(index, pname, bufSize, length,
+                                            params);
+}
+
+void TraceGLApi::glGetVertexAttribIivRobustANGLEFn(GLuint index,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetVertexAttribIivRobustANGLE")
+  gl_api_->glGetVertexAttribIivRobustANGLEFn(index, pname, bufSize, length,
+                                             params);
+}
+
+void TraceGLApi::glGetVertexAttribIuivRobustANGLEFn(GLuint index,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    GLsizei* length,
+                                                    GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetVertexAttribIuivRobustANGLE")
+  gl_api_->glGetVertexAttribIuivRobustANGLEFn(index, pname, bufSize, length,
+                                              params);
 }
 
 void TraceGLApi::glGetVertexAttribivFn(GLuint index,
@@ -10185,11 +13360,33 @@ void TraceGLApi::glGetVertexAttribivFn(GLuint index,
   gl_api_->glGetVertexAttribivFn(index, pname, params);
 }
 
+void TraceGLApi::glGetVertexAttribivRobustANGLEFn(GLuint index,
+                                                  GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glGetVertexAttribivRobustANGLE")
+  gl_api_->glGetVertexAttribivRobustANGLEFn(index, pname, bufSize, length,
+                                            params);
+}
+
 void TraceGLApi::glGetVertexAttribPointervFn(GLuint index,
                                              GLenum pname,
                                              void** pointer) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetVertexAttribPointerv")
   gl_api_->glGetVertexAttribPointervFn(index, pname, pointer);
+}
+
+void TraceGLApi::glGetVertexAttribPointervRobustANGLEFn(GLuint index,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        GLsizei* length,
+                                                        void** pointer) {
+  TRACE_EVENT_BINARY_EFFICIENT0(
+      "gpu", "TraceGLAPI::glGetVertexAttribPointervRobustANGLE")
+  gl_api_->glGetVertexAttribPointervRobustANGLEFn(index, pname, bufSize, length,
+                                                  pointer);
 }
 
 void TraceGLApi::glHintFn(GLenum target, GLenum mode) {
@@ -10334,6 +13531,21 @@ void TraceGLApi::glMemoryBarrierEXTFn(GLbitfield barriers) {
   gl_api_->glMemoryBarrierEXTFn(barriers);
 }
 
+void TraceGLApi::glObjectLabelFn(GLenum identifier,
+                                 GLuint name,
+                                 GLsizei length,
+                                 const char* label) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glObjectLabel")
+  gl_api_->glObjectLabelFn(identifier, name, length, label);
+}
+
+void TraceGLApi::glObjectPtrLabelFn(void* ptr,
+                                    GLsizei length,
+                                    const char* label) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glObjectPtrLabel")
+  gl_api_->glObjectPtrLabelFn(ptr, length, label);
+}
+
 void TraceGLApi::glPathCommandsNVFn(GLuint path,
                                     GLsizei numCommands,
                                     const GLubyte* commands,
@@ -10382,6 +13594,11 @@ void TraceGLApi::glPolygonOffsetFn(GLfloat factor, GLfloat units) {
   gl_api_->glPolygonOffsetFn(factor, units);
 }
 
+void TraceGLApi::glPopDebugGroupFn() {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glPopDebugGroup")
+  gl_api_->glPopDebugGroupFn();
+}
+
 void TraceGLApi::glPopGroupMarkerEXTFn(void) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glPopGroupMarkerEXT")
   gl_api_->glPopGroupMarkerEXTFn();
@@ -10418,6 +13635,14 @@ void TraceGLApi::glProgramPathFragmentInputGenNVFn(GLuint program,
                                              components, coeffs);
 }
 
+void TraceGLApi::glPushDebugGroupFn(GLenum source,
+                                    GLuint id,
+                                    GLsizei length,
+                                    const char* message) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glPushDebugGroup")
+  gl_api_->glPushDebugGroupFn(source, id, length, message);
+}
+
 void TraceGLApi::glPushGroupMarkerEXTFn(GLsizei length, const char* marker) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glPushGroupMarkerEXT")
   gl_api_->glPushGroupMarkerEXTFn(length, marker);
@@ -10433,6 +13658,20 @@ void TraceGLApi::glReadBufferFn(GLenum src) {
   gl_api_->glReadBufferFn(src);
 }
 
+void TraceGLApi::glReadnPixelsRobustANGLEFn(GLint x,
+                                            GLint y,
+                                            GLsizei width,
+                                            GLsizei height,
+                                            GLenum format,
+                                            GLenum type,
+                                            GLsizei bufSize,
+                                            GLsizei* length,
+                                            void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glReadnPixelsRobustANGLE")
+  gl_api_->glReadnPixelsRobustANGLEFn(x, y, width, height, format, type,
+                                      bufSize, length, data);
+}
+
 void TraceGLApi::glReadPixelsFn(GLint x,
                                 GLint y,
                                 GLsizei width,
@@ -10442,6 +13681,20 @@ void TraceGLApi::glReadPixelsFn(GLint x,
                                 void* pixels) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glReadPixels")
   gl_api_->glReadPixelsFn(x, y, width, height, format, type, pixels);
+}
+
+void TraceGLApi::glReadPixelsRobustANGLEFn(GLint x,
+                                           GLint y,
+                                           GLsizei width,
+                                           GLsizei height,
+                                           GLenum format,
+                                           GLenum type,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           void* pixels) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glReadPixelsRobustANGLE")
+  gl_api_->glReadPixelsRobustANGLEFn(x, y, width, height, format, type, bufSize,
+                                     length, pixels);
 }
 
 void TraceGLApi::glReleaseShaderCompilerFn(void) {
@@ -10525,6 +13778,15 @@ void TraceGLApi::glSamplerParameterfvFn(GLuint sampler,
   gl_api_->glSamplerParameterfvFn(sampler, pname, params);
 }
 
+void TraceGLApi::glSamplerParameterfvRobustANGLEFn(GLuint sampler,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   const GLfloat* param) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glSamplerParameterfvRobustANGLE")
+  gl_api_->glSamplerParameterfvRobustANGLEFn(sampler, pname, bufSize, param);
+}
+
 void TraceGLApi::glSamplerParameteriFn(GLuint sampler,
                                        GLenum pname,
                                        GLint param) {
@@ -10532,11 +13794,38 @@ void TraceGLApi::glSamplerParameteriFn(GLuint sampler,
   gl_api_->glSamplerParameteriFn(sampler, pname, param);
 }
 
+void TraceGLApi::glSamplerParameterIivRobustANGLEFn(GLuint sampler,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    const GLint* param) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glSamplerParameterIivRobustANGLE")
+  gl_api_->glSamplerParameterIivRobustANGLEFn(sampler, pname, bufSize, param);
+}
+
+void TraceGLApi::glSamplerParameterIuivRobustANGLEFn(GLuint sampler,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     const GLuint* param) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glSamplerParameterIuivRobustANGLE")
+  gl_api_->glSamplerParameterIuivRobustANGLEFn(sampler, pname, bufSize, param);
+}
+
 void TraceGLApi::glSamplerParameterivFn(GLuint sampler,
                                         GLenum pname,
                                         const GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glSamplerParameteriv")
   gl_api_->glSamplerParameterivFn(sampler, pname, params);
+}
+
+void TraceGLApi::glSamplerParameterivRobustANGLEFn(GLuint sampler,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   const GLint* param) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glSamplerParameterivRobustANGLE")
+  gl_api_->glSamplerParameterivRobustANGLEFn(sampler, pname, bufSize, param);
 }
 
 void TraceGLApi::glScissorFn(GLint x, GLint y, GLsizei width, GLsizei height) {
@@ -10729,6 +14018,22 @@ void TraceGLApi::glTexImage2DFn(GLenum target,
                           format, type, pixels);
 }
 
+void TraceGLApi::glTexImage2DRobustANGLEFn(GLenum target,
+                                           GLint level,
+                                           GLint internalformat,
+                                           GLsizei width,
+                                           GLsizei height,
+                                           GLint border,
+                                           GLenum format,
+                                           GLenum type,
+                                           GLsizei bufSize,
+                                           const void* pixels) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexImage2DRobustANGLE")
+  gl_api_->glTexImage2DRobustANGLEFn(target, level, internalformat, width,
+                                     height, border, format, type, bufSize,
+                                     pixels);
+}
+
 void TraceGLApi::glTexImage3DFn(GLenum target,
                                 GLint level,
                                 GLint internalformat,
@@ -10744,6 +14049,23 @@ void TraceGLApi::glTexImage3DFn(GLenum target,
                           border, format, type, pixels);
 }
 
+void TraceGLApi::glTexImage3DRobustANGLEFn(GLenum target,
+                                           GLint level,
+                                           GLint internalformat,
+                                           GLsizei width,
+                                           GLsizei height,
+                                           GLsizei depth,
+                                           GLint border,
+                                           GLenum format,
+                                           GLenum type,
+                                           GLsizei bufSize,
+                                           const void* pixels) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexImage3DRobustANGLE")
+  gl_api_->glTexImage3DRobustANGLEFn(target, level, internalformat, width,
+                                     height, depth, border, format, type,
+                                     bufSize, pixels);
+}
+
 void TraceGLApi::glTexParameterfFn(GLenum target, GLenum pname, GLfloat param) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexParameterf")
   gl_api_->glTexParameterfFn(target, pname, param);
@@ -10756,9 +14078,36 @@ void TraceGLApi::glTexParameterfvFn(GLenum target,
   gl_api_->glTexParameterfvFn(target, pname, params);
 }
 
+void TraceGLApi::glTexParameterfvRobustANGLEFn(GLenum target,
+                                               GLenum pname,
+                                               GLsizei bufSize,
+                                               const GLfloat* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glTexParameterfvRobustANGLE")
+  gl_api_->glTexParameterfvRobustANGLEFn(target, pname, bufSize, params);
+}
+
 void TraceGLApi::glTexParameteriFn(GLenum target, GLenum pname, GLint param) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexParameteri")
   gl_api_->glTexParameteriFn(target, pname, param);
+}
+
+void TraceGLApi::glTexParameterIivRobustANGLEFn(GLenum target,
+                                                GLenum pname,
+                                                GLsizei bufSize,
+                                                const GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glTexParameterIivRobustANGLE")
+  gl_api_->glTexParameterIivRobustANGLEFn(target, pname, bufSize, params);
+}
+
+void TraceGLApi::glTexParameterIuivRobustANGLEFn(GLenum target,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 const GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glTexParameterIuivRobustANGLE")
+  gl_api_->glTexParameterIuivRobustANGLEFn(target, pname, bufSize, params);
 }
 
 void TraceGLApi::glTexParameterivFn(GLenum target,
@@ -10766,6 +14115,15 @@ void TraceGLApi::glTexParameterivFn(GLenum target,
                                     const GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexParameteriv")
   gl_api_->glTexParameterivFn(target, pname, params);
+}
+
+void TraceGLApi::glTexParameterivRobustANGLEFn(GLenum target,
+                                               GLenum pname,
+                                               GLsizei bufSize,
+                                               const GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu",
+                                "TraceGLAPI::glTexParameterivRobustANGLE")
+  gl_api_->glTexParameterivRobustANGLEFn(target, pname, bufSize, params);
 }
 
 void TraceGLApi::glTexStorage2DEXTFn(GLenum target,
@@ -10802,6 +14160,21 @@ void TraceGLApi::glTexSubImage2DFn(GLenum target,
                              format, type, pixels);
 }
 
+void TraceGLApi::glTexSubImage2DRobustANGLEFn(GLenum target,
+                                              GLint level,
+                                              GLint xoffset,
+                                              GLint yoffset,
+                                              GLsizei width,
+                                              GLsizei height,
+                                              GLenum format,
+                                              GLenum type,
+                                              GLsizei bufSize,
+                                              const void* pixels) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexSubImage2DRobustANGLE")
+  gl_api_->glTexSubImage2DRobustANGLEFn(target, level, xoffset, yoffset, width,
+                                        height, format, type, bufSize, pixels);
+}
+
 void TraceGLApi::glTexSubImage3DFn(GLenum target,
                                    GLint level,
                                    GLint xoffset,
@@ -10816,6 +14189,24 @@ void TraceGLApi::glTexSubImage3DFn(GLenum target,
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexSubImage3D")
   gl_api_->glTexSubImage3DFn(target, level, xoffset, yoffset, zoffset, width,
                              height, depth, format, type, pixels);
+}
+
+void TraceGLApi::glTexSubImage3DRobustANGLEFn(GLenum target,
+                                              GLint level,
+                                              GLint xoffset,
+                                              GLint yoffset,
+                                              GLint zoffset,
+                                              GLsizei width,
+                                              GLsizei height,
+                                              GLsizei depth,
+                                              GLenum format,
+                                              GLenum type,
+                                              GLsizei bufSize,
+                                              const void* pixels) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexSubImage3DRobustANGLE")
+  gl_api_->glTexSubImage3DRobustANGLEFn(target, level, xoffset, yoffset,
+                                        zoffset, width, height, depth, format,
+                                        type, bufSize, pixels);
 }
 
 void TraceGLApi::glTransformFeedbackVaryingsFn(GLuint program,
@@ -11739,6 +15130,38 @@ void NoContextGLApi::glCullFaceFn(GLenum mode) {
   LOG(ERROR) << "Trying to call glCullFace() without current GL context";
 }
 
+void NoContextGLApi::glDebugMessageCallbackFn(GLDEBUGPROC callback,
+                                              const void* userParam) {
+  NOTREACHED()
+      << "Trying to call glDebugMessageCallback() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glDebugMessageCallback() without current GL context";
+}
+
+void NoContextGLApi::glDebugMessageControlFn(GLenum source,
+                                             GLenum type,
+                                             GLenum severity,
+                                             GLsizei count,
+                                             const GLuint* ids,
+                                             GLboolean enabled) {
+  NOTREACHED()
+      << "Trying to call glDebugMessageControl() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glDebugMessageControl() without current GL context";
+}
+
+void NoContextGLApi::glDebugMessageInsertFn(GLenum source,
+                                            GLenum type,
+                                            GLuint id,
+                                            GLenum severity,
+                                            GLsizei length,
+                                            const char* buf) {
+  NOTREACHED()
+      << "Trying to call glDebugMessageInsert() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glDebugMessageInsert() without current GL context";
+}
+
 void NoContextGLApi::glDeleteBuffersARBFn(GLsizei n, const GLuint* buffers) {
   NOTREACHED()
       << "Trying to call glDeleteBuffersARB() without current GL context";
@@ -12177,6 +15600,19 @@ void NoContextGLApi::glGetActiveUniformBlockivFn(GLuint program,
                 "context";
 }
 
+void NoContextGLApi::glGetActiveUniformBlockivRobustANGLEFn(
+    GLuint program,
+    GLuint uniformBlockIndex,
+    GLenum pname,
+    GLsizei bufSize,
+    GLsizei* length,
+    GLint* params) {
+  NOTREACHED() << "Trying to call glGetActiveUniformBlockivRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetActiveUniformBlockivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetActiveUniformBlockNameFn(GLuint program,
                                                    GLuint uniformBlockIndex,
                                                    GLsizei bufSize,
@@ -12217,9 +15653,41 @@ GLint NoContextGLApi::glGetAttribLocationFn(GLuint program, const char* name) {
   return 0;
 }
 
+void NoContextGLApi::glGetBooleani_vRobustANGLEFn(GLenum target,
+                                                  GLuint index,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLboolean* data) {
+  NOTREACHED() << "Trying to call glGetBooleani_vRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetBooleani_vRobustANGLE() without current "
+                "GL context";
+}
+
 void NoContextGLApi::glGetBooleanvFn(GLenum pname, GLboolean* params) {
   NOTREACHED() << "Trying to call glGetBooleanv() without current GL context";
   LOG(ERROR) << "Trying to call glGetBooleanv() without current GL context";
+}
+
+void NoContextGLApi::glGetBooleanvRobustANGLEFn(GLenum pname,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                GLboolean* data) {
+  NOTREACHED()
+      << "Trying to call glGetBooleanvRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetBooleanvRobustANGLE() without current GL context";
+}
+
+void NoContextGLApi::glGetBufferParameteri64vRobustANGLEFn(GLenum target,
+                                                           GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLint64* params) {
+  NOTREACHED() << "Trying to call glGetBufferParameteri64vRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetBufferParameteri64vRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetBufferParameterivFn(GLenum target,
@@ -12229,6 +15697,42 @@ void NoContextGLApi::glGetBufferParameterivFn(GLenum target,
       << "Trying to call glGetBufferParameteriv() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetBufferParameteriv() without current GL context";
+}
+
+void NoContextGLApi::glGetBufferParameterivRobustANGLEFn(GLenum target,
+                                                         GLenum pname,
+                                                         GLsizei bufSize,
+                                                         GLsizei* length,
+                                                         GLint* params) {
+  NOTREACHED() << "Trying to call glGetBufferParameterivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetBufferParameterivRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetBufferPointervRobustANGLEFn(GLenum target,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      void** params) {
+  NOTREACHED() << "Trying to call glGetBufferPointervRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetBufferPointervRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetDebugMessageLogFn(GLuint count,
+                                            GLsizei bufSize,
+                                            GLenum* sources,
+                                            GLenum* types,
+                                            GLuint* ids,
+                                            GLenum* severities,
+                                            GLsizei* lengths,
+                                            char* messageLog) {
+  NOTREACHED()
+      << "Trying to call glGetDebugMessageLog() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetDebugMessageLog() without current GL context";
 }
 
 GLenum NoContextGLApi::glGetErrorFn(void) {
@@ -12247,6 +15751,16 @@ void NoContextGLApi::glGetFenceivNVFn(GLuint fence,
 void NoContextGLApi::glGetFloatvFn(GLenum pname, GLfloat* params) {
   NOTREACHED() << "Trying to call glGetFloatv() without current GL context";
   LOG(ERROR) << "Trying to call glGetFloatv() without current GL context";
+}
+
+void NoContextGLApi::glGetFloatvRobustANGLEFn(GLenum pname,
+                                              GLsizei bufSize,
+                                              GLsizei* length,
+                                              GLfloat* data) {
+  NOTREACHED()
+      << "Trying to call glGetFloatvRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetFloatvRobustANGLE() without current GL context";
 }
 
 GLint NoContextGLApi::glGetFragDataIndexFn(GLuint program, const char* name) {
@@ -12277,6 +15791,32 @@ void NoContextGLApi::glGetFramebufferAttachmentParameterivEXTFn(
                 "without current GL context";
 }
 
+void NoContextGLApi::glGetFramebufferAttachmentParameterivRobustANGLEFn(
+    GLenum target,
+    GLenum attachment,
+    GLenum pname,
+    GLsizei bufSize,
+    GLsizei* length,
+    GLint* params) {
+  NOTREACHED() << "Trying to call "
+                  "glGetFramebufferAttachmentParameterivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call "
+                "glGetFramebufferAttachmentParameterivRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetFramebufferParameterivRobustANGLEFn(GLenum target,
+                                                              GLenum pname,
+                                                              GLsizei bufSize,
+                                                              GLsizei* length,
+                                                              GLint* params) {
+  NOTREACHED() << "Trying to call glGetFramebufferParameterivRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetFramebufferParameterivRobustANGLE() "
+                "without current GL context";
+}
+
 GLenum NoContextGLApi::glGetGraphicsResetStatusARBFn(void) {
   NOTREACHED() << "Trying to call glGetGraphicsResetStatusARB() without "
                   "current GL context";
@@ -12293,9 +15833,30 @@ void NoContextGLApi::glGetInteger64i_vFn(GLenum target,
   LOG(ERROR) << "Trying to call glGetInteger64i_v() without current GL context";
 }
 
+void NoContextGLApi::glGetInteger64i_vRobustANGLEFn(GLenum target,
+                                                    GLuint index,
+                                                    GLsizei bufSize,
+                                                    GLsizei* length,
+                                                    GLint64* data) {
+  NOTREACHED() << "Trying to call glGetInteger64i_vRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetInteger64i_vRobustANGLE() without current "
+                "GL context";
+}
+
 void NoContextGLApi::glGetInteger64vFn(GLenum pname, GLint64* params) {
   NOTREACHED() << "Trying to call glGetInteger64v() without current GL context";
   LOG(ERROR) << "Trying to call glGetInteger64v() without current GL context";
+}
+
+void NoContextGLApi::glGetInteger64vRobustANGLEFn(GLenum pname,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint64* data) {
+  NOTREACHED() << "Trying to call glGetInteger64vRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetInteger64vRobustANGLE() without current "
+                "GL context";
 }
 
 void NoContextGLApi::glGetIntegeri_vFn(GLenum target,
@@ -12305,9 +15866,30 @@ void NoContextGLApi::glGetIntegeri_vFn(GLenum target,
   LOG(ERROR) << "Trying to call glGetIntegeri_v() without current GL context";
 }
 
+void NoContextGLApi::glGetIntegeri_vRobustANGLEFn(GLenum target,
+                                                  GLuint index,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint* data) {
+  NOTREACHED() << "Trying to call glGetIntegeri_vRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetIntegeri_vRobustANGLE() without current "
+                "GL context";
+}
+
 void NoContextGLApi::glGetIntegervFn(GLenum pname, GLint* params) {
   NOTREACHED() << "Trying to call glGetIntegerv() without current GL context";
   LOG(ERROR) << "Trying to call glGetIntegerv() without current GL context";
+}
+
+void NoContextGLApi::glGetIntegervRobustANGLEFn(GLenum pname,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                GLint* data) {
+  NOTREACHED()
+      << "Trying to call glGetIntegervRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetIntegervRobustANGLE() without current GL context";
 }
 
 void NoContextGLApi::glGetInternalformativFn(GLenum target,
@@ -12319,6 +15901,97 @@ void NoContextGLApi::glGetInternalformativFn(GLenum target,
       << "Trying to call glGetInternalformativ() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetInternalformativ() without current GL context";
+}
+
+void NoContextGLApi::glGetInternalformativRobustANGLEFn(GLenum target,
+                                                        GLenum internalformat,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        GLsizei* length,
+                                                        GLint* params) {
+  NOTREACHED() << "Trying to call glGetInternalformativRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetInternalformativRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetMultisamplefvRobustANGLEFn(GLenum pname,
+                                                     GLuint index,
+                                                     GLsizei bufSize,
+                                                     GLsizei* length,
+                                                     GLfloat* val) {
+  NOTREACHED() << "Trying to call glGetMultisamplefvRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetMultisamplefvRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetnUniformfvRobustANGLEFn(GLuint program,
+                                                  GLint location,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLfloat* params) {
+  NOTREACHED() << "Trying to call glGetnUniformfvRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetnUniformfvRobustANGLE() without current "
+                "GL context";
+}
+
+void NoContextGLApi::glGetnUniformivRobustANGLEFn(GLuint program,
+                                                  GLint location,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLint* params) {
+  NOTREACHED() << "Trying to call glGetnUniformivRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetnUniformivRobustANGLE() without current "
+                "GL context";
+}
+
+void NoContextGLApi::glGetnUniformuivRobustANGLEFn(GLuint program,
+                                                   GLint location,
+                                                   GLsizei bufSize,
+                                                   GLsizei* length,
+                                                   GLuint* params) {
+  NOTREACHED() << "Trying to call glGetnUniformuivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetnUniformuivRobustANGLE() without current "
+                "GL context";
+}
+
+void NoContextGLApi::glGetObjectLabelFn(GLenum identifier,
+                                        GLuint name,
+                                        GLsizei bufSize,
+                                        GLsizei* length,
+                                        char* label) {
+  NOTREACHED()
+      << "Trying to call glGetObjectLabel() without current GL context";
+  LOG(ERROR) << "Trying to call glGetObjectLabel() without current GL context";
+}
+
+void NoContextGLApi::glGetObjectPtrLabelFn(void* ptr,
+                                           GLsizei bufSize,
+                                           GLsizei* length,
+                                           char* label) {
+  NOTREACHED()
+      << "Trying to call glGetObjectPtrLabel() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetObjectPtrLabel() without current GL context";
+}
+
+void NoContextGLApi::glGetPointervFn(GLenum pname, void** params) {
+  NOTREACHED() << "Trying to call glGetPointerv() without current GL context";
+  LOG(ERROR) << "Trying to call glGetPointerv() without current GL context";
+}
+
+void NoContextGLApi::glGetPointervRobustANGLERobustANGLEFn(GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           void** params) {
+  NOTREACHED() << "Trying to call glGetPointervRobustANGLERobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetPointervRobustANGLERobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetProgramBinaryFn(GLuint program,
@@ -12352,11 +16025,35 @@ void NoContextGLApi::glGetProgramInterfaceivFn(GLuint program,
       << "Trying to call glGetProgramInterfaceiv() without current GL context";
 }
 
+void NoContextGLApi::glGetProgramInterfaceivRobustANGLEFn(
+    GLuint program,
+    GLenum programInterface,
+    GLenum pname,
+    GLsizei bufSize,
+    GLsizei* length,
+    GLint* params) {
+  NOTREACHED() << "Trying to call glGetProgramInterfaceivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetProgramInterfaceivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetProgramivFn(GLuint program,
                                       GLenum pname,
                                       GLint* params) {
   NOTREACHED() << "Trying to call glGetProgramiv() without current GL context";
   LOG(ERROR) << "Trying to call glGetProgramiv() without current GL context";
+}
+
+void NoContextGLApi::glGetProgramivRobustANGLEFn(GLuint program,
+                                                 GLenum pname,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLint* params) {
+  NOTREACHED() << "Trying to call glGetProgramivRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetProgramivRobustANGLE() without current GL "
+                "context";
 }
 
 void NoContextGLApi::glGetProgramResourceivFn(GLuint program,
@@ -12402,6 +16099,17 @@ void NoContextGLApi::glGetQueryivFn(GLenum target,
   LOG(ERROR) << "Trying to call glGetQueryiv() without current GL context";
 }
 
+void NoContextGLApi::glGetQueryivRobustANGLEFn(GLenum target,
+                                               GLenum pname,
+                                               GLsizei bufSize,
+                                               GLsizei* length,
+                                               GLint* params) {
+  NOTREACHED()
+      << "Trying to call glGetQueryivRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetQueryivRobustANGLE() without current GL context";
+}
+
 void NoContextGLApi::glGetQueryObjecti64vFn(GLuint id,
                                             GLenum pname,
                                             GLint64* params) {
@@ -12409,6 +16117,17 @@ void NoContextGLApi::glGetQueryObjecti64vFn(GLuint id,
       << "Trying to call glGetQueryObjecti64v() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetQueryObjecti64v() without current GL context";
+}
+
+void NoContextGLApi::glGetQueryObjecti64vRobustANGLEFn(GLuint id,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint64* params) {
+  NOTREACHED() << "Trying to call glGetQueryObjecti64vRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetQueryObjecti64vRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetQueryObjectivFn(GLuint id,
@@ -12420,6 +16139,17 @@ void NoContextGLApi::glGetQueryObjectivFn(GLuint id,
       << "Trying to call glGetQueryObjectiv() without current GL context";
 }
 
+void NoContextGLApi::glGetQueryObjectivRobustANGLEFn(GLuint id,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     GLsizei* length,
+                                                     GLint* params) {
+  NOTREACHED() << "Trying to call glGetQueryObjectivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetQueryObjectivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetQueryObjectui64vFn(GLuint id,
                                              GLenum pname,
                                              GLuint64* params) {
@@ -12427,6 +16157,17 @@ void NoContextGLApi::glGetQueryObjectui64vFn(GLuint id,
       << "Trying to call glGetQueryObjectui64v() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetQueryObjectui64v() without current GL context";
+}
+
+void NoContextGLApi::glGetQueryObjectui64vRobustANGLEFn(GLuint id,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        GLsizei* length,
+                                                        GLuint64* params) {
+  NOTREACHED() << "Trying to call glGetQueryObjectui64vRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetQueryObjectui64vRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetQueryObjectuivFn(GLuint id,
@@ -12438,6 +16179,17 @@ void NoContextGLApi::glGetQueryObjectuivFn(GLuint id,
       << "Trying to call glGetQueryObjectuiv() without current GL context";
 }
 
+void NoContextGLApi::glGetQueryObjectuivRobustANGLEFn(GLuint id,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLuint* params) {
+  NOTREACHED() << "Trying to call glGetQueryObjectuivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetQueryObjectuivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetRenderbufferParameterivEXTFn(GLenum target,
                                                        GLenum pname,
                                                        GLint* params) {
@@ -12445,6 +16197,17 @@ void NoContextGLApi::glGetRenderbufferParameterivEXTFn(GLenum target,
                   "current GL context";
   LOG(ERROR) << "Trying to call glGetRenderbufferParameterivEXT() without "
                 "current GL context";
+}
+
+void NoContextGLApi::glGetRenderbufferParameterivRobustANGLEFn(GLenum target,
+                                                               GLenum pname,
+                                                               GLsizei bufSize,
+                                                               GLsizei* length,
+                                                               GLint* params) {
+  NOTREACHED() << "Trying to call glGetRenderbufferParameterivRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetRenderbufferParameterivRobustANGLE() "
+                "without current GL context";
 }
 
 void NoContextGLApi::glGetSamplerParameterfvFn(GLuint sampler,
@@ -12456,6 +16219,39 @@ void NoContextGLApi::glGetSamplerParameterfvFn(GLuint sampler,
       << "Trying to call glGetSamplerParameterfv() without current GL context";
 }
 
+void NoContextGLApi::glGetSamplerParameterfvRobustANGLEFn(GLuint sampler,
+                                                          GLenum pname,
+                                                          GLsizei bufSize,
+                                                          GLsizei* length,
+                                                          GLfloat* params) {
+  NOTREACHED() << "Trying to call glGetSamplerParameterfvRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetSamplerParameterfvRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetSamplerParameterIivRobustANGLEFn(GLuint sampler,
+                                                           GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLint* params) {
+  NOTREACHED() << "Trying to call glGetSamplerParameterIivRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetSamplerParameterIivRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetSamplerParameterIuivRobustANGLEFn(GLuint sampler,
+                                                            GLenum pname,
+                                                            GLsizei bufSize,
+                                                            GLsizei* length,
+                                                            GLuint* params) {
+  NOTREACHED() << "Trying to call glGetSamplerParameterIuivRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetSamplerParameterIuivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetSamplerParameterivFn(GLuint sampler,
                                                GLenum pname,
                                                GLint* params) {
@@ -12463,6 +16259,17 @@ void NoContextGLApi::glGetSamplerParameterivFn(GLuint sampler,
       << "Trying to call glGetSamplerParameteriv() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetSamplerParameteriv() without current GL context";
+}
+
+void NoContextGLApi::glGetSamplerParameterivRobustANGLEFn(GLuint sampler,
+                                                          GLenum pname,
+                                                          GLsizei bufSize,
+                                                          GLsizei* length,
+                                                          GLint* params) {
+  NOTREACHED() << "Trying to call glGetSamplerParameterivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetSamplerParameterivRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetShaderInfoLogFn(GLuint shader,
@@ -12480,6 +16287,17 @@ void NoContextGLApi::glGetShaderivFn(GLuint shader,
                                      GLint* params) {
   NOTREACHED() << "Trying to call glGetShaderiv() without current GL context";
   LOG(ERROR) << "Trying to call glGetShaderiv() without current GL context";
+}
+
+void NoContextGLApi::glGetShaderivRobustANGLEFn(GLuint shader,
+                                                GLenum pname,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                GLint* params) {
+  NOTREACHED()
+      << "Trying to call glGetShaderivRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glGetShaderivRobustANGLE() without current GL context";
 }
 
 void NoContextGLApi::glGetShaderPrecisionFormatFn(GLenum shadertype,
@@ -12532,6 +16350,18 @@ void NoContextGLApi::glGetTexLevelParameterfvFn(GLenum target,
       << "Trying to call glGetTexLevelParameterfv() without current GL context";
 }
 
+void NoContextGLApi::glGetTexLevelParameterfvRobustANGLEFn(GLenum target,
+                                                           GLint level,
+                                                           GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLfloat* params) {
+  NOTREACHED() << "Trying to call glGetTexLevelParameterfvRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetTexLevelParameterfvRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetTexLevelParameterivFn(GLenum target,
                                                 GLint level,
                                                 GLenum pname,
@@ -12540,6 +16370,18 @@ void NoContextGLApi::glGetTexLevelParameterivFn(GLenum target,
       << "Trying to call glGetTexLevelParameteriv() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetTexLevelParameteriv() without current GL context";
+}
+
+void NoContextGLApi::glGetTexLevelParameterivRobustANGLEFn(GLenum target,
+                                                           GLint level,
+                                                           GLenum pname,
+                                                           GLsizei bufSize,
+                                                           GLsizei* length,
+                                                           GLint* params) {
+  NOTREACHED() << "Trying to call glGetTexLevelParameterivRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetTexLevelParameterivRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetTexParameterfvFn(GLenum target,
@@ -12551,6 +16393,39 @@ void NoContextGLApi::glGetTexParameterfvFn(GLenum target,
       << "Trying to call glGetTexParameterfv() without current GL context";
 }
 
+void NoContextGLApi::glGetTexParameterfvRobustANGLEFn(GLenum target,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLfloat* params) {
+  NOTREACHED() << "Trying to call glGetTexParameterfvRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetTexParameterfvRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetTexParameterIivRobustANGLEFn(GLenum target,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint* params) {
+  NOTREACHED() << "Trying to call glGetTexParameterIivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetTexParameterIivRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetTexParameterIuivRobustANGLEFn(GLenum target,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        GLsizei* length,
+                                                        GLuint* params) {
+  NOTREACHED() << "Trying to call glGetTexParameterIuivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetTexParameterIuivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetTexParameterivFn(GLenum target,
                                            GLenum pname,
                                            GLint* params) {
@@ -12558,6 +16433,17 @@ void NoContextGLApi::glGetTexParameterivFn(GLenum target,
       << "Trying to call glGetTexParameteriv() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetTexParameteriv() without current GL context";
+}
+
+void NoContextGLApi::glGetTexParameterivRobustANGLEFn(GLenum target,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint* params) {
+  NOTREACHED() << "Trying to call glGetTexParameterivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetTexParameterivRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetTransformFeedbackVaryingFn(GLuint program,
@@ -12599,6 +16485,17 @@ void NoContextGLApi::glGetUniformfvFn(GLuint program,
   LOG(ERROR) << "Trying to call glGetUniformfv() without current GL context";
 }
 
+void NoContextGLApi::glGetUniformfvRobustANGLEFn(GLuint program,
+                                                 GLint location,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLfloat* params) {
+  NOTREACHED() << "Trying to call glGetUniformfvRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetUniformfvRobustANGLE() without current GL "
+                "context";
+}
+
 void NoContextGLApi::glGetUniformIndicesFn(GLuint program,
                                            GLsizei uniformCount,
                                            const char* const* uniformNames,
@@ -12616,6 +16513,17 @@ void NoContextGLApi::glGetUniformivFn(GLuint program,
   LOG(ERROR) << "Trying to call glGetUniformiv() without current GL context";
 }
 
+void NoContextGLApi::glGetUniformivRobustANGLEFn(GLuint program,
+                                                 GLint location,
+                                                 GLsizei bufSize,
+                                                 GLsizei* length,
+                                                 GLint* params) {
+  NOTREACHED() << "Trying to call glGetUniformivRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetUniformivRobustANGLE() without current GL "
+                "context";
+}
+
 GLint NoContextGLApi::glGetUniformLocationFn(GLuint program, const char* name) {
   NOTREACHED()
       << "Trying to call glGetUniformLocation() without current GL context";
@@ -12631,6 +16539,17 @@ void NoContextGLApi::glGetUniformuivFn(GLuint program,
   LOG(ERROR) << "Trying to call glGetUniformuiv() without current GL context";
 }
 
+void NoContextGLApi::glGetUniformuivRobustANGLEFn(GLuint program,
+                                                  GLint location,
+                                                  GLsizei bufSize,
+                                                  GLsizei* length,
+                                                  GLuint* params) {
+  NOTREACHED() << "Trying to call glGetUniformuivRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glGetUniformuivRobustANGLE() without current "
+                "GL context";
+}
+
 void NoContextGLApi::glGetVertexAttribfvFn(GLuint index,
                                            GLenum pname,
                                            GLfloat* params) {
@@ -12638,6 +16557,39 @@ void NoContextGLApi::glGetVertexAttribfvFn(GLuint index,
       << "Trying to call glGetVertexAttribfv() without current GL context";
   LOG(ERROR)
       << "Trying to call glGetVertexAttribfv() without current GL context";
+}
+
+void NoContextGLApi::glGetVertexAttribfvRobustANGLEFn(GLuint index,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLfloat* params) {
+  NOTREACHED() << "Trying to call glGetVertexAttribfvRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetVertexAttribfvRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetVertexAttribIivRobustANGLEFn(GLuint index,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       GLsizei* length,
+                                                       GLint* params) {
+  NOTREACHED() << "Trying to call glGetVertexAttribIivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetVertexAttribIivRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glGetVertexAttribIuivRobustANGLEFn(GLuint index,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        GLsizei* length,
+                                                        GLuint* params) {
+  NOTREACHED() << "Trying to call glGetVertexAttribIuivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetVertexAttribIuivRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glGetVertexAttribivFn(GLuint index,
@@ -12649,6 +16601,17 @@ void NoContextGLApi::glGetVertexAttribivFn(GLuint index,
       << "Trying to call glGetVertexAttribiv() without current GL context";
 }
 
+void NoContextGLApi::glGetVertexAttribivRobustANGLEFn(GLuint index,
+                                                      GLenum pname,
+                                                      GLsizei bufSize,
+                                                      GLsizei* length,
+                                                      GLint* params) {
+  NOTREACHED() << "Trying to call glGetVertexAttribivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glGetVertexAttribivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glGetVertexAttribPointervFn(GLuint index,
                                                  GLenum pname,
                                                  void** pointer) {
@@ -12656,6 +16619,17 @@ void NoContextGLApi::glGetVertexAttribPointervFn(GLuint index,
                   "GL context";
   LOG(ERROR) << "Trying to call glGetVertexAttribPointerv() without current GL "
                 "context";
+}
+
+void NoContextGLApi::glGetVertexAttribPointervRobustANGLEFn(GLuint index,
+                                                            GLenum pname,
+                                                            GLsizei bufSize,
+                                                            GLsizei* length,
+                                                            void** pointer) {
+  NOTREACHED() << "Trying to call glGetVertexAttribPointervRobustANGLE() "
+                  "without current GL context";
+  LOG(ERROR) << "Trying to call glGetVertexAttribPointervRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glHintFn(GLenum target, GLenum mode) {
@@ -12837,6 +16811,22 @@ void NoContextGLApi::glMemoryBarrierEXTFn(GLbitfield barriers) {
       << "Trying to call glMemoryBarrierEXT() without current GL context";
 }
 
+void NoContextGLApi::glObjectLabelFn(GLenum identifier,
+                                     GLuint name,
+                                     GLsizei length,
+                                     const char* label) {
+  NOTREACHED() << "Trying to call glObjectLabel() without current GL context";
+  LOG(ERROR) << "Trying to call glObjectLabel() without current GL context";
+}
+
+void NoContextGLApi::glObjectPtrLabelFn(void* ptr,
+                                        GLsizei length,
+                                        const char* label) {
+  NOTREACHED()
+      << "Trying to call glObjectPtrLabel() without current GL context";
+  LOG(ERROR) << "Trying to call glObjectPtrLabel() without current GL context";
+}
+
 void NoContextGLApi::glPathCommandsNVFn(GLuint path,
                                         GLsizei numCommands,
                                         const GLubyte* commands,
@@ -12898,6 +16888,11 @@ void NoContextGLApi::glPolygonOffsetFn(GLfloat factor, GLfloat units) {
   LOG(ERROR) << "Trying to call glPolygonOffset() without current GL context";
 }
 
+void NoContextGLApi::glPopDebugGroupFn() {
+  NOTREACHED() << "Trying to call glPopDebugGroup() without current GL context";
+  LOG(ERROR) << "Trying to call glPopDebugGroup() without current GL context";
+}
+
 void NoContextGLApi::glPopGroupMarkerEXTFn(void) {
   NOTREACHED()
       << "Trying to call glPopGroupMarkerEXT() without current GL context";
@@ -12940,6 +16935,15 @@ void NoContextGLApi::glProgramPathFragmentInputGenNVFn(GLuint program,
                 "current GL context";
 }
 
+void NoContextGLApi::glPushDebugGroupFn(GLenum source,
+                                        GLuint id,
+                                        GLsizei length,
+                                        const char* message) {
+  NOTREACHED()
+      << "Trying to call glPushDebugGroup() without current GL context";
+  LOG(ERROR) << "Trying to call glPushDebugGroup() without current GL context";
+}
+
 void NoContextGLApi::glPushGroupMarkerEXTFn(GLsizei length,
                                             const char* marker) {
   NOTREACHED()
@@ -12958,6 +16962,21 @@ void NoContextGLApi::glReadBufferFn(GLenum src) {
   LOG(ERROR) << "Trying to call glReadBuffer() without current GL context";
 }
 
+void NoContextGLApi::glReadnPixelsRobustANGLEFn(GLint x,
+                                                GLint y,
+                                                GLsizei width,
+                                                GLsizei height,
+                                                GLenum format,
+                                                GLenum type,
+                                                GLsizei bufSize,
+                                                GLsizei* length,
+                                                void* data) {
+  NOTREACHED()
+      << "Trying to call glReadnPixelsRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glReadnPixelsRobustANGLE() without current GL context";
+}
+
 void NoContextGLApi::glReadPixelsFn(GLint x,
                                     GLint y,
                                     GLsizei width,
@@ -12967,6 +16986,21 @@ void NoContextGLApi::glReadPixelsFn(GLint x,
                                     void* pixels) {
   NOTREACHED() << "Trying to call glReadPixels() without current GL context";
   LOG(ERROR) << "Trying to call glReadPixels() without current GL context";
+}
+
+void NoContextGLApi::glReadPixelsRobustANGLEFn(GLint x,
+                                               GLint y,
+                                               GLsizei width,
+                                               GLsizei height,
+                                               GLenum format,
+                                               GLenum type,
+                                               GLsizei bufSize,
+                                               GLsizei* length,
+                                               void* pixels) {
+  NOTREACHED()
+      << "Trying to call glReadPixelsRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glReadPixelsRobustANGLE() without current GL context";
 }
 
 void NoContextGLApi::glReleaseShaderCompilerFn(void) {
@@ -13064,6 +17098,16 @@ void NoContextGLApi::glSamplerParameterfvFn(GLuint sampler,
       << "Trying to call glSamplerParameterfv() without current GL context";
 }
 
+void NoContextGLApi::glSamplerParameterfvRobustANGLEFn(GLuint sampler,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       const GLfloat* param) {
+  NOTREACHED() << "Trying to call glSamplerParameterfvRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glSamplerParameterfvRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glSamplerParameteriFn(GLuint sampler,
                                            GLenum pname,
                                            GLint param) {
@@ -13073,6 +17117,26 @@ void NoContextGLApi::glSamplerParameteriFn(GLuint sampler,
       << "Trying to call glSamplerParameteri() without current GL context";
 }
 
+void NoContextGLApi::glSamplerParameterIivRobustANGLEFn(GLuint sampler,
+                                                        GLenum pname,
+                                                        GLsizei bufSize,
+                                                        const GLint* param) {
+  NOTREACHED() << "Trying to call glSamplerParameterIivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glSamplerParameterIivRobustANGLE() without "
+                "current GL context";
+}
+
+void NoContextGLApi::glSamplerParameterIuivRobustANGLEFn(GLuint sampler,
+                                                         GLenum pname,
+                                                         GLsizei bufSize,
+                                                         const GLuint* param) {
+  NOTREACHED() << "Trying to call glSamplerParameterIuivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glSamplerParameterIuivRobustANGLE() without "
+                "current GL context";
+}
+
 void NoContextGLApi::glSamplerParameterivFn(GLuint sampler,
                                             GLenum pname,
                                             const GLint* params) {
@@ -13080,6 +17144,16 @@ void NoContextGLApi::glSamplerParameterivFn(GLuint sampler,
       << "Trying to call glSamplerParameteriv() without current GL context";
   LOG(ERROR)
       << "Trying to call glSamplerParameteriv() without current GL context";
+}
+
+void NoContextGLApi::glSamplerParameterivRobustANGLEFn(GLuint sampler,
+                                                       GLenum pname,
+                                                       GLsizei bufSize,
+                                                       const GLint* param) {
+  NOTREACHED() << "Trying to call glSamplerParameterivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glSamplerParameterivRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glScissorFn(GLint x,
@@ -13285,6 +17359,22 @@ void NoContextGLApi::glTexImage2DFn(GLenum target,
   LOG(ERROR) << "Trying to call glTexImage2D() without current GL context";
 }
 
+void NoContextGLApi::glTexImage2DRobustANGLEFn(GLenum target,
+                                               GLint level,
+                                               GLint internalformat,
+                                               GLsizei width,
+                                               GLsizei height,
+                                               GLint border,
+                                               GLenum format,
+                                               GLenum type,
+                                               GLsizei bufSize,
+                                               const void* pixels) {
+  NOTREACHED()
+      << "Trying to call glTexImage2DRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glTexImage2DRobustANGLE() without current GL context";
+}
+
 void NoContextGLApi::glTexImage3DFn(GLenum target,
                                     GLint level,
                                     GLint internalformat,
@@ -13297,6 +17387,23 @@ void NoContextGLApi::glTexImage3DFn(GLenum target,
                                     const void* pixels) {
   NOTREACHED() << "Trying to call glTexImage3D() without current GL context";
   LOG(ERROR) << "Trying to call glTexImage3D() without current GL context";
+}
+
+void NoContextGLApi::glTexImage3DRobustANGLEFn(GLenum target,
+                                               GLint level,
+                                               GLint internalformat,
+                                               GLsizei width,
+                                               GLsizei height,
+                                               GLsizei depth,
+                                               GLint border,
+                                               GLenum format,
+                                               GLenum type,
+                                               GLsizei bufSize,
+                                               const void* pixels) {
+  NOTREACHED()
+      << "Trying to call glTexImage3DRobustANGLE() without current GL context";
+  LOG(ERROR)
+      << "Trying to call glTexImage3DRobustANGLE() without current GL context";
 }
 
 void NoContextGLApi::glTexParameterfFn(GLenum target,
@@ -13314,11 +17421,41 @@ void NoContextGLApi::glTexParameterfvFn(GLenum target,
   LOG(ERROR) << "Trying to call glTexParameterfv() without current GL context";
 }
 
+void NoContextGLApi::glTexParameterfvRobustANGLEFn(GLenum target,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   const GLfloat* params) {
+  NOTREACHED() << "Trying to call glTexParameterfvRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glTexParameterfvRobustANGLE() without current "
+                "GL context";
+}
+
 void NoContextGLApi::glTexParameteriFn(GLenum target,
                                        GLenum pname,
                                        GLint param) {
   NOTREACHED() << "Trying to call glTexParameteri() without current GL context";
   LOG(ERROR) << "Trying to call glTexParameteri() without current GL context";
+}
+
+void NoContextGLApi::glTexParameterIivRobustANGLEFn(GLenum target,
+                                                    GLenum pname,
+                                                    GLsizei bufSize,
+                                                    const GLint* params) {
+  NOTREACHED() << "Trying to call glTexParameterIivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glTexParameterIivRobustANGLE() without current "
+                "GL context";
+}
+
+void NoContextGLApi::glTexParameterIuivRobustANGLEFn(GLenum target,
+                                                     GLenum pname,
+                                                     GLsizei bufSize,
+                                                     const GLuint* params) {
+  NOTREACHED() << "Trying to call glTexParameterIuivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glTexParameterIuivRobustANGLE() without "
+                "current GL context";
 }
 
 void NoContextGLApi::glTexParameterivFn(GLenum target,
@@ -13327,6 +17464,16 @@ void NoContextGLApi::glTexParameterivFn(GLenum target,
   NOTREACHED()
       << "Trying to call glTexParameteriv() without current GL context";
   LOG(ERROR) << "Trying to call glTexParameteriv() without current GL context";
+}
+
+void NoContextGLApi::glTexParameterivRobustANGLEFn(GLenum target,
+                                                   GLenum pname,
+                                                   GLsizei bufSize,
+                                                   const GLint* params) {
+  NOTREACHED() << "Trying to call glTexParameterivRobustANGLE() without "
+                  "current GL context";
+  LOG(ERROR) << "Trying to call glTexParameterivRobustANGLE() without current "
+                "GL context";
 }
 
 void NoContextGLApi::glTexStorage2DEXTFn(GLenum target,
@@ -13362,6 +17509,22 @@ void NoContextGLApi::glTexSubImage2DFn(GLenum target,
   LOG(ERROR) << "Trying to call glTexSubImage2D() without current GL context";
 }
 
+void NoContextGLApi::glTexSubImage2DRobustANGLEFn(GLenum target,
+                                                  GLint level,
+                                                  GLint xoffset,
+                                                  GLint yoffset,
+                                                  GLsizei width,
+                                                  GLsizei height,
+                                                  GLenum format,
+                                                  GLenum type,
+                                                  GLsizei bufSize,
+                                                  const void* pixels) {
+  NOTREACHED() << "Trying to call glTexSubImage2DRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glTexSubImage2DRobustANGLE() without current "
+                "GL context";
+}
+
 void NoContextGLApi::glTexSubImage3DFn(GLenum target,
                                        GLint level,
                                        GLint xoffset,
@@ -13375,6 +17538,24 @@ void NoContextGLApi::glTexSubImage3DFn(GLenum target,
                                        const void* pixels) {
   NOTREACHED() << "Trying to call glTexSubImage3D() without current GL context";
   LOG(ERROR) << "Trying to call glTexSubImage3D() without current GL context";
+}
+
+void NoContextGLApi::glTexSubImage3DRobustANGLEFn(GLenum target,
+                                                  GLint level,
+                                                  GLint xoffset,
+                                                  GLint yoffset,
+                                                  GLint zoffset,
+                                                  GLsizei width,
+                                                  GLsizei height,
+                                                  GLsizei depth,
+                                                  GLenum format,
+                                                  GLenum type,
+                                                  GLsizei bufSize,
+                                                  const void* pixels) {
+  NOTREACHED() << "Trying to call glTexSubImage3DRobustANGLE() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glTexSubImage3DRobustANGLE() without current "
+                "GL context";
 }
 
 void NoContextGLApi::glTransformFeedbackVaryingsFn(GLuint program,

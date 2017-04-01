@@ -6,30 +6,40 @@
 
 #include <algorithm>
 
+#include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_result_view.h"
 #include "chrome/browser/ui/views/theme_copying_widget.h"
 #include "components/omnibox/browser/omnibox_view.h"
-#include "grit/theme_resources.h"
-#include "ui/base/material_design/material_design_controller.h"
-#include "ui/base/resource/resource_bundle.h"
+#include "third_party/skia/include/core/SkDrawLooper.h"
 #include "ui/base/theme_provider.h"
 #include "ui/compositor/clip_recorder.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
-#include "ui/resources/grit/ui_resources.h"
+#include "ui/gfx/shadow_value.h"
 #include "ui/views/controls/image_view.h"
-#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/view_targeter.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
+
+namespace {
+
+// Cache the shadow images so that potentially expensive shadow drawing isn't
+// repeated.
+base::LazyInstance<gfx::ImageSkia> g_top_shadow = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<gfx::ImageSkia> g_bottom_shadow = LAZY_INSTANCE_INITIALIZER;
+
+const int kPopupVerticalPadding = 4;
+
+}  // namespace
 
 class OmniboxPopupContentsView::AutocompletePopupWidget
     : public ThemeCopyingWidget,
@@ -74,12 +84,29 @@ OmniboxPopupContentsView::OmniboxPopupContentsView(
   // The contents is owned by the LocationBarView.
   set_owned_by_client();
 
-  ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    top_shadow_ = rb->GetImageSkiaNamed(IDR_OMNIBOX_DROPDOWN_SHADOW_TOP);
-    bottom_shadow_ = rb->GetImageSkiaNamed(IDR_OMNIBOX_DROPDOWN_SHADOW_BOTTOM);
-  } else {
-    bottom_shadow_ = rb->GetImageSkiaNamed(IDR_BUBBLE_B);
+  if (g_top_shadow.Get().isNull()) {
+    std::vector<gfx::ShadowValue> shadows;
+    // Blur by 1dp. See comment below about blur accounting.
+    shadows.emplace_back(gfx::Vector2d(), 2, SK_ColorBLACK);
+    g_top_shadow.Get() =
+        gfx::ImageSkiaOperations::CreateHorizontalShadow(shadows, false);
+  }
+  if (g_bottom_shadow.Get().isNull()) {
+    const int kSmallShadowBlur = 3;
+    const int kLargeShadowBlur = 8;
+    const int kLargeShadowYOffset = 3;
+
+    std::vector<gfx::ShadowValue> shadows;
+    // gfx::ShadowValue counts blur pixels both inside and outside the shape,
+    // whereas these blur values only describe the outside portion, hence they
+    // must be doubled.
+    shadows.emplace_back(gfx::Vector2d(), 2 * kSmallShadowBlur,
+                         SK_ColorBLACK);
+    shadows.emplace_back(gfx::Vector2d(0, kLargeShadowYOffset),
+                         2 * kLargeShadowBlur, SK_ColorBLACK);
+
+    g_bottom_shadow.Get() =
+        gfx::ImageSkiaOperations::CreateHorizontalShadow(shadows, true);
   }
 
   SetEventTargeter(
@@ -121,10 +148,9 @@ gfx::Rect OmniboxPopupContentsView::GetPopupBounds() const {
 
 void OmniboxPopupContentsView::LayoutChildren() {
   gfx::Rect contents_rect = GetContentsBounds();
-  contents_rect.Inset(GetLayoutInsets(OMNIBOX_DROPDOWN));
-  contents_rect.Inset(start_margin_,
-                      views::NonClientFrameView::kClientEdgeThickness,
-                      end_margin_, 0);
+  contents_rect.Inset(gfx::Insets(kPopupVerticalPadding, 0));
+  contents_rect.Inset(start_margin_, g_top_shadow.Get().height(), end_margin_,
+                      0);
 
   int top = contents_rect.y();
   for (size_t i = 0; i < AutocompleteResult::kMaxMatches; ++i) {
@@ -198,24 +224,11 @@ void OmniboxPopupContentsView::UpdatePopupAppearance() {
   for (size_t i = result_size; i < AutocompleteResult::kMaxMatches; ++i)
     child_at(i)->SetVisible(false);
 
-  // In non-material mode, we want the popup to appear as if it's overlaying
-  // the top of the page content, i.e., is flush against the client edge at the
-  // bottom of the toolbar. However, if the bookmarks bar is attached, we want
-  // to draw over it (so as not to push the results below it), but that means
-  // the toolbar won't be drawing a client edge separating itself from the
-  // popup. So we unconditionally overlap the toolbar by the thickness of the
-  // client edge and draw our own edge (see OnPaint()), which fixes the
-  // attached bookmark bar case without breaking the other case.
-  int top_edge_overlap = views::NonClientFrameView::kClientEdgeThickness;
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    // In material mode, we cover the bookmark bar similarly, but instead of
-    // appearing below the client edge, we want the popup to appear to overlay
-    // the bottom of the toolbar. So instead of drawing a client edge atop the
-    // popup, we shift the popup to completely cover the client edge, and then
-    // draw an additional semitransparent shadow above that. So the total
-    // overlap necessary is the client edge thickness plus the shadow height.
-    top_edge_overlap += top_shadow_->height();
-  }
+  // We want the popup to appear to overlay the bottom of the toolbar. So we
+  // shift the popup to completely cover the client edge, and then draw an
+  // additional semitransparent shadow above that.
+  int top_edge_overlap = views::NonClientFrameView::kClientEdgeThickness +
+                         g_top_shadow.Get().height();
 
   gfx::Point top_left_screen_coord;
   int width;
@@ -368,8 +381,9 @@ void OmniboxPopupContentsView::OnMouseReleased(
   }
 
   if (event.IsOnlyMiddleMouseButton() || event.IsOnlyLeftMouseButton()) {
-    OpenSelectedLine(event, event.IsOnlyLeftMouseButton() ? CURRENT_TAB :
-                                                            NEW_BACKGROUND_TAB);
+    OpenSelectedLine(event, event.IsOnlyLeftMouseButton()
+                                ? WindowOpenDisposition::CURRENT_TAB
+                                : WindowOpenDisposition::NEW_BACKGROUND_TAB);
   }
 }
 
@@ -401,7 +415,7 @@ void OmniboxPopupContentsView::OnGestureEvent(ui::GestureEvent* event) {
       break;
     case ui::ET_GESTURE_TAP:
     case ui::ET_GESTURE_SCROLL_END:
-      OpenSelectedLine(*event, CURRENT_TAB);
+      OpenSelectedLine(*event, WindowOpenDisposition::CURRENT_TAB);
       break;
     default:
       return;
@@ -421,17 +435,14 @@ int OmniboxPopupContentsView::CalculatePopupHeight() {
   // Add enough space on the top and bottom so it looks like there is the same
   // amount of space between the text and the popup border as there is in the
   // interior between each row of text.
-  return popup_height + views::NonClientFrameView::kClientEdgeThickness +
-      GetLayoutInsets(OMNIBOX_DROPDOWN).height() +
-      bottom_shadow_->height() -
-      GetLayoutConstant(OMNIBOX_DROPDOWN_BORDER_INTERIOR);
+  return popup_height + kPopupVerticalPadding * 2 +
+         g_top_shadow.Get().height() + g_bottom_shadow.Get().height();
 }
 
 OmniboxResultView* OmniboxPopupContentsView::CreateResultView(
     int model_index,
     const gfx::FontList& font_list) {
-  return new OmniboxResultView(this, model_index, location_bar_view_,
-                               font_list);
+  return new OmniboxResultView(this, model_index, font_list);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -442,26 +453,17 @@ const char* OmniboxPopupContentsView::GetClassName() const {
 }
 
 void OmniboxPopupContentsView::OnPaint(gfx::Canvas* canvas) {
-  // Top border.
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    canvas->TileImageInt(*top_shadow_, 0, 0, width(), top_shadow_->height());
-  } else {
-    canvas->FillRect(gfx::Rect(0, 0, width(),
-                               views::NonClientFrameView::kClientEdgeThickness),
-                     location_bar_view_->GetThemeProvider()->GetColor(
-                         ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR));
-  }
-
-  // Bottom border.
-  canvas->TileImageInt(*bottom_shadow_, 0, height() - bottom_shadow_->height(),
-                       width(), bottom_shadow_->height());
+  canvas->TileImageInt(g_top_shadow.Get(), 0, 0, width(),
+                       g_top_shadow.Get().height());
+  canvas->TileImageInt(g_bottom_shadow.Get(), 0,
+                       height() - g_bottom_shadow.Get().height(), width(),
+                       g_bottom_shadow.Get().height());
 }
 
 void OmniboxPopupContentsView::PaintChildren(const ui::PaintContext& context) {
   gfx::Rect contents_bounds = GetContentsBounds();
-  const int interior = GetLayoutConstant(OMNIBOX_DROPDOWN_BORDER_INTERIOR);
-  contents_bounds.Inset(0, views::NonClientFrameView::kClientEdgeThickness, 0,
-                        bottom_shadow_->height() - interior);
+  contents_bounds.Inset(0, g_top_shadow.Get().height(), 0,
+                        g_bottom_shadow.Get().height());
 
   ui::ClipRecorder clip_recorder(context);
   clip_recorder.ClipRect(contents_bounds);

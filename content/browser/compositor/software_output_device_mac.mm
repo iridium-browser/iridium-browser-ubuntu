@@ -5,6 +5,7 @@
 #include "content/browser/compositor/software_output_device_mac.h"
 
 #include "base/mac/foundation_util.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/accelerated_widget_mac/accelerated_widget_mac.h"
 #include "ui/compositor/compositor.h"
@@ -113,8 +114,8 @@ SkCanvas* SoftwareOutputDeviceMac::BeginPaint(
       IOSurfaceGetBaseAddress(io_surfaces_[current_index_]));
   size_t stride = IOSurfaceGetBytesPerRow(io_surfaces_[current_index_]);
 
-  canvas_ = sk_sp<SkCanvas>(SkCanvas::NewRasterDirectN32(
-      pixel_size_.width(), pixel_size_.height(), pixels, stride));
+  canvas_ = SkCanvas::MakeRasterDirectN32(pixel_size_.width(),
+                                          pixel_size_.height(), pixels, stride);
 
   CopyPreviousBufferDamage(SkRegion(gfx::RectToSkIRect(new_damage_rect)));
 

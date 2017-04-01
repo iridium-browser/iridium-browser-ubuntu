@@ -85,9 +85,6 @@ class _TBMResultWrapper(ResultsWrapperInterface):
     if value.tir_label:
       assert value.tir_label == self._tir_label
     else:
-      logging.warning(
-          'TimelineBasedMetric should create the interaction record label '
-          'for %r values.' % value.name)
       value.tir_label = self._tir_label
     self._results.AddValue(value)
 
@@ -205,6 +202,12 @@ class Options(object):
   def config(self):
     return self._config
 
+  def AddTimelineBasedMetric(self, metric):
+    assert isinstance(metric, basestring)
+    if self._timeline_based_metrics is None:
+      self._timeline_based_metrics = []
+    self._timeline_based_metrics.append(metric)
+
   def SetTimelineBasedMetrics(self, metrics):
     """Sets the new-style (TBMv2) metrics to run.
 
@@ -271,11 +274,19 @@ class TimelineBasedMeasurement(story_test.StoryTest):
     """Configure and start tracing."""
     if not platform.tracing_controller.IsChromeTracingSupported():
       raise Exception('Not supported')
+    if self._tbm_options.config.enable_chrome_trace:
+      # Always enable 'blink.console' category for:
+      # 1) Backward compat of chrome clock sync (crbug.com/646925)
+      # 2) Allows users to add trace event through javascript.
+      # Note that blink.console is extremely low-overhead, so this doesn't
+      # affect the tracing overhead budget much.
+      chrome_config = self._tbm_options.config.chrome_trace_config
+      chrome_config.category_filter.AddIncludedCategory('blink.console')
     platform.tracing_controller.StartTracing(self._tbm_options.config)
 
   def Measure(self, platform, results):
     """Collect all possible metrics and added them to results."""
-    platform.tracing_controller.iteration_info = results.iteration_info
+    platform.tracing_controller.telemetry_info = results.telemetry_info
     trace_result = platform.tracing_controller.StopTracing()
     trace_value = trace.TraceValue(results.current_page, trace_result)
     results.AddValue(trace_value)
@@ -315,12 +326,10 @@ class TimelineBasedMeasurement(story_test.StoryTest):
       results.AddValue(
           common_value_helpers.TranslateMreFailure(d, page))
 
-    value_dicts = mre_result.pairs.get('values', [])
-    results.value_set.extend(value_dicts)
-    for d in value_dicts:
-      if common_value_helpers.IsScalarNumericValue(d):
-        results.AddValue(
-            common_value_helpers.TranslateScalarValue(d, page))
+    results.value_set.extend(mre_result.pairs.get('histograms', []))
+
+    for d in mre_result.pairs.get('scalars', []):
+      results.AddValue(common_value_helpers.TranslateScalarValue(d, page))
 
   def _ComputeLegacyTimelineBasedMetrics(self, results, trace_result):
     model = model_module.TimelineModel(trace_result)

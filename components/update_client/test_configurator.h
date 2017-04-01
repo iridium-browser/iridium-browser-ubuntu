@@ -14,22 +14,25 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/update_client/configurator.h"
-#include "net/url_request/url_request_test_util.h"
+#include "url/gurl.h"
 
-class GURL;
 class PrefService;
 
 namespace base {
 class SequencedTaskRunner;
+class SingleThreadTaskRunner;
 }  // namespace base
+
+namespace net {
+class TestURLRequestContextGetter;
+class URLRequestContextGetter;
+}  // namespace net
 
 namespace update_client {
 
 #define POST_INTERCEPT_SCHEME "https"
 #define POST_INTERCEPT_HOSTNAME "localhost2"
 #define POST_INTERCEPT_PATH "/update2"
-
-struct CrxComponent;
 
 // component 1 has extension id "jebgalgnebhfojomionfpkfelancnnkf", and
 // the RSA public key the following hash:
@@ -64,6 +67,7 @@ class TestConfigurator : public Configurator {
   int UpdateDelay() const override;
   std::vector<GURL> UpdateUrl() const override;
   std::vector<GURL> PingUrl() const override;
+  std::string GetProdId() const override;
   base::Version GetBrowserVersion() const override;
   std::string GetChannel() const override;
   std::string GetBrand() const override;
@@ -80,6 +84,7 @@ class TestConfigurator : public Configurator {
   scoped_refptr<base::SequencedTaskRunner> GetSequencedTaskRunner()
       const override;
   PrefService* GetPrefService() const override;
+  bool IsPerUserInstall() const override;
 
   void SetBrand(const std::string& brand);
   void SetOnDemandTime(int seconds);

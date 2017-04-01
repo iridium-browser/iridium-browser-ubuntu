@@ -6,12 +6,12 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
@@ -156,7 +156,7 @@ class SoftwareVideoRendererTest : public ::testing::Test {
 TEST_F(SoftwareVideoRendererTest, DecodeFrame) {
   const int kFrameCount = 5;
 
-  ScopedVector<DesktopFrame> test_frames;
+  std::vector<std::unique_ptr<DesktopFrame>> test_frames;
 
   // std::vector<bool> doesn't allow to get pointer to individual values, so
   // int needs to be used instead.
@@ -167,7 +167,7 @@ TEST_F(SoftwareVideoRendererTest, DecodeFrame) {
     callback_called[frame_index] = 0;
 
     renderer_->ProcessVideoPacket(
-        encoder_.Encode(*test_frames[frame_index], 0),
+        encoder_.Encode(*test_frames[frame_index]),
         base::Bind(&SetTrue, &(callback_called[frame_index])));
   }
 

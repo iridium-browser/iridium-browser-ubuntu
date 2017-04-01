@@ -158,11 +158,9 @@ class RenderViewSizeObserver : public WebContentsObserver {
     rwhv_create_size_ = rvh->GetWidget()->GetView()->GetViewBounds().size();
   }
 
-  void DidStartProvisionalLoadForFrame(
-      RenderFrameHost* render_frame_host,
-      const GURL& url,
-      bool is_error_page,
-      bool is_iframe_srcdoc) override {
+  void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
+                                       const GURL& url,
+                                       bool is_error_page) override {
     ResizeWebContentsView(shell_, wcv_new_size_, false);
   }
 
@@ -382,7 +380,8 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLSubframe) {
 
   // Navigate with the subframe's FrameTreeNode ID.
   const GURL url(embedded_test_server()->GetURL("/title1.html"));
-  OpenURLParams params(url, Referrer(), frame_tree_node_id, CURRENT_TAB,
+  OpenURLParams params(url, Referrer(), frame_tree_node_id,
+                       WindowOpenDisposition::CURRENT_TAB,
                        ui::PAGE_TRANSITION_LINK, true);
   shell()->web_contents()->OpenURL(params);
 
@@ -898,17 +897,11 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, NewNamedWindow) {
 
 // TODO(clamy): Make the test work on Windows and on Mac. On Mac and Windows,
 // there seem to be an issue with the ShellJavascriptDialogManager.
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_NoResetOnBeforeUnloadCanceledOnCommit \
-  DISABLED_NoResetOnBeforeUnloadCanceledOnCommit
-#else
-#define MAYBE_NoResetOnBeforeUnloadCanceledOnCommit \
-  NoResetOnBeforeUnloadCanceledOnCommit
-#endif
+// Flaky on all platforms: https://crbug.com/655628
 // Test that if a BeforeUnload dialog is destroyed due to the commit of a
 // cross-site navigation, it will not reset the loading state.
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
-                       MAYBE_NoResetOnBeforeUnloadCanceledOnCommit) {
+                       DISABLED_NoResetOnBeforeUnloadCanceledOnCommit) {
   ASSERT_TRUE(embedded_test_server()->Start());
   const GURL kStartURL(
       embedded_test_server()->GetURL("/hang_before_unload.html"));
@@ -922,7 +915,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   TestNavigationManager cross_site_delayer(shell()->web_contents(),
                                            kCrossSiteURL);
   shell()->LoadURL(kCrossSiteURL);
-  EXPECT_TRUE(cross_site_delayer.WaitForWillStartRequest());
+  EXPECT_TRUE(cross_site_delayer.WaitForRequestStart());
 
   // Click on a link in the page. This will show the BeforeUnload dialog.
   // Ensure the dialog is not dismissed, which will cause it to still be
@@ -988,9 +981,9 @@ class TestJavaScriptDialogManager : public JavaScriptDialogManager,
     return true;
   }
 
-  void CancelActiveAndPendingDialogs(WebContents* web_contents) override {}
-
-  void ResetDialogState(WebContents* web_contents) override {}
+  void CancelDialogs(WebContents* web_contents,
+                     bool suppress_callbacks,
+                     bool reset_state) override {}
 
  private:
   std::string last_message_;
@@ -1181,10 +1174,12 @@ class DownloadImageObserver {
 };
 
 void DownloadImageTestInternal(Shell* shell,
-                               const GURL &image_url,
-                               int expected_http_status) {
+                               const GURL& image_url,
+                               int expected_http_status,
+                               int expected_number_of_images) {
   using ::testing::_;
   using ::testing::InvokeWithoutArgs;
+  using ::testing::SizeIs;
 
   // Set up everything.
   DownloadImageObserver download_image_observer;
@@ -1193,7 +1188,8 @@ void DownloadImageTestInternal(Shell* shell,
 
   // Set up expectation and stub.
   EXPECT_CALL(download_image_observer,
-              OnFinishDownloadImage(_, expected_http_status, _, _, _));
+              OnFinishDownloadImage(_, expected_http_status, _,
+                                    SizeIs(expected_number_of_images), _));
   ON_CALL(download_image_observer, OnFinishDownloadImage(_, _, _, _, _))
       .WillByDefault(
           InvokeWithoutArgs(loop_runner.get(), &MessageLoopRunner::Quit));
@@ -1225,16 +1221,26 @@ void ExpectNoValidImageCallback(const base::Closure& quit_closure,
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
                        DownloadImage_HttpImage) {
   ASSERT_TRUE(embedded_test_server()->Start());
-  const GURL kImageUrl =
-      embedded_test_server()->GetURL("/image.jpg");
-  DownloadImageTestInternal(shell(), kImageUrl, 200);
+  const GURL kImageUrl = embedded_test_server()->GetURL("/single_face.jpg");
+  DownloadImageTestInternal(shell(), kImageUrl, 200, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
                        DownloadImage_Deny_FileImage) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  shell()->LoadURL(embedded_test_server()->GetURL("/simple_page.html"));
+
+  const GURL kImageUrl = GetTestUrl("", "single_face.jpg");
+  DownloadImageTestInternal(shell(), kImageUrl, 0, 0);
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       DownloadImage_Allow_FileImage) {
+  shell()->LoadURL(GetTestUrl("", "simple_page.html"));
+
   const GURL kImageUrl =
       GetTestUrl("", "image.jpg");
-  DownloadImageTestInternal(shell(), kImageUrl, 0);
+  DownloadImageTestInternal(shell(), kImageUrl, 0, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, DownloadImage_NoValidImage) {
@@ -1247,6 +1253,79 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, DownloadImage_NoValidImage) {
       base::Bind(&ExpectNoValidImageCallback, run_loop.QuitClosure()));
 
   run_loop.Run();
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, DownloadImage_DataImage) {
+  const GURL kImageUrl = GURL(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUAAAAFCAYAAACNbyblAAAAHE"
+      "lEQVQI12P4//8/w38GIAXDIBKE0DHxgljNBAAO9TXL0Y4OHwAAAABJRU5ErkJggg==");
+  DownloadImageTestInternal(shell(), kImageUrl, 0, 1);
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       DownloadImage_InvalidDataImage) {
+  const GURL kImageUrl = GURL("data:image/png;invalid");
+  DownloadImageTestInternal(shell(), kImageUrl, 0, 0);
+}
+
+class MouseLockDelegate : public WebContentsDelegate {
+ public:
+  // WebContentsDelegate:
+  void RequestToLockMouse(WebContents* web_contents,
+                          bool user_gesture,
+                          bool last_unlocked_by_target) override {
+    request_to_lock_mouse_called_ = true;
+  }
+  bool request_to_lock_mouse_called_ = false;
+};
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
+                       RenderWidgetDeletedWhileMouseLockPending) {
+  host_resolver()->AddRule("*", "127.0.0.1");
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  std::unique_ptr<MouseLockDelegate> delegate(new MouseLockDelegate());
+  shell()->web_contents()->SetDelegate(delegate.get());
+  ASSERT_TRUE(shell()->web_contents()->GetDelegate() == delegate.get());
+
+  NavigateToURL(shell(),
+                embedded_test_server()->GetURL("a.com", "/title1.html"));
+
+  // Try to request pointer lock. WebContentsDelegate should get a notification.
+  ASSERT_TRUE(ExecuteScript(shell(),
+                            "window.domAutomationController.send(document.body."
+                            "requestPointerLock());"));
+  EXPECT_TRUE(delegate.get()->request_to_lock_mouse_called_);
+
+  // Make sure that the renderer didn't get the pointer lock, since the
+  // WebContentsDelegate didn't approve the notification.
+  bool locked = false;
+  ASSERT_TRUE(ExecuteScriptAndExtractBool(shell(),
+                                          "window.domAutomationController.send("
+                                          "document.pointerLockElement == "
+                                          "null);",
+                                          &locked));
+  EXPECT_TRUE(locked);
+
+  // Try to request the pointer lock again. Since there's a pending request in
+  // WebContentsDelelgate, the WebContents shouldn't ask again.
+  delegate.get()->request_to_lock_mouse_called_ = false;
+  ASSERT_TRUE(ExecuteScript(shell(),
+                            "window.domAutomationController.send(document.body."
+                            "requestPointerLock());"));
+  EXPECT_FALSE(delegate.get()->request_to_lock_mouse_called_);
+
+  // Force a cross-process navigation so that the RenderWidgetHost is deleted.
+  NavigateToURL(shell(),
+                embedded_test_server()->GetURL("b.com", "/title1.html"));
+
+  // Make sure the WebContents cleaned up the previous pending request. A new
+  // request should be forwarded to the WebContentsDelegate.
+  delegate.get()->request_to_lock_mouse_called_ = false;
+  ASSERT_TRUE(ExecuteScript(shell(),
+                            "window.domAutomationController.send(document.body."
+                            "requestPointerLock());"));
+  EXPECT_TRUE(delegate.get()->request_to_lock_mouse_called_);
 }
 
 }  // namespace content

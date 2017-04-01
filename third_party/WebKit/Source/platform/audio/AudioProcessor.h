@@ -38,48 +38,57 @@ namespace blink {
 
 class AudioBus;
 
-// AudioProcessor is an abstract base class representing an audio signal processing object with a single input and a single output,
-// where the number of input channels equals the number of output channels.  It can be used as one part of a complex DSP algorithm,
-// or as the processor for a basic (one input - one output) AudioNode.
+// AudioProcessor is an abstract base class representing an audio signal
+// processing object with a single input and a single output, where the number
+// of input channels equals the number of output channels.  It can be used as
+// one part of a complex DSP algorithm, or as the processor for a basic (one
+// input - one output) AudioNode.
 
 class PLATFORM_EXPORT AudioProcessor {
-    USING_FAST_MALLOC(AudioProcessor);
-public:
-    AudioProcessor(float sampleRate, unsigned numberOfChannels)
-        : m_initialized(false)
-        , m_numberOfChannels(numberOfChannels)
-        , m_sampleRate(sampleRate)
-    {
-    }
+  USING_FAST_MALLOC(AudioProcessor);
 
-    virtual ~AudioProcessor();
+ public:
+  AudioProcessor(float sampleRate, unsigned numberOfChannels)
+      : m_initialized(false),
+        m_numberOfChannels(numberOfChannels),
+        m_sampleRate(sampleRate) {}
 
-    // Full initialization can be done here instead of in the constructor.
-    virtual void initialize() = 0;
-    virtual void uninitialize() = 0;
+  virtual ~AudioProcessor();
 
-    // Processes the source to destination bus.  The number of channels must match in source and destination.
-    virtual void process(const AudioBus* source, AudioBus* destination, size_t framesToProcess) = 0;
+  // Full initialization can be done here instead of in the constructor.
+  virtual void initialize() = 0;
+  virtual void uninitialize() = 0;
 
-    // Resets filter state
-    virtual void reset() = 0;
+  // Processes the source to destination bus.  The number of channels must match
+  // in source and destination.
+  virtual void process(const AudioBus* source,
+                       AudioBus* destination,
+                       size_t framesToProcess) = 0;
 
-    virtual void setNumberOfChannels(unsigned) = 0;
-    virtual unsigned numberOfChannels() const = 0;
+  // Forces all AudioParams in the processor to run the timeline,
+  // bypassing any other processing the processor would do in
+  // process().
+  virtual void processOnlyAudioParams(size_t framesToProcess){};
 
-    bool isInitialized() const { return m_initialized; }
+  // Resets filter state
+  virtual void reset() = 0;
 
-    float sampleRate() const { return m_sampleRate; }
+  virtual void setNumberOfChannels(unsigned) = 0;
+  virtual unsigned numberOfChannels() const = 0;
 
-    virtual double tailTime() const = 0;
-    virtual double latencyTime() const = 0;
+  bool isInitialized() const { return m_initialized; }
 
-protected:
-    bool m_initialized;
-    unsigned m_numberOfChannels;
-    float m_sampleRate;
+  float sampleRate() const { return m_sampleRate; }
+
+  virtual double tailTime() const = 0;
+  virtual double latencyTime() const = 0;
+
+ protected:
+  bool m_initialized;
+  unsigned m_numberOfChannels;
+  float m_sampleRate;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // AudioProcessor_h
+#endif  // AudioProcessor_h

@@ -31,10 +31,14 @@ bool IsValidRect(const RECT& rect) {
 
 }  // namespace
 
+DxgiAdapterDuplicator::Context::Context() = default;
+DxgiAdapterDuplicator::Context::Context(const Context& other) = default;
+DxgiAdapterDuplicator::Context::~Context() = default;
+
 DxgiAdapterDuplicator::DxgiAdapterDuplicator(const D3dDevice& device)
     : device_(device) {}
-
 DxgiAdapterDuplicator::DxgiAdapterDuplicator(DxgiAdapterDuplicator&&) = default;
+DxgiAdapterDuplicator::~DxgiAdapterDuplicator() = default;
 
 bool DxgiAdapterDuplicator::Initialize() {
   if (DoInitialize()) {
@@ -62,11 +66,11 @@ bool DxgiAdapterDuplicator::DoInitialize() {
     }
 
     DXGI_OUTPUT_DESC desc;
-    error = _com_error(output->GetDesc(&desc));
+    error = output->GetDesc(&desc);
     if (error.Error() == S_OK) {
       if (desc.AttachedToDesktop && IsValidRect(desc.DesktopCoordinates)) {
         ComPtr<IDXGIOutput1> output1;
-        error = _com_error(output.As(&output1));
+        error = output.As(&output1);
         if (error.Error() != S_OK || !output1) {
           LOG(LS_WARNING) << "Failed to convert IDXGIOutput to IDXGIOutput1, "
                              "this usually means the system does not support "
@@ -113,11 +117,10 @@ void DxgiAdapterDuplicator::Unregister(const Context* const context) {
 }
 
 bool DxgiAdapterDuplicator::Duplicate(Context* context,
-                                      const DesktopFrame* last_frame,
-                                      DesktopFrame* target) {
+                                      SharedDesktopFrame* target) {
   RTC_DCHECK_EQ(context->contexts.size(), duplicators_.size());
   for (size_t i = 0; i < duplicators_.size(); i++) {
-    if (!duplicators_[i].Duplicate(&context->contexts[i], last_frame,
+    if (!duplicators_[i].Duplicate(&context->contexts[i],
                                    duplicators_[i].desktop_rect().top_left(),
                                    target)) {
       return false;
@@ -128,13 +131,12 @@ bool DxgiAdapterDuplicator::Duplicate(Context* context,
 
 bool DxgiAdapterDuplicator::DuplicateMonitor(Context* context,
                                              int monitor_id,
-                                             const DesktopFrame* last_frame,
-                                             DesktopFrame* target) {
+                                             SharedDesktopFrame* target) {
   RTC_DCHECK(monitor_id >= 0 &&
              monitor_id < static_cast<int>(duplicators_.size()) &&
              context->contexts.size() == duplicators_.size());
-  return duplicators_[monitor_id].Duplicate(
-      &context->contexts[monitor_id], last_frame, DesktopVector(), target);
+  return duplicators_[monitor_id].Duplicate(&context->contexts[monitor_id],
+                                            DesktopVector(), target);
 }
 
 DesktopRect DxgiAdapterDuplicator::ScreenRect(int id) const {

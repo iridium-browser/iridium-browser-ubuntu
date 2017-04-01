@@ -4,8 +4,8 @@
 
 #include "ash/default_wallpaper_delegate.h"
 
-#include "ash/desktop_background/desktop_background_controller.h"
-#include "ash/shell.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
+#include "ash/common/wm_shell.h"
 #include "ui/wm/core/window_animations.h"
 
 namespace ash {
@@ -28,12 +28,8 @@ bool DefaultWallpaperDelegate::ShouldShowInitialAnimation() {
 void DefaultWallpaperDelegate::UpdateWallpaper(bool clear_cache) {}
 
 void DefaultWallpaperDelegate::InitializeWallpaper() {
-  ash::Shell::GetInstance()
-      ->desktop_background_controller()
-      ->CreateEmptyWallpaper();
+  WmShell::Get()->wallpaper_controller()->CreateEmptyWallpaper();
 }
-
-void DefaultWallpaperDelegate::OpenSetWallpaperPage() {}
 
 bool DefaultWallpaperDelegate::CanOpenSetWallpaperPage() {
   return false;

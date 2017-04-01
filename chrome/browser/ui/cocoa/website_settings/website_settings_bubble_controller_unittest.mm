@@ -9,13 +9,17 @@
 #include "base/i18n/rtl.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
+#include "chrome/test/base/testing_profile.h"
+#include "content/public/test/test_browser_thread_bundle.h"
+#include "content/public/test/test_web_contents_factory.h"
+#include "net/test/test_certificate_data.h"
 #include "testing/gtest_mac.h"
 
 @interface WebsiteSettingsBubbleController (ExposedForTesting)
 - (NSView*)permissionsView;
 - (NSButton*)resetDecisionsButton;
-- (NSButton*)securityDetailsButton;
+- (NSButton*)connectionHelpButton;
 @end
 
 @implementation WebsiteSettingsBubbleController (ExposedForTesting)
@@ -25,8 +29,9 @@
 - (NSButton*)resetDecisionsButton {
   return resetDecisionsButton_;
 }
-- (NSButton*)securityDetailsButton {
-  return securityDetailsButton_;
+- (NSButton*)connectionHelpButton {
+
+  return connectionHelpButton_;
 }
 @end
 
@@ -58,33 +63,26 @@ enum PermissionMenuIndices {
 };
 
 const ContentSettingsType kTestPermissionTypes[] = {
-  // NOTE: FULLSCREEN does not support "Always block", so it must appear as
-  // one of the first three permissions.
-  CONTENT_SETTINGS_TYPE_FULLSCREEN,
   CONTENT_SETTINGS_TYPE_IMAGES,
   CONTENT_SETTINGS_TYPE_JAVASCRIPT,
   CONTENT_SETTINGS_TYPE_PLUGINS,
   CONTENT_SETTINGS_TYPE_POPUPS,
   CONTENT_SETTINGS_TYPE_GEOLOCATION,
   CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-  CONTENT_SETTINGS_TYPE_MOUSELOCK,
   CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC
 };
 
 const ContentSetting kTestSettings[] = {
   CONTENT_SETTING_DEFAULT,
   CONTENT_SETTING_DEFAULT,
-  CONTENT_SETTING_DEFAULT,
   CONTENT_SETTING_ALLOW,
   CONTENT_SETTING_BLOCK,
   CONTENT_SETTING_ALLOW,
   CONTENT_SETTING_BLOCK,
-  CONTENT_SETTING_ALLOW,
   CONTENT_SETTING_BLOCK
 };
 
 const ContentSetting kTestDefaultSettings[] = {
-  CONTENT_SETTING_ALLOW,
   CONTENT_SETTING_BLOCK,
   CONTENT_SETTING_ASK
 };
@@ -94,10 +92,8 @@ const content_settings::SettingSource kTestSettingSources[] = {
   content_settings::SETTING_SOURCE_USER,
   content_settings::SETTING_SOURCE_USER,
   content_settings::SETTING_SOURCE_USER,
-  content_settings::SETTING_SOURCE_USER,
   content_settings::SETTING_SOURCE_POLICY,
   content_settings::SETTING_SOURCE_POLICY,
-  content_settings::SETTING_SOURCE_EXTENSION,
   content_settings::SETTING_SOURCE_EXTENSION
 };
 
@@ -130,9 +126,9 @@ class WebsiteSettingsBubbleControllerTest : public CocoaTest {
     [controller_ setDefaultWindowWidth:default_width];
     [controller_ initWithParentWindow:test_window()
               websiteSettingsUIBridge:bridge_
-                          webContents:nil
-                                  url:GURL("https://www.google.com")
-                   isDevToolsDisabled:NO];
+                          webContents:web_contents_factory_.CreateWebContents(
+                                          &profile_)
+                                  url:GURL("https://www.google.com")];
     window_ = [controller_ window];
     [controller_ showWindow:nil];
   }
@@ -198,43 +194,19 @@ class WebsiteSettingsBubbleControllerTest : public CocoaTest {
       permission_info_list.push_back(info);
     }
     ChosenObjectInfoList chosen_object_info_list;
-    bridge_->SetPermissionInfo(permission_info_list, chosen_object_info_list);
+    bridge_->SetPermissionInfo(permission_info_list,
+                               std::move(chosen_object_info_list));
   }
+
+  content::TestBrowserThreadBundle thread_bundle_;
+  TestingProfile profile_;
+  content::TestWebContentsFactory web_contents_factory_;
 
   WebsiteSettingsBubbleControllerForTesting* controller_;  // Weak, owns self.
   NSWindow* window_;  // Weak, owned by controller.
 };
 
-TEST_F(WebsiteSettingsBubbleControllerTest, BasicIdentity) {
-  WebsiteSettingsUI::IdentityInfo info;
-  info.site_identity = std::string("nhl.com");
-  info.identity_status = WebsiteSettings::SITE_IDENTITY_STATUS_UNKNOWN;
-
-  CreateBubble();
-
-  // Test setting the site identity.
-  bridge_->SetIdentityInfo(const_cast<WebsiteSettingsUI::IdentityInfo&>(info));
-  NSTextField* identity_field = FindTextField(TEXT_EQUAL, @"nhl.com");
-  ASSERT_TRUE(identity_field != nil);
-
-  // Test changing the site identity, and ensure that the UI is updated.
-  info.site_identity = std::string("google.com");
-  bridge_->SetIdentityInfo(const_cast<WebsiteSettingsUI::IdentityInfo&>(info));
-  EXPECT_EQ(identity_field, FindTextField(TEXT_EQUAL, @"google.com"));
-
-  // Find the identity status field.
-  NSTextField* identity_status_field =
-      FindTextField(TEXT_NOT_EQUAL, @"google.com");
-  ASSERT_NE(identity_field, identity_status_field);
-
-  // Ensure the text of the identity status field changes when the status does.
-  NSString* status = [identity_status_field stringValue];
-  info.identity_status = WebsiteSettings::SITE_IDENTITY_STATUS_CERT;
-  bridge_->SetIdentityInfo(const_cast<WebsiteSettingsUI::IdentityInfo&>(info));
-  EXPECT_NSNE(status, [identity_status_field stringValue]);
-}
-
-TEST_F(WebsiteSettingsBubbleControllerTest, SecurityDetailsButton) {
+TEST_F(WebsiteSettingsBubbleControllerTest, ConnectionHelpButton) {
   WebsiteSettingsUI::IdentityInfo info;
   info.site_identity = std::string("example.com");
   info.identity_status = WebsiteSettings::SITE_IDENTITY_STATUS_UNKNOWN;
@@ -243,8 +215,8 @@ TEST_F(WebsiteSettingsBubbleControllerTest, SecurityDetailsButton) {
 
   bridge_->SetIdentityInfo(const_cast<WebsiteSettingsUI::IdentityInfo&>(info));
 
-  EXPECT_EQ([[controller_ securityDetailsButton] action],
-            @selector(showSecurityDetails:));
+  EXPECT_EQ([[controller_ connectionHelpButton] action],
+            @selector(openConnectionHelp:));
 }
 
 TEST_F(WebsiteSettingsBubbleControllerTest, ResetDecisionsButton) {
@@ -260,7 +232,8 @@ TEST_F(WebsiteSettingsBubbleControllerTest, ResetDecisionsButton) {
   EXPECT_EQ([controller_ resetDecisionsButton], nil);
 
   // Set identity info, specifying that the button should be shown.
-  info.cert_id = 1;
+  info.certificate = net::X509Certificate::CreateFromBytes(
+      reinterpret_cast<const char*>(google_der), sizeof(google_der));
   info.show_ssl_decision_revoke_button = true;
   bridge_->SetIdentityInfo(const_cast<WebsiteSettingsUI::IdentityInfo&>(info));
   EXPECT_NE([controller_ resetDecisionsButton], nil);
@@ -279,10 +252,9 @@ TEST_F(WebsiteSettingsBubbleControllerTest, SetPermissionInfo) {
   CreateBubble();
   SetTestPermissions();
 
-  // There should be three subviews per permission (an icon, a label and a
-  // select box), plus a text label for the Permission section.
+  // There should be three subviews per permission.
   NSArray* subviews = [[controller_ permissionsView] subviews];
-  EXPECT_EQ(arraysize(kTestPermissionTypes) * 3 + 1, [subviews count]);
+  EXPECT_EQ(arraysize(kTestPermissionTypes) * 3 , [subviews count]);
 
   // Ensure that there is a distinct label for each permission.
   NSMutableSet* labels = [NSMutableSet set];
@@ -290,8 +262,7 @@ TEST_F(WebsiteSettingsBubbleControllerTest, SetPermissionInfo) {
     if ([view isKindOfClass:[NSTextField class]])
       [labels addObject:[static_cast<NSTextField*>(view) stringValue]];
   }
-  // The section header ("Permissions") will also be found, hence the +1.
-  EXPECT_EQ(arraysize(kTestPermissionTypes) + 1, [labels count]);
+  EXPECT_EQ(arraysize(kTestPermissionTypes), [labels count]);
 
   // Ensure that the button labels are distinct, and look for the correct
   // number of disabled buttons.
@@ -308,9 +279,9 @@ TEST_F(WebsiteSettingsBubbleControllerTest, SetPermissionInfo) {
   }
   EXPECT_EQ(arraysize(kTestPermissionTypes), [labels count]);
 
-  // 4 of the buttons should be disabled -- the ones that have a setting source
+  // 3 of the buttons should be disabled -- the ones that have a setting source
   // of SETTING_SOURCE_POLICY or SETTING_SOURCE_EXTENSION.
-  EXPECT_EQ(4, disabled_count);
+  EXPECT_EQ(3, disabled_count);
 }
 
 TEST_F(WebsiteSettingsBubbleControllerTest, WindowWidth) {

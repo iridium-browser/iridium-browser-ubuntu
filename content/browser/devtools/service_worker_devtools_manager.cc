@@ -4,6 +4,7 @@
 
 #include "content/browser/devtools/service_worker_devtools_manager.h"
 
+#include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -88,7 +89,8 @@ bool ServiceWorkerDevToolsManager::WorkerCreated(
         new ServiceWorkerDevToolsAgentHost(id, service_worker_id,
                                            is_installed_version);
     workers_[id] = host.get();
-    FOR_EACH_OBSERVER(Observer, observer_list_, WorkerCreated(host.get()));
+    for (auto& observer : observer_list_)
+      observer.WorkerCreated(host.get());
     if (debug_service_worker_on_start_)
         host->PauseForDebugOnStart();
     return host->IsPausedForDebugOnStart();
@@ -113,14 +115,12 @@ void ServiceWorkerDevToolsManager::WorkerReadyForInspection(
     return;
   scoped_refptr<ServiceWorkerDevToolsAgentHost> host = it->second;
   host->WorkerReadyForInspection();
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    WorkerReadyForInspection(host.get()));
+  for (auto& observer : observer_list_)
+    observer.WorkerReadyForInspection(host.get());
 
   // Then bring up UI for the ones not picked by other clients.
-  if (host->IsPausedForDebugOnStart() && !host->IsAttached()) {
-    host->Inspect(RenderProcessHost::FromID(worker_process_id)->
-        GetBrowserContext());
-  }
+  if (host->IsPausedForDebugOnStart() && !host->IsAttached())
+    static_cast<DevToolsAgentHostImpl*>(host.get())->Inspect();
 }
 
 void ServiceWorkerDevToolsManager::WorkerVersionInstalled(int worker_process_id,
@@ -132,8 +132,8 @@ void ServiceWorkerDevToolsManager::WorkerVersionInstalled(int worker_process_id,
     return;
   scoped_refptr<ServiceWorkerDevToolsAgentHost> host = it->second;
   host->WorkerVersionInstalled();
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    WorkerVersionInstalled(host.get()));
+  for (auto& observer : observer_list_)
+    observer.WorkerVersionInstalled(host.get());
 }
 
 void ServiceWorkerDevToolsManager::WorkerVersionDoomed(int worker_process_id,
@@ -145,7 +145,8 @@ void ServiceWorkerDevToolsManager::WorkerVersionDoomed(int worker_process_id,
     return;
   scoped_refptr<ServiceWorkerDevToolsAgentHost> host = it->second;
   host->WorkerVersionDoomed();
-  FOR_EACH_OBSERVER(Observer, observer_list_, WorkerVersionDoomed(host.get()));
+  for (auto& observer : observer_list_)
+    observer.WorkerVersionDoomed(host.get());
 }
 
 void ServiceWorkerDevToolsManager::WorkerDestroyed(int worker_process_id,
@@ -157,7 +158,8 @@ void ServiceWorkerDevToolsManager::WorkerDestroyed(int worker_process_id,
     return;
   scoped_refptr<WorkerDevToolsAgentHost> agent_host(it->second);
   agent_host->WorkerDestroyed();
-  FOR_EACH_OBSERVER(Observer, observer_list_, WorkerDestroyed(it->second));
+  for (auto& observer : observer_list_)
+    observer.WorkerDestroyed(it->second);
 }
 
 void ServiceWorkerDevToolsManager::RemoveInspectedWorkerData(WorkerId id) {

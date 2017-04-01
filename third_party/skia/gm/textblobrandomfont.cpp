@@ -77,7 +77,7 @@ protected:
         }
 
         // build
-        fBlob.reset(builder.build());
+        fBlob = builder.make();
     }
 
     SkString onShortName() override {
@@ -97,8 +97,9 @@ protected:
 
         canvas->drawColor(sk_tool_utils::color_to_565(SK_ColorWHITE));
 
-        SkImageInfo info = SkImageInfo::MakeN32(kWidth, kHeight, kPremul_SkAlphaType,
-                                                sk_ref_sp(canvas->imageInfo().colorSpace()));
+        SkImageInfo info = SkImageInfo::Make(kWidth, kHeight, canvas->imageInfo().colorType(),
+                                             kPremul_SkAlphaType,
+                                             canvas->imageInfo().refColorSpace());
         SkSurfaceProps props(0, kUnknown_SkPixelGeometry);
         auto surface(canvas->makeSurface(info, &props));
         if (surface) {
@@ -136,10 +137,10 @@ protected:
     }
 
 private:
-    SkAutoTUnref<const SkTextBlob> fBlob;
+    sk_sp<SkTextBlob> fBlob;
 
-    static const int kWidth = 2000;
-    static const int kHeight = 1600;
+    static constexpr int kWidth = 2000;
+    static constexpr int kHeight = 1600;
 
     typedef GM INHERITED;
 };

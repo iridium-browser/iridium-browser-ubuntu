@@ -60,6 +60,7 @@
 #include "net/http/http_auth_preferences.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/log/net_log_event_type.h"
 #include "net/nqe/external_estimate_provider.h"
 #include "net/nqe/network_quality_estimator.h"
 #include "net/proxy/proxy_config_service.h"
@@ -77,6 +78,10 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "url/url_constants.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 // The IOSChromeIOThread object must outlive any tasks posted to the IO thread
 // before the Quit task, so base::Bind() calls are not refcounted.
@@ -160,7 +165,8 @@ class IOSChromeIOThread::LoggingNetworkChangeObserver
   void OnIPAddressChanged() override {
     VLOG(1) << "Observed a change to the network IP addresses";
 
-    net_log_->AddGlobalEntry(net::NetLog::TYPE_NETWORK_IP_ADDRESSES_CHANGED);
+    net_log_->AddGlobalEntry(
+        net::NetLogEventType::NETWORK_IP_ADDRESSES_CHANGED);
   }
 
   // NetworkChangeNotifier::ConnectionTypeObserver implementation.
@@ -173,7 +179,7 @@ class IOSChromeIOThread::LoggingNetworkChangeObserver
             << type_as_string;
 
     net_log_->AddGlobalEntry(
-        net::NetLog::TYPE_NETWORK_CONNECTIVITY_CHANGED,
+        net::NetLogEventType::NETWORK_CONNECTIVITY_CHANGED,
         net::NetLog::StringCallback("new_connection_type", &type_as_string));
   }
 
@@ -186,7 +192,7 @@ class IOSChromeIOThread::LoggingNetworkChangeObserver
     VLOG(1) << "Observed a network change to state " << type_as_string;
 
     net_log_->AddGlobalEntry(
-        net::NetLog::TYPE_NETWORK_CHANGED,
+        net::NetLogEventType::NETWORK_CHANGED,
         net::NetLog::StringCallback("new_connection_type", &type_as_string));
   }
 
@@ -394,7 +400,6 @@ void IOSChromeIOThread::Init() {
   }
 
   params_.ignore_certificate_errors = false;
-  params_.enable_quic_port_selection = false;
   params_.enable_user_alternate_protocol_ports = false;
 
   std::string quic_user_agent_id = ::GetChannelString();

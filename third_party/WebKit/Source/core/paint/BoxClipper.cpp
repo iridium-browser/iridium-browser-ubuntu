@@ -5,6 +5,7 @@
 #include "core/paint/BoxClipper.h"
 
 #include "core/layout/LayoutBox.h"
+#include "core/layout/svg/LayoutSVGRoot.h"
 #include "core/paint/ObjectPaintProperties.h"
 #include "core/paint/PaintInfo.h"
 #include "core/paint/PaintLayer.h"
@@ -15,70 +16,98 @@
 
 namespace blink {
 
-BoxClipper::BoxClipper(const LayoutBox& box, const PaintInfo& paintInfo, const LayoutPoint& accumulatedOffset, ContentsClipBehavior contentsClipBehavior)
-    : m_box(box)
-    , m_paintInfo(paintInfo)
-    , m_clipType(DisplayItem::UninitializedType)
-{
-    ASSERT(m_paintInfo.phase != PaintPhaseSelfBlockBackgroundOnly && m_paintInfo.phase != PaintPhaseSelfOutlineOnly);
+// Clips for boxes are applied by the box's PaintLayerClipper, if the box has
+// a self-painting PaintLayer. Otherwise the box clips itself.
+// Note that this method is very similar to
+// PaintLayerClipper::shouldClipOverflow for that reason.
+//
+// An exception is control clip, which is currently never applied by
+// PaintLayerClipper.
+static bool boxNeedsClip(const LayoutBox& box) {
+  if (box.hasLayer() && box.layer()->isSelfPaintingLayer())
+    return false;
+  if (box.isSVGRoot() && toLayoutSVGRoot(box).shouldApplyViewportClip())
+    return true;
+  return box.hasOverflowClip() || box.styleRef().containsPaint() ||
+         box.hasControlClip();
+}
 
-    if (m_paintInfo.phase == PaintPhaseMask)
-        return;
+DISABLE_CFI_PERF
+BoxClipper::BoxClipper(const LayoutBox& box,
+                       const PaintInfo& paintInfo,
+                       const LayoutPoint& accumulatedOffset,
+                       ContentsClipBehavior contentsClipBehavior)
+    : m_box(box),
+      m_paintInfo(paintInfo),
+      m_clipType(DisplayItem::kUninitializedType) {
+  DCHECK(m_paintInfo.phase != PaintPhaseSelfBlockBackgroundOnly &&
+         m_paintInfo.phase != PaintPhaseSelfOutlineOnly);
 
-    if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
-        const auto* objectProperties = m_box.objectPaintProperties();
-        if (objectProperties && objectProperties->overflowClip()) {
-            PaintChunkProperties properties(paintInfo.context.getPaintController().currentPaintChunkProperties());
-            properties.clip = objectProperties->overflowClip();
-            m_scopedClipProperty.emplace(paintInfo.context.getPaintController(), box, paintInfo.displayItemTypeForClipping(), properties);
-        }
-        return;
+  if (m_paintInfo.phase == PaintPhaseMask)
+    return;
+
+  if (RuntimeEnabledFeatures::slimmingPaintV2Enabled()) {
+    const auto* objectProperties = m_box.paintProperties();
+    if (objectProperties && objectProperties->overflowClip()) {
+      PaintChunkProperties properties(
+          paintInfo.context.getPaintController().currentPaintChunkProperties());
+      properties.propertyTreeState.setClip(objectProperties->overflowClip());
+      m_scopedClipProperty.emplace(paintInfo.context.getPaintController(), box,
+                                   paintInfo.displayItemTypeForClipping(),
+                                   properties);
     }
+    return;
+  }
 
-    bool isControlClip = m_box.hasControlClip();
-    bool isOverflowOrContainmentClip = (m_box.hasOverflowClip() || box.styleRef().containsPaint()) && !(m_box.hasLayer() && m_box.layer()->isSelfPaintingLayer());
+  if (!boxNeedsClip(m_box))
+    return;
 
-    if (!isControlClip && !isOverflowOrContainmentClip)
-        return;
+  LayoutRect clipRect = m_box.hasControlClip()
+                            ? m_box.controlClipRect(accumulatedOffset)
+                            : m_box.overflowClipRect(accumulatedOffset);
+  FloatRoundedRect clipRoundedRect(0, 0, 0, 0);
+  bool hasBorderRadius = m_box.style()->hasBorderRadius();
+  if (hasBorderRadius)
+    clipRoundedRect = m_box.style()->getRoundedInnerBorderFor(
+        LayoutRect(accumulatedOffset, m_box.size()));
 
-    LayoutRect clipRect = isControlClip ? m_box.controlClipRect(accumulatedOffset) : m_box.overflowClipRect(accumulatedOffset);
-    FloatRoundedRect clipRoundedRect(0, 0, 0, 0);
-    bool hasBorderRadius = m_box.style()->hasBorderRadius();
+  // Selection may extend beyond visual overflow, so this optimization is
+  // invalid if selection is present.
+  if (contentsClipBehavior == SkipContentsClipIfPossible &&
+      box.getSelectionState() == SelectionNone) {
+    LayoutRect contentsVisualOverflow = m_box.contentsVisualOverflowRect();
+    if (contentsVisualOverflow.isEmpty())
+      return;
+
+    LayoutRect conservativeClipRect = clipRect;
     if (hasBorderRadius)
-        clipRoundedRect = m_box.style()->getRoundedInnerBorderFor(LayoutRect(accumulatedOffset, m_box.size()));
+      conservativeClipRect.intersect(
+          LayoutRect(clipRoundedRect.radiusCenterRect()));
+    conservativeClipRect.moveBy(-accumulatedOffset);
+    if (m_box.hasLayer())
+      conservativeClipRect.move(m_box.scrolledContentOffset());
+    if (conservativeClipRect.contains(contentsVisualOverflow))
+      return;
+  }
 
-    // Selection may extend beyond visual overflow, so this optimization is invalid if selection is present.
-    if (contentsClipBehavior == SkipContentsClipIfPossible && box.getSelectionState() == SelectionNone) {
-        LayoutRect contentsVisualOverflow = m_box.contentsVisualOverflowRect();
-        if (contentsVisualOverflow.isEmpty())
-            return;
-
-        LayoutRect conservativeClipRect = clipRect;
-        if (hasBorderRadius)
-            conservativeClipRect.intersect(LayoutRect(clipRoundedRect.radiusCenterRect()));
-        conservativeClipRect.moveBy(-accumulatedOffset);
-        if (m_box.hasLayer())
-            conservativeClipRect.move(m_box.scrolledContentOffset());
-        if (conservativeClipRect.contains(contentsVisualOverflow))
-            return;
-    }
-
-    if (!m_paintInfo.context.getPaintController().displayItemConstructionIsDisabled()) {
-        m_clipType = m_paintInfo.displayItemTypeForClipping();
-        Vector<FloatRoundedRect> roundedRects;
-        if (hasBorderRadius)
-            roundedRects.append(clipRoundedRect);
-        m_paintInfo.context.getPaintController().createAndAppend<ClipDisplayItem>(m_box, m_clipType, pixelSnappedIntRect(clipRect), roundedRects);
-    }
+  if (!m_paintInfo.context.getPaintController()
+           .displayItemConstructionIsDisabled()) {
+    m_clipType = m_paintInfo.displayItemTypeForClipping();
+    Vector<FloatRoundedRect> roundedRects;
+    if (hasBorderRadius)
+      roundedRects.push_back(clipRoundedRect);
+    m_paintInfo.context.getPaintController().createAndAppend<ClipDisplayItem>(
+        m_box, m_clipType, pixelSnappedIntRect(clipRect), roundedRects);
+  }
 }
 
-BoxClipper::~BoxClipper()
-{
-    if (m_clipType == DisplayItem::UninitializedType)
-        return;
+BoxClipper::~BoxClipper() {
+  if (m_clipType == DisplayItem::kUninitializedType)
+    return;
 
-    DCHECK(m_box.hasControlClip() || ((m_box.hasOverflowClip() || m_box.style()->containsPaint()) && !(m_box.hasLayer() && m_box.layer()->isSelfPaintingLayer())));
-    m_paintInfo.context.getPaintController().endItem<EndClipDisplayItem>(m_box, DisplayItem::clipTypeToEndClipType(m_clipType));
+  DCHECK(boxNeedsClip(m_box));
+  m_paintInfo.context.getPaintController().endItem<EndClipDisplayItem>(
+      m_box, DisplayItem::clipTypeToEndClipType(m_clipType));
 }
 
-} // namespace blink
+}  // namespace blink

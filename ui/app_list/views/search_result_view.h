@@ -24,9 +24,9 @@ class RenderText;
 }
 
 namespace views {
-class ImageButton;
 class ImageView;
 class MenuRunner;
+class ProgressBar;
 }
 
 namespace app_list {
@@ -34,10 +34,8 @@ namespace test {
 class SearchResultListViewTest;
 }  // namespace test
 
-class ProgressBarView;
 class SearchResult;
 class SearchResultListView;
-class SearchResultViewDelegate;
 class SearchResultActionsView;
 
 // SearchResultView displays a SearchResult.
@@ -119,7 +117,7 @@ class APP_LIST_EXPORT SearchResultView
   std::unique_ptr<gfx::RenderText> title_text_;
   std::unique_ptr<gfx::RenderText> details_text_;
   SearchResultActionsView* actions_view_;  // Owned by the views hierarchy.
-  ProgressBarView* progress_bar_;  // Owned by views hierarchy.
+  views::ProgressBar* progress_bar_;       // Owned by views hierarchy.
 
   std::unique_ptr<views::MenuRunner> context_menu_runner_;
 

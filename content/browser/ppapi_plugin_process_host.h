@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <queue>
+#include <string>
 #include <vector>
 
 #include "base/files/file_path.h"
@@ -51,8 +52,8 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
         base::ProcessId plugin_pid,
         int plugin_child_id) = 0;
 
-    // Returns true if the current connection is off-the-record.
-    virtual bool OffTheRecord() = 0;
+    // Returns true if the current connection is incognito.
+    virtual bool Incognito() = 0;
 
    protected:
     virtual ~Client() {}
@@ -151,6 +152,7 @@ class PpapiPluginProcessHost : public BrowserChildProcessHostDelegate,
 
   // IPC message handlers.
   void OnRendererPluginChannelCreated(const IPC::ChannelHandle& handle);
+  void OnFieldTrialActivated(const std::string& trial_name);
 
   // Handles most requests from the plugin. May be NULL.
   scoped_refptr<PepperMessageFilter> filter_;

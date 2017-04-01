@@ -14,18 +14,36 @@ class GvrApi;
 
 namespace device {
 
+class GvrDeviceProvider;
+class GvrDelegate;
+
 class GvrDevice : public VRDevice {
  public:
-  GvrDevice(VRDeviceProvider* provider, gvr::GvrApi* gvr_api);
+  GvrDevice(GvrDeviceProvider* provider, GvrDelegate* delegate);
   ~GvrDevice() override;
 
   // VRDevice
-  VRDisplayPtr GetVRDevice() override;
-  VRPosePtr GetPose() override;
+  mojom::VRDisplayInfoPtr GetVRDevice() override;
+  mojom::VRPosePtr GetPose() override;
   void ResetPose() override;
 
+  void RequestPresent(const base::Callback<void(bool)>& callback) override;
+  void SetSecureOrigin(bool secure_origin) override;
+  void ExitPresent() override;
+
+  void SubmitFrame(mojom::VRPosePtr pose) override;
+  void UpdateLayerBounds(mojom::VRLayerBoundsPtr left_bounds,
+                         mojom::VRLayerBoundsPtr right_bounds) override;
+
+  void SetDelegate(GvrDelegate* delegate);
+
  private:
-  gvr::GvrApi* gvr_api_;
+  gvr::GvrApi* GetGvrApi();
+
+  GvrDelegate* delegate_;
+  GvrDeviceProvider* gvr_provider_;
+  bool secure_origin_ = false;
+  uint32_t pose_index_ = 1;
 
   DISALLOW_COPY_AND_ASSIGN(GvrDevice);
 };

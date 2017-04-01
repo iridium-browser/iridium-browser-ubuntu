@@ -6,34 +6,52 @@
 #define NGFragment_h
 
 #include "core/CoreExport.h"
-#include "core/layout/ng/ng_fragment_base.h"
-#include "core/layout/ng/ng_constraint_space.h"
-#include "core/layout/ng/ng_units.h"
+#include "core/layout/ng/ng_physical_fragment.h"
+#include "core/layout/ng/ng_writing_mode.h"
 #include "platform/LayoutUnit.h"
 #include "platform/heap/Handle.h"
-#include "wtf/Vector.h"
 
 namespace blink {
 
-class CORE_EXPORT NGFragment final : public NGFragmentBase {
+class CORE_EXPORT NGFragment : public GarbageCollected<NGFragment> {
  public:
-  // This modified the passed-in children vector.
-  NGFragment(NGLogicalSize size,
-             NGLogicalSize overflow,
-             NGWritingMode writingMode,
-             NGDirection direction,
-             HeapVector<Member<const NGFragmentBase>>& children)
-      : NGFragmentBase(size, overflow, writingMode, direction, FragmentBox) {
-    children_.swap(children);
+  NGWritingMode WritingMode() const {
+    return static_cast<NGWritingMode>(writing_mode_);
+  }
+  TextDirection Direction() const {
+    return static_cast<TextDirection>(direction_);
   }
 
-  DEFINE_INLINE_TRACE_AFTER_DISPATCH() {
-    visitor->trace(children_);
-    NGFragmentBase::traceAfterDispatch(visitor);
-  }
+  // Returns the border-box size.
+  LayoutUnit InlineSize() const;
+  LayoutUnit BlockSize() const;
 
- private:
-  HeapVector<Member<const NGFragmentBase>> children_;
+  // Returns the total size, including the contents outside of the border-box.
+  LayoutUnit InlineOverflow() const;
+  LayoutUnit BlockOverflow() const;
+
+  // Returns the offset relative to the parent fragement's content-box.
+  LayoutUnit InlineOffset() const;
+  LayoutUnit BlockOffset() const;
+
+  NGPhysicalFragment::NGFragmentType Type() const;
+
+  NGPhysicalFragment* PhysicalFragment() const { return physical_fragment_; };
+
+  DECLARE_TRACE();
+
+ protected:
+  NGFragment(NGWritingMode writing_mode,
+             TextDirection direction,
+             NGPhysicalFragment* physical_fragment)
+      : physical_fragment_(physical_fragment),
+        writing_mode_(writing_mode),
+        direction_(static_cast<unsigned>(direction)) {}
+
+  Member<NGPhysicalFragment> physical_fragment_;
+
+  unsigned writing_mode_ : 3;
+  unsigned direction_ : 1;
 };
 
 }  // namespace blink

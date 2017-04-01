@@ -18,14 +18,14 @@ namespace cc {
 class AnimationPlayer;
 class AnimationHost;
 class AnimationTimeline;
-class ElementAnimations;
 
 // Contains an AnimationTimeline and its AnimationPlayer that owns the impl
 // only scroll offset animations running on a particular CC Layer.
 // We have just one player for impl-only scroll offset animations. I.e. only
 // one element can have an impl-only scroll offset animation at any given time.
 // Note that this class only exists on the compositor thread.
-class CC_EXPORT ScrollOffsetAnimationsImpl : public AnimationDelegate {
+class CC_ANIMATION_EXPORT ScrollOffsetAnimationsImpl
+    : public AnimationDelegate {
  public:
   explicit ScrollOffsetAnimationsImpl(AnimationHost* animation_host);
 
@@ -33,12 +33,14 @@ class CC_EXPORT ScrollOffsetAnimationsImpl : public AnimationDelegate {
 
   void ScrollAnimationCreate(ElementId element_id,
                              const gfx::ScrollOffset& target_offset,
-                             const gfx::ScrollOffset& current_offset);
+                             const gfx::ScrollOffset& current_offset,
+                             base::TimeDelta delayed_by);
 
   bool ScrollAnimationUpdateTarget(ElementId element_id,
                                    const gfx::Vector2dF& scroll_delta,
                                    const gfx::ScrollOffset& max_scroll_offset,
-                                   base::TimeTicks frame_monotonic_time);
+                                   base::TimeTicks frame_monotonic_time,
+                                   base::TimeDelta delayed_by);
 
   // Aborts the currently running scroll offset animation on an element and
   // starts a new one offsetted by adjustment.

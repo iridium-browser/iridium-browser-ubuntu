@@ -13,7 +13,6 @@
 
 namespace test_runner {
 
-class AccessibilityController;
 class TestRunner;
 class WebFrameTestProxyBase;
 class WebTestDelegate;
@@ -25,10 +24,9 @@ class WebViewTestProxyBase;
 // WebFrameTestClient or to the product code (i.e. to RenderFrameImpl).
 class WebFrameTestClient : public blink::WebFrameClient {
  public:
-  // Caller has to ensure that all arguments (|test_runner|, |delegate| and so
-  // forth) live longer than |this|.
-  WebFrameTestClient(TestRunner* test_runner,
-                     WebTestDelegate* delegate,
+  // Caller has to ensure that all arguments (|delegate|,
+  // |web_view_test_proxy_base_| and so forth) live longer than |this|.
+  WebFrameTestClient(WebTestDelegate* delegate,
                      WebViewTestProxyBase* web_view_test_proxy_base,
                      WebFrameTestProxyBase* web_frame_test_proxy_base);
 
@@ -62,8 +60,8 @@ class WebFrameTestClient : public blink::WebFrameClient {
                          blink::WebNavigationPolicy policy,
                          const blink::WebString& suggested_name,
                          bool replaces_current_history_item) override;
-  void didStartProvisionalLoad(blink::WebLocalFrame* frame,
-                               double trigering_event_time) override;
+  void loadErrorPage(int reason) override;
+  void didStartProvisionalLoad(blink::WebLocalFrame* frame) override;
   void didReceiveServerRedirectForProvisionalLoad(
       blink::WebLocalFrame* frame) override;
   void didFailProvisionalLoad(blink::WebLocalFrame* frame,
@@ -105,10 +103,12 @@ class WebFrameTestClient : public blink::WebFrameClient {
   void didClearWindowObject(blink::WebLocalFrame* frame) override;
   bool runFileChooser(const blink::WebFileChooserParams& params,
                       blink::WebFileChooserCompletion* completion) override;
+  blink::WebEffectiveConnectionType getEffectiveConnectionType() override;
 
  private:
+  TestRunner* test_runner();
+
   // Borrowed pointers to other parts of Layout Tests state.
-  TestRunner* test_runner_;
   WebTestDelegate* delegate_;
   WebViewTestProxyBase* web_view_test_proxy_base_;
   WebFrameTestProxyBase* web_frame_test_proxy_base_;

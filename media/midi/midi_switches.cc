@@ -5,11 +5,18 @@
 #include "build/build_config.h"
 #include "media/midi/midi_switches.h"
 
-namespace switches {
+namespace midi {
+namespace features {
 
 #if defined(OS_ANDROID)
-// Use Android Midi API for WebMIDI
-const char kUseAndroidMidiApi[] = "use-android-midi-api";
+const base::Feature kMidiManagerAndroid{"MidiManagerAndroid",
+                                        base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
-}  // namespace switches
+#if defined(OS_WIN)
+const base::Feature kMidiManagerWinrt{"MidiManagerWinrt",
+                                      base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
+
+}  // namespace features
+}  // namespace midi

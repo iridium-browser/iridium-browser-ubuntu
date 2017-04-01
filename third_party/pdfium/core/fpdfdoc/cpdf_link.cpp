@@ -4,17 +4,17 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fpdfdoc/include/cpdf_link.h"
+#include "core/fpdfdoc/cpdf_link.h"
 
-#include "core/fpdfapi/fpdf_parser/include/cpdf_array.h"
-#include "core/fpdfdoc/include/cpdf_nametree.h"
+#include "core/fpdfapi/parser/cpdf_array.h"
+#include "core/fpdfdoc/cpdf_nametree.h"
 
 CFX_FloatRect CPDF_Link::GetRect() {
-  return m_pDict->GetRectBy("Rect");
+  return m_pDict->GetRectFor("Rect");
 }
 
 CPDF_Dest CPDF_Link::GetDest(CPDF_Document* pDoc) {
-  CPDF_Object* pDest = m_pDict->GetDirectObjectBy("Dest");
+  CPDF_Object* pDest = m_pDict->GetDirectObjectFor("Dest");
   if (!pDest)
     return CPDF_Dest();
 
@@ -28,5 +28,5 @@ CPDF_Dest CPDF_Link::GetDest(CPDF_Document* pDoc) {
 }
 
 CPDF_Action CPDF_Link::GetAction() {
-  return CPDF_Action(m_pDict->GetDictBy("A"));
+  return CPDF_Action(m_pDict->GetDictFor("A"));
 }

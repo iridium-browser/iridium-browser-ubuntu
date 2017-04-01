@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/files/file.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/pattern.h"
@@ -22,9 +23,10 @@
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_names.mojom.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
-#include "content/public/test/test_mojo_app.h"
+#include "content/public/test/test_service.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
@@ -35,7 +37,9 @@
 #include "content/shell/browser/shell_web_contents_view_delegate_creator.h"
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/common/shell_switches.h"
+#include "grit/shell_resources.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -59,7 +63,11 @@
 #endif
 
 #if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-#include "media/mojo/services/mojo_media_application_factory.h"  // nogncheck
+#include "media/mojo/services/media_service_factory.h"  // nogncheck
+#endif
+
+#if defined(USE_AURA)
+#include "services/navigation/navigation.h"
 #endif
 
 namespace content {
@@ -150,12 +158,15 @@ bool ShellContentBrowserClient::DoesSiteRequireDedicatedProcess(
   DCHECK(command_line->HasSwitch(switches::kIsolateSitesForTesting));
   std::string pattern =
       command_line->GetSwitchValueASCII(switches::kIsolateSitesForTesting);
+
   url::Origin origin(effective_site_url);
 
-  // Schemes like blob or filesystem, which have an embedded origin, should
-  // already have been canonicalized to the origin site.
-  CHECK_EQ(origin.scheme(), effective_site_url.scheme())
-      << "a site url should have the same scheme as its origin.";
+  if (!origin.unique()) {
+    // Schemes like blob or filesystem, which have an embedded origin, should
+    // already have been canonicalized to the origin site.
+    CHECK_EQ(origin.scheme(), effective_site_url.scheme())
+        << "a site url should have the same scheme as its origin.";
+  }
 
   // Practically |origin.Serialize()| is the same as
   // |effective_site_url.spec()|, except Origin serialization strips the
@@ -183,19 +194,46 @@ bool ShellContentBrowserClient::IsHandledURL(const GURL& url) {
   return false;
 }
 
-void ShellContentBrowserClient::RegisterInProcessMojoApplications(
-    StaticMojoApplicationMap* apps) {
-#if (ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
-  content::MojoApplicationInfo app_info;
-  app_info.application_factory = base::Bind(&media::CreateMojoMediaApplication);
-  apps->insert(std::make_pair("mojo:media", app_info));
+void ShellContentBrowserClient::RegisterInProcessServices(
+    StaticServiceMap* services) {
+#if defined(ENABLE_MOJO_MEDIA_IN_BROWSER_PROCESS)
+  {
+    content::ServiceInfo info;
+    info.factory = base::Bind(&media::CreateMediaServiceForTesting);
+    services->insert(std::make_pair("media", info));
+  }
+#endif
+#if defined(USE_AURA)
+  {
+    content::ServiceInfo info;
+    info.factory = base::Bind(&navigation::CreateNavigationService);
+    services->insert(std::make_pair("navigation", info));
+  }
 #endif
 }
 
-void ShellContentBrowserClient::RegisterOutOfProcessMojoApplications(
-      OutOfProcessMojoApplicationMap* apps) {
-  apps->insert(std::make_pair(kTestMojoAppUrl,
-                              base::UTF8ToUTF16("Test Mojo App")));
+void ShellContentBrowserClient::RegisterOutOfProcessServices(
+      OutOfProcessServiceMap* services) {
+  services->insert(std::make_pair(kTestServiceUrl,
+                                  base::UTF8ToUTF16("Test Service")));
+}
+
+std::unique_ptr<base::Value>
+ShellContentBrowserClient::GetServiceManifestOverlay(base::StringPiece name) {
+  int id = -1;
+  if (name == content::mojom::kBrowserServiceName)
+    id = IDR_CONTENT_SHELL_BROWSER_MANIFEST_OVERLAY;
+  else if (name == content::mojom::kRendererServiceName)
+    id = IDR_CONTENT_SHELL_RENDERER_MANIFEST_OVERLAY;
+  else if (name == content::mojom::kUtilityServiceName)
+    id = IDR_CONTENT_SHELL_UTILITY_MANIFEST_OVERLAY;
+  if (id == -1)
+    return nullptr;
+
+  base::StringPiece manifest_contents =
+      ui::ResourceBundle::GetSharedInstance().GetRawDataResourceForScale(
+          id, ui::ScaleFactor::SCALE_FACTOR_NONE);
+  return base::JSONReader::Read(manifest_contents);
 }
 
 void ShellContentBrowserClient::AppendExtraCommandLineSwitches(
@@ -271,7 +309,7 @@ net::NetLog* ShellContentBrowserClient::GetNetLog() {
 }
 
 bool ShellContentBrowserClient::ShouldSwapProcessesForRedirect(
-    ResourceContext* resource_context,
+    BrowserContext* browser_context,
     const GURL& current_url,
     const GURL& new_url) {
   return g_swap_processes_for_redirect;
@@ -279,7 +317,7 @@ bool ShellContentBrowserClient::ShouldSwapProcessesForRedirect(
 
 DevToolsManagerDelegate*
 ShellContentBrowserClient::GetDevToolsManagerDelegate() {
-  return new ShellDevToolsManagerDelegate();
+  return new ShellDevToolsManagerDelegate(browser_context());
 }
 
 void ShellContentBrowserClient::OpenURL(
@@ -292,42 +330,27 @@ void ShellContentBrowserClient::OpenURL(
                                       gfx::Size())->web_contents());
 }
 
-#if defined(OS_ANDROID)
-void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
-    const base::CommandLine& command_line,
-    int child_process_id,
-    content::FileDescriptorInfo* mappings,
-    std::map<int, base::MemoryMappedFile::Region>* regions) {
-  mappings->Share(
-      kShellPakDescriptor,
-      base::GlobalDescriptors::GetInstance()->Get(kShellPakDescriptor));
-  regions->insert(std::make_pair(
-      kShellPakDescriptor,
-      base::GlobalDescriptors::GetInstance()->GetRegion(kShellPakDescriptor)));
-
-  if (breakpad::IsCrashReporterEnabled()) {
-    base::File f(breakpad::CrashDumpManager::GetInstance()->CreateMinidumpFile(
-        child_process_id));
-    if (!f.IsValid()) {
-      LOG(ERROR) << "Failed to create file for minidump, crash reporting will "
-                 << "be disabled for this process.";
-    } else {
-      mappings->Transfer(kAndroidMinidumpDescriptor,
-                         base::ScopedFD(f.TakePlatformFile()));
-    }
-  }
-}
-#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 void ShellContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
     content::FileDescriptorInfo* mappings) {
+#if defined(OS_ANDROID)
+  mappings->ShareWithRegion(
+      kShellPakDescriptor,
+      base::GlobalDescriptors::GetInstance()->Get(kShellPakDescriptor),
+      base::GlobalDescriptors::GetInstance()->GetRegion(kShellPakDescriptor));
+
+  breakpad::CrashDumpObserver::GetInstance()->BrowserChildProcessStarted(
+      child_process_id, mappings);
+#else
   int crash_signal_fd = GetCrashSignalFD(command_line);
   if (crash_signal_fd >= 0) {
     mappings->Share(kCrashDumpSignal, crash_signal_fd);
   }
-}
 #endif  // defined(OS_ANDROID)
+}
+#endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
 
 #if defined(OS_WIN)
 bool ShellContentBrowserClient::PreSpawnRenderer(

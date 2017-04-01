@@ -10,17 +10,19 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.NativeClassQualifiedName;
 import org.chromium.net.BidirectionalStream;
+import org.chromium.net.CallbackException;
 import org.chromium.net.CronetException;
-import org.chromium.net.Preconditions;
-import org.chromium.net.QuicException;
+import org.chromium.net.ExperimentalBidirectionalStream;
+import org.chromium.net.NetworkException;
+import org.chromium.net.RequestFinishedInfo;
 import org.chromium.net.RequestPriority;
-import org.chromium.net.UrlRequestException;
 import org.chromium.net.UrlResponseInfo;
 
 import java.nio.ByteBuffer;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +39,7 @@ import javax.annotation.concurrent.GuardedBy;
  */
 @JNINamespace("cronet")
 @VisibleForTesting
-public class CronetBidirectionalStream extends BidirectionalStream {
+public class CronetBidirectionalStream extends ExperimentalBidirectionalStream {
     /**
      * States of BidirectionalStream are tracked in mReadState and mWriteState.
      * The write state is separated out as it changes independently of the read state.
@@ -77,12 +79,14 @@ public class CronetBidirectionalStream extends BidirectionalStream {
 
     private final CronetUrlRequestContext mRequestContext;
     private final Executor mExecutor;
-    private final Callback mCallback;
+    private final VersionSafeCallbacks.BidirectionalStreamCallback mCallback;
     private final String mInitialUrl;
     private final int mInitialPriority;
     private final String mInitialMethod;
     private final String mRequestHeaders[];
     private final boolean mDelayRequestHeadersUntilFirstFlush;
+    private final Collection<Object> mRequestAnnotations;
+    private CronetException mException;
 
     /*
      * Synchronizes access to mNativeStream, mReadState and mWriteState.
@@ -105,6 +109,10 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     @GuardedBy("mNativeStreamLock")
     // Whether request headers have been sent.
     private boolean mRequestHeadersSent;
+
+    @GuardedBy("mNativeStreamLock")
+    // Metrics information. Obtained when request succeeds, fails or is canceled.
+    private RequestFinishedInfo.Metrics mMetrics;
 
     /* Native BidirectionalStream object, owned by CronetBidirectionalStream. */
     @GuardedBy("mNativeStreamLock")
@@ -131,7 +139,7 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     private State mWriteState = State.NOT_STARTED;
 
     // Only modified on the network thread.
-    private UrlResponseInfo mResponseInfo;
+    private UrlResponseInfoImpl mResponseInfo;
 
     /*
      * OnReadCompleted callback is repeatedly invoked when each read is completed, so it
@@ -216,19 +224,20 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     }
 
     CronetBidirectionalStream(CronetUrlRequestContext requestContext, String url,
-            @BidirectionalStream.Builder.StreamPriority int priority, Callback callback,
-            Executor executor, String httpMethod, List<Map.Entry<String, String>> requestHeaders,
-            boolean delayRequestHeadersUntilNextFlush) {
+            @CronetEngineBase.StreamPriority int priority, Callback callback, Executor executor,
+            String httpMethod, List<Map.Entry<String, String>> requestHeaders,
+            boolean delayRequestHeadersUntilNextFlush, Collection<Object> requestAnnotations) {
         mRequestContext = requestContext;
         mInitialUrl = url;
         mInitialPriority = convertStreamPriority(priority);
-        mCallback = callback;
+        mCallback = new VersionSafeCallbacks.BidirectionalStreamCallback(callback);
         mExecutor = executor;
         mInitialMethod = httpMethod;
         mRequestHeaders = stringsFromHeaderList(requestHeaders);
         mDelayRequestHeadersUntilFirstFlush = delayRequestHeadersUntilNextFlush;
         mPendingData = new LinkedList<>();
         mFlushData = new LinkedList<>();
+        mRequestAnnotations = requestAnnotations;
     }
 
     @Override
@@ -240,7 +249,8 @@ public class CronetBidirectionalStream extends BidirectionalStream {
             try {
                 mNativeStream = nativeCreateBidirectionalStream(
                         mRequestContext.getUrlRequestContextAdapter(),
-                        !mDelayRequestHeadersUntilFirstFlush);
+                        !mDelayRequestHeadersUntilFirstFlush,
+                        mRequestContext.hasRequestFinishedListener());
                 mRequestContext.onRequestStarted();
                 // Non-zero startResult means an argument error.
                 int startResult = nativeStart(mNativeStream, mInitialUrl, mInitialPriority,
@@ -481,12 +491,12 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     @SuppressWarnings("unused")
     @CalledByNative
     private void onResponseHeadersReceived(int httpStatusCode, String negotiatedProtocol,
-            String[] headers, long receivedBytesCount) {
+            String[] headers, long receivedByteCount) {
         try {
             mResponseInfo = prepareResponseInfoOnNetworkThread(
-                    httpStatusCode, negotiatedProtocol, headers, receivedBytesCount);
+                    httpStatusCode, negotiatedProtocol, headers, receivedByteCount);
         } catch (Exception e) {
-            failWithException(new CronetException("Cannot prepare ResponseInfo", null));
+            failWithException(new CronetExceptionImpl("Cannot prepare ResponseInfo", null));
             return;
         }
         postTaskToExecutor(new Runnable() {
@@ -511,15 +521,15 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     @SuppressWarnings("unused")
     @CalledByNative
     private void onReadCompleted(final ByteBuffer byteBuffer, int bytesRead, int initialPosition,
-            int initialLimit, long receivedBytesCount) {
-        mResponseInfo.setReceivedBytesCount(receivedBytesCount);
+            int initialLimit, long receivedByteCount) {
+        mResponseInfo.setReceivedByteCount(receivedByteCount);
         if (byteBuffer.position() != initialPosition || byteBuffer.limit() != initialLimit) {
             failWithException(
-                    new CronetException("ByteBuffer modified externally during read", null));
+                    new CronetExceptionImpl("ByteBuffer modified externally during read", null));
             return;
         }
         if (bytesRead < 0 || initialPosition + bytesRead > initialLimit) {
-            failWithException(new CronetException("Invalid number of bytes read", null));
+            failWithException(new CronetExceptionImpl("Invalid number of bytes read", null));
             return;
         }
         byteBuffer.position(initialPosition + bytesRead);
@@ -545,8 +555,8 @@ public class CronetBidirectionalStream extends BidirectionalStream {
         for (int i = 0; i < byteBuffers.length; i++) {
             ByteBuffer buffer = byteBuffers[i];
             if (buffer.position() != initialPositions[i] || buffer.limit() != initialLimits[i]) {
-                failWithException(
-                        new CronetException("ByteBuffer modified externally during write", null));
+                failWithException(new CronetExceptionImpl(
+                        "ByteBuffer modified externally during write", null));
                 return;
             }
             // Current implementation always writes the complete buffer.
@@ -561,7 +571,7 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     @CalledByNative
     private void onResponseTrailersReceived(String[] trailers) {
         final UrlResponseInfo.HeaderBlock trailersBlock =
-                new UrlResponseInfo.HeaderBlock(headersListFromStrings(trailers));
+                new UrlResponseInfoImpl.HeaderBlockImpl(headersListFromStrings(trailers));
         postTaskToExecutor(new Runnable() {
             public void run() {
                 synchronized (mNativeStreamLock) {
@@ -582,15 +592,16 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     @SuppressWarnings("unused")
     @CalledByNative
     private void onError(int errorCode, int nativeError, int nativeQuicError, String errorString,
-            long receivedBytesCount) {
+            long receivedByteCount) {
         if (mResponseInfo != null) {
-            mResponseInfo.setReceivedBytesCount(receivedBytesCount);
+            mResponseInfo.setReceivedByteCount(receivedByteCount);
         }
-        if (errorCode == UrlRequestException.ERROR_QUIC_PROTOCOL_FAILED) {
-            failWithException(new QuicException("Exception in BidirectionalStream: " + errorString,
-                    nativeError, nativeQuicError));
+        if (errorCode == NetworkException.ERROR_QUIC_PROTOCOL_FAILED) {
+            failWithException(
+                    new QuicExceptionImpl("Exception in BidirectionalStream: " + errorString,
+                            nativeError, nativeQuicError));
         } else {
-            failWithException(new CronetException(
+            failWithException(new NetworkExceptionImpl(
                     "Exception in BidirectionalStream: " + errorString, errorCode, nativeError));
         }
     }
@@ -610,6 +621,41 @@ public class CronetBidirectionalStream extends BidirectionalStream {
                 }
             }
         });
+    }
+
+    /**
+    * Called by the native code to report metrics just before the native adapter is destroyed.
+    */
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private void onMetricsCollected(long requestStartMs, long dnsStartMs, long dnsEndMs,
+            long connectStartMs, long connectEndMs, long sslStartMs, long sslEndMs,
+            long sendingStartMs, long sendingEndMs, long pushStartMs, long pushEndMs,
+            long responseStartMs, long requestEndMs, boolean socketReused, long sentByteCount,
+            long receivedByteCount) {
+        synchronized (mNativeStreamLock) {
+            if (mMetrics != null) {
+                throw new IllegalStateException("Metrics collection should only happen once.");
+            }
+            mMetrics = new CronetMetrics(requestStartMs, dnsStartMs, dnsEndMs, connectStartMs,
+                    connectEndMs, sslStartMs, sslEndMs, sendingStartMs, sendingEndMs, pushStartMs,
+                    pushEndMs, responseStartMs, requestEndMs, socketReused, sentByteCount,
+                    receivedByteCount);
+            assert mReadState == mWriteState;
+            assert (mReadState == State.SUCCESS) || (mReadState == State.ERROR)
+                    || (mReadState == State.CANCELED);
+            int finishedReason;
+            if (mReadState == State.SUCCESS) {
+                finishedReason = RequestFinishedInfo.SUCCEEDED;
+            } else if (mReadState == State.CANCELED) {
+                finishedReason = RequestFinishedInfo.CANCELED;
+            } else {
+                finishedReason = RequestFinishedInfo.FAILED;
+            }
+            final RequestFinishedInfo requestFinishedInfo = new RequestFinishedInfoImpl(mInitialUrl,
+                    mRequestAnnotations, mMetrics, finishedReason, mResponseInfo, mException);
+            mRequestContext.reportFinished(requestFinishedInfo);
+        }
     }
 
     @VisibleForTesting
@@ -639,8 +685,7 @@ public class CronetBidirectionalStream extends BidirectionalStream {
         return headersArray;
     }
 
-    private static int convertStreamPriority(
-            @BidirectionalStream.Builder.StreamPriority int priority) {
+    private static int convertStreamPriority(@CronetEngineBase.StreamPriority int priority) {
         switch (priority) {
             case Builder.STREAM_PRIORITY_IDLE:
                 return RequestPriority.IDLE;
@@ -676,12 +721,12 @@ public class CronetBidirectionalStream extends BidirectionalStream {
         }
     }
 
-    private UrlResponseInfo prepareResponseInfoOnNetworkThread(int httpStatusCode,
-            String negotiatedProtocol, String[] headers, long receivedBytesCount) {
-        UrlResponseInfo responseInfo =
-                new UrlResponseInfo(Arrays.asList(mInitialUrl), httpStatusCode, "",
+    private UrlResponseInfoImpl prepareResponseInfoOnNetworkThread(int httpStatusCode,
+            String negotiatedProtocol, String[] headers, long receivedByteCount) {
+        UrlResponseInfoImpl responseInfo =
+                new UrlResponseInfoImpl(Arrays.asList(mInitialUrl), httpStatusCode, "",
                         headersListFromStrings(headers), false, negotiatedProtocol, null);
-        responseInfo.setReceivedBytesCount(receivedBytesCount);
+        responseInfo.setReceivedByteCount(receivedByteCount);
         return responseInfo;
     }
 
@@ -692,8 +737,8 @@ public class CronetBidirectionalStream extends BidirectionalStream {
             return;
         }
         nativeDestroy(mNativeStream, sendOnCanceled);
-        mNativeStream = 0;
         mRequestContext.onRequestDestroyed();
+        mNativeStream = 0;
         if (mOnDestroyedCallbackForTesting != null) {
             mOnDestroyedCallbackForTesting.run();
         }
@@ -703,6 +748,7 @@ public class CronetBidirectionalStream extends BidirectionalStream {
      * Fails the stream with an exception. Only called on the Executor.
      */
     private void failWithExceptionOnExecutor(CronetException e) {
+        mException = e;
         // Do not call into mCallback if request is complete.
         synchronized (mNativeStreamLock) {
             if (isDoneLocked()) {
@@ -725,8 +771,8 @@ public class CronetBidirectionalStream extends BidirectionalStream {
      * Only called on the Executor.
      */
     private void onCallbackException(Exception e) {
-        CronetException streamError =
-                new CronetException("CalledByNative method has thrown an exception", e);
+        CallbackException streamError =
+                new CallbackExceptionImpl("CalledByNative method has thrown an exception", e);
         Log.e(CronetUrlRequestContext.LOG_TAG, "Exception in CalledByNative method", e);
         failWithExceptionOnExecutor(streamError);
     }
@@ -743,8 +789,8 @@ public class CronetBidirectionalStream extends BidirectionalStream {
     }
 
     // Native methods are implemented in cronet_bidirectional_stream_adapter.cc.
-    private native long nativeCreateBidirectionalStream(
-            long urlRequestContextAdapter, boolean sendRequestHeadersAutomatically);
+    private native long nativeCreateBidirectionalStream(long urlRequestContextAdapter,
+            boolean sendRequestHeadersAutomatically, boolean enableMetricsCollection);
 
     @NativeClassQualifiedName("CronetBidirectionalStreamAdapter")
     private native int nativeStart(long nativePtr, String url, int priority, String method,

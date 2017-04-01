@@ -8,7 +8,6 @@
 
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/always_on_top_controller.h"
 #include "ash/common/wm/fullscreen_window_finder.h"
 #include "ash/common/wm/window_positioner.h"
@@ -16,13 +15,16 @@
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm/wm_screen_util.h"
 #include "ash/common/wm/workspace/workspace_layout_manager_backdrop_delegate.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/common/wm_window_property.h"
+#include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "base/command_line.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/compositor/layer.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 
@@ -38,7 +40,7 @@ WorkspaceLayoutManager::WorkspaceLayoutManager(WmWindow* window)
   shell_->AddShellObserver(this);
   shell_->AddActivationObserver(this);
   root_window_->AddObserver(this);
-  root_window_controller_->AddObserver(this);
+  display::Screen::GetScreen()->AddObserver(this);
   DCHECK(window->GetBoolProperty(
       WmWindowProperty::SNAP_CHILDREN_TO_PIXEL_BOUNDARY));
 }
@@ -51,14 +53,14 @@ WorkspaceLayoutManager::~WorkspaceLayoutManager() {
     window_state->RemoveObserver(this);
     window->RemoveObserver(this);
   }
-  root_window_->GetRootWindowController()->RemoveObserver(this);
+  display::Screen::GetScreen()->RemoveObserver(this);
   shell_->RemoveActivationObserver(this);
   shell_->RemoveShellObserver(this);
 }
 
 void WorkspaceLayoutManager::SetMaximizeBackdropDelegate(
     std::unique_ptr<WorkspaceLayoutManagerBackdropDelegate> delegate) {
-  backdrop_delegate_.reset(delegate.release());
+  backdrop_delegate_ = std::move(delegate);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -132,7 +134,7 @@ void WorkspaceLayoutManager::OnKeyboardBoundsChanging(
   bool change_work_area =
       (!base::CommandLine::ForCurrentProcess()->HasSwitch(
            ::switches::kUseNewVirtualKeyboardBehavior) ||
-       keyboard::KeyboardController::GetInstance()->get_lock_keyboard());
+       keyboard::KeyboardController::GetInstance()->keyboard_locked());
   if (!change_work_area)
     return;
 
@@ -173,18 +175,7 @@ void WorkspaceLayoutManager::OnKeyboardBoundsChanging(
   }
 }
 
-//////////////////////////////////////////////////////////////////////////////
-// WorkspaceLayoutManager, WmRootWindowControllerObserver implementation:
-
-void WorkspaceLayoutManager::OnWorkAreaChanged() {
-  const gfx::Rect work_area(wm::GetDisplayWorkAreaBounds(window_));
-  if (work_area != work_area_in_parent_) {
-    const wm::WMEvent event(wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
-    AdjustAllWindowsBoundsForWorkAreaChange(&event);
-  }
-  if (backdrop_delegate_)
-    backdrop_delegate_->OnDisplayWorkAreaInsetsChanged();
-}
+void WorkspaceLayoutManager::OnKeyboardClosed() {}
 
 //////////////////////////////////////////////////////////////////////////////
 // WorkspaceLayoutManager, aura::WindowObserver implementation:
@@ -216,7 +207,7 @@ void WorkspaceLayoutManager::OnWindowPropertyChanged(
   if (property == WmWindowProperty::ALWAYS_ON_TOP &&
       window->GetBoolProperty(WmWindowProperty::ALWAYS_ON_TOP)) {
     WmWindow* container =
-        root_window_controller_->GetAlwaysOnTopController()->GetContainer(
+        root_window_controller_->always_on_top_controller()->GetContainer(
             window);
     if (window->GetParent() != container)
       container->AddChild(window);
@@ -279,6 +270,24 @@ void WorkspaceLayoutManager::OnPostWindowStateTypeChange(
   UpdateShelfVisibility();
   if (backdrop_delegate_)
     backdrop_delegate_->OnPostWindowStateTypeChange(window_state, old_type);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// WorkspaceLayoutManager, display::DisplayObserver implementation:
+
+void WorkspaceLayoutManager::OnDisplayMetricsChanged(
+    const display::Display& display,
+    uint32_t changed_metrics) {
+  if (window_->GetDisplayNearestWindow().id() != display.id())
+    return;
+
+  const gfx::Rect work_area(wm::GetDisplayWorkAreaBounds(window_));
+  if (work_area != work_area_in_parent_) {
+    const wm::WMEvent event(wm::WM_EVENT_WORKAREA_BOUNDS_CHANGED);
+    AdjustAllWindowsBoundsForWorkAreaChange(&event);
+  }
+  if (backdrop_delegate_)
+    backdrop_delegate_->OnDisplayWorkAreaInsetsChanged();
 }
 
 //////////////////////////////////////////////////////////////////////////////

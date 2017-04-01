@@ -2,8 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from py_trace_event import trace_event
+
 
 class AppBackend(object):
+
+  __metaclass__ = trace_event.TracedMetaClass
+
   def __init__(self, app_type, platform_backend):
     super(AppBackend, self).__init__()
     self._app = None
@@ -39,6 +44,9 @@ class AppBackend(object):
     # TODO(catapult:#2194): Remove the unnecessary pass below when the method
     # has been implemented on all concrete subclasses.
     pass  # pylint: disable=unnecessary-pass
+    raise NotImplementedError
+
+  def Background(self):
     raise NotImplementedError
 
   def Close(self):

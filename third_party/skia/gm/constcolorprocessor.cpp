@@ -12,12 +12,12 @@
 #if SK_SUPPORT_GPU
 
 #include "GrContext.h"
-#include "GrDrawContextPriv.h"
+#include "GrRenderTargetContextPriv.h"
 #include "SkGrPriv.h"
 #include "SkGradientShader.h"
-#include "batches/GrDrawBatch.h"
-#include "batches/GrRectBatchFactory.h"
 #include "effects/GrConstColorProcessor.h"
+#include "ops/GrDrawOp.h"
+#include "ops/GrRectOpFactory.h"
 
 namespace skiagm {
 /**
@@ -46,8 +46,9 @@ protected:
     }
 
     void onDraw(SkCanvas* canvas) override {
-        GrDrawContext* drawContext = canvas->internal_private_accessTopLayerDrawContext();
-        if (!drawContext) {
+        GrRenderTargetContext* renderTargetContext =
+            canvas->internal_private_accessTopLayerRenderTargetContext();
+        if (!renderTargetContext) {
             skiagm::GM::DrawGpuOnlyMessage(canvas);
             return;
         }
@@ -57,21 +58,21 @@ protected:
             return;
         }
 
-        static const GrColor kColors[] = {
+        constexpr GrColor kColors[] = {
             0xFFFFFFFF,
             0xFFFF00FF,
             0x80000000,
             0x00000000,
         };
 
-        static const SkColor kPaintColors[] = {
+        constexpr SkColor kPaintColors[] = {
             0xFFFFFFFF,
             0xFFFF0000,
             0x80FF0000,
             0x00000000,
         };
 
-        static const char* kModeStrs[] {
+        const char* kModeStrs[] {
             "kIgnore",
             "kModulateRGBA",
             "kModulateA",
@@ -99,20 +100,19 @@ protected:
                     } else {
                         skPaint.setColor(kPaintColors[paintType]);
                     }
-                    // SRGBTODO: No sRGB inputs allowed here?
-                    SkAssertResult(SkPaintToGrPaint(context, drawContext, skPaint, viewMatrix,
-                                                    &grPaint));
+                    SkAssertResult(SkPaintToGrPaint(context, renderTargetContext, skPaint,
+                                                    viewMatrix, &grPaint));
 
                     GrConstColorProcessor::InputMode mode = (GrConstColorProcessor::InputMode) m;
-                    GrColor color = kColors[procColor];
+                    GrColor4f color = GrColor4f::FromGrColor(kColors[procColor]);
                     sk_sp<GrFragmentProcessor> fp(GrConstColorProcessor::Make(color, mode));
 
                     grPaint.addColorFragmentProcessor(std::move(fp));
 
-                    SkAutoTUnref<GrDrawBatch> batch(
-                            GrRectBatchFactory::CreateNonAAFill(grPaint.getColor(), viewMatrix,
-                                                                renderRect, nullptr, nullptr));
-                    drawContext->drawContextPriv().testingOnly_drawBatch(grPaint, batch);
+                    std::unique_ptr<GrDrawOp> op(GrRectOpFactory::MakeNonAAFill(
+                            grPaint.getColor(), viewMatrix, renderRect, nullptr, nullptr));
+                    renderTargetContext->priv().testingOnly_addDrawOp(
+                            std::move(grPaint), GrAAType::kNone, std::move(op));
 
                     // Draw labels for the input to the processor and the processor to the right of
                     // the test rect. The input label appears above the processor label.
@@ -175,16 +175,13 @@ private:
     // Use this as a way of generating and input FP
     sk_sp<SkShader> fShader;
 
-    static const SkScalar       kPad;
-    static const SkScalar       kRectSize;
-    static const int            kWidth  = 820;
-    static const int            kHeight = 500;
+    static constexpr SkScalar       kPad = 10.f;
+    static constexpr SkScalar       kRectSize = 20.f;
+    static constexpr int            kWidth  = 820;
+    static constexpr int            kHeight = 500;
 
     typedef GM INHERITED;
 };
-
-const SkScalar ConstColorProcessor::kPad = 10.f;
-const SkScalar ConstColorProcessor::kRectSize = 20.f;
 
 DEF_GM(return new ConstColorProcessor;)
 }

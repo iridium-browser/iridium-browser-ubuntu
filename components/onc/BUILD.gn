@@ -2,17 +2,20 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: components/onc.gypi:onc_component
 component("onc") {
   sources = [
     "onc_constants.cc",
     "onc_constants.h",
     "onc_export.h",
+    "onc_pref_names.cc",
+    "onc_pref_names.h",
   ]
 
   defines = [ "ONC_IMPLEMENTATION" ]
 
   deps = [
     "//base",
+    "//components/pref_registry",
+    "//components/prefs",
   ]
 }

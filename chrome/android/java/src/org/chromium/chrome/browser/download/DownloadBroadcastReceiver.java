@@ -5,12 +5,13 @@
 package org.chromium.chrome.browser.download;
 
 import android.app.DownloadManager;
-import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+
+import org.chromium.chrome.browser.util.IntentUtils;
 
 /**
  * This {@link BroadcastReceiver} handles clicks to download notifications and their action buttons.
@@ -39,7 +40,7 @@ public class DownloadBroadcastReceiver extends BroadcastReceiver {
     }
 
     /**
-     * Called to open a given download item that is downloaded by the android DownloadManager.
+     * Called to open a particular download item.  Falls back to opening Download Home.
      * @param context Context of the receiver.
      * @param intent Intent from the android DownloadManager.
      */
@@ -50,23 +51,20 @@ public class DownloadBroadcastReceiver extends BroadcastReceiver {
             DownloadManagerService.openDownloadsPage(context);
             return;
         }
+
         long id = ids[0];
-        DownloadManager manager =
-                (DownloadManager) context.getSystemService(Context.DOWNLOAD_SERVICE);
-        Uri uri = manager.getUriForDownloadedFile(id);
+        Uri uri = DownloadManagerDelegate.getContentUriFromDownloadManager(context, id);
         if (uri == null) {
-            // Open the downloads page
             DownloadManagerService.openDownloadsPage(context);
-        } else {
-            Intent launchIntent = new Intent(Intent.ACTION_VIEW);
-            launchIntent.setDataAndType(uri, manager.getMimeTypeForDownloadedFile(id));
-            launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try {
-                context.startActivity(launchIntent);
-            } catch (ActivityNotFoundException e) {
-                DownloadManagerService.openDownloadsPage(context);
-            }
+            return;
         }
+
+        String downloadFilename = IntentUtils.safeGetStringExtra(
+                intent, DownloadNotificationService.EXTRA_DOWNLOAD_FILE_PATH);
+        boolean isSupportedMimeType =  IntentUtils.safeGetBooleanExtra(
+                intent, DownloadNotificationService.EXTRA_IS_SUPPORTED_MIME_TYPE, false);
+        DownloadManagerService.openDownloadedContent(
+                context, downloadFilename, isSupportedMimeType, id);
     }
 
     /**

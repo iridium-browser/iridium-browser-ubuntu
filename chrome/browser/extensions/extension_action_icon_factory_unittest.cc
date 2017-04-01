@@ -19,10 +19,10 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/grit/theme_resources.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/test/test_browser_thread.h"
 #include "extensions/common/extension.h"
-#include "grit/theme_resources.h"
 #include "skia/ext/image_operations.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/material_design/material_design_controller.h"
@@ -195,8 +195,7 @@ class ExtensionActionIconFactoryTest
 INSTANTIATE_TEST_CASE_P(
     ExtensionActionIconFactoryTest_MaterialDesign,
     ExtensionActionIconFactoryTest,
-    testing::Values(ui::MaterialDesignController::NON_MATERIAL,
-                    ui::MaterialDesignController::MATERIAL_NORMAL,
+    testing::Values(ui::MaterialDesignController::MATERIAL_NORMAL,
                     ui::MaterialDesignController::MATERIAL_HYBRID));
 
 // If there is no default icon, and the icon has not been set using |SetIcon|,
@@ -276,19 +275,20 @@ TEST_P(ExtensionActionIconFactoryTest, DefaultIcon) {
   ASSERT_FALSE(browser_action->default_icon());
   ASSERT_TRUE(browser_action->GetExplicitlySetIcon(0 /*tab id*/).IsEmpty());
 
+  scoped_refptr<const Extension> extension_with_icon =
+      CreateExtension("browser_action_with_icon", Manifest::INVALID_LOCATION);
+  ASSERT_TRUE(extension_with_icon);
+
   int icon_size = ExtensionAction::ActionIconSize();
   gfx::Image default_icon =
-      EnsureImageSize(LoadIcon("browser_action/no_icon/icon.png"), icon_size);
+      EnsureImageSize(LoadIcon("browser_action_with_icon/icon.png"), icon_size);
   ASSERT_FALSE(default_icon.IsEmpty());
 
-  std::unique_ptr<ExtensionIconSet> default_icon_set(new ExtensionIconSet());
-  default_icon_set->Add(icon_size, "icon.png");
-
-  browser_action->SetDefaultIconForTest(std::move(default_icon_set));
+  browser_action = GetBrowserAction(*extension_with_icon);
   ASSERT_TRUE(browser_action->default_icon());
 
   ExtensionActionIconFactory icon_factory(
-      profile(), extension.get(), browser_action, this);
+      profile(), extension_with_icon.get(), browser_action, this);
 
   gfx::Image icon = icon_factory.GetIcon(0);
 

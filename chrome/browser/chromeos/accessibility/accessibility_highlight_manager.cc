@@ -9,21 +9,12 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/cursor_manager.h"
 
 namespace chromeos {
 
 namespace {
-
-const gfx::Rect& OffscreenRect() {
-  CR_DEFINE_STATIC_LOCAL(const gfx::Rect, r, (INT_MIN, INT_MIN, 0, 0));
-  return r;
-}
-
-const gfx::Point& OffscreenPoint() {
-  CR_DEFINE_STATIC_LOCAL(const gfx::Point, p, (INT_MIN, INT_MIN));
-  return p;
-}
 
 ui::InputMethod* GetInputMethod(aura::Window* root_window) {
   if (root_window->GetHost())
@@ -34,9 +25,6 @@ ui::InputMethod* GetInputMethod(aura::Window* root_window) {
 }  // namespace
 
 AccessibilityHighlightManager::AccessibilityHighlightManager() {
-  focus_rect_ = OffscreenRect();
-  cursor_point_ = OffscreenPoint();
-  caret_point_ = OffscreenPoint();
 }
 
 AccessibilityHighlightManager::~AccessibilityHighlightManager() {
@@ -47,10 +35,8 @@ AccessibilityHighlightManager::~AccessibilityHighlightManager() {
   AccessibilityFocusRingController::GetInstance()->SetFocusRing(
       std::vector<gfx::Rect>(),
       AccessibilityFocusRingController::FADE_OUT_FOCUS_RING);
-  AccessibilityFocusRingController::GetInstance()->SetCaretRing(
-      OffscreenPoint());
-  AccessibilityFocusRingController::GetInstance()->SetCursorRing(
-      OffscreenPoint());
+  AccessibilityFocusRingController::GetInstance()->HideCaretRing();
+  AccessibilityFocusRingController::GetInstance()->HideCursorRing();
 
   ash::Shell* shell = ash::Shell::GetInstance();
   if (shell && registered_observers_) {
@@ -92,7 +78,11 @@ void AccessibilityHighlightManager::RegisterObservers() {
 
 void AccessibilityHighlightManager::OnMouseEvent(ui::MouseEvent* event) {
   if (event->type() == ui::ET_MOUSE_MOVED) {
-    cursor_point_ = event->root_location();
+    cursor_point_ = event->location();
+    if (event->target()) {
+      ::wm::ConvertPointToScreen(static_cast<aura::Window*>(event->target()),
+                                 &cursor_point_);
+    }
     UpdateCursorHighlight();
   }
 }
@@ -149,14 +139,14 @@ void AccessibilityHighlightManager::UpdateFocusAndCaretHighlights() {
         std::vector<gfx::Rect>(),
         AccessibilityFocusRingController::FADE_OUT_FOCUS_RING);
   } else if (focus_) {
-    controller->SetCaretRing(OffscreenPoint());
+    controller->HideCaretRing();
     std::vector<gfx::Rect> rects;
     if (!focus_rect_.IsEmpty())
       rects.push_back(focus_rect_);
     controller->SetFocusRing(
         rects, AccessibilityFocusRingController::FADE_OUT_FOCUS_RING);
   } else {
-    controller->SetCaretRing(OffscreenPoint());
+    controller->HideCaretRing();
     controller->SetFocusRing(
         std::vector<gfx::Rect>(),
         AccessibilityFocusRingController::FADE_OUT_FOCUS_RING);
@@ -164,15 +154,12 @@ void AccessibilityHighlightManager::UpdateFocusAndCaretHighlights() {
 }
 
 void AccessibilityHighlightManager::UpdateCursorHighlight() {
-  gfx::Point point = cursor_point_;
-
-  if (!cursor_)
-    point = OffscreenPoint();
-
-  if (!IsCursorVisible())
-    point = OffscreenPoint();
-
-  AccessibilityFocusRingController::GetInstance()->SetCursorRing(point);
+  if (cursor_ && IsCursorVisible()) {
+    AccessibilityFocusRingController::GetInstance()->SetCursorRing(
+        cursor_point_);
+  } else {
+    AccessibilityFocusRingController::GetInstance()->HideCursorRing();
+  }
 }
 
 }  // namespace chromeos

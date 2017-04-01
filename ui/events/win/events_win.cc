@@ -255,6 +255,10 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   return gfx::Point(native_point);
 }
 
+gfx::PointF EventLocationFromNativeF(const base::NativeEvent& native_event) {
+  return gfx::PointF(EventLocationFromNative(native_event));
+}
+
 gfx::Point EventSystemLocationFromNative(
     const base::NativeEvent& native_event) {
   POINT global_point = { static_cast<short>(LOWORD(native_event.lParam)),
@@ -349,7 +353,8 @@ bool GetScrollOffsets(const base::NativeEvent& native_event,
                       float* y_offset,
                       float* x_offset_ordinal,
                       float* y_offset_ordinal,
-                      int* finger_count) {
+                      int* finger_count,
+                      EventMomentumPhase* momentum_phase) {
   // TODO(ananta)
   // Support retrieving the scroll offsets from the scroll event.
   if (native_event.message == WM_VSCROLL || native_event.message == WM_HSCROLL)

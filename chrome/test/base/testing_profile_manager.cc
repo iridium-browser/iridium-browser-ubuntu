@@ -15,7 +15,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
@@ -60,7 +60,7 @@ bool TestingProfileManager::SetUp() {
 
 TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& profile_name,
-    std::unique_ptr<syncable_prefs::PrefServiceSyncable> prefs,
+    std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs,
     const base::string16& user_name,
     int avatar_id,
     const std::string& supervised_user_id,
@@ -68,7 +68,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
   DCHECK(called_set_up_);
 
   // Create a path for the profile based on the name.
-  base::FilePath profile_path(profiles_dir_.path());
+  base::FilePath profile_path(profiles_dir_.GetPath());
 #if defined(OS_CHROMEOS)
   if (profile_name != chrome::kInitialProfile) {
     profile_path =
@@ -115,7 +115,7 @@ TestingProfile* TestingProfileManager::CreateTestingProfile(
     const std::string& name) {
   DCHECK(called_set_up_);
   return CreateTestingProfile(
-      name, std::unique_ptr<syncable_prefs::PrefServiceSyncable>(),
+      name, std::unique_ptr<sync_preferences::PrefServiceSyncable>(),
       base::UTF8ToUTF16(name), 0, std::string(),
       TestingProfile::TestingFactories());
 }
@@ -223,7 +223,7 @@ void TestingProfileManager::UpdateLastUser(Profile* last_active) {
 
 const base::FilePath& TestingProfileManager::profiles_dir() {
   DCHECK(called_set_up_);
-  return profiles_dir_.path();
+  return profiles_dir_.GetPath();
 }
 
 ProfileManager* TestingProfileManager::profile_manager() {
@@ -247,7 +247,7 @@ void TestingProfileManager::SetUpInternal() {
   // Set up the directory for profiles.
   ASSERT_TRUE(profiles_dir_.CreateUniqueTempDir());
 
-  profile_manager_ = new testing::ProfileManager(profiles_dir_.path());
+  profile_manager_ = new testing::ProfileManager(profiles_dir_.GetPath());
   browser_process_->SetProfileManager(profile_manager_);  // Takes ownership.
 
   profile_manager_->GetProfileInfoCache().

@@ -5,32 +5,39 @@
 #ifndef WorkerNavigatorNetworkInformation_h
 #define WorkerNavigatorNetworkInformation_h
 
+#include "core/workers/WorkerNavigator.h"
 #include "platform/Supplementable.h"
 
 namespace blink {
 
-class ExecutionContext;
 class NetworkInformation;
+class ScriptState;
 class WorkerNavigator;
 
-class WorkerNavigatorNetworkInformation final : public GarbageCollected<WorkerNavigatorNetworkInformation>, public Supplement<WorkerNavigator> {
-    USING_GARBAGE_COLLECTED_MIXIN(WorkerNavigatorNetworkInformation);
-public:
-    static WorkerNavigatorNetworkInformation& from(WorkerNavigator&, ExecutionContext*);
-    static WorkerNavigatorNetworkInformation* toWorkerNavigatorNetworkInformation(WorkerNavigator&, ExecutionContext*);
-    static const char* supplementName();
+class WorkerNavigatorNetworkInformation final
+    : public GarbageCollected<WorkerNavigatorNetworkInformation>,
+      public Supplement<WorkerNavigator> {
+  USING_GARBAGE_COLLECTED_MIXIN(WorkerNavigatorNetworkInformation);
 
-    static NetworkInformation* connection(ExecutionContext*, WorkerNavigator&);
+ public:
+  static WorkerNavigatorNetworkInformation& from(WorkerNavigator&,
+                                                 ExecutionContext*);
+  static WorkerNavigatorNetworkInformation* toWorkerNavigatorNetworkInformation(
+      WorkerNavigator&,
+      ExecutionContext*);
+  static const char* supplementName();
 
-    DECLARE_VIRTUAL_TRACE();
+  static NetworkInformation* connection(ScriptState*, WorkerNavigator&);
 
-private:
-    WorkerNavigatorNetworkInformation(WorkerNavigator&, ExecutionContext*);
-    NetworkInformation* connection(ExecutionContext*);
+  DECLARE_VIRTUAL_TRACE();
 
-    Member<NetworkInformation> m_connection;
+ private:
+  WorkerNavigatorNetworkInformation(WorkerNavigator&, ExecutionContext*);
+  NetworkInformation* connection(ExecutionContext*);
+
+  Member<NetworkInformation> m_connection;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WorkerNavigatorNetworkInformation_h
+#endif  // WorkerNavigatorNetworkInformation_h

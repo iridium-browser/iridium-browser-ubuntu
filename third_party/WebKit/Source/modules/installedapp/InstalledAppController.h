@@ -5,7 +5,7 @@
 #ifndef InstalledAppController_h
 #define InstalledAppController_h
 
-#include "core/frame/DOMWindowProperty.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/frame/LocalFrame.h"
 #include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
@@ -16,29 +16,33 @@ namespace blink {
 class WebSecurityOrigin;
 
 class MODULES_EXPORT InstalledAppController final
-    : public GarbageCollectedFinalized<InstalledAppController>, public Supplement<LocalFrame>, public DOMWindowProperty {
-    USING_GARBAGE_COLLECTED_MIXIN(InstalledAppController);
-    WTF_MAKE_NONCOPYABLE(InstalledAppController);
-public:
-    virtual ~InstalledAppController();
+    : public GarbageCollectedFinalized<InstalledAppController>,
+      public Supplement<LocalFrame>,
+      public ContextLifecycleObserver {
+  USING_GARBAGE_COLLECTED_MIXIN(InstalledAppController);
+  WTF_MAKE_NONCOPYABLE(InstalledAppController);
 
-    void getInstalledApps(const WebSecurityOrigin&, std::unique_ptr<AppInstalledCallbacks>);
+ public:
+  virtual ~InstalledAppController();
 
-    static void provideTo(LocalFrame&, WebInstalledAppClient*);
-    static InstalledAppController* from(LocalFrame&);
-    static const char* supplementName();
+  void getInstalledApps(const WebSecurityOrigin&,
+                        std::unique_ptr<AppInstalledCallbacks>);
 
-    DECLARE_VIRTUAL_TRACE();
+  static void provideTo(LocalFrame&, WebInstalledAppClient*);
+  static InstalledAppController* from(LocalFrame&);
+  static const char* supplementName();
 
-private:
-    InstalledAppController(LocalFrame&, WebInstalledAppClient*);
+  DECLARE_VIRTUAL_TRACE();
 
-    // Inherited from DOMWindowProperty.
-    void willDestroyGlobalObjectInFrame() override;
+ private:
+  InstalledAppController(LocalFrame&, WebInstalledAppClient*);
 
-    WebInstalledAppClient* m_client;
+  // Inherited from ContextLifecycleObserver.
+  void contextDestroyed(ExecutionContext*) override;
+
+  WebInstalledAppClient* m_client;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // InstalledAppController_h
+#endif  // InstalledAppController_h

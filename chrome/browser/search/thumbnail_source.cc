@@ -47,8 +47,7 @@ std::string ThumbnailSource::GetSource() const {
 
 void ThumbnailSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   GURL page_url;
   GURL fallback_thumbnail_url;
@@ -80,13 +79,13 @@ std::string ThumbnailSource::GetMimeType(const std::string&) const {
   return "image/png";
 }
 
-base::MessageLoop* ThumbnailSource::MessageLoopForRequestPath(
-    const std::string& path) const {
+scoped_refptr<base::SingleThreadTaskRunner>
+ThumbnailSource::TaskRunnerForRequestPath(const std::string& path) const {
   // TopSites can be accessed from the IO thread. Otherwise, the URLs should be
   // accessed on the UI thread.
   return thumbnail_service_.get()
              ? nullptr
-             : content::URLDataSource::MessageLoopForRequestPath(path);
+             : content::URLDataSource::TaskRunnerForRequestPath(path);
 }
 
 bool ThumbnailSource::ShouldServiceRequest(

@@ -14,20 +14,22 @@ Polymer({
       value: '',
     },
 
-    querying: Boolean,
-
-    // An array of history entries in reverse chronological order.
-    historyData_: Array,
-
     resultLoadingDisabled_: {
       type: Boolean,
       value: false,
     },
+
+    // An array of history entries in reverse chronological order.
+    historyData_: Array,
+
+    lastFocused_: Object,
+
+    querying: Boolean,
   },
 
   listeners: {
-    'scroll': 'notifyListScroll_',
     'remove-bookmark-stars': 'removeBookmarkStars_',
+    'open-menu': 'onOpenMenu_',
   },
 
   /** @override */
@@ -35,7 +37,7 @@ Polymer({
     // It is possible (eg, when middle clicking the reload button) for all other
     // resize events to fire before the list is attached and can be measured.
     // Adding another resize here ensures it will get sized correctly.
-    /** @type {IronListElement} */(this.$['infinite-list']).notifyResize();
+    /** @type {IronListElement} */ (this.$['infinite-list']).notifyResize();
     this.$['infinite-list'].scrollTarget = this;
     this.$['scroll-threshold'].scrollTarget = this;
   },
@@ -58,22 +60,17 @@ Polymer({
   },
 
   /**
-   * Disables history result loading when there are no more history results.
-   */
-  disableResultLoading: function() {
-    this.resultLoadingDisabled_ = true;
-  },
-
-  /**
    * Adds the newly updated history results into historyData_. Adds new fields
    * for each result.
    * @param {!Array<!HistoryEntry>} historyResults The new history results.
    * @param {boolean} incremental Whether the result is from loading more
    * history, or a new search/list reload.
+   * @param {boolean} finished True if there are no more results available and
+   * result loading should be disabled.
    */
-  addNewResults: function(historyResults, incremental) {
+  addNewResults: function(historyResults, incremental, finished) {
     var results = historyResults.slice();
-    /** @type {IronScrollThresholdElement} */(this.$['scroll-threshold'])
+    /** @type {IronScrollThresholdElement} */ (this.$['scroll-threshold'])
         .clearTriggers();
 
     if (!incremental) {
@@ -93,6 +90,8 @@ Polymer({
       // initialized correctly.
       this.set('historyData_', results);
     }
+
+    this.resultLoadingDisabled_ = finished;
   },
 
   /**
@@ -104,6 +103,19 @@ Polymer({
       return;
 
     this.fire('load-more-history');
+  },
+
+  /**
+   * Ensure that the item is visible in the scroll pane when its menu is
+   * opened (it is possible to open off-screen items using keyboard shortcuts).
+   * @param {Event} e
+   * @private
+   */
+  onOpenMenu_: function(e) {
+    var index = e.detail.index;
+    var list = /** @type {IronListElement} */ (this.$['infinite-list']);
+    if (index < list.firstVisibleIndex || index > list.lastVisibleIndex)
+      list.scrollToIndex(index);
   },
 
   /**
@@ -150,22 +162,6 @@ Polymer({
     return i == length - 1 ||
         this.historyData_[i].dateRelativeDay !=
         this.historyData_[i + 1].dateRelativeDay;
-  },
-
-  /**
-   * @param {number} index
-   * @return {boolean}
-   * @private
-   */
-  isFirstItem_: function(index) {
-    return index == 0;
-  },
-
-  /**
-   * @private
-   */
-  notifyListScroll_: function() {
-    this.fire('history-list-scrolled');
   },
 
   /**

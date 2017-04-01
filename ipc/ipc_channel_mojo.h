@@ -68,17 +68,12 @@ class IPC_EXPORT ChannelMojo
 
   // Channel implementation
   bool Connect() override;
+  void Pause() override;
+  void Unpause(bool flush) override;
+  void Flush() override;
   void Close() override;
   bool Send(Message* message) override;
-  bool IsSendThreadSafe() const override;
-  base::ProcessId GetPeerPID() const override;
-  base::ProcessId GetSelfPID() const override;
   Channel::AssociatedInterfaceSupport* GetAssociatedInterfaceSupport() override;
-
-#if defined(OS_POSIX) && !defined(OS_NACL_SFI)
-  int GetClientFileDescriptor() const override;
-  base::ScopedFD TakeClientFileDescriptor() override;
-#endif  // defined(OS_POSIX) && !defined(OS_NACL_SFI)
 
   // These access protected API of IPC::Message, which has ChannelMojo
   // as a friend class.
@@ -94,7 +89,7 @@ class IPC_EXPORT ChannelMojo
                         mojom::ChannelAssociatedRequest receiver) override;
 
   // MessagePipeReader::Delegate
-  void OnPeerPidReceived() override;
+  void OnPeerPidReceived(int32_t peer_pid) override;
   void OnMessageReceived(const Message& message) override;
   void OnPipeError() override;
   void OnAssociatedInterfaceRequest(

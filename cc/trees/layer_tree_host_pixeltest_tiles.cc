@@ -11,7 +11,6 @@
 #include "cc/playback/display_item_list_settings.h"
 #include "cc/playback/drawing_display_item.h"
 #include "cc/test/layer_tree_pixel_test.h"
-#include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 
@@ -116,8 +115,8 @@ class BlueYellowClient : public ContentLayerClient {
         DisplayItemList::Create(settings);
 
     SkPictureRecorder recorder;
-    sk_sp<SkCanvas> canvas =
-        sk_ref_sp(recorder.beginRecording(gfx::RectToSkRect(gfx::Rect(size_))));
+    SkCanvas* canvas =
+        recorder.beginRecording(gfx::RectToSkRect(gfx::Rect(size_)));
     gfx::Rect top(0, 0, size_.width(), size_.height() / 2);
     gfx::Rect bottom(0, size_.height() / 2, size_.width(), size_.height() / 2);
 
@@ -159,7 +158,7 @@ class LayerTreeHostTilesTestPartialInvalidation
   }
 
   void DidCommitAndDrawFrame() override {
-    switch (layer_tree_host()->source_frame_number()) {
+    switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
         // We have done one frame, so the layer's content has been rastered.
         // Now we change the picture behind it to record something completely

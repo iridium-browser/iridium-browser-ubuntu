@@ -16,6 +16,7 @@ from telemetry.internal.platform.profiler import profiler_finder
 from telemetry.internal.util import exception_formatter
 from telemetry.internal.util import file_handle
 from telemetry.page import cache_temperature
+from telemetry.page import traffic_setting
 from telemetry.page import legacy_page_test
 from telemetry import story
 from telemetry.util import screenshot
@@ -46,29 +47,18 @@ class SharedPageState(story.SharedState):
   def __init__(self, test, finder_options, story_set):
     super(SharedPageState, self).__init__(test, finder_options, story_set)
     if isinstance(test, timeline_based_measurement.TimelineBasedMeasurement):
-      assert not finder_options.profiler, (
-          'This is a Timeline Based Measurement benchmark. You cannot run it '
-          'with the --profiler flag. If you need trace data, tracing is always '
-          ' enabled in Timeline Based Measurement benchmarks and you can get '
-          'the trace data by using --output-format=json.')
+      if finder_options.profiler:
+        assert not 'trace' in finder_options.profiler, (
+            'This is a Timeline Based Measurement benchmark. You cannot run it '
+            'with trace profiler enabled. If you need trace data, tracing is '
+            'always enabled in Timeline Based Measurement benchmarks and you '
+            'can get the trace data by adding --output-format=json.')
       # This is to avoid the cyclic-import caused by timeline_based_page_test.
       from telemetry.web_perf import timeline_based_page_test
       self._test = timeline_based_page_test.TimelineBasedPageTest(test)
     else:
       self._test = test
-    device_type = self._device_type
-    # TODO(aiolos, nednguyen): Remove this logic of pulling out user_agent_type
-    # from story_set once all page_set are converted to story_set
-    # (crbug.com/439512).
-
-    def _IsPageSetInstance(s):
-      # This is needed to avoid importing telemetry.page.page_set which will
-      # cause cyclic import.
-      return 'PageSet' == s.__class__.__name__ or 'PageSet' in (
-          list(c.__name__ for c in s.__class__.__bases__))
-    if not device_type and _IsPageSetInstance(story_set):
-      device_type = story_set.user_agent_type
-    _PrepareFinderOptions(finder_options, self._test, device_type)
+    _PrepareFinderOptions(finder_options, self._test, self._device_type)
     self._browser = None
     self._finder_options = finder_options
     self._possible_browser = self._GetPossibleBrowser(
@@ -92,10 +82,19 @@ class SharedPageState(story.SharedState):
     else:
       wpr_mode = wpr_modes.WPR_REPLAY
 
+    use_live_traffic = wpr_mode == wpr_modes.WPR_OFF
+
     if self.platform.network_controller.is_open:
       self.platform.network_controller.Close()
+    self.platform.network_controller.InitializeIfNeeded(
+        use_live_traffic=use_live_traffic)
     self.platform.network_controller.Open(wpr_mode,
                                           browser_options.extra_wpr_args)
+    self.platform.Initialize()
+
+  @property
+  def possible_browser(self):
+    return self._possible_browser
 
   @property
   def browser(self):
@@ -119,9 +118,6 @@ class SharedPageState(story.SharedState):
     if not enabled and not finder_options.run_disabled_tests:
       logging.warning(msg)
       logging.warning('You are trying to run a disabled test.')
-      logging.warning(
-          'Pass --also-run-disabled-tests to squelch this message.')
-      sys.exit(0)
 
     if possible_browser.IsRemote():
       possible_browser.RunRemote()
@@ -237,8 +233,16 @@ class SharedPageState(story.SharedState):
       if started_browser:
         self.browser.tabs[0].WaitForDocumentReadyStateToBeComplete()
 
+    # Reset traffic shaping to speed up cache temperature setup.
+    self.platform.network_controller.UpdateTrafficSettings(0, 0, 0)
     cache_temperature.EnsurePageCacheTemperature(
         self._current_page, self.browser, self._previous_page)
+    if self._current_page.traffic_setting != traffic_setting.NONE:
+      s = traffic_setting.NETWORK_CONFIGS[self._current_page.traffic_setting]
+      self.platform.network_controller.UpdateTrafficSettings(
+          round_trip_latency_ms=s.round_trip_latency_ms,
+          download_bandwidth_kbps=s.download_bandwidth_kbps,
+          upload_bandwidth_kbps=s.upload_bandwidth_kbps)
 
     # Start profiling if needed.
     if self._finder_options.profiler:

@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/statistics_recorder.h"
 #include "build/build_config.h"
@@ -18,7 +19,7 @@ class EmbeddedSearchFieldTrialTest : public testing::Test {
  protected:
   void SetUp() override {
     field_trial_list_.reset(new base::FieldTrialList(
-        new metrics::SHA1EntropyProvider("42")));
+        base::MakeUnique<metrics::SHA1EntropyProvider>("42")));
     base::StatisticsRecorder::Initialize();
   }
 
@@ -164,17 +165,13 @@ typedef EmbeddedSearchFieldTrialTest InstantExtendedEnabledParamTest;
 TEST_F(InstantExtendedEnabledParamTest, QueryExtractionDisabled) {
   ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("EmbeddedSearch",
                                                      "Group1 espv:12"));
-  // Make sure InstantExtendedEnabledParam() returns an empty string for search
-  // requests.
-  EXPECT_EQ("", InstantExtendedEnabledParam(true));
-  EXPECT_EQ("espv=12&", InstantExtendedEnabledParam(false));
+  EXPECT_EQ("espv=12&", InstantExtendedEnabledParam());
 }
 
 TEST_F(InstantExtendedEnabledParamTest, UseDefaultEmbeddedSearchPageVersion) {
   ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
       "EmbeddedSearch", "Group1 espv:-1"));
-  EXPECT_EQ("", InstantExtendedEnabledParam(true));
-  EXPECT_EQ("espv=2&", InstantExtendedEnabledParam(false));
+  EXPECT_EQ("espv=2&", InstantExtendedEnabledParam());
 }
 
 #endif  // !defined(OS_IOS) && !defined(OS_ANDROID)

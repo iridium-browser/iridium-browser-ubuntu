@@ -15,8 +15,8 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.components.sync.signin.AccountManagerHelper;
-import org.chromium.components.sync.signin.ChromeSigninController;
+import org.chromium.components.signin.AccountManagerHelper;
+import org.chromium.components.signin.ChromeSigninController;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -51,8 +51,8 @@ public final class OAuth2TokenService
 
     private static final String OAUTH2_SCOPE_PREFIX = "oauth2:";
 
-    private Context mPendingValidationContext = null;
-    private boolean mPendingValidationForceNotifications = false;
+    private Context mPendingValidationContext;
+    private boolean mPendingValidationForceNotifications;
 
     private final long mNativeOAuth2TokenServiceDelegateAndroid;
     private final ObserverList<OAuth2TokenServiceObserver> mObservers;

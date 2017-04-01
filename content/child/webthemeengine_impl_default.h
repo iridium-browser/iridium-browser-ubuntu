@@ -21,12 +21,17 @@ class WebThemeEngineImpl : public blink::WebThemeEngine {
              blink::WebThemeEngine::State state,
              const blink::WebRect& rect,
              const blink::WebThemeEngine::ExtraParams* extra_params) override;
-  virtual void paintStateTransition(blink::WebCanvas* canvas,
-                                    blink::WebThemeEngine::Part part,
-                                    blink::WebThemeEngine::State startState,
-                                    blink::WebThemeEngine::State endState,
-                                    double progress,
-                                    const blink::WebRect& rect);
+  void getOverlayScrollbarStyle(
+      blink::WebThemeEngine::ScrollbarStyle*) override;
+#if defined(OS_WIN)
+  // Caches the scrollbar metrics. These are retrieved in the browser and passed
+  // to the renderer in RendererPreferences because the required Windows system
+  // calls cannot be made in sandboxed renderers.
+  static void cacheScrollBarMetrics(int32_t vertical_scroll_bar_width,
+                                    int32_t horizontal_scroll_bar_height,
+                                    int32_t vertical_arrow_bitmap_height,
+                                    int32_t horizontal_arrow_bitmap_width);
+#endif
 };
 
 }  // namespace content

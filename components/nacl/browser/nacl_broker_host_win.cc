@@ -7,9 +7,11 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "components/nacl/browser/nacl_broker_service_win.h"
 #include "components/nacl/browser/nacl_browser.h"
 #include "components/nacl/common/nacl_cmd_line.h"
+#include "components/nacl/common/nacl_constants.h"
 #include "components/nacl/common/nacl_messages.h"
 #include "components/nacl/common/nacl_process_type.h"
 #include "components/nacl/common/nacl_switches.h"
@@ -17,8 +19,9 @@
 #include "content/public/browser/child_process_data.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
-#include "ipc/ipc_switches.h"
+#include "mojo/edk/embedder/embedder.h"
 
 namespace {
 // NOTE: changes to this class need to be reviewed by the security team.
@@ -40,18 +43,18 @@ class NaClBrokerSandboxedProcessLauncherDelegate
 namespace nacl {
 
 NaClBrokerHost::NaClBrokerHost() : is_terminating_(false) {
-  process_.reset(content::BrowserChildProcessHost::Create(
-      static_cast<content::ProcessType>(PROCESS_TYPE_NACL_BROKER), this));
 }
 
 NaClBrokerHost::~NaClBrokerHost() {
 }
 
 bool NaClBrokerHost::Init() {
-  // Create the channel that will be used for communicating with the broker.
-  std::string channel_id = process_->GetHost()->CreateChannel();
-  if (channel_id.empty())
-    return false;
+  DCHECK(!process_);
+  process_.reset(content::BrowserChildProcessHost::Create(
+      static_cast<content::ProcessType>(PROCESS_TYPE_NACL_BROKER), this,
+      kNaClBrokerServiceName));
+
+  process_->GetHost()->CreateChannelMojo();
 
   // Create the path to the nacl broker/loader executable.
   base::FilePath nacl_path;
@@ -63,13 +66,13 @@ bool NaClBrokerHost::Init() {
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,
                               switches::kNaClBrokerProcess);
-  cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
   if (NaClBrowser::GetDelegate()->DialogsAreSuppressed())
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
-  process_->Launch(new NaClBrokerSandboxedProcessLauncherDelegate,
-                   cmd_line,
-                   true);
+  process_->Launch(
+      base::MakeUnique<NaClBrokerSandboxedProcessLauncherDelegate>(),
+      base::WrapUnique(cmd_line),
+      true);
   return true;
 }
 
@@ -84,14 +87,15 @@ bool NaClBrokerHost::OnMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
-bool NaClBrokerHost::LaunchLoader(const std::string& loader_channel_id) {
+bool NaClBrokerHost::LaunchLoader(const std::string& loader_channel_token) {
   return process_->Send(
-      new NaClProcessMsg_LaunchLoaderThroughBroker(loader_channel_id));
+      new NaClProcessMsg_LaunchLoaderThroughBroker(loader_channel_token));
 }
 
-void NaClBrokerHost::OnLoaderLaunched(const std::string& loader_channel_id,
+void NaClBrokerHost::OnLoaderLaunched(const std::string& loader_channel_token,
                                       base::ProcessHandle handle) {
-  NaClBrokerService::GetInstance()->OnLoaderLaunched(loader_channel_id, handle);
+  NaClBrokerService::GetInstance()->OnLoaderLaunched(loader_channel_token,
+                                                     handle);
 }
 
 bool NaClBrokerHost::LaunchDebugExceptionHandler(

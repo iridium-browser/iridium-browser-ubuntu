@@ -130,12 +130,6 @@ This file contains the strings for ash.
       nontranslateable parts and create placeholders for them. -->
 
       <!-- TODO(zork): Only include these in Aura builds -->
-      <message name="IDS_ASH_SHELF_APP_LIST_TITLE" desc="The title used for the Ash App List in the Shelf">
-        Apps
-      </message>
-      <message name="IDS_ASH_SHELF_APP_LIST_SYNCING_TITLE" desc="The title used for the Ash App List in the Shelf to indicate loading/syncing apps.">
-        Syncing apps...
-      </message>
       <message name="IDS_ASH_SHELF_APP_LIST_LAUNCHER_TITLE" desc="The title used for the Ash Launcher in the Shelf (not mentioning 'Apps' since this is a general launcher).">
         Launcher
       </message>
@@ -181,6 +175,9 @@ This file contains the strings for ash.
       </message>
       <message name="IDS_ASH_STATUS_TRAY_BRAILLE_DISPLAY_CONNECTED_BUBBLE" desc="The message shown on a bubble when a braille display is connected">
 Braille display connected.
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_SETTINGS" desc="The accessible text for a settings button.">
+        Settings
       </message>
       <message name="IDS_ASH_STATUS_TRAY_SPOKEN_FEEDBACK_ENABLED_BUBBLE" desc="The message shown on a bubble when spoken feedback is enabled">
 ChromeVox (spoken feedback) is enabled.
@@ -288,9 +285,6 @@ Press Ctrl+Alt+Z to disable.
         Mute
       </message>
 
-      <message name="IDS_ASH_STATUS_TRAY_UNKNOWN_DISPLAY_NAME" desc="Label shown in tray for a display whose name is unknown.">
-        Unknown Display
-      </message>
       <message name="IDS_ASH_STATUS_TRAY_DRIVE" desc="The label used for Google Drive tray details header.">
         Google Drive
       </message>
@@ -302,6 +296,15 @@ Press Ctrl+Alt+Z to disable.
       </message>
       <message name="IDS_ASH_STATUS_TRAY_IME_SETTINGS" desc="The label used for IME settings entry.">
         Customize languages and input...
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_IME_EMOJI" desc="The label used for IME emoji entry.">
+        Emoji palette
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_IME_HANDWRITING" desc="The label used for IME handwriting entry.">
+        Handwriting input
+      </message>
+      <message name="IDS_ASH_STATUS_TRAY_IME_VOICE" desc="The label used for IME voice entry.">
+        Voice input
       </message>
 
       <message name="IDS_ASH_STATUS_TRAY_LOCALE_CHANGE_MESSAGE" desc="The message used for locale change notifications in the system tray.">
@@ -319,7 +322,7 @@ Press Ctrl+Alt+Z to disable.
       </message>
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SPOKEN_FEEDBACK" desc="The label used in the accessibility menu of the
     system tray to toggle on/off spoken feedback feature.">
-        ChromeVox (Spoken feedback)
+        ChromeVox (spoken feedback)
       </message>
       <message name="IDS_ASH_STATUS_TRAY_ACCESSIBILITY_HIGH_CONTRAST_MODE" desc="The label used in the accessibility menu of the system tray to toggle on/off high contrast feature.">
         High contrast mode
@@ -396,12 +399,6 @@ Press Ctrl+Alt+Z to disable.
       <message name="IDS_ASH_NOTIFICATION_UNREAD_COUNT_NINE_PLUS" desc="The text shown in the notification icon for the unread count when the count is more than 9.">
         9+
       </message>
-      <message name="IDS_ASH_INTERNAL_DISPLAY_NAME" desc="The name used for internal displays, which is shown in the display settings.">
-        Internal Display
-      </message>
-      <message name="IDS_ASH_VIRTUAL_DISPLAY_NAME" desc="The name used for virtual displays, which is shown in the display settings. Virtual displays are not associated with a physical monitor.">
-        Virtual Display
-      </message>
       <message name="IDS_ASH_EXIT_WARNING_POPUP_TEXT" desc="The text of the popup when the user preses the exit shortcut.">
         Press Ctrl+Shift+Q twice to quit.
       </message>
@@ -431,9 +428,6 @@ Press Ctrl+Alt+Z to disable.
       <!-- Overview Mode -->
       <message name="IDS_ASH_OVERVIEW_BUTTON_ACCESSIBLE_NAME" desc="The accessible name for the Overview button in the system tray.">
         Toggle window overview
-      </message>
-      <message name="IDS_ASH_OVERVIEW_CLOSE_ITEM_BUTTON_ACCESSIBLE_NAME" desc="The accessible name for the close button on windows while in Overview mode.">
-        Close <ph name="WINDOW_TITLE">$1</ph>
       </message>
 
       <!-- ChromeOS-specific strings -->

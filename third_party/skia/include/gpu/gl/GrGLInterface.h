@@ -116,6 +116,7 @@ public:
         GrGLFunction<GrGLBindFramebufferProc> fBindFramebuffer;
         GrGLFunction<GrGLBindRenderbufferProc> fBindRenderbuffer;
         GrGLFunction<GrGLBindTextureProc> fBindTexture;
+        GrGLFunction<GrGLBindImageTextureProc> fBindImageTexture;
         GrGLFunction<GrGLBindVertexArrayProc> fBindVertexArray;
         GrGLFunction<GrGLBlendBarrierProc> fBlendBarrier;
         GrGLFunction<GrGLBlendColorProc> fBlendColor;
@@ -155,6 +156,7 @@ public:
         GrGLFunction<GrGLDrawElementsProc> fDrawElements;
         GrGLFunction<GrGLDrawElementsIndirectProc> fDrawElementsIndirect;
         GrGLFunction<GrGLDrawElementsInstancedProc> fDrawElementsInstanced;
+        GrGLFunction<GrGLDrawRangeElementsProc> fDrawRangeElements;
         GrGLFunction<GrGLEnableProc> fEnable;
         GrGLFunction<GrGLEnableVertexAttribArrayProc> fEnableVertexAttribArray;
         GrGLFunction<GrGLEndQueryProc> fEndQuery;
@@ -206,6 +208,8 @@ public:
         GrGLFunction<GrGLMapBufferRangeProc> fMapBufferRange;
         GrGLFunction<GrGLMapBufferSubDataProc> fMapBufferSubData;
         GrGLFunction<GrGLMapTexSubImage2DProc> fMapTexSubImage2D;
+        GrGLFunction<GrGLMemoryBarrierProc> fMemoryBarrier;
+        GrGLFunction<GrGLMemoryBarrierByRegionProc> fMemoryBarrierByRegion;
         GrGLFunction<GrGLMultiDrawArraysIndirectProc> fMultiDrawArraysIndirect;
         GrGLFunction<GrGLMultiDrawElementsIndirectProc> fMultiDrawElementsIndirect;
         GrGLFunction<GrGLPixelStoreiProc> fPixelStorei;
@@ -450,6 +454,11 @@ public:
         GrGLFunction<GrGLFlushMappedNamedBufferRangeProc> fFlushMappedNamedBufferRange;
         // OpenGL 3.1
         GrGLFunction<GrGLTextureBufferProc> fTextureBuffer;
+
+        /* ARB_sync */
+        GrGLFunction<GrGLFenceSyncProc> fFenceSync;
+        GrGLFunction<GrGLClientWaitSyncProc> fClientWaitSync;
+        GrGLFunction<GrGLDeleteSyncProc> fDeleteSync;
 
         /* KHR_debug */
         GrGLFunction<GrGLDebugMessageControlProc> fDebugMessageControl;

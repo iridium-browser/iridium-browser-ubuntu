@@ -14,6 +14,7 @@
 #include "SkFontDescriptor.h"
 #include "SkFontHost_FreeType_common.h"
 #include "SkGlyph.h"
+#include "SkMakeUnique.h"
 #include "SkMask.h"
 #include "SkMaskGamma.h"
 #include "SkMatrix22.h"
@@ -24,7 +25,6 @@
 #include "SkStream.h"
 #include "SkString.h"
 #include "SkTemplates.h"
-#include "SkTypes.h"
 #include <memory>
 
 #if defined(SK_CAN_USE_DLOPEN)
@@ -50,6 +50,12 @@
 #ifndef FT_LOAD_COLOR
 #    define FT_LOAD_COLOR ( 1L << 20 )
 #    define FT_PIXEL_MODE_BGRA 7
+#endif
+
+// FT_LOAD_BITMAP_METRICS_ONLY was introduced in FreeType 2.7.1
+// The following may be removed once FreeType 2.7.1 is required to build.
+#ifndef FT_LOAD_BITMAP_METRICS_ONLY
+#    define FT_LOAD_BITMAP_METRICS_ONLY ( 1L << 22 )
 #endif
 
 //#define ENABLE_GLYPH_SPEW     // for tracing calls
@@ -179,7 +185,9 @@ static void unref_ft_library() {
 
 class SkScalerContext_FreeType : public SkScalerContext_FreeType_Base {
 public:
-    SkScalerContext_FreeType(SkTypeface*, const SkScalerContextEffects&, const SkDescriptor* desc);
+    SkScalerContext_FreeType(sk_sp<SkTypeface>,
+                             const SkScalerContextEffects&,
+                             const SkDescriptor* desc);
     virtual ~SkScalerContext_FreeType();
 
     bool success() const {
@@ -192,7 +200,7 @@ protected:
     void generateAdvance(SkGlyph* glyph) override;
     void generateMetrics(SkGlyph* glyph) override;
     void generateImage(const SkGlyph& glyph) override;
-    void generatePath(const SkGlyph& glyph, SkPath* path) override;
+    void generatePath(SkGlyphID glyphID, SkPath* path) override;
     void generateFontMetrics(SkPaint::FontMetrics*) override;
     SkUnichar generateGlyphToChar(uint16_t glyph) override;
 
@@ -234,12 +242,11 @@ struct SkFaceRec {
     SkFaceRec* fNext;
     FT_Face fFace;
     FT_StreamRec fFTStream;
-    SkAutoTDelete<SkStreamAsset> fSkStream;
+    std::unique_ptr<SkStreamAsset> fSkStream;
     uint32_t fRefCnt;
     uint32_t fFontID;
 
-    // assumes ownership of the stream, will delete when its done
-    SkFaceRec(SkStreamAsset* strm, uint32_t fontID);
+    SkFaceRec(std::unique_ptr<SkStreamAsset> stream, uint32_t fontID);
 };
 
 extern "C" {
@@ -262,12 +269,12 @@ extern "C" {
     static void sk_ft_stream_close(FT_Stream) {}
 }
 
-SkFaceRec::SkFaceRec(SkStreamAsset* stream, uint32_t fontID)
-        : fNext(nullptr), fSkStream(stream), fRefCnt(1), fFontID(fontID)
+SkFaceRec::SkFaceRec(std::unique_ptr<SkStreamAsset> stream, uint32_t fontID)
+        : fNext(nullptr), fSkStream(std::move(stream)), fRefCnt(1), fFontID(fontID)
 {
     sk_bzero(&fFTStream, sizeof(fFTStream));
     fFTStream.size = fSkStream->getLength();
-    fFTStream.descriptor.pointer = fSkStream;
+    fFTStream.descriptor.pointer = fSkStream.get();
     fFTStream.read  = sk_ft_stream_io;
     fFTStream.close = sk_ft_stream_close;
 }
@@ -319,12 +326,11 @@ static FT_Face ref_ft_face(const SkTypeface* typeface) {
         rec = rec->fNext;
     }
 
-    SkAutoTDelete<SkFontData> data(typeface->createFontData());
+    std::unique_ptr<SkFontData> data = typeface->makeFontData();
     if (nullptr == data || !data->hasStream()) {
         return nullptr;
     }
 
-    // this passes ownership of stream to the rec
     rec = new SkFaceRec(data->detachStream(), fontID);
 
     FT_Open_Args args;
@@ -447,7 +453,10 @@ static void populate_glyph_to_unicode(FT_Face& face, SkTDArray<SkUnichar>* glyph
     SkUnichar charCode = FT_Get_First_Char(face, &glyphIndex);
     while (glyphIndex) {
         SkASSERT(glyphIndex < SkToUInt(numGlyphs));
-        (*glyphToUnicode)[glyphIndex] = charCode;
+        // Use the first character that maps to this glyphID. https://crbug.com/359065
+        if (0 == (*glyphToUnicode)[glyphIndex]) {
+            (*glyphToUnicode)[glyphIndex] = charCode;
+        }
         charCode = FT_Get_Next_Char(face, charCode, &glyphIndex);
     }
 }
@@ -611,13 +620,12 @@ static bool isAxisAligned(const SkScalerContext::Rec& rec) {
 
 SkScalerContext* SkTypeface_FreeType::onCreateScalerContext(const SkScalerContextEffects& effects,
                                                             const SkDescriptor* desc) const {
-    SkScalerContext_FreeType* c =
-            new SkScalerContext_FreeType(const_cast<SkTypeface_FreeType*>(this), effects, desc);
+    auto c = skstd::make_unique<SkScalerContext_FreeType>(
+            sk_ref_sp(const_cast<SkTypeface_FreeType*>(this)), effects, desc);
     if (!c->success()) {
-        delete c;
-        c = nullptr;
+        return nullptr;
     }
-    return c;
+    return c.release();
 }
 
 void SkTypeface_FreeType::onFilterRec(SkScalerContextRec* rec) const {
@@ -724,10 +732,10 @@ static FT_Int chooseBitmapStrike(FT_Face face, FT_F26Dot6 scaleY) {
     return chosenStrikeIndex;
 }
 
-SkScalerContext_FreeType::SkScalerContext_FreeType(SkTypeface* typeface,
+SkScalerContext_FreeType::SkScalerContext_FreeType(sk_sp<SkTypeface> typeface,
                                                    const SkScalerContextEffects& effects,
                                                    const SkDescriptor* desc)
-    : SkScalerContext_FreeType_Base(typeface, effects, desc)
+    : SkScalerContext_FreeType_Base(std::move(typeface), effects, desc)
     , fFace(nullptr)
     , fFTSize(nullptr)
     , fStrikeIndex(-1)
@@ -740,7 +748,8 @@ SkScalerContext_FreeType::SkScalerContext_FreeType(SkTypeface* typeface,
 
     // load the font file
     using UnrefFTFace = SkFunctionWrapper<void, skstd::remove_pointer_t<FT_Face>, unref_ft_face>;
-    std::unique_ptr<skstd::remove_pointer_t<FT_Face>, UnrefFTFace> ftFace(ref_ft_face(typeface));
+    using FT_FaceRef = skstd::remove_pointer_t<FT_Face>;
+    std::unique_ptr<FT_FaceRef, UnrefFTFace> ftFace(ref_ft_face(this->getTypeface()));
     if (nullptr == ftFace) {
         SkDEBUGF(("Could not create FT_Face.\n"));
         return;
@@ -1080,7 +1089,8 @@ void SkScalerContext_FreeType::generateMetrics(SkGlyph* glyph) {
         return;
     }
 
-    err = FT_Load_Glyph( fFace, glyph->getGlyphID(), fLoadGlyphFlags );
+    err = FT_Load_Glyph( fFace, glyph->getGlyphID(),
+                         fLoadGlyphFlags | FT_LOAD_BITMAP_METRICS_ONLY );
     if (err != 0) {
         glyph->zeroMetrics();
         return;
@@ -1208,7 +1218,7 @@ void SkScalerContext_FreeType::generateImage(const SkGlyph& glyph) {
 }
 
 
-void SkScalerContext_FreeType::generatePath(const SkGlyph& glyph, SkPath* path) {
+void SkScalerContext_FreeType::generatePath(SkGlyphID glyphID, SkPath* path) {
     SkAutoMutexAcquire  ac(gFTMutex);
 
     SkASSERT(path);
@@ -1222,11 +1232,11 @@ void SkScalerContext_FreeType::generatePath(const SkGlyph& glyph, SkPath* path) 
     flags |= FT_LOAD_NO_BITMAP; // ignore embedded bitmaps so we're sure to get the outline
     flags &= ~FT_LOAD_RENDER;   // don't scan convert (we just want the outline)
 
-    FT_Error err = FT_Load_Glyph( fFace, glyph.getGlyphID(), flags);
+    FT_Error err = FT_Load_Glyph(fFace, glyphID, flags);
 
     if (err != 0) {
         SkDEBUGF(("SkScalerContext_FreeType::generatePath: FT_Load_Glyph(glyph:%d flags:%d) returned 0x%x\n",
-                    glyph.getGlyphID(), flags, err));
+                  glyphID, flags, err));
         path->reset();
         return;
     }
@@ -1561,7 +1571,7 @@ SkTypeface_FreeType::Scanner::~Scanner() {
     }
 }
 
-FT_Face SkTypeface_FreeType::Scanner::openFace(SkStream* stream, int ttcIndex,
+FT_Face SkTypeface_FreeType::Scanner::openFace(SkStreamAsset* stream, int ttcIndex,
                                                FT_Stream ftStream) const
 {
     if (fLibrary == nullptr) {
@@ -1595,7 +1605,7 @@ FT_Face SkTypeface_FreeType::Scanner::openFace(SkStream* stream, int ttcIndex,
     return face;
 }
 
-bool SkTypeface_FreeType::Scanner::recognizedFont(SkStream* stream, int* numFaces) const {
+bool SkTypeface_FreeType::Scanner::recognizedFont(SkStreamAsset* stream, int* numFaces) const {
     SkAutoMutexAcquire libraryLock(fLibraryMutex);
 
     FT_StreamRec streamRec;
@@ -1612,7 +1622,7 @@ bool SkTypeface_FreeType::Scanner::recognizedFont(SkStream* stream, int* numFace
 
 #include "SkTSearch.h"
 bool SkTypeface_FreeType::Scanner::scanFont(
-    SkStream* stream, int ttcIndex,
+    SkStreamAsset* stream, int ttcIndex,
     SkString* name, SkFontStyle* style, bool* isFixedPitch, AxisDefinitions* axes) const
 {
     SkAutoMutexAcquire libraryLock(fLibraryMutex);

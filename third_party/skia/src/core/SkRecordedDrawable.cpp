@@ -21,7 +21,7 @@ void SkRecordedDrawable::onDraw(SkCanvas* canvas) {
         drawables = fDrawableList->begin();
         drawableCount = fDrawableList->count();
     }
-    SkRecordDraw(*fRecord, canvas, nullptr, drawables, drawableCount, fBBH, nullptr/*callback*/);
+    SkRecordDraw(*fRecord, canvas, nullptr, drawables, drawableCount, fBBH.get(), nullptr);
 }
 
 SkPicture* SkRecordedDrawable::onNewPictureSnapshot() {
@@ -78,14 +78,16 @@ sk_sp<SkFlattenable> SkRecordedDrawable::CreateProc(SkReadBuffer& buffer) {
 
     // Unflatten into a SkPictureData.
     SkPictInfo info;
+    info.setVersion(buffer.getVersion());
     info.fCullRect = bounds;
-    SkAutoTDelete<SkPictureData> pictureData(SkPictureData::CreateFromBuffer(buffer, info));
+    info.fFlags = 0;    // ???
+    std::unique_ptr<SkPictureData> pictureData(SkPictureData::CreateFromBuffer(buffer, info));
     if (!pictureData) {
         return nullptr;
     }
 
     // Create a drawable.
-    SkPicturePlayback playback(pictureData);
+    SkPicturePlayback playback(pictureData.get());
     SkPictureRecorder recorder;
     playback.draw(recorder.beginRecording(bounds), nullptr, &buffer);
     return recorder.finishRecordingAsDrawable();

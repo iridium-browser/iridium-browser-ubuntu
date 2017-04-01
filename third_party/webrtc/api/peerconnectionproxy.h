@@ -42,10 +42,19 @@ BEGIN_SIGNALING_PROXY_MAP(PeerConnection)
   PROXY_METHOD3(bool, GetStats, StatsObserver*,
                 MediaStreamTrackInterface*,
                 StatsOutputLevel)
+  PROXY_METHOD1(void, GetStats, RTCStatsCollectorCallback*)
   PROXY_METHOD2(rtc::scoped_refptr<DataChannelInterface>,
                 CreateDataChannel, const std::string&, const DataChannelInit*)
   PROXY_CONSTMETHOD0(const SessionDescriptionInterface*, local_description)
   PROXY_CONSTMETHOD0(const SessionDescriptionInterface*, remote_description)
+  PROXY_CONSTMETHOD0(const SessionDescriptionInterface*,
+                     pending_local_description)
+  PROXY_CONSTMETHOD0(const SessionDescriptionInterface*,
+                     pending_remote_description)
+  PROXY_CONSTMETHOD0(const SessionDescriptionInterface*,
+                     current_local_description)
+  PROXY_CONSTMETHOD0(const SessionDescriptionInterface*,
+                     current_remote_description)
   PROXY_METHOD2(void, CreateOffer, CreateSessionDescriptionObserver*,
                 const MediaConstraintsInterface*)
   PROXY_METHOD2(void, CreateAnswer, CreateSessionDescriptionObserver*,
@@ -62,6 +71,11 @@ BEGIN_SIGNALING_PROXY_MAP(PeerConnection)
                 SessionDescriptionInterface*)
   PROXY_METHOD2(void, SetRemoteDescription, SetSessionDescriptionObserver*,
                 SessionDescriptionInterface*)
+  PROXY_METHOD0(PeerConnectionInterface::RTCConfiguration, GetConfiguration);
+  PROXY_METHOD2(bool,
+                SetConfiguration,
+                const PeerConnectionInterface::RTCConfiguration&,
+                RTCError*);
   PROXY_METHOD1(bool,
                 SetConfiguration,
                 const PeerConnectionInterface::RTCConfiguration&);
@@ -71,7 +85,6 @@ BEGIN_SIGNALING_PROXY_MAP(PeerConnection)
                 const std::vector<cricket::Candidate>&);
   PROXY_METHOD1(void, RegisterUMAObserver, UMAObserver*)
   PROXY_METHOD0(SignalingState, signaling_state)
-  PROXY_METHOD0(IceState, ice_state)
   PROXY_METHOD0(IceConnectionState, ice_connection_state)
   PROXY_METHOD0(IceGatheringState, ice_gathering_state)
   PROXY_METHOD2(bool, StartRtcEventLog, rtc::PlatformFile, int64_t)

@@ -2,12 +2,14 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//android_webview/system_webview_apk_tmpl.gni")
+import("//android_webview/webview_repack_locales.gni")
 import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 import("//build/config/locales.gni")
+import("//components/spellcheck/spellcheck_build_features.gni")
 import("//tools/grit/repack.gni")
-import("system_webview_apk_tmpl.gni")
-import("webview_repack_locales.gni")
+import("//tools/resources/generate_resource_whitelist.gni")
 
 declare_args() {
   # Package name of the system_webview_apk target.
@@ -17,6 +19,14 @@ declare_args() {
 if (!defined(use_webview_internal_framework)) {
   use_webview_internal_framework = false
 }
+
+if (enable_resource_whitelist_generation) {
+  system_webview_pak_whitelist =
+      "$target_gen_dir/system_webview_pak_whitelist.txt"
+}
+
+system_webview_android_manifest =
+    "$target_gen_dir/system_webview_apk/AndroidManifest.xml"
 
 group("android_webview") {
   if (!use_webview_internal_framework) {
@@ -28,71 +38,28 @@ group("android_webview") {
 
 jinja_template("system_webview_manifest") {
   input = "apk/java/AndroidManifest.xml"
-  output = "$target_gen_dir/system_webview_manifest/AndroidManifest.xml"
+  output = system_webview_android_manifest
   variables = [ "package=$system_webview_package_name" ]
 }
 
 webview_repack_locales("repack_locales") {
   input_locales = locales
   output_locales = locales
+
+  if (enable_resource_whitelist_generation) {
+    repack_whitelist = system_webview_pak_whitelist
+    deps = [
+      ":system_webview_pak_whitelist",
+    ]
+  }
 }
 
-locale_pak_resources("locale_paks") {
-  sources = [
-    "$root_out_dir/android_webview/locales/am.pak",
-    "$root_out_dir/android_webview/locales/ar.pak",
-    "$root_out_dir/android_webview/locales/bg.pak",
-    "$root_out_dir/android_webview/locales/bn.pak",
-    "$root_out_dir/android_webview/locales/ca.pak",
-    "$root_out_dir/android_webview/locales/cs.pak",
-    "$root_out_dir/android_webview/locales/da.pak",
-    "$root_out_dir/android_webview/locales/de.pak",
-    "$root_out_dir/android_webview/locales/el.pak",
-    "$root_out_dir/android_webview/locales/en-GB.pak",
-    "$root_out_dir/android_webview/locales/en-US.pak",
-    "$root_out_dir/android_webview/locales/es-419.pak",
-    "$root_out_dir/android_webview/locales/es.pak",
-    "$root_out_dir/android_webview/locales/et.pak",
-    "$root_out_dir/android_webview/locales/fa.pak",
-    "$root_out_dir/android_webview/locales/fi.pak",
-    "$root_out_dir/android_webview/locales/fil.pak",
-    "$root_out_dir/android_webview/locales/fr.pak",
-    "$root_out_dir/android_webview/locales/gu.pak",
-    "$root_out_dir/android_webview/locales/he.pak",
-    "$root_out_dir/android_webview/locales/hi.pak",
-    "$root_out_dir/android_webview/locales/hr.pak",
-    "$root_out_dir/android_webview/locales/hu.pak",
-    "$root_out_dir/android_webview/locales/id.pak",
-    "$root_out_dir/android_webview/locales/it.pak",
-    "$root_out_dir/android_webview/locales/ja.pak",
-    "$root_out_dir/android_webview/locales/kn.pak",
-    "$root_out_dir/android_webview/locales/ko.pak",
-    "$root_out_dir/android_webview/locales/lt.pak",
-    "$root_out_dir/android_webview/locales/lv.pak",
-    "$root_out_dir/android_webview/locales/ml.pak",
-    "$root_out_dir/android_webview/locales/mr.pak",
-    "$root_out_dir/android_webview/locales/ms.pak",
-    "$root_out_dir/android_webview/locales/nb.pak",
-    "$root_out_dir/android_webview/locales/nl.pak",
-    "$root_out_dir/android_webview/locales/pl.pak",
-    "$root_out_dir/android_webview/locales/pt-BR.pak",
-    "$root_out_dir/android_webview/locales/pt-PT.pak",
-    "$root_out_dir/android_webview/locales/ro.pak",
-    "$root_out_dir/android_webview/locales/ru.pak",
-    "$root_out_dir/android_webview/locales/sk.pak",
-    "$root_out_dir/android_webview/locales/sl.pak",
-    "$root_out_dir/android_webview/locales/sr.pak",
-    "$root_out_dir/android_webview/locales/sv.pak",
-    "$root_out_dir/android_webview/locales/sw.pak",
-    "$root_out_dir/android_webview/locales/ta.pak",
-    "$root_out_dir/android_webview/locales/te.pak",
-    "$root_out_dir/android_webview/locales/th.pak",
-    "$root_out_dir/android_webview/locales/tr.pak",
-    "$root_out_dir/android_webview/locales/uk.pak",
-    "$root_out_dir/android_webview/locales/vi.pak",
-    "$root_out_dir/android_webview/locales/zh-CN.pak",
-    "$root_out_dir/android_webview/locales/zh-TW.pak",
-  ]
+android_assets("locale_pak_assets") {
+  disable_compression = true
+  sources = []
+  foreach(_locale, locales) {
+    sources += [ "$root_out_dir/android_webview/locales/$_locale.pak" ]
+  }
   deps = [
     ":repack_locales",
   ]
@@ -112,6 +79,11 @@ repack("repack_pack") {
     "//third_party/WebKit/public:resources",
   ]
   output = "$target_gen_dir/resources.pak"
+
+  if (enable_resource_whitelist_generation) {
+    repack_whitelist = system_webview_pak_whitelist
+    deps += [ ":system_webview_pak_whitelist" ]
+  }
 }
 
 repack("repack_100_percent") {
@@ -126,6 +98,11 @@ repack("repack_100_percent") {
     "//ui/resources",
   ]
   output = "$target_gen_dir/chrome_100_percent.pak"
+
+  if (enable_resource_whitelist_generation) {
+    repack_whitelist = system_webview_pak_whitelist
+    deps += [ ":system_webview_pak_whitelist" ]
+  }
 }
 
 webview_license_path = "$target_gen_dir/webview_licenses.notice"
@@ -153,10 +130,14 @@ android_assets("monochrome_webview_assets") {
     "//third_party/icu:icu_assets",
     "//v8:v8_external_startup_data_assets",
   ]
+  if (android_64bit_target_cpu && build_apk_secondary_abi) {
+    deps += [ ":v8_snapshot_secondary_abi_assets" ]
+  }
 }
 
 android_assets("assets") {
   deps = [
+    ":locale_pak_assets",
     ":monochrome_webview_assets",
     ":pak_file_assets",
   ]
@@ -186,7 +167,6 @@ android_resources("resources") {
   resource_dirs = [ "java/res" ]
   custom_package = "org.chromium.android_webview"
   deps = [
-    ":locale_paks",
     ":strings_grd",
   ]
 }
@@ -203,60 +183,10 @@ grit("generate_aw_strings") {
   source = "ui/aw_strings.grd"
   outputs = [
     "grit/aw_strings.h",
-    "aw_strings_am.pak",
-    "aw_strings_ar.pak",
-    "aw_strings_bg.pak",
-    "aw_strings_bn.pak",
-    "aw_strings_ca.pak",
-    "aw_strings_cs.pak",
-    "aw_strings_da.pak",
-    "aw_strings_de.pak",
-    "aw_strings_el.pak",
-    "aw_strings_en-US.pak",
-    "aw_strings_en-GB.pak",
-    "aw_strings_es.pak",
-    "aw_strings_es-419.pak",
-    "aw_strings_et.pak",
-    "aw_strings_fa.pak",
-    "aw_strings_fi.pak",
-    "aw_strings_fil.pak",
-    "aw_strings_fr.pak",
-    "aw_strings_gu.pak",
-    "aw_strings_he.pak",
-    "aw_strings_hi.pak",
-    "aw_strings_hr.pak",
-    "aw_strings_hu.pak",
-    "aw_strings_id.pak",
-    "aw_strings_it.pak",
-    "aw_strings_ja.pak",
-    "aw_strings_kn.pak",
-    "aw_strings_ko.pak",
-    "aw_strings_lt.pak",
-    "aw_strings_lv.pak",
-    "aw_strings_ml.pak",
-    "aw_strings_mr.pak",
-    "aw_strings_ms.pak",
-    "aw_strings_nl.pak",
-    "aw_strings_nb.pak",
-    "aw_strings_pl.pak",
-    "aw_strings_pt-BR.pak",
-    "aw_strings_pt-PT.pak",
-    "aw_strings_ro.pak",
-    "aw_strings_ru.pak",
-    "aw_strings_sk.pak",
-    "aw_strings_sl.pak",
-    "aw_strings_sr.pak",
-    "aw_strings_sv.pak",
-    "aw_strings_sw.pak",
-    "aw_strings_ta.pak",
-    "aw_strings_te.pak",
-    "aw_strings_th.pak",
-    "aw_strings_tr.pak",
-    "aw_strings_uk.pak",
-    "aw_strings_vi.pak",
-    "aw_strings_zh-CN.pak",
-    "aw_strings_zh-TW.pak",
   ]
+  foreach(_locale, locales) {
+    outputs += [ "aw_strings_${_locale}.pak" ]
+  }
 }
 
 grit("generate_components_strings") {
@@ -264,7 +194,8 @@ grit("generate_components_strings") {
 
   # components_strings contains strings from all components. WebView
   # will never display most of them, so we try to limit the included
-  # strings
+  # strings. This whitelist trims about 50% more than the compile-based
+  # whitelist generated by :system_webview_pak_whitelist.
   whitelist = rebase_path("ui/grit_components_whitelist.txt")
   inputs = [
     whitelist,
@@ -275,60 +206,6 @@ grit("generate_components_strings") {
   ]
   outputs = [
     "grit/components_strings.h",
-    "components_strings_am.pak",
-    "components_strings_ar.pak",
-    "components_strings_bg.pak",
-    "components_strings_bn.pak",
-    "components_strings_ca.pak",
-    "components_strings_cs.pak",
-    "components_strings_da.pak",
-    "components_strings_de.pak",
-    "components_strings_el.pak",
-    "components_strings_en-GB.pak",
-    "components_strings_en-US.pak",
-    "components_strings_es.pak",
-    "components_strings_es-419.pak",
-    "components_strings_et.pak",
-    "components_strings_fa.pak",
-    "components_strings_fake-bidi.pak",
-    "components_strings_fi.pak",
-    "components_strings_fil.pak",
-    "components_strings_fr.pak",
-    "components_strings_gu.pak",
-    "components_strings_he.pak",
-    "components_strings_hi.pak",
-    "components_strings_hr.pak",
-    "components_strings_hu.pak",
-    "components_strings_id.pak",
-    "components_strings_it.pak",
-    "components_strings_ja.pak",
-    "components_strings_kn.pak",
-    "components_strings_ko.pak",
-    "components_strings_lt.pak",
-    "components_strings_lv.pak",
-    "components_strings_ml.pak",
-    "components_strings_mr.pak",
-    "components_strings_ms.pak",
-    "components_strings_nl.pak",
-    "components_strings_nb.pak",
-    "components_strings_pl.pak",
-    "components_strings_pt-BR.pak",
-    "components_strings_pt-PT.pak",
-    "components_strings_ro.pak",
-    "components_strings_ru.pak",
-    "components_strings_sk.pak",
-    "components_strings_sl.pak",
-    "components_strings_sr.pak",
-    "components_strings_sv.pak",
-    "components_strings_sw.pak",
-    "components_strings_ta.pak",
-    "components_strings_te.pak",
-    "components_strings_th.pak",
-    "components_strings_tr.pak",
-    "components_strings_uk.pak",
-    "components_strings_vi.pak",
-    "components_strings_zh-CN.pak",
-    "components_strings_zh-TW.pak",
     "java/res/values-am/components_strings.xml",
     "java/res/values-ar/components_strings.xml",
     "java/res/values-bg/components_strings.xml",
@@ -374,6 +251,9 @@ grit("generate_components_strings") {
     "java/res/values-zh-rTW/components_strings.xml",
     "java/res/values/components_strings.xml",
   ]
+  foreach(_locale, locales_with_fake_bidi) {
+    outputs += [ "components_strings_${_locale}.pak" ]
+  }
 }
 
 source_set("webview_entry_point") {
@@ -393,11 +273,35 @@ shared_library("libwebviewchromium") {
 }
 
 if (android_64bit_target_cpu) {
+  android_assets("v8_snapshot_secondary_abi_assets") {
+    _secondary_abi_out_dir =
+        get_label_info("//v8($android_secondary_abi_toolchain)", "root_out_dir")
+    assert(android_64bit_target_cpu,
+           "32-bit targets shouldn't have secondary abi")
+    arch_suffix = "32"
+    renaming_sources = [ "$_secondary_abi_out_dir/snapshot_blob.bin" ]
+    renaming_destinations = [ "snapshot_blob_$arch_suffix.bin" ]
+    disable_compression = true
+    deps = [
+      "//v8($android_secondary_abi_toolchain)",
+    ]
+  }
+
   shared_library("monochrome") {
     deps = [
       ":webview_entry_point",
     ]
     configs -= [ "//build/config/android:hide_native_jni_exports" ]
+  }
+}
+
+if (enable_resource_whitelist_generation) {
+  generate_resource_whitelist("system_webview_pak_whitelist") {
+    deps = [
+      ":libwebviewchromium",
+    ]
+    input = "$root_out_dir/libwebviewchromium$shlib_extension.whitelist"
+    output = system_webview_pak_whitelist
   }
 }
 
@@ -410,6 +314,8 @@ source_set("common") {
     "browser/aw_browser_permission_request_delegate.h",
     "browser/aw_browser_policy_connector.cc",
     "browser/aw_browser_policy_connector.h",
+    "browser/aw_browser_terminator.cc",
+    "browser/aw_browser_terminator.h",
     "browser/aw_content_browser_client.cc",
     "browser/aw_content_browser_client.h",
     "browser/aw_contents_client_bridge_base.cc",
@@ -417,8 +323,8 @@ source_set("common") {
     "browser/aw_contents_io_thread_client.h",
     "browser/aw_cookie_access_policy.cc",
     "browser/aw_cookie_access_policy.h",
-    "browser/aw_dev_tools_discovery_provider.cc",
-    "browser/aw_dev_tools_discovery_provider.h",
+    "browser/aw_devtools_manager_delegate.cc",
+    "browser/aw_devtools_manager_delegate.h",
     "browser/aw_download_manager_delegate.cc",
     "browser/aw_download_manager_delegate.h",
     "browser/aw_form_database_service.cc",
@@ -432,9 +338,6 @@ source_set("common") {
     "browser/aw_locale_manager.h",
     "browser/aw_login_delegate.cc",
     "browser/aw_login_delegate.h",
-    "browser/aw_message_port_message_filter.cc",
-    "browser/aw_message_port_message_filter.h",
-    "browser/aw_message_port_service.h",
     "browser/aw_metrics_service_client.cc",
     "browser/aw_metrics_service_client.h",
     "browser/aw_permission_manager.cc",
@@ -447,11 +350,18 @@ source_set("common") {
     "browser/aw_quota_manager_bridge.h",
     "browser/aw_quota_permission_context.cc",
     "browser/aw_quota_permission_context.h",
+    "browser/aw_render_process_gone_delegate.h",
     "browser/aw_render_thread_context_provider.cc",
     "browser/aw_render_thread_context_provider.h",
     "browser/aw_resource_context.cc",
     "browser/aw_resource_context.h",
     "browser/aw_result_codes.h",
+    "browser/aw_safe_browsing_config_helper.cc",
+    "browser/aw_safe_browsing_config_helper.h",
+    "browser/aw_safe_browsing_resource_throttle.cc",
+    "browser/aw_safe_browsing_resource_throttle.h",
+    "browser/aw_safe_browsing_ui_manager.cc",
+    "browser/aw_safe_browsing_ui_manager.h",
     "browser/aw_ssl_host_state_delegate.cc",
     "browser/aw_ssl_host_state_delegate.h",
     "browser/aw_web_preferences_populater.cc",
@@ -461,6 +371,8 @@ source_set("common") {
     "browser/browser_view_renderer_client.h",
     "browser/child_frame.cc",
     "browser/child_frame.h",
+    "browser/command_line_helper.cc",
+    "browser/command_line_helper.h",
     "browser/compositor_id.cc",
     "browser/compositor_id.h",
     "browser/deferred_gpu_command_service.cc",
@@ -493,6 +405,8 @@ source_set("common") {
     "browser/net/aw_url_request_context_getter.h",
     "browser/net/aw_url_request_job_factory.cc",
     "browser/net/aw_url_request_job_factory.h",
+    "browser/net/aw_web_resource_request.cc",
+    "browser/net/aw_web_resource_request.h",
     "browser/net/aw_web_resource_response.h",
     "browser/net/init_native_callback.h",
     "browser/net/input_stream_reader.cc",
@@ -507,6 +421,8 @@ source_set("common") {
     "browser/parent_output_surface.h",
     "browser/render_thread_manager.cc",
     "browser/render_thread_manager.h",
+    "browser/renderer_host/auto_login_parser.cc",
+    "browser/renderer_host/auto_login_parser.h",
     "browser/renderer_host/aw_render_view_host_ext.cc",
     "browser/renderer_host/aw_render_view_host_ext.h",
     "browser/renderer_host/aw_resource_dispatcher_host_delegate.cc",
@@ -527,21 +443,20 @@ source_set("common") {
     "common/aw_hit_test_data.h",
     "common/aw_media_client_android.cc",
     "common/aw_media_client_android.h",
-    "common/aw_message_port_messages.h",
+    "common/aw_paths.cc",
+    "common/aw_paths.h",
     "common/aw_resource.h",
     "common/aw_switches.cc",
     "common/aw_switches.h",
+    "common/crash_reporter/aw_microdump_crash_reporter.cc",
+    "common/crash_reporter/aw_microdump_crash_reporter.h",
     "common/devtools_instrumentation.h",
     "common/render_view_messages.cc",
     "common/render_view_messages.h",
     "common/url_constants.cc",
     "common/url_constants.h",
-    "crash_reporter/aw_microdump_crash_reporter.cc",
-    "crash_reporter/aw_microdump_crash_reporter.h",
     "gpu/aw_content_gpu_client.cc",
     "gpu/aw_content_gpu_client.h",
-    "lib/aw_browser_dependency_factory_impl.cc",
-    "lib/aw_browser_dependency_factory_impl.h",
     "lib/main/aw_main_delegate.cc",
     "lib/main/aw_main_delegate.h",
     "lib/main/webview_jni_onload.cc",
@@ -553,8 +468,6 @@ source_set("common") {
     "renderer/aw_content_settings_client.h",
     "renderer/aw_key_systems.cc",
     "renderer/aw_key_systems.h",
-    "renderer/aw_message_port_client.cc",
-    "renderer/aw_message_port_client.h",
     "renderer/aw_print_web_view_helper_delegate.cc",
     "renderer/aw_print_web_view_helper_delegate.h",
     "renderer/aw_render_frame_ext.cc",
@@ -574,23 +487,27 @@ source_set("common") {
     "//android_webview/common:version",
     "//android_webview/native:native",
     "//cc/surfaces",
-    "//components/auto_login_parser:auto_login_parser",
+    "//components/autofill/content/browser",
     "//components/autofill/content/renderer",
     "//components/cdm/browser",
     "//components/cdm/renderer",
     "//components/crash/content/app",
     "//components/crash/content/browser",
-    "//components/devtools_discovery",
     "//components/metrics",
     "//components/metrics:gpu",
     "//components/metrics:net",
     "//components/metrics:profiler",
     "//components/metrics:ui",
     "//components/navigation_interception",
+    "//components/policy:generated",
+    "//components/policy/core/browser",
     "//components/prefs",
     "//components/printing/browser",
     "//components/printing/common",
     "//components/printing/renderer",
+    "//components/safe_browsing",
+    "//components/safe_browsing_db:safe_browsing_db_mobile",
+    "//components/spellcheck:build_features",
     "//components/supervised_user_error_page",
     "//components/supervised_user_error_page:gin",
     "//components/version_info",
@@ -601,17 +518,20 @@ source_set("common") {
     "//content",
     "//content/public/app:both",
     "//content/public/browser",
+    "//content/public/common:service_names",
+    "//crypto",
     "//gin",
-    "//gpu/command_buffer/client:gl_in_process_context",
     "//gpu/command_buffer/client:gles2_c_lib",
     "//gpu/command_buffer/client:gles2_implementation",
     "//gpu/command_buffer/common:gles2_utils",
     "//gpu/command_buffer/service",
+    "//gpu/ipc:gl_in_process_context",
     "//gpu/skia_bindings",
     "//media",
     "//media/midi",
     "//net:extras",
     "//printing",
+    "//services/service_manager/public/cpp",
     "//skia",
     "//third_party/WebKit/public:blink",
     "//ui/events:gesture_detection",
@@ -620,13 +540,6 @@ source_set("common") {
     "//ui/shell_dialogs",
     "//v8",
   ]
-
-  if (enable_configuration_policy) {
-    deps += [
-      "//components/policy:generated",
-      "//components/policy/core/browser",
-    ]
-  }
 
   if (enable_spellcheck) {
     deps += [
@@ -641,9 +554,11 @@ source_set("common") {
 android_library("android_webview_java") {
   java_files = [
     "java/src/org/chromium/android_webview/AndroidProtocolHandler.java",
+    "java/src/org/chromium/android_webview/AwActionModeCallback.java",
     "java/src/org/chromium/android_webview/AwAutofillClient.java",
     "java/src/org/chromium/android_webview/AwBrowserContext.java",
     "java/src/org/chromium/android_webview/AwBrowserProcess.java",
+    "java/src/org/chromium/android_webview/AwContentVideoViewEmbedder.java",
     "java/src/org/chromium/android_webview/AwContentViewClient.java",
     "java/src/org/chromium/android_webview/AwContents.java",
     "java/src/org/chromium/android_webview/AwContentsBackgroundThreadClient.java",
@@ -661,14 +576,14 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/AwGLFunctor.java",
     "java/src/org/chromium/android_webview/AwHttpAuthHandler.java",
     "java/src/org/chromium/android_webview/AwLayoutSizer.java",
-    "java/src/org/chromium/android_webview/AwMessagePort.java",
-    "java/src/org/chromium/android_webview/AwMessagePortService.java",
     "java/src/org/chromium/android_webview/AwMetricsServiceClient.java",
     "java/src/org/chromium/android_webview/AwNetworkChangeNotifierRegistrationPolicy.java",
     "java/src/org/chromium/android_webview/AwPdfExporter.java",
     "java/src/org/chromium/android_webview/AwPicture.java",
     "java/src/org/chromium/android_webview/AwPrintDocumentAdapter.java",
+    "java/src/org/chromium/android_webview/AwSafeBrowsingConfigHelper.java",
     "java/src/org/chromium/android_webview/AwQuotaManagerBridge.java",
+    "java/src/org/chromium/android_webview/AwRenderProcessGoneDetail.java",
     "java/src/org/chromium/android_webview/AwResource.java",
     "java/src/org/chromium/android_webview/AwScrollOffsetManager.java",
     "java/src/org/chromium/android_webview/AwServiceWorkerClient.java",
@@ -684,6 +599,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/AwWebContentsObserver.java",
     "java/src/org/chromium/android_webview/AwWebResourceResponse.java",
     "java/src/org/chromium/android_webview/AwZoomControls.java",
+    "java/src/org/chromium/android_webview/CleanupReference.java",
     "java/src/org/chromium/android_webview/ClientCertLookupTable.java",
     "java/src/org/chromium/android_webview/DefaultVideoPosterRequestHandler.java",
     "java/src/org/chromium/android_webview/ErrorCodeConversionHelper.java",
@@ -696,8 +612,7 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/JsResultReceiver.java",
     "java/src/org/chromium/android_webview/NullAwViewMethods.java",
     "java/src/org/chromium/android_webview/OverScrollGlow.java",
-    "java/src/org/chromium/android_webview/PlatformServiceBridge.java",
-    "java/src/org/chromium/android_webview/PostMessageSender.java",
+    "java/src/org/chromium/android_webview/PopupTouchHandleDrawable.java",
     "java/src/org/chromium/android_webview/ResourcesContextWrapperFactory.java",
     "java/src/org/chromium/android_webview/ScrollAccessibilityHelper.java",
     "java/src/org/chromium/android_webview/SslUtil.java",
@@ -706,11 +621,16 @@ android_library("android_webview_java") {
     "java/src/org/chromium/android_webview/policy/AwPolicyProvider.java",
   ]
   deps = [
+    ":android_webview_crash_services_java",
+    ":android_webview_platform_services_java",
     ":resources",
     ":strings_grd",
     "//base:base_java",
-    "//components/external_video_surface:java",
+    "//components/autofill/android:autofill_java",
+    "//components/minidump_uploader:minidump_uploader_java",
     "//components/navigation_interception/android:navigation_interception_java",
+    "//components/policy/android:policy_java",
+    "//components/safe_browsing_db/android:safe_browsing_java",
     "//components/web_contents_delegate_android:web_contents_delegate_android_java",
     "//components/web_restrictions:web_restrictions_java",
     "//content/public/android:content_java",
@@ -718,11 +638,9 @@ android_library("android_webview_java") {
     "//net/android:net_java",
     "//third_party/android_tools:android_support_annotations_java",
     "//ui/android:ui_java",
+    google_play_services_library,
+    google_play_services_resources,
   ]
-
-  if (enable_configuration_policy) {
-    deps += [ "//components/policy/android:policy_java" ]
-  }
 
   if (enable_spellcheck) {
     deps += [ "//components/spellcheck/browser/android:java" ]
@@ -781,10 +699,45 @@ java_strings_grd("strings_grd") {
   ]
 }
 
+# Separate target to allow for a dependency on GmsCore without pulling in all of
+# android_webview_java.
+android_library("android_webview_platform_services_java") {
+  java_files =
+      [ "java/src/org/chromium/android_webview/PlatformServiceBridge.java" ]
+
+  deps = [
+    "//base:base_java",
+  ]
+}
+
+# Keep crash services separate from other WebView code to keep their deps clean
+# (and make them easy to move).
+android_library("android_webview_crash_services_java") {
+  java_files = [
+    "java/src/org/chromium/android_webview/crash/CrashReceiverService.java",
+    "java/src/org/chromium/android_webview/crash/MinidumpUploaderImpl.java",
+    "java/src/org/chromium/android_webview/crash/MinidumpUploader.java",
+    "java/src/org/chromium/android_webview/crash/MinidumpUploadJobService.java",
+    "java/src/org/chromium/android_webview/crash/SynchronizedWebViewCommandLine.java",
+  ]
+  deps = [
+    "//base:base_java",
+    "//components/minidump_uploader:minidump_uploader_java",
+  ]
+
+  srcjar_deps = [ ":crash_receiver_aidl" ]
+}
+
+android_aidl("crash_receiver_aidl") {
+  import_include = "java/src"
+  sources = [
+    "java/src/org/chromium/android_webview/crash/ICrashReceiverService.aidl",
+  ]
+}
+
 if (!use_webview_internal_framework) {
   system_webview_apk_tmpl("system_webview_apk") {
-    android_manifest = get_target_outputs(":system_webview_manifest")
-    android_manifest = android_manifest[1]
+    android_manifest = system_webview_android_manifest
     android_manifest_dep = ":system_webview_manifest"
     deps = [
       ":system_webview_resources",

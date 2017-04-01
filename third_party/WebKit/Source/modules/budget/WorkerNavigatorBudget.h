@@ -5,6 +5,7 @@
 #ifndef WorkerNavigatorBudget_h
 #define WorkerNavigatorBudget_h
 
+#include "core/workers/WorkerNavigator.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/GarbageCollected.h"
 #include "wtf/Noncopyable.h"
@@ -15,25 +16,27 @@ class BudgetService;
 class WorkerNavigator;
 
 // This exposes the budget object on the WorkerNavigator partial interface.
-class WorkerNavigatorBudget final : public GarbageCollected<WorkerNavigatorBudget>, public Supplement<WorkerNavigator> {
-    USING_GARBAGE_COLLECTED_MIXIN(WorkerNavigatorBudget);
-    WTF_MAKE_NONCOPYABLE(WorkerNavigatorBudget);
+class WorkerNavigatorBudget final
+    : public GarbageCollected<WorkerNavigatorBudget>,
+      public Supplement<WorkerNavigator> {
+  USING_GARBAGE_COLLECTED_MIXIN(WorkerNavigatorBudget);
+  WTF_MAKE_NONCOPYABLE(WorkerNavigatorBudget);
 
-public:
-    static WorkerNavigatorBudget& from(WorkerNavigator&);
+ public:
+  static WorkerNavigatorBudget& from(WorkerNavigator&);
 
-    static BudgetService* budget(WorkerNavigator&);
-    BudgetService* budget();
+  static BudgetService* budget(WorkerNavigator&);
+  BudgetService* budget();
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    WorkerNavigatorBudget();
-    static const char* supplementName();
+ private:
+  WorkerNavigatorBudget();
+  static const char* supplementName();
 
-    Member<BudgetService> m_budget;
+  Member<BudgetService> m_budget;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WorkerNavigatorBudget_h
+#endif  // WorkerNavigatorBudget_h

@@ -9,6 +9,7 @@
 #include "net/quic/core/crypto/chacha20_poly1305_decrypter.h"
 #include "net/quic/core/crypto/crypto_protocol.h"
 #include "net/quic/core/crypto/null_decrypter.h"
+#include "net/quic/platform/api/quic_logging.h"
 
 using base::StringPiece;
 using std::string;
@@ -22,10 +23,8 @@ QuicDecrypter* QuicDecrypter::Create(QuicTag algorithm) {
       return new Aes128Gcm12Decrypter();
     case kCC20:
       return new ChaCha20Poly1305Decrypter();
-    case kNULL:
-      return new NullDecrypter();
     default:
-      LOG(FATAL) << "Unsupported algorithm: " << algorithm;
+      QUIC_LOG(FATAL) << "Unsupported algorithm: " << algorithm;
       return nullptr;
   }
 }
@@ -33,13 +32,13 @@ QuicDecrypter* QuicDecrypter::Create(QuicTag algorithm) {
 // static
 void QuicDecrypter::DiversifyPreliminaryKey(StringPiece preliminary_key,
                                             StringPiece nonce_prefix,
-                                            DiversificationNonce nonce,
+                                            const DiversificationNonce& nonce,
                                             size_t key_size,
                                             size_t nonce_prefix_size,
                                             string* out_key,
                                             string* out_nonce_prefix) {
   crypto::HKDF hkdf(preliminary_key.as_string() + nonce_prefix.as_string(),
-                    StringPiece(nonce, kDiversificationNonceSize),
+                    StringPiece(nonce.data(), nonce.size()),
                     "QUIC key diversification", 0, key_size, 0,
                     nonce_prefix_size, 0);
   *out_key = hkdf.server_write_key().as_string();

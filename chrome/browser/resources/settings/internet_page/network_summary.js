@@ -35,6 +35,8 @@ var NetworkStateListObject;
 Polymer({
   is: 'network-summary',
 
+  behaviors: [CrPolicyNetworkBehavior],
+
   properties: {
     /**
      * Highest priority connected network or null.
@@ -46,39 +48,46 @@ Polymer({
       notify: true,
     },
 
-    /**
-     * The device state for each network device type.
-     * @type {DeviceStateObject}
-     */
-    deviceStates: {
-      type: Object,
-      value: function() { return {}; },
-    },
-
-    /**
-     * Array of active network states, one per device type.
-     * @type {!Array<!CrOnc.NetworkStateProperties>}
-     */
-    activeNetworkStates: {
-      type: Array,
-      value: function() { return []; },
-    },
-
-    /**
-     * List of network state data for each network type.
-     * @type {NetworkStateListObject}
-     */
-    networkStateLists: {
-      type: Object,
-      value: function() { return {}; },
-    },
+    /** @type {!chrome.networkingPrivate.GlobalPolicy|undefined} */
+    globalPolicy: Object,
 
     /**
      * Interface for networkingPrivate calls, passed from internet_page.
      * @type {NetworkingPrivate}
      */
-    networkingPrivate: {
+    networkingPrivate: Object,
+
+    /**
+     * The device state for each network device type.
+     * @private {DeviceStateObject}
+     */
+    deviceStates_: {
       type: Object,
+      value: function() {
+        return {};
+      },
+    },
+
+    /**
+     * Array of active network states, one per device type.
+     * @private {!Array<!CrOnc.NetworkStateProperties>}
+     */
+    activeNetworkStates_: {
+      type: Array,
+      value: function() {
+        return [];
+      },
+    },
+
+    /**
+     * List of network state data for each network type.
+     * @private {NetworkStateListObject}
+     */
+    networkStateLists_: {
+      type: Object,
+      value: function() {
+        return {};
+      },
     },
   },
 
@@ -163,7 +172,7 @@ Polymer({
    */
   onSelected_: function(event) {
     var state = event.detail;
-    if (this.canConnect_(state)) {
+    if (this.canConnect_(state, this.globalPolicy)) {
       this.connectToNetwork_(state);
       return;
     }
@@ -188,13 +197,17 @@ Polymer({
    * networkingPrivate.onNetworkListChanged event callback.
    * @private
    */
-  onNetworkListChangedEvent_: function() { this.getNetworkLists_(); },
+  onNetworkListChangedEvent_: function() {
+    this.getNetworkLists_();
+  },
 
   /**
    * networkingPrivate.onDeviceStateListChanged event callback.
    * @private
    */
-  onDeviceStateListChangedEvent_: function() { this.getNetworkLists_(); },
+  onDeviceStateListChangedEvent_: function() {
+    this.getNetworkLists_();
+  },
 
   /**
    * networkingPrivate.onNetworksChanged event callback.
@@ -215,11 +228,17 @@ Polymer({
   /**
    * Determines whether or not a network state can be connected to.
    * @param {!CrOnc.NetworkStateProperties} state The network state.
+   * @param {!chrome.networkingPrivate.GlobalPolicy|undefined} globalPolicy
    * @private
    */
-  canConnect_: function(state) {
+  canConnect_: function(state, globalPolicy) {
     if (state.Type == CrOnc.Type.ETHERNET ||
         state.Type == CrOnc.Type.VPN && !this.defaultNetwork) {
+      return false;
+    }
+    if (state.Type == CrOnc.Type.WI_FI && !!globalPolicy &&
+        globalPolicy.AllowOnlyPolicyNetworksToConnect &&
+        !this.isPolicySource(state.Source)) {
       return false;
     }
     return state.ConnectionState == CrOnc.ConnectionState.NOT_CONNECTED;
@@ -249,9 +268,9 @@ Polymer({
       return;
     }
     // Find the active state for the type and update it.
-    for (let i = 0; i < this.activeNetworkStates.length; ++i) {
-      if (this.activeNetworkStates[i].type == state.type) {
-        this.activeNetworkStates[i] = state;
+    for (let i = 0; i < this.activeNetworkStates_.length; ++i) {
+      if (this.activeNetworkStates_[i].type == state.type) {
+        this.activeNetworkStates_[i] = state;
         return;
       }
     }
@@ -327,7 +346,7 @@ Polymer({
       for (let state of opt_deviceStates)
         newDeviceStates[state.Type] = state;
     } else {
-      newDeviceStates = this.deviceStates;
+      newDeviceStates = this.deviceStates_;
     }
 
     // Clear any current networks.
@@ -366,19 +385,31 @@ Polymer({
       });
     }
 
-    // Push the active networks onto newActiveNetworkStates in device order,
-    // creating an empty state for devices with no networks.
-    var newActiveNetworkStates = [];
+    // Push the active networks onto newActiveNetworkStates in order based on
+    // device priority, creating an empty state for devices with no networks.
+    let newActiveNetworkStates = [];
     this.activeNetworkIds_ = new Set;
-    for (let type in newDeviceStates) {
-      var state = activeNetworkStatesByType.get(type) || {GUID: '', Type: type};
+    let orderedDeviceTypes = [
+      CrOnc.Type.ETHERNET, CrOnc.Type.WI_FI, CrOnc.Type.CELLULAR,
+      CrOnc.Type.WI_MAX, CrOnc.Type.VPN
+    ];
+    for (let type of orderedDeviceTypes) {
+      let device = newDeviceStates[type];
+      if (!device)
+        continue;
+      let state = activeNetworkStatesByType.get(type) || {GUID: '', Type: type};
+      if (state.Source === undefined &&
+          device.State == chrome.networkingPrivate.DeviceStateType.PROHIBITED) {
+        // Prohibited technologies are enforced by the device policy.
+        state.Source = CrOnc.Source.DEVICE_POLICY;
+      }
       newActiveNetworkStates.push(state);
       this.activeNetworkIds_.add(state.GUID);
     }
 
-    this.deviceStates = newDeviceStates;
-    this.networkStateLists = newNetworkStateLists;
+    this.deviceStates_ = newDeviceStates;
+    this.networkStateLists_ = newNetworkStateLists;
     // Set activeNetworkStates last to rebuild the dom-repeat.
-    this.activeNetworkStates = newActiveNetworkStates;
+    this.activeNetworkStates_ = newActiveNetworkStates;
   },
 });

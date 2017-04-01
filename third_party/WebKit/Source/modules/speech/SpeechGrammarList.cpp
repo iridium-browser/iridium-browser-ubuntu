@@ -25,42 +25,40 @@
 
 #include "modules/speech/SpeechGrammarList.h"
 
+#include "bindings/core/v8/ScriptState.h"
 #include "core/dom/Document.h"
 
 namespace blink {
 
-SpeechGrammarList* SpeechGrammarList::create()
-{
-    return new SpeechGrammarList;
+SpeechGrammarList* SpeechGrammarList::create() {
+  return new SpeechGrammarList;
 }
 
-SpeechGrammar* SpeechGrammarList::item(unsigned index) const
-{
-    if (index >= m_grammars.size())
-        return nullptr;
+SpeechGrammar* SpeechGrammarList::item(unsigned index) const {
+  if (index >= m_grammars.size())
+    return nullptr;
 
-    return m_grammars[index];
+  return m_grammars[index];
 }
 
-void SpeechGrammarList::addFromUri(ExecutionContext* executionContext, const String& src, double weight)
-{
-    Document* document = toDocument(executionContext);
-    m_grammars.append(SpeechGrammar::create(document->completeURL(src), weight));
+void SpeechGrammarList::addFromUri(ScriptState* scriptState,
+                                   const String& src,
+                                   double weight) {
+  Document* document = toDocument(scriptState->getExecutionContext());
+  m_grammars.push_back(
+      SpeechGrammar::create(document->completeURL(src), weight));
 }
 
-void SpeechGrammarList::addFromString(const String& string, double weight)
-{
-    String urlString = String("data:application/xml,") + encodeWithURLEscapeSequences(string);
-    m_grammars.append(SpeechGrammar::create(KURL(KURL(), urlString), weight));
+void SpeechGrammarList::addFromString(const String& string, double weight) {
+  String urlString =
+      String("data:application/xml,") + encodeWithURLEscapeSequences(string);
+  m_grammars.push_back(SpeechGrammar::create(KURL(KURL(), urlString), weight));
 }
 
-SpeechGrammarList::SpeechGrammarList()
-{
+SpeechGrammarList::SpeechGrammarList() {}
+
+DEFINE_TRACE(SpeechGrammarList) {
+  visitor->trace(m_grammars);
 }
 
-DEFINE_TRACE(SpeechGrammarList)
-{
-    visitor->trace(m_grammars);
-}
-
-} // namespace blink
+}  // namespace blink

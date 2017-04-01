@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from common.chrome_proxy_shared_page_state import ChromeProxySharedPageState
 from telemetry.page import page as page_module
 from telemetry import story
 
@@ -11,7 +12,8 @@ class PassThroughPage(page_module.Page):
   """
 
   def __init__(self, url, page_set):
-    super(PassThroughPage, self).__init__(url=url, page_set=page_set)
+    super(PassThroughPage, self).__init__(url=url, page_set=page_set,
+        shared_page_state_class=ChromeProxySharedPageState)
 
   def RunNavigateSteps(self, action_runner):
     super(PassThroughPage, self).RunNavigateSteps(action_runner)
@@ -19,7 +21,7 @@ class PassThroughPage(page_module.Page):
         (function() {
           var request = new XMLHttpRequest();
           request.open("GET", "%s");
-          request.setRequestHeader("Chrome-Proxy", "pass-through");
+          request.setRequestHeader("Chrome-Proxy-Accept-Transform", "identity");
           request.send(null);
         })();''' % (self.url))
     action_runner.Wait(1)

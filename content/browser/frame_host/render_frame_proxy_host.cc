@@ -184,14 +184,11 @@ bool RenderFrameProxyHost::InitRenderFrameProxy() {
         site_instance_.get());
   }
 
-  Send(new FrameMsg_NewFrameProxy(routing_id_,
-                                  frame_tree_node_->frame_tree()
-                                      ->GetRenderViewHost(site_instance_.get())
-                                      ->GetRoutingID(),
-                                  opener_routing_id,
-                                  parent_routing_id,
-                                  frame_tree_node_
-                                      ->current_replication_state()));
+  int view_routing_id = frame_tree_node_->frame_tree()
+      ->GetRenderViewHost(site_instance_.get())->GetRoutingID();
+  GetProcess()->GetRendererInterface()->CreateFrameProxy(
+      routing_id_, view_routing_id, opener_routing_id, parent_routing_id,
+      frame_tree_node_->current_replication_state());
 
   render_frame_proxy_created_ = true;
 
@@ -257,15 +254,19 @@ void RenderFrameProxyHost::OnOpenURL(
 
   // Since this navigation targeted a specific RenderFrameProxy, it should stay
   // in the current tab.
-  DCHECK_EQ(CURRENT_TAB, params.disposition);
+  DCHECK_EQ(WindowOpenDisposition::CURRENT_TAB, params.disposition);
 
   // TODO(alexmos, creis): Figure out whether |params.user_gesture| needs to be
   // passed in as well.
+  // TODO(lfg, lukasza): Remove |extra_headers| parameter from
+  // RequestTransferURL method once both RenderFrameProxyHost and
+  // RenderFrameHostImpl call RequestOpenURL from their OnOpenURL handlers.
+  // See also https://crbug.com/647772.
   frame_tree_node_->navigator()->RequestTransferURL(
       current_rfh, validated_url, site_instance_.get(), std::vector<GURL>(),
       params.referrer, ui::PAGE_TRANSITION_LINK, GlobalRequestID(),
       params.should_replace_current_entry, params.uses_post ? "POST" : "GET",
-      params.resource_request_body);
+      params.resource_request_body, params.extra_headers);
 }
 
 void RenderFrameProxyHost::OnRouteMessageEvent(

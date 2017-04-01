@@ -4,11 +4,10 @@
 
 #include "components/toolbar/test_toolbar_model.h"
 
-#include "components/grit/components_scaled_resources.h"
 #include "ui/gfx/vector_icons_public.h"
 
 TestToolbarModel::TestToolbarModel()
-    : security_level_(security_state::SecurityStateModel::NONE),
+    : security_level_(security_state::NONE),
 #if defined(TOOLKIT_VIEWS)
       icon_(gfx::VectorIconId::LOCATION_BAR_HTTP),
 #else
@@ -27,24 +26,22 @@ GURL TestToolbarModel::GetURL() const {
   return url_;
 }
 
-security_state::SecurityStateModel::SecurityLevel
-TestToolbarModel::GetSecurityLevel(bool ignore_editing) const {
+security_state::SecurityLevel TestToolbarModel::GetSecurityLevel(
+    bool ignore_editing) const {
   return security_level_;
-}
-
-int TestToolbarModel::GetIcon() const {
-  // This placeholder implementation should be removed when MD is default.
-  return IDR_LOCATION_BAR_HTTP;
 }
 
 gfx::VectorIconId TestToolbarModel::GetVectorIcon() const {
   return icon_;
 }
 
+base::string16 TestToolbarModel::GetSecureVerboseText() const {
+  return base::string16();
+}
+
 base::string16 TestToolbarModel::GetEVCertName() const {
-  return (security_level_ == security_state::SecurityStateModel::EV_SECURE)
-             ? ev_cert_name_
-             : base::string16();
+  return (security_level_ == security_state::EV_SECURE) ? ev_cert_name_
+                                                        : base::string16();
 }
 
 bool TestToolbarModel::ShouldDisplayURL() const {

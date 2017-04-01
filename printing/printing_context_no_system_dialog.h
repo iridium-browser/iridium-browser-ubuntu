@@ -10,10 +10,6 @@
 #include "base/macros.h"
 #include "printing/printing_context.h"
 
-namespace base {
-class DictionaryValue;
-}
-
 namespace printing {
 
 class PRINTING_EXPORT PrintingContextNoSystemDialog : public PrintingContext {
@@ -31,14 +27,13 @@ class PRINTING_EXPORT PrintingContextNoSystemDialog : public PrintingContext {
   Result UpdatePrinterSettings(bool external_preview,
                                bool show_system_dialog,
                                int page_count) override;
-  Result InitWithSettings(const PrintSettings& settings) override;
   Result NewDocument(const base::string16& document_name) override;
   Result NewPage() override;
   Result PageDone() override;
   Result DocumentDone() override;
   void Cancel() override;
   void ReleaseContext() override;
-  gfx::NativeDrawingContext context() const override;
+  skia::NativeDrawingContext context() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PrintingContextNoSystemDialog);

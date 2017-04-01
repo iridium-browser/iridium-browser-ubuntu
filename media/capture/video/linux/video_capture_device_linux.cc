@@ -37,8 +37,8 @@ std::list<uint32_t> VideoCaptureDeviceLinux::GetListOfUsableFourCCs(
 
 VideoCaptureDeviceLinux::VideoCaptureDeviceLinux(
     const VideoCaptureDeviceDescriptor& device_descriptor)
-    : v4l2_thread_("V4L2CaptureThread"),
-      device_descriptor_(device_descriptor) {}
+    : device_descriptor_(device_descriptor),
+      v4l2_thread_("V4L2CaptureThread") {}
 
 VideoCaptureDeviceLinux::~VideoCaptureDeviceLinux() {
   // Check if the thread is running.
@@ -69,6 +69,10 @@ void VideoCaptureDeviceLinux::AllocateAndStart(
                  params.requested_format.frame_size.width(),
                  params.requested_format.frame_size.height(),
                  params.requested_format.frame_rate, base::Passed(&client)));
+
+  for (const auto& request : photo_requests_queue_)
+    v4l2_thread_.task_runner()->PostTask(FROM_HERE, request);
+  photo_requests_queue_.clear();
 }
 
 void VideoCaptureDeviceLinux::StopAndDeAllocate() {
@@ -79,7 +83,45 @@ void VideoCaptureDeviceLinux::StopAndDeAllocate() {
       base::Bind(&V4L2CaptureDelegate::StopAndDeAllocate, capture_impl_));
   v4l2_thread_.Stop();
 
-  capture_impl_ = NULL;
+  capture_impl_ = nullptr;
+}
+
+void VideoCaptureDeviceLinux::TakePhoto(TakePhotoCallback callback) {
+  DCHECK(capture_impl_);
+  auto functor = base::Bind(&V4L2CaptureDelegate::TakePhoto, capture_impl_,
+                            base::Passed(&callback));
+  if (!v4l2_thread_.IsRunning()) {
+    // We have to wait until we get the device AllocateAndStart()ed.
+    photo_requests_queue_.push_back(std::move(functor));
+    return;
+  }
+  v4l2_thread_.task_runner()->PostTask(FROM_HERE, std::move(functor));
+}
+
+void VideoCaptureDeviceLinux::GetPhotoCapabilities(
+    GetPhotoCapabilitiesCallback callback) {
+  auto functor = base::Bind(&V4L2CaptureDelegate::GetPhotoCapabilities,
+                            capture_impl_, base::Passed(&callback));
+  if (!v4l2_thread_.IsRunning()) {
+    // We have to wait until we get the device AllocateAndStart()ed.
+    photo_requests_queue_.push_back(std::move(functor));
+    return;
+  }
+  v4l2_thread_.task_runner()->PostTask(FROM_HERE, std::move(functor));
+}
+
+void VideoCaptureDeviceLinux::SetPhotoOptions(
+    mojom::PhotoSettingsPtr settings,
+    SetPhotoOptionsCallback callback) {
+  auto functor =
+      base::Bind(&V4L2CaptureDelegate::SetPhotoOptions, capture_impl_,
+                 base::Passed(&settings), base::Passed(&callback));
+  if (!v4l2_thread_.IsRunning()) {
+    // We have to wait until we get the device AllocateAndStart()ed.
+    photo_requests_queue_.push_back(std::move(functor));
+    return;
+  }
+  v4l2_thread_.task_runner()->PostTask(FROM_HERE, std::move(functor));
 }
 
 void VideoCaptureDeviceLinux::SetRotation(int rotation) {

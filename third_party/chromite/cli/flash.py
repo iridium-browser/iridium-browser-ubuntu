@@ -11,7 +11,7 @@ import re
 import shutil
 import tempfile
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.lib import auto_updater
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
@@ -78,17 +78,29 @@ class UsbImagerOperation(operation.ProgressBarOperation):
     self.ProgressBar(float(self._transferred) / self._size)
 
 
-def _IsFilePathGPTDiskImage(file_path):
+def _IsFilePathGPTDiskImage(file_path, require_pmbr=False):
   """Determines if a file is a valid GPT disk.
 
   Args:
     file_path: Path to the file to test.
+    require_pmbr: Whether to require a PMBR in LBA0.
   """
   if os.path.isfile(file_path):
-    with cros_build_lib.Open(file_path) as image_file:
-      image_file.seek(0x1fe)
-      if image_file.read(10) == '\x55\xaaEFI PART':
+    with open(file_path) as image_file:
+      if require_pmbr:
+        # Seek to the end of LBA0 and look for the PMBR boot signature.
+        image_file.seek(0x1fe)
+        if image_file.read(2) != '\x55\xaa':
+          return False
+        # Current file position is start of LBA1 now.
+      else:
+        # Seek to LBA1 where the GPT starts.
+        image_file.seek(0x200)
+
+      # See if there's a GPT here.
+      if image_file.read(8) == 'EFI PART':
         return True
+
   return False
 
 
@@ -315,7 +327,7 @@ class RemoteDeviceUpdater(object):
   def __init__(self, ssh_hostname, ssh_port, image, stateful_update=True,
                rootfs_update=True, clobber_stateful=False, reboot=True,
                board=None, src_image_to_delta=None, wipe=True, debug=False,
-               yes=False, force=False, ping=True,
+               yes=False, force=False, ssh_private_key=None, ping=True,
                disable_verification=False):
     """Initializes RemoteDeviceUpdater"""
     if not stateful_update and not rootfs_update:
@@ -333,6 +345,7 @@ class RemoteDeviceUpdater(object):
     self.clobber_stateful = clobber_stateful
     self.reboot = reboot
     self.debug = debug
+    self.ssh_private_key = ssh_private_key
     self.ping = ping
     # Do not wipe if debug is set.
     self.wipe = wipe and not debug
@@ -425,15 +438,15 @@ class RemoteDeviceUpdater(object):
       device_connected = False
 
       with remote_access.ChromiumOSDeviceHandler(
-          self.ssh_hostname, port=self.ssh_port,
-          base_dir=self.DEVICE_BASE_DIR, ping=self.ping) as device:
+          self.ssh_hostname, port=self.ssh_port, base_dir=self.DEVICE_BASE_DIR,
+          private_key=self.ssh_private_key, ping=self.ping) as device:
         device_connected = True
 
         # Get payload directory
         payload_dir = self.GetPayloadDir(device)
 
         # Do auto-update
-        chromeos_AU = auto_updater.ChromiumOSUpdater(
+        chromeos_AU = auto_updater.ChromiumOSFlashUpdater(
             device, payload_dir, self.tempdir,
             do_rootfs_update=self.do_rootfs_update,
             do_stateful_update=self.do_stateful_update,
@@ -458,8 +471,9 @@ class RemoteDeviceUpdater(object):
 
 def Flash(device, image, board=None, install=False, src_image_to_delta=None,
           rootfs_update=True, stateful_update=True, clobber_stateful=False,
-          reboot=True, wipe=True, ping=True, disable_rootfs_verification=False,
-          clear_cache=False, yes=False, force=False, debug=False):
+          reboot=True, wipe=True, ssh_private_key=None, ping=True,
+          disable_rootfs_verification=False, clear_cache=False, yes=False,
+          force=False, debug=False):
   """Flashes a device, USB drive, or file with an image.
 
   This provides functionality common to `cros flash` and `brillo flash`
@@ -479,6 +493,7 @@ def Flash(device, image, board=None, install=False, src_image_to_delta=None,
     clobber_stateful: Clobber stateful partition; SSH |device| scheme only.
     reboot: Reboot device after update; SSH |device| scheme only.
     wipe: Wipe temporary working directory; SSH |device| scheme only.
+    ssh_private_key: Path to an SSH private key file; None to use test keys.
     ping: Ping the device before attempting update; SSH |device| scheme only.
     disable_rootfs_verification: Remove rootfs verification after update; SSH
         |device| scheme only.
@@ -530,6 +545,7 @@ def Flash(device, image, board=None, install=False, src_image_to_delta=None,
         debug=debug,
         yes=yes,
         force=force,
+        ssh_private_key=ssh_private_key,
         ping=ping,
         disable_verification=disable_rootfs_verification)
     updater.Run()

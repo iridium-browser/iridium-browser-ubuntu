@@ -12,9 +12,7 @@
 
 /*
  * A factory for creating default Geometry Processors which simply multiply position by the uniform
- * view matrix and wire through color, coverage, UV coords if requested.  Right now this is only
- * used in the creation of optimized draw states because adding default GPs to the drawstate can
- * interfere with batching due to updating the drawstate.
+ * view matrix and wire through color, coverage, UV coords if requested.
  */
 namespace GrDefaultGeoProcFactory {
     // Structs for adding vertex attributes
@@ -24,7 +22,7 @@ namespace GrDefaultGeoProcFactory {
 
     struct PositionCoverageAttr {
         SkPoint fPosition;
-        GrColor fCoverage;
+        float   fCoverage;
     };
 
     struct PositionColorAttr {
@@ -35,7 +33,7 @@ namespace GrDefaultGeoProcFactory {
     struct PositionColorCoverageAttr {
         SkPoint fPosition;
         SkColor fColor;
-        GrColor fCoverage;
+        float   fCoverage;
     };
 
     struct PositionLocalCoordAttr {
@@ -46,7 +44,7 @@ namespace GrDefaultGeoProcFactory {
     struct PositionLocalCoordCoverageAttr {
         SkPoint fPosition;
         SkPoint fLocalCoord;
-        GrColor fCoverage;
+        float   fCoverage;
     };
 
     struct PositionColorLocalCoordAttr {
@@ -59,7 +57,7 @@ namespace GrDefaultGeoProcFactory {
         SkPoint fPosition;
         GrColor fColor;
         SkPoint fLocalCoord;
-        GrColor fCoverage;
+        float   fCoverage;
     };
 
     struct Color {
@@ -68,7 +66,7 @@ namespace GrDefaultGeoProcFactory {
             kUniform_Type,
             kAttribute_Type,
         };
-        Color(GrColor color) : fType(kUniform_Type), fColor(color) {}
+        explicit Color(GrColor color) : fType(kUniform_Type), fColor(color) {}
         Color(Type type) : fType(type), fColor(GrColor_ILLEGAL) {
             SkASSERT(type != kUniform_Type);
 
@@ -84,12 +82,11 @@ namespace GrDefaultGeoProcFactory {
 
     struct Coverage {
         enum Type {
-            kNone_Type,
             kSolid_Type,
             kUniform_Type,
             kAttribute_Type,
         };
-        Coverage(uint8_t coverage) : fType(kUniform_Type), fCoverage(coverage) {}
+        explicit Coverage(uint8_t coverage) : fType(kUniform_Type), fCoverage(coverage) {}
         Coverage(Type type) : fType(type), fCoverage(0xff) {
             SkASSERT(type != kUniform_Type);
         }
@@ -129,8 +126,6 @@ namespace GrDefaultGeoProcFactory {
                                                   const Coverage&,
                                                   const LocalCoords&,
                                                   const SkMatrix& viewMatrix);
-
-    inline size_t DefaultVertexStride() { return sizeof(PositionAttr); }
 };
 
 #endif

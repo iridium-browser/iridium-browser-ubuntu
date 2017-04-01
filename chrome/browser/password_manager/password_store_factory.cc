@@ -19,9 +19,8 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
-#include "components/os_crypt/key_storage_util_linux.h"
 #include "components/os_crypt/os_crypt_switches.h"
 #include "components/password_manager/core/browser/login_database.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -43,7 +42,7 @@
 #elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
 // Don't do anything. We're going to use the default store.
 #elif defined(USE_X11)
-#include "base/nix/xdg_util.h"
+#include "components/os_crypt/key_storage_util_linux.h"
 #if defined(USE_GNOME_KEYRING)
 #include "chrome/browser/password_manager/native_backend_gnome_x.h"
 #endif
@@ -91,7 +90,7 @@ void PasswordStoreFactory::OnPasswordsSyncedStatePotentiallyChanged(
       GetForProfile(profile, ServiceAccessType::EXPLICIT_ACCESS);
   if (!password_store)
     return;
-  sync_driver::SyncService* sync_service =
+  syncer::SyncService* sync_service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   net::URLRequestContextGetter* request_context_getter =
       profile->GetRequestContext();

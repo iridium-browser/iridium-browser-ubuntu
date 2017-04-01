@@ -39,75 +39,73 @@
 namespace blink {
 
 struct SameSizeAsElementRareData : NodeRareData {
-    short indices[1];
-    LayoutSize sizeForResizing;
-    IntSize scrollOffset;
-    void* pointers[2];
-    Member<void*> members[13];
+  LayoutSize sizeForResizing;
+  IntSize scrollOffset;
+  void* pointers[2];
+  Member<void*> members[13];
 };
 
-CSSStyleDeclaration& ElementRareData::ensureInlineCSSStyleDeclaration(Element* ownerElement)
-{
-    if (!m_cssomWrapper)
-        m_cssomWrapper = new InlineCSSStyleDeclaration(ownerElement);
-    return *m_cssomWrapper;
+CSSStyleDeclaration& ElementRareData::ensureInlineCSSStyleDeclaration(
+    Element* ownerElement) {
+  if (!m_cssomWrapper)
+    m_cssomWrapper = new InlineCSSStyleDeclaration(ownerElement);
+  return *m_cssomWrapper;
 }
 
-InlineStylePropertyMap& ElementRareData::ensureInlineStylePropertyMap(Element* ownerElement)
-{
-    if (!m_cssomMapWrapper) {
-        m_cssomMapWrapper = new InlineStylePropertyMap(ownerElement);
+InlineStylePropertyMap& ElementRareData::ensureInlineStylePropertyMap(
+    Element* ownerElement) {
+  if (!m_cssomMapWrapper) {
+    m_cssomMapWrapper = new InlineStylePropertyMap(ownerElement);
+  }
+  return *m_cssomMapWrapper;
+}
+
+AttrNodeList& ElementRareData::ensureAttrNodeList() {
+  if (!m_attrNodeList)
+    m_attrNodeList = new AttrNodeList;
+  return *m_attrNodeList;
+}
+
+ElementRareData::ResizeObserverDataMap&
+ElementRareData::ensureResizeObserverData() {
+  if (!m_resizeObserverData)
+    m_resizeObserverData =
+        new HeapHashMap<Member<ResizeObserver>, Member<ResizeObservation>>();
+  return *m_resizeObserverData;
+}
+
+DEFINE_TRACE_AFTER_DISPATCH(ElementRareData) {
+  visitor->trace(m_dataset);
+  visitor->trace(m_classList);
+  visitor->trace(m_shadow);
+  visitor->trace(m_attributeMap);
+  visitor->trace(m_attrNodeList);
+  visitor->trace(m_elementAnimations);
+  visitor->trace(m_cssomWrapper);
+  visitor->trace(m_cssomMapWrapper);
+  visitor->trace(m_pseudoElementData);
+  visitor->trace(m_v0CustomElementDefinition);
+  visitor->trace(m_customElementDefinition);
+  visitor->trace(m_intersectionObserverData);
+  visitor->trace(m_resizeObserverData);
+  NodeRareData::traceAfterDispatch(visitor);
+}
+
+DEFINE_TRACE_WRAPPERS_AFTER_DISPATCH(ElementRareData) {
+  if (m_attrNodeList.get()) {
+    for (auto& attr : *m_attrNodeList) {
+      visitor->traceWrappersWithManualWriteBarrier(attr);
     }
-    return *m_cssomMapWrapper;
+  }
+  visitor->traceWrappersWithManualWriteBarrier(m_shadow);
+  visitor->traceWrappersWithManualWriteBarrier(m_attributeMap);
+  visitor->traceWrappersWithManualWriteBarrier(m_dataset);
+  visitor->traceWrappersWithManualWriteBarrier(m_classList);
+  visitor->traceWrappersWithManualWriteBarrier(m_intersectionObserverData);
+  NodeRareData::traceWrappersAfterDispatch(visitor);
 }
 
-AttrNodeList& ElementRareData::ensureAttrNodeList()
-{
-    if (!m_attrNodeList)
-        m_attrNodeList = new AttrNodeList;
-    return *m_attrNodeList;
-}
+static_assert(sizeof(ElementRareData) == sizeof(SameSizeAsElementRareData),
+              "ElementRareData should stay small");
 
-ElementRareData::ResizeObserverDataMap& ElementRareData::ensureResizeObserverData()
-{
-    if (!m_resizeObserverData)
-        m_resizeObserverData = new HeapHashMap<Member<ResizeObserver>, Member<ResizeObservation>>();
-    return *m_resizeObserverData;
-}
-
-DEFINE_TRACE_AFTER_DISPATCH(ElementRareData)
-{
-    visitor->trace(m_dataset);
-    visitor->trace(m_classList);
-    visitor->trace(m_shadow);
-    visitor->trace(m_attributeMap);
-    visitor->trace(m_attrNodeList);
-    visitor->trace(m_elementAnimations);
-    visitor->trace(m_cssomWrapper);
-    visitor->trace(m_cssomMapWrapper);
-    visitor->trace(m_pseudoElementData);
-    visitor->trace(m_v0CustomElementDefinition);
-    visitor->trace(m_customElementDefinition);
-    visitor->trace(m_intersectionObserverData);
-    visitor->trace(m_resizeObserverData);
-    NodeRareData::traceAfterDispatch(visitor);
-}
-
-DEFINE_TRACE_WRAPPERS_AFTER_DISPATCH(ElementRareData)
-{
-    if (m_attrNodeList.get()) {
-        for (auto& attr : *m_attrNodeList) {
-            visitor->traceWrappers(attr);
-        }
-    }
-    visitor->traceWrappers(m_shadow);
-    visitor->traceWrappers(m_attributeMap);
-    visitor->traceWrappers(m_dataset);
-    visitor->traceWrappers(m_classList);
-    visitor->traceWrappers(m_intersectionObserverData);
-    NodeRareData::traceWrappersAfterDispatch(visitor);
-}
-
-static_assert(sizeof(ElementRareData) == sizeof(SameSizeAsElementRareData), "ElementRareData should stay small");
-
-} // namespace blink
+}  // namespace blink

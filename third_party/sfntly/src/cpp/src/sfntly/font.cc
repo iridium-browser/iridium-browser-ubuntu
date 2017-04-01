@@ -40,24 +40,27 @@
 
 namespace sfntly {
 
-const int32_t SFNTVERSION_MAJOR = 1;
-const int32_t SFNTVERSION_MINOR = 0;
+namespace {
+
+const int32_t kSFNTVersionMajor = 1;
+const int32_t kSFNTVersionMinor = 0;
+
+const int32_t kMaxTableSize = 200 * 1024 * 1024;
+
+}  // namespace
 
 /******************************************************************************
  * Font class
  ******************************************************************************/
 Font::~Font() {}
 
-bool Font::HasTable(int32_t tag) {
-  TableMap::const_iterator result = tables_.find(tag);
-  TableMap::const_iterator end = tables_.end();
-  return (result != end);
+bool Font::HasTable(int32_t tag) const {
+  return tables_.find(tag) != tables_.end();
 }
 
 Table* Font::GetTable(int32_t tag) {
-  if (!HasTable(tag)) {
+  if (!HasTable(tag))
     return NULL;
-  }
   return tables_[tag];
 }
 
@@ -308,15 +311,12 @@ Table::Builder* Font::Builder::NewTableBuilder(int32_t tag,
 }
 
 void Font::Builder::RemoveTableBuilder(int32_t tag) {
-  TableBuilderMap::iterator target = table_builders_.find(tag);
-  if (target != table_builders_.end()) {
-    table_builders_.erase(target);
-  }
+  table_builders_.erase(tag);
 }
 
 Font::Builder::Builder(FontFactory* factory)
     : factory_(factory),
-      sfnt_version_(Fixed1616::Fixed(SFNTVERSION_MAJOR, SFNTVERSION_MINOR)) {
+      sfnt_version_(Fixed1616::Fixed(kSFNTVersionMajor, kSFNTVersionMinor)) {
 }
 
 void Font::Builder::LoadFont(InputStream* is) {
@@ -393,57 +393,66 @@ void Font::Builder::BuildTablesFromBuilders(Font* font,
 }
 
 static Table::Builder* GetBuilder(TableBuilderMap* builder_map, int32_t tag) {
-  if (builder_map) {
-    TableBuilderMap::iterator target = builder_map->find(tag);
-    if (target != builder_map->end()) {
-      return target->second.p_;
-    }
-  }
+  if (!builder_map)
+    return NULL;
 
-  return NULL;
+  TableBuilderMap::iterator target = builder_map->find(tag);
+  if (target == builder_map->end())
+    return NULL;
+
+  return target->second.p_;
+}
+
+// Like GetBuilder(), but the returned Builder must be able to support reads.
+static Table::Builder* GetReadBuilder(TableBuilderMap* builder_map, int32_t tag) {
+  Table::Builder* builder = GetBuilder(builder_map, tag);
+  if (!builder || !builder->InternalReadData())
+    return NULL;
+
+  return builder;
 }
 
 void Font::Builder::InterRelateBuilders(TableBuilderMap* builder_map) {
-  Table::Builder* raw_head_builder = GetBuilder(builder_map, Tag::head);
+  Table::Builder* raw_head_builder = GetReadBuilder(builder_map, Tag::head);
   FontHeaderTableBuilderPtr header_table_builder;
   if (raw_head_builder != NULL) {
-      header_table_builder =
-          down_cast<FontHeaderTable::Builder*>(raw_head_builder);
+    header_table_builder =
+        down_cast<FontHeaderTable::Builder*>(raw_head_builder);
   }
 
-  Table::Builder* raw_hhea_builder = GetBuilder(builder_map, Tag::hhea);
+  Table::Builder* raw_hhea_builder = GetReadBuilder(builder_map, Tag::hhea);
   HorizontalHeaderTableBuilderPtr horizontal_header_builder;
   if (raw_head_builder != NULL) {
-      horizontal_header_builder =
-          down_cast<HorizontalHeaderTable::Builder*>(raw_hhea_builder);
+    horizontal_header_builder =
+        down_cast<HorizontalHeaderTable::Builder*>(raw_hhea_builder);
   }
 
-  Table::Builder* raw_maxp_builder = GetBuilder(builder_map, Tag::maxp);
+  Table::Builder* raw_maxp_builder = GetReadBuilder(builder_map, Tag::maxp);
   MaximumProfileTableBuilderPtr max_profile_builder;
   if (raw_maxp_builder != NULL) {
-      max_profile_builder =
-          down_cast<MaximumProfileTable::Builder*>(raw_maxp_builder);
+    max_profile_builder =
+        down_cast<MaximumProfileTable::Builder*>(raw_maxp_builder);
   }
 
   Table::Builder* raw_loca_builder = GetBuilder(builder_map, Tag::loca);
   LocaTableBuilderPtr loca_table_builder;
   if (raw_loca_builder != NULL) {
-      loca_table_builder = down_cast<LocaTable::Builder*>(raw_loca_builder);
+    loca_table_builder = down_cast<LocaTable::Builder*>(raw_loca_builder);
   }
 
   Table::Builder* raw_hmtx_builder = GetBuilder(builder_map, Tag::hmtx);
   HorizontalMetricsTableBuilderPtr horizontal_metrics_builder;
   if (raw_hmtx_builder != NULL) {
-      horizontal_metrics_builder =
-          down_cast<HorizontalMetricsTable::Builder*>(raw_hmtx_builder);
+    horizontal_metrics_builder =
+        down_cast<HorizontalMetricsTable::Builder*>(raw_hmtx_builder);
   }
 
 #if defined (SFNTLY_EXPERIMENTAL)
   Table::Builder* raw_hdmx_builder = GetBuilder(builder_map, Tag::hdmx);
   HorizontalDeviceMetricsTableBuilderPtr hdmx_table_builder;
   if (raw_hdmx_builder != NULL) {
-      hdmx_table_builder =
-          down_cast<HorizontalDeviceMetricsTable::Builder*>(raw_hdmx_builder);
+    hdmx_table_builder =
+        down_cast<HorizontalDeviceMetricsTable::Builder*>(raw_hdmx_builder);
   }
 #endif
 
@@ -525,32 +534,38 @@ void Font::Builder::LoadTableData(HeaderOffsetSortedSet* headers,
                                   FontInputStream* is,
                                   DataBlockMap* table_data) {
   assert(table_data);
-  for (HeaderOffsetSortedSet::iterator table_header = headers->begin(),
+  for (HeaderOffsetSortedSet::iterator it = headers->begin(),
                                        table_end = headers->end();
-                                       table_header != table_end;
-                                       ++table_header) {
-    is->Skip((*table_header)->offset() - is->position());
-    FontInputStream table_is(is, (*table_header)->length());
+                                       it != table_end;
+                                       ++it) {
+    const Ptr<Header> header = *it;
+    is->Skip(header->offset() - is->position());
+    if (header->length() > kMaxTableSize)
+      continue;
+
+    FontInputStream table_is(is, header->length());
     WritableFontDataPtr data;
-    data.Attach(
-        WritableFontData::CreateWritableFontData((*table_header)->length()));
-    data->CopyFrom(&table_is, (*table_header)->length());
-    table_data->insert(DataBlockEntry(*table_header, data));
+    data.Attach(WritableFontData::CreateWritableFontData(header->length()));
+    data->CopyFrom(&table_is, header->length());
+    table_data->insert(DataBlockEntry(header, data));
   }
 }
 
 void Font::Builder::LoadTableData(HeaderOffsetSortedSet* headers,
                                   WritableFontData* fd,
                                   DataBlockMap* table_data) {
-  for (HeaderOffsetSortedSet::iterator table_header = headers->begin(),
+  for (HeaderOffsetSortedSet::iterator it = headers->begin(),
                                        table_end = headers->end();
-                                       table_header != table_end;
-                                       ++table_header) {
+                                       it != table_end;
+                                       ++it) {
+    const Ptr<Header> header = *it;
+    if (header->length() > kMaxTableSize)
+      continue;
+
     FontDataPtr sliced_data;
-    sliced_data.Attach(
-        fd->Slice((*table_header)->offset(), (*table_header)->length()));
+    sliced_data.Attach(fd->Slice(header->offset(), header->length()));
     WritableFontDataPtr data = down_cast<WritableFontData*>(sliced_data.p_);
-    table_data->insert(DataBlockEntry(*table_header, data));
+    table_data->insert(DataBlockEntry(header, data));
   }
 }
 

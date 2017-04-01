@@ -7,9 +7,10 @@ package org.chromium.chrome.browser.provider;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 
 import java.util.Arrays;
 import java.util.Date;
@@ -91,6 +92,7 @@ public class ProviderBookmarksUriTest extends ProviderTestBase {
 
     @MediumTest
     @Feature({"Android-ContentProvider"})
+    @RetryOnFailure
     public void testQueryBookmark() {
         final long now = System.currentTimeMillis();
         final long lastUpdateTime[] = { now, now - 1000 * 60 };
@@ -170,6 +172,7 @@ public class ProviderBookmarksUriTest extends ProviderTestBase {
 
     @MediumTest
     @Feature({"Android-ContentProvider"})
+    @RetryOnFailure
     public void testUpdateBookmark() {
         final long now = System.currentTimeMillis();
         final long lastUpdateTime[] = { now, now - 1000 * 60 };
@@ -221,6 +224,7 @@ public class ProviderBookmarksUriTest extends ProviderTestBase {
 
     @MediumTest
     @Feature({"Android-ContentProvider"})
+    @RetryOnFailure
     public void testDeleteBookmark() {
         final long now = System.currentTimeMillis();
         final long lastUpdateTime[] = { now, now - 1000 * 60 };

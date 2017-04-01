@@ -4,6 +4,7 @@
 
 #include "extensions/browser/app_window/app_window_contents.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -65,27 +66,20 @@ void AppWindowContentsImpl::LoadContents(int32_t creator_process_id) {
 void AppWindowContentsImpl::NativeWindowChanged(
     NativeAppWindow* native_app_window) {
   base::ListValue args;
-  base::DictionaryValue* dictionary = new base::DictionaryValue();
-  args.Append(dictionary);
-  host_->GetSerializedState(dictionary);
+  std::unique_ptr<base::DictionaryValue> dictionary(
+      new base::DictionaryValue());
+  host_->GetSerializedState(dictionary.get());
+  args.Append(std::move(dictionary));
 
   content::RenderFrameHost* rfh = web_contents_->GetMainFrame();
-  rfh->Send(new ExtensionMsg_MessageInvoke(
-      rfh->GetRoutingID(), host_->extension_id(), "app.window",
-      "updateAppWindowProperties", args, false));
+  rfh->Send(new ExtensionMsg_MessageInvoke(rfh->GetRoutingID(),
+                                           host_->extension_id(), "app.window",
+                                           "updateAppWindowProperties", args));
 }
 
 void AppWindowContentsImpl::NativeWindowClosed() {
   content::RenderViewHost* rvh = web_contents_->GetRenderViewHost();
   rvh->Send(new ExtensionMsg_AppWindowClosed(rvh->GetRoutingID()));
-}
-
-void AppWindowContentsImpl::DispatchWindowShownForTests() const {
-  base::ListValue args;
-  content::RenderFrameHost* rfh = web_contents_->GetMainFrame();
-  rfh->Send(new ExtensionMsg_MessageInvoke(
-      rfh->GetRoutingID(), host_->extension_id(), "app.window",
-      "appWindowShownForTests", args, false));
 }
 
 void AppWindowContentsImpl::OnWindowReady() {

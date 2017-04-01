@@ -5,26 +5,31 @@
 #include "chrome/browser/ui/views/apps/chrome_native_app_window_views_aura_ash.h"
 
 #include "apps/ui/views/app_window_frame_view.h"
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/ash_constants.h"
+#include "ash/common/ash_switches.h"
 #include "ash/common/frame/custom_frame_view_ash.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/shelf/shelf_item_types.h"
+#include "ash/common/wm/panels/panel_frame_view.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/window_state_delegate.h"
 #include "ash/common/wm/window_state_observer.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/screen_util.h"
+#include "ash/shared/app_types.h"
 #include "ash/shared/immersive_fullscreen_controller.h"
 #include "ash/shell.h"
-#include "ash/wm/panels/panel_frame_view.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state_aura.h"
+#include "chrome/browser/chromeos/note_taking_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "services/ui/public/cpp/property_type_converters.h"
-#include "services/ui/public/cpp/window.h"
 #include "services/ui/public/interfaces/window_manager.mojom.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/aura/mus/mus_util.h"
+#include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/hit_test.h"
@@ -54,13 +59,12 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
     // control.
     // TODO(pkotwicz): This is a hack. Remove ASAP. http://crbug.com/319048
     window_state_->AddObserver(this);
-    ash::WmWindowAura::GetAuraWindow(window_state_->window())
-        ->AddObserver(this);
+    ash::WmWindow::GetAuraWindow(window_state_->window())->AddObserver(this);
   }
   ~NativeAppWindowStateDelegate() override {
     if (window_state_) {
       window_state_->RemoveObserver(this);
-      ash::WmWindowAura::GetAuraWindow(window_state_->window())
+      ash::WmWindow::GetAuraWindow(window_state_->window())
           ->RemoveObserver(this);
     }
   }
@@ -103,8 +107,7 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
   // Overridden from aura::WindowObserver:
   void OnWindowDestroying(aura::Window* window) override {
     window_state_->RemoveObserver(this);
-    ash::WmWindowAura::GetAuraWindow(window_state_->window())
-        ->RemoveObserver(this);
+    ash::WmWindow::GetAuraWindow(window_state_->window())->RemoveObserver(this);
     window_state_ = NULL;
   }
 
@@ -117,20 +120,32 @@ class NativeAppWindowStateDelegate : public ash::wm::WindowStateDelegate,
 
 }  // namespace
 
-ChromeNativeAppWindowViewsAuraAsh::ChromeNativeAppWindowViewsAuraAsh() {
-}
+ChromeNativeAppWindowViewsAuraAsh::ChromeNativeAppWindowViewsAuraAsh() {}
 
-ChromeNativeAppWindowViewsAuraAsh::~ChromeNativeAppWindowViewsAuraAsh() {
-}
+ChromeNativeAppWindowViewsAuraAsh::~ChromeNativeAppWindowViewsAuraAsh() {}
 
 void ChromeNativeAppWindowViewsAuraAsh::InitializeWindow(
     AppWindow* app_window,
     const AppWindow::CreateParams& create_params) {
   ChromeNativeAppWindowViewsAura::InitializeWindow(app_window, create_params);
-  // Restore docked state on ash desktop.
-  if (create_params.state == ui::SHOW_STATE_DOCKED) {
-    widget()->GetNativeWindow()->SetProperty(aura::client::kShowStateKey,
-                                             create_params.state);
+  aura::Window* window = widget()->GetNativeWindow();
+
+  // TODO(afakhry): Remove Docked Windows in M58.
+  // Restore docked state on ash desktop if the docked windows flag is enabled.
+  if (create_params.state == ui::SHOW_STATE_DOCKED &&
+      ash::switches::DockedWindowsEnabled()) {
+    window->SetProperty(aura::client::kShowStateKey, create_params.state);
+  }
+
+  window->SetProperty(aura::client::kAppIdKey,
+                      new std::string(app_window->extension_id()));
+
+  if (app_window->window_type_is_panel()) {
+    // Ash's ShelfWindowWatcher handles app panel windows once this type is set.
+    window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_APP_PANEL);
+  } else {
+    window->SetProperty(aura::client::kAppType,
+                        static_cast<int>(ash::AppType::CHROME_APP));
   }
 }
 
@@ -141,13 +156,13 @@ void ChromeNativeAppWindowViewsAuraAsh::OnBeforeWidgetInit(
   ChromeNativeAppWindowViewsAura::OnBeforeWidgetInit(create_params, init_params,
                                                      widget);
   if (create_params.is_ime_window) {
-    // Puts ime windows into ime window container.
+    // Puts ime windows into the ime window container.
     init_params->parent =
         ash::Shell::GetContainer(ash::Shell::GetPrimaryRootWindow(),
                                  ash::kShellWindowId_ImeWindowParentContainer);
   }
   init_params->mus_properties
-      [ui::mojom::WindowManager::kRemoveStandardFrame_Property] =
+      [ui::mojom::WindowManager::kRemoveStandardFrame_InitProperty] =
       mojo::ConvertTo<std::vector<uint8_t>>(init_params->remove_standard_frame);
 }
 
@@ -161,6 +176,7 @@ void ChromeNativeAppWindowViewsAuraAsh::OnBeforePanelWidgetInit(
 
   if (ash::Shell::HasInstance() && use_default_bounds) {
     // Open a new panel on the target root.
+    init_params->context = ash::Shell::GetTargetRootWindow();
     init_params->bounds = ash::ScreenUtil::ConvertRectToScreen(
         ash::Shell::GetTargetRootWindow(), gfx::Rect(GetPreferredSize()));
   }
@@ -214,10 +230,13 @@ ChromeNativeAppWindowViewsAuraAsh::GetRestoredState() const {
       }
       return ui::SHOW_STATE_FULLSCREEN;
     }
-    if (widget()->GetNativeWindow()->GetProperty(
-            aura::client::kShowStateKey) == ui::SHOW_STATE_DOCKED ||
-        widget()->GetNativeWindow()->GetProperty(
-            aura::client::kRestoreShowStateKey) == ui::SHOW_STATE_DOCKED) {
+
+    // TODO(afakhry): Remove Docked Windows in M58.
+    if (ash::switches::DockedWindowsEnabled() &&
+        (widget()->GetNativeWindow()->GetProperty(
+             aura::client::kShowStateKey) == ui::SHOW_STATE_DOCKED ||
+         widget()->GetNativeWindow()->GetProperty(
+             aura::client::kRestoreShowStateKey) == ui::SHOW_STATE_DOCKED)) {
       return ui::SHOW_STATE_DOCKED;
     }
   }
@@ -226,10 +245,8 @@ ChromeNativeAppWindowViewsAuraAsh::GetRestoredState() const {
 }
 
 bool ChromeNativeAppWindowViewsAuraAsh::IsAlwaysOnTop() const {
-  if (app_window()->window_type_is_panel()) {
-    return
-        ash::wm::GetWindowState(widget()->GetNativeWindow())->panel_attached();
-  }
+  if (app_window()->window_type_is_panel())
+    return widget()->GetNativeWindow()->GetProperty(ash::kPanelAttachedKey);
   return widget()->IsAlwaysOnTop();
 }
 
@@ -318,10 +335,8 @@ void ChromeNativeAppWindowViewsAuraAsh::SetFullscreen(int fullscreen_types) {
     // OS fullscreen.
     ash::wm::WindowState* window_state =
         ash::wm::GetWindowState(widget()->GetNativeWindow());
-    window_state->set_shelf_mode_in_fullscreen(
-        fullscreen_types != AppWindow::FULLSCREEN_TYPE_OS
-            ? ash::wm::WindowState::SHELF_HIDDEN
-            : ash::wm::WindowState::SHELF_AUTO_HIDE_VISIBLE);
+    window_state->set_hide_shelf_when_fullscreen(fullscreen_types !=
+                                                 AppWindow::FULLSCREEN_TYPE_OS);
     DCHECK(ash::Shell::HasInstance());
     ash::Shell::GetInstance()->UpdateShelfVisibility();
   }
@@ -334,7 +349,7 @@ void ChromeNativeAppWindowViewsAuraAsh::UpdateDraggableRegions(
   SkRegion* draggable_region = GetDraggableRegion();
   // Set the NativeAppWindow's draggable region on the mus window.
   if (draggable_region && !draggable_region->isEmpty() && widget() &&
-      GetMusWindow(widget()->GetNativeWindow())) {
+      service_manager::ServiceManagerIsRemote()) {
     // Supply client area insets that encompass all draggable regions.
     gfx::Insets insets(draggable_region->getBounds().bottom(), 0, 0, 0);
 
@@ -346,8 +361,11 @@ void ChromeNativeAppWindowViewsAuraAsh::UpdateDraggableRegions(
     for (SkRegion::Iterator i(inverted_region); !i.done(); i.next())
       additional_client_regions.push_back(gfx::SkIRectToRect(i.rect()));
 
-    GetMusWindow(widget()->GetNativeWindow())
-        ->SetClientArea(insets, std::move(additional_client_regions));
+    aura::WindowTreeHostMus* window_tree_host =
+        static_cast<aura::WindowTreeHostMus*>(
+            widget()->GetNativeWindow()->GetHost());
+    window_tree_host->SetClientArea(insets,
+                                    std::move(additional_client_regions));
   }
 }
 

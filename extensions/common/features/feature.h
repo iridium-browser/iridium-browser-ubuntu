@@ -23,14 +23,14 @@ class Extension;
 // express requirements for where it can be accessed, and supports testing
 // support for those requirements. If platforms are not specified, then feature
 // is available on all platforms.
+//
+// See //chrome/common/extensions/api/_features.md for a description of feature
+// usage and types.
 class Feature {
  public:
   // The JavaScript contexts the feature is supported in.
   enum Context {
     UNSPECIFIED_CONTEXT,
-
-    // See chrome/common/extensions/api/_features.md for a description of these
-    // contexts.
     BLESSED_EXTENSION_CONTEXT,
     UNBLESSED_EXTENSION_CONTEXT,
     CONTENT_SCRIPT_CONTEXT,
@@ -61,6 +61,7 @@ class Feature {
     INVALID_PLATFORM,
     INVALID_MIN_MANIFEST_VERSION,
     INVALID_MAX_MANIFEST_VERSION,
+    INVALID_SESSION_TYPE,
     NOT_PRESENT,
     UNSUPPORTED_CHANNEL,
     FOUND_IN_BLACKLIST,
@@ -93,6 +94,10 @@ class Feature {
   // Note that this arg is passed as a StringPiece to avoid a lot of bloat from
   // inlined std::string code.
   void set_name(base::StringPiece name);
+  const std::string& alias() const { return alias_; }
+  void set_alias(base::StringPiece alias);
+  const std::string& source() const { return source_; }
+  void set_source(base::StringPiece source);
   bool no_parent() const { return no_parent_; }
 
   // Gets the platform the code is currently running on.
@@ -145,13 +150,11 @@ class Feature {
   virtual bool IsIdInBlacklist(const std::string& extension_id) const = 0;
   virtual bool IsIdInWhitelist(const std::string& extension_id) const = 0;
 
-  void set_check_channel(bool check_channel) { check_channel_ = check_channel; }
-
  protected:
   std::string name_;
+  std::string alias_;
+  std::string source_;
   bool no_parent_;
-  // TODO(devlin): Remove this once we set the feature channel for tests.
-  bool check_channel_;
 };
 
 }  // namespace extensions

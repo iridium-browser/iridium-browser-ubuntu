@@ -43,7 +43,7 @@ class PnaclHostTest : public testing::Test {
   void SetUp() override {
     host_ = PnaclHost::GetInstance();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    host_->InitForTest(temp_dir_.path(), true);
+    host_->InitForTest(temp_dir_.GetPath(), true);
     base::RunLoop().RunUntilIdle();
     EXPECT_EQ(PnaclHost::CacheReady, host_->cache_state_);
   }
@@ -59,7 +59,7 @@ class PnaclHostTest : public testing::Test {
     return host_->cache_state_ == PnaclHost::CacheReady;
   }
   void ReInitBackend() {
-    host_->InitForTest(temp_dir_.path(), true);
+    host_->InitForTest(temp_dir_.GetPath(), true);
     base::RunLoop().RunUntilIdle();
     EXPECT_EQ(PnaclHost::CacheReady, host_->cache_state_);
   }
@@ -432,6 +432,8 @@ TEST_F(PnaclHostTest, ClearTranslationCache) {
   // queues, because the backend will be freed once it is.
   EXPECT_EQ(0, GetCacheSize());
   EXPECT_EQ(0, cb.GetResult(net::ERR_IO_PENDING));
+  // Call posted PnaclHost::CopyFileToBuffer() tasks.
+  base::RunLoop().RunUntilIdle();
   // Now check that the backend has been freed.
   EXPECT_FALSE(CacheIsInitialized());
 }
@@ -442,7 +444,7 @@ class PnaclHostTestDisk : public PnaclHostTest {
   void SetUp() override {
     host_ = PnaclHost::GetInstance();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    host_->InitForTest(temp_dir_.path(), false);
+    host_->InitForTest(temp_dir_.GetPath(), false);
     EXPECT_EQ(PnaclHost::CacheInitializing, host_->cache_state_);
   }
   void DeInit() {

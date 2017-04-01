@@ -1,3 +1,5 @@
 include_rules = [
-  "+ipc",
+  "+mojo/public",
+  "+content/public/common",
+  "+services/service_manager/public",
 ]

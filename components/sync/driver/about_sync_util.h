@@ -15,7 +15,7 @@ namespace base {
 class DictionaryValue;
 }
 
-namespace sync_driver {
+namespace syncer {
 
 class SyncService;
 
@@ -65,14 +65,14 @@ extern const char kUpdate[];
 
 // This function returns a DictionaryValue which contains all the information
 // required to populate the 'About' tab of about:sync.
-// Note that |service| may be NULL.
+// Note that |service| may be null.
 std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
-    sync_driver::SyncService* service,
+    SyncService* service,
     SigninManagerBase* signin,
     version_info::Channel channel);
 
 }  // namespace sync_ui_util
 
-}  // namespace sync_driver
+}  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_DRIVER_ABOUT_SYNC_UTIL_H_

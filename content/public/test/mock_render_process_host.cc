@@ -20,6 +20,7 @@
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/child_process_host_impl.h"
 #include "content/common/frame_messages.h"
+#include "content/common/renderer.mojom.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/notification_details.h"
@@ -28,10 +29,8 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/storage_partition.h"
-
-#if defined(ENABLE_BROWSER_CDMS)
-#include "media/base/media_keys.h"
-#endif
+#include "media/media_features.h"
+#include "mojo/public/cpp/bindings/associated_interface_ptr.h"
 
 namespace content {
 
@@ -61,9 +60,8 @@ MockRenderProcessHost::~MockRenderProcessHost() {
 
   // In unit tests, Cleanup() might not have been called.
   if (!deletion_callback_called_) {
-    FOR_EACH_OBSERVER(RenderProcessHostObserver,
-                      observers_,
-                      RenderProcessHostDestroyed(this));
+    for (auto& observer : observers_)
+      observer.RenderProcessHostDestroyed(this);
     RenderProcessHostImpl::UnregisterHost(GetID());
   }
 }
@@ -76,16 +74,15 @@ void MockRenderProcessHost::SimulateCrash() {
       NOTIFICATION_RENDERER_PROCESS_CLOSED, Source<RenderProcessHost>(this),
       Details<RenderProcessHost::RendererClosedDetails>(&details));
 
-  FOR_EACH_OBSERVER(
-      RenderProcessHostObserver, observers_,
-      RenderProcessExited(this, details.status, details.exit_code));
+  for (auto& observer : observers_)
+    observer.RenderProcessExited(this, details.status, details.exit_code);
 
   // Send every routing ID a FrameHostMsg_RenderProcessGone message. To ensure a
   // predictable order for unittests which may assert against the order, we sort
   // the listeners by descending routing ID, instead of using the arbitrary
   // hash-map order like RenderProcessHostImpl.
   std::vector<std::pair<int32_t, IPC::Listener*>> sorted_listeners_;
-  IDMap<IPC::Listener>::iterator iter(&listeners_);
+  IDMap<IPC::Listener*>::iterator iter(&listeners_);
   while (!iter.IsAtEnd()) {
     sorted_listeners_.push_back(
         std::make_pair(iter.GetCurrentKey(), iter.GetCurrentValue()));
@@ -99,14 +96,13 @@ void MockRenderProcessHost::SimulateCrash() {
   }
 }
 
-void MockRenderProcessHost::EnableSendQueue() {
-}
-
 bool MockRenderProcessHost::Init() {
   has_connection_ = true;
-  remote_interfaces_.reset(new shell::InterfaceProvider);
+  remote_interfaces_.reset(new service_manager::InterfaceProvider);
   return true;
 }
+
+void MockRenderProcessHost::EnableSendQueue() {}
 
 int MockRenderProcessHost::GetNextRoutingID() {
   return ++prev_routing_id_;
@@ -132,7 +128,8 @@ void MockRenderProcessHost::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-void MockRenderProcessHost::ShutdownForBadMessage() {
+void MockRenderProcessHost::ShutdownForBadMessage(
+    CrashReportMode crash_report_mode) {
   ++bad_msg_count_;
 }
 
@@ -210,9 +207,8 @@ bool MockRenderProcessHost::IgnoreInputEvents() const {
 
 void MockRenderProcessHost::Cleanup() {
   if (listeners_.IsEmpty()) {
-    FOR_EACH_OBSERVER(RenderProcessHostObserver,
-                      observers_,
-                      RenderProcessHostDestroyed(this));
+    for (auto& observer : observers_)
+      observer.RenderProcessHostDestroyed(this);
     base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, this);
     RenderProcessHostImpl::UnregisterHost(GetID());
     deletion_callback_called_ = true;
@@ -259,10 +255,8 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
   return base::TimeDelta::FromMilliseconds(0);
 }
 
-void MockRenderProcessHost::NotifyTimezoneChange(const std::string& zone_id) {
-}
-
-shell::InterfaceProvider* MockRenderProcessHost::GetRemoteInterfaces() {
+service_manager::InterfaceProvider*
+MockRenderProcessHost::GetRemoteInterfaces() {
   return remote_interfaces_.get();
 }
 
@@ -277,33 +271,63 @@ const base::TimeTicks& MockRenderProcessHost::GetInitTimeForNavigationMetrics()
   return dummy_time;
 }
 
-#if defined(ENABLE_BROWSER_CDMS)
-scoped_refptr<media::MediaKeys> MockRenderProcessHost::GetCdm(
-    int render_frame_id,
-    int cdm_id) const {
-  return nullptr;
-}
-#endif
-
 bool MockRenderProcessHost::IsProcessBackgrounded() const {
   return is_process_backgrounded_;
 }
 
-void MockRenderProcessHost::IncrementWorkerRefCount() {
+size_t MockRenderProcessHost::GetWorkerRefCount() const {
+  return worker_ref_count_;
+}
+
+void MockRenderProcessHost::IncrementServiceWorkerRefCount() {
   ++worker_ref_count_;
 }
 
-void MockRenderProcessHost::DecrementWorkerRefCount() {
+void MockRenderProcessHost::DecrementServiceWorkerRefCount() {
   --worker_ref_count_;
 }
 
+void MockRenderProcessHost::IncrementSharedWorkerRefCount() {
+  ++worker_ref_count_;
+}
+
+void MockRenderProcessHost::DecrementSharedWorkerRefCount() {
+  --worker_ref_count_;
+}
+
+void MockRenderProcessHost::ForceReleaseWorkerRefCounts() {
+  worker_ref_count_ = 0;
+}
+
+bool MockRenderProcessHost::IsWorkerRefCountDisabled() {
+  return false;
+}
+
 void MockRenderProcessHost::PurgeAndSuspend() {}
+
+void MockRenderProcessHost::Resume() {}
+
+mojom::Renderer* MockRenderProcessHost::GetRendererInterface() {
+  if (!renderer_interface_) {
+    renderer_interface_.reset(new mojom::RendererAssociatedPtr);
+    mojo::GetIsolatedProxy(renderer_interface_.get());
+  }
+  return renderer_interface_->get();
+}
+
+void MockRenderProcessHost::SetIsNeverSuitableForReuse() {
+  NOTREACHED();
+}
+
+bool MockRenderProcessHost::MayReuseHost() {
+  return true;
+}
 
 void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {
   RenderProcessHostImpl::FilterURL(this, empty_allowed, url);
 }
 
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
 void MockRenderProcessHost::EnableAudioDebugRecordings(
     const base::FilePath& file) {
 }

@@ -21,7 +21,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_interfaces.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/nqe/network_quality_estimator.h"
 #include "net/proxy/proxy_config.h"
@@ -34,9 +34,8 @@ class SingleThreadTaskRunner;
 }
 
 namespace net {
-class HostPortPair;
 class NetLog;
-class URLFetcher;
+class ProxyServer;
 class URLRequest;
 class URLRequestContextGetter;
 class URLRequestStatus;
@@ -51,8 +50,8 @@ typedef base::Callback<void(const std::string&,
 class DataReductionProxyConfigValues;
 class DataReductionProxyConfigurator;
 class DataReductionProxyEventCreator;
-class DataReductionProxyService;
 class SecureProxyChecker;
+class WarmupURLFetcher;
 struct DataReductionProxyTypeInfo;
 
 // Values of the UMA DataReductionProxy.ProbeURL histogram.
@@ -93,9 +92,9 @@ class DataReductionProxyConfig
   // of the |DataReductionProxyConfig| instance, with the exception of
   // |config_values| which is owned by |this|. |event_creator| is used for
   // logging the start and end of a secure proxy check; |net_log| is used to
-  // create a net::BoundNetLog for correlating the start and end of the check.
-  // |config_values| contains the Data Reduction Proxy configuration values.
-  // |configurator| is the target for a configuration update.
+  // create a net::NetLogWithSource for correlating the start and end of the
+  // check. |config_values| contains the Data Reduction Proxy configuration
+  // values. |configurator| is the target for a configuration update.
   DataReductionProxyConfig(
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       net::NetLog* net_log,
@@ -105,7 +104,13 @@ class DataReductionProxyConfig
   ~DataReductionProxyConfig() override;
 
   // Performs initialization on the IO thread.
+  // |basic_url_request_context_getter| is the net::URLRequestContextGetter that
+  // disables the use of alternative protocols and proxies.
+  // |url_request_context_getter| is the default net::URLRequestContextGetter
+  // used for making URL requests.
   void InitializeOnIOThread(const scoped_refptr<net::URLRequestContextGetter>&
+                                basic_url_request_context_getter,
+                            const scoped_refptr<net::URLRequestContextGetter>&
                                 url_request_context_getter);
 
   // Sets the proxy configs, enabling or disabling the proxy according to
@@ -130,7 +135,7 @@ class DataReductionProxyConfig
       const net::URLRequest* request,
       DataReductionProxyTypeInfo* proxy_info) const;
 
-  // Returns true if the specified |host_port_pair| matches a Data Reduction
+  // Returns true if the specified |proxy_server| matches a Data Reduction
   // Proxy. If true, |proxy_info.proxy_servers.front()| will contain the name of
   // the proxy that matches. Subsequent entries in |proxy_info.proxy_servers|
   // will contain the name of the Data Reduction Proxy servers that would be
@@ -139,7 +144,7 @@ class DataReductionProxyConfig
   // can be NULL if the caller isn't interested in its values. Virtual for
   // testing.
   virtual bool IsDataReductionProxy(
-      const net::HostPortPair& host_port_pair,
+      const net::ProxyServer& proxy_server,
       DataReductionProxyTypeInfo* proxy_info) const;
 
   // Returns true if this request would be bypassed by the Data Reduction Proxy
@@ -174,9 +179,6 @@ class DataReductionProxyConfig
   virtual bool ContainsDataReductionProxy(
       const net::ProxyConfig::ProxyRules& proxy_rules) const;
 
-  // Returns true if the Data Reduction Proxy configuration may be used.
-  bool allowed() const;
-
   // Returns true if the Data Reduction Proxy promo may be shown. This is not
   // tied to whether the Data Reduction Proxy is enabled.
   bool promo_allowed() const;
@@ -201,11 +203,6 @@ class DataReductionProxyConfig
   net::ProxyConfig ProxyConfigIgnoringHoldback() const;
 
  protected:
-  // Virtualized for mocking. Records UMA containing the result of requesting
-  // the secure proxy check.
-  virtual void RecordSecureProxyCheckFetchResult(
-      SecureProxyCheckFetchResult result);
-
   // Virtualized for mocking. Returns the list of network interfaces in use.
   // |interfaces| can be null.
   virtual void GetNetworkList(net::NetworkInterfaceList* interfaces,
@@ -218,16 +215,16 @@ class DataReductionProxyConfig
 
   virtual base::TimeTicks GetTicksNow() const;
 
+  // Updates the Data Reduction Proxy configurator with the current config.
+  void UpdateConfigForTesting(bool enabled, bool restricted);
+
+  // Updates the callback that is called when the warmup URL has been fetched.
+  void SetWarmupURLFetcherCallbackForTesting(
+      base::Callback<void()> warmup_url_fetched_callback);
+
  private:
-  friend class DataReductionProxyConfigTest;
   friend class MockDataReductionProxyConfig;
   friend class TestDataReductionProxyConfig;
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
-                           TestGetDataReductionProxies);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
-                           TestOnIPAddressChanged);
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
-                           TestOnIPAddressChanged_SecureProxyDisabledByDefault);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            TestSetProxyConfigsHoldback);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
@@ -241,6 +238,7 @@ class DataReductionProxyConfig
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest, LoFiAccuracy);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            LoFiAccuracyNonZeroDelay);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest, WarmupURL);
 
   // Values of the estimated network quality at the beginning of the most
   // recent query of the Network Quality Estimator.
@@ -252,9 +250,6 @@ class DataReductionProxyConfig
 
   // NetworkChangeNotifier::IPAddressObserver:
   void OnIPAddressChanged() override;
-
-  // Updates the Data Reduction Proxy configurator with the current config.
-  virtual void UpdateConfigurator(bool enabled, bool restricted);
 
   // Populates the parameters for the Lo-Fi field trial if the session is part
   // of either Lo-Fi enabled or Lo-Fi control field trial group.
@@ -313,7 +308,23 @@ class DataReductionProxyConfig
   bool IsEffectiveConnectionTypeSlowerThanThreshold(
       net::EffectiveConnectionType effective_connection_type) const;
 
+  // Checks if the current network has captive portal, and handles the result.
+  // If the captive portal probe was blocked on the current network, disables
+  // the use of secure proxies.
+  void HandleCaptivePortal();
+
+  // Returns true if the current network has captive portal. Virtualized
+  // for testing.
+  virtual bool GetIsCaptivePortal() const;
+
+  // Fetches the warmup URL.
+  void FetchWarmupURL();
+
+  // URL fetcher used for performing the secure proxy check.
   std::unique_ptr<SecureProxyChecker> secure_proxy_checker_;
+
+  // URL fetcher used for fetching the warmup URL.
+  std::unique_ptr<WarmupURLFetcher> warmup_url_fetcher_;
 
   // Indicates if the secure Data Reduction Proxy can be used or not.
   bool secure_proxy_allowed_;
@@ -327,12 +338,12 @@ class DataReductionProxyConfig
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
   // The caller must ensure that the |net_log_|, if set, outlives this instance.
-  // It is used to create new instances of |bound_net_log_| on secure proxy
-  // checks. |bound_net_log_| permits the correlation of the begin and end
-  // phases of a given secure proxy check, and a new one is created for each
-  // secure proxy check (with |net_log_| as a parameter).
+  // It is used to create new instances of |net_log_with_source_| on secure
+  // proxy checks. |net_log_with_source_| permits the correlation of the begin
+  // and end phases of a given secure proxy check, and a new one is created for
+  // each secure proxy check (with |net_log_| as a parameter).
   net::NetLog* net_log_;
-  net::BoundNetLog bound_net_log_;
+  net::NetLogWithSource net_log_with_source_;
 
   // The caller must ensure that the |configurator_| outlives this instance.
   DataReductionProxyConfigurator* configurator_;
@@ -386,6 +397,10 @@ class DataReductionProxyConfig
   // Intervals after the main frame request arrives at which accuracy of network
   // quality prediction is recorded.
   std::vector<base::TimeDelta> lofi_accuracy_recording_intervals_;
+
+  // Set to true if the captive portal probe for the current network has been
+  // blocked.
+  bool is_captive_portal_;
 
   base::WeakPtrFactory<DataReductionProxyConfig> weak_factory_;
 

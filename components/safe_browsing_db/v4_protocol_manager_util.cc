@@ -5,12 +5,14 @@
 #include "components/safe_browsing_db/v4_protocol_manager_util.h"
 
 #include "base/base64.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
+#include "base/sha1.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "crypto/sha2.h"
 #include "net/base/escape.h"
+#include "net/base/ip_address.h"
 #include "net/http/http_request_headers.h"
 #include "url/url_util.h"
 
@@ -61,77 +63,148 @@ std::string Escape(const std::string& url) {
 
 }  // namespace
 
-std::ostream& operator<<(std::ostream& os, const UpdateListIdentifier& id) {
-  os << "{hash: " << id.hash() << "; platform_type: " << id.platform_type
-     << "; threat_entry_type: " << id.threat_entry_type
-     << "; threat_type: " << id.threat_type << "}";
+std::ostream& operator<<(std::ostream& os, const ListIdentifier& id) {
+  os << "{hash: " << id.hash() << "; platform_type: " << id.platform_type()
+     << "; threat_entry_type: " << id.threat_entry_type()
+     << "; threat_type: " << id.threat_type() << "}";
   return os;
 }
 
+PlatformType GetCurrentPlatformType() {
 #if defined(OS_WIN)
-#define PLATFORM_TYPE WINDOWS_PLATFORM
+  return WINDOWS_PLATFORM;
 #elif defined(OS_LINUX)
-#define PLATFORM_TYPE LINUX_PLATFORM
+  return LINUX_PLATFORM;
 #elif defined(OS_MACOSX)
-#define PLATFORM_TYPE OSX_PLATFORM
+  return OSX_PLATFORM;
 #else
 // This should ideally never compile but it is getting compiled on Android.
 // See: https://bugs.chromium.org/p/chromium/issues/detail?id=621647
 // TODO(vakh): Once that bug is fixed, this should be removed. If we leave
 // the platform_type empty, the server won't recognize the request and
 // return an error response which will pollute our UMA metrics.
-#define PLATFORM_TYPE LINUX_PLATFORM
+return LINUX_PLATFORM;
 #endif
-
-const UpdateListIdentifier GetUrlMalwareId() {
-  return UpdateListIdentifier(PLATFORM_TYPE, URL, MALWARE_THREAT);
 }
 
-const UpdateListIdentifier GetUrlSocEngId() {
-  return UpdateListIdentifier(PLATFORM_TYPE, URL, SOCIAL_ENGINEERING_PUBLIC);
+const ListIdentifier GetCertCsdDownloadWhitelistId() {
+  return ListIdentifier(GetCurrentPlatformType(), CERT, CSD_DOWNLOAD_WHITELIST);
+}
+
+const ListIdentifier GetChromeExtMalwareId() {
+  return ListIdentifier(CHROME_PLATFORM, CHROME_EXTENSION, MALWARE_THREAT);
+}
+
+const ListIdentifier GetChromeUrlApiId() {
+  return ListIdentifier(CHROME_PLATFORM, URL, API_ABUSE);
+}
+
+const ListIdentifier GetChromeFilenameClientIncidentId() {
+  return ListIdentifier(CHROME_PLATFORM, FILENAME, CLIENT_INCIDENT);
+}
+
+const ListIdentifier GetChromeUrlClientIncidentId() {
+  return ListIdentifier(CHROME_PLATFORM, URL, CLIENT_INCIDENT);
+}
+
+const ListIdentifier GetIpMalwareId() {
+  return ListIdentifier(GetCurrentPlatformType(), IP_RANGE, MALWARE_THREAT);
+}
+
+const ListIdentifier GetUrlCsdDownloadWhitelistId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, CSD_DOWNLOAD_WHITELIST);
+}
+
+const ListIdentifier GetUrlCsdWhitelistId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, CSD_WHITELIST);
+}
+
+const ListIdentifier GetUrlMalwareId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, MALWARE_THREAT);
+}
+
+const ListIdentifier GetUrlMalBinId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, MALICIOUS_BINARY);
+}
+
+const ListIdentifier GetUrlSocEngId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL,
+                        SOCIAL_ENGINEERING_PUBLIC);
+}
+
+const ListIdentifier GetUrlUwsId() {
+  return ListIdentifier(GetCurrentPlatformType(), URL, UNWANTED_SOFTWARE);
 }
 
 // The Safe Browsing V4 server URL prefix.
 const char kSbV4UrlPrefix[] = "https://safebrowsing.googleapis.com/v4";
 
-bool UpdateListIdentifier::operator==(const UpdateListIdentifier& other) const {
-  return platform_type == other.platform_type &&
-         threat_entry_type == other.threat_entry_type &&
-         threat_type == other.threat_type;
+StoreAndHashPrefix::StoreAndHashPrefix(ListIdentifier list_id,
+                                       HashPrefix hash_prefix)
+    : list_id(list_id), hash_prefix(hash_prefix) {}
+
+StoreAndHashPrefix::~StoreAndHashPrefix() {}
+
+bool StoreAndHashPrefix::operator==(const StoreAndHashPrefix& other) const {
+  return list_id == other.list_id && hash_prefix == other.hash_prefix;
 }
 
-bool UpdateListIdentifier::operator!=(const UpdateListIdentifier& other) const {
+bool StoreAndHashPrefix::operator!=(const StoreAndHashPrefix& other) const {
   return !operator==(other);
 }
 
-size_t UpdateListIdentifier::hash() const {
-  std::size_t first = std::hash<unsigned int>()(platform_type);
-  std::size_t second = std::hash<unsigned int>()(threat_entry_type);
-  std::size_t third = std::hash<unsigned int>()(threat_type);
+size_t StoreAndHashPrefix::hash() const {
+  std::size_t first = list_id.hash();
+  std::size_t second = std::hash<std::string>()(hash_prefix);
+
+  return base::HashInts(first, second);
+}
+
+bool ListIdentifier::operator==(const ListIdentifier& other) const {
+  return platform_type_ == other.platform_type_ &&
+         threat_entry_type_ == other.threat_entry_type_ &&
+         threat_type_ == other.threat_type_;
+}
+
+bool ListIdentifier::operator!=(const ListIdentifier& other) const {
+  return !operator==(other);
+}
+
+size_t ListIdentifier::hash() const {
+  std::size_t first = std::hash<unsigned int>()(platform_type_);
+  std::size_t second = std::hash<unsigned int>()(threat_entry_type_);
+  std::size_t third = std::hash<unsigned int>()(threat_type_);
 
   std::size_t interim = base::HashInts(first, second);
   return base::HashInts(interim, third);
 }
 
-UpdateListIdentifier::UpdateListIdentifier() {}
+ListIdentifier::ListIdentifier() {}
 
-UpdateListIdentifier::UpdateListIdentifier(PlatformType platform_type,
-                                           ThreatEntryType threat_entry_type,
-                                           ThreatType threat_type)
-    : platform_type(platform_type),
-      threat_entry_type(threat_entry_type),
-      threat_type(threat_type) {
+ListIdentifier::ListIdentifier(PlatformType platform_type,
+                               ThreatEntryType threat_entry_type,
+                               ThreatType threat_type)
+    : platform_type_(platform_type),
+      threat_entry_type_(threat_entry_type),
+      threat_type_(threat_type) {
   DCHECK(PlatformType_IsValid(platform_type));
   DCHECK(ThreatEntryType_IsValid(threat_entry_type));
   DCHECK(ThreatType_IsValid(threat_type));
 }
 
-UpdateListIdentifier::UpdateListIdentifier(const ListUpdateResponse& response)
-    : UpdateListIdentifier(response.platform_type(),
-                           response.threat_entry_type(),
-                           response.threat_type()) {}
+ListIdentifier::ListIdentifier(const ListUpdateResponse& response)
+    : ListIdentifier(response.platform_type(),
+                     response.threat_entry_type(),
+                     response.threat_type()) {}
 
-V4ProtocolConfig::V4ProtocolConfig() : disable_auto_update(false) {}
+V4ProtocolConfig::V4ProtocolConfig(const std::string& client_name,
+                                   bool disable_auto_update,
+                                   const std::string& key_param,
+                                   const std::string& version)
+    : client_name(client_name),
+      disable_auto_update(disable_auto_update),
+      key_param(key_param),
+      version(version) {}
 
 V4ProtocolConfig::V4ProtocolConfig(const V4ProtocolConfig& other) = default;
 
@@ -209,7 +282,7 @@ void V4ProtocolManagerUtil::UpdateHeaders(net::HttpRequestHeaders* headers) {
 // static
 void V4ProtocolManagerUtil::UrlToFullHashes(
     const GURL& url,
-    base::hash_set<FullHash>* full_hashes) {
+    std::vector<FullHash>* full_hashes) {
   std::string canon_host, canon_path, canon_query;
   CanonicalizeUrl(url, &canon_host, &canon_path, &canon_query);
 
@@ -224,9 +297,34 @@ void V4ProtocolManagerUtil::UrlToFullHashes(
   GeneratePathVariantsToCheck(canon_path, canon_query, &paths);
   for (const std::string& host : hosts) {
     for (const std::string& path : paths) {
-      full_hashes->insert(crypto::SHA256HashString(host + path));
+      full_hashes->push_back(crypto::SHA256HashString(host + path));
     }
   }
+}
+
+// static
+bool V4ProtocolManagerUtil::FullHashToHashPrefix(const FullHash& full_hash,
+                                                 PrefixSize prefix_size,
+                                                 HashPrefix* hash_prefix) {
+  if (full_hash.size() < prefix_size) {
+    return false;
+  }
+  *hash_prefix = full_hash.substr(prefix_size);
+  return true;
+}
+
+// static
+bool V4ProtocolManagerUtil::FullHashToSmallestHashPrefix(
+    const FullHash& full_hash,
+    HashPrefix* hash_prefix) {
+  return FullHashToHashPrefix(full_hash, kMinHashPrefixLength, hash_prefix);
+}
+
+// static
+bool V4ProtocolManagerUtil::FullHashMatchesHashPrefix(
+    const FullHash& full_hash,
+    const HashPrefix& hash_prefix) {
+  return full_hash.compare(0, hash_prefix.length(), hash_prefix) == 0;
 }
 
 // static
@@ -441,6 +539,48 @@ void V4ProtocolManagerUtil::GeneratePathVariantsToCheck(
 
   if (!query.empty())
     paths->push_back(path + "?" + query);
+}
+
+// static
+void V4ProtocolManagerUtil::SetClientInfoFromConfig(
+    ClientInfo* client_info,
+    const V4ProtocolConfig& config) {
+  DCHECK(client_info);
+  client_info->set_client_id(config.client_name);
+  client_info->set_client_version(config.version);
+}
+
+// static
+bool V4ProtocolManagerUtil::GetIPV6AddressFromString(
+    const std::string& ip_address,
+    net::IPAddress* address) {
+  DCHECK(address);
+  if (!address->AssignFromIPLiteral(ip_address))
+    return false;
+  if (address->IsIPv4())
+    *address = net::ConvertIPv4ToIPv4MappedIPv6(*address);
+  return address->IsIPv6();
+}
+
+// static
+bool V4ProtocolManagerUtil::IPAddressToEncodedIPV6Hash(
+    const std::string& ip_address,
+    FullHash* hashed_encoded_ip) {
+  net::IPAddress address;
+  if (!GetIPV6AddressFromString(ip_address, &address)) {
+    return false;
+  }
+  std::string packed_ip = net::IPAddressToPackedString(address);
+  if (packed_ip.empty()) {
+    return false;
+  }
+
+  const std::string hash = base::SHA1HashString(packed_ip);
+  DCHECK_EQ(20u, hash.size());
+  hashed_encoded_ip->resize(hash.size() + 1);
+  hashed_encoded_ip->replace(0, hash.size(), hash);
+  (*hashed_encoded_ip)[hash.size()] = static_cast<unsigned char>(128);
+  return true;
 }
 
 }  // namespace safe_browsing

@@ -12,7 +12,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -90,6 +89,17 @@ class ImeObserverNonChromeOS : public ui::ImeObserver {
     DispatchEventToExtension(
         extensions::events::INPUT_IME_ON_COMPOSITION_BOUNDS_CHANGED,
         OnCompositionBoundsChanged::kEventName, std::move(args));
+  }
+
+  void OnRequestEngineSwitch() override {
+    Browser* browser = chrome::FindLastActive();
+    if (!browser)
+      return;
+    extensions::InputImeEventRouter* router =
+        extensions::GetInputImeEventRouter(browser->profile());
+    if (!router)
+      return;
+    ui::IMEBridge::Get()->SetCurrentEngineHandler(router->active_engine());
   }
 
  private:
@@ -356,15 +366,16 @@ ExtensionFunction::ResponseAction InputImeCreateWindowFunction::Run() {
   if (!engine)
     return RespondNow(Error(kErrorNoActiveEngine));
 
+  std::string error;
   int frame_id = engine->CreateImeWindow(
       extension(), render_frame_host(),
       options.url.get() ? *options.url : url::kAboutBlankURL,
       options.window_type == input_ime::WINDOW_TYPE_FOLLOWCURSOR
           ? ui::ImeWindow::FOLLOW_CURSOR
           : ui::ImeWindow::NORMAL,
-      bounds, &error_);
+      bounds, &error);
   if (!frame_id)
-    return RespondNow(Error(error_));
+    return RespondNow(Error(error));
 
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->Set("frameId", new base::FundamentalValue(frame_id));

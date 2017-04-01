@@ -5,8 +5,8 @@
 package org.chromium.chrome.browser.tabmodel;
 
 import android.content.Context;
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
-import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.StreamUtil;
@@ -15,6 +15,7 @@ import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabIdManager;
@@ -77,9 +78,9 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
             @Override
             public TabPersistentStore call() throws Exception {
                 TabPersistencePolicy persistencePolicy = new TabbedModeTabPersistencePolicy(
-                        selectorIndex);
+                        selectorIndex, false);
                 TabPersistentStore store = new TabPersistentStore(
-                        persistencePolicy, selector, null, null, false);
+                        persistencePolicy, selector, null, null);
                 return store;
             }
         });
@@ -253,6 +254,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
      */
     @SmallTest
     @Feature({"TabPersistentStore"})
+    @RetryOnFailure
     public void testFindsMaxIdProperly() throws IOException {
         TabModelSelector selector0 = new MockTabModelSelector(1, 1, null);
         TabModelSelector selector1 = new MockTabModelSelector(1, 1, null);

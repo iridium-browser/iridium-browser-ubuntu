@@ -7,16 +7,18 @@
 
 namespace blink {
 
+// From https://w3c.github.io/encrypted-media/#exceptions.
 enum WebContentDecryptionModuleException {
-    WebContentDecryptionModuleExceptionNotSupportedError,
-    WebContentDecryptionModuleExceptionInvalidStateError,
-    WebContentDecryptionModuleExceptionInvalidAccessError,
-    WebContentDecryptionModuleExceptionQuotaExceededError,
-    WebContentDecryptionModuleExceptionUnknownError,
-    WebContentDecryptionModuleExceptionClientError,
-    WebContentDecryptionModuleExceptionOutputError,
+  WebContentDecryptionModuleExceptionTypeError,
+  WebContentDecryptionModuleExceptionNotSupportedError,
+  WebContentDecryptionModuleExceptionInvalidStateError,
+  WebContentDecryptionModuleExceptionQuotaExceededError,
+  // TODO(jrummell): UnknownError is not part of the spec, but CDMs can
+  // generate other error codes (in addition to the 4 listed above). Remove
+  // UnknownError when the CDMs no longer use other error codes.
+  WebContentDecryptionModuleExceptionUnknownError
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebContentDecryptionModuleException_h
+#endif  // WebContentDecryptionModuleException_h

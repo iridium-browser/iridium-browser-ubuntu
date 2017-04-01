@@ -10,11 +10,11 @@
 
 #include <map>
 #include <memory>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/linked_ptr.h"
-#include "base/memory/scoped_vector.h"
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/zoom_level_delegate.h"
@@ -30,7 +30,7 @@ class FilePath;
 class Time;
 }
 
-namespace shell {
+namespace service_manager {
 class Connector;
 }
 
@@ -53,24 +53,23 @@ class BlobHandle;
 class BrowserPluginGuestManager;
 class DownloadManager;
 class DownloadManagerDelegate;
-class IndexedDBContext;
-class MojoShellConnection;
 class PermissionManager;
 class PushMessagingService;
 class ResourceContext;
+class ServiceManagerConnection;
 class SiteInstance;
 class StoragePartition;
 class SSLHostStateDelegate;
 
 // A mapping from the scheme name to the protocol handler that services its
 // content.
-typedef std::map<
-  std::string, linked_ptr<net::URLRequestJobFactory::ProtocolHandler> >
-    ProtocolHandlerMap;
+using ProtocolHandlerMap =
+    std::map<std::string,
+             linked_ptr<net::URLRequestJobFactory::ProtocolHandler>>;
 
-// A scoped vector of protocol interceptors.
-typedef ScopedVector<net::URLRequestInterceptor>
-    URLRequestInterceptorScopedVector;
+// A owning vector of protocol interceptors.
+using URLRequestInterceptorScopedVector =
+    std::vector<std::unique_ptr<net::URLRequestInterceptor>>;
 
 // This class holds the context needed for a browsing session.
 // It lives on the UI thread. All these methods must only be called on the UI
@@ -88,7 +87,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       BrowserContext* browser_context, SiteInstance* site_instance);
   static content::StoragePartition* GetStoragePartitionForSite(
       BrowserContext* browser_context, const GURL& site);
-  typedef base::Callback<void(StoragePartition*)> StoragePartitionCallback;
+  using StoragePartitionCallback = base::Callback<void(StoragePartition*)>;
   static void ForEachStoragePartition(
       BrowserContext* browser_context,
       const StoragePartitionCallback& callback);
@@ -107,7 +106,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   static content::StoragePartition* GetDefaultStoragePartition(
       BrowserContext* browser_context);
 
-  typedef base::Callback<void(std::unique_ptr<BlobHandle>)> BlobCallback;
+  using BlobCallback = base::Callback<void(std::unique_ptr<BlobHandle>)>;
 
   // |callback| returns a nullptr scoped_ptr on failure.
   static void CreateMemoryBackedBlob(BrowserContext* browser_context,
@@ -147,27 +146,28 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   static void SetDownloadManagerForTesting(BrowserContext* browser_context,
                                            DownloadManager* download_manager);
 
-  // Makes mojo aware of this BrowserContext, and assigns a user ID number to
-  // it. Should be called for each BrowserContext created.
+  // Makes the Service Manager aware of this BrowserContext, and assigns a user
+  // ID number to it. Should be called for each BrowserContext created.
   static void Initialize(BrowserContext* browser_context,
                          const base::FilePath& path);
 
-  // Returns a Shell User ID associated with this BrowserContext. This ID is not
-  // persistent across runs. See
-  // services/shell/public/interfaces/connector.mojom. By default, this user id
-  // is randomly generated when Initialize() is called.
-  static const std::string& GetShellUserIdFor(BrowserContext* browser_context);
+  // Returns a Service User ID associated with this BrowserContext. This ID is
+  // not persistent across runs. See
+  // services/service_manager/public/interfaces/connector.mojom. By default,
+  // this user id is randomly generated when Initialize() is called.
+  static const std::string& GetServiceUserIdFor(
+      BrowserContext* browser_context);
 
   // Returns the BrowserContext associated with |user_id|, or nullptr if no
   // BrowserContext exists for that |user_id|.
-  static BrowserContext* GetBrowserContextForShellUserId(
+  static BrowserContext* GetBrowserContextForServiceUserId(
       const std::string& user_id);
 
   // Returns a Connector associated with this BrowserContext, which can be used
   // to connect to service instances bound as this user.
-  static shell::Connector* GetShellConnectorFor(
+  static service_manager::Connector* GetConnectorFor(
       BrowserContext* browser_context);
-  static MojoShellConnection* GetMojoShellConnectionFor(
+  static ServiceManagerConnection* GetServiceManagerConnectionFor(
       BrowserContext* browser_context);
 
   ~BrowserContext() override;

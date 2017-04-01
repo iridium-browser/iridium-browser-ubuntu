@@ -25,10 +25,10 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/ui/browser_list_observer.h"
+#include "chrome/common/features.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
-class NewProfileLauncher;
 class ProfileAttributesStorage;
 class ProfileInfoCache;
 
@@ -42,7 +42,7 @@ class ProfileManager : public base::NonThreadSafe,
   explicit ProfileManager(const base::FilePath& user_data_dir);
   ~ProfileManager() override;
 
-#if defined(ENABLE_SESSION_SERVICE)
+#if BUILDFLAG(ENABLE_SESSION_SERVICE)
   // Invokes SessionServiceFactory::ShutdownForProfile() for all profiles.
   static void ShutdownSessionServices();
 #endif
@@ -190,10 +190,9 @@ class ProfileManager : public base::NonThreadSafe,
   ProfileShortcutManager* profile_shortcut_manager();
 
 #if !defined(OS_ANDROID)
-  // Less strict version of ScheduleProfileForDeletion(), silently fail if
-  // profile already marked for deletion. Returns true if the profile scheduled
-  // for deletion.
-  bool MaybeScheduleProfileForDeletion(
+  // Less strict version of ScheduleProfileForDeletion(), silently exits if
+  // profile is either scheduling or marked for deletion.
+  void MaybeScheduleProfileForDeletion(
       const base::FilePath& profile_dir,
       const CreateCallback& callback,
       ProfileMetrics::ProfileDelete deletion_source);
@@ -211,6 +210,10 @@ class ProfileManager : public base::NonThreadSafe,
   // Checks if any ephemeral profiles are left behind (e.g. because of a browser
   // crash) and schedule them for deletion.
   void CleanUpEphemeralProfiles();
+
+  // Checks if files of deleted profiles are left behind (e.g. because of a
+  // browser crash) and delete them in case they still exist.
+  void CleanUpDeletedProfiles();
 
   // Initializes user prefs of |profile|. This includes profile name and
   // avatar values.
@@ -300,6 +303,14 @@ class ProfileManager : public base::NonThreadSafe,
   Profile* CreateAndInitializeProfile(const base::FilePath& profile_dir);
 
 #if !defined(OS_ANDROID)
+  // Continues the scheduled profile deletion after closing all the profile's
+  // browsers tabs. Creates a new profile if the profile to be deleted is the
+  // last non-supervised profile. In the Mac, loads the next non-supervised
+  // profile if the profile to be deleted is the active profile.
+  void EnsureActiveProfileExistsBeforeDeletion(
+      const CreateCallback& callback,
+      const base::FilePath& profile_dir);
+
   // Schedules the profile at the given path to be deleted on shutdown,
   // and marks the new profile as active.
   void FinishDeletingProfile(const base::FilePath& profile_dir,

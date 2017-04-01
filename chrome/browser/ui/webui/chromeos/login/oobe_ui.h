@@ -14,10 +14,14 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/settings/shutdown_policy_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
-#include "chrome/browser/ui/webui/chromeos/login/oobe_screen.h"
 #include "content/public/browser/web_ui_controller.h"
+
+namespace ash {
+class ScreenDimmer;
+}
 
 namespace base {
 class DictionaryValue;
@@ -25,6 +29,7 @@ class DictionaryValue;
 
 namespace chromeos {
 class AppLaunchSplashScreenActor;
+class ArcTermsOfServiceScreenActor;
 class AutoEnrollmentCheckScreenActor;
 class BaseScreenHandler;
 class ControllerPairingScreenActor;
@@ -44,7 +49,6 @@ class KioskEnableScreenActor;
 class LoginScreenContext;
 class NativeWindowDelegate;
 class NetworkDropdownHandler;
-class NetworkErrorView;
 class NetworkStateInformer;
 class NetworkView;
 class SigninScreenHandler;
@@ -98,6 +102,7 @@ class OobeUI : public content::WebUIController,
   KioskAutolaunchScreenActor* GetKioskAutolaunchScreenActor();
   KioskEnableScreenActor* GetKioskEnableScreenActor();
   TermsOfServiceScreenActor* GetTermsOfServiceScreenActor();
+  ArcTermsOfServiceScreenActor* GetArcTermsOfServiceScreenActor();
   UserImageView* GetUserImageView();
   ErrorScreen* GetErrorScreen();
   WrongHWIDScreenActor* GetWrongHWIDScreenActor();
@@ -112,7 +117,7 @@ class OobeUI : public content::WebUIController,
   GaiaScreenHandler* GetGaiaScreenActor();
   UserBoardView* GetUserBoardScreenActor();
 
-  // ShutdownPolicyObserver::Delegate
+  // ShutdownPolicyHandler::Delegate
   void OnShutdownPolicyChanged(bool reboot_on_shutdown) override;
 
   // Collects localized strings from the owned handlers.
@@ -154,11 +159,15 @@ class OobeUI : public content::WebUIController,
     return network_state_informer_.get();
   }
 
+  // Does ReloadContent() if needed (for example, if material design mode has
+  // changed).
+  void UpdateLocalizedStringsIfNeeded();
+
  private:
-  void AddScreenHandler(BaseScreenHandler* handler);
+  void AddScreenHandler(std::unique_ptr<BaseScreenHandler> handler);
 
   // CoreOobeHandler::Delegate implementation:
-  void OnCurrentScreenChanged(const std::string& screen) override;
+  void OnCurrentScreenChanged(OobeScreen screen) override;
 
   // Type of UI.
   std::string display_type_;
@@ -210,6 +219,7 @@ class OobeUI : public content::WebUIController,
   SigninScreenHandler* signin_screen_handler_ = nullptr;
 
   TermsOfServiceScreenActor* terms_of_service_screen_actor_ = nullptr;
+  ArcTermsOfServiceScreenActor* arc_terms_of_service_screen_actor_ = nullptr;
   UserImageView* user_image_view_ = nullptr;
 
   std::vector<BaseScreenHandler*> handlers_;  // Non-owning pointers.
@@ -229,6 +239,10 @@ class OobeUI : public content::WebUIController,
   // calls.
   bool ready_ = false;
 
+  // This flag stores material-design mode (on/off) of currently displayed UI.
+  // If different version of UI is required, UI is updated.
+  bool oobe_ui_md_mode_ = false;
+
   // Callbacks to notify when JS part is fully loaded and ready to accept calls.
   std::vector<base::Closure> ready_callbacks_;
 
@@ -237,6 +251,8 @@ class OobeUI : public content::WebUIController,
 
   // Observer of CrosSettings watching the kRebootOnShutdown policy.
   std::unique_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;
+
+  std::unique_ptr<ash::ScreenDimmer> screen_dimmer_;
 
   DISALLOW_COPY_AND_ASSIGN(OobeUI);
 };

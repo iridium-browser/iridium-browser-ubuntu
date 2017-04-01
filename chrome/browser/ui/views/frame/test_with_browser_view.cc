@@ -29,7 +29,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
-#include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
+#include "chrome/browser/chromeos/input_method/mock_input_method_manager_impl.h"
 #endif
 
 namespace {
@@ -37,7 +37,7 @@ namespace {
 std::unique_ptr<KeyedService> CreateTemplateURLService(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return base::WrapUnique(new TemplateURLService(
+  return base::MakeUnique<TemplateURLService>(
       profile->GetPrefs(),
       std::unique_ptr<SearchTermsData>(new UIThreadSearchTermsData(profile)),
       WebDataServiceFactory::GetKeywordWebDataForProfile(
@@ -46,19 +46,19 @@ std::unique_ptr<KeyedService> CreateTemplateURLService(
           new ChromeTemplateURLServiceClient(
               HistoryServiceFactory::GetForProfile(
                   profile, ServiceAccessType::EXPLICIT_ACCESS))),
-      nullptr, nullptr, base::Closure()));
+      nullptr, nullptr, base::Closure());
 }
 
 std::unique_ptr<KeyedService> CreateAutocompleteClassifier(
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return base::WrapUnique(new AutocompleteClassifier(
+  return base::MakeUnique<AutocompleteClassifier>(
       base::WrapUnique(new AutocompleteController(
           base::WrapUnique(new ChromeAutocompleteProviderClient(profile)),
 
           nullptr, AutocompleteClassifier::kDefaultOmniboxProviders)),
       std::unique_ptr<AutocompleteSchemeClassifier>(
-          new TestSchemeClassifier())));
+          new TestSchemeClassifier()));
 }
 
 }  // namespace
@@ -78,7 +78,7 @@ void TestWithBrowserView::SetUp() {
       new ScopedTestingLocalState(TestingBrowserProcess::GetGlobal()));
 #if defined(OS_CHROMEOS)
   chromeos::input_method::InitializeForTesting(
-      new chromeos::input_method::MockInputMethodManager);
+      new chromeos::input_method::MockInputMethodManagerImpl);
 #endif
   testing_io_thread_state_.reset(new chrome::TestingIOThreadState());
   BrowserWithTestWindowTest::SetUp();

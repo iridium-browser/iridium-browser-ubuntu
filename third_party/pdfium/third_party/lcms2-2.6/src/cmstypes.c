@@ -962,7 +962,7 @@ cmsBool  Type_Text_Description_Write(struct _cms_typehandler_struct* self, cmsIO
     len = cmsMLUgetASCII(mlu, cmsNoLanguage, cmsNoCountry, NULL, 0);
 
     // From ICC3.4: It has been found that textDescriptionType can contain misaligned data
-    //(see clause 4.1 for the definition of “aligned?. Because the Unicode language
+    //(see clause 4.1 for the definition of 'aligned'. Because the Unicode language
     // code and Unicode count immediately follow the ASCII description, their
     // alignment is not correct if the ASCII count is not a multiple of four. The
     // ScriptCode code is misaligned when the ASCII count is odd. Profile reading and
@@ -1112,7 +1112,10 @@ void *Type_Curve_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, cm
                NewGamma = cmsBuildTabulatedToneCurve16(self ->ContextID, Count, NULL);
                if (!NewGamma) return NULL;
 
-               if (!_cmsReadUInt16Array(io, Count, NewGamma -> Table16)) return NULL;
+               if (!_cmsReadUInt16Array(io, Count, NewGamma -> Table16)) {
+                 cmsFreeToneCurve(NewGamma);
+                 return NULL;
+               }
 
                *nItems = 1;
                return NewGamma;
@@ -2350,7 +2353,10 @@ cmsStage* ReadCLUT(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, cmsUI
 
         for (i=0; i < Data ->nEntries; i++) {
 
-            if (io ->Read(io, &v, sizeof(cmsUInt8Number), 1) != 1) return NULL;
+            if (io ->Read(io, &v, sizeof(cmsUInt8Number), 1) != 1) {
+              cmsStageFree(CLUT);
+              return NULL;
+            }
             Data ->Tab.T[i] = FROM_8_TO_16(v);
         }
 
@@ -2964,7 +2970,7 @@ void *Type_ColorantTable_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER
 {
     cmsUInt32Number i, Count;
     cmsNAMEDCOLORLIST* List;
-    char Name[34];
+    char Name[33];
     cmsUInt16Number PCS[3];
 
 
@@ -2979,7 +2985,7 @@ void *Type_ColorantTable_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER
     for (i=0; i < Count; i++) {
 
         if (io ->Read(io, Name, 32, 1) != 1) goto Error;
-        Name[33] = 0;
+        Name[32] = 0;
 
         if (!_cmsReadUInt16Array(io, 3, PCS)) goto Error;
 
@@ -3058,9 +3064,10 @@ void Type_ColorantTable_Free(struct _cms_typehandler_struct* self, void* Ptr)
 //The namedColor2Type is a count value and array of structures that provide color
 //coordinates for 7-bit ASCII color names. For each named color, a PCS and optional
 //device representation of the color are given. Both representations are 16-bit values.
-//The device representation corresponds to the header’s “color space of data?field.
-//This representation should be consistent with the “number of device components?//field in the namedColor2Type. If this field is 0, device coordinates are not provided.
-//The PCS representation corresponds to the header’s PCS field. The PCS representation
+//The device representation corresponds to the header's 'color space of data' field.
+//This representation should be consistent with the 'number of device components'
+//field in the namedColor2Type. If this field is 0, device coordinates are not provided.
+//The PCS representation corresponds to the header's PCS field. The PCS representation
 //is always provided. Color names are fixed-length, 32-byte fields including null
 //termination. In order to maintain maximum portability, it is strongly recommended
 //that special characters of the 7-bit ASCII set not be used.
@@ -3096,7 +3103,7 @@ void *Type_NamedColor_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* i
 
     if (nDeviceCoords > cmsMAXCHANNELS) {
         cmsSignalError(self->ContextID, cmsERROR_RANGE, "Too many device coordinates '%d'", nDeviceCoords);
-        return 0;
+        goto Error;
     }
     for (i=0; i < count; i++) {
 
@@ -3105,7 +3112,8 @@ void *Type_NamedColor_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* i
         char Root[33];
 
         memset(Colorant, 0, sizeof(Colorant));
-        if (io -> Read(io, Root, 32, 1) != 1) return NULL;
+        if (io -> Read(io, Root, 32, 1) != 1) goto Error;
+        Root[32] = 0;
         if (!_cmsReadUInt16Array(io, 3, PCS)) goto Error;
         if (!_cmsReadUInt16Array(io, nDeviceCoords, Colorant)) goto Error;
 
@@ -3802,7 +3810,8 @@ void Type_Screening_Free(struct _cms_typehandler_struct* self, void* Ptr)
 // ********************************************************************************
 //
 //This type represents a set of viewing condition parameters including:
-//CIE ’absolute?illuminant white point tristimulus values and CIE ’absolute?//surround tristimulus values.
+//CIE 'absolute'illuminant white point tristimulus values and CIE 'absolute'
+//surround tristimulus values.
 
 static
 void *Type_ViewingConditions_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, cmsUInt32Number* nItems, cmsUInt32Number SizeOfTag)
@@ -3888,7 +3897,7 @@ void GenericMPEfree(struct _cms_typehandler_struct* self, void *Ptr)
 }
 
 // Each curve is stored in one or more curve segments, with break-points specified between curve segments.
-// The first curve segment always starts at –Infinity, and the last curve segment always ends at +Infinity. The
+// The first curve segment always starts at -Infinity, and the last curve segment always ends at +Infinity. The
 // first and last curve segments shall be specified in terms of a formula, whereas the other segments shall be
 // specified either in terms of a formula, or by a sampled curve.
 
@@ -3961,7 +3970,7 @@ cmsToneCurve* ReadSegmentedCurve(struct _cms_typehandler_struct* self, cmsIOHAND
             case cmsSigSampledCurveSeg: {
                 cmsUInt32Number Count;
 
-                if (!_cmsReadUInt32Number(io, &Count)) return NULL;
+                if (!_cmsReadUInt32Number(io, &Count)) goto Error;
 
                 Segments[i].nGridPoints = Count;
                 Segments[i].SampledPoints = (cmsFloat32Number*) _cmsCalloc(self ->ContextID, Count, sizeof(cmsFloat32Number));
@@ -3980,7 +3989,7 @@ cmsToneCurve* ReadSegmentedCurve(struct _cms_typehandler_struct* self, cmsIOHAND
                 _cmsTagSignature2String(String, (cmsTagSignature) ElementSig);
                 cmsSignalError(self->ContextID, cmsERROR_UNKNOWN_EXTENSION, "Unknown curve element type '%s' found.", String);
                 }
-                return NULL;
+                goto Error;
 
          }
      }
@@ -3994,7 +4003,12 @@ cmsToneCurve* ReadSegmentedCurve(struct _cms_typehandler_struct* self, cmsIOHAND
      return Curve;
 
 Error:
-     if (Segments) _cmsFree(self ->ContextID, Segments);
+     if (Segments) {
+         for (i=0; i < nSegments; i++) {
+             if (Segments[i].SampledPoints) _cmsFree(self ->ContextID, Segments[i].SampledPoints);
+         }
+         _cmsFree(self ->ContextID, Segments);
+     }
      return NULL;
 }
 
@@ -4196,7 +4210,11 @@ void *Type_MPEmatrix_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* io
 
         cmsFloat32Number v;
 
-        if (!_cmsReadFloat32Number(io, &v)) return NULL;
+        if (!_cmsReadFloat32Number(io, &v)) {
+            _cmsFree(self ->ContextID, Matrix);
+            _cmsFree(self ->ContextID, Offsets);
+            return NULL;
+        }
         Matrix[i] = v;
     }
 
@@ -4205,7 +4223,11 @@ void *Type_MPEmatrix_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* io
 
         cmsFloat32Number v;
 
-        if (!_cmsReadFloat32Number(io, &v)) return NULL;
+        if (!_cmsReadFloat32Number(io, &v)) {
+            _cmsFree(self ->ContextID, Matrix);
+            _cmsFree(self ->ContextID, Offsets);
+            return NULL;
+        }
         Offsets[i] = v;
     }
 
@@ -4277,8 +4299,12 @@ void *Type_MPEclut_Read(struct _cms_typehandler_struct* self, cmsIOHANDLER* io, 
 
     // Copy MAX_INPUT_DIMENSIONS at most. Expand to cmsUInt32Number
     nMaxGrids = InputChans > MAX_INPUT_DIMENSIONS ? MAX_INPUT_DIMENSIONS : InputChans;
-    for (i=0; i < nMaxGrids; i++) GridPoints[i] = (cmsUInt32Number) Dimensions8[i];
 
+    for (i = 0; i < nMaxGrids; i++) {
+        if (Dimensions8[i] == 1) goto Error; // Impossible value, 0 for no CLUT and then 2 at least
+        GridPoints[i] = (cmsUInt32Number)Dimensions8[i];
+    }
+    
     // Allocate the true CLUT
     mpe = cmsStageAllocCLutFloatGranular(self ->ContextID, GridPoints, InputChans, OutputChans, NULL);
     if (mpe == NULL) goto Error;

@@ -16,8 +16,8 @@ component("test_runner") {
   sources = [
     "accessibility_controller.cc",
     "accessibility_controller.h",
-    "app_banner_client.cc",
-    "app_banner_client.h",
+    "app_banner_service.cc",
+    "app_banner_service.h",
     "event_sender.cc",
     "event_sender.h",
     "gamepad_controller.cc",
@@ -89,8 +89,6 @@ component("test_runner") {
     "web_frame_test_client.h",
     "web_frame_test_proxy.cc",
     "web_frame_test_proxy.h",
-    "web_task.cc",
-    "web_task.h",
     "web_test_delegate.h",
     "web_test_interfaces.cc",
     "web_test_interfaces.h",
@@ -101,6 +99,8 @@ component("test_runner") {
     "web_view_test_proxy.h",
     "web_widget_test_client.cc",
     "web_widget_test_client.h",
+    "web_widget_test_proxy.cc",
+    "web_widget_test_proxy.h",
   ]
 
   # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -112,9 +112,11 @@ component("test_runner") {
     "//base:i18n",
     "//cc",
     "//cc/blink",
+    "//content/public/common",
     "//gin",
     "//gpu",
     "//gpu/command_buffer/client:gles2_interface",
+    "//media/midi:mojo",
     "//net",
     "//skia",
     "//third_party/WebKit/public:blink",
@@ -127,6 +129,10 @@ component("test_runner") {
     "//ui/gfx/geometry",
     "//url",
     "//v8",
+  ]
+
+  data_deps = [
+    ":resources",
   ]
 
   if (is_mac) {
@@ -186,36 +192,22 @@ if (is_mac) {
 
 group("resources") {
   deps = []
+  data_deps = []
 
   if (is_mac) {
     deps += [ ":test_runner_bundle_data" ]
+    data_deps += [ ":test_runner_bundle_data" ]
   } else {
     deps += [ ":copy_ahem" ]
+    data_deps += [ ":copy_ahem" ]
   }
 
   if (use_x11) {
     deps += [ ":copy_x11_fonts" ]
+    data_deps += [ ":copy_x11_fonts" ]
   }
   if (is_android) {
     deps += [ ":copy_android_fonts" ]
-  }
-}
-
-if (is_mac || is_win) {
-  # GYP version: components/test_runner/test_runner.gyp:layout_test_helper
-  executable("layout_test_helper") {
-    sources = [
-      "helper/layout_test_helper_mac.mm",
-      "helper/layout_test_helper_win.cc",
-    ]
-
-    if (is_mac) {
-      libs = [ "AppKit.framework" ]
-    }
-
-    deps = [
-      "//build/config/sanitizers:deps",
-      "//build/win:default_exe_manifest",
-    ]
+    data_deps += [ ":copy_android_fonts" ]
   }
 }

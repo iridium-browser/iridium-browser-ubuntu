@@ -18,6 +18,7 @@
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -34,6 +35,10 @@
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/os_crypt/os_crypt.h"
+#include "components/sync/base/model_type.h"
+#include "components/sync/model/metadata_batch.h"
+#include "components/sync/protocol/entity_metadata.pb.h"
+#include "components/sync/protocol/model_type_state.pb.h"
 #include "components/webdata/common/web_database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -415,7 +420,8 @@ bool AutofillTable::CreateTablesIfNecessary() {
           InitProfilePhonesTable() && InitProfileTrashTable() &&
           InitMaskedCreditCardsTable() && InitUnmaskedCreditCardsTable() &&
           InitServerCardMetadataTable() && InitServerAddressesTable() &&
-          InitServerAddressMetadataTable());
+          InitServerAddressMetadataTable() && InitAutofillSyncMetadataTable() &&
+          InitModelTypeStateTable());
 }
 
 bool AutofillTable::IsSyncable() {
@@ -462,6 +468,9 @@ bool AutofillTable::MigrateToVersion(int version,
     case 67:
       *update_compatible_version = false;
       return MigrateToVersion67AddMaskedCardBillingAddress();
+    case 70:
+      *update_compatible_version = false;
+      return MigrateToVersion70AddSyncMetadata();
   }
   return true;
 }
@@ -912,7 +921,7 @@ std::unique_ptr<AutofillProfile> AutofillTable::GetAutofillProfile(
 }
 
 bool AutofillTable::GetAutofillProfiles(
-    std::vector<AutofillProfile*>* profiles) {
+    std::vector<std::unique_ptr<AutofillProfile>>* profiles) {
   DCHECK(profiles);
   profiles->clear();
 
@@ -926,13 +935,14 @@ bool AutofillTable::GetAutofillProfiles(
     std::unique_ptr<AutofillProfile> profile = GetAutofillProfile(guid);
     if (!profile)
       return false;
-    profiles->push_back(profile.release());
+    profiles->push_back(std::move(profile));
   }
 
   return s.Succeeded();
 }
 
-bool AutofillTable::GetServerProfiles(std::vector<AutofillProfile*>* profiles) {
+bool AutofillTable::GetServerProfiles(
+    std::vector<std::unique_ptr<AutofillProfile>>* profiles) const {
   profiles->clear();
 
   sql::Statement s(db_->GetUniqueStatement(
@@ -957,8 +967,9 @@ bool AutofillTable::GetServerProfiles(std::vector<AutofillProfile*>* profiles) {
 
   while (s.Step()) {
     int index = 0;
-    std::unique_ptr<AutofillProfile> profile(new AutofillProfile(
-        AutofillProfile::SERVER_PROFILE, s.ColumnString(index++)));
+    std::unique_ptr<AutofillProfile> profile =
+        base::MakeUnique<AutofillProfile>(AutofillProfile::SERVER_PROFILE,
+                                          s.ColumnString(index++));
     profile->set_use_count(s.ColumnInt64(index++));
     profile->set_use_date(Time::FromInternalValue(s.ColumnInt64(index++)));
     // Modification date is not tracked for server profiles. Explicitly set it
@@ -986,7 +997,7 @@ bool AutofillTable::GetServerProfiles(std::vector<AutofillProfile*>* profiles) {
     profile->SetInfo(AutofillType(PHONE_HOME_WHOLE_NUMBER), phone_number,
                      profile->language_code());
 
-    profiles->push_back(profile.release());
+    profiles->push_back(std::move(profile));
   }
 
   return s.Succeeded();
@@ -1173,7 +1184,7 @@ std::unique_ptr<CreditCard> AutofillTable::GetCreditCard(
 }
 
 bool AutofillTable::GetCreditCards(
-    std::vector<CreditCard*>* credit_cards) {
+    std::vector<std::unique_ptr<CreditCard>>* credit_cards) {
   DCHECK(credit_cards);
   credit_cards->clear();
 
@@ -1187,14 +1198,14 @@ bool AutofillTable::GetCreditCards(
     std::unique_ptr<CreditCard> credit_card = GetCreditCard(guid);
     if (!credit_card)
       return false;
-    credit_cards->push_back(credit_card.release());
+    credit_cards->push_back(std::move(credit_card));
   }
 
   return s.Succeeded();
 }
 
 bool AutofillTable::GetServerCreditCards(
-    std::vector<CreditCard*>* credit_cards) {
+    std::vector<std::unique_ptr<CreditCard>>* credit_cards) const {
   credit_cards->clear();
 
   sql::Statement s(db_->GetUniqueStatement(
@@ -1225,7 +1236,8 @@ bool AutofillTable::GetServerCreditCards(
         CreditCard::FULL_SERVER_CARD;
     std::string server_id = s.ColumnString(index++);
 
-    CreditCard* card = new CreditCard(record_type, server_id);
+    std::unique_ptr<CreditCard> card =
+        base::MakeUnique<CreditCard>(record_type, server_id);
     card->SetRawInfo(
         CREDIT_CARD_NUMBER,
         record_type == CreditCard::MASKED_SERVER_CARD ? last_four
@@ -1239,7 +1251,7 @@ bool AutofillTable::GetServerCreditCards(
     std::string card_type = s.ColumnString(index++);
     if (record_type == CreditCard::MASKED_SERVER_CARD) {
       // The type must be set after setting the number to override the
-      // autodectected type.
+      // autodetected type.
       card->SetTypeForMaskedCard(card_type.c_str());
     } else {
       DCHECK_EQ(CreditCard::GetCreditCardType(full_card_number), card_type);
@@ -1250,7 +1262,7 @@ bool AutofillTable::GetServerCreditCards(
     card->SetRawInfo(CREDIT_CARD_EXP_MONTH, s.ColumnString16(index++));
     card->SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, s.ColumnString16(index++));
     card->set_billing_address_id(s.ColumnString(index++));
-    credit_cards->push_back(card);
+    credit_cards->push_back(std::move(card));
   }
 
   return s.Succeeded();
@@ -1557,7 +1569,7 @@ bool AutofillTable::RemoveAutofillDataModifiedBetween(
 bool AutofillTable::RemoveOriginURLsModifiedBetween(
     const Time& delete_begin,
     const Time& delete_end,
-    ScopedVector<AutofillProfile>* profiles) {
+    std::vector<std::unique_ptr<AutofillProfile>>* profiles) {
   DCHECK(delete_end.is_null() || delete_begin < delete_end);
 
   time_t delete_begin_t = delete_begin.ToTimeT();
@@ -1592,7 +1604,7 @@ bool AutofillTable::RemoveOriginURLsModifiedBetween(
     if (!profile)
       return false;
 
-    profiles->push_back(profile.release());
+    profiles->push_back(std::move(profile));
   }
 
   // Remember Autofill credit cards with URL origins in the time range.
@@ -1674,6 +1686,122 @@ bool AutofillTable::IsAutofillGUIDInTrash(const std::string& guid) {
   s.BindString(0, guid);
 
   return s.Step();
+}
+
+bool AutofillTable::GetAllSyncMetadata(syncer::ModelType model_type,
+                                       syncer::MetadataBatch* metadata_batch) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+  syncer::EntityMetadataMap metadata_records;
+  if (GetAllSyncEntityMetadata(model_type, &metadata_records)) {
+    for (const auto& pair : metadata_records) {
+      // todo(pnoland): add batch transfer of metadata map
+      metadata_batch->AddMetadata(pair.first, pair.second);
+    }
+  } else {
+    return false;
+  }
+
+  sync_pb::ModelTypeState model_type_state;
+  if (GetModelTypeState(model_type, &model_type_state)) {
+    metadata_batch->SetModelTypeState(model_type_state);
+  } else {
+    return false;
+  }
+
+  return true;
+}
+
+bool AutofillTable::GetAllSyncEntityMetadata(
+    syncer::ModelType model_type,
+    syncer::EntityMetadataMap* metadata_records) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT storage_key, value FROM autofill_sync_metadata"));
+
+  while (s.Step()) {
+    std::string storage_key = s.ColumnString(0);
+    std::string serialized_metadata = s.ColumnString(1);
+    sync_pb::EntityMetadata metadata_record;
+    if (metadata_record.ParseFromString(serialized_metadata)) {
+      metadata_records->insert(std::make_pair(storage_key, metadata_record));
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool AutofillTable::UpdateSyncMetadata(
+    syncer::ModelType model_type,
+    const std::string& storage_key,
+    const sync_pb::EntityMetadata& metadata) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+
+  sql::Statement s(
+      db_->GetUniqueStatement("INSERT OR REPLACE INTO autofill_sync_metadata "
+                              "(storage_key, value) VALUES(?, ?)"));
+  s.BindString(0, storage_key);
+  s.BindString(1, metadata.SerializeAsString());
+
+  return s.Run();
+}
+
+bool AutofillTable::ClearSyncMetadata(syncer::ModelType model_type,
+                                      const std::string& storage_key) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+
+  sql::Statement s(db_->GetUniqueStatement(
+      "DELETE FROM autofill_sync_metadata WHERE storage_key=?"));
+  s.BindString(0, storage_key);
+
+  return s.Run();
+}
+
+bool AutofillTable::GetModelTypeState(syncer::ModelType model_type,
+                                      sync_pb::ModelTypeState* state) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+
+  sql::Statement s(db_->GetUniqueStatement(
+      "SELECT value FROM autofill_model_type_state WHERE id=1"));
+
+  if (!s.Step()) {
+    return false;
+  }
+
+  std::string serialized_state = s.ColumnString(0);
+  return state->ParseFromString(serialized_state);
+}
+
+bool AutofillTable::UpdateModelTypeState(
+    syncer::ModelType model_type,
+    const sync_pb::ModelTypeState& model_type_state) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+
+  // Hardcode the id to force a collision, ensuring that there remains only a
+  // single entry.
+  sql::Statement s(db_->GetUniqueStatement(
+      "INSERT OR REPLACE INTO autofill_model_type_state (id, value) "
+      "VALUES(1,?)"));
+  s.BindString(0, model_type_state.SerializeAsString());
+
+  return s.Run();
+}
+
+bool AutofillTable::ClearModelTypeState(syncer::ModelType model_type) {
+  DCHECK_EQ(model_type, syncer::AUTOFILL)
+      << "Only the AUTOFILL model type is supported";
+
+  sql::Statement s(db_->GetUniqueStatement(
+      "DELETE FROM autofill_model_type_state WHERE id=1"));
+
+  return s.Run();
 }
 
 bool AutofillTable::InitMainTable() {
@@ -1868,6 +1996,29 @@ bool AutofillTable::InitServerAddressMetadataTable() {
                       "id VARCHAR NOT NULL,"
                       "use_count INTEGER NOT NULL DEFAULT 0, "
                       "use_date INTEGER NOT NULL DEFAULT 0)")) {
+      NOTREACHED();
+      return false;
+    }
+  }
+  return true;
+}
+
+bool AutofillTable::InitAutofillSyncMetadataTable() {
+  if (!db_->DoesTableExist("autofill_sync_metadata")) {
+    if (!db_->Execute("CREATE TABLE autofill_sync_metadata ("
+                      "storage_key VARCHAR PRIMARY KEY NOT NULL,"
+                      "value BLOB)")) {
+      NOTREACHED();
+      return false;
+    }
+  }
+  return true;
+}
+
+bool AutofillTable::InitModelTypeStateTable() {
+  if (!db_->DoesTableExist("autofill_model_type_state")) {
+    if (!db_->Execute("CREATE TABLE autofill_model_type_state (id INTEGER "
+                      "PRIMARY KEY, value BLOB)")) {
       NOTREACHED();
       return false;
     }
@@ -2309,6 +2460,17 @@ bool AutofillTable::MigrateToVersion67AddMaskedCardBillingAddress() {
   // returns an empty string for that.
   return db_->Execute(
       "ALTER TABLE masked_credit_cards ADD COLUMN billing_address_id VARCHAR");
+}
+
+bool AutofillTable::MigrateToVersion70AddSyncMetadata() {
+  if (!db_->Execute("CREATE TABLE autofill_sync_metadata ("
+                    "storage_key VARCHAR PRIMARY KEY NOT NULL,"
+                    "value BLOB)")) {
+    return false;
+  }
+  return db_->Execute(
+      "CREATE TABLE autofill_model_type_state (id INTEGER PRIMARY KEY, value "
+      "BLOB)");
 }
 
 }  // namespace autofill

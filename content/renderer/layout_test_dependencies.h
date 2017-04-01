@@ -13,12 +13,13 @@
 namespace cc {
 class ContextProvider;
 class CopyOutputRequest;
-class OutputSurface;
+class CompositorFrameSink;
 class SwapPromise;
 }
 
 namespace gpu {
 class GpuChannelHost;
+class GpuMemoryBufferManager;
 }
 
 namespace content {
@@ -28,11 +29,12 @@ class CompositorDependencies;
 // RenderThreadImpl.
 class LayoutTestDependencies {
  public:
-  virtual std::unique_ptr<cc::OutputSurface> CreateOutputSurface(
+  virtual std::unique_ptr<cc::CompositorFrameSink> CreateCompositorFrameSink(
       int32_t routing_id,
       scoped_refptr<gpu::GpuChannelHost> gpu_channel,
       scoped_refptr<cc::ContextProvider> compositor_context_provider,
       scoped_refptr<cc::ContextProvider> worker_context_provider,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       CompositorDependencies* deps) = 0;
 
   // Returns a SwapPromise which should be queued for the next compositor frame.

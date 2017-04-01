@@ -7,12 +7,11 @@
 #include <memory>
 
 #include "base/values.h"
+#include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/screens/update_model.h"
-#include "chrome/browser/ui/webui/chromeos/login/oobe_screen.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/login/localized_values_builder.h"
-#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -54,6 +53,9 @@ void UpdateScreenHandler::DeclareLocalizedValues(
   builder->Add("cancelUpdateHint", IDS_EMPTY_STRING);
   builder->Add("cancelledUpdateMessage", IDS_EMPTY_STRING);
 #endif
+
+  // For Material Design OOBE
+  builder->Add("updatingScreenTitle", IDS_UPDATING_SCREEN_TITLE);
 }
 
 void UpdateScreenHandler::Initialize() {
@@ -61,9 +63,6 @@ void UpdateScreenHandler::Initialize() {
     Show();
     show_on_init_ = false;
   }
-}
-
-void UpdateScreenHandler::PrepareToShow() {
 }
 
 void UpdateScreenHandler::Show() {

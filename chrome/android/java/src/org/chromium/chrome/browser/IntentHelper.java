@@ -14,7 +14,7 @@ import android.util.Patterns;
 
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.annotations.CalledByNative;
-import org.chromium.components.sync.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerHelper;
 
 import java.io.File;
 
@@ -37,6 +37,7 @@ public abstract class IntentHelper {
      * @param chooserTitle The title of the activity chooser.
      * @param fileToAttach The file name of the attachment.
      */
+    @SuppressWarnings("deprecation")  // Update usage of Html.fromHtml when API min is 24
     @CalledByNative
     static void sendEmail(Context context, String email, String subject, String body,
             String chooserTitle, String fileToAttach) {

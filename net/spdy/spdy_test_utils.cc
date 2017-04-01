@@ -4,8 +4,10 @@
 
 #include "net/spdy/spdy_test_utils.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "base/base64.h"
@@ -92,43 +94,15 @@ void CompareCharArraysWithHexError(const string& description,
       << HexDumpWithMarks(actual, actual_len, marks.get(), max_len);
 }
 
-void SetFrameFlags(SpdySerializedFrame* frame,
-                   uint8_t flags,
-                   SpdyMajorVersion spdy_version) {
-  switch (spdy_version) {
-    case SPDY3:
-    case HTTP2:
-      frame->data()[4] = flags;
-      break;
-    default:
-      LOG(FATAL) << "Unsupported SPDY version.";
-  }
+void SetFrameFlags(SpdySerializedFrame* frame, uint8_t flags) {
+  frame->data()[4] = flags;
 }
 
-void SetFrameLength(SpdySerializedFrame* frame,
-                    size_t length,
-                    SpdyMajorVersion spdy_version) {
-  switch (spdy_version) {
-    case SPDY3:
-      CHECK_EQ(0u, length & ~kLengthMask);
-      {
-        int32_t wire_length = base::HostToNet32(length);
-        // The length field in SPDY 3 is a 24-bit (3B) integer starting at
-        // offset 5.
-        memcpy(frame->data() + 5, reinterpret_cast<char*>(&wire_length) + 1, 3);
-      }
-      break;
-    case HTTP2:
-      CHECK_GT(1u<<14, length);
-      {
-        int32_t wire_length = base::HostToNet32(length);
-        memcpy(frame->data(),
-               reinterpret_cast<char*>(&wire_length) + 1,
-               3);
-      }
-      break;
-    default:
-      LOG(FATAL) << "Unsupported SPDY version.";
+void SetFrameLength(SpdySerializedFrame* frame, size_t length) {
+  CHECK_GT(1u << 14, length);
+  {
+    int32_t wire_length = base::HostToNet32(length);
+    memcpy(frame->data(), reinterpret_cast<char*>(&wire_length) + 1, 3);
   }
 }
 
@@ -176,23 +150,34 @@ void TestHeadersHandler::OnHeaderBlockStart() {
 
 void TestHeadersHandler::OnHeader(base::StringPiece name,
                                   base::StringPiece value) {
-  if (FLAGS_chromium_http2_flag_use_new_spdy_header_block_header_joining) {
-    block_.AppendValueOrAddHeader(name, value);
-  } else {
-    auto it = block_.find(name);
-    if (it == block_.end()) {
-      block_[name] = value;
-    } else {
-      string new_value = it->second.as_string();
-      new_value.append((name == "cookie") ? "; " : string(1, '\0'));
-      value.AppendToString(&new_value);
-      block_.ReplaceOrAppendHeader(name, new_value);
-    }
-  }
+  block_.AppendValueOrAddHeader(name, value);
 }
 
 void TestHeadersHandler::OnHeaderBlockEnd(size_t header_bytes_parsed) {
   header_bytes_parsed_ = header_bytes_parsed;
+}
+
+void TestHeadersHandler::OnHeaderBlockEnd(
+    size_t header_bytes_parsed,
+    size_t /* compressed_header_bytes_parsed */) {
+  header_bytes_parsed_ = header_bytes_parsed;
+}
+
+TestServerPushDelegate::TestServerPushDelegate() {}
+
+TestServerPushDelegate::~TestServerPushDelegate() {}
+
+void TestServerPushDelegate::OnPush(
+    std::unique_ptr<ServerPushHelper> push_helper) {
+  push_helpers[push_helper->GetURL()] = std::move(push_helper);
+}
+
+bool TestServerPushDelegate::CancelPush(GURL url) {
+  auto itr = push_helpers.find(url);
+  DCHECK(itr != push_helpers.end());
+  itr->second->Cancel();
+  push_helpers.erase(itr);
+  return true;
 }
 
 }  // namespace test

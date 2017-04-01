@@ -118,7 +118,7 @@ int UnixDomainClientSocket::GetLocalAddress(IPEndPoint* address) const {
   return ERR_ADDRESS_INVALID;
 }
 
-const BoundNetLog& UnixDomainClientSocket::NetLog() const {
+const NetLogWithSource& UnixDomainClientSocket::NetLog() const {
   return net_log_;
 }
 
@@ -132,7 +132,7 @@ bool UnixDomainClientSocket::WasEverUsed() const {
   return true;  // We don't care.
 }
 
-bool UnixDomainClientSocket::WasNpnNegotiated() const {
+bool UnixDomainClientSocket::WasAlpnNegotiated() const {
   return false;
 }
 

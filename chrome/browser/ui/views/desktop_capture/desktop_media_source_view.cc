@@ -4,10 +4,10 @@
 
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_source_view.h"
 
-#include "chrome/browser/media/desktop_media_list.h"
+#include "chrome/browser/media/webrtc/desktop_media_list.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_list_view.h"
 #include "chrome/browser/ui/views/desktop_capture/desktop_media_picker_views.h"
-#include "ui/accessibility/ax_view_state.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/gfx/canvas.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/border.h"
@@ -22,6 +22,7 @@ DesktopMediaSourceViewStyle::DesktopMediaSourceViewStyle(
 DesktopMediaSourceViewStyle::DesktopMediaSourceViewStyle(
     int columns,
     const gfx::Size& item_size,
+    const gfx::Rect& icon_rect,
     const gfx::Rect& label_rect,
     gfx::HorizontalAlignment text_alignment,
     const gfx::Rect& image_rect,
@@ -29,6 +30,7 @@ DesktopMediaSourceViewStyle::DesktopMediaSourceViewStyle(
     int focus_rectangle_inset)
     : columns(columns),
       item_size(item_size),
+      icon_rect(icon_rect),
       label_rect(label_rect),
       text_alignment(text_alignment),
       image_rect(image_rect),
@@ -42,11 +44,14 @@ DesktopMediaSourceView::DesktopMediaSourceView(
     : parent_(parent),
       source_id_(source_id),
       style_(style),
+      icon_view_(new views::ImageView()),
       image_view_(new views::ImageView()),
       label_(new views::Label()),
       selected_(false) {
+  AddChildView(icon_view_);
   AddChildView(image_view_);
   AddChildView(label_);
+  icon_view_->set_interactive(false);
   image_view_->set_interactive(false);
   SetFocusBehavior(FocusBehavior::ALWAYS);
   SetStyle(style_);
@@ -63,6 +68,10 @@ void DesktopMediaSourceView::SetName(const base::string16& name) {
 
 void DesktopMediaSourceView::SetThumbnail(const gfx::ImageSkia& thumbnail) {
   image_view_->SetImage(thumbnail);
+}
+
+void DesktopMediaSourceView::SetIcon(const gfx::ImageSkia& icon) {
+  icon_view_->SetImage(icon);
 }
 
 void DesktopMediaSourceView::SetSelected(bool selected) {
@@ -86,13 +95,13 @@ void DesktopMediaSourceView::SetSelected(bool selected) {
 
     const SkColor border_color = GetNativeTheme()->GetSystemColor(
         ui::NativeTheme::kColorId_FocusedBorderColor);
-    image_view_->SetBorder(views::Border::CreateSolidBorder(
+    image_view_->SetBorder(views::CreateSolidBorder(
         style_.selection_border_thickness, border_color));
     label_->SetFontList(label_->font_list().Derive(0, gfx::Font::NORMAL,
                                                    gfx::Font::Weight::BOLD));
     parent_->OnSelectionChanged();
   } else {
-    image_view_->SetBorder(views::Border::NullBorder());
+    image_view_->SetBorder(views::NullBorder());
     label_->SetFontList(label_->font_list().Derive(0, gfx::Font::NORMAL,
                                                    gfx::Font::Weight::NORMAL));
   }
@@ -110,9 +119,11 @@ void DesktopMediaSourceView::SetStyle(DesktopMediaSourceViewStyle style) {
   if (selected_) {
     const SkColor border_color = GetNativeTheme()->GetSystemColor(
         ui::NativeTheme::kColorId_FocusedBorderColor);
-    image_view_->SetBorder(views::Border::CreateSolidBorder(
+    image_view_->SetBorder(views::CreateSolidBorder(
         style_.selection_border_thickness, border_color));
   }
+  icon_view_->SetBoundsRect(style_.icon_rect);
+  icon_view_->SetImageSize(style_.icon_rect.size());
   label_->SetBoundsRect(style_.label_rect);
   label_->SetHorizontalAlignment(style_.text_alignment);
 }
@@ -188,7 +199,7 @@ void DesktopMediaSourceView::OnGestureEvent(ui::GestureEvent* event) {
   }
 }
 
-void DesktopMediaSourceView::GetAccessibleState(ui::AXViewState* state) {
-  state->role = ui::AX_ROLE_BUTTON;
-  state->name = label_->text();
+void DesktopMediaSourceView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  node_data->role = ui::AX_ROLE_BUTTON;
+  node_data->SetName(label_->text());
 }

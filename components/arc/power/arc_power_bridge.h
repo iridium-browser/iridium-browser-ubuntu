@@ -8,19 +8,21 @@
 #include <map>
 
 #include "base/macros.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service.h"
+#include "components/arc/common/power.mojom.h"
 #include "components/arc/instance_holder.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "ui/display/chromeos/display_configurator.h"
+#include "ui/display/manager/chromeos/display_configurator.h"
 
 namespace arc {
+
+class ArcBridgeService;
 
 // ARC Power Client sets power management policy based on requests from
 // ARC instances.
 class ArcPowerBridge : public ArcService,
                        public InstanceHolder<mojom::PowerInstance>::Observer,
-                       public ui::DisplayConfigurator::Observer,
+                       public display::DisplayConfigurator::Observer,
                        public mojom::PowerHost {
  public:
   explicit ArcPowerBridge(ArcBridgeService* bridge_service);

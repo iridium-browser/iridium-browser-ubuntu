@@ -6,9 +6,9 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -49,10 +49,9 @@ class TestNavigationObserver::TestWebContentsObserver
 
   void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
                                        const GURL& validated_url,
-                                       bool is_error_page,
-                                       bool is_iframe_srcdoc) override {
+                                       bool is_error_page) override {
     parent_->OnDidStartProvisionalLoad(render_frame_host, validated_url,
-                                       is_error_page, is_iframe_srcdoc);
+                                       is_error_page);
   }
 
   void DidFailProvisionalLoad(
@@ -109,9 +108,6 @@ TestNavigationObserver::TestNavigationObserver(
 
 TestNavigationObserver::~TestNavigationObserver() {
   StopWatchingNewWebContents();
-
-  base::STLDeleteContainerPointers(web_contents_observers_.begin(),
-                                   web_contents_observers_.end());
 }
 
 void TestNavigationObserver::Wait() {
@@ -130,7 +126,7 @@ void TestNavigationObserver::StopWatchingNewWebContents() {
 
 void TestNavigationObserver::RegisterAsObserver(WebContents* web_contents) {
   web_contents_observers_.insert(
-      new TestWebContentsObserver(this, web_contents));
+      base::MakeUnique<TestWebContentsObserver>(this, web_contents));
 }
 
 void TestNavigationObserver::OnWebContentsCreated(WebContents* web_contents) {
@@ -140,8 +136,11 @@ void TestNavigationObserver::OnWebContentsCreated(WebContents* web_contents) {
 void TestNavigationObserver::OnWebContentsDestroyed(
     TestWebContentsObserver* observer,
     WebContents* web_contents) {
-  web_contents_observers_.erase(observer);
-  delete observer;
+  web_contents_observers_.erase(std::find_if(
+      web_contents_observers_.begin(), web_contents_observers_.end(),
+      [observer](const std::unique_ptr<TestWebContentsObserver>& ptr) {
+        return ptr.get() == observer;
+      }));
 }
 
 void TestNavigationObserver::OnNavigationEntryCommitted(
@@ -176,8 +175,7 @@ void TestNavigationObserver::OnDidStopLoading(WebContents* web_contents) {
 void TestNavigationObserver::OnDidStartProvisionalLoad(
     RenderFrameHost* render_frame_host,
     const GURL& validated_url,
-    bool is_error_page,
-    bool is_iframe_srcdoc) {
+    bool is_error_page) {
   last_navigation_succeeded_ = false;
 }
 

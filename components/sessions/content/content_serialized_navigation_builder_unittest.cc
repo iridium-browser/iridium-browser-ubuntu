@@ -4,7 +4,11 @@
 
 #include "components/sessions/content/content_serialized_navigation_builder.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "components/sessions/content/content_record_password_state.h"
+#include "components/sessions/content/content_serialized_navigation_driver.h"
+#include "components/sessions/content/extended_info_handler.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/sessions/core/serialized_navigation_entry_test_helper.h"
 #include "content/public/browser/favicon_status.h"
@@ -16,6 +20,35 @@
 namespace sessions {
 
 namespace {
+
+const char kExtendedInfoKey1[] = "Key 1";
+const char kExtendedInfoValue1[] = "Value 1";
+const char kExtendedInfoKey2[] = "Key 2";
+const char kExtendedInfoValue2[] = "Value 2";
+
+class TestExtendedInfoHandler : public ExtendedInfoHandler {
+ public:
+  explicit TestExtendedInfoHandler(const std::string& key) : key_(key) {}
+  ~TestExtendedInfoHandler() override {}
+
+  std::string GetExtendedInfo(
+      const content::NavigationEntry& entry) const override {
+    base::string16 data;
+    entry.GetExtraData(key_, &data);
+    return base::UTF16ToASCII(data);
+  }
+
+  void RestoreExtendedInfo(const std::string& info,
+                           content::NavigationEntry* entry) override {
+    entry->SetExtraData(key_, base::ASCIIToUTF16(info));
+  }
+
+ private:
+  std::string key_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestExtendedInfoHandler);
+};
+
 // Create a NavigationEntry from the test_data constants in
 // serialized_navigation_entry_test_helper.h.
 std::unique_ptr<content::NavigationEntry> MakeNavigationEntryForTest() {
@@ -49,14 +82,47 @@ std::unique_ptr<content::NavigationEntry> MakeNavigationEntryForTest() {
   return navigation_entry;
 }
 
+void SetExtendedInfoForTest(content::NavigationEntry* entry) {
+  entry->SetExtraData(kExtendedInfoKey1,
+                      base::ASCIIToUTF16(kExtendedInfoValue1));
+  entry->SetExtraData(kExtendedInfoKey2,
+                      base::ASCIIToUTF16(kExtendedInfoValue2));
+}
+
 }  // namespace
 
+class ContentSerializedNavigationBuilderTest : public testing::Test {
+ public:
+  ContentSerializedNavigationBuilderTest() {}
+  ~ContentSerializedNavigationBuilderTest() override {}
+
+  void SetUp() override {
+    ContentSerializedNavigationDriver* driver =
+        ContentSerializedNavigationDriver::GetInstance();
+    driver->RegisterExtendedInfoHandler(
+        kExtendedInfoKey1, base::WrapUnique<ExtendedInfoHandler>(
+                               new TestExtendedInfoHandler(kExtendedInfoKey1)));
+    driver->RegisterExtendedInfoHandler(
+        kExtendedInfoKey2, base::WrapUnique<ExtendedInfoHandler>(
+                               new TestExtendedInfoHandler(kExtendedInfoKey2)));
+  }
+
+  void TearDown() override {
+    ContentSerializedNavigationDriver* driver =
+        ContentSerializedNavigationDriver::GetInstance();
+    driver->extended_info_handler_map_.clear();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ContentSerializedNavigationBuilderTest);
+};
 
 // Create a SerializedNavigationEntry from a NavigationEntry.  All its fields
 // should match the NavigationEntry's.
-TEST(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
+TEST_F(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
   const std::unique_ptr<content::NavigationEntry> navigation_entry(
       MakeNavigationEntryForTest());
+  SetExtendedInfoForTest(navigation_entry.get());
 
   const SerializedNavigationEntry& navigation =
       ContentSerializedNavigationBuilder::FromNavigationEntry(
@@ -85,15 +151,24 @@ TEST(ContentSerializedNavigationBuilderTest, FromNavigationEntry) {
   EXPECT_EQ(test_data::kRedirectURL1, navigation.redirect_chain()[1]);
   EXPECT_EQ(test_data::kVirtualURL, navigation.redirect_chain()[2]);
   EXPECT_EQ(test_data::kPasswordState, navigation.password_state());
+
+  ASSERT_EQ(2U, navigation.extended_info_map().size());
+  ASSERT_EQ(1U, navigation.extended_info_map().count(kExtendedInfoKey1));
+  EXPECT_EQ(kExtendedInfoValue1,
+            navigation.extended_info_map().at(kExtendedInfoKey1));
+  ASSERT_EQ(1U, navigation.extended_info_map().count(kExtendedInfoKey2));
+  EXPECT_EQ(kExtendedInfoValue2,
+            navigation.extended_info_map().at(kExtendedInfoKey2));
 }
 
 // Create a NavigationEntry, then create another one by converting to
 // a SerializedNavigationEntry and back.  The new one should match the old one
 // except for fields that aren't preserved, which should be set to
 // expected values.
-TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
+TEST_F(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
   const std::unique_ptr<content::NavigationEntry> old_navigation_entry(
       MakeNavigationEntryForTest());
+  SetExtendedInfoForTest(old_navigation_entry.get());
 
   const SerializedNavigationEntry& navigation =
       ContentSerializedNavigationBuilder::FromNavigationEntry(
@@ -101,7 +176,7 @@ TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
 
   const std::unique_ptr<content::NavigationEntry> new_navigation_entry(
       ContentSerializedNavigationBuilder::ToNavigationEntry(
-          &navigation, test_data::kPageID, NULL));
+          &navigation, NULL));
 
   EXPECT_EQ(test_data::kReferrerURL, new_navigation_entry->GetReferrer().url);
   EXPECT_EQ(test_data::kReferrerPolicy,
@@ -110,7 +185,6 @@ TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
   EXPECT_EQ(test_data::kTitle, new_navigation_entry->GetTitle());
   EXPECT_EQ(test_data::kEncodedPageState,
             new_navigation_entry->GetPageState().ToEncodedData());
-  EXPECT_EQ(test_data::kPageID, new_navigation_entry->GetPageID());
   EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
       new_navigation_entry->GetTransitionType(), ui::PAGE_TRANSITION_RELOAD));
   EXPECT_EQ(test_data::kHasPostData, new_navigation_entry->GetHasPostData());
@@ -131,9 +205,17 @@ TEST(ContentSerializedNavigationBuilderTest, ToNavigationEntry) {
             new_navigation_entry->GetRedirectChain()[1]);
   EXPECT_EQ(test_data::kVirtualURL,
             new_navigation_entry->GetRedirectChain()[2]);
+
+  base::string16 extra_data;
+  EXPECT_TRUE(
+      new_navigation_entry->GetExtraData(kExtendedInfoKey1, &extra_data));
+  EXPECT_EQ(kExtendedInfoValue1, base::UTF16ToASCII(extra_data));
+  EXPECT_TRUE(
+      new_navigation_entry->GetExtraData(kExtendedInfoKey2, &extra_data));
+  EXPECT_EQ(kExtendedInfoValue2, base::UTF16ToASCII(extra_data));
 }
 
-TEST(ContentSerializedNavigationBuilderTest, SetPasswordState) {
+TEST_F(ContentSerializedNavigationBuilderTest, SetPasswordState) {
   std::unique_ptr<content::NavigationEntry> entry(
       content::NavigationEntry::Create());
 

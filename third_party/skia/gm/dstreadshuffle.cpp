@@ -9,7 +9,6 @@
 #include "SkPath.h"
 #include "SkRandom.h"
 #include "SkShader.h"
-#include "SkXfermode.h"
 
 namespace skiagm {
 
@@ -44,8 +43,8 @@ protected:
     void drawShape(SkCanvas* canvas,
                    SkPaint* paint,
                    ShapeType type) {
-        static const SkRect kRect = SkRect::MakeXYWH(SkIntToScalar(-50), SkIntToScalar(-50),
-                                                     SkIntToScalar(75), SkIntToScalar(105));
+        const SkRect kRect = SkRect::MakeXYWH(SkIntToScalar(-50), SkIntToScalar(-50),
+                                              SkIntToScalar(75), SkIntToScalar(105));
         switch (type) {
             case kCircle_ShapeType:
                 canvas->drawCircle(0, 0, 50, *paint);
@@ -157,10 +156,10 @@ protected:
                             SkPaint p;
                             p.setAntiAlias(true);
                             p.setColor(color);
-                            // In order to get some batching on the GPU backend we do 2 src over for
-                            // each xfer mode which requires a dst read
-                            p.setXfermodeMode(r % 3 == 0 ? SkXfermode::kLighten_Mode :
-                                                           SkXfermode::kSrcOver_Mode);
+                            // In order to get some op combining on the GPU backend we do 2 src over
+                            // for each xfer mode which requires a dst read
+                            p.setBlendMode(r % 3 == 0 ? SkBlendMode::kLighten :
+                                                        SkBlendMode::kSrcOver);
                             SetStyle(&p, style, width);
                             canvas->save();
                             canvas->translate(x, y);
@@ -180,11 +179,11 @@ private:
     enum {
         kNumShapes = 100,
     };
-    SkAutoTUnref<SkShader> fBG;
-    SkPath                 fConcavePath;
-    SkPath                 fConvexPath;
-    static const int kWidth = 900;
-    static const int kHeight = 400;
+    sk_sp<SkShader>      fBG;
+    SkPath               fConcavePath;
+    SkPath               fConvexPath;
+    static constexpr int kWidth = 900;
+    static constexpr int kHeight = 400;
     typedef GM INHERITED;
 };
 

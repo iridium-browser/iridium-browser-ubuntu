@@ -5,13 +5,14 @@
 #include "ash/common/wm/container_finder.h"
 
 #include "ash/common/session/session_state_delegate.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/always_on_top_controller.h"
 #include "ash/common/wm/root_window_finder.h"
 #include "ash/common/wm/window_state.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/common/wm_window_property.h"
+#include "ash/public/cpp/shell_window_ids.h"
+#include "ash/root_window_controller.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace ash {
@@ -53,17 +54,18 @@ WmWindow* GetSystemModalContainer(WmWindow* root, WmWindow* window) {
 WmWindow* GetContainerFromAlwaysOnTopController(WmWindow* root,
                                                 WmWindow* window) {
   return root->GetRootWindowController()
-      ->GetAlwaysOnTopController()
+      ->always_on_top_controller()
       ->GetContainer(window);
 }
 
 }  // namespace
 
 WmWindow* GetContainerForWindow(WmWindow* window) {
-  WmWindow* container = window->GetParent();
-  while (container && container->GetType() != ui::wm::WINDOW_TYPE_UNKNOWN)
-    container = container->GetParent();
-  return container;
+  WmWindow* parent = window->GetParent();
+  // The first parent with an explicit shell window ID is the container.
+  while (parent && parent->GetShellWindowId() == kShellWindowId_Invalid)
+    parent = parent->GetParent();
+  return parent;
 }
 
 WmWindow* GetDefaultParent(WmWindow* context,
@@ -90,7 +92,7 @@ WmWindow* GetDefaultParent(WmWindow* context,
       return target_root->GetChildByShellWindowId(
           kShellWindowId_UnparentedControlContainer);
     case ui::wm::WINDOW_TYPE_PANEL:
-      if (window->GetWindowState()->panel_attached())
+      if (window->GetBoolProperty(WmWindowProperty::PANEL_ATTACHED))
         return target_root->GetChildByShellWindowId(
             kShellWindowId_PanelContainer);
       return GetContainerFromAlwaysOnTopController(target_root, window);
@@ -105,6 +107,23 @@ WmWindow* GetDefaultParent(WmWindow* context,
       break;
   }
   return nullptr;
+}
+
+std::vector<WmWindow*> GetContainersFromAllRootWindows(
+    int container_id,
+    WmWindow* priority_root) {
+  std::vector<WmWindow*> containers;
+  for (WmWindow* root : WmShell::Get()->GetAllRootWindows()) {
+    WmWindow* container = root->GetChildByShellWindowId(container_id);
+    if (!container)
+      continue;
+
+    if (priority_root && priority_root->Contains(container))
+      containers.insert(containers.begin(), container);
+    else
+      containers.push_back(container);
+  }
+  return containers;
 }
 
 }  // namespace wm

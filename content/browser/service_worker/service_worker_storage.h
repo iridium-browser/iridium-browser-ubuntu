@@ -143,6 +143,17 @@ class CONTENT_EXPORT ServiceWorkerStorage
   // registration->last_update_check().
   void UpdateLastUpdateCheckTime(ServiceWorkerRegistration* registration);
 
+  // Updates the specified registration's navigation preload state in storage.
+  // The caller is responsible for mutating the live registration's state.
+  void UpdateNavigationPreloadEnabled(int64_t registration_id,
+                                      const GURL& origin,
+                                      bool enable,
+                                      const StatusCallback& callback);
+  void UpdateNavigationPreloadHeader(int64_t registration_id,
+                                     const GURL& origin,
+                                     const std::string& value,
+                                     const StatusCallback& callback);
+
   // Deletes the registration data for |registration_id|. If the registration's
   // version is live, its script resources will remain available.
   // PurgeResources should be called when it's OK to delete them.
@@ -229,9 +240,11 @@ class CONTENT_EXPORT ServiceWorkerStorage
   void PurgeResources(const ResourceList& resources);
 
  private:
+  friend class ForeignFetchRequestHandlerTest;
   friend class ServiceWorkerDispatcherHostTest;
   friend class ServiceWorkerHandleTest;
   friend class ServiceWorkerStorageTest;
+  friend class ServiceWorkerStorageOriginTrialsTest;
   friend class ServiceWorkerRegistrationTest;
   friend class ServiceWorkerResourceStorageTest;
   friend class ServiceWorkerControlleeRequestHandlerTest;
@@ -361,15 +374,15 @@ class CONTENT_EXPORT ServiceWorkerStorage
       const ServiceWorkerDatabase::RegistrationData& data,
       const ResourceList& resources,
       ServiceWorkerDatabase::Status status);
-  void DidGetRegistrations(const GetRegistrationsCallback& callback,
-                           RegistrationList* registration_data_list,
-                           std::vector<ResourceList>* resources_list,
-                           const GURL& origin_filter,
-                           ServiceWorkerDatabase::Status status);
-  void DidGetRegistrationsInfos(const GetRegistrationsInfosCallback& callback,
-                                RegistrationList* registration_data_list,
-                                const GURL& origin_filter,
-                                ServiceWorkerDatabase::Status status);
+  void DidGetRegistrationsForOrigin(const GetRegistrationsCallback& callback,
+                                    RegistrationList* registration_data_list,
+                                    std::vector<ResourceList>* resources_list,
+                                    const GURL& origin_filter,
+                                    ServiceWorkerDatabase::Status status);
+  void DidGetAllRegistrationsInfos(
+      const GetRegistrationsInfosCallback& callback,
+      RegistrationList* registration_data_list,
+      ServiceWorkerDatabase::Status status);
   void DidStoreRegistration(
       const StatusCallback& callback,
       const ServiceWorkerDatabase::RegistrationData& new_version,

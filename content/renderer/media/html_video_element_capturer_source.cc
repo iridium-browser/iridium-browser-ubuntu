@@ -21,7 +21,6 @@
 #include "third_party/libyuv/include/libyuv.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "third_party/skia/include/core/SkXfermode.h"
 
 namespace {
 const float kMinFramesPerSecond = 1.0;
@@ -135,9 +134,12 @@ void HtmlVideoElementCapturerSource::sendNewFrame() {
   const blink::WebSize resolution = web_media_player_->naturalSize();
 
   SkCanvas* canvas = surface_->getCanvas();
+  SkPaint paint;
+  paint.setBlendMode(SkBlendMode::kSrc);
+  paint.setFilterQuality(kLow_SkFilterQuality);
   web_media_player_->paint(
       canvas, blink::WebRect(0, 0, resolution.width, resolution.height),
-      0xFF /* alpha */, SkXfermode::kSrc_Mode);
+      paint);
   DCHECK_NE(kUnknown_SkColorType, canvas->imageInfo().colorType());
   DCHECK_EQ(canvas->imageInfo().width(), resolution.width);
   DCHECK_EQ(canvas->imageInfo().height(), resolution.height);

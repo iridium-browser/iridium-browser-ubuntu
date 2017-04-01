@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/common/constants.h"
@@ -66,9 +67,9 @@ class NativeAppWindowCocoaBrowserTest
       content::WindowedNotificationObserver app_loaded_observer(
           content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
           content::NotificationService::AllSources());
-      OpenApplication(
-          AppLaunchParams(profile(), app_, extensions::LAUNCH_CONTAINER_NONE,
-                          NEW_WINDOW, extensions::SOURCE_TEST));
+      OpenApplication(AppLaunchParams(
+          profile(), app_, extensions::LAUNCH_CONTAINER_NONE,
+          WindowOpenDisposition::NEW_WINDOW, extensions::SOURCE_TEST));
       app_loaded_observer.Wait();
     }
   }
@@ -275,6 +276,8 @@ IN_PROC_BROWSER_TEST_P(NativeAppWindowCocoaBrowserTest, Fullscreen) {
 
 // Test Minimize, Restore combinations with their native equivalents.
 IN_PROC_BROWSER_TEST_P(NativeAppWindowCocoaBrowserTest, Minimize) {
+  if (base::mac::IsOS10_10())
+    return;  // Fails when swarmed. http://crbug.com/660582
   SetUpAppWithWindows(1);
   AppWindow* app_window = GetFirstAppWindow();
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
@@ -400,6 +403,8 @@ IN_PROC_BROWSER_TEST_P(NativeAppWindowCocoaBrowserTest, MaximizeConstrained) {
 
 // Test Minimize, Maximize, Restore combinations with their native equivalents.
 IN_PROC_BROWSER_TEST_P(NativeAppWindowCocoaBrowserTest, MinimizeMaximize) {
+  if (base::mac::IsOS10_10())
+    return;  // Fails when swarmed. http://crbug.com/660582
   SetUpAppWithWindows(1);
   AppWindow* app_window = GetFirstAppWindow();
   extensions::NativeAppWindow* window = app_window->GetBaseWindow();
@@ -556,7 +561,7 @@ void TestControls(AppWindow* app_window) {
   // fullscreen action. The above check that collectionBehavior does not include
   // NSWindowCollectionBehaviorFullScreenPrimary is sufficient to determine that
   // the window can't be fullscreened.
-  if (base::mac::IsOSMavericks()) {
+  if (base::mac::IsOS10_9()) {
     EXPECT_EQ(can_fullscreen,
               [[ns_window standardWindowButton:NSWindowZoomButton] isEnabled]);
   }
@@ -636,7 +641,7 @@ NSBitmapImageRep* ScreenshotNSWindow(NSWindow* window) {
   // NOTE: This doesn't work with Views, but the regular test does, so use that.
   bool mac_views = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableMacViewsNativeAppWindows);
-  if (base::mac::IsOSMavericks() && !mac_views) {
+  if (base::mac::IsOS10_9() && !mac_views) {
     // -[NSView setNeedsDisplay:YES] doesn't synchronously display the view, it
     // gets drawn by another event in the queue, so let that run first.
     content::RunAllPendingInMessageLoop();

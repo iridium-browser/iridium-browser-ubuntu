@@ -32,6 +32,7 @@
 #ifndef PerformanceResourceTiming_h
 #define PerformanceResourceTiming_h
 
+#include "core/dom/DOMHighResTimeStamp.h"
 #include "core/timing/PerformanceEntry.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
@@ -41,59 +42,89 @@ namespace blink {
 class ResourceLoadTiming;
 class ResourceTimingInfo;
 
-class PerformanceResourceTiming final : public PerformanceEntry {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static PerformanceResourceTiming* create(const ResourceTimingInfo& info, double timeOrigin, double startTime, double lastRedirectEndTime, bool m_allowTimingDetails, bool m_allowRedirectDetails)
-    {
-        return new PerformanceResourceTiming(info, timeOrigin, startTime, lastRedirectEndTime, m_allowTimingDetails, m_allowRedirectDetails);
-    }
+class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
+  DEFINE_WRAPPERTYPEINFO();
 
-    static PerformanceResourceTiming* create(const ResourceTimingInfo& info, double timeOrigin, double startTime, bool m_allowTimingDetails)
-    {
-        return new PerformanceResourceTiming(info, timeOrigin, startTime, 0.0, m_allowTimingDetails, false);
-    }
+ public:
+  ~PerformanceResourceTiming() override;
+  static PerformanceResourceTiming* create(const ResourceTimingInfo& info,
+                                           double timeOrigin,
+                                           double startTime,
+                                           double lastRedirectEndTime,
+                                           bool allowTimingDetails,
+                                           bool allowRedirectDetails) {
+    return new PerformanceResourceTiming(
+        info, timeOrigin, startTime, lastRedirectEndTime, allowTimingDetails,
+        allowRedirectDetails);
+  }
 
-    AtomicString initiatorType() const;
+  static PerformanceResourceTiming* create(const ResourceTimingInfo& info,
+                                           double timeOrigin,
+                                           double startTime,
+                                           bool allowTimingDetails) {
+    return new PerformanceResourceTiming(info, timeOrigin, startTime, 0.0,
+                                         allowTimingDetails, false);
+  }
 
-    double workerStart() const;
-    double redirectStart() const;
-    double redirectEnd() const;
-    double fetchStart() const;
-    double domainLookupStart() const;
-    double domainLookupEnd() const;
-    double connectStart() const;
-    double connectEnd() const;
-    double secureConnectionStart() const;
-    double requestStart() const;
-    double responseStart() const;
-    double responseEnd() const;
-    unsigned long long transferSize() const;
-    unsigned long long encodedBodySize() const;
-    unsigned long long decodedBodySize() const;
+  AtomicString initiatorType() const;
 
-protected:
-    void buildJSONValue(V8ObjectBuilder&) const override;
+  DOMHighResTimeStamp workerStart() const;
+  virtual DOMHighResTimeStamp redirectStart() const;
+  virtual DOMHighResTimeStamp redirectEnd() const;
+  virtual DOMHighResTimeStamp fetchStart() const;
+  DOMHighResTimeStamp domainLookupStart() const;
+  DOMHighResTimeStamp domainLookupEnd() const;
+  DOMHighResTimeStamp connectStart() const;
+  DOMHighResTimeStamp connectEnd() const;
+  DOMHighResTimeStamp secureConnectionStart() const;
+  DOMHighResTimeStamp requestStart() const;
+  DOMHighResTimeStamp responseStart() const;
+  virtual DOMHighResTimeStamp responseEnd() const;
+  unsigned long long transferSize() const;
+  unsigned long long encodedBodySize() const;
+  unsigned long long decodedBodySize() const;
 
-private:
-    PerformanceResourceTiming(const ResourceTimingInfo&, double timeOrigin, double startTime, double lastRedirectEndTime, bool m_allowTimingDetails, bool m_allowRedirectDetails);
-    ~PerformanceResourceTiming() override;
+ protected:
+  void buildJSONValue(V8ObjectBuilder&) const override;
 
-    double workerReady() const;
+  PerformanceResourceTiming(const AtomicString& initiatorType,
+                            double timeOrigin,
+                            ResourceLoadTiming*,
+                            double lastRedirectEndTime,
+                            double finishTime,
+                            unsigned long long transferSize,
+                            unsigned long long encodedBodyLength,
+                            unsigned long long decodedBodyLength,
+                            bool didReuseConnection,
+                            bool allowTimingDetails,
+                            bool allowRedirectDetails,
+                            const String& name,
+                            const String& entryType,
+                            double startTime);
 
-    AtomicString m_initiatorType;
-    double m_timeOrigin;
-    RefPtr<ResourceLoadTiming> m_timing;
-    double m_lastRedirectEndTime;
-    double m_finishTime;
-    unsigned long long m_transferSize;
-    unsigned long long m_encodedBodySize;
-    unsigned long long m_decodedBodySize;
-    bool m_didReuseConnection;
-    bool m_allowTimingDetails;
-    bool m_allowRedirectDetails;
+ private:
+  PerformanceResourceTiming(const ResourceTimingInfo&,
+                            double timeOrigin,
+                            double startTime,
+                            double lastRedirectEndTime,
+                            bool m_allowTimingDetails,
+                            bool m_allowRedirectDetails);
+
+  double workerReady() const;
+
+  AtomicString m_initiatorType;
+  double m_timeOrigin;
+  RefPtr<ResourceLoadTiming> m_timing;
+  double m_lastRedirectEndTime;
+  double m_finishTime;
+  unsigned long long m_transferSize;
+  unsigned long long m_encodedBodySize;
+  unsigned long long m_decodedBodySize;
+  bool m_didReuseConnection;
+  bool m_allowTimingDetails;
+  bool m_allowRedirectDetails;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PerformanceResourceTiming_h
+#endif  // PerformanceResourceTiming_h

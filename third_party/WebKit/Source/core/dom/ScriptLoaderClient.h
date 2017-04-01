@@ -22,27 +22,32 @@
 #define ScriptLoaderClient_h
 
 #include "core/CoreExport.h"
+#include "wtf/text/AtomicString.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class CORE_EXPORT ScriptLoaderClient {
-public:
-    virtual ~ScriptLoaderClient() { }
+ public:
+  virtual ~ScriptLoaderClient() {}
 
-    virtual void dispatchLoadEvent() = 0;
+  virtual void dispatchLoadEvent() = 0;
 
-    virtual String sourceAttributeValue() const = 0;
-    virtual String charsetAttributeValue() const = 0;
-    virtual String typeAttributeValue() const = 0;
-    virtual String languageAttributeValue() const = 0;
-    virtual String forAttributeValue() const = 0;
-    virtual String eventAttributeValue() const = 0;
-    virtual bool asyncAttributeValue() const = 0;
-    virtual bool deferAttributeValue() const = 0;
-    virtual bool hasSourceAttribute() const = 0;
+  virtual String sourceAttributeValue() const = 0;
+  virtual String charsetAttributeValue() const = 0;
+  virtual String typeAttributeValue() const = 0;
+  virtual String languageAttributeValue() const = 0;
+  virtual String forAttributeValue() const = 0;
+  virtual String eventAttributeValue() const = 0;
+  virtual bool asyncAttributeValue() const = 0;
+  virtual bool deferAttributeValue() const = 0;
+  virtual bool hasSourceAttribute() const = 0;
+
+  virtual AtomicString nonce() const = 0;
+  virtual void setNonce(const String&) = 0;
+  virtual void clearNonce() = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

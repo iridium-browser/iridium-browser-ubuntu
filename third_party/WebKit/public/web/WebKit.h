@@ -66,10 +66,6 @@ BLINK_EXPORT void setMockThemeEnabledForTest(bool);
 BLINK_EXPORT void setFontAntialiasingEnabledForTest(bool);
 BLINK_EXPORT bool fontAntialiasingEnabledForTest();
 
-// Forces the use of the complex text path for layout tests.
-BLINK_EXPORT void setAlwaysUseComplexTextForTest(bool);
-BLINK_EXPORT bool alwaysUseComplexTextForTest();
-
 // Purge the plugin list cache. If |reloadPages| is true, any pages
 // containing plugins will be reloaded after refreshing the plugin list.
 BLINK_EXPORT void resetPluginCache(bool reloadPages = false);
@@ -85,6 +81,6 @@ BLINK_EXPORT void MemoryPressureNotificationToWorkerThreadIsolates(
 // Set the RAIL performance mode on all worker thread isolates.
 BLINK_EXPORT void setRAILModeOnWorkerThreadIsolates(v8::RAILMode);
 
-} // namespace blink
+}  // namespace blink
 
 #endif

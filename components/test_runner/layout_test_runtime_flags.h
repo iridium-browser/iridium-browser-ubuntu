@@ -109,7 +109,6 @@ class TEST_RUNNER_EXPORT LayoutTestRuntimeFlags {
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(scripts_allowed)
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(storage_allowed)
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(plugins_allowed)
-  DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(displaying_insecure_content_allowed)
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(running_insecure_content_allowed)
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(
       dump_web_content_settings_client_callbacks)
@@ -179,6 +178,10 @@ class TEST_RUNNER_EXPORT LayoutTestRuntimeFlags {
   // If true, the test_shell will output descriptive test for spellcheck
   // execution.
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(dump_spell_check_callbacks)
+
+  // If true, content_shell will output text for alert(), confirm(), prompt(),
+  // etc.
+  DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(dump_javascript_dialogs)
 
 #undef DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG
 #undef DEFINE_STRING_LAYOUT_TEST_RUNTIME_FLAG

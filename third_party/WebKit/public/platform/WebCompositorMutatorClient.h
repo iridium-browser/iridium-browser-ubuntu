@@ -6,16 +6,18 @@
 #define WebCompositorMutatorClient_h
 
 #include "WebCommon.h"
-#include "cc/animation/layer_tree_mutator.h"
+
+#include "cc/trees/layer_tree_mutator.h"
 
 namespace blink {
 
 // This is used by the compositor to invoke compositor worker callbacks.
-class BLINK_PLATFORM_EXPORT WebCompositorMutatorClient : public cc::LayerTreeMutator {
-public:
-    virtual ~WebCompositorMutatorClient() {}
+class BLINK_PLATFORM_EXPORT WebCompositorMutatorClient
+    : public cc::LayerTreeMutator {
+ public:
+  virtual ~WebCompositorMutatorClient() {}
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebCompositorMutatorClient_h
+#endif  // WebCompositorMutatorClient_h

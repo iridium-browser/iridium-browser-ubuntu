@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-<include src="keyboard_overlay_data.js">
+// <include src="keyboard_overlay_data.js">
 
 var BASE_KEYBOARD = {
   top: 0,
@@ -894,7 +894,7 @@ function initKeyboardOverlayId(inputMethodId) {
   var inputMethodIdToOverlayId =
       keyboardOverlayData['inputMethodIdToOverlayId'];
   if (inputMethodId) {
-    if (inputMethodId.indexOf(IME_ID_PREFIX) == 0) {
+    if (inputMethodId.startsWith(IME_ID_PREFIX)) {
       // If the input method is a component extension IME, remove the prefix:
       //   _comp_ime_<ext_id>
       // The extension id is a hash value with 32 characters.

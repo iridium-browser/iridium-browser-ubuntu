@@ -13,9 +13,10 @@ namespace mus {
 
 class WindowManager;
 
+// Controls accelerators that are specific to mash.
 class AcceleratorControllerDelegateMus : public AcceleratorControllerDelegate {
  public:
-  AcceleratorControllerDelegateMus();
+  explicit AcceleratorControllerDelegateMus(WindowManager* window_manager);
   ~AcceleratorControllerDelegateMus() override;
 
   // AcceleratorControllerDelegate:
@@ -31,6 +32,8 @@ class AcceleratorControllerDelegateMus : public AcceleratorControllerDelegate {
                                              int new_shortcut_id) override;
 
  private:
+  WindowManager* window_manager_;
+
   DISALLOW_COPY_AND_ASSIGN(AcceleratorControllerDelegateMus);
 };
 

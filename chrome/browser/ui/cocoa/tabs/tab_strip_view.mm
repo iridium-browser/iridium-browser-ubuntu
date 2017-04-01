@@ -13,12 +13,13 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/browser_window_layout.h"
 #import "chrome/browser/ui/cocoa/new_tab_button.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #import "ui/base/cocoa/appkit_utils.h"
 #import "ui/base/cocoa/nsgraphics_context_additions.h"
 #import "ui/base/cocoa/nsview_additions.h"
@@ -61,28 +62,6 @@
   if (!themeProvider)
     return;
 
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    // First draw the toolbar bitmap, so that theme colors can shine through.
-    NSRect backgroundRect = [self bounds];
-    backgroundRect.size.height = 2 * [self cr_lineWidth];
-    if (NSIntersectsRect(backgroundRect, dirtyRect))
-      [self drawBackground:backgroundRect];
-
-    // Draw the border bitmap, which is partially transparent.
-    NSImage* image = themeProvider->GetNSImageNamed(IDR_TOOLBAR_SHADE_TOP);
-    NSRect borderRect = backgroundRect;
-    borderRect.size.height = [image size].height;
-    if (NSIntersectsRect(borderRect, dirtyRect)) {
-      BOOL focused = [window isMainWindow];
-      NSDrawThreePartImage(borderRect, nil, image, nil, /*vertical=*/ NO,
-                           NSCompositeSourceOver,
-                           focused ?  1.0 : tabs::kImageNoFocusAlpha,
-                           /*flipped=*/ NO);
-    }
-
-    return;
-  }
-
   NSColor* strokeColor;
   if (themeProvider->HasCustomImage(IDR_THEME_TOOLBAR) ||
       themeProvider->HasCustomColor(ThemeProperties::COLOR_TOOLBAR)) {
@@ -122,7 +101,6 @@
   const ui::ThemeProvider* themeProvider = [[self window] themeProvider];
   bool hasCustomThemeImage = themeProvider &&
       themeProvider->HasCustomImage(IDR_THEME_FRAME);
-  bool isModeMaterial = ui::MaterialDesignController::IsModeMaterial();
   BOOL supportsVibrancy = [self visualEffectView] != nil;
   BOOL isMainWindow = [[self window] isMainWindow];
 
@@ -131,8 +109,7 @@
   // and not being used to drag tabs between browser windows). The gray is
   // somewhat opaque for Incognito mode, very opaque for non-Incognito mode, and
   // completely opaque when the window is not active.
-  if (themeProvider && !hasCustomThemeImage && isModeMaterial &&
-      !inATabDraggingOverlayWindow_) {
+  if (themeProvider && !hasCustomThemeImage && !inATabDraggingOverlayWindow_) {
     NSColor* theColor = nil;
     if (isMainWindow) {
       if (supportsVibrancy &&
@@ -371,14 +348,15 @@
 }
 
 - (NSVisualEffectView*)visualEffectView {
-  // NSVisualEffectView is only used in Material Design, and only available on
-  // OS X 10.10 and higher.
-  if (!ui::MaterialDesignController::IsModeMaterial() ||
-      !base::mac::IsOSYosemiteOrLater()) {
+  // NSVisualEffectView is only available on OS X 10.10 and higher.
+  if (!base::mac::IsAtLeastOS10_10())
     return nil;
+
+  NSView* rootView = [[self window] contentView];
+  if (!chrome::ShouldUseFullSizeContentView()) {
+    rootView = [rootView superview];
   }
 
-  NSView* rootView = [[[self window] contentView] superview];
   Class nsVisualEffectViewClass = NSClassFromString(@"NSVisualEffectView");
   DCHECK(nsVisualEffectViewClass);
   for (NSView* view in [rootView subviews]) {

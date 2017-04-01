@@ -6,9 +6,10 @@
 
 #include "fpdfsdk/pdfwindow/PWL_EditCtrl.h"
 
-#include "core/fpdfdoc/include/cpvt_section.h"
-#include "core/fpdfdoc/include/cpvt_word.h"
-#include "fpdfsdk/fxedit/include/fxet_edit.h"
+#include "core/fpdfdoc/cpvt_section.h"
+#include "core/fpdfdoc/cpvt_word.h"
+#include "core/fxge/fx_font.h"
+#include "fpdfsdk/fxedit/fxet_edit.h"
 #include "fpdfsdk/pdfwindow/PWL_Caret.h"
 #include "fpdfsdk/pdfwindow/PWL_FontMap.h"
 #include "fpdfsdk/pdfwindow/PWL_ScrollBar.h"
@@ -19,8 +20,8 @@
 CPWL_EditCtrl::CPWL_EditCtrl()
     : m_pEdit(new CFX_Edit),
       m_pEditCaret(nullptr),
-      m_bMouseDown(FALSE),
-      m_nCharSet(DEFAULT_CHARSET),
+      m_bMouseDown(false),
+      m_nCharSet(FXFONT_DEFAULT_CHARSET),
       m_nCodePage(0) {}
 
 CPWL_EditCtrl::~CPWL_EditCtrl() {}
@@ -37,7 +38,7 @@ void CPWL_EditCtrl::OnCreated() {
   m_pEdit->Initialize();
 }
 
-FX_BOOL CPWL_EditCtrl::IsWndHorV() {
+bool CPWL_EditCtrl::IsWndHorV() {
   CFX_Matrix mt = GetWindowMatrix();
   CFX_FloatPoint point1(0, 1);
   CFX_FloatPoint point2(1, 1);
@@ -135,16 +136,16 @@ FX_FLOAT CPWL_EditCtrl::GetFontSize() const {
   return m_pEdit->GetFontSize();
 }
 
-FX_BOOL CPWL_EditCtrl::OnKeyDown(uint16_t nChar, uint32_t nFlag) {
+bool CPWL_EditCtrl::OnKeyDown(uint16_t nChar, uint32_t nFlag) {
   if (m_bMouseDown)
-    return TRUE;
+    return true;
 
-  FX_BOOL bRet = CPWL_Wnd::OnKeyDown(nChar, nFlag);
+  bool bRet = CPWL_Wnd::OnKeyDown(nChar, nFlag);
 
   // FILTER
   switch (nChar) {
     default:
-      return FALSE;
+      return false;
     case FWL_VKEY_Delete:
     case FWL_VKEY_Up:
     case FWL_VKEY_Down:
@@ -172,35 +173,35 @@ FX_BOOL CPWL_EditCtrl::OnKeyDown(uint16_t nChar, uint32_t nFlag) {
   switch (nChar) {
     case FWL_VKEY_Delete:
       Delete();
-      return TRUE;
+      return true;
     case FWL_VKEY_Insert:
       if (IsSHIFTpressed(nFlag))
         PasteText();
-      return TRUE;
+      return true;
     case FWL_VKEY_Up:
-      m_pEdit->OnVK_UP(IsSHIFTpressed(nFlag), FALSE);
-      return TRUE;
+      m_pEdit->OnVK_UP(IsSHIFTpressed(nFlag), false);
+      return true;
     case FWL_VKEY_Down:
-      m_pEdit->OnVK_DOWN(IsSHIFTpressed(nFlag), FALSE);
-      return TRUE;
+      m_pEdit->OnVK_DOWN(IsSHIFTpressed(nFlag), false);
+      return true;
     case FWL_VKEY_Left:
-      m_pEdit->OnVK_LEFT(IsSHIFTpressed(nFlag), FALSE);
-      return TRUE;
+      m_pEdit->OnVK_LEFT(IsSHIFTpressed(nFlag), false);
+      return true;
     case FWL_VKEY_Right:
-      m_pEdit->OnVK_RIGHT(IsSHIFTpressed(nFlag), FALSE);
-      return TRUE;
+      m_pEdit->OnVK_RIGHT(IsSHIFTpressed(nFlag), false);
+      return true;
     case FWL_VKEY_Home:
       m_pEdit->OnVK_HOME(IsSHIFTpressed(nFlag), IsCTRLpressed(nFlag));
-      return TRUE;
+      return true;
     case FWL_VKEY_End:
       m_pEdit->OnVK_END(IsSHIFTpressed(nFlag), IsCTRLpressed(nFlag));
-      return TRUE;
+      return true;
     case FWL_VKEY_Unknown:
       if (!IsSHIFTpressed(nFlag))
         Clear();
       else
         CutText();
-      return TRUE;
+      return true;
     default:
       break;
   }
@@ -208,9 +209,9 @@ FX_BOOL CPWL_EditCtrl::OnKeyDown(uint16_t nChar, uint32_t nFlag) {
   return bRet;
 }
 
-FX_BOOL CPWL_EditCtrl::OnChar(uint16_t nChar, uint32_t nFlag) {
+bool CPWL_EditCtrl::OnChar(uint16_t nChar, uint32_t nFlag) {
   if (m_bMouseDown)
-    return TRUE;
+    return true;
 
   CPWL_Wnd::OnChar(nChar, nFlag);
 
@@ -218,14 +219,14 @@ FX_BOOL CPWL_EditCtrl::OnChar(uint16_t nChar, uint32_t nFlag) {
   switch (nChar) {
     case 0x0A:
     case 0x1B:
-      return FALSE;
+      return false;
     default:
       break;
   }
 
-  FX_BOOL bCtrl = IsCTRLpressed(nFlag);
-  FX_BOOL bAlt = IsALTpressed(nFlag);
-  FX_BOOL bShift = IsSHIFTpressed(nFlag);
+  bool bCtrl = IsCTRLpressed(nFlag);
+  bool bAlt = IsALTpressed(nFlag);
+  bool bShift = IsSHIFTpressed(nFlag);
 
   uint16_t word = nChar;
 
@@ -233,30 +234,30 @@ FX_BOOL CPWL_EditCtrl::OnChar(uint16_t nChar, uint32_t nFlag) {
     switch (nChar) {
       case 'C' - 'A' + 1:
         CopyText();
-        return TRUE;
+        return true;
       case 'V' - 'A' + 1:
         PasteText();
-        return TRUE;
+        return true;
       case 'X' - 'A' + 1:
         CutText();
-        return TRUE;
+        return true;
       case 'A' - 'A' + 1:
         SelectAll();
-        return TRUE;
+        return true;
       case 'Z' - 'A' + 1:
         if (bShift)
           Redo();
         else
           Undo();
-        return TRUE;
+        return true;
       default:
         if (nChar < 32)
-          return FALSE;
+          return false;
     }
   }
 
   if (IsReadOnly())
-    return TRUE;
+    return true;
 
   if (m_pEdit->IsSelected() && word == FWL_VKEY_Back)
     word = FWL_VKEY_Unknown;
@@ -277,28 +278,26 @@ FX_BOOL CPWL_EditCtrl::OnChar(uint16_t nChar, uint32_t nFlag) {
       break;
   }
 
-  return TRUE;
+  return true;
 }
 
-FX_BOOL CPWL_EditCtrl::OnLButtonDown(const CFX_FloatPoint& point,
-                                     uint32_t nFlag) {
+bool CPWL_EditCtrl::OnLButtonDown(const CFX_FloatPoint& point, uint32_t nFlag) {
   CPWL_Wnd::OnLButtonDown(point, nFlag);
 
   if (ClientHitTest(point)) {
     if (m_bMouseDown)
       InvalidateRect();
 
-    m_bMouseDown = TRUE;
+    m_bMouseDown = true;
     SetCapture();
 
     m_pEdit->OnMouseDown(point, IsSHIFTpressed(nFlag), IsCTRLpressed(nFlag));
   }
 
-  return TRUE;
+  return true;
 }
 
-FX_BOOL CPWL_EditCtrl::OnLButtonUp(const CFX_FloatPoint& point,
-                                   uint32_t nFlag) {
+bool CPWL_EditCtrl::OnLButtonUp(const CFX_FloatPoint& point, uint32_t nFlag) {
   CPWL_Wnd::OnLButtonUp(point, nFlag);
 
   if (m_bMouseDown) {
@@ -307,32 +306,30 @@ FX_BOOL CPWL_EditCtrl::OnLButtonUp(const CFX_FloatPoint& point,
       SetFocus();
 
     ReleaseCapture();
-    m_bMouseDown = FALSE;
+    m_bMouseDown = false;
   }
 
-  return TRUE;
+  return true;
 }
 
-FX_BOOL CPWL_EditCtrl::OnMouseMove(const CFX_FloatPoint& point,
-                                   uint32_t nFlag) {
+bool CPWL_EditCtrl::OnMouseMove(const CFX_FloatPoint& point, uint32_t nFlag) {
   CPWL_Wnd::OnMouseMove(point, nFlag);
 
   if (m_bMouseDown)
-    m_pEdit->OnMouseMove(point, FALSE, FALSE);
+    m_pEdit->OnMouseMove(point, false, false);
 
-  return TRUE;
+  return true;
 }
 
 CFX_FloatRect CPWL_EditCtrl::GetContentRect() const {
   return m_pEdit->GetContentRect();
 }
 
-void CPWL_EditCtrl::SetEditCaret(FX_BOOL bVisible) {
-  CFX_FloatPoint ptHead(0, 0), ptFoot(0, 0);
-
-  if (bVisible) {
+void CPWL_EditCtrl::SetEditCaret(bool bVisible) {
+  CFX_FloatPoint ptHead;
+  CFX_FloatPoint ptFoot;
+  if (bVisible)
     GetCaretInfo(ptHead, ptFoot);
-  }
 
   CPVT_WordPlace wpTemp = m_pEdit->GetCaretWordPlace();
   IOnSetCaret(bVisible, ptHead, ptFoot, wpTemp);
@@ -358,19 +355,18 @@ void CPWL_EditCtrl::GetCaretInfo(CFX_FloatPoint& ptHead,
 }
 
 void CPWL_EditCtrl::GetCaretPos(int32_t& x, int32_t& y) const {
-  CFX_FloatPoint ptHead(0, 0), ptFoot(0, 0);
-
+  CFX_FloatPoint ptHead;
+  CFX_FloatPoint ptFoot;
   GetCaretInfo(ptHead, ptFoot);
-
   PWLtoWnd(ptHead, x, y);
 }
 
-void CPWL_EditCtrl::SetCaret(FX_BOOL bVisible,
+void CPWL_EditCtrl::SetCaret(bool bVisible,
                              const CFX_FloatPoint& ptHead,
                              const CFX_FloatPoint& ptFoot) {
   if (m_pEditCaret) {
     if (!IsFocused() || m_pEdit->IsSelected())
-      bVisible = FALSE;
+      bVisible = false;
 
     m_pEditCaret->SetCaret(bVisible, ptHead, ptFoot);
   }
@@ -401,7 +397,7 @@ void CPWL_EditCtrl::Paint() {
   m_pEdit->Paint();
 }
 
-void CPWL_EditCtrl::EnableRefresh(FX_BOOL bRefresh) {
+void CPWL_EditCtrl::EnableRefresh(bool bRefresh) {
   m_pEdit->EnableRefresh(bRefresh);
 }
 
@@ -464,8 +460,8 @@ FX_FLOAT CPWL_EditCtrl::GetCaretFontSize() const {
   return fFontSize;
 }
 
-void CPWL_EditCtrl::SetText(const FX_WCHAR* csText) {
-  m_pEdit->SetText(csText);
+void CPWL_EditCtrl::SetText(const CFX_WideString& wsText) {
+  m_pEdit->SetText(wsText);
 }
 
 void CPWL_EditCtrl::CopyText() {}
@@ -474,11 +470,11 @@ void CPWL_EditCtrl::PasteText() {}
 
 void CPWL_EditCtrl::CutText() {}
 
-void CPWL_EditCtrl::ShowVScrollBar(FX_BOOL bShow) {}
+void CPWL_EditCtrl::ShowVScrollBar(bool bShow) {}
 
-void CPWL_EditCtrl::InsertText(const FX_WCHAR* csText) {
+void CPWL_EditCtrl::InsertText(const CFX_WideString& wsText) {
   if (!IsReadOnly())
-    m_pEdit->InsertText(csText, DEFAULT_CHARSET);
+    m_pEdit->InsertText(wsText, FXFONT_DEFAULT_CHARSET);
 }
 
 void CPWL_EditCtrl::InsertWord(uint16_t word, int32_t nCharset) {
@@ -501,11 +497,11 @@ void CPWL_EditCtrl::Backspace() {
     m_pEdit->Backspace();
 }
 
-FX_BOOL CPWL_EditCtrl::CanUndo() const {
+bool CPWL_EditCtrl::CanUndo() const {
   return !IsReadOnly() && m_pEdit->CanUndo();
 }
 
-FX_BOOL CPWL_EditCtrl::CanRedo() const {
+bool CPWL_EditCtrl::CanRedo() const {
   return !IsReadOnly() && m_pEdit->CanRedo();
 }
 
@@ -537,9 +533,9 @@ void CPWL_EditCtrl::IOnSetScrollInfoY(FX_FLOAT fPlateMin,
 
   if (IsFloatBigger(Info.fPlateWidth, Info.fContentMax - Info.fContentMin) ||
       IsFloatEqual(Info.fPlateWidth, Info.fContentMax - Info.fContentMin)) {
-    ShowVScrollBar(FALSE);
+    ShowVScrollBar(false);
   } else {
-    ShowVScrollBar(TRUE);
+    ShowVScrollBar(true);
   }
 }
 
@@ -547,7 +543,7 @@ void CPWL_EditCtrl::IOnSetScrollPosY(FX_FLOAT fy) {
   OnNotify(this, PNM_SETSCROLLPOS, SBT_VSCROLL, (intptr_t)&fy);
 }
 
-void CPWL_EditCtrl::IOnSetCaret(FX_BOOL bVisible,
+void CPWL_EditCtrl::IOnSetCaret(bool bVisible,
                                 const CFX_FloatPoint& ptHead,
                                 const CFX_FloatPoint& ptFoot,
                                 const CPVT_WordPlace& place) {
@@ -569,7 +565,7 @@ void CPWL_EditCtrl::IOnInvalidateRect(CFX_FloatRect* pRect) {
 }
 
 int32_t CPWL_EditCtrl::GetCharSet() const {
-  return m_nCharSet < 0 ? DEFAULT_CHARSET : m_nCharSet;
+  return m_nCharSet < 0 ? FXFONT_DEFAULT_CHARSET : m_nCharSet;
 }
 
 void CPWL_EditCtrl::GetTextRange(const CFX_FloatRect& rect,
@@ -591,6 +587,6 @@ CFX_WideString CPWL_EditCtrl::GetText(int32_t& nStartChar,
 void CPWL_EditCtrl::SetReadyToInput() {
   if (m_bMouseDown) {
     ReleaseCapture();
-    m_bMouseDown = FALSE;
+    m_bMouseDown = false;
   }
 }

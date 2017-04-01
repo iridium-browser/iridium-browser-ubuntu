@@ -15,7 +15,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -31,9 +31,6 @@
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_stats.h"
-#include "chrome/browser/extensions/devtools_util.h"
-#include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
@@ -71,6 +68,7 @@
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/guest_view/browser/guest_view_base.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
@@ -82,6 +80,7 @@
 #include "components/spellcheck/browser/pref_names.h"
 #include "components/spellcheck/browser/spellcheck_host_metrics.h"
 #include "components/spellcheck/common/spellcheck_common.h"
+#include "components/spellcheck/spellcheck_build_features.h"
 #include "components/translate/core/browser/translate_download_manager.h"
 #include "components/translate/core/browser/translate_manager.h"
 #include "components/translate/core/browser/translate_prefs.h"
@@ -92,6 +91,7 @@
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/download_save_info.h"
 #include "content/public/browser/download_url_parameters.h"
+#include "content/public/browser/guest_mode.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -99,19 +99,17 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/browser_plugin_guest_mode.h"
 #include "content/public/common/menu_item.h"
-#include "content/public/common/ssl_status.h"
 #include "content/public/common/url_utils.h"
-#include "extensions/browser/extension_host.h"
-#include "extensions/browser/extension_system.h"
-#include "extensions/browser/guest_view/web_view/web_view_guest.h"
-#include "extensions/browser/view_type_utils.h"
-#include "extensions/common/extension.h"
+#include "extensions/features/features.h"
 #include "net/base/escape.h"
+#include "ppapi/features/features.h"
+#include "printing/features/features.h"
+#include "third_party/WebKit/public/public_features.h"
 #include "third_party/WebKit/public/web/WebContextMenuData.h"
 #include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
 #include "third_party/WebKit/public/web/WebPluginAction.h"
@@ -125,31 +123,39 @@
 #include "ui/gfx/path.h"
 #include "ui/gfx/text_elider.h"
 
-#if !defined(USE_BROWSER_SPELLCHECKER)
+#if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
 #include "chrome/browser/renderer_context_menu/spelling_options_submenu_observer.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/devtools_util.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "extensions/browser/extension_host.h"
+#include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
+#include "extensions/browser/guest_view/web_view/web_view_guest.h"
+#include "extensions/browser/view_type_utils.h"
+#include "extensions/common/extension.h"
 #endif
 
-#if defined(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
 #include "chrome/browser/printing/print_view_manager_common.h"
 #include "components/printing/common/print_messages.h"
 
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
-#endif  // defined(ENABLE_PRINT_PREVIEW)
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 
 #if defined(ENABLE_MEDIA_ROUTER)
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
 #endif
 
 #if defined(GOOGLE_CHROME_BUILD)
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #endif
 
@@ -260,9 +266,9 @@ const struct UmaEnumCommandIdPair {
     {35, -1, IDC_CONTENT_CONTEXT_VIEWFRAMEINFO},
     {36, -1, IDC_CONTENT_CONTEXT_UNDO},
     {37, -1, IDC_CONTENT_CONTEXT_REDO},
-    {38, -1, IDC_CONTENT_CONTEXT_CUT},
+    {38, 28, IDC_CONTENT_CONTEXT_CUT},
     {39, 4, IDC_CONTENT_CONTEXT_COPY},
-    {40, -1, IDC_CONTENT_CONTEXT_PASTE},
+    {40, 29, IDC_CONTENT_CONTEXT_PASTE},
     {41, -1, IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE},
     {42, -1, IDC_CONTENT_CONTEXT_DELETE},
     {43, -1, IDC_CONTENT_CONTEXT_SELECTALL},
@@ -273,11 +279,11 @@ const struct UmaEnumCommandIdPair {
     {52, -1, IDC_CONTENT_CONTEXT_OPENLINKWITH},
     {53, -1, IDC_CHECK_SPELLING_WHILE_TYPING},
     {54, -1, IDC_SPELLCHECK_MENU},
-    {55, -1, IDC_CONTENT_CONTEXT_SPELLING_TOGGLE},
+    {55, 27, IDC_CONTENT_CONTEXT_SPELLING_TOGGLE},
     {56, -1, IDC_SPELLCHECK_LANGUAGES_FIRST},
     {57, 11, IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE},
-    {58, -1, IDC_SPELLCHECK_SUGGESTION_0},
-    {59, -1, IDC_SPELLCHECK_ADD_TO_DICTIONARY},
+    {58, 25, IDC_SPELLCHECK_SUGGESTION_0},
+    {59, 26, IDC_SPELLCHECK_ADD_TO_DICTIONARY},
     {60, -1, IDC_SPELLPANEL_TOGGLE},
     {61, -1, IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB},
     {62, -1, IDC_WRITING_DIRECTION_MENU},
@@ -373,7 +379,9 @@ WindowOpenDisposition ForceNewTabDispositionFromEventFlags(
     int event_flags) {
   WindowOpenDisposition disposition =
       ui::DispositionFromEventFlags(event_flags);
-  return disposition == CURRENT_TAB ? NEW_FOREGROUND_TAB : disposition;
+  return disposition == WindowOpenDisposition::CURRENT_TAB
+             ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+             : disposition;
 }
 
 // Returns the preference of the profile represented by the |context|.
@@ -402,7 +410,7 @@ content::Referrer CreateReferrer(const GURL& url,
 }
 
 content::WebContents* GetWebContentsToUse(content::WebContents* web_contents) {
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // If we're viewing in a MimeHandlerViewGuest, use its embedder WebContents.
   if (extensions::MimeHandlerViewGuest::FromWebContents(web_contents)) {
     WebContents* top_level_web_contents =
@@ -447,7 +455,7 @@ void AddAvatarToLastMenuItem(gfx::Image icon, ui::SimpleMenuModel* menu) {
   gfx::Path circular_mask;
   gfx::Canvas canvas(icon.Size(), 1.0f, true);
   canvas.FillRect(gfx::Rect(icon.Size()), SK_ColorTRANSPARENT,
-                  SkXfermode::kClear_Mode);
+                  SkBlendMode::kClear);
   circular_mask.addCircle(SkIntToScalar(width) / 2, SkIntToScalar(height) / 2,
                           SkIntToScalar(std::min(width, height)) / 2);
   canvas.ClipPath(circular_mask, true);
@@ -484,7 +492,7 @@ void OnProfileCreated(const GURL& link_url,
     Browser* browser = chrome::FindLastActiveWithProfile(profile);
     chrome::NavigateParams nav_params(browser, link_url,
                                       ui::PAGE_TRANSITION_LINK);
-    nav_params.disposition = NEW_FOREGROUND_TAB;
+    nav_params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
     nav_params.referrer = referrer;
     nav_params.window_action = chrome::NavigateParams::SHOW_WINDOW;
     chrome::Navigate(&nav_params);
@@ -497,12 +505,15 @@ void OnProfileCreated(const GURL& link_url,
 gfx::Vector2d RenderViewContextMenu::GetOffset(
     RenderFrameHost* render_frame_host) {
   gfx::Vector2d offset;
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // When --use-cross-process-frames-for-guests is enabled, the position is
   // transformed in the browser process hittesting code.
-  if (!content::BrowserPluginGuestMode::UseCrossProcessFramesForGuests()) {
-    WebContents* web_contents =
-        WebContents::FromRenderFrameHost(render_frame_host);
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(render_frame_host);
+  // TODO(ekaramad): For now, MimeHandlerView is based on BrowserPlugin even
+  // when guests use OOPIF. Remove the check below when MimeHandlerView is also
+  // based on OOPIF (https://crbug.com/642826).
+  if (!content::GuestMode::IsCrossProcessFrameGuest(web_contents)) {
     WebContents* top_level_web_contents =
         guest_view::GuestViewBase::GetTopLevelWebContents(web_contents);
     if (web_contents && top_level_web_contents &&
@@ -512,7 +523,7 @@ gfx::Vector2d RenderViewContextMenu::GetOffset(
       offset = bounds.origin() - top_level_bounds.origin();
     }
   }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
   return offset;
 }
 
@@ -525,7 +536,7 @@ bool RenderViewContextMenu::IsDevToolsURL(const GURL& url) {
 bool RenderViewContextMenu::IsInternalResourcesURL(const GURL& url) {
   if (!url.SchemeIs(content::kChromeUIScheme))
     return false;
-  return url.host() == chrome::kChromeUISyncResourcesHost;
+  return url.host_piece() == chrome::kChromeUISyncResourcesHost;
 }
 
 // static
@@ -560,6 +571,7 @@ RenderViewContextMenu::RenderViewContextMenu(
       protocol_handler_submenu_model_(this),
       protocol_handler_registry_(
           ProtocolHandlerRegistryFactory::GetForBrowserContext(GetProfile())),
+      save_as_text_experiement_enabled_(false),
       embedder_web_contents_(GetWebContentsToUse(source_web_contents_)) {
   if (!g_custom_id_ranges_initialized) {
     g_custom_id_ranges_initialized = true;
@@ -568,6 +580,12 @@ RenderViewContextMenu::RenderViewContextMenu(
   }
   set_content_type(ContextMenuContentTypeFactory::Create(
       source_web_contents_, params));
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableSaveAsMenuLabelExperiment) ||
+      base::FieldTrialList::FindFullName("SaveAsMenuText") == "download") {
+    save_as_text_experiement_enabled_ = true;
+  }
 }
 
 RenderViewContextMenu::~RenderViewContextMenu() {
@@ -575,7 +593,7 @@ RenderViewContextMenu::~RenderViewContextMenu() {
 
 // Menu construction functions -------------------------------------------------
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 // static
 bool RenderViewContextMenu::ExtensionContextAndPatternMatch(
     const content::ContextMenuParams& params,
@@ -723,7 +741,7 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
   extension_items_.AppendExtensionItems(key, PrintableSelectionText(), &index,
                                         false /* is_action_menu */);
 }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 void RenderViewContextMenu::InitMenu() {
   RenderViewContextMenuBase::InitMenu();
@@ -779,7 +797,8 @@ void RenderViewContextMenu::InitMenu() {
   }
 
   if (content_type_->SupportsGroup(
-          ContextMenuContentType::ITEM_GROUP_SEARCH_PROVIDER)) {
+          ContextMenuContentType::ITEM_GROUP_SEARCH_PROVIDER) &&
+      params_.misspelled_word.empty()) {
     AppendSearchProvider();
   }
 
@@ -790,7 +809,8 @@ void RenderViewContextMenu::InitMenu() {
   }
 
   if (content_type_->SupportsGroup(
-          ContextMenuContentType::ITEM_GROUP_EDITABLE)) {
+          ContextMenuContentType::ITEM_GROUP_EDITABLE) &&
+      params_.misspelled_word.empty()) {
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
     AppendLanguageSettings();
     AppendPlatformEditableItems();
@@ -865,6 +885,12 @@ void RenderViewContextMenu::RecordUsedItem(int id) {
                                 enum_id,
                                 kUmaEnumToControlId[kMappingSize - 1].enum_id);
     }
+    // Misspelled word context.
+    if (!params_.misspelled_word.empty()) {
+      UMA_HISTOGRAM_ENUMERATION("ContextMenu.SelectedOption.MisspelledWord",
+                                enum_id,
+                                kUmaEnumToControlId[kMappingSize - 1].enum_id);
+    }
   } else {
     NOTREACHED() << "Update kUmaEnumToControlId. Unhanded IDC: " << id;
   }
@@ -893,7 +919,7 @@ bool RenderViewContextMenu::IsHTML5Fullscreen() const {
   return controller->IsTabFullscreen();
 }
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
 void RenderViewContextMenu::HandleAuthorizeAllPlugins() {
   ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
       source_web_contents_, false, std::string());
@@ -901,7 +927,7 @@ void RenderViewContextMenu::HandleAuthorizeAllPlugins() {
 #endif
 
 void RenderViewContextMenu::AppendPrintPreviewItems() {
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   if (!print_preview_menu_observer_.get()) {
     print_preview_menu_observer_.reset(
         new PrintPreviewContextMenuObserver(source_web_contents_));
@@ -921,7 +947,7 @@ void RenderViewContextMenu::AppendDeveloperItems() {
   // devtools build.
   bool show_developer_items = !IsDevToolsURL(params_.page_url);
 
-#if defined(DEBUG_DEVTOOLS)
+#if BUILDFLAG(DEBUG_DEVTOOLS)
   show_developer_items = true;
 #endif
 
@@ -1051,8 +1077,13 @@ void RenderViewContextMenu::AppendLinkItems() {
     }
 #endif  // !defined(OS_CHROMEOS)
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVELINKAS,
-                                    IDS_CONTENT_CONTEXT_SAVELINKAS);
+    if (save_as_text_experiement_enabled_) {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVELINKAS,
+                                      IDS_CONTENT_CONTEXT_DOWNLOADLINK);
+    } else {
+      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVELINKAS,
+                                      IDS_CONTENT_CONTEXT_SAVELINKAS);
+    }
   }
 
   menu_model_.AddItemWithStringId(
@@ -1079,9 +1110,10 @@ void RenderViewContextMenu::AppendOpenWithLinkItems() {
 
 void RenderViewContextMenu::AppendImageItems() {
   std::map<std::string, std::string>::const_iterator it =
-      params_.properties.find(data_reduction_proxy::chrome_proxy_header());
+      params_.properties.find(
+          data_reduction_proxy::chrome_proxy_content_transform_header());
   if (it != params_.properties.end() && it->second ==
-      data_reduction_proxy::chrome_proxy_lo_fi_directive()) {
+      data_reduction_proxy::empty_image_directive()) {
     menu_model_.AddItemWithStringId(
         IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE,
         IDS_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE);
@@ -1097,8 +1129,13 @@ void RenderViewContextMenu::AppendImageItems() {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB,
                                     IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
   }
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
-                                  IDS_CONTENT_CONTEXT_SAVEIMAGEAS);
+  if (save_as_text_experiement_enabled_) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
+                                    IDS_CONTENT_CONTEXT_DOWNLOADIMAGE);
+  } else {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
+                                    IDS_CONTENT_CONTEXT_SAVEIMAGEAS);
+  }
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYIMAGE,
                                   IDS_CONTENT_CONTEXT_COPYIMAGE);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYIMAGELOCATION,
@@ -1129,16 +1166,26 @@ void RenderViewContextMenu::AppendAudioItems() {
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENAVNEWTAB,
                                   IDS_CONTENT_CONTEXT_OPENAUDIONEWTAB);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
-                                  IDS_CONTENT_CONTEXT_SAVEAUDIOAS);
+  if (save_as_text_experiement_enabled_) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
+                                    IDS_CONTENT_CONTEXT_DOWNLOADAUDIO);
+  } else {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
+                                    IDS_CONTENT_CONTEXT_SAVEAUDIOAS);
+  }
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYAVLOCATION,
                                   IDS_CONTENT_CONTEXT_COPYAUDIOLOCATION);
   AppendMediaRouterItem();
 }
 
 void RenderViewContextMenu::AppendCanvasItems() {
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
-                                  IDS_CONTENT_CONTEXT_SAVEIMAGEAS);
+  if (save_as_text_experiement_enabled_) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
+                                    IDS_CONTENT_CONTEXT_DOWNLOADIMAGE);
+  } else {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEIMAGEAS,
+                                    IDS_CONTENT_CONTEXT_SAVEIMAGEAS);
+  }
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYIMAGE,
                                   IDS_CONTENT_CONTEXT_COPYIMAGE);
 }
@@ -1148,8 +1195,13 @@ void RenderViewContextMenu::AppendVideoItems() {
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENAVNEWTAB,
                                   IDS_CONTENT_CONTEXT_OPENVIDEONEWTAB);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
-                                  IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
+  if (save_as_text_experiement_enabled_) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
+                                    IDS_CONTENT_CONTEXT_DOWNLOADVIDEO);
+  } else {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SAVEAVAS,
+                                    IDS_CONTENT_CONTEXT_SAVEVIDEOAS);
+  }
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYAVLOCATION,
                                   IDS_CONTENT_CONTEXT_COPYVIDEOLOCATION);
   AppendMediaRouterItem();
@@ -1187,8 +1239,13 @@ void RenderViewContextMenu::AppendPageItems() {
   menu_model_.AddItemWithStringId(IDC_FORWARD, IDS_CONTENT_CONTEXT_FORWARD);
   menu_model_.AddItemWithStringId(IDC_RELOAD, IDS_CONTENT_CONTEXT_RELOAD);
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
-  menu_model_.AddItemWithStringId(IDC_SAVE_PAGE,
-                                  IDS_CONTENT_CONTEXT_SAVEPAGEAS);
+  if (save_as_text_experiement_enabled_) {
+    menu_model_.AddItemWithStringId(IDC_SAVE_PAGE,
+                                    IDS_CONTENT_CONTEXT_DOWNLOADPAGE);
+  } else {
+    menu_model_.AddItemWithStringId(IDC_SAVE_PAGE,
+                                    IDS_CONTENT_CONTEXT_SAVEPAGEAS);
+  }
   menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
   AppendMediaRouterItem();
 
@@ -1208,7 +1265,7 @@ void RenderViewContextMenu::AppendPageItems() {
 }
 
 void RenderViewContextMenu::AppendExitFullscreenItem() {
-  Browser* browser = chrome::FindBrowserWithWebContents(source_web_contents_);
+  Browser* browser = GetBrowser();
   if (!browser)
     return;
 
@@ -1234,7 +1291,8 @@ void RenderViewContextMenu::AppendCopyItem() {
 void RenderViewContextMenu::AppendPrintItem() {
   if (GetPrefs(browser_context_)->GetBoolean(prefs::kPrintingEnabled) &&
       (params_.media_type == WebContextMenuData::MediaTypeNone ||
-       params_.media_flags & WebContextMenuData::MediaCanPrint)) {
+       params_.media_flags & WebContextMenuData::MediaCanPrint) &&
+      params_.misspelled_word.empty()) {
     menu_model_.AddItemWithStringId(IDC_PRINT, IDS_CONTENT_CONTEXT_PRINT);
   }
 }
@@ -1316,6 +1374,11 @@ void RenderViewContextMenu::AppendEditableItems() {
   if (use_spelling)
     AppendSpellingSuggestionItems();
 
+  if (!params_.misspelled_word.empty()) {
+    AppendSearchProvider();
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  }
+
 // 'Undo' and 'Redo' for text input with no suggestions and no text selected.
 // We make an exception for OS X as context clicking will select the closest
 // word. In this case both items are always shown.
@@ -1342,10 +1405,12 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_COPY);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_PASTE,
                                   IDS_CONTENT_CONTEXT_PASTE);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE,
-                                  IDS_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SELECTALL,
-                                  IDS_CONTENT_CONTEXT_SELECTALL);
+  if (params_.misspelled_word.empty()) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE,
+                                    IDS_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE);
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SELECTALL,
+                                    IDS_CONTENT_CONTEXT_SELECTALL);
+  }
 
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 }
@@ -1460,8 +1525,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     return params_.link_url.is_valid();
   }
 
-  IncognitoModePrefs::Availability incognito_avail =
-      IncognitoModePrefs::GetAvailability(prefs);
   switch (id) {
     case IDC_BACK:
       return embedder_web_contents_->GetController().CanGoBack();
@@ -1554,7 +1617,8 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsSavePageEnabled();
 
     case IDC_CONTENT_CONTEXT_RELOADFRAME:
-      return params_.frame_url.is_valid();
+      return params_.frame_url.is_valid() &&
+             params_.frame_url.GetOrigin() != chrome::kChromeUIPrintURL;
 
     case IDC_CONTENT_CONTEXT_UNDO:
       return !!(params_.edit_flags & WebContextMenuData::CanUndo);
@@ -1581,9 +1645,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return !!(params_.edit_flags & WebContextMenuData::CanSelectAll);
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
-      return !browser_context_->IsOffTheRecord() &&
-             params_.link_url.is_valid() &&
-             incognito_avail != IncognitoModePrefs::DISABLED;
+      return IsOpenLinkOTREnabled();
 
     case IDC_PRINT:
       return IsPrintPreviewEnabled();
@@ -1675,12 +1737,14 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW:
       OpenURLWithExtraHeaders(params_.link_url, GetDocumentURL(params_),
-              NEW_WINDOW, ui::PAGE_TRANSITION_LINK, "", true);
+                              WindowOpenDisposition::NEW_WINDOW,
+                              ui::PAGE_TRANSITION_LINK, "", true);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD:
       OpenURLWithExtraHeaders(params_.link_url, GURL(),
-              OFF_THE_RECORD, ui::PAGE_TRANSITION_LINK, "", true);
+                              WindowOpenDisposition::OFF_THE_RECORD,
+                              ui::PAGE_TRANSITION_LINK, "", true);
       break;
 
     case IDC_CONTENT_CONTEXT_SAVELINKAS:
@@ -1715,8 +1779,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB:
       OpenURLWithExtraHeaders(
-          params_.src_url, GetDocumentURL(params_), NEW_BACKGROUND_TAB,
-          ui::PAGE_TRANSITION_LINK,
+          params_.src_url, GetDocumentURL(params_),
+          WindowOpenDisposition::NEW_BACKGROUND_TAB, ui::PAGE_TRANSITION_LINK,
           data_reduction_proxy::kDataReductionPassThroughHeader, false);
       break;
 
@@ -1726,9 +1790,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
     case IDC_CONTENT_CONTEXT_OPENAVNEWTAB:
-      OpenURL(params_.src_url,
-              GetDocumentURL(params_),
-              NEW_BACKGROUND_TAB,
+      OpenURL(params_.src_url, GetDocumentURL(params_),
+              WindowOpenDisposition::NEW_BACKGROUND_TAB,
               ui::PAGE_TRANSITION_LINK);
       break;
 
@@ -1769,7 +1832,8 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_RELOAD:
-      embedder_web_contents_->GetController().Reload(true);
+      embedder_web_contents_->GetController().Reload(
+          content::ReloadType::NORMAL, true);
       break;
 
     case IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP:
@@ -1908,6 +1972,7 @@ void RenderViewContextMenu::NotifyURLOpened(
   RetargetingDetails details;
   details.source_web_contents = source_web_contents_;
   // Don't use GetRenderFrameHost() as it may be NULL. crbug.com/399789
+  details.source_render_process_id = render_process_id_;
   details.source_render_frame_id = render_frame_id_;
   details.target_url = url;
   details.target_web_contents = new_contents;
@@ -2033,7 +2098,7 @@ bool RenderViewContextMenu::IsSaveAsEnabled() const {
   bool can_save =
       (params_.media_flags & WebContextMenuData::MediaCanSave) &&
       url.is_valid() && ProfileIOData::IsHandledProtocol(url.scheme());
-#if defined(ENABLE_PRINT_PREVIEW)
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
       // Do not save the preview PDF on the print preview page.
   can_save = can_save &&
       !(printing::PrintPreviewDialogController::IsPrintPreviewURL(url));
@@ -2117,12 +2182,22 @@ bool RenderViewContextMenu::IsRouteMediaEnabled() const {
   return !manager || !manager->IsDialogActive();
 }
 
+bool RenderViewContextMenu::IsOpenLinkOTREnabled() const {
+  if (browser_context_->IsOffTheRecord() || !params_.link_url.is_valid())
+    return false;
+
+  IncognitoModePrefs::Availability incognito_avail =
+      IncognitoModePrefs::GetAvailability(GetPrefs(browser_context_));
+  return incognito_avail != IncognitoModePrefs::DISABLED;
+}
+
 void RenderViewContextMenu::ExecOpenLinkNewTab() {
   Browser* browser = chrome::FindBrowserWithWebContents(source_web_contents_);
   OpenURLWithExtraHeaders(params_.link_url, GetDocumentURL(params_),
-          (!browser || browser->is_app()) ? NEW_FOREGROUND_TAB
-                                          : NEW_BACKGROUND_TAB,
-          ui::PAGE_TRANSITION_LINK, "", true);
+                          (!browser || browser->is_app())
+                              ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+                              : WindowOpenDisposition::NEW_BACKGROUND_TAB,
+                          ui::PAGE_TRANSITION_LINK, "", true);
 }
 
 void RenderViewContextMenu::ExecProtocolHandler(int event_flags,
@@ -2242,7 +2317,7 @@ void RenderViewContextMenu::ExecSaveAs() {
 }
 
 void RenderViewContextMenu::ExecExitFullscreen() {
-  Browser* browser = chrome::FindBrowserWithWebContents(source_web_contents_);
+  Browser* browser = GetBrowser();
   if (!browser) {
     NOTREACHED();
     return;
@@ -2355,7 +2430,7 @@ void RenderViewContextMenu::ExecRestartPackagedApp() {
 }
 
 void RenderViewContextMenu::ExecPrint() {
-#if defined(ENABLE_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
   if (params_.media_type != WebContextMenuData::MediaTypeNone) {
     RenderFrameHost* render_frame_host = GetRenderFrameHost();
     if (render_frame_host) {
@@ -2369,7 +2444,7 @@ void RenderViewContextMenu::ExecPrint() {
       source_web_contents_,
       GetPrefs(browser_context_)->GetBoolean(prefs::kPrintPreviewDisabled),
       !params_.selection_text.empty());
-#endif  // defined(ENABLE_PRINTING)
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 }
 
 void RenderViewContextMenu::ExecRouteMedia() {

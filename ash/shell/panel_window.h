@@ -12,8 +12,6 @@
 
 namespace ash {
 
-class PanelFrameView;
-
 // Example Class for panel windows (Widget::InitParams::TYPE_PANEL).
 // Instances of PanelWindow will get added to the PanelContainer top level
 // window which manages the panel layout through PanelLayoutManager.
@@ -38,7 +36,6 @@ class PanelWindow : public views::WidgetDelegateView {
 
   // Overridden from views::WidgetDelegate:
   base::string16 GetWindowTitle() const override;
-  View* GetContentsView() override;
   bool CanResize() const override;
   bool CanMaximize() const override;
   bool CanMinimize() const override;

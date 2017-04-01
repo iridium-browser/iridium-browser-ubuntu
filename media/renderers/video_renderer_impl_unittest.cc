@@ -44,11 +44,7 @@ using ::testing::StrictMock;
 
 namespace media {
 
-ACTION_P(RunClosure, closure) {
-  closure.Run();
-}
-
-MATCHER_P(HasTimestamp, ms, "") {
+MATCHER_P(HasTimestampMatcher, ms, "") {
   *result_listener << "has timestamp " << arg->timestamp().InMilliseconds();
   return arg->timestamp().InMilliseconds() == ms;
 }
@@ -297,7 +293,7 @@ class VideoRendererImplTest : public testing::Test {
 
     {
       WaitableMessageLoopEvent event;
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
       EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
           .WillOnce(RunClosure(event.GetClosure()));
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
@@ -308,7 +304,7 @@ class VideoRendererImplTest : public testing::Test {
       Mock::VerifyAndClearExpectations(&mock_cb_);
     }
 
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeProgressing();
 
     // Advance time slightly, but enough to exceed the duration of the last
     // frame.
@@ -321,10 +317,10 @@ class VideoRendererImplTest : public testing::Test {
       // start rendering frames on its own thread, so the first frame may be
       // received.
       time_source_.StartTicking();
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(30))).Times(0);
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(30))).Times(0);
 
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(60))).Times(0);
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(90)))
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(60))).Times(0);
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(90)))
           .WillOnce(RunClosure(event.GetClosure()));
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
       AdvanceTimeInMs(91);
@@ -346,8 +342,8 @@ class VideoRendererImplTest : public testing::Test {
     }
 
     // Simulate delayed buffering state callbacks.
-    renderer_->OnTimeStateChanged(false);
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeStopped();
+    renderer_->OnTimeProgressing();
 
     // Receiving end of stream should signal having enough.
     {
@@ -372,7 +368,7 @@ class VideoRendererImplTest : public testing::Test {
     QueueFrames("0 20 40 60");
     {
       WaitableMessageLoopEvent event;
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
       EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
           .WillOnce(RunClosure(event.GetClosure()));
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
@@ -383,7 +379,7 @@ class VideoRendererImplTest : public testing::Test {
       Mock::VerifyAndClearExpectations(&mock_cb_);
     }
 
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeProgressing();
     time_source_.StartTicking();
 
     // Advance time, this should cause have nothing to be signaled.
@@ -392,7 +388,7 @@ class VideoRendererImplTest : public testing::Test {
       WaitableMessageLoopEvent event;
       EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
           .WillOnce(RunClosure(event.GetClosure()));
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(20))).Times(1);
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(20))).Times(1);
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
       AdvanceTimeInMs(20);
       event.RunAndWait();
@@ -402,7 +398,7 @@ class VideoRendererImplTest : public testing::Test {
     AdvanceTimeInMs(59);
     EXPECT_EQ(3u, renderer_->frames_queued_for_testing());
     time_source_.StopTicking();
-    renderer_->OnTimeStateChanged(false);
+    renderer_->OnTimeStopped();
     EXPECT_EQ(0u, renderer_->frames_queued_for_testing());
     ASSERT_TRUE(IsReadPending());
 
@@ -411,10 +407,13 @@ class VideoRendererImplTest : public testing::Test {
     {
       SCOPED_TRACE("Waiting for BUFFERING_HAVE_ENOUGH");
       WaitableMessageLoopEvent event;
-      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(80))).Times(1);
+      EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(80))).Times(1);
       EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
       EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
           .WillOnce(RunClosure(event.GetClosure()));
+      // Note: In the normal underflow case we queue 5 frames here instead of
+      // four since the underflow increases the number of required frames to
+      // reach the have enough state.
       if (type == UnderflowTestType::NORMAL)
         QueueFrames("80 100 120 140 160");
       else
@@ -510,7 +509,7 @@ TEST_F(VideoRendererImplTest, Initialize) {
 TEST_F(VideoRendererImplTest, InitializeAndStartPlayingFrom) {
   Initialize();
   QueueFrames("0 10 20 30");
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -533,7 +532,7 @@ TEST_F(VideoRendererImplTest, InitializeAndEndOfStream) {
     event.RunAndWait();
   }
   // Firing a time state changed to true should be ignored...
-  renderer_->OnTimeStateChanged(true);
+  renderer_->OnTimeProgressing();
   EXPECT_FALSE(null_video_sink_->is_started());
   Destroy();
 }
@@ -546,7 +545,7 @@ TEST_F(VideoRendererImplTest, DestroyWhileInitializing) {
 TEST_F(VideoRendererImplTest, DestroyWhileFlushing) {
   Initialize();
   QueueFrames("0 10 20 30");
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -559,7 +558,7 @@ TEST_F(VideoRendererImplTest, DestroyWhileFlushing) {
 TEST_F(VideoRendererImplTest, Play) {
   Initialize();
   QueueFrames("0 10 20 30");
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -590,7 +589,7 @@ static void VideoRendererImplTest_FlushDoneCB(VideoRendererImplTest* test,
 
 TEST_F(VideoRendererImplTest, FlushCallbackNoLock) {
   Initialize();
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
@@ -619,7 +618,7 @@ TEST_F(VideoRendererImplTest, DecodeError_Playing) {
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
 
   StartPlayingFrom(0);
-  renderer_->OnTimeStateChanged(true);
+  renderer_->OnTimeProgressing();
   time_source_.StartTicking();
   AdvanceTimeInMs(10);
 
@@ -641,7 +640,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_Exact) {
   Initialize();
   QueueFrames("50 60 70 80 90");
 
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(60)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(60)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -654,7 +653,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_RightBefore) {
   Initialize();
   QueueFrames("50 60 70 80 90");
 
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(50)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(50)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -667,7 +666,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_RightAfter) {
   Initialize();
   QueueFrames("50 60 70 80 90");
 
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(60)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(60)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -682,7 +681,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_LowDelay) {
   InitializeWithLowDelay(true);
   QueueFrames("0 10");
 
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(10)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(10)));
   // Expect some amount of have enough/nothing due to only requiring one frame.
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
       .Times(AnyNumber());
@@ -696,11 +695,11 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_LowDelay) {
   QueueFrames("20");
   SatisfyPendingDecode();
 
-  renderer_->OnTimeStateChanged(true);
+  renderer_->OnTimeProgressing();
   time_source_.StartTicking();
 
   WaitableMessageLoopEvent event;
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(20)))
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(20)))
       .WillOnce(RunClosure(event.GetClosure()));
   AdvanceTimeInMs(20);
   event.RunAndWait();
@@ -712,7 +711,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFrom_LowDelay) {
 TEST_F(VideoRendererImplTest, DestroyDuringOutstandingRead) {
   Initialize();
   QueueFrames("0 10 20 30");
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -769,7 +768,7 @@ TEST_F(VideoRendererImplTest, RenderingStopsAfterFirstFrame) {
     SCOPED_TRACE("Waiting for first frame to be painted.");
     WaitableMessageLoopEvent event;
 
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)))
         .WillOnce(RunClosure(event.GetClosure()));
     StartPlayingFrom(0);
 
@@ -788,7 +787,7 @@ TEST_F(VideoRendererImplTest, RenderingStopsAfterOneFrameWithEOS) {
   InitializeWithLowDelay(true);
   QueueFrames("0");
 
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0))).Times(1);
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0))).Times(1);
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
@@ -800,13 +799,13 @@ TEST_F(VideoRendererImplTest, RenderingStopsAfterOneFrameWithEOS) {
 
     null_video_sink_->set_stop_cb(event.GetClosure());
     StartPlayingFrom(0);
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeProgressing();
 
     EXPECT_TRUE(IsReadPending());
     SatisfyPendingDecodeWithEndOfStream();
     WaitForEnded();
 
-    renderer_->OnTimeStateChanged(false);
+    renderer_->OnTimeStopped();
     event.RunAndWait();
   }
 
@@ -830,7 +829,7 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
     EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_))
         .Times(4)
         .WillRepeatedly(SaveArg<0>(&last_pipeline_statistics));
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
     EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
     EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
     StartPlayingFrom(0);
@@ -854,7 +853,7 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
       .Times(testing::AtMost(1));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
       .Times(testing::AtMost(1));
-  renderer_->OnTimeStateChanged(true);
+  renderer_->OnTimeProgressing();
   time_source_.StartTicking();
 
   // Suspend all future callbacks and synthetically advance the media time,
@@ -862,7 +861,7 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
   // a pending read is ready.
   null_video_sink_->set_background_render(true);
   AdvanceTimeInMs(91);
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(90)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(90)));
   WaitForPendingDecode();
   SatisfyPendingDecodeWithEndOfStream();
 
@@ -894,16 +893,16 @@ TEST_F(VideoRendererImplTest, UnderflowEvictionBeforeEOS) {
     WaitableMessageLoopEvent event;
     EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
         .WillOnce(RunClosure(event.GetClosure()));
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeProgressing();
     time_source_.StartTicking();
+    // Jump time far enough forward that no frames are valid.
+    AdvanceTimeInMs(1000);
     event.RunAndWait();
   }
 
   WaitForPendingDecode();
 
-  // Jump time far enough forward that no frames are valid.
-  renderer_->OnTimeStateChanged(false);
-  AdvanceTimeInMs(1000);
+  renderer_->OnTimeStopped();
   time_source_.StopTicking();
 
   // Providing the end of stream packet should remove all frames and exit.
@@ -914,8 +913,7 @@ TEST_F(VideoRendererImplTest, UnderflowEvictionBeforeEOS) {
 }
 
 // Tests the case where underflow evicts all frames in the HAVE_ENOUGH state.
-// Note: Disabled for merge into M54 since it is flaky there.
-TEST_F(VideoRendererImplTest, DISABLED_UnderflowEvictionWhileHaveEnough) {
+TEST_F(VideoRendererImplTest, UnderflowEvictionWhileHaveEnough) {
   Initialize();
   QueueFrames("0 30 60 90 100");
 
@@ -932,32 +930,30 @@ TEST_F(VideoRendererImplTest, DISABLED_UnderflowEvictionWhileHaveEnough) {
     event.RunAndWait();
   }
 
-  null_video_sink_->set_background_render(true);
-  time_source_.StartTicking();
-  renderer_->OnTimeStateChanged(true);
-  WaitForPendingDecode();
-  renderer_->OnTimeStateChanged(false);
+  // Now wait until we have no effective frames.
+  {
+    SCOPED_TRACE("Waiting for zero effective frames.");
+    WaitableMessageLoopEvent event;
+    null_video_sink_->set_background_render(true);
+    time_source_.StartTicking();
+    AdvanceTimeInMs(1000);
+    renderer_->OnTimeProgressing();
+    EXPECT_CALL(mock_cb_, FrameReceived(_))
+        .WillOnce(RunClosure(event.GetClosure()));
+    event.RunAndWait();
+    ASSERT_EQ(renderer_->effective_frames_queued_for_testing(), 0u);
+  }
 
-  // Jump time far enough forward that no frames are valid.
-  AdvanceTimeInMs(1000);
-
+  // When OnTimeStopped() is called it should transition to HAVE_NOTHING.
   {
     SCOPED_TRACE("Waiting for BUFFERING_HAVE_NOTHING");
     WaitableMessageLoopEvent event;
     EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_NOTHING))
         .WillOnce(RunClosure(event.GetClosure()));
-    QueueFrames("120");
-    SatisfyPendingDecode();
+    renderer_->OnTimeStopped();
     event.RunAndWait();
   }
 
-  // This should do nothing.
-  renderer_->OnTimeStateChanged(true);
-
-  // Providing the end of stream packet should remove all frames and exit.
-  SatisfyPendingDecodeWithEndOfStream();
-  EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
-  WaitForEnded();
   Destroy();
 }
 
@@ -966,7 +962,7 @@ TEST_F(VideoRendererImplTest, StartPlayingFromThenFlushThenEOS) {
   QueueFrames("0 30 60 90");
 
   WaitableMessageLoopEvent event;
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
       .WillOnce(RunClosure(event.GetClosure()));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
@@ -1003,18 +999,18 @@ TEST_F(VideoRendererImplTest, FramesAreNotExpiredDuringPreroll) {
   QueueFrames("0 10 20");
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH))
       .Times(testing::AtMost(1));
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);
   EXPECT_CALL(mock_cb_, OnVideoOpacityChange(_)).Times(1);
   StartPlayingFrom(0);
 
-  renderer_->OnTimeStateChanged(true);
+  renderer_->OnTimeProgressing();
   time_source_.StartTicking();
 
   WaitableMessageLoopEvent event;
   // Frame "10" should not have been expired.
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(10)))
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(10)))
       .WillOnce(RunClosure(event.GetClosure()));
   AdvanceTimeInMs(10);
   event.RunAndWait();
@@ -1052,16 +1048,16 @@ TEST_F(VideoRendererImplTest, NaturalSizeChange) {
   {
     // Callback is fired for the first frame.
     EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(initial_size));
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
     StartPlayingFrom(0);
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeProgressing();
     time_source_.StartTicking();
   }
   {
     // Callback should be fired once when switching to the larger size.
     EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(larger_size));
     WaitableMessageLoopEvent event;
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(10)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(10)))
         .WillOnce(RunClosure(event.GetClosure()));
     AdvanceTimeInMs(10);
     event.RunAndWait();
@@ -1069,7 +1065,7 @@ TEST_F(VideoRendererImplTest, NaturalSizeChange) {
   {
     // Called is not fired because frame size does not change.
     WaitableMessageLoopEvent event;
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(20)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(20)))
         .WillOnce(RunClosure(event.GetClosure()));
     AdvanceTimeInMs(10);
     event.RunAndWait();
@@ -1078,7 +1074,7 @@ TEST_F(VideoRendererImplTest, NaturalSizeChange) {
     // Callback is fired once when switching to the larger size.
     EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(initial_size));
     WaitableMessageLoopEvent event;
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(30)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(30)))
         .WillOnce(RunClosure(event.GetClosure()));
     AdvanceTimeInMs(10);
     event.RunAndWait();
@@ -1118,15 +1114,15 @@ TEST_F(VideoRendererImplTest, OpacityChange) {
   {
     // Callback is fired for the first frame.
     EXPECT_CALL(mock_cb_, OnVideoOpacityChange(false));
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
     StartPlayingFrom(0);
-    renderer_->OnTimeStateChanged(true);
+    renderer_->OnTimeProgressing();
     time_source_.StartTicking();
   }
   {
     // Callback is not fired because opacity does not change.
     WaitableMessageLoopEvent event;
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(10)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(10)))
         .WillOnce(RunClosure(event.GetClosure()));
     AdvanceTimeInMs(10);
     event.RunAndWait();
@@ -1135,7 +1131,7 @@ TEST_F(VideoRendererImplTest, OpacityChange) {
     // Called is fired when opacity changes.
     EXPECT_CALL(mock_cb_, OnVideoOpacityChange(true));
     WaitableMessageLoopEvent event;
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(20)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(20)))
         .WillOnce(RunClosure(event.GetClosure()));
     AdvanceTimeInMs(10);
     event.RunAndWait();
@@ -1143,7 +1139,7 @@ TEST_F(VideoRendererImplTest, OpacityChange) {
   {
     // Callback is not fired because opacity does not change.
     WaitableMessageLoopEvent event;
-    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(30)))
+    EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(30)))
         .WillOnce(RunClosure(event.GetClosure()));
     AdvanceTimeInMs(10);
     event.RunAndWait();
@@ -1168,7 +1164,7 @@ class VideoRendererImplAsyncAddFrameReadyTest : public VideoRendererImplTest {
 TEST_F(VideoRendererImplAsyncAddFrameReadyTest, InitializeAndStartPlayingFrom) {
   Initialize();
   QueueFrames("0 10 20 30");
-  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestamp(0)));
+  EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(0)));
   EXPECT_CALL(mock_cb_, OnBufferingStateChange(BUFFERING_HAVE_ENOUGH));
   EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_)).Times(AnyNumber());
   EXPECT_CALL(mock_cb_, OnVideoNaturalSizeChange(_)).Times(1);

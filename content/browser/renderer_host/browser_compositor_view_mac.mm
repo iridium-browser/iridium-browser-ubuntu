@@ -86,7 +86,6 @@ class RecyclableCompositorMac : public ui::CompositorObserver {
   void OnCompositingStarted(ui::Compositor* compositor,
                             base::TimeTicks start_time) override {}
   void OnCompositingEnded(ui::Compositor* compositor) override {}
-  void OnCompositingAborted(ui::Compositor* compositor) override {}
   void OnCompositingLockStateChanged(ui::Compositor* compositor) override {}
   void OnCompositingShuttingDown(ui::Compositor* compositor) override {}
 
@@ -99,7 +98,9 @@ class RecyclableCompositorMac : public ui::CompositorObserver {
 
 RecyclableCompositorMac::RecyclableCompositorMac()
     : accelerated_widget_mac_(new ui::AcceleratedWidgetMac()),
-      compositor_(content::GetContextFactory(),
+      compositor_(content::GetContextFactoryPrivate()->AllocateFrameSinkId(),
+                  content::GetContextFactory(),
+                  content::GetContextFactoryPrivate(),
                   ui::WindowResizeHelperMac::Get()->task_runner()) {
   compositor_.SetAcceleratedWidget(
       accelerated_widget_mac_->accelerated_widget());
@@ -174,7 +175,9 @@ BrowserCompositorMac::BrowserCompositorMac(
   g_browser_compositor_count += 1;
 
   root_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
-  delegated_frame_host_.reset(new DelegatedFrameHost(this));
+  ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+  delegated_frame_host_.reset(new DelegatedFrameHost(
+      factory->GetContextFactoryPrivate()->AllocateFrameSinkId(), this));
 
   SetRenderWidgetHostIsHidden(render_widget_host_is_hidden);
   SetNSViewAttachedToWindow(ns_view_attached_to_window);
@@ -265,11 +268,11 @@ void BrowserCompositorMac::CopyFromCompositingSurfaceToVideoFrame(
       src_subrect, target, callback_with_decrement);
 }
 
-void BrowserCompositorMac::SwapCompositorFrame(uint32_t output_surface_id,
-                                               cc::CompositorFrame frame) {
+void BrowserCompositorMac::SwapCompositorFrame(
+    uint32_t compositor_frame_sink_id,
+    cc::CompositorFrame frame) {
   // Compute the frame size based on the root render pass rect size.
-  cc::RenderPass* root_pass =
-      frame.delegated_frame_data->render_pass_list.back().get();
+  cc::RenderPass* root_pass = frame.render_pass_list.back().get();
   float scale_factor = frame.metadata.device_scale_factor;
   gfx::Size pixel_size = root_pass->output_rect.size();
   gfx::Size dip_size = gfx::ConvertSizeToDIP(scale_factor, pixel_size);
@@ -278,7 +281,7 @@ void BrowserCompositorMac::SwapCompositorFrame(uint32_t output_surface_id,
     recyclable_compositor_->compositor()->SetScaleAndSize(scale_factor,
                                                           pixel_size);
   }
-  delegated_frame_host_->SwapDelegatedFrame(output_surface_id,
+  delegated_frame_host_->SwapDelegatedFrame(compositor_frame_sink_id,
                                             std::move(frame));
 }
 
@@ -435,21 +438,11 @@ void BrowserCompositorMac::DelegatedFrameHostResizeLockWasReleased() {
 }
 
 void BrowserCompositorMac::DelegatedFrameHostSendReclaimCompositorResources(
-    int output_surface_id,
+    int compositor_frame_sink_id,
     bool is_swap_ack,
     const cc::ReturnedResourceArray& resources) {
   client_->BrowserCompositorMacSendReclaimCompositorResources(
-      output_surface_id, is_swap_ack, resources);
-}
-
-void BrowserCompositorMac::DelegatedFrameHostOnLostCompositorResources() {
-  client_->BrowserCompositorMacOnLostCompositorResources();
-}
-
-void BrowserCompositorMac::DelegatedFrameHostUpdateVSyncParameters(
-    const base::TimeTicks& timebase,
-    const base::TimeDelta& interval) {
-  client_->BrowserCompositorMacUpdateVSyncParameters(timebase, interval);
+      compositor_frame_sink_id, is_swap_ack, resources);
 }
 
 void BrowserCompositorMac::SetBeginFrameSource(cc::BeginFrameSource* source) {

@@ -33,6 +33,7 @@
 
 #include "WebCanvas.h"
 #include "WebColor.h"
+#include "WebScrollbarOverlayColorTheme.h"
 #include "WebSize.h"
 
 namespace blink {
@@ -40,131 +41,152 @@ namespace blink {
 struct WebRect;
 
 class WebThemeEngine {
-public:
-    // The current state of the associated Part.
-    enum State {
-        StateDisabled,
-        StateHover,
-        StateNormal,
-        StatePressed,
-        StateFocused,
-        StateReadonly,
-    };
+ public:
+  // The current state of the associated Part.
+  enum State {
+    StateDisabled,
+    StateHover,
+    StateNormal,
+    StatePressed,
+    StateFocused,
+    StateReadonly,
+  };
 
-    // The UI part which is being accessed.
-    enum Part {
-        // ScrollbarTheme parts
-        PartScrollbarDownArrow,
-        PartScrollbarLeftArrow,
-        PartScrollbarRightArrow,
-        PartScrollbarUpArrow,
-        PartScrollbarHorizontalThumb,
-        PartScrollbarVerticalThumb,
-        PartScrollbarHorizontalTrack,
-        PartScrollbarVerticalTrack,
-        PartScrollbarCorner,
+  // The UI part which is being accessed.
+  enum Part {
+    // ScrollbarTheme parts
+    PartScrollbarDownArrow,
+    PartScrollbarLeftArrow,
+    PartScrollbarRightArrow,
+    PartScrollbarUpArrow,
+    PartScrollbarHorizontalThumb,
+    PartScrollbarVerticalThumb,
+    PartScrollbarHorizontalTrack,
+    PartScrollbarVerticalTrack,
+    PartScrollbarCorner,
 
-        // LayoutTheme parts
-        PartCheckbox,
-        PartRadio,
-        PartButton,
-        PartTextField,
-        PartMenuList,
-        PartSliderTrack,
-        PartSliderThumb,
-        PartInnerSpinButton,
-        PartProgressBar
-    };
+    // LayoutTheme parts
+    PartCheckbox,
+    PartRadio,
+    PartButton,
+    PartTextField,
+    PartMenuList,
+    PartSliderTrack,
+    PartSliderThumb,
+    PartInnerSpinButton,
+    PartProgressBar
+  };
 
-    // Extra parameters for drawing the PartScrollbarHorizontalTrack and
-    // PartScrollbarVerticalTrack.
-    struct ScrollbarTrackExtraParams {
-        bool isBack; // Whether this is the 'back' part or the 'forward' part.
+  // Extra parameters for drawing the PartScrollbarHorizontalTrack and
+  // PartScrollbarVerticalTrack.
+  struct ScrollbarTrackExtraParams {
+    bool isBack;  // Whether this is the 'back' part or the 'forward' part.
 
-        // The bounds of the entire track, as opposed to the part being painted.
-        int trackX;
-        int trackY;
-        int trackWidth;
-        int trackHeight;
-    };
+    // The bounds of the entire track, as opposed to the part being painted.
+    int trackX;
+    int trackY;
+    int trackWidth;
+    int trackHeight;
+  };
 
-    // Extra parameters for PartCheckbox, PartPushButton and PartRadio.
-    struct ButtonExtraParams {
-        bool checked;
-        bool indeterminate; // Whether the button state is indeterminate.
-        bool isDefault; // Whether the button is default button.
-        bool hasBorder;
-        WebColor backgroundColor;
-    };
+  // Extra parameters for PartCheckbox, PartPushButton and PartRadio.
+  struct ButtonExtraParams {
+    bool checked;
+    bool indeterminate;  // Whether the button state is indeterminate.
+    bool isDefault;      // Whether the button is default button.
+    bool hasBorder;
+    WebColor backgroundColor;
+  };
 
-    // Extra parameters for PartTextField
-    struct TextFieldExtraParams {
-        bool isTextArea;
-        bool isListbox;
-        WebColor backgroundColor;
-    };
+  // Extra parameters for PartTextField
+  struct TextFieldExtraParams {
+    bool isTextArea;
+    bool isListbox;
+    WebColor backgroundColor;
+  };
 
-    // Extra parameters for PartMenuList
-    struct MenuListExtraParams {
-        bool hasBorder;
-        bool hasBorderRadius;
-        int arrowX;
-        int arrowY;
-        int arrowSize;
-        WebColor arrowColor;
-        WebColor backgroundColor;
-        bool fillContentArea;
-    };
+  // Extra parameters for PartMenuList
+  struct MenuListExtraParams {
+    bool hasBorder;
+    bool hasBorderRadius;
+    int arrowX;
+    int arrowY;
+    int arrowSize;
+    WebColor arrowColor;
+    WebColor backgroundColor;
+    bool fillContentArea;
+  };
 
-    // Extra parameters for PartSliderTrack and PartSliderThumb
-    struct SliderExtraParams {
-        bool vertical;
-        bool inDrag;
-    };
+  // Extra parameters for PartSliderTrack and PartSliderThumb
+  struct SliderExtraParams {
+    bool vertical;
+    bool inDrag;
+  };
 
-    // Extra parameters for PartInnerSpinButton
-    struct InnerSpinButtonExtraParams {
-        bool spinUp;
-        bool readOnly;
-    };
+  // Extra parameters for PartInnerSpinButton
+  struct InnerSpinButtonExtraParams {
+    bool spinUp;
+    bool readOnly;
+  };
 
-    // Extra parameters for PartProgressBar
-    struct ProgressBarExtraParams {
-        bool determinate;
-        int valueRectX;
-        int valueRectY;
-        int valueRectWidth;
-        int valueRectHeight;
-    };
+  // Extra parameters for PartProgressBar
+  struct ProgressBarExtraParams {
+    bool determinate;
+    int valueRectX;
+    int valueRectY;
+    int valueRectWidth;
+    int valueRectHeight;
+  };
 
-    union ExtraParams {
-        ScrollbarTrackExtraParams scrollbarTrack;
-        ButtonExtraParams button;
-        TextFieldExtraParams textField;
-        MenuListExtraParams menuList;
-        SliderExtraParams slider;
-        InnerSpinButtonExtraParams innerSpin;
-        ProgressBarExtraParams progressBar;
-    };
+  // Extra parameters for scrollbar thumb. Used only for overlay scrollbars.
+  struct ScrollbarThumbExtraParams {
+    WebScrollbarOverlayColorTheme scrollbarTheme;
+  };
 
-    // Gets the size of the given theme part. For variable sized items
-    // like vertical scrollbar thumbs, the width will be the required width of
-    // the track while the height will be the minimum height.
-    virtual WebSize getSize(Part) { return WebSize(); }
+  union ExtraParams {
+    ScrollbarTrackExtraParams scrollbarTrack;
+    ButtonExtraParams button;
+    TextFieldExtraParams textField;
+    MenuListExtraParams menuList;
+    SliderExtraParams slider;
+    InnerSpinButtonExtraParams innerSpin;
+    ProgressBarExtraParams progressBar;
+    ScrollbarThumbExtraParams scrollbarThumb;
+  };
 
-    struct ScrollbarStyle {
-        int thumbThickness;
-        int scrollbarMargin;
-        WebColor color;
-    };
+  // Gets the size of the given theme part. For variable sized items
+  // like vertical scrollbar thumbs, the width will be the required width of
+  // the track while the height will be the minimum height.
+  virtual WebSize getSize(Part) { return WebSize(); }
 
-    // Gets the overlay scrollbar style. Used for mobile theme.
-    virtual void getOverlayScrollbarStyle(ScrollbarStyle*) { }
+  struct ScrollbarStyle {
+    int thumbThickness;
+    int scrollbarMargin;
+    WebColor color;
+    double fadeOutDelaySeconds;
+    double fadeOutDurationSeconds;
+  };
 
-    // Paint the given the given theme part.
-    virtual void paint(WebCanvas*, Part, State, const WebRect&, const ExtraParams*) { }
+  // Gets the overlay scrollbar style. Not used on Mac.
+  virtual void getOverlayScrollbarStyle(ScrollbarStyle* style) {
+    // Disable overlay scrollbar fade out (for non-composited scrollers) unless
+    // explicitly enabled by the implementing child class. NOTE: these values
+    // aren't used to control Mac fade out - that happens in ScrollAnimatorMac.
+    style->fadeOutDelaySeconds = 0.0;
+    style->fadeOutDurationSeconds = 0.0;
+    // The other fields in this struct are used only on Android to draw solid
+    // color scrollbars. On other platforms the scrollbars are painted in
+    // NativeTheme so these fields are unused in non-Android WebThemeEngines.
+  }
+
+  // Paint the given the given theme part.
+  virtual void paint(WebCanvas*,
+                     Part,
+                     State,
+                     const WebRect&,
+                     const ExtraParams*) {}
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

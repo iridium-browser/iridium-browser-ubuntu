@@ -182,14 +182,14 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       // This algorithm works by walking all the ops and pushing any
       // annotations onto a stack. When a non-annotation op is found, the
       // annotations stack is traversed and stored with the op.
-      var annotationGroups = new Array();
-      var opsWithoutAnnotations = new Array();
+      var annotationGroups = [];
+      var opsWithoutAnnotations = [];
       for (var opIndex = 0; opIndex < ops.length; opIndex++) {
         var op = ops[opIndex];
         op.opIndex = opIndex;
         switch (op.cmd_string) {
           case BEGIN_ANNOTATION:
-            annotationGroups.push(new Array());
+            annotationGroups.push([]);
             break;
           case END_ANNOTATION:
             annotationGroups.pop();
@@ -198,21 +198,21 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
             annotationGroups[annotationGroups.length - 1].push(op);
             break;
           default:
-            var annotations = new Array();
+            var annotations = [];
             var elementInfo = {};
             annotationGroups.forEach(function(annotationGroup) {
               elementInfo = {};
               annotationGroup.forEach(function(annotation) {
                 annotation.info.forEach(function(info) {
-                  if (info.indexOf(ANNOTATION_TAG) != -1)
+                  if (info.indexOf(ANNOTATION_TAG) !== -1)
                     elementInfo.tag = info.substring(
                         info.indexOf(ANNOTATION_TAG) +
                         ANNOTATION_TAG.length).toLowerCase();
-                  else if (info.indexOf(ANNOTATION_ID) != -1)
+                  else if (info.indexOf(ANNOTATION_ID) !== -1)
                     elementInfo.id = info.substring(
                         info.indexOf(ANNOTATION_ID) +
                         ANNOTATION_ID.length);
-                  else if (info.indexOf(ANNOTATION_CLASS) != -1)
+                  else if (info.indexOf(ANNOTATION_CLASS) !== -1)
                     elementInfo.class = info.substring(
                         info.indexOf(ANNOTATION_CLASS) +
                         ANNOTATION_CLASS.length);
@@ -232,7 +232,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
   };
 
   return {
-    PictureOpsListView: PictureOpsListView
+    PictureOpsListView,
   };
 });
 </script>

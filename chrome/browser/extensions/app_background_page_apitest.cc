@@ -13,6 +13,7 @@
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -57,7 +58,8 @@ class AppBackgroundPageApiTest : public ExtensionApiTest {
       LOG(ERROR) << "Unable to create a temporary directory.";
       return false;
     }
-    base::FilePath manifest_path = app_dir_.path().AppendASCII("manifest.json");
+    base::FilePath manifest_path =
+        app_dir_.GetPath().AppendASCII("manifest.json");
     int bytes_written = base::WriteFile(manifest_path,
                                         app_manifest.data(),
                                         app_manifest.size());
@@ -66,7 +68,7 @@ class AppBackgroundPageApiTest : public ExtensionApiTest {
                  << bytes_written;
       return false;
     }
-    *app_dir = app_dir_.path();
+    *app_dir = app_dir_.GetPath();
     return true;
   }
 

@@ -23,6 +23,15 @@
 namespace {
 
 const char kElementKey[] = "ELEMENT";
+const char kElementKeyW3C[] = "element-6066-11e4-a52e-4f735466cecf";
+
+std::string GetElementKey() {
+  Session* session = GetThreadLocalSession();
+  if (session && session->w3c_compliant)
+    return kElementKeyW3C;
+  else
+    return kElementKey;
+}
 
 bool ParseFromValue(base::Value* value, WebPoint* point) {
   base::DictionaryValue* dict_value;
@@ -72,8 +81,8 @@ bool ParseFromValue(base::Value* value, WebRect* rect) {
   return true;
 }
 
-base::Value* CreateValueFrom(const WebRect& rect) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+std::unique_ptr<base::DictionaryValue> CreateValueFrom(const WebRect& rect) {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("left", rect.X());
   dict->SetInteger("top", rect.Y());
   dict->SetInteger("width", rect.Width());
@@ -207,14 +216,15 @@ Status GetElementBorder(
 
 }  // namespace
 
-base::DictionaryValue* CreateElement(const std::string& element_id) {
-  base::DictionaryValue* element = new base::DictionaryValue();
-  element->SetString(kElementKey, element_id);
+std::unique_ptr<base::DictionaryValue> CreateElement(
+    const std::string& element_id) {
+  std::unique_ptr<base::DictionaryValue> element(new base::DictionaryValue());
+  element->SetString(GetElementKey(), element_id);
   return element;
 }
 
-base::Value* CreateValueFrom(const WebPoint& point) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+std::unique_ptr<base::DictionaryValue> CreateValueFrom(const WebPoint& point) {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetInteger("x", point.x);
   dict->SetInteger("y", point.y);
   return dict;
@@ -254,7 +264,7 @@ Status FindElement(int interval_ms,
     if (status.IsError())
       return status;
 
-    if (!temp->IsType(base::Value::TYPE_NULL)) {
+    if (!temp->IsType(base::Value::Type::NONE)) {
       if (only_one) {
         value->reset(temp.release());
         return Status(kOk);
@@ -262,7 +272,6 @@ Status FindElement(int interval_ms,
         base::ListValue* result;
         if (!temp->GetAsList(&result))
           return Status(kUnknownError, "script returns unexpected result");
-
         if (result->GetSize() > 0U) {
           value->reset(temp.release());
           return Status(kOk);
@@ -382,7 +391,7 @@ Status GetElementClickableLocation(
       return status;
     const base::DictionaryValue* element_dict;
     if (!result->GetAsDictionary(&element_dict) ||
-        !element_dict->GetString(kElementKey, &target_element_id))
+        !element_dict->GetString(GetElementKey(), &target_element_id))
       return Status(kUnknownError, "no element reference returned by script");
   }
   bool is_displayed = false;
@@ -630,7 +639,7 @@ Status ScrollElementRegionIntoView(
     if (!result->GetAsDictionary(&element_dict))
       return Status(kUnknownError, "no element reference returned by script");
     std::string frame_element_id;
-    if (!element_dict->GetString(kElementKey, &frame_element_id))
+    if (!element_dict->GetString(GetElementKey(), &frame_element_id))
       return Status(kUnknownError, "failed to locate a sub frame");
 
     // Modify |region_offset| by the frame's border.

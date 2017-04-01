@@ -6,7 +6,7 @@
 
 #include <vector>
 
-#include "ash/aura/wm_window_aura.h"
+#include "ash/common/accelerators/accelerator_controller.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm_shell.h"
@@ -33,7 +33,7 @@ TEST_F(ScreenPinningControllerTest, IsPinned) {
   aura::Window* w1 = CreateTestWindowInShellWithId(0);
   wm::ActivateWindow(w1);
 
-  wm::PinWindow(w1);
+  wm::PinWindow(w1, /* trusted */ false);
   EXPECT_TRUE(WmShell::Get()->IsPinned());
 }
 
@@ -42,14 +42,14 @@ TEST_F(ScreenPinningControllerTest, OnlyOnePinnedWindow) {
   aura::Window* w2 = CreateTestWindowInShellWithId(1);
   wm::ActivateWindow(w1);
 
-  wm::PinWindow(w1);
-  EXPECT_TRUE(WmWindowAura::Get(w1)->GetWindowState()->IsPinned());
-  EXPECT_FALSE(WmWindowAura::Get(w2)->GetWindowState()->IsPinned());
+  wm::PinWindow(w1, /* trusted */ false);
+  EXPECT_TRUE(WmWindow::Get(w1)->GetWindowState()->IsPinned());
+  EXPECT_FALSE(WmWindow::Get(w2)->GetWindowState()->IsPinned());
 
   // Prohibit to pin two (or more) windows.
-  wm::PinWindow(w2);
-  EXPECT_TRUE(WmWindowAura::Get(w1)->GetWindowState()->IsPinned());
-  EXPECT_FALSE(WmWindowAura::Get(w2)->GetWindowState()->IsPinned());
+  wm::PinWindow(w2, /* trusted */ false);
+  EXPECT_TRUE(WmWindow::Get(w1)->GetWindowState()->IsPinned());
+  EXPECT_FALSE(WmWindow::Get(w2)->GetWindowState()->IsPinned());
 }
 
 TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
@@ -57,7 +57,7 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
   aura::Window* w2 = CreateTestWindowInShellWithId(1);
   wm::ActivateWindow(w1);
 
-  wm::PinWindow(w1);
+  wm::PinWindow(w1, /* trusted */ false);
   {
     // Window w1 should be in front of w2.
     std::vector<aura::Window*> siblings = w1->parent()->children();
@@ -72,7 +72,7 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
   {
     wm::ActivateWindow(w2);
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
-    WmWindowAura::Get(w2)->GetWindowState()->OnWMEvent(&event);
+    WmWindow::Get(w2)->GetWindowState()->OnWMEvent(&event);
   }
   {
     // Verify that w1 is still in front of w2.
@@ -88,7 +88,7 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
   {
     wm::ActivateWindow(w2);
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
-    WmWindowAura::Get(w2)->GetWindowState()->OnWMEvent(&event);
+    WmWindow::Get(w2)->GetWindowState()->OnWMEvent(&event);
   }
   {
     // Verify that w1 is still in front of w2.
@@ -104,7 +104,7 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
   {
     wm::ActivateWindow(w2);
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_MAXIMIZE);
-    WmWindowAura::Get(w2)->GetWindowState()->OnWMEvent(&event);
+    WmWindow::Get(w2)->GetWindowState()->OnWMEvent(&event);
   }
   {
     // Verify that w1 is still in front of w2.
@@ -120,7 +120,7 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
   {
     wm::ActivateWindow(w2);
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_MAXIMIZE);
-    WmWindowAura::Get(w2)->GetWindowState()->OnWMEvent(&event);
+    WmWindow::Get(w2)->GetWindowState()->OnWMEvent(&event);
   }
   {
     // Verify that w1 is still in front of w2.
@@ -133,13 +133,13 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
   }
 
   // Restore w1.
-  WmWindowAura::Get(w1)->GetWindowState()->Restore();
+  WmWindow::Get(w1)->GetWindowState()->Restore();
 
   // Now, fullscreen-ize w2 should put it in front of w1.
   {
     wm::ActivateWindow(w2);
     const wm::WMEvent event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
-    WmWindowAura::Get(w2)->GetWindowState()->OnWMEvent(&event);
+    WmWindow::Get(w2)->GetWindowState()->OnWMEvent(&event);
   }
   {
     // Verify that w1 is still in front of w2.
@@ -150,6 +150,19 @@ TEST_F(ScreenPinningControllerTest, FullscreenInPinnedMode) {
     EXPECT_NE(-1, index2);
     EXPECT_GT(index2, index1);
   }
+}
+
+TEST_F(ScreenPinningControllerTest, TrustedPinnedWithAccelerator) {
+  aura::Window* w1 = CreateTestWindowInShellWithId(0);
+  wm::ActivateWindow(w1);
+
+  wm::PinWindow(w1, /* trusted */ true);
+  EXPECT_TRUE(WmShell::Get()->IsPinned());
+
+  WmShell::Get()->accelerator_controller()->PerformActionIfEnabled(UNPIN);
+  // The UNPIN accelerator key is disabled for trusted pinned and the window
+  // must be still pinned.
+  EXPECT_TRUE(WmShell::Get()->IsPinned());
 }
 
 }  // namespace ash

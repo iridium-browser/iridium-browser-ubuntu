@@ -2,17 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://w3c.github.io/mediacapture-image/index.html#photosettings
+// https://www.w3.org/TR/image-capture/#PhotoSettings
 
-[
-    RuntimeEnabled=ImageCapture
-] dictionary PhotoSettings {
-    unsigned long zoom;
-    unsigned long imageHeight;
-    unsigned long imageWidth;
-    MeteringMode focusMode;
+dictionary PhotoSettings {
+    MeteringMode whiteBalanceMode;
+    double colorTemperature;
     MeteringMode exposureMode;
+    double exposureCompensation;
+    double iso;
+    boolean redEyeReduction;
+    MeteringMode focusMode;
     sequence<Point2D> pointsOfInterest;
-    // TODO(mcasas): Implement all other PhotoSettings fields
-    // https://crbug.com/518807
+
+    double brightness;
+    double contrast;
+    double saturation;
+    double sharpness;
+    double zoom;
+    double imageHeight;
+    double imageWidth;
+    FillLightMode fillLightMode;
 };

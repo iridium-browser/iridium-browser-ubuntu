@@ -4,10 +4,11 @@
 
 #include "ash/mus/context_menu_mus.h"
 
-#include "ash/common/shelf/shelf_types.h"
 #include "ash/common/shelf/wm_shelf.h"
+#include "ash/common/wallpaper/wallpaper_controller.h"
 #include "ash/common/wallpaper/wallpaper_delegate.h"
 #include "ash/common/wm_shell.h"
+#include "ash/public/cpp/shelf_types.h"
 #include "grit/ash_strings.h"
 
 namespace ash {
@@ -21,9 +22,7 @@ ContextMenuMus::ContextMenuMus(WmShelf* wm_shelf)
                            IDS_ASH_SHELF_CONTEXT_MENU_AUTO_HIDE);
   AddSubMenuWithStringId(MENU_ALIGNMENT_MENU,
                          IDS_ASH_SHELF_CONTEXT_MENU_POSITION, &alignment_menu_);
-#if defined(OS_CHROMEOS)
   AddItemWithStringId(MENU_CHANGE_WALLPAPER, IDS_AURA_SET_DESKTOP_WALLPAPER);
-#endif
 }
 
 ContextMenuMus::~ContextMenuMus() {}
@@ -35,9 +34,8 @@ bool ContextMenuMus::IsCommandIdChecked(int command_id) const {
 }
 
 bool ContextMenuMus::IsCommandIdEnabled(int command_id) const {
-  // TODO(msw): Port WallpaperDelegateMus and support this (crbug.com/629605):
-  // if (command_id == MENU_CHANGE_WALLPAPER)
-  //   return WmShell::Get()->wallpaper_delegate()->CanOpenSetWallpaperPage();
+  if (command_id == MENU_CHANGE_WALLPAPER)
+    return WmShell::Get()->wallpaper_delegate()->CanOpenSetWallpaperPage();
   return true;
 }
 
@@ -48,8 +46,7 @@ void ContextMenuMus::ExecuteCommand(int command_id, int event_flags) {
                                        ? SHELF_AUTO_HIDE_BEHAVIOR_NEVER
                                        : SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
   } else if (command_id == MENU_CHANGE_WALLPAPER) {
-    // TODO(msw): Port WallpaperDelegateMus and support this (crbug.com/629605):
-    // WmShell::Get()->wallpaper_delegate()->OpenSetWallpaperPage();
+    WmShell::Get()->wallpaper_controller()->OpenSetWallpaperPage();
   }
 }
 

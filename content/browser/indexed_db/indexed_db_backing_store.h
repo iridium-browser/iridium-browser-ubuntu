@@ -19,6 +19,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string_piece.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -26,13 +27,13 @@
 #include "content/browser/indexed_db/indexed_db_active_blob_registry.h"
 #include "content/browser/indexed_db/indexed_db_blob_info.h"
 #include "content/browser/indexed_db/indexed_db_leveldb_coding.h"
-#include "content/browser/indexed_db/indexed_db_metadata.h"
 #include "content/browser/indexed_db/leveldb/leveldb_iterator.h"
 #include "content/browser/indexed_db/leveldb/leveldb_transaction.h"
 #include "content/common/content_export.h"
 #include "content/common/indexed_db/indexed_db_key.h"
 #include "content/common/indexed_db/indexed_db_key_path.h"
 #include "content/common/indexed_db/indexed_db_key_range.h"
+#include "content/common/indexed_db/indexed_db_metadata.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
 #include "url/gurl.h"
@@ -90,9 +91,13 @@ class CONTENT_EXPORT IndexedDBBackingStore
     DISALLOW_COPY_AND_ASSIGN(RecordIdentifier);
   };
 
+  enum class BlobWriteResult { FAILURE_ASYNC, SUCCESS_ASYNC, SUCCESS_SYNC };
+
   class BlobWriteCallback : public base::RefCounted<BlobWriteCallback> {
    public:
-    virtual void Run(bool succeeded) = 0;
+    // TODO(dmurph): Make all calls to this method async after measuring
+    // performance.
+    virtual leveldb::Status Run(BlobWriteResult result) = 0;
 
    protected:
     friend class base::RefCounted<BlobWriteCallback>;
@@ -282,6 +287,8 @@ class CONTENT_EXPORT IndexedDBBackingStore
     // has been bumped, and journal cleaning should be deferred.
     bool committing_;
 
+    base::WeakPtrFactory<Transaction> ptr_factory_;
+
     DISALLOW_COPY_AND_ASSIGN(Transaction);
   };
 
@@ -349,18 +356,20 @@ class CONTENT_EXPORT IndexedDBBackingStore
     IndexedDBBackingStore::RecordIdentifier record_identifier_;
 
    private:
+    enum class ContinueResult { LEVELDB_ERROR, DONE, OUT_OF_BOUNDS };
+
     // For cursors with direction Next or NextNoDuplicate.
-    bool ContinueNext(const IndexedDBKey* key,
-                      const IndexedDBKey* primary_key,
-                      IteratorState state,
-                      leveldb::Status*);
+    ContinueResult ContinueNext(const IndexedDBKey* key,
+                                const IndexedDBKey* primary_key,
+                                IteratorState state,
+                                leveldb::Status*);
     // For cursors with direction Prev or PrevNoDuplicate. The PrevNoDuplicate
     // case has additional complexity of not being symmetric with
     // NextNoDuplicate.
-    bool ContinuePrevious(const IndexedDBKey* key,
-                          const IndexedDBKey* primary_key,
-                          IteratorState state,
-                          leveldb::Status*);
+    ContinueResult ContinuePrevious(const IndexedDBKey* key,
+                                    const IndexedDBKey* primary_key,
+                                    IteratorState state,
+                                    leveldb::Status*);
 
     DISALLOW_COPY_AND_ASSIGN(Cursor);
   };
@@ -416,7 +425,7 @@ class CONTENT_EXPORT IndexedDBBackingStore
   virtual leveldb::Status CreateIDBDatabaseMetaData(const base::string16& name,
                                                     int64_t version,
                                                     int64_t* row_id);
-  virtual bool UpdateIDBDatabaseIntVersion(
+  virtual void UpdateIDBDatabaseIntVersion(
       IndexedDBBackingStore::Transaction* transaction,
       int64_t row_id,
       int64_t version);
@@ -437,11 +446,16 @@ class CONTENT_EXPORT IndexedDBBackingStore
       int64_t object_store_id,
       const base::string16& name,
       const IndexedDBKeyPath& key_path,
-      bool auto_increment);
+      bool auto_increment) WARN_UNUSED_RESULT;
   virtual leveldb::Status DeleteObjectStore(
       IndexedDBBackingStore::Transaction* transaction,
       int64_t database_id,
       int64_t object_store_id) WARN_UNUSED_RESULT;
+  virtual leveldb::Status RenameObjectStore(
+      IndexedDBBackingStore::Transaction* transaction,
+      int64_t database_id,
+      int64_t object_store_id,
+      const base::string16& name) WARN_UNUSED_RESULT;
 
   virtual leveldb::Status GetRecord(
       IndexedDBBackingStore::Transaction* transaction,
@@ -505,6 +519,12 @@ class CONTENT_EXPORT IndexedDBBackingStore
       int64_t database_id,
       int64_t object_store_id,
       int64_t index_id) WARN_UNUSED_RESULT;
+  virtual leveldb::Status RenameIndex(
+      IndexedDBBackingStore::Transaction* transaction,
+      int64_t database_id,
+      int64_t object_store_id,
+      int64_t index_id,
+      const base::string16& new_name) WARN_UNUSED_RESULT;
   virtual leveldb::Status PutIndexDataForRecord(
       IndexedDBBackingStore::Transaction* transaction,
       int64_t database_id,

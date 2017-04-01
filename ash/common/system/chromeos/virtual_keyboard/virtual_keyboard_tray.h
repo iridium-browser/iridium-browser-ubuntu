@@ -36,6 +36,7 @@ class VirtualKeyboardTray : public TrayBackgroundView,
 
   // keyboard::KeyboardControllerObserver:
   void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardClosed() override;
 
  private:
   // Creates a new border for the icon. The padding is determined based on the
@@ -47,6 +48,8 @@ class VirtualKeyboardTray : public TrayBackgroundView,
 
   // Weak pointer, will be parented by TrayContainer for its lifetime.
   views::ImageView* icon_;
+
+  WmShelf* wm_shelf_;
 
   DISALLOW_COPY_AND_ASSIGN(VirtualKeyboardTray);
 };

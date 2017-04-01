@@ -7,19 +7,18 @@
 #include <algorithm>
 
 #include "base/command_line.h"
+#include "base/feature_list.h"
 #include "base/metrics/user_metrics_action.h"
 #include "build/build_config.h"
 #include "chrome/browser/permissions/permission_request.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
+#include "chrome/browser/ui/website_settings/permission_prompt.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/user_metrics.h"
 #include "url/origin.h"
-
-#if !defined(OS_ANDROID)
-#include "chrome/browser/ui/browser_finder.h"
-#endif
 
 namespace {
 
@@ -31,7 +30,7 @@ class CancelledRequest : public PermissionRequest {
         origin_(cancelled->GetOrigin()) {}
   ~CancelledRequest() override {}
 
-  int GetIconId() const override { return icon_; }
+  IconId GetIconId() const override { return icon_; }
   base::string16 GetMessageTextFragment() const override {
     return message_fragment_;
   }
@@ -45,7 +44,7 @@ class CancelledRequest : public PermissionRequest {
   void RequestFinished() override { delete this; }
 
  private:
-  int icon_;
+  IconId icon_;
   base::string16 message_fragment_;
   GURL origin_;
 };
@@ -78,15 +77,12 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(PermissionRequestManager);
 PermissionRequestManager::PermissionRequestManager(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
-#if !defined(OS_ANDROID)  // No bubbles in android tests.
       view_factory_(base::Bind(&PermissionPrompt::Create)),
-#endif
       view_(nullptr),
       main_frame_has_fully_loaded_(false),
       persist_(true),
       auto_response_for_test_(NONE),
-      weak_factory_(this) {
-}
+      weak_factory_(this) {}
 
 PermissionRequestManager::~PermissionRequestManager() {
   if (view_ != NULL)
@@ -241,13 +237,8 @@ void PermissionRequestManager::DisplayPendingRequests() {
   if (IsBubbleVisible())
     return;
 
-#if defined(OS_ANDROID)
-  NOTREACHED();
-  return;
-#else
-  view_ = view_factory_.Run(chrome::FindBrowserWithWebContents(web_contents()));
+  view_ = view_factory_.Run(web_contents());
   view_->SetDelegate(this);
-#endif
 
   TriggerShowBubble();
 }
@@ -259,6 +250,15 @@ void PermissionRequestManager::UpdateAnchorPosition() {
 
 bool PermissionRequestManager::IsBubbleVisible() {
   return view_ && view_->IsVisible();
+}
+
+// static
+bool PermissionRequestManager::IsEnabled() {
+#if defined(OS_ANDROID)
+  return base::FeatureList::IsEnabled(features::kUseGroupedPermissionInfobars);
+#else
+  return true;
+#endif
 }
 
 gfx::NativeWindow PermissionRequestManager::GetBubbleWindow() {
@@ -507,7 +507,8 @@ void PermissionRequestManager::RemoveObserver(Observer* observer) {
 }
 
 void PermissionRequestManager::NotifyBubbleAdded() {
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnBubbleAdded());
+  for (Observer& observer : observer_list_)
+    observer.OnBubbleAdded();
 }
 
 void PermissionRequestManager::DoAutoResponseForTesting() {

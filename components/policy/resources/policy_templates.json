@@ -120,6 +120,8 @@
 #   'can_be_recommended' can be set to True to include that policy in the
 #   recommended policies templates. This only affects the template generation;
 #   all policies can be at the recommended level. The default is False.
+#   'per_profile' controls whether a user policy applies to every user logging
+#   into the browser or only one profile.
 #
 #   The 'max_size' key is used to specify the maximal size of the external data
 #   that a policy can reference, in bytes. This annotation is compulsory for
@@ -137,7 +139,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 343
+#   For your editing convenience: highest ID currently used: 359
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -520,6 +522,27 @@
       'label': '''List of disabled protocol schemes''',
     },
     {
+      'name': 'Http09OnNonDefaultPortsEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:54-', 'chrome_os:54-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': False,
+      'id': 345,
+      'caption': '''Enables HTTP/0.9 support on non-default ports''',
+      'tags': [],
+      'desc': '''This policy enables HTTP/0.9 on ports other than 80 for HTTP and 443 for HTTPS.
+
+      This policy is disabled by default, and if enabled, leaves users open to the security issue https://crbug.com/600352.
+
+      This policy is intended to give enterprises a chance to migrate exising servers off of HTTP/0.9, and will be removed in the future.
+
+      If this policy is not set, HTTP/0.9 will be disabled on non-default ports.''',
+    },
+    {
       'name': 'JavascriptEnabled',
       'type': 'main',
       'schema': { 'type': 'boolean' },
@@ -630,14 +653,9 @@
     },
     {
       'name': 'AllowDeletingBrowserHistory',
-      'future': True,
       'type': 'main',
       'schema': { 'type': 'boolean' },
-      # TODO(pamg): Restore the correct 'supported' line when the UI properly
-      # shows that deleting browser history is disabled. Also fix the 'os' line
-      # in policy_test_cases.json.
-      # 'supported_on': ['chrome.*:27-', 'chrome_os:27-'],
-      'supported_on': [],
+      'supported_on': ['chrome.*:57-', 'chrome_os:57-'],
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -645,8 +663,8 @@
       'example_value': True,
       'id': 187,
       'caption': '''Enable deleting browser and download history''',
-      'tags': [],
-      'desc': '''Enables deleting browser history and download history in <ph name="PRODUCT_NAME">$<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+      'tags': ['local-data-access', 'admin-sharing'],
+      'desc': '''Enables deleting browser history and download history in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
 
       Note that even with this policy disabled, the browsing and download history are not guaranteed to be retained: users may be able to edit or delete the history database files directly, and the browser itself may expire or archive any or all history items at any time.
 
@@ -998,6 +1016,23 @@
 
           The value is parsed as a JSON dictionary of policy name to policy value mappings.''',
         },
+        {
+          'name': 'RemoteAccessHostAllowUiAccessForRemoteAssistance',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome.win:55-'],
+          'features': {
+            'dynamic_refresh': False,
+            'per_profile': False,
+          },
+          'example_value': True,
+          'id': 344,
+          'caption': '''Allow remote users to interact with elevated windows in remote assistance sessions''',
+          'tags': ['system-security'],
+          'desc': '''If this setting is enabled, the remote assistance host will be run in a process with <ph name="UIACCESS_PERMISSION_NAME">uiAccess</ph> permissions.  This will allow remote users to interact with elevated windows on the local user's desktop.
+
+          If this setting is disabled or not configured, the remote assistance host will run in the user's context and remote users cannot interact with elevated windows on the desktop.''',
+        },
       ],
     },
     {
@@ -1018,6 +1053,7 @@
       If this setting is enabled or not configured, users can print.
 
       If this setting is disabled, users cannot print from <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Printing is disabled in the wrench menu, extensions, JavaScript applications, etc. It is still possible to print from plugins that bypass <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> while printing. For example, certain Flash applications have the print option in their context menu, which is not covered by this policy.''',
+      'arc_support': 'This policy has no effect on Android apps.',
     },
     {
       'name': 'CloudPrintProxyEnabled',
@@ -1053,13 +1089,13 @@
       'id': 162,
       'caption': '''Force SafeSearch''',
       'tags': ['filtering'],
-      'desc': '''This policy is deprecated, please use ForceGoogleSafeSearch and ForceYouTubeSafetyMode instead. This policy will be ignored if either the ForceGoogleSafeSearch or ForceYouTubeSafetyMode policies are set.
+      'desc': '''This policy is deprecated, please use <ph name="FORCEGOOGLESAFESEARCH_POLICY_NAME">ForceGoogleSafeSearch</ph> and <ph name="FORCEYOUTUBERESTRICT_POLICY_NAME">ForceYouTubeRestrict</ph> instead. This policy is ignored if either the <ph name="FORCEGOOGLESAFESEARCH_POLICY_NAME">ForceGoogleSafeSearch</ph>, the <ph name="FORCEYOUTUBERESTRICT_POLICY_NAME">ForceYouTubeRestrict</ph> or the (deprecated) <ph name="FORCEYOUTUBESAFETYMODE_POLICY_NAME">ForceYouTubeSafetyMode</ph> policies are set.
 
-      Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting. This setting also forces Safety Mode on YouTube.
+      Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting. This setting also forces Moderate Restricted Mode on YouTube.
 
-      If you enable this setting, SafeSearch in Google Search and YouTube is always active.
+      If you enable this setting, SafeSearch in Google Search and Moderate Restricted Mode YouTube is always active.
 
-      If you disable this setting or do not set a value, SafeSearch in Google Search and YouTube is not enforced.''',
+      If you disable this setting or do not set a value, SafeSearch in Google Search and Restricted Mode in YouTube is not enforced.''',
     },
     {
       'name': 'ForceGoogleSafeSearch',
@@ -1091,15 +1127,64 @@
         'dynamic_refresh': True,
         'per_profile': True,
       },
+      'deprecated': True,
       'example_value': False,
       'id': 283,
       'caption': '''Force YouTube Safety Mode''',
       'tags': ['filtering'],
-      'desc': '''Forces YouTube Safety Mode to active and prevents users from changing this setting.
+      'desc': '''This policy is deprecated. Consider using <ph name="FORCEYOUTUBERESTRICT_POLICY_NAME">ForceYouTubeRestrict</ph>, which overrides this policy and allows more fine-grained tuning.
 
-      If you enable this setting, Safety Mode on YouTube is always active.
+      Forces YouTube Moderate Restricted Mode and prevents users from changing this setting.
 
-      If you disable this setting or do not set a value, Safety Mode on YouTube is not enforced.''',
+      If this setting is enabled, Restricted Mode on YouTube is always enforced to be at least Moderate.
+
+      If this setting is disabled or no value is set, Restricted Mode on YouTube is not enforced by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. External policies such as YouTube policies might still enforce Restricted Mode, though.''',
+      'arc_support': 'This policy has no effect on the Android YouTube app. If Safety Mode on YouTube should be enforced, installation of the Android YouTube app should be disallowed.',
+    },
+    {
+      'name': 'ForceYouTubeRestrict',
+      'type': 'int-enum',
+      'schema': {
+        'type': 'integer',
+        'enum': [ 0, 1, 2 ],
+      },
+      'items': [
+        {
+          'name': 'Off',
+          'value': 0,
+          'caption': '''Do not enforce Restricted Mode on YouTube''',
+        },
+        {
+          'name': 'Moderate',
+          'value': 1,
+          'caption': '''Enforce at least Moderate Restricted Mode on YouTube''',
+        },
+        {
+          'name': 'Strict',
+          'value': 2,
+          'caption': '''Enforce Strict Restricted Mode for YouTube''',
+        },
+      ],
+      'supported_on': ['chrome.*:55-', 'chrome_os:55-', 'android:55-'],
+      'features': {
+        'can_be_recommended': False,
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': 0,
+      'id': 348,
+      'caption': '''Force minimum YouTube Restricted Mode''',
+      'tags': ['filtering'],
+      'desc': '''Enforces a minimum Restricted Mode on YouTube and prevents users from
+      picking a less restricted mode.
+
+      If this setting is set to Strict, Strict Restricted Mode on YouTube is always active.
+
+      If this setting is set to Moderate, the user may only pick Moderate Restricted Mode
+      and Strict Restricted Mode on YouTube, but cannot disable Restricted Mode.
+
+      If this setting is set to Off or no value is set, Restricted Mode on YouTube is not enforced by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. External policies such as YouTube policies might still enforce Restricted Mode, though.''',
+      'arc_support': 'This policy has no effect on the Android YouTube app. If Safety Mode on YouTube should be enforced, installation of the Android YouTube app should be disallowed.',
     },
     {
       'name': 'SafeBrowsingEnabled',
@@ -1188,6 +1273,7 @@
           it in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. If this
           policy is unset, password saving is allowed (but can be turned off by
           the user).''',
+          'arc_support': 'This policy has no effect on Android apps.',
         },
         {
           'name': 'PasswordManagerAllowShowPasswords',
@@ -1246,6 +1332,7 @@
         'items': { 'type': 'string' },
       },
       'supported_on': ['chrome.*:8-', 'chrome_os:11-'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -1254,7 +1341,9 @@
       'id': 19,
       'caption': '''Specify a list of disabled plugins''',
       'tags': [],
-      'desc': '''Specifies a list of plugins that are disabled in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+      'desc': '''This policy is deprecated. Please use the <ph name="DEFAULT_PLUGINS_SETTING_POLICY">$1<ex>DefaultPluginsSetting</ex></ph> to control the avalability of the Flash plugin and <ph name="ALWAYS_OPEN_PDF_EXTERNALLY_POLICY">$1<ex>AlwaysOpenPdfExternally</ex></ph> to control whether the integrated PDF viewer should be used for opening PDF files.
+
+      Specifies a list of plugins that are disabled in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
 
       The wildcard characters '*' and '?' can be used to match sequences of arbitrary characters. '*' matches an arbitrary number of characters while '?' specifies an optional single character, i.e. matches zero or one characters. The escape character is '\\', so to match actual '*', '?', or '\\' characters, you can put a '\\' in front of them.
 
@@ -1273,6 +1362,7 @@
         'items': { 'type': 'string' },
       },
       'supported_on': ['chrome.*:11-', 'chrome_os:11-'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -1281,7 +1371,9 @@
       'id': 78,
       'caption': '''Specify a list of enabled plugins''',
       'tags': ['system-security'],
-      'desc': '''Specifies a list of plugins that are enabled in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
+      'desc': '''This policy is deprecated. Please use the <ph name="DEFAULT_PLUGINS_SETTING_POLICY">$1<ex>DefaultPluginsSetting</ex></ph> to control the avalability of the Flash plugin and <ph name="ALWAYS_OPEN_PDF_EXTERNALLY_POLICY">$1<ex>AlwaysOpenPdfExternally</ex></ph> to control whether the integrated PDF viewer should be used for opening PDF files.
+
+      Specifies a list of plugins that are enabled in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing this setting.
 
       The wildcard characters '*' and '?' can be used to match sequences of arbitrary characters. '*' matches an arbitrary number of characters while '?' specifies an optional single character, i.e. matches zero or one characters. The escape character is '\\', so to match actual '*', '?', or '\\' characters, you can put a '\\' in front of them.
 
@@ -1300,6 +1392,7 @@
         'items': { 'type': 'string' },
       },
       'supported_on': ['chrome.*:11-', 'chrome_os:11-'],
+      'deprecated': True,
       'features': {
         'dynamic_refresh': True,
         'per_profile': True,
@@ -1308,7 +1401,9 @@
       'id': 79,
       'caption': '''Specify a list of plugins that the user can enable or disable''',
       'tags': [],
-      'desc': '''Specifies a list of plugins that user can enable or disable in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      'desc': '''This policy is deprecated. Please use the <ph name="DEFAULT_PLUGINS_SETTING_POLICY">$1<ex>DefaultPluginsSetting</ex></ph> to control the avalability of the Flash plugin and <ph name="ALWAYS_OPEN_PDF_EXTERNALLY_POLICY">$1<ex>AlwaysOpenPdfExternally</ex></ph> to control whether the integrated PDF viewer should be used for opening PDF files.
+
+      Specifies a list of plugins that user can enable or disable in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
       The wildcard characters '*' and '?' can be used to match sequences of arbitrary characters. '*' matches an arbitrary number of characters while '?' specifies an optional single character, i.e. matches zero or one characters. The escape character is '\\', so to match actual '*', '?', or '\\' characters, you can put a '\\' in front of them.
 
@@ -1320,6 +1415,23 @@
 
       If this policy is left not set any plugin that matches the patterns in the 'DisabledPlugins' will be locked disabled and the user won't be able to enable them.''',
       'label': '''List of exceptions to the list of disabled plugins''',
+    },
+    {
+      'name': 'AlwaysOpenPdfExternally',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:55-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 347,
+      'caption': '''Always Open PDF files externally''',
+      'tags': [],
+      'desc': '''Disables the internal PDF viewer in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. Instead it treats it as download and allows the user to open PDF files with the default application.
+
+      If this policy is left not set or disabled the PDF plugin will be used to open PDF files unless the user disables it.''',
     },
     {
       'name': 'DisablePluginFinder',
@@ -1356,7 +1468,56 @@
 
       If you enable this setting, users cannot change or override this setting in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-      If this policy is left not set Google Sync will be available for the user to choose whether to use it or not.''',
+      If this policy is left not set Google Sync will be available for the user to choose whether to use it or not.
+
+      To fully disable Google Sync, it is recommended that you disable the Google Sync service in the Google Admin console.''',
+      'arc_support': 'Disabling Google Sync will cause Android Backup and Restore to not function properly.',
+    },
+    {
+      'name': 'RoamingProfileSupportEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.win:57-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': True,
+      'id': 358,
+      'caption': '''Enable the creation of roaming copies for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> profile data.''',
+      'tags': ['local-data-access'],
+      'desc': '''Enables the creation of roaming copies for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> profile data.
+
+      If you enable this setting, the settings stored in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> profiles like bookmarks, autofill data, passwords, etc. will also be written to a file stored in the Roaming user profile folder or a location specified by the Administrator through the <ph name="ROAMINGPROFILELOCATION_POLICY_NAME">$1<ex>RoamingProfileLocation</ex></ph> policy.
+
+      Google Sync is automatically disabled when this policy is enabled.
+
+      To prevent accidental data leaks it is advisable to also set the <ph name="SIGNINALLOWED_POLICY_NAME">$1<ex>SigninAllowed</ex></ph> policy to False.
+
+      If this policy is disabled or left not set only the regular local profiles will be used.''',
+      'label': '''Enable the creation of roaming copies for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> profile data.''',
+    },
+    {
+      'name': 'RoamingProfileLocation',
+      'type': 'string',
+      'schema': { 'type': 'string' },
+      'supported_on': ['chrome.win:57-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': '${roaming_app_data}\\chrome-profile',
+      'id': 359,
+      'caption': '''Set the roaming profile directory''',
+      'tags': ['local-data-access'],
+      'desc': '''Configures the directory that <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use for storing the roaming copy of the profiles.
+
+      If you set this policy, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will use the provided directory to store the roaming copy of the profiles if the <ph name="ROAMINGPROFILESUPPORTENABLED_POLICY_NAME">$1<ex>RoamingProfileSupportEnabled</ex></ph> policy has been enabled. If the <ph name="ROAMINGPROFILESUPPORTENABLED_POLICY_NAME">$1<ex>RoamingProfileSupportEnabled</ex></ph> policy is disabled or left unset the value stored in this policy is not used.
+
+      See https://www.chromium.org/administrators/policy-list-3/user-data-directory-variables for a list of variables that can be used.
+
+      If this policy is left not set the default roaming profile path will be used.''',
+      'label': '''Set the roaming profile directory''',
     },
     {
       'name': 'SigninAllowed',
@@ -1512,6 +1673,7 @@
 
       If this policy is left not set the default download directory will be used and the user will be able to change it.''',
       'label': '''Set download directory''',
+      'arc_support': 'This policy has no effect on Android apps. Android apps always use the default downloads directory and cannot access any files downloaded by <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> into a non-default downloads directory.',
     },
     {
       'name': 'ClearSiteDataOnExit',
@@ -1558,7 +1720,7 @@
       'name': 'Proxy',
       'type': 'group',
       'caption': '''Proxy server''',
-      'desc': '''Allows you to specify the proxy server used by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing proxy settings. ARC-apps will be able to use this proxy server too.
+      'desc': '''Allows you to specify the proxy server used by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing proxy settings.
 
       If you choose to never use a proxy server and always connect directly, all other options are ignored.
 
@@ -1625,7 +1787,7 @@
           'id': 21,
           'caption': '''Choose how to specify proxy server settings''',
           'tags': [],
-          'desc': '''Allows you to specify the proxy server used by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing proxy settings. ARC-apps will be able to use this proxy server too.
+          'desc': '''Allows you to specify the proxy server used by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing proxy settings.
 
           If you choose to never use a proxy server and always connect directly, all other options are ignored.
 
@@ -1643,6 +1805,15 @@
           If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and ARC-apps ignore all proxy-related options specified from the command line.
 
           Leaving this policy not set will allow the users to choose the proxy settings on their own.''',
+          'arc_support': '''You cannot force Android apps to use a proxy. A subset of proxy settings is made available to Android apps, which they may voluntarily choose to honor:
+
+          If you choose to never use a proxy server, Android apps are informed that no proxy is configured.
+
+          If you choose to use system proxy settings or a fixed server proxy, Android apps are provided with the http proxy server address and port.
+
+          If you choose to auto detect the proxy server, the script URL "http://wpad/wpad.dat" is provided to Android apps. No other part of the proxy auto-detection protocol is used.
+
+          If you choose to use a .pac proxy script, the script URL is provided to Android apps.''',
         },
         {
           'name': 'ProxyServerMode',
@@ -1690,7 +1861,7 @@
           'tags': [],
           'desc': '''This policy is deprecated, use ProxyMode instead.
 
-          Allows you to specify the proxy server used by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing proxy settings. ARC-apps will be able to use this proxy server too.
+          Allows you to specify the proxy server used by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> and prevents users from changing proxy settings.
 
           If you choose to never use a proxy server and always connect directly, all other options are ignored.
 
@@ -1704,6 +1875,7 @@
           If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> ignores all proxy-related options specified from the command line.
 
           Leaving this policy not set will allow the users to choose the proxy settings on their own.''',
+          'arc_support': 'You cannot force Android apps to use a proxy. A subset of proxy settings is made available to Android apps, which they may voluntarily choose to honor. See the <ph name="PROXY_MODE_POLICY">ProxyMode</ph> policy for more details.',
         },
         {
           'name': 'ProxyServer',
@@ -1731,6 +1903,7 @@
 
           For more options and detailed examples, visit:
           <ph name="PROXY_HELP_URL">https://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>https://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>.''',
+          'arc_support': 'You cannot force Android apps to use a proxy. A subset of proxy settings is made available to Android apps, which they may voluntarily choose to honor. See the <ph name="PROXY_MODE_POLICY">ProxyMode</ph> policy for more details.',
         },
         {
           'name': 'ProxyPacUrl',
@@ -1758,6 +1931,7 @@
 
           For detailed examples, visit:
           <ph name="PROXY_HELP_URL">https://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>https://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>.''',
+          'arc_support': 'You cannot force Android apps to use a proxy. A subset of proxy settings is made available to Android apps, which they may voluntarily choose to honor. See the <ph name="PROXY_MODE_POLICY">ProxyMode</ph> policy for more details.',
         },
         {
           'name': 'ProxyBypassList',
@@ -1777,7 +1951,7 @@
           'id': 25,
           'caption': '''Proxy bypass rules''',
           'tags': [],
-          'desc': '''<ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will bypass any proxy for the list of hosts given here. ARC-apps will be able to use this list as a bypass rules list.
+          'desc': '''<ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will bypass any proxy for the list of hosts given here.
 
           This policy only takes effect if you have selected manual proxy settings at 'Choose how to specify proxy server settings'.
 
@@ -1786,6 +1960,7 @@
           For more detailed examples, visit:
           <ph name="PROXY_HELP_URL">https://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett<ex>https://www.chromium.org/developers/design-documents/network-settings#TOC-Command-line-options-for-proxy-sett</ex></ph>.''',
           'label': '''Comma-separated list of proxy bypass rules''',
+          'arc_support': 'You cannot force Android apps to use a proxy. A subset of proxy settings is made available to Android apps, which they may voluntarily choose to honor. See the <ph name="PROXY_MODE_POLICY">ProxyMode</ph> policy for more details.',
         },
       ],
     },
@@ -1824,6 +1999,7 @@
       'desc': '''Configures the proxy settings for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>. These proxy settings will be available for ARC-apps too.
 
       This policy isn't ready for usage yet, please don't use it.''',
+      'arc_support': 'Only a subset of proxy configuration options are made available to Android apps. Android apps may voluntarily choose to use the proxy. You cannot force them to use a proxy.',
     },
     {
       'name': 'HTTPAuthentication',
@@ -2061,8 +2237,7 @@
           This policy takes precedence over a potentially conflicting
           ExtensionsInstallBlacklist policy. If an app or extension that
           previously had been force-installed is removed from this list, it is
-          automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google
-          Chrome</ex></ph>.
+          automatically uninstalled by <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
           For Windows instances that are not joined to an Active Directory
           domain, forced installation is limited to apps and extensions listed
@@ -2096,6 +2271,7 @@
           automatically and the user can uninstall any app or extension in <ph
           name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
           'label': '''Extension/App IDs and update URLs to be silently installed''',
+          'arc_support': 'Android apps can be force-installed from the Google Admin console using Google Play. They do not use this policy.',
         },
         {
           'name': 'ExtensionInstallSources',
@@ -2335,9 +2511,8 @@
 
       If you enable this setting, the Developer Tools can not be accessed and web-site elements can not be inspected anymore. Any keyboard shortcuts and any menu or context menu entries to open the Developer Tools or the JavaScript Console will be disabled.
 
-      Setting this option to disabled or leaving it not set will allow the use to use the Developer Tools and the JavaScript console.
-
-      For <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices capable of running Android apps, this policy also controls access to Android Developer Options. If you set this policy to true, users cannot access Developer Options. If you set this policy to false or leave it unset, users can access Developer Options by tapping seven times on the build number in the Android settings app.''',
+      Setting this option to disabled or leaving it not set allows the user to use the Developer Tools and the JavaScript console.''',
+      'arc_support': 'This policy also controls access to Android Developer Options. If you set this policy to true, users cannot access Developer Options. If you set this policy to false or leave it unset, users can access Developer Options by tapping seven times on the build number in the Android settings app.',
     },
     {
       'name': 'RestoreOnStartupGroup',
@@ -3060,9 +3235,8 @@
           'tags': ['website-sharing'],
           'desc': '''Allows you to set whether websites are allowed to track the users' physical location. Tracking the users' physical location can be allowed by default, denied by default or the user can be asked every time a website requests the physical location.
 
-          If this policy is set to 'BlockGeolocation', location sharing is disallowed for ARC apps.
-
           If this policy is left not set, 'AskGeolocation' will be used and the user will be able to change it.''',
+          'arc_support': 'If this policy is set to <ph name="BLOCK_GEOLOCATION_SETTING">BlockGeolocation</ph>, Android apps cannot access location information. If you set this policy to any other value or leave it unset, the user is asked to consent when an Android app wants to access location information.',
         },
         {
           'name': 'DefaultMediaStreamSetting',
@@ -3148,7 +3322,7 @@
               'caption': '''Do not allow any site to use key generation''',
             },
           ],
-          'supported_on': ['chrome.*:49-', 'chrome_os:49-', 'android:49-'],
+          'supported_on': ['chrome.*:49-56', 'chrome_os:49-56', 'android:49-56'],
           'features': {
             'dynamic_refresh': True,
             'per_profile': True,
@@ -3349,7 +3523,7 @@
             'type': 'array',
             'items': { 'type': 'string' },
           },
-          'supported_on': ['chrome.*:49-', 'chrome_os:49-', 'android:49-'],
+          'supported_on': ['chrome.*:49-56', 'chrome_os:49-56', 'android:49-56'],
           'features': {
             'dynamic_refresh': True,
             'per_profile': True,
@@ -3369,7 +3543,7 @@
             'type': 'array',
             'items': { 'type': 'string' },
           },
-          'supported_on': ['chrome.*:49-', 'chrome_os:49-', 'android:49-'],
+          'supported_on': ['chrome.*:49-56', 'chrome_os:49-56', 'android:49-56'],
           'features': {
             'dynamic_refresh': True,
             'per_profile': True,
@@ -3485,6 +3659,7 @@
           'desc': '''Allows you to register a list of protocol handlers. This can only be a recommended policy. The property |protocol| should be set to the scheme such as 'mailto' and the property |url| should be set to the URL pattern of the application that handles the scheme. The pattern can include a '%s', which if present will be replaced by the handled URL.
 
           The protocol handlers registered by policy are merged with the ones registered by the user and both are available for use. The user can override the protocol handlers installed by policy by installing a new default handler, but cannot remove a protocol handler registered by policy.''',
+          'arc_support': 'The protocol handlers set via this policy are not used when handling Android intents.',
         },
         {
           'name': 'PopupsBlockedForUrls',
@@ -3919,6 +4094,7 @@
       If the setting is changed while the user is signed into a multiprofile session, all users in the session will be checked against their corresponding settings. The session will be closed if any one of the users is no longer allowed to be in the session.
 
       If the policy is left not set, the default value 'MultiProfileUserBehaviorMustBePrimary' applies for enterprise-managed users and 'MultiProfileUserBehaviorUnrestricted' will be used for non-managed users.''',
+      'arc_support': 'When multiple users are logged in, only the primary user can use Android apps.',
     },
     {
       'name': 'InstantEnabled',
@@ -4339,6 +4515,7 @@
       Note that it is not recommended to block internal 'chrome://*' URLs since this may lead to unexpected errors.
 
       If this policy is not set no URL will be blacklisted in the browser.''',
+      'arc_support': 'Android apps may voluntarily choose to honor this list. You cannot force them to honor it.',
     },
     {
       'name': 'URLWhitelist',
@@ -4373,6 +4550,7 @@
       This policy is limited to 1000 entries; subsequent entries will be ignored.
 
       If this policy is not set there will be no exceptions to the blacklist from the 'URLBlacklist' policy.''',
+      'arc_support': 'Android apps may voluntarily choose to honor this list. You cannot force them to honor it.',
     },
     {
       'name': 'OpenNetworkConfiguration',
@@ -4388,6 +4566,7 @@
       'caption': '''User-level network configuration''',
       'tags': ['full-admin-access'],
       'desc': '''Allows pushing network configuration to be applied per-user to a <ph name="PRODUCT_OS_NAME">$2<ex>Chromium OS</ex></ph> device. The network configuration is a JSON-formatted string as defined by the Open Network Configuration format described at <ph name="ONC_SPEC_URL">https://sites.google.com/a/chromium.org/dev/chromium-os/chromiumos-design-docs/open-network-configuration</ph>''',
+      'arc_support': 'Android apps can use the network configurations and CA certificates set via this policy, but do not have access to some configuration options.',
     },
     {
       'name': 'DeviceOpenNetworkConfiguration',
@@ -4403,6 +4582,7 @@
       'caption': '''Device-level network configuration''',
       'tags': ['full-admin-access'],
       'desc': '''Allows pushing network configuration to be applied for all users of a <ph name="PRODUCT_OS_NAME">$2<ex>Chromium OS</ex></ph> device. The network configuration is a JSON-formatted string as defined by the Open Network Configuration format described at <ph name="ONC_SPEC_URL">https://sites.google.com/a/chromium.org/dev/chromium-os/chromiumos-design-docs/open-network-configuration</ph>''',
+      'arc_support': 'Android apps can use the network configurations and CA certificates set via this policy, but do not have access to some configuration options.',
     },
     {
       'name': 'CloudPrintSubmitEnabled',
@@ -4562,6 +4742,7 @@
       Printers connected to <ph name="CLOUD_PRINT_NAME">Google Cloud Print</ph> are considered <ph name="PRINTER_TYPE_CLOUD">"cloud"</ph>, the rest of the printers are classified as <ph name="PRINTER_TYPE_LOCAL">"local"</ph>.
       Omitting a field means all values match, for example, not specifying connectivity will cause Print Preview to initiate the discovery of all kinds of printers, local and cloud.
       Regular expression patterns must follow the JavaScript RegExp syntax and matches are case sensistive.''',
+      'arc_support': 'This policy has no effect on Android apps.',
     },
     {
       'name': 'DisableSSLRecordSplitting',
@@ -4736,6 +4917,7 @@
       'desc': '''Report OS and firmware version of enrolled devices.
 
       If this setting is not set or set to True, enrolled devices will report the OS and firmware version periodically. If this setting is set to False, version info will not be reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceActivityTimes',
@@ -4753,6 +4935,7 @@
       'desc': '''Report device activity times.
 
       If this setting is not set or set to True, enrolled devices will report time periods when a user is active on the device. If this setting is set to False, device activity times will not be recorded or reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceBootMode',
@@ -4770,6 +4953,7 @@
       'desc': '''Report the state of the device's dev switch at boot.
 
       If the policy is set to false, the state of the dev switch will not be reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceLocation',
@@ -4788,6 +4972,7 @@
       'desc': '''Report the geographic location of the device.
 
       If the policy is not set, or set to false, the location will not be reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceNetworkInterfaces',
@@ -4805,6 +4990,7 @@
       'desc': '''Report list of network interfaces with their types and hardware addresses to the server.
 
       If the policy is set to false, the interface list will not be reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceUsers',
@@ -4822,6 +5008,7 @@
       'desc': '''Report list of device users that have recently logged in.
 
       If the policy is set to false, the users will not be reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceHardwareStatus',
@@ -4840,6 +5027,7 @@
 
       If the policy is set to false, the statistics will not be reported.
       If set to true or left unset, statistics will be reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportDeviceSessionStatus',
@@ -4857,9 +5045,10 @@
       'desc': '''Report information about the active kiosk session, such as
       application ID and version.
 
-      If the policy is set to false, the session information will not be
-      reported. If set to true or left unset, session information will be
+      If the policy is set to false, the kiosk session information will not be
+      reported. If set to true or left unset, kiosk session information will be
       reported.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'ReportUploadFrequency',
@@ -4870,7 +5059,7 @@
       'features': {
         'dynamic_refresh': True,
       },
-      'example_value': 180000,
+      'example_value': 10800000,
       'id': 292,
       'caption': '''Frequency of device status report uploads''',
       'tags': ['admin-sharing'],
@@ -4878,6 +5067,28 @@
 
       If this policy is unset, the default frequency is 3 hours. The minimum
       allowed frequency is 60 seconds.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
+    },
+    {
+      'name': 'ReportArcStatusEnabled',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:55-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': False,
+      'id': 349,
+      'caption': '''Report information about status of Android''',
+      'tags': ['admin-sharing'],
+      'desc': '''Information about the status of Android is sent back to the
+      server.
+
+      If the policy is set to false, no status information is reported.
+      If set to true or left unset, status information is reported.
+
+      This policy only applies if Android apps are enabled.''',
     },
     {
       'name': 'HeartbeatEnabled',
@@ -4897,6 +5108,7 @@
 
       If this policy is set to true, monitoring network packets (so-called <ph name="HEARTBEATS_TERM">heartbeats</ph>) will be sent.
       If set to false or unset, no packets will be sent.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'HeartbeatFrequency',
@@ -4916,6 +5128,7 @@
       If this policy is unset, the default frequency is 3 minutes. The minimum
       frequency is 30 seconds and the maximum frequency is 24 hours - values
       outside of this range will be clamped to this range.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'LogUploadEnabled',
@@ -4935,6 +5148,7 @@
 
       If this policy is set to true, system logs will be sent. If set
       to false or unset, then no system logs will be sent.''',
+      'arc_support': 'This policy has no effect on the logging done by Android.',
     },
     {
       'name': 'DeviceUserWhitelist',
@@ -4955,6 +5169,7 @@
       'desc': '''Defines the list of users that are allowed to login to the device. Entries are of the form <ph name="USER_WHITELIST_ENTRY_FORMAT">user@domain</ph>, such as <ph name="USER_WHITELIST_ENTRY_EXAMPLE">madmax@managedchrome.com</ph>. To allow arbitrary users on a domain, use entries of the form <ph name="USER_WHITELIST_ENTRY_WILDCARD">*@domain</ph>.
 
       If this policy is not configured, there are no restrictions on which users are allowed to sign in. Note that creating new users still requires the <ph name="DEVICEALLOWNEWUSERS_POLICY_NAME">DeviceAllowNewUsers</ph> policy to be configured appropriately.''',
+      'arc_support': 'This policy controls who may start a <ph name="PRODUCT_OS_NAME">$2<ex>Chromium OS</ex></ph> session. It does not prevent users from signing in to additional Google accounts within Android. If you want to prevent this, configure the Android-specific <ph name="CLOUDDPC_ACCOUNT_MANAGEMENT_POLICY">accountTypesWithManagementDisabled</ph> policy as part of <ph name="ARC_POLICY">ArcPolicy</ph>.',
     },
     {
       'name': 'DeviceAllowNewUsers',
@@ -4972,6 +5187,7 @@
       'desc': '''Controls whether <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> allows new user accounts to be created. If this policy is set to false, users that do not have an account already will not be able to login.
 
       If this policy is set to true or not configured, new user accounts will be allowed to be created provided that <ph name="DEVICEUSERWHITELISTPROTO_POLICY_NAME">DeviceUserWhitelist</ph> does not prevent the user from logging in.''',
+      'arc_support': 'This policy controls whether new users can be added to <ph name="PRODUCT_OS_NAME">$2<ex>Chromium OS</ex></ph>. It does not prevent users from signing in to additional Google accounts within Android. If you want to prevent this, configure the Android-specific <ph name="CLOUDDPC_ACCOUNT_MANAGEMENT_POLICY">accountTypesWithManagementDisabled</ph> policy as part of <ph name="ARC_POLICY">ArcPolicy</ph>.',
     },
     {
       'name': 'DeviceGuestModeEnabled',
@@ -5034,6 +5250,7 @@
       'caption': '''Enable metrics reporting''',
       'tags': ['admin-sharing'],
       'desc': '''Controls whether usage metrics are reported back to Google. If set to true, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will report usage metrics. If not configured or set to false, metrics reporting will be disabled.''',
+      'arc_support': 'This policy also controls Android usage and diagnostic data collection.',
     },
     {
       'name': 'ChromeOsReleaseChannel',
@@ -5233,7 +5450,9 @@
       'tags': ['system-security'],
       'desc': '''Disables automatic updates when set to True.
 
-      <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices automatically check for updates when this setting is not configured or set to False.''',
+      <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices automatically check for updates when this setting is not configured or set to False.
+
+      Warning: It is recommended to keep auto-updates enabled so that users receive software updates and critical security fixes. Turning off auto-updates might leave users at risk.''',
     },
     {
       'name': 'DeviceAutoUpdateP2PEnabled',
@@ -5270,7 +5489,9 @@
       "" (or not configured): update to latest version available.
       "1412.": update to any minor version of 1412 (e.g. 1412.24.34 or 1412.60.2)
       "1412.2.": update to any minor version of 1412.2 (e.g. 1412.2.34 or 1412.2.2)
-      "1412.24.34": update to this specific version only''',
+      "1412.24.34": update to this specific version only
+
+      Warning: It is not recommended to configure version restrictions as they may prevent users from receiving software updates and critical security fixes. Restricting updates to a specific version prefix might leave users at risk.''',
     },
     {
       'name': 'DeviceUpdateScatterFactor',
@@ -5443,7 +5664,8 @@
 
       If this policy is set to True, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will prevent the device from booting into developer mode. The system will refuse to boot and show an error screen when the developer switch is turned on.
 
-      If this policy is unset or set to False, developer mode will remain available for the device.'''
+      If this policy is unset or set to False, developer mode will remain available for the device.''',
+      'arc_support': 'This policy controls <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> developer mode only. If you want to prevent access to Android Developer Options, you need to set the <ph name="DEVELOPER_TOOLS_POLICY">DeveloperToolsDisabled</ph> policy.',
     },
     {
       'name': 'BackgroundModeEnabled',
@@ -5489,6 +5711,7 @@
           'desc': '''Disables Google Drive syncing in the <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> Files app when set to True. In that case, no data is uploaded to Google Drive.
 
           If not set or set to False, then users will be able to transfer files to Google Drive.''',
+          'arc_support': 'This policy does not prevent the user from using the Android Google Drive app. If you want to prevent access to Google Drive, you should disallow installation of the Android Google Drive app as well.',
         },
         {
           'name': 'DriveDisabledOverCellular',
@@ -5506,6 +5729,7 @@
           'desc': '''Disables Google Drive syncing in the <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> Files app when using a cellular connection when set to True. In that case, data is only synced to Google Drive when connected via WiFi or Ethernet.
 
           If not set or set to False, then users will be able to transfer files to Google Drive via cellular connections.''',
+          'arc_support': 'This policy has no effect on the Android Google Drive app. If you want to prevent use of Google Drive over cellular connections, you should disallow installation of the Android Google Drive app.',
         },
       ],
     },
@@ -5581,7 +5805,7 @@
       'id': 299,
       'caption': '''Allow users to opt in to Safe Browsing extended reporting''',
       'tags': [],
-      'desc': '''Setting this policy to false stops users from choosing to send information about security errors they encounter to Google servers. If this setting is true or not configured, then users will be allowed to send information when they encounter an SSL error or Safe Browsing warning.''',
+      'desc': '''Setting this policy to false stops users from choosing to send some system information and page content to Google servers. If this setting is true or not configured, then users will be allowed to send some system information and page content to Safe Browsing to help detect dangerous apps and sites.''',
     },
     {
       'name': 'SpellCheckServiceEnabled',
@@ -5616,9 +5840,7 @@
       'id': 152,
       'caption': '''Disable mounting of external storage''',
       'tags': [],
-      'desc': '''Disable mounting of external storage.
-
-      When this policy is set to true, external storage will not be available in the file browser.
+      'desc': '''When this policy is set to true, external storage will not be available in the file browser.
 
       This policy affects all types of storage media. For example: USB flash drives, external hard drives, SD and other memory cards, optical storage etc. Internal storage is not affected, therefore files saved in the Download folder can still be accessed. Google Drive is also not affected by this policy.
 
@@ -5632,9 +5854,15 @@
       'tags': [],
       'supported_on': ['chrome_os:54-'],
       'caption': '''Treat external storage devices as read-only.''',
-      'desc': '''When this policy is set to true, users cannot write anything to external storage devices.''',
+      'desc': '''When this policy is set to true, users cannot write anything to external storage devices.
+
+      If this setting is set to false or not configured, then users can create and modify files of external storage devices which are physically writable.
+
+      The ExternalStorageDisabled policy takes precedence over this policy - if ExternalStorageDisabled is set to true, then all access to external storage is disabled and this policy is consequently ignored.
+
+      Dynamic refresh of this policy is supported in M56 and later.''',
       'features': {
-        'dynamic_refresh': False,
+        'dynamic_refresh': True,
         'per_profile': True,
       },
       'example_value': True
@@ -5681,9 +5909,9 @@
 
       When this policy is disabled, the user will never be prompted and audio
       capture only be available to URLs configured in AudioCaptureAllowedUrls.
-      For ARC apps, the microphone is permanently muted.
 
       This policy affects all types of audio inputs and not only the built-in microphone.''',
+      'arc_support': 'For Android apps, this policy affects the microphone only. When this policy is set to true, the microphone is muted for all Android apps, with no exceptions.',
     },
     {
       'name': 'AudioCaptureAllowedUrls',
@@ -5725,15 +5953,12 @@
       If enabled or not configured (default), the user will be prompted for
       video capture access except for URLs configured in the
       VideoCaptureAllowedUrls list which will be granted access without prompting.
-      ARC apps will be able to access the camera if they have been given
-      permission.
 
       When this policy is disabled, the user will never be prompted and video
       capture only be available to URLs configured in VideoCaptureAllowedUrls.
-      ARC apps will not be able to access the camera.
 
-      Outside of ARC-apps, this policy affects all types of video inputs and
-      not only the built-in camera.''',
+      This policy affects all types of video inputs and not only the built-in camera.''',
+      'arc_support': 'For Android apps, this policy affects the built-in camera only. When this policy is set to true, the camera is disabled for all Android apps, with no exceptions.',
     },
     {
       'name': 'VideoCaptureAllowedUrls',
@@ -5773,7 +5998,6 @@
       'desc': '''Disables taking screenshots.
 
       If enabled screenshots cannot be taken using keyboard shortcuts or extension APIs.
-      Additionally, screen capture is disabled for ARC apps.
 
       If disabled or not specified, taking screenshots is allowed.'''
     },
@@ -5992,6 +6216,7 @@
       If this policy is set to false, neither the user nor any apps or extensions can enter fullscreen mode.
 
       On all platforms except <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph>, kiosk mode is unavailable when fullscreen mode is disabled.''',
+      'arc_support': 'This policy has no effect on the Android apps. They will be able to enter fullscreen mode even if this policy is set to <ph name="FALSE">False</ph>.',
     },
     {
       'name': 'PowerManagement',
@@ -6491,6 +6716,7 @@
           If this policy is set to True or is unset, the user is not considered to be idle while video is playing. This prevents the idle delay, screen dim delay, screen off delay and screen lock delay from being reached and the corresponding actions from being taken.
 
           If this policy is set to False, video activity does not prevent the user from being considered idle.''',
+          'arc_support': 'Video playing in Android apps is not taken into consideration, even if this policy is set to <ph name="TRUE">True</ph>.',
         },
         {
           'name': 'PresentationIdleDelayScale',
@@ -7305,7 +7531,7 @@
           'tags': [],
           'desc': '''If true, remote attestation is allowed for the device and a certificate will automatically be generated and uploaded to the Device Management Server.
 
-          If it is set to false, or if it is not set, no certificate will be generated and calls to the enterprise.platformKeysPrivate extension API will fail.''',
+          If it is set to false, or if it is not set, no certificate will be generated and calls to the enterprise.platformKeys extension API will fail.''',
         },
         {
           'name': 'AttestationEnabledForUser',
@@ -7320,7 +7546,7 @@
           'id': 200,
           'caption': '''Enable remote attestation for the user''',
           'tags': [],
-          'desc': '''If true, the user can use the hardware on Chrome devices to remote attest its identity to the privacy CA via the Enterprise Platform Keys API chrome.enterprise.platformKeysPrivate.challengeUserKey().
+          'desc': '''If true, the user can use the hardware on Chrome devices to remote attest its identity to the privacy CA via the <ph name="ENTERPRISE_PLATFORM_KEYS_API">Enterprise Platform Keys API</ph> using <ph name="CHALLENGE_USER_KEY_FUNCTION">chrome.enterprise.platformKeys.challengeUserKey()</ph>.
 
           If it is set to false, or if it is not set, calls to the API will fail with an error code.''',
         },
@@ -7340,7 +7566,7 @@
           'id': 201,
           'caption': '''Extensions allowed to to use the remote attestation API''',
           'tags': [],
-          'desc': '''This policy specifies the allowed extensions to use Enterprise Platform Keys API chrome.enterprise.platformKeysPrivate.challengeUserKey() for remote attestation. Extensions must be added to this list to use the API.
+          'desc': '''This policy specifies the allowed extensions to use the <ph name="ENTERPRISE_PLATFORM_KEYS_API">Enterprise Platform Keys API</ph> function <ph name="CHALLENGE_USER_KEY_FUNCTION">chrome.enterprise.platformKeys.challengeUserKey()</ph> for remote attestation. Extensions must be added to this list to use the API.
 
           If an extension is not in the list, or the list is not set, the call to the API will fail with an error code.''',
         },
@@ -7596,9 +7822,9 @@
 
       The policy consists of a list of bookmarks whereas each bookmark is a
       dictionary containing the keys <ph name="NAME">"name"</ph> and <ph
-      name="URL">"url"</ph> which hold the bookmark's name and its target. A
+      name="URL_LABEL">"url"</ph> which hold the bookmark's name and its target. A
       subfolder may be configured by defining a bookmark without an <ph
-      name="URL">"url"</ph> key but with an additional <ph
+      name="URL_LABEL">"url"</ph> key but with an additional <ph
       name="CHILDREN">"children"</ph> key which itself contains a list of
       bookmarks as defined above (some of which may be folders again). <ph
       name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> amends incomplete URLs
@@ -7782,6 +8008,7 @@
       When this policy is set to false or unset, cookies set by the IdP are transferred to the user's profile during their first login on a device only.
 
       This policy affects users whose domain matches the device's enrollment domain only. For all other users, cookies set by the IdP are transferred to the user's profile during their first login on the device only.''',
+      'arc_support': 'Cookies transferred to the user\'s profile are not accessible to Android apps.',
     },
     {
       'name': 'EasyUnlockAllowed',
@@ -7872,6 +8099,24 @@
       'desc': '''If this policy is set to true or not configured, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will allow Add Person from the user manager.
 
       If this policy is set to false, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will not allow creation of new profiles from the profile manager.''',
+    },
+    {
+      'name': 'ForceBrowserSignin',
+      'type': 'main',
+      'future': True,
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:55-', 'android:57-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False,
+      },
+      'example_value': False,
+      'id': 346,
+      'caption': '''Enables force sign in for <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
+      'tags': [],
+      'desc': '''If this policy is set to true, user has to sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> with their profile before using the browser. And the default value of BrowserGuestModeEnabled will be set to false.
+
+      If this policy is set to false or not configured, user can use the browser without sign in to <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.''',
     },
     {
       'name': 'SSLVersionMin',
@@ -8106,6 +8351,7 @@
       'tags': [],
       'desc': '''<ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> caches Apps and Extensions for installation by multiple users of a single device to avoid re-downloading them for each user.
       If this policy is not configured or the value is lower than 1 MB, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will use the default cache size.''',
+      'arc_support': 'The cache is not used for Android apps. If multiple users install the same Android app, it will be downloaded anew for each user.',
     },
     {
       'name': 'DeviceLoginScreenDomainAutoComplete',
@@ -8211,6 +8457,7 @@
       By default an extension cannot use a key designated for corporate usage, which is equivalent to setting allowCorporateKeyUsage to false for that extension.
 
       Only if allowCorporateKeyUsage is set to true for an extension, it can use any platform key marked for corporate usage to sign arbitrary data. This permission should only be granted if the extension is trusted to secure access to the key against attackers.''',
+      'arc_support': 'Android apps cannot get access to corporate keys. This policy has no effect on them.',
     },
     {
       'name': 'WelcomePageOnOSUpgradeEnabled',
@@ -8375,14 +8622,17 @@
       'example_value': True,
       'id': 319,
       'caption': '''Allow the auto launched with zero delay kiosk app to control <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version''',
-      'tags': [],
+      'tags': ['system-security'],
       'desc': '''Whether to allow the auto launched with zero delay kiosk app to control <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version.
 
       This policy controls whether to allow the auto launched with zero delay kiosk app to control <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version by declaring a required_platform_version in its manifest and use it as the auto update target version prefix.
 
       If the policy is set to true, the value of required_platform_version manifest key of the auto launched with zero delay kiosk app is used as auto update target version prefix.
 
-      If the policy is not configured or set to false, the required_platform_version manifest key is ignored and auto update proceeds as normal.''',
+      If the policy is not configured or set to false, the required_platform_version manifest key is ignored and auto update proceeds as normal.
+
+      Warning: It is not recommended to delegate control of the <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version to a kiosk app as it may prevent the device from receiving software updates and critical security fixes. Delegating control of the <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version might leave users at risk.''',
+      'arc_support': 'If the kiosk app is an Android app, it will have no control over the <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> version, even if this policy is set to <ph name="TRUE">True</ph>.',
     },
     {
       'name': 'LoginAuthenticationBehavior',
@@ -8473,7 +8723,7 @@
 
       If this policy is set, the user cannot change or override it.
 
-      After enabling Bluetooth, the device must be rebooted for the changes to take effect (no need to reboot the device when disabling Bluetooth).''',
+      After enabling Bluetooth, the user must log out and log back in for the changes to take effect (no need for this when disabling Bluetooth).''',
     },
     {
       'name': 'SuppressUnsupportedOSWarning',
@@ -8586,6 +8836,44 @@
       'example_value': True,
       'tags': [],
       'id': 327,
+    },
+    {
+      'name': 'NetworkThrottlingEnabled',
+      'device_only': True,
+      'caption': '''Enables throttling network bandwidth''',
+      'desc': '''Allows choosing whether network throttling is enabled or not.
+      This applies to all users, and to all interfaces on the device. Once set,
+      the throttling persists until the policy is changed to disable it.
+
+      If set to false, there is no throttling.
+      If set to true, the system is throttled to achieve the provided upload and download rates (in kbits/s).''',
+      'type': 'dict',
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'enabled': {
+            'description': 'A boolean flag indicating if throttling is enabled.',
+            'type': 'boolean'
+          },
+          'upload_rate_kbits': {
+            'description': 'Desired upload rate in kbits/s.',
+            'type': 'integer'
+          },
+          'download_rate_kbits': {
+            'description': 'Desired download rate in kbits/s.',
+            'type': 'integer'
+          }
+        },
+        'required': ['enabled', 'upload_rate_kbits', 'download_rate_kbits']
+      },
+      'supported_on': ['chrome_os:56-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': False,
+      },
+      'example_value': [{'enabled': 'true', 'upload_rate_kbits': '5600', 'download_rate_kbits': '5600'}],
+      'tags': [],
+      'id': 351,
     },
     {
       'name': 'LoginVideoCaptureAllowedUrls',
@@ -8852,8 +9140,9 @@
       'id': 341,
       'type': 'string',
       'schema' : { 'type': 'string' },
-      'tags': ['filtering'],
+      'tags': ['filtering', 'admin-sharing'],
       'supported_on': ['webview_android:54-'],
+      'future': True,
       'caption': '''Set an external source of URL restrictions''',
       'desc' : '''When this policy is set to a non-empty string the WebView will read URL restrictions from the content provider with the given authority name.''',
       'features': {
@@ -8879,6 +9168,249 @@
 
       If set to False, updates to components are disabled. However, some components are exempt from this policy: updates to any component that does not contain executable code, or does not significantly alter the behavior of the browser, or is critical for its security will not be disabled.
       Examples of such components include the certificate revocation lists and safe browsing data. ''',
+    },
+    {
+      'name': 'NativePrinters',
+      'type': 'list',
+      'schema': {
+        'type': 'array',
+        'items': {
+          'type': 'object',
+          'id': 'PrinterType',
+          'properties': {
+            'display_name': { 'type': 'string' },
+            'description': { 'type': 'string' },
+            'manufacturer': { 'type': 'string' },
+            'model': { 'type': 'string' },
+            'uri': { 'type': 'string' },
+            'uuid': { 'type': 'string' },
+            'ppd_resource': {
+              'type': 'object',
+              'id': 'PpdResource',
+              'properties': {
+                'effective_manufacturer': { 'type': 'string' },
+                'effective_model': { 'type': 'string' }
+              }
+            }
+          }
+        }
+      },
+      'supported_on': [ 'chrome_os:56-' ],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': [{
+        "display_name": "Color Laser",
+        "description": "The printer next to the water cooler.",
+        "manufacturer": "Printer Manufacturer",
+        "model": "Color Laser 2004",
+        "uri": "ipps://print-server.intranet.example.com:443/ipp/cl2k4",
+        "uuid": "1c395fdb-5d93-4904-b246-b2c046e79d12",
+        "ppd_resource": {
+          "effective_manufacturer": "MakesPrinters",
+          "effective_model": "ColorLaser2k4"
+        }
+      }],
+      'id': 350,
+      'caption': '''Native Printing''',
+      'tags': [],
+      'desc': '''Configures a list of printers.
+
+      This policy allows administrators to provide printer configurations for
+      their users.
+
+      <ph name="PRINTER_DISPLAY_NAME">display_name</ph> and <ph
+      name="PRINTER_DESCRIPTION">description</ph> are free form strings that
+      can be customized for ease of printer selection. <ph
+      name="PRINTER_MANUFACTURER">manufacturer</ph> and <ph
+      name="PRINTER_MODEL">model</ph> should match one of the <ph
+      name="PRODUCT_NAME">$2<ex>Google Chrome OS</ex></ph> supported
+      printers.  <ph name="PRINTER_URI">uri</ph> should be an address reachable
+      from a client computer including the <ph name="URI_SCHEME">scheme</ph>,
+      <ph name="URI_PORT">port</ph>, and <ph name="URI_QUEUE">queue</ph>.  <ph
+      name="PRINTER_UUID">uuid</ph> is optional.  If provided, it is used to
+      help deduplicate <ph name="ZEROCONF_DISCOVERY">zeroconf</ph> printers.
+
+      Printer setup is completed upon the first use of a printer.  PPDs are not
+      downloaded until the printer is used.  After that time, frequently used
+      PPDs are cached.
+
+      This policy has no effect on whether users can configure printers on
+      individual devices.  It is intended to be supplementary to the
+      configuration of printers by individual users.''',
+    },
+    {
+      'name': 'QuickUnlock',
+      'type': 'group',
+      'caption': '''Quick unlock policies''',
+      'desc': '''Configures quick unlock related policies.''',
+      'policies': [
+        {
+          'name': 'QuickUnlockModeWhitelist',
+          'type': 'list',
+          'schema': {
+            'type': 'array',
+            'items': {
+              'type': 'string',
+              'enum': [
+                'all',
+                'PIN'
+              ],
+            },
+            'id': 'QuickUnlockModeWhitelist',
+          },
+          'supported_on': ['chrome_os:56-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': ['PIN'],
+          'default_for_enterprise_users': [],
+          'id': 352,
+          'caption': '''Configure allowed quick unlock modes.''',
+          'tags': [],
+          'desc': '''Controls which quick unlock modes are allowed to be set up and used.
+          This setting white-lists the allowed quick unlock modes that can be set up and used to unlock the lock screen. The value is a list of strings, each of which should be one of the following: "all", "PIN". If "all" is selected, then all supported quick modes will be available, otherwise the modes in the list will be the ones available.
+
+          If this setting is configured, quick unlock modes which have a type that is not on this list can not be set up or used.
+
+          If this setting is left not configured, "PIN" mode will be enabled, and all other modes will be disabled.''',
+        },
+        {
+          'name': 'QuickUnlockTimeout',
+          'type': 'int-enum',
+          'schema': {
+            'type': 'integer',
+            'enum': [ 0, 1, 2, 3 ],
+          },
+          'items': [
+            {
+              'name': 'SixHours',
+              'value': 0,
+              'caption': '''Password entry is required every six hours.''',
+            },
+            {
+              'name': 'TweleveHours',
+              'value': 1,
+              'caption': '''Password entry is required every twelve hours.''',
+            },
+            {
+              'name': 'Day',
+              'value': 2,
+              'caption': '''Password entry is required every day (24 hours).''',
+            },
+            {
+              'name': 'Week',
+              'value': 3,
+              'caption': '''Password entry is required every week (168 hours).''',
+            },
+          ],
+          'supported_on': ['chrome_os:57-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': 2,
+          'id': 353,
+          'caption': '''Sets how often user has to enter password to use quick unlock.''',
+          'tags': [],
+          'desc': '''This setting controls how often the lock screen will request the password to be entered in order to continue using quick unlock. Each time the lock screen is entered, if the last password entry was more than this setting, the quick unlock will not be available on entering the lock screen. Should the user stay on the lock screen past this period of time, a password will be requested next time the user enters the wrong code, or re-enters the lock screen, whichever comes first.
+
+          If this setting is configured, users using quick unlock will be requested to enter their passwords on the lock screen depending on this setting.
+
+          If this setting is not configured, users using quick unlock will be requested to enter their password on the lock screen every day.''',
+        },
+        {
+          'name': 'PinUnlockMinimumLength',
+          'type': 'int',
+          'schema': { 'type': 'integer' },
+          'supported_on': ['chrome_os:57-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': 4,
+          'id': 354,
+          'caption': '''Sets the minimum length of the lock screen PIN.''',
+          'tags': [],
+          'desc': '''This setting controls the minimum length a PIN can be.
+
+          If this setting is configured to be less than 1, the minimum length a PIN can be is 1.
+
+          If this setting is not configured, the minimum length a PIN can be is 4.''',
+        },
+        {
+          'name': 'PinUnlockMaximumLength',
+          'type': 'int',
+          'schema': { 'type': 'integer' },
+          'supported_on': ['chrome_os:57-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': 0,
+          'id': 355,
+          'caption': '''Sets the maximum length of the lock screen PIN.''',
+          'tags': [],
+          'desc': '''This setting controls the maximum length a PIN can be.
+
+          If this setting is configured to be 0 or less, there is no maximum length and a user can set a PIN as long as they want.
+
+          If this setting is less than PinUnlockMinimumLength but greater than 0, the maximum length is the same as the minimum length.
+
+          If this setting is not configured, there is no maximum length and a user can set a PIN as long as they want.''',
+        },
+        {
+          'name': 'PinUnlockWeakPinsAllowed',
+          'type': 'main',
+          'schema': { 'type': 'boolean' },
+          'supported_on': ['chrome_os:57-'],
+          'features': {
+            'dynamic_refresh': True,
+            'per_profile': True,
+          },
+          'example_value': False,
+          'id': 356,
+          'caption': '''Enables users to set weak PINs for the lock screen PIN.''',
+          'tags': [],
+          'desc': '''If this setting is configured to be false, users will be prevented from setting PINs that are considered weak. Such PINs include PINs which contain the same digit throughout, PINs whose digits are increasing by 1, PINs whose digits are decreasing by 1 and PINs which are too common.
+
+          If this setting is configured to be true, or not configured, users can enter these PINs and will only get a warning display.''',
+        },
+      ],
+    },
+    {
+      'name': 'DeviceWallpaperImage',
+      'type': 'external',
+      'schema': {
+        'type': 'object',
+        'properties': {
+          'url': { "type": "string" },
+          'hash': { "type": "string" }
+        },
+      },
+      'supported_on': ['chrome_os:57-'],
+      'device_only': True,
+      'features': {
+        'dynamic_refresh': True,
+      },
+      'example_value': { "url": "https://example.com/device_wallpaper.jpg", "hash": "examplewallpaperexamplewallpaperexamplewallpaperexamplewallpaper" },
+      'max_size': 16777216,
+      'id': 357,
+      'caption': '''Device wallpaper image''',
+      'tags': [],
+      'desc': '''Configure device-level wallpaper image that is shown on the login screen if no user has yet signed in to the device. The policy is set by specifying the URL from which the Chrome OS device can download the wallpaper image and a cryptographic hash used to verify the integrity of the download. The image must be in JPEG format, its file size must not exceed 16MB. The URL must be accessible without any authentication. The wallpaper image is downloaded and cached. It will be re-downloaded whenever the URL or the hash changes.
+
+      The policy should be speicified as a string that expresses the URL and hash in JSON format, e.g.,
+      {
+        "url": "https://example.com/device_wallpaper.jpg",
+        "hash": "examplewallpaperhash"
+      }
+
+      If the device wallpaper policy is set, the Chrome OS device will download and use the wallpaper image on the login screen if no user has yet signed in to the device. Once the user logs in, the user's wallpaper policy kicks in.
+
+      If the device wallpaper policy is left not set, it's the user's wallpaper policy to decide what to show if the user's wallpaper policy is set.''',
     },
   ],
   'messages': {
@@ -8930,6 +9462,10 @@
     'doc_description': {
       'desc': '''Caption text of the 'description text' in the summary chart of a policy in the generated documentation''',
       'text': '''Description:'''
+    },
+    'doc_arc_support': {
+      'desc': '''Caption text of the field in the generated documentation that describes how a policy affects Android applications on Chrome OS''',
+      'text': '''Note for <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> devices supporting Android apps:'''
     },
     'doc_example_value': {
       'desc': '''Caption text of the field 'example value' in the summary chart of a policy in the generated documentation''',

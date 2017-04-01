@@ -20,6 +20,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/ports/SkTypeface_mac.h"
+#include "ui/gfx/decorated_text.h"
 
 namespace {
 
@@ -29,7 +30,7 @@ namespace {
 // 10.10.
 base::ScopedCFTypeRef<CTFontRef> CopyFontWithSymbolicTraits(CTFontRef font,
                                                             int sym_traits) {
-  if (base::mac::IsOSElCapitanOrLater()) {
+  if (base::mac::IsAtLeastOS10_11()) {
     return base::ScopedCFTypeRef<CTFontRef>(CTFontCreateCopyWithSymbolicTraits(
         font, 0, nullptr, sym_traits, sym_traits));
   }
@@ -110,6 +111,10 @@ SizeF RenderTextMac::GetStringSizeF() {
 SelectionModel RenderTextMac::FindCursorPosition(const Point& point) {
   // TODO(asvitkine): Implement this. http://crbug.com/131618
   return SelectionModel();
+}
+
+bool RenderTextMac::IsSelectionSupported() const {
+  return false;
 }
 
 std::vector<RenderText::FontSpan> RenderTextMac::GetFontSpansForTesting() {
@@ -446,6 +451,17 @@ void RenderTextMac::InvalidateStyle() {
   attributes_.reset();
   runs_.clear();
   runs_valid_ = false;
+}
+
+bool RenderTextMac::GetDecoratedTextForRange(const Range& range,
+                                             DecoratedText* decorated_text) {
+  // TODO(karandeepb): This is not invoked on any codepath currently. Style the
+  // returned text if need be.
+  if (obscured())
+    return false;
+
+  decorated_text->text = GetTextFromRange(range);
+  return true;
 }
 
 }  // namespace gfx

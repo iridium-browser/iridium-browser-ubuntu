@@ -5,12 +5,11 @@
 #include "components/sync/engine_impl/process_updates_util.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include <string>
 
 #include "base/location.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/data_type_histogram.h"
 #include "components/sync/engine/cycle/update_counters.h"

@@ -9,7 +9,7 @@
 
 #include <memory>
 
-#include "fpdfsdk/include/cpdfsdk_baannot.h"
+#include "fpdfsdk/cpdfsdk_baannot.h"
 #include "fpdfsdk/javascript/JS_Define.h"
 
 class Annot : public CJS_EmbedObj {
@@ -17,15 +17,14 @@ class Annot : public CJS_EmbedObj {
   explicit Annot(CJS_Object* pJSObject);
   ~Annot() override;
 
-  FX_BOOL hidden(IJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
-  FX_BOOL name(IJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
-  FX_BOOL type(IJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
+  bool hidden(IJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
+  bool name(IJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
+  bool type(IJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError);
 
   void SetSDKAnnot(CPDFSDK_BAAnnot* annot);
 
  private:
-  CPDFSDK_Annot* m_pAnnot = nullptr;
-  std::unique_ptr<CPDFSDK_Annot::Observer> m_pObserver;
+  CPDFSDK_Annot::ObservedPtr m_pAnnot;
 };
 
 class CJS_Annot : public CJS_Object {

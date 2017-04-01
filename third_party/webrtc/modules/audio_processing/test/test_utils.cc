@@ -36,6 +36,8 @@ void RawFile::WriteSamples(const float* samples, size_t num_samples) {
 ChannelBufferWavReader::ChannelBufferWavReader(std::unique_ptr<WavReader> file)
     : file_(std::move(file)) {}
 
+ChannelBufferWavReader::~ChannelBufferWavReader() = default;
+
 bool ChannelBufferWavReader::Read(ChannelBuffer<float>* buffer) {
   RTC_CHECK_EQ(file_->num_channels(), buffer->num_channels());
   interleaved_.resize(buffer->size());
@@ -52,6 +54,8 @@ bool ChannelBufferWavReader::Read(ChannelBuffer<float>* buffer) {
 
 ChannelBufferWavWriter::ChannelBufferWavWriter(std::unique_ptr<WavWriter> file)
     : file_(std::move(file)) {}
+
+ChannelBufferWavWriter::~ChannelBufferWavWriter() = default;
 
 void ChannelBufferWavWriter::Write(const ChannelBuffer<float>& buffer) {
   RTC_CHECK_EQ(file_->num_channels(), buffer.num_channels());
@@ -132,7 +136,7 @@ std::vector<Point> ParseArrayGeometry(const std::string& mic_positions) {
   const std::vector<float> values = ParseList<float>(mic_positions);
   const size_t num_mics =
       rtc::CheckedDivExact(values.size(), static_cast<size_t>(3));
-  RTC_CHECK_GT(num_mics, 0u) << "mic_positions is not large enough.";
+  RTC_CHECK_GT(num_mics, 0) << "mic_positions is not large enough.";
 
   std::vector<Point> result;
   result.reserve(num_mics);

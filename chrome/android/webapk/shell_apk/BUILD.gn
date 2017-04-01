@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/android/rules.gni")
+import("shell_apk_version.gni")
 
 declare_args() {
   # The origin URL of the WebAPK. Used to generate a unique package name for
@@ -15,6 +16,11 @@ declare_args() {
   # The Url of the Web Manifest file.
   webapk_web_manifest_url = "https://www.template.com/manifest.json"
 
+  # Murmur2 hash of the homescreen icon. The hash should be of the icon as it is
+  # available from the web. The icon bytes should not be transformed (e.g.
+  # decoded / encoded) prior to taking the hash.
+  webapk_icon_murmur2_hash = "0"
+
   # Attributes from Web Manifest.
   webapk_start_url = "https://www.template.com/home_page"
   webapk_name = "Longer Sample WebAPK Name"
@@ -24,14 +30,7 @@ declare_args() {
   webapk_orientation = "portrait"
   webapk_theme_color = "2147483648L"  # HostBrowserLauncher#MANIFEST_COLOR_INVALID_OR_MISSING
   webapk_background_color = "2147483648L"  #HostBrowserLauncher#MANIFEST_COLOR_INVALID_OR_MISSING
-
-  # The URL of the app icon. Empty if the app icon is generated.
-  webapk_icon_url = "http://www.template.com/icon.png"
-
-  # Murmur2 hash of the homescreen icon. The hash should be of the icon as it is
-  # available from the web. The icon bytes should not be transformed (e.g.
-  # decoded / encoded) prior to taking the hash.
-  webapk_icon_murmur2_hash = "0L"
+  webapk_icon_urls_and_icon_murmur2_hashes = "http://www.template.com/icon1.png $webapk_icon_murmur2_hash http://www.template.com/icon2.png $webapk_icon_murmur2_hash"
 
   # Host part of |webapk_scope_url|.
   webapk_scope_url_host = "www.template.com"
@@ -56,6 +55,7 @@ jinja_template("shell_apk_manifest") {
   output = shell_apk_manifest
 
   variables = [
+    "shell_apk_version=$shell_apk_version",
     "manifest_package=$shell_apk_manifest_package",
     "runtime_host=$webapk_runtime_host",
     "start_url=$webapk_start_url",
@@ -66,8 +66,7 @@ jinja_template("shell_apk_manifest") {
     "orientation=$webapk_orientation",
     "theme_color=$webapk_theme_color",
     "background_color=$webapk_background_color",
-    "icon_url=$webapk_icon_url",
-    "icon_murmur2_hash=$webapk_icon_murmur2_hash",
+    "icon_urls_and_icon_murmur2_hashes=$webapk_icon_urls_and_icon_murmur2_hashes",
     "scope_url_host=$webapk_scope_url_host",
     "scope_url_path=$webapk_scope_url_path",
     "web_manifest_url=$webapk_web_manifest_url",
@@ -114,8 +113,8 @@ android_apk("webapk") {
     proguard_enabled = true
     proguard_configs = [
       "//chrome/android/java/proguard.flags",
-      "//base/android/base_proguard_config.flags",
-      "//base/android/release_proguard_config.flags",
+      "//base/android/proguard/chromium_apk.flags",
+      "//base/android/proguard/chromium_code.flags",
     ]
   }
 }
@@ -130,6 +129,7 @@ android_library("shell_apk_javatests") {
     "//base:base_java_test_support",
     "//chrome/android/webapk/libs/common:common_java",
     "//content/public/test/android:content_java_test_support",
+    "//third_party/android_support_test_runner:runner_java",
   ]
   srcjar_deps = [ "javatests/dex_optimizer:dex_optimizer_service_aidl" ]
 }
@@ -142,5 +142,6 @@ junit_binary("webapk_shell_apk_junit_tests") {
   deps = [
     ":webapk_java",
     "//chrome/android/webapk/libs/common:common_java",
+    "//chrome/android/webapk/test:junit_test_support",
   ]
 }

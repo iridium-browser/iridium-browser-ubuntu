@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.browser;
 
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 import android.text.TextUtils;
 
 import org.chromium.base.BuildInfo;
 import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 
 import java.io.BufferedReader;
@@ -17,15 +18,11 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Test to make sure browser and renderer are seperated process.
  */
 public class ProcessIsolationTest extends ChromeActivityTestCaseBase<ChromeActivity> {
-    private Pattern mUidPattern;
-
     public ProcessIsolationTest() {
         super(ChromeActivity.class);
     }
@@ -38,6 +35,7 @@ public class ProcessIsolationTest extends ChromeActivityTestCaseBase<ChromeActiv
     @MediumTest
     @DisableIf.Build(sdk_is_greater_than = 22, message = "crbug.com/517611")
     @Feature({"Browser", "Security"})
+    @RetryOnFailure
     public void testProcessIsolationForRenderers() throws InterruptedException {
         int tabsCount = getActivity().getCurrentTabModel().getCount();
         // The ActivityManager can be used to retrieve the current processes, but the reported UID
@@ -56,11 +54,22 @@ public class ProcessIsolationTest extends ChromeActivityTestCaseBase<ChromeActiv
         try {
             Process psProcess = Runtime.getRuntime().exec("ps");
             reader = new BufferedReader(new InputStreamReader(psProcess.getInputStream()));
-            String line;
+            String line = reader.readLine();
+            assertNotNull(line);
+            final String[] lineSections = line.split("\\s+");
+            int pidIndex = -1;
+            for (int index = 0; index < lineSections.length; index++) {
+                if ("PID".equals(lineSections[index])) {
+                    pidIndex = index;
+                    break;
+                }
+            }
+            assertNotSame(-1, pidIndex);
+
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append('\n');
                 if (line.indexOf(packageName) != -1) {
-                    String uid = retrieveUid(line);
+                    final String uid = line.split("\\s+")[pidIndex];
                     assertNotNull("Failed to retrieve UID from " + line, uid);
                     if (line.indexOf("sandboxed_process") != -1) {
                         // Renderer process.
@@ -104,15 +113,6 @@ public class ProcessIsolationTest extends ChromeActivityTestCaseBase<ChromeActiv
         assertEquals("Found at least two processes with the same UID in ps output: \n"
                 + sb.toString(),
                 uids.size(), new HashSet<String>(uids).size());
-    }
-
-    private String retrieveUid(String psLine) {
-        if (mUidPattern == null) {
-            mUidPattern = Pattern.compile("^\\S+");
-        }
-        Matcher m = mUidPattern.matcher(psLine);
-        if (!m.find()) return null;
-        return m.group(0);
     }
 
     @Override

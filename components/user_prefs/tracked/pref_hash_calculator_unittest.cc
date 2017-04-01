@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -91,9 +92,9 @@ TEST(PrefHashCalculatorTest, CatchHashChanges) {
   nested_empty_dict->Set("a", new base::DictionaryValue);
   nested_empty_dict->Set("b", new base::ListValue);
   std::unique_ptr<base::ListValue> nested_empty_list(new base::ListValue);
-  nested_empty_list->Append(new base::DictionaryValue);
-  nested_empty_list->Append(new base::ListValue);
-  nested_empty_list->Append(nested_empty_dict->DeepCopy());
+  nested_empty_list->Append(base::MakeUnique<base::DictionaryValue>());
+  nested_empty_list->Append(base::MakeUnique<base::ListValue>());
+  nested_empty_list->Append(nested_empty_dict->CreateDeepCopy());
 
   // A dictionary with an empty dictionary, an empty list, and nested empty
   // dictionaries/lists in it.
@@ -110,15 +111,15 @@ TEST(PrefHashCalculatorTest, CatchHashChanges) {
   list_value->AppendInteger(100);
   list_value->AppendDouble(1.0);
 
-  ASSERT_EQ(base::Value::TYPE_NULL, null_value->GetType());
-  ASSERT_EQ(base::Value::TYPE_BOOLEAN, bool_value->GetType());
-  ASSERT_EQ(base::Value::TYPE_INTEGER, int_value->GetType());
-  ASSERT_EQ(base::Value::TYPE_DOUBLE, double_value->GetType());
-  ASSERT_EQ(base::Value::TYPE_STRING, string_value->GetType());
-  ASSERT_EQ(base::Value::TYPE_DICTIONARY, dict_value->GetType());
-  ASSERT_EQ(base::Value::TYPE_LIST, list_value->GetType());
+  ASSERT_EQ(base::Value::Type::NONE, null_value->GetType());
+  ASSERT_EQ(base::Value::Type::BOOLEAN, bool_value->GetType());
+  ASSERT_EQ(base::Value::Type::INTEGER, int_value->GetType());
+  ASSERT_EQ(base::Value::Type::DOUBLE, double_value->GetType());
+  ASSERT_EQ(base::Value::Type::STRING, string_value->GetType());
+  ASSERT_EQ(base::Value::Type::DICTIONARY, dict_value->GetType());
+  ASSERT_EQ(base::Value::Type::LIST, list_value->GetType());
 
-  // Test every value type independently. Intentionally omits TYPE_BINARY which
+  // Test every value type independently. Intentionally omits Type::BINARY which
   // isn't even allowed in JSONWriter's input.
   static const char kExpectedNullValue[] =
       "82A9F3BBC7F9FF84C76B033C854E79EEB162783FA7B3E99FF9372FA8E12C44F7";

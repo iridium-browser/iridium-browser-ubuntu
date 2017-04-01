@@ -196,14 +196,15 @@ char* SkRegion::toString() {
     if (result == nullptr) {
         return nullptr;
     }
-    count = sprintf(result, "SkRegion(");
+    count = snprintf(result, max, "SkRegion(");
     iter.reset(*this);
     while (!iter.done()) {
         const SkIRect& r = iter.rect();
-        count += sprintf(result+count, "(%d,%d,%d,%d)", r.fLeft, r.fTop, r.fRight, r.fBottom);
+        count += snprintf(result+count, max - count, 
+                "(%d,%d,%d,%d)", r.fLeft, r.fTop, r.fRight, r.fBottom);
         iter.next();
     }
-    count += sprintf(result+count, ")");
+    count += snprintf(result+count, max - count, ")");
     return result;
 }
 #endif
@@ -1127,9 +1128,9 @@ size_t SkRegion::writeToMemory(void* storage) const {
 }
 
 size_t SkRegion::readFromMemory(const void* storage, size_t length) {
-    SkRBufferWithSizeCheck  buffer(storage, length);
-    SkRegion                tmp;
-    int32_t                 count;
+    SkRBuffer   buffer(storage, length);
+    SkRegion    tmp;
+    int32_t     count;
 
     if (buffer.readS32(&count) && (count >= 0) && buffer.read(&tmp.fBounds, sizeof(tmp.fBounds))) {
         if (count == 0) {

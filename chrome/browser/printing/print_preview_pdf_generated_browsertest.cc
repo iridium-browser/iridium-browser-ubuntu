@@ -24,6 +24,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/md5.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -213,7 +214,7 @@ class PrintPreviewObserver : public WebContentsObserver {
 
   // Saves the print preview settings to be sent to the print preview dialog.
   void SetPrintPreviewSettings(const PrintPreviewSettings& settings) {
-    settings_.reset(new PrintPreviewSettings(settings));
+    settings_ = base::MakeUnique<PrintPreviewSettings>(settings);
   }
 
   // Returns the setting that could not be set in the preview dialog.
@@ -279,8 +280,8 @@ class PrintPreviewObserver : public WebContentsObserver {
     ASSERT_TRUE(ui);
     ASSERT_TRUE(ui->web_ui());
 
-    // The |ui->web_ui()| owns the message handler.
-    ui->web_ui()->AddMessageHandler(new UIDoneLoadingMessageHandler(this));
+    ui->web_ui()->AddMessageHandler(
+        base::MakeUnique<UIDoneLoadingMessageHandler>(this));
     ui->web_ui()->CallJavascriptFunctionUnsafe(
         "onEnableManipulateSettingsForTest");
   }
@@ -341,10 +342,8 @@ class PrintPreviewPdfGeneratedBrowserTest : public InProcessBrowserTest {
     std::string pdf_data;
 
     ASSERT_TRUE(base::ReadFileToString(pdf_file_save_path_, &pdf_data));
-    ASSERT_TRUE(chrome_pdf::GetPDFDocInfo(pdf_data.data(),
-                                          pdf_data.size(),
-                                          &num_pages,
-                                          &max_width_in_points));
+    ASSERT_TRUE(chrome_pdf::GetPDFDocInfo(pdf_data.data(), pdf_data.size(),
+                                          &num_pages, &max_width_in_points));
 
     ASSERT_GT(num_pages, 0);
     double max_width_in_pixels =
@@ -352,11 +351,9 @@ class PrintPreviewPdfGeneratedBrowserTest : public InProcessBrowserTest {
 
     for (int i = 0; i < num_pages; ++i) {
       double width_in_points, height_in_points;
-      ASSERT_TRUE(chrome_pdf::GetPDFPageSizeByIndex(pdf_data.data(),
-                                                    pdf_data.size(),
-                                                    i,
-                                                    &width_in_points,
-                                                    &height_in_points));
+      ASSERT_TRUE(chrome_pdf::GetPDFPageSizeByIndex(
+          pdf_data.data(), pdf_data.size(), i, &width_in_points,
+          &height_in_points));
 
       double width_in_pixels = ConvertUnitDouble(
           width_in_points, kPointsPerInch, kDpi);
@@ -376,29 +373,22 @@ class PrintPreviewPdfGeneratedBrowserTest : public InProcessBrowserTest {
       PdfRenderSettings settings(rect, kDpi, true);
 
       int int_max = std::numeric_limits<int>::max();
-      if (settings.area().width() > int_max / kColorChannels ||
-          settings.area().height() > int_max / (kColorChannels *
-              settings.area().width())) {
+      if (settings.area.width() > int_max / kColorChannels ||
+          settings.area.height() >
+              int_max / (kColorChannels * settings.area.width())) {
         FAIL() << "The dimensions of the image are too large."
                << "Decrease the DPI or the dimensions of the image.";
       }
 
-      std::vector<uint8_t> page_bitmap_data(
-          kColorChannels * settings.area().size().GetArea());
+      std::vector<uint8_t> page_bitmap_data(kColorChannels *
+                                            settings.area.size().GetArea());
 
       ASSERT_TRUE(chrome_pdf::RenderPDFPageToBitmap(
-          pdf_data.data(),
-          pdf_data.size(),
-          i,
-          page_bitmap_data.data(),
-          settings.area().size().width(),
-          settings.area().size().height(),
-          settings.dpi(),
-          true));
-      FillPng(&page_bitmap_data,
-              width_in_pixels,
-              max_width_in_pixels,
-              settings.area().size().height());
+          pdf_data.data(), pdf_data.size(), i, page_bitmap_data.data(),
+          settings.area.size().width(), settings.area.size().height(),
+          settings.dpi, settings.autorotate));
+      FillPng(&page_bitmap_data, width_in_pixels, max_width_in_pixels,
+              settings.area.size().height());
       bitmap_data.insert(bitmap_data.end(),
                          page_bitmap_data.begin(),
                          page_bitmap_data.end());
@@ -466,8 +456,8 @@ class PrintPreviewPdfGeneratedBrowserTest : public InProcessBrowserTest {
         browser()->tab_strip_model()->GetActiveWebContents();
     ASSERT_TRUE(tab);
 
-    print_preview_observer_.reset(
-        new PrintPreviewObserver(browser(), tab, pdf_file_save_path_));
+    print_preview_observer_ = base::MakeUnique<PrintPreviewObserver>(
+        browser(), tab, pdf_file_save_path_);
     chrome::DuplicateTab(browser());
 
     WebContents* initiator =
@@ -505,7 +495,8 @@ class PrintPreviewPdfGeneratedBrowserTest : public InProcessBrowserTest {
     std::cout.flush();
 
     ASSERT_TRUE(tmp_dir_.CreateUniqueTempDir());
-    ASSERT_TRUE(base::CreateTemporaryFileInDir(tmp_dir_.path(), &stdin_path));
+    ASSERT_TRUE(
+        base::CreateTemporaryFileInDir(tmp_dir_.GetPath(), &stdin_path));
 
     // Redirects |std::cin| to the file |stdin_path|. |in| is not freed because
     // if it goes out of scope, |std::cin.rdbuf| will be freed, causing an
@@ -515,7 +506,7 @@ class PrintPreviewPdfGeneratedBrowserTest : public InProcessBrowserTest {
     std::cin.rdbuf(in->rdbuf());
 
     pdf_file_save_path_ =
-        tmp_dir_.path().Append(FILE_PATH_LITERAL("dummy.pdf"));
+        tmp_dir_.GetPath().Append(FILE_PATH_LITERAL("dummy.pdf"));
 
     // Send the file path to the layout test framework so that it can
     // communicate with this browser test.

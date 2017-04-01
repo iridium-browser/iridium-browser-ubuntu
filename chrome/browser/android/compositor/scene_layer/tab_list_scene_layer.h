@@ -23,7 +23,6 @@ namespace ui {
 class ResourceManager;
 }
 
-namespace chrome {
 namespace android {
 
 class LayerTitleCache;
@@ -63,6 +62,7 @@ class TabListSceneLayer : public SceneLayer {
       jint border_resource_id,
       jint border_inner_shadow_resource_id,
       jboolean can_use_live_layer,
+      jboolean browser_controls_at_bottom,
       jint tab_background_color,
       jint back_logo_color,
       jboolean incognito,
@@ -98,13 +98,13 @@ class TabListSceneLayer : public SceneLayer {
       jint toolbar_background_color,
       jint close_button_color,
       jboolean anonymize_toolbar,
+      jboolean show_tab_title,
       jint toolbar_textbox_resource_id,
       jint toolbar_textbox_background_color,
       jfloat toolbar_textbox_alpha,
       jfloat toolbar_alpha,
       jfloat toolbar_y_offset,
       jfloat side_border_scale,
-      jboolean attach_content,
       jboolean inset_border);
 
   base::android::ScopedJavaLocalRef<jobject> GetJavaObject(JNIEnv* env);
@@ -136,6 +136,5 @@ class TabListSceneLayer : public SceneLayer {
 bool RegisterTabListSceneLayer(JNIEnv* env);
 
 }  // namespace android
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_ANDROID_COMPOSITOR_SCENE_LAYER_TAB_LIST_SCENE_LAYER_H_

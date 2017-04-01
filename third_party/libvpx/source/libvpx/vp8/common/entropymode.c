@@ -34,27 +34,18 @@ int vp8_mv_cont(const int_mv *l, const int_mv *a) {
 
 static const vp8_prob sub_mv_ref_prob[VP8_SUBMVREFS - 1] = { 180, 162, 25 };
 
-const vp8_prob vp8_sub_mv_ref_prob2[SUBMVREF_COUNT][VP8_SUBMVREFS - 1] = {
-  { 147, 136, 18 },
-  { 106, 145, 1 },
-  { 179, 121, 1 },
-  { 223, 1, 34 },
-  { 208, 1, 1 }
-};
+const vp8_prob vp8_sub_mv_ref_prob2[SUBMVREF_COUNT]
+                                   [VP8_SUBMVREFS - 1] = { { 147, 136, 18 },
+                                                           { 106, 145, 1 },
+                                                           { 179, 121, 1 },
+                                                           { 223, 1, 34 },
+                                                           { 208, 1, 1 } };
 
 const vp8_mbsplit vp8_mbsplits[VP8_NUMMBSPLITS] = {
-  {
-      0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
-  },
-  {
-      0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1,
-  },
-  {
-      0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3,
-  },
-  {
-      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-  }
+  { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1 },
+  { 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1 },
+  { 0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3 },
+  { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 }
 };
 
 const int vp8_mbsplit_count[VP8_NUMMBSPLITS] = { 2, 2, 4, 16 };

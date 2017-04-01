@@ -37,6 +37,27 @@ import uuid
 
 LOG_FILE_ENV_VAR = "CHROME_REMOTE_DESKTOP_LOG_FILE"
 
+ENV_VARS_FORWARDED_TO_CHILD_ENV = [
+    "HOME",
+    "LANG",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "USER",
+    "USERNAME",
+    LOG_FILE_ENV_VAR,
+    "GOOGLE_CLIENT_ID_REMOTING",
+    "GOOGLE_CLIENT_ID_REMOTING_HOST",
+    "GOOGLE_CLIENT_SECRET_REMOTING",
+    "GOOGLE_CLIENT_SECRET_REMOTING_HOST"
+]
+
+# If this env var is defined, extra host params will be loaded from this env var
+# as a list of strings separated by space (\s+). Note that param that contains
+# space is currently NOT supported and will be broken down into two params at
+# the space character.
+HOST_EXTRA_PARAMS_ENV_VAR = "CHROME_REMOTE_DESKTOP_HOST_EXTRA_PARAMS"
+
 # This script has a sensible default for the initial and maximum desktop size,
 # which can be overridden either on the command-line, or via a comma-separated
 # list of sizes in this environment variable.
@@ -359,54 +380,54 @@ class Desktop:
       display += 1
     return display
 
-  def _init_child_env(self):
-    # Create clean environment for new session, so it is cleanly separated from
-    # the user's console X session.
-    self.child_env = {}
+  def _init_child_env(self, keep_env):
+    if keep_env:
+      self.child_env = dict(os.environ)
+    else:
+      # Create clean environment for new session, so it is cleanly separated
+      # from the user's console X session.
+      self.child_env = {}
 
-    for key in [
-        "HOME",
-        "LANG",
-        "LOGNAME",
-        "PATH",
-        "SHELL",
-        "USER",
-        "USERNAME",
-        LOG_FILE_ENV_VAR]:
-      if key in os.environ:
-        self.child_env[key] = os.environ[key]
+      for key in ENV_VARS_FORWARDED_TO_CHILD_ENV:
+        if key in os.environ:
+          self.child_env[key] = os.environ[key]
+
+      # Initialize the environment from files that would normally be read in a
+      # PAM-authenticated session.
+      for env_filename in [
+        "/etc/environment",
+        "/etc/default/locale",
+        os.path.expanduser("~/.pam_environment")]:
+        if not os.path.exists(env_filename):
+          continue
+        try:
+          with open(env_filename, "r") as env_file:
+            for line in env_file:
+              line = line.rstrip("\n")
+              # Split at the first "=", leaving any further instances in the
+              # value.
+              key_value_pair = line.split("=", 1)
+              if len(key_value_pair) == 2:
+                key, value = tuple(key_value_pair)
+                # The file stores key=value assignments, but the value may be
+                # quoted, so strip leading & trailing quotes from it.
+                value = value.strip("'\"")
+                self.child_env[key] = value
+        except IOError:
+          logging.error("Failed to read file: %s" % env_filename)
 
     # Ensure that the software-rendering GL drivers are loaded by the desktop
     # session, instead of any hardware GL drivers installed on the system.
-    self.child_env["LD_LIBRARY_PATH"] = (
+    library_path = (
         "/usr/lib/%(arch)s-linux-gnu/mesa:"
         "/usr/lib/%(arch)s-linux-gnu/dri:"
         "/usr/lib/%(arch)s-linux-gnu/gallium-pipe" %
         { "arch": platform.machine() })
 
-    # Initialize the environment from files that would normally be read in a
-    # PAM-authenticated session.
-    for env_filename in [
-      "/etc/environment",
-      "/etc/default/locale",
-      os.path.expanduser("~/.pam_environment")]:
-      if not os.path.exists(env_filename):
-        continue
-      try:
-        with open(env_filename, "r") as env_file:
-          for line in env_file:
-            line = line.rstrip("\n")
-            # Split at the first "=", leaving any further instances in the
-            # value.
-            key_value_pair = line.split("=", 1)
-            if len(key_value_pair) == 2:
-              key, value = tuple(key_value_pair)
-              # The file stores key=value assignments, but the value may be
-              # quoted, so strip leading & trailing quotes from it.
-              value = value.strip("'\"")
-              self.child_env[key] = value
-      except IOError:
-        logging.error("Failed to read file: %s" % env_filename)
+    if "LD_LIBRARY_PATH" in self.child_env:
+      library_path += ":" + self.child_env["LD_LIBRARY_PATH"]
+
+    self.child_env["LD_LIBRARY_PATH"] = library_path
 
   def _setup_pulseaudio(self):
     self.pulseaudio_pipe = None
@@ -462,19 +483,39 @@ class Desktop:
     self.ssh_auth_sockname = ("/tmp/chromoting.%s.ssh_auth_sock" %
                               os.environ["USER"])
 
+  # Returns child environment not containing TMPDIR.
+  # Certain values of TMPDIR can break the X server (crbug.com/672684), so we
+  # want to make sure it isn't set in the envirionment we use to start the
+  # server.
+  def _x_env(self):
+    if "TMPDIR" not in self.child_env:
+      return self.child_env
+    else:
+      env_copy = dict(self.child_env)
+      del env_copy["TMPDIR"]
+      return env_copy
+
+  def _wait_for_x(self):
+    # Wait for X to be active.
+    with open(os.devnull, "r+") as devnull:
+      for _test in range(20):
+        exit_code = subprocess.call("xdpyinfo", env=self.child_env,
+                                    stdout=devnull)
+        if exit_code == 0:
+          break
+        time.sleep(0.5)
+      if exit_code != 0:
+        raise Exception("Could not connect to X server.")
+      else:
+        logging.info("X server is active.")
+
   def _launch_xvfb(self, display, x_auth_file, extra_x_args):
     max_width = max([width for width, height in self.sizes])
     max_height = max([height for width, height in self.sizes])
 
     xvfb = locate_xvfb_randr()
-    if xvfb:
-      self.server_supports_exact_resize = True
-      self.server_supports_randr = True
-      self.randr_add_sizes = True
-    else:
+    if not xvfb:
       xvfb = "Xvfb"
-      self.server_supports_exact_resize = False
-      self.server_supports_randr = False
 
     logging.info("Starting %s on display :%d" % (xvfb, display))
     screen_option = "%dx%dx24" % (max_width, max_height)
@@ -484,9 +525,20 @@ class Desktop:
          "-nolisten", "tcp",
          "-noreset",
          "-screen", "0", screen_option
-        ] + extra_x_args)
+        ] + extra_x_args, env=self._x_env())
     if not self.x_proc.pid:
       raise Exception("Could not start Xvfb.")
+
+    self._wait_for_x()
+
+    with open(os.devnull, "r+") as devnull:
+      exit_code = subprocess.call("xrandr", env=self.child_env,
+                                  stdout=devnull, stderr=devnull)
+    if exit_code == 0:
+      # RandR is supported
+      self.server_supports_exact_resize = True
+      self.server_supports_randr = True
+      self.randr_add_sizes = True
 
   def _launch_xorg(self, display, x_auth_file, extra_x_args):
     with tempfile.NamedTemporaryFile(
@@ -516,22 +568,22 @@ class Desktop:
          "-logfile", "/dev/null",
          "-verbose", "3",
          "-config", config_file.name
-        ] + extra_x_args, env=self.child_env)
+        ] + extra_x_args, env=self._x_env())
     if not self.x_proc.pid:
       raise Exception("Could not start Xorg.")
+    self._wait_for_x()
 
   def _launch_x_server(self, extra_x_args):
     x_auth_file = os.path.expanduser("~/.Xauthority")
     self.child_env["XAUTHORITY"] = x_auth_file
-    devnull = open(os.devnull, "r+")
     display = self.get_unused_display_number()
 
     # Run "xauth add" with |child_env| so that it modifies the same XAUTHORITY
     # file which will be used for the X session.
-    ret_code = subprocess.call("xauth add :%d . `mcookie`" % display,
-                               env=self.child_env, shell=True)
-    if ret_code != 0:
-      raise Exception("xauth failed with code %d" % ret_code)
+    exit_code = subprocess.call("xauth add :%d . `mcookie`" % display,
+                                env=self.child_env, shell=True)
+    if exit_code != 0:
+      raise Exception("xauth failed with code %d" % exit_code)
 
     # Disable the Composite extension iff the X session is the default
     # Unity-2D, since it uses Metacity which fails to generate DAMAGE
@@ -540,11 +592,6 @@ class Desktop:
     if (len(x_session) == 2 and
         x_session[1] == "/usr/bin/gnome-session --session=ubuntu-2d"):
       extra_x_args.extend(["-extension", "Composite"])
-
-    if USE_XORG_ENV_VAR in os.environ:
-      self._launch_xorg(display, x_auth_file, extra_x_args)
-    else:
-      self._launch_xvfb(display, x_auth_file, extra_x_args)
 
     self.child_env["DISPLAY"] = ":%d" % display
     self.child_env["CHROME_REMOTE_DESKTOP_SESSION"] = "1"
@@ -559,16 +606,10 @@ class Desktop:
     if self.ssh_auth_sockname:
       self.child_env["SSH_AUTH_SOCK"] = self.ssh_auth_sockname
 
-    # Wait for X to be active.
-    for _test in range(20):
-      retcode = subprocess.call("xdpyinfo", env=self.child_env, stdout=devnull)
-      if retcode == 0:
-        break
-      time.sleep(0.5)
-    if retcode != 0:
-      raise Exception("Could not connect to X server.")
+    if USE_XORG_ENV_VAR in os.environ:
+      self._launch_xorg(display, x_auth_file, extra_x_args)
     else:
-      logging.info("X server is active.")
+      self._launch_xvfb(display, x_auth_file, extra_x_args)
 
     # The remoting host expects the server to use "evdev" keycodes, but Xvfb
     # starts configured to use the "base" ruleset, resulting in XKB configuring
@@ -576,51 +617,51 @@ class Desktop:
     # Reconfigure the X server to use "evdev" keymap rules.  The X server must
     # be started with -noreset otherwise it'll reset as soon as the command
     # completes, since there are no other X clients running yet.
-    retcode = subprocess.call(["setxkbmap", "-rules", "evdev"],
-                              env=self.child_env)
-    if retcode != 0:
+    exit_code = subprocess.call(["setxkbmap", "-rules", "evdev"],
+                                env=self.child_env)
+    if exit_code != 0:
       logging.error("Failed to set XKB to 'evdev'")
 
     if not self.server_supports_randr:
       return
 
-    # Register the screen sizes with RandR, if needed.  Errors here are
-    # non-fatal; the X server will continue to run with the dimensions from the
-    # "-screen" option.
-    if self.randr_add_sizes:
-      for width, height in self.sizes:
-        label = "%dx%d" % (width, height)
-        args = ["xrandr", "--newmode", label, "0", str(width), "0", "0", "0",
-                str(height), "0", "0", "0"]
-        subprocess.call(args, env=self.child_env, stdout=devnull,
-                        stderr=devnull)
-        args = ["xrandr", "--addmode", "screen", label]
-        subprocess.call(args, env=self.child_env, stdout=devnull,
-                        stderr=devnull)
+    with open(os.devnull, "r+") as devnull:
+      # Register the screen sizes with RandR, if needed.  Errors here are
+      # non-fatal; the X server will continue to run with the dimensions from
+      # the "-screen" option.
+      if self.randr_add_sizes:
+        for width, height in self.sizes:
+          label = "%dx%d" % (width, height)
+          args = ["xrandr", "--newmode", label, "0", str(width), "0", "0", "0",
+                  str(height), "0", "0", "0"]
+          subprocess.call(args, env=self.child_env, stdout=devnull,
+                          stderr=devnull)
+          args = ["xrandr", "--addmode", "screen", label]
+          subprocess.call(args, env=self.child_env, stdout=devnull,
+                          stderr=devnull)
 
-    # Set the initial mode to the first size specified, otherwise the X server
-    # would default to (max_width, max_height), which might not even be in the
-    # list.
-    initial_size = self.sizes[0]
-    label = "%dx%d" % initial_size
-    args = ["xrandr", "-s", label]
-    subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+      # Set the initial mode to the first size specified, otherwise the X server
+      # would default to (max_width, max_height), which might not even be in the
+      # list.
+      initial_size = self.sizes[0]
+      label = "%dx%d" % initial_size
+      args = ["xrandr", "-s", label]
+      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
-    # Set the physical size of the display so that the initial mode is running
-    # at approximately 96 DPI, since some desktops require the DPI to be set to
-    # something realistic.
-    args = ["xrandr", "--dpi", "96"]
-    subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
+      # Set the physical size of the display so that the initial mode is running
+      # at approximately 96 DPI, since some desktops require the DPI to be set
+      # to something realistic.
+      args = ["xrandr", "--dpi", "96"]
+      subprocess.call(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
-    # Monitor for any automatic resolution changes from the desktop environment.
-    args = [SCRIPT_PATH, "--watch-resolution", str(initial_size[0]),
-            str(initial_size[1])]
+      # Monitor for any automatic resolution changes from the desktop
+      # environment.
+      args = [SCRIPT_PATH, "--watch-resolution", str(initial_size[0]),
+              str(initial_size[1])]
 
-    # It is not necessary to wait() on the process here, as this script's main
-    # loop will reap the exit-codes of all child processes.
-    subprocess.Popen(args, env=self.child_env, stdout=devnull, stderr=devnull)
-
-    devnull.close()
+      # It is not necessary to wait() on the process here, as this script's main
+      # loop will reap the exit-codes of all child processes.
+      subprocess.Popen(args, env=self.child_env, stdout=devnull, stderr=devnull)
 
   def _launch_x_session(self):
     # Start desktop session.
@@ -641,14 +682,14 @@ class Desktop:
     if not self.session_proc.pid:
       raise Exception("Could not start X session")
 
-  def launch_session(self, x_args):
-    self._init_child_env()
+  def launch_session(self, keep_env, x_args):
+    self._init_child_env(keep_env)
     self._setup_pulseaudio()
     self._setup_gnubby()
     self._launch_x_server(x_args)
     self._launch_x_session()
 
-  def launch_host(self, host_config):
+  def launch_host(self, host_config, extra_start_host_args):
     # Start remoting host
     args = [HOST_BINARY_PATH, "--host-config=-"]
     if self.pulseaudio_pipe:
@@ -657,6 +698,8 @@ class Desktop:
       args.append("--server-supports-exact-resize")
     if self.ssh_auth_sockname:
       args.append("--ssh-auth-sockname=%s" % self.ssh_auth_sockname)
+
+    args.extend(extra_start_host_args)
 
     # Have the host process use SIGUSR1 to signal a successful start.
     def sigusr1_handler(signum, frame):
@@ -854,11 +897,11 @@ class ParentProcessLogger(object):
       false otherwise.
     """
     # If Ctrl-C is pressed, inform the user that the daemon is still running.
-    # This signal will cause the read loop below to stop with an EINTR IOError.
     def sigint_handler(signum, frame):
       _ = signum, frame
       print("Interrupted. The daemon is still running in the background.",
             file=sys.stderr)
+      sys.exit(1)
 
     signal.signal(signal.SIGINT, sigint_handler)
 
@@ -881,17 +924,13 @@ class ParentProcessLogger(object):
     # Print lines as they're logged to the pipe until EOF is reached or readline
     # is interrupted by one of the signal handlers above.
     host_ready = False
-    try:
-      for line in iter(self._read_file.readline, ''):
-        if line[:4] == "MSG:":
-          sys.stderr.write(line[4:])
-        elif line == "READY\n":
-          host_ready = True
-        else:
-          sys.stderr.write("Unrecognized command: " + line)
-    except IOError as e:
-      if e.errno != errno.EINTR:
-        raise
+    for line in iter(self._read_file.readline, ''):
+      if line[:4] == "MSG:":
+        sys.stderr.write(line[4:])
+      elif line == "READY\n":
+        host_ready = True
+      else:
+        sys.stderr.write("Unrecognized command: " + line)
     print("Log file: %s" % os.environ[LOG_FILE_ENV_VAR], file=sys.stderr)
     return host_ready
 
@@ -1228,6 +1267,9 @@ Web Store: https://chrome.google.com/remotedesktop"""
                     action="store", metavar="USER",
                     help="Adds the specified user to the chrome-remote-desktop "
                     "group (must be run as root).")
+  parser.add_option("", "--keep-parent-env", dest="keep_env", default=False,
+                    action="store_true",
+                    help=optparse.SUPPRESS_HELP)
   parser.add_option("", "--watch-resolution", dest="watch_resolution",
                     type="int", nargs=2, default=False, action="store",
                     help=optparse.SUPPRESS_HELP)
@@ -1461,7 +1503,7 @@ Web Store: https://chrome.google.com/remotedesktop"""
           relaunch_times.append(x_server_inhibitor.earliest_relaunch_time)
         else:
           logging.info("Launching X server and X session.")
-          desktop.launch_session(args)
+          desktop.launch_session(options.keep_env, args)
           x_server_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
                                             backoff_time)
           allow_relaunch_self = True
@@ -1472,7 +1514,13 @@ Web Store: https://chrome.google.com/remotedesktop"""
         relaunch_times.append(host_inhibitor.earliest_relaunch_time)
       else:
         logging.info("Launching host process")
-        desktop.launch_host(host_config)
+
+        extra_start_host_args = []
+        if HOST_EXTRA_PARAMS_ENV_VAR in os.environ:
+            extra_start_host_args = \
+                re.split('\s+', os.environ[HOST_EXTRA_PARAMS_ENV_VAR].strip())
+        desktop.launch_host(host_config, extra_start_host_args)
+
         host_inhibitor.record_started(MINIMUM_PROCESS_LIFETIME,
                                       backoff_time)
 

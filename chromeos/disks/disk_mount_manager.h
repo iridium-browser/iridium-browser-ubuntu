@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 
 #include "base/callback_forward.h"
 #include "chromeos/chromeos_export.h"
@@ -54,7 +55,12 @@ class CHROMEOS_EXPORT DiskMountManager {
   class Disk {
    public:
     Disk(const std::string& device_path,
+         // The path to the mount point of this device. Empty if not mounted.
+         // (e.g. /media/removable/VOLUME)
          const std::string& mount_path,
+         // Whether the device is mounted in read-only mode by the policy.
+         // Valid only when the device mounted and mount_path_ is non-empty.
+         bool write_disabled_by_policy,
          const std::string& system_path,
          const std::string& file_path,
          const std::string& device_label,
@@ -68,7 +74,7 @@ class CHROMEOS_EXPORT DiskMountManager {
          DeviceType device_type,
          uint64_t total_size_in_bytes,
          bool is_parent,
-         bool is_read_only,
+         bool is_read_only_hardware,
          bool has_media,
          bool on_boot_device,
          bool on_removable_device,
@@ -82,7 +88,7 @@ class CHROMEOS_EXPORT DiskMountManager {
 
     // The path to the mount point of this device. Will be empty if not mounted.
     // (e.g. /media/removable/VOLUME)
-    const std::string&  mount_path() const { return mount_path_; }
+    const std::string& mount_path() const { return mount_path_; }
 
     // The path of the device according to the udev system.
     // (e.g. /sys/devices/pci0000:00/.../8:0:0:0/block/sdb/sdb1)
@@ -129,8 +135,13 @@ class CHROMEOS_EXPORT DiskMountManager {
     // Is the device is a parent device (i.e. sdb rather than sdb1).
     bool is_parent() const { return is_parent_; }
 
+    // Whether the user can write to the device. True if read-only.
+    bool is_read_only() const {
+      return is_read_only_hardware_ || write_disabled_by_policy_;
+    }
+
     // Is the device read only.
-    bool is_read_only() const { return is_read_only_; }
+    bool is_read_only_hardware() const { return is_read_only_hardware_; }
 
     // Does the device contains media.
     bool has_media() const { return has_media_; }
@@ -148,13 +159,18 @@ class CHROMEOS_EXPORT DiskMountManager {
       mount_path_ = mount_path;
     }
 
-    void set_read_only(bool is_read_only) { is_read_only_ = is_read_only; }
+    void set_write_disabled_by_policy(bool disable) {
+      write_disabled_by_policy_ = disable;
+    }
 
     void clear_mount_path() { mount_path_.clear(); }
+
+    bool is_mounted() const { return !mount_path_.empty(); }
 
    private:
     std::string device_path_;
     std::string mount_path_;
+    bool write_disabled_by_policy_;
     std::string system_path_;
     std::string file_path_;
     std::string device_label_;
@@ -168,13 +184,13 @@ class CHROMEOS_EXPORT DiskMountManager {
     DeviceType device_type_;
     uint64_t total_size_in_bytes_;
     bool is_parent_;
-    bool is_read_only_;
+    bool is_read_only_hardware_;
     bool has_media_;
     bool on_boot_device_;
     bool on_removable_device_;
     bool is_hidden_;
   };
-  typedef std::map<std::string, Disk*> DiskMap;
+  typedef std::map<std::string, std::unique_ptr<Disk>> DiskMap;
 
   // A struct to store information about mount point.
   struct MountPointInfo {
@@ -280,6 +296,10 @@ class CHROMEOS_EXPORT DiskMountManager {
                            UnmountOptions options,
                            const UnmountPathCallback& callback) = 0;
 
+  // Remounts mounted removable devices to change the read-only mount option.
+  // Devices that can be mounted only in its read-only mode will be ignored.
+  virtual void RemountAllRemovableDrives(chromeos::MountAccessMode mode) = 0;
+
   // Formats Device given its mount path. Unmounts the device.
   // Example: mount_path: /media/VOLUME_LABEL
   virtual void FormatMountedDevice(const std::string& mount_path) = 0;
@@ -291,7 +311,7 @@ class CHROMEOS_EXPORT DiskMountManager {
 
   // Used in tests to initialize the manager's disk and mount point sets.
   // Default implementation does noting. It just fails.
-  virtual bool AddDiskForTest(Disk* disk);
+  virtual bool AddDiskForTest(std::unique_ptr<Disk> disk);
   virtual bool AddMountPointForTest(const MountPointInfo& mount_point);
 
   // Returns corresponding string to |type| like "unknown_filesystem".

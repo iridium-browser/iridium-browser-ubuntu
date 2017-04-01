@@ -105,12 +105,7 @@ public:
         }
     }
 
-    ShowMipLevels(int N) : fN(N) {
-        fBM[0] = sk_tool_utils::create_checkerboard_bitmap(N, N, SK_ColorBLACK, SK_ColorWHITE, 2);
-        fBM[1] = make_bitmap(N, N);
-        fBM[2] = make_bitmap2(N, N);
-        fBM[3] = make_bitmap3(N, N);
-    }
+    ShowMipLevels(int N) : fN(N) { }
 
 protected:
 
@@ -144,8 +139,8 @@ protected:
         baseBM.lockPixels();
         baseBM.peekPixels(&prevPM);
 
-        SkSourceGammaTreatment treatment = SkSourceGammaTreatment::kIgnore;
-        SkAutoTUnref<SkMipMap> mm(SkMipMap::Build(baseBM, treatment, nullptr));
+        SkDestinationSurfaceColorMode colorMode = SkDestinationSurfaceColorMode::kLegacy;
+        sk_sp<SkMipMap> mm(SkMipMap::Build(baseBM, colorMode, nullptr));
 
         int index = 0;
         SkMipMap::Level level;
@@ -198,6 +193,13 @@ protected:
         }
     }
 
+    void onOnceBeforeDraw() override {
+        fBM[0] = sk_tool_utils::create_checkerboard_bitmap(fN, fN, SK_ColorBLACK, SK_ColorWHITE, 2);
+        fBM[1] = make_bitmap(fN, fN);
+        fBM[2] = make_bitmap2(fN, fN);
+        fBM[3] = make_bitmap3(fN, fN);
+    }
+
     void onDraw(SkCanvas* canvas) override {
         canvas->translate(4, 4);
         for (const auto& bm : fBM) {
@@ -214,6 +216,46 @@ DEF_GM( return new ShowMipLevels(256); )
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+static void copy_32_to_g8(void* dst, size_t dstRB, const void* src, const SkImageInfo& srcInfo,
+                          size_t srcRB) {
+    uint8_t* dst8 = (uint8_t*)dst;
+    const uint32_t* src32 = (const uint32_t*)src;
+
+    const int w = srcInfo.width();
+    const int h = srcInfo.height();
+    const bool isBGRA = (kBGRA_8888_SkColorType == srcInfo.colorType());
+
+    for (int y = 0; y < h; ++y) {
+        if (isBGRA) {
+            // BGRA
+            for (int x = 0; x < w; ++x) {
+                uint32_t s = src32[x];
+                dst8[x] = SkComputeLuminance((s >> 16) & 0xFF, (s >> 8) & 0xFF, s & 0xFF);
+            }
+        } else {
+            // RGBA
+            for (int x = 0; x < w; ++x) {
+                uint32_t s = src32[x];
+                dst8[x] = SkComputeLuminance(s & 0xFF, (s >> 8) & 0xFF, (s >> 16) & 0xFF);
+            }
+        }
+        src32 = (const uint32_t*)((const char*)src32 + srcRB);
+        dst8 += dstRB;
+    }
+}
+
+void copy_to(SkBitmap* dst, SkColorType dstColorType, const SkBitmap& src) {
+    if (kGray_8_SkColorType == dstColorType) {
+        SkImageInfo grayInfo = src.info().makeColorType(kGray_8_SkColorType);
+        dst->allocPixels(grayInfo);
+        copy_32_to_g8(dst->getPixels(), dst->rowBytes(), src.getPixels(), src.info(),
+                      src.rowBytes());
+        return;
+    }
+
+    src.copyTo(dst, dstColorType);
+}
+
 /**
  *  Show mip levels that were built, for all supported colortypes
  */
@@ -222,12 +264,7 @@ class ShowMipLevels2 : public skiagm::GM {
     SkBitmap  fBM[4];
 
 public:
-    ShowMipLevels2(int w, int h) : fW(w), fH(h) {
-        fBM[0] = sk_tool_utils::create_checkerboard_bitmap(w, h, SHOW_MIP_COLOR, SK_ColorWHITE, 2);
-        fBM[1] = make_bitmap(w, h);
-        fBM[2] = make_bitmap2(w, h);
-        fBM[3] = make_bitmap3(w, h);
-    }
+    ShowMipLevels2(int w, int h) : fW(w), fH(h) { }
 
 protected:
 
@@ -253,8 +290,8 @@ protected:
         SkScalar x = 4;
         SkScalar y = 4;
 
-        SkSourceGammaTreatment treatment = SkSourceGammaTreatment::kIgnore;
-        SkAutoTUnref<SkMipMap> mm(SkMipMap::Build(baseBM, treatment, nullptr));
+        SkDestinationSurfaceColorMode colorMode = SkDestinationSurfaceColorMode::kLegacy;
+        sk_sp<SkMipMap> mm(SkMipMap::Build(baseBM, colorMode, nullptr));
 
         int index = 0;
         SkMipMap::Level level;
@@ -286,10 +323,18 @@ protected:
 
         for (auto ctype : ctypes) {
             SkBitmap bm;
-            orig.copyTo(&bm, ctype);
+            copy_to(&bm, ctype, orig);
             drawLevels(canvas, bm);
             canvas->translate(orig.width()/2 + 8.0f, 0);
         }
+    }
+
+    void onOnceBeforeDraw() override {
+        fBM[0] = sk_tool_utils::create_checkerboard_bitmap(fW, fH,
+                                                           SHOW_MIP_COLOR, SK_ColorWHITE, 2);
+        fBM[1] = make_bitmap(fW, fH);
+        fBM[2] = make_bitmap2(fW, fH);
+        fBM[3] = make_bitmap3(fW, fH);
     }
 
     void onDraw(SkCanvas* canvas) override {

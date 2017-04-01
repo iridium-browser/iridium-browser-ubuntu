@@ -8,7 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -112,9 +112,9 @@ PluginPowerSaverHelper::GetPeripheralContentStatus(
   auto status = PeripheralContentHeuristic::GetPeripheralStatus(
       origin_whitelist_, main_frame_origin, content_origin, unobscured_size);
 
-  // Never record ESSENTIAL_UNKNOWN_SIZE. Wait for retest after size is known.
+  // Never record UNKNOWN_SIZE. Wait for retest after size is known.
   if (record_decision == RenderFrame::RECORD_DECISION &&
-      status != RenderFrame::CONTENT_STATUS_ESSENTIAL_UNKNOWN_SIZE) {
+      status != RenderFrame::CONTENT_STATUS_UNKNOWN_SIZE) {
     UMA_HISTOGRAM_ENUMERATION(kPeripheralHeuristicHistogram, status,
                               RenderFrame::CONTENT_STATUS_NUM_ITEMS);
   }

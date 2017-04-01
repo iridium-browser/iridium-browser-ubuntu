@@ -18,10 +18,12 @@
 
 #if defined(OS_CHROMEOS)
 #include "base/json/json_string_value_serializer.h"
+#include "base/memory/ptr_util.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
+#include "chrome/browser/chromeos/fileapi/file_system_backend_delegate.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/browser_context.h"
@@ -49,15 +51,16 @@ class PlatformUtilTestContentBrowserClient : public ChromeContentBrowserClient {
   void GetAdditionalFileSystemBackends(
       content::BrowserContext* browser_context,
       const base::FilePath& storage_partition_path,
-      ScopedVector<storage::FileSystemBackend>* additional_backends) override {
+      std::vector<std::unique_ptr<storage::FileSystemBackend>>*
+          additional_backends) override {
     storage::ExternalMountPoints* external_mount_points =
         content::BrowserContext::GetMountPoints(browser_context);
 
     // New FileSystemBackend that uses our MockSpecialStoragePolicy.
-    chromeos::FileSystemBackend* backend = new chromeos::FileSystemBackend(
-        nullptr, nullptr, nullptr, external_mount_points,
-        storage::ExternalMountPoints::GetSystemInstance());
-    additional_backends->push_back(backend);
+    additional_backends->push_back(
+        base::MakeUnique<chromeos::FileSystemBackend>(
+            nullptr, nullptr, nullptr, nullptr, nullptr, external_mount_points,
+            storage::ExternalMountPoints::GetSystemInstance()));
   }
 };
 
@@ -157,19 +160,19 @@ class PlatformUtilTest : public PlatformUtilTestBase {
     ASSERT_TRUE(directory_.CreateUniqueTempDir());
 
     // A valid file.
-    existing_file_ = directory_.path().AppendASCII("test_file.txt");
+    existing_file_ = directory_.GetPath().AppendASCII("test_file.txt");
     ASSERT_EQ(
         kTestFileDataLength,
         base::WriteFile(existing_file_, kTestFileData, kTestFileDataLength));
 
     // A valid folder.
-    existing_folder_ = directory_.path().AppendASCII("test_folder");
+    existing_folder_ = directory_.GetPath().AppendASCII("test_folder");
     ASSERT_TRUE(base::CreateDirectory(existing_folder_));
 
     // A non-existent path.
-    nowhere_ = directory_.path().AppendASCII("nowhere");
+    nowhere_ = directory_.GetPath().AppendASCII("nowhere");
 
-    SetUpPlatformFixture(directory_.path());
+    SetUpPlatformFixture(directory_.GetPath());
   }
 
   OpenOperationResult CallOpenItem(const base::FilePath& path,
@@ -225,11 +228,11 @@ class PlatformUtilPosixTest : public PlatformUtilTest {
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(PlatformUtilTest::SetUp());
 
-    symlink_to_file_ = directory_.path().AppendASCII("l_file.txt");
+    symlink_to_file_ = directory_.GetPath().AppendASCII("l_file.txt");
     ASSERT_TRUE(base::CreateSymbolicLink(existing_file_, symlink_to_file_));
-    symlink_to_folder_ = directory_.path().AppendASCII("l_folder");
+    symlink_to_folder_ = directory_.GetPath().AppendASCII("l_folder");
     ASSERT_TRUE(base::CreateSymbolicLink(existing_folder_, symlink_to_folder_));
-    symlink_to_nowhere_ = directory_.path().AppendASCII("l_nowhere");
+    symlink_to_nowhere_ = directory_.GetPath().AppendASCII("l_nowhere");
     ASSERT_TRUE(base::CreateSymbolicLink(nowhere_, symlink_to_nowhere_));
   }
 
@@ -264,7 +267,7 @@ TEST_F(PlatformUtilPosixTest, OpenFolderWithPosixSymlinksChromeOS) {
 
 TEST_F(PlatformUtilTest, OpenFileWithUnhandledFileType) {
   base::FilePath unhandled_file =
-      directory_.path().AppendASCII("myfile.filetype");
+      directory_.GetPath().AppendASCII("myfile.filetype");
   ASSERT_EQ(3, base::WriteFile(unhandled_file, "cat", 3));
   EXPECT_EQ(OPEN_FAILED_NO_HANLDER_FOR_FILE_TYPE,
             CallOpenItem(unhandled_file, OPEN_FILE));

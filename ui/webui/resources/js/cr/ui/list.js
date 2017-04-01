@@ -28,9 +28,9 @@ cr.define('cr.ui', function() {
     var x = e.clientX;
     var y = e.clientY;
     return x >= rect.left + el.clientLeft &&
-           x < rect.left + el.clientLeft + el.clientWidth &&
-           y >= rect.top + el.clientTop &&
-           y < rect.top + el.clientTop + el.clientHeight;
+        x < rect.left + el.clientLeft + el.clientWidth &&
+        y >= rect.top + el.clientTop &&
+        y < rect.top + el.clientTop + el.clientHeight;
   }
 
   function getComputedStyle(el) {
@@ -124,10 +124,9 @@ cr.define('cr.ui', function() {
 
       if (this.dataModel_) {
         this.dataModel_.removeEventListener(
-            'permuted',
-            this.boundHandleDataModelPermuted_);
-        this.dataModel_.removeEventListener('change',
-                                            this.boundHandleDataModelChange_);
+            'permuted', this.boundHandleDataModelPermuted_);
+        this.dataModel_.removeEventListener(
+            'change', this.boundHandleDataModelChange_);
       }
 
       this.dataModel_ = dataModel;
@@ -140,10 +139,9 @@ cr.define('cr.ui', function() {
 
       if (this.dataModel_) {
         this.dataModel_.addEventListener(
-            'permuted',
-            this.boundHandleDataModelPermuted_);
-        this.dataModel_.addEventListener('change',
-                                         this.boundHandleDataModelChange_);
+            'permuted', this.boundHandleDataModelPermuted_);
+        this.dataModel_.addEventListener(
+            'change', this.boundHandleDataModelChange_);
       }
 
       this.redraw();
@@ -158,8 +156,7 @@ cr.define('cr.ui', function() {
      * Override to be notified when |this.dataModel| is set.
      * @protected
      */
-    onSetDataModelComplete: function() {
-    },
+    onSetDataModelComplete: function() {},
 
     /**
      * Cached item for measuring the default item size by measureItem().
@@ -186,8 +183,8 @@ cr.define('cr.ui', function() {
 
       if (oldSm) {
         oldSm.removeEventListener('change', this.boundHandleOnChange_);
-        oldSm.removeEventListener('leadIndexChange',
-                                  this.boundHandleLeadChange_);
+        oldSm.removeEventListener(
+            'leadIndexChange', this.boundHandleLeadChange_);
       }
 
       this.selectionModel_ = sm;
@@ -268,8 +265,7 @@ cr.define('cr.ui', function() {
      * @type {HTMLCollection}
      */
     get items() {
-      return Array.prototype.filter.call(this.children,
-                                         this.isItem, this);
+      return Array.prototype.filter.call(this.children, this.isItem, this);
     },
 
     /**
@@ -280,7 +276,7 @@ cr.define('cr.ui', function() {
      */
     isItem: function(child) {
       return child.nodeType == Node.ELEMENT_NODE &&
-             child != this.beforeFiller_ && child != this.afterFiller_;
+          child != this.beforeFiller_ && child != this.afterFiller_;
     },
 
     batchCount_: 0,
@@ -333,19 +329,6 @@ cr.define('cr.ui', function() {
       // Make list focusable
       if (!this.hasAttribute('tabindex'))
         this.tabIndex = 0;
-
-      // Try to get an unique id prefix from the id of this element or the
-      // nearest ancestor with an id.
-      var element = this;
-      while (element && !element.id)
-        element = element.parentElement;
-      if (element && element.id)
-        this.uniqueIdPrefix_ = element.id;
-      else
-        this.uniqueIdPrefix_ = 'list';
-
-      // The next id suffix to use when giving each item an unique id.
-      this.nextUniqueIdSuffix_ = 0;
     },
 
     /**
@@ -414,8 +397,14 @@ cr.define('cr.ui', function() {
     measureItem: function(opt_item) {
       var dataModel = this.dataModel;
       if (!dataModel || !dataModel.length) {
-        return {height: 0, marginTop: 0, marginBottom: 0,
-                width: 0, marginLeft: 0, marginRight: 0};
+        return {
+          height: 0,
+          marginTop: 0,
+          marginBottom: 0,
+          width: 0,
+          marginLeft: 0,
+          marginRight: 0
+        };
       }
       var item = opt_item || this.cachedMeasuredItem_ ||
           this.createItem(dataModel.item(0));
@@ -457,10 +446,13 @@ cr.define('cr.ui', function() {
       if (!opt_item)
         this.removeChild(item);
       return {
-          height: Math.max(0, h),
-          marginTop: mt, marginBottom: mb,
-          width: Math.max(0, w),
-          marginLeft: ml, marginRight: mr};
+        height: Math.max(0, h),
+        marginTop: mt,
+        marginBottom: mb,
+        width: Math.max(0, w),
+        marginLeft: ml,
+        marginRight: mr
+      };
     },
 
     /**
@@ -472,7 +464,7 @@ cr.define('cr.ui', function() {
       if (this.disabled)
         return;
 
-      var target = /** @type {HTMLElement} */(e.target);
+      var target = /** @type {HTMLElement} */ (e.target);
 
       var ancestor = this.getListItemAncestor(target);
       var index = -1;
@@ -496,7 +488,7 @@ cr.define('cr.ui', function() {
       if (this.disabled)
         return;
 
-      var target = /** @type {HTMLElement} */(e.target);
+      var target = /** @type {HTMLElement} */ (e.target);
 
       // If the target was this element we need to make sure that the user did
       // not click on a border or a scrollbar.
@@ -626,6 +618,8 @@ cr.define('cr.ui', function() {
             self.scrollIndexIntoView(e.newValue);
           }, 0);
         }
+      } else {
+        this.removeAttribute('aria-activedescendant');
       }
     },
 
@@ -731,8 +725,8 @@ cr.define('cr.ui', function() {
       var clientHeight = this.clientHeight;
 
       var cs = getComputedStyle(this);
-      var paddingY = parseInt(cs.paddingTop, 10) +
-                     parseInt(cs.paddingBottom, 10);
+      var paddingY =
+          parseInt(cs.paddingTop, 10) + parseInt(cs.paddingBottom, 10);
       var availableHeight = clientHeight - paddingY;
 
       var self = this;
@@ -817,7 +811,6 @@ cr.define('cr.ui', function() {
     createItem: function(value) {
       var item = new this.itemConstructor_(value);
       item.label = value;
-      item.id = this.uniqueIdPrefix_ + '-' + this.nextUniqueIdSuffix_++;
       if (typeof item.decorate == 'function')
         item.decorate();
       return item;
@@ -874,8 +867,8 @@ cr.define('cr.ui', function() {
         return this.dataModel.length;
 
       // Estimates index.
-      var estimatedIndex = Math.min(Math.floor(offset / itemHeight),
-                                    this.dataModel.length - 1);
+      var estimatedIndex =
+          Math.min(Math.floor(offset / itemHeight), this.dataModel.length - 1);
       var isIncrementing = this.getItemTop(estimatedIndex) < offset;
 
       // Searchs the correct index.
@@ -918,7 +911,8 @@ cr.define('cr.ui', function() {
         return {
           first: 0,
           length: this.dataModel.length,
-          last: this.dataModel.length};
+          last: this.dataModel.length
+        };
       } else {
         var firstIndex = this.getIndexForListOffset_(scrollTop);
         var lastIndex = this.getIndexForListOffset_(scrollTop + clientHeight);
@@ -926,7 +920,8 @@ cr.define('cr.ui', function() {
         return {
           first: firstIndex,
           length: lastIndex - firstIndex + 1,
-          last: lastIndex + 1};
+          last: lastIndex + 1
+        };
       }
     },
 
@@ -945,8 +940,8 @@ cr.define('cr.ui', function() {
 
       function insert() {
         var dataItem = dataModel.item(currentIndex);
-        var newItem = self.cachedItems_[currentIndex] ||
-            self.createItem(dataItem);
+        var newItem =
+            self.cachedItems_[currentIndex] || self.createItem(dataItem);
         newItem.listIndex = currentIndex;
         self.cachedItems_[currentIndex] = newItem;
         self.insertBefore(newItem, item);
@@ -1095,8 +1090,7 @@ cr.define('cr.ui', function() {
       // Draws the hidden rows just above/below the viewport to prevent
       // flashing in scroll.
       var firstIndex = Math.max(
-          0,
-          Math.min(dataModel.length - 1, itemsInViewPort.first - 1));
+          0, Math.min(dataModel.length - 1, itemsInViewPort.first - 1));
       var lastIndex = Math.min(itemsInViewPort.last + 1, dataModel.length);
 
       var beforeFillerHeight =
@@ -1200,8 +1194,7 @@ cr.define('cr.ui', function() {
      * event.
      * @param {number} index The index of the activated item.
      */
-    activateItemAtIndex: function(index) {
-    },
+    activateItemAtIndex: function(index) {},
 
     /**
      * Returns a ListItem for the leadIndex. If the item isn't present in the
@@ -1220,8 +1213,8 @@ cr.define('cr.ui', function() {
         return null;
       var cachedItems = this.cachedItems_ || {};
 
-      var item = cachedItems[index] ||
-                 this.createItem(this.dataModel.item(index));
+      var item =
+          cachedItems[index] || this.createItem(this.dataModel.item(index));
       if (this.pinnedItem_ != item && this.pinnedItem_ &&
           this.pinnedItem_.hidden) {
         this.removeChild(this.pinnedItem_);
@@ -1294,7 +1287,7 @@ cr.define('cr.ui', function() {
    * @param {Event} e The mouse event object.
    */
   function handleMouseDown(e) {
-    e.target = /** @type {!HTMLElement} */(e.target);
+    e.target = /** @type {!HTMLElement} */ (e.target);
     var listItem = this.getListItemAncestor(e.target);
     var wasSelected = listItem && listItem.selected;
     this.handlePointerDownUp_(e);
@@ -1326,7 +1319,7 @@ cr.define('cr.ui', function() {
    * @param {Event} e The event object for 'dragstart'.
    */
   function handleDragStart(e) {
-    e = /** @type {MouseEvent} */(e);
+    e = /** @type {MouseEvent} */ (e);
     var element = e.target.ownerDocument.elementFromPoint(e.clientX, e.clientY);
     var listItem = this.getListItemAncestor(element);
     if (!listItem)
@@ -1350,14 +1343,12 @@ cr.define('cr.ui', function() {
    */
   function containsFocusableElement(start, root) {
     for (var element = start; element && element != root;
-        element = element.parentElement) {
+         element = element.parentElement) {
       if (element.tabIndex >= 0 && !element.disabled)
         return true;
     }
     return false;
   }
 
-  return {
-    List: List
-  };
+  return {List: List};
 });

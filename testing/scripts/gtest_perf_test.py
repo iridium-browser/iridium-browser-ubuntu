@@ -44,11 +44,11 @@ def main_run(args):
       gtest_args.extend([
           '--no-xvfb',
           '--run-python-script', os.path.join(
-              args.paths['checkout'], 'build', 'android', 'test_runner.py'),
-          'gtest', '--release',
-          '--suite', test_suite,
+              args.paths['checkout'], 'out', args.build_config_fs, 'bin',
+              'run_%s' % test_suite),
           '--verbose',
       ])
+      gtest_args.extend(script_args[1:])
     else:
       gtest_args.extend(['--xvfb'])
       gtest_args.extend(script_args)
@@ -67,10 +67,7 @@ def main_run(args):
 
 
 def main_compile_targets(args):
-  if 'android' == args.properties.get('target_platform'):
-    json.dump(['${name}_apk'], args.output)
-  else:
-    json.dump(['$name'], args.output)
+  json.dump(['$name'], args.output)
 
 
 if __name__ == '__main__':

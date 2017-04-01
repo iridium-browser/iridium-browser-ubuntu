@@ -343,7 +343,7 @@ namespace D3D9
 
 		TRACE("unsigned long count = %d, const D3DRECT *rects = 0x%0.8p, unsigned long flags = 0x%0.8X, unsigned long color = 0x%0.8X, float z = %f, unsigned long stencil = %d", count, rects, flags, color, z, stencil);
 
-		if(rects == 0 && count != 0)
+		if(!rects && count != 0)
 		{
 			return INVALIDCALL();
 		}
@@ -5789,8 +5789,8 @@ namespace D3D9
 				{
 					for(int i = 0; i < MAX_VERTEX_INPUTS; i++)
 					{
-						if(usage == shader->input[i].usage &&
-						   index == shader->input[i].index)
+						const sw::Shader::Semantic& input = shader->getInput(i);
+						if((usage == input.usage) && (index == input.index))
 						{
 							renderer->setInputStream(i, attribute);
 
@@ -5802,8 +5802,9 @@ namespace D3D9
 				{
 					for(int i = 0; i < MAX_VERTEX_OUTPUTS; i++)
 					{
-						if((usage == shader->output[i][0].usage || (usage == D3DDECLUSAGE_POSITIONT && shader->output[i][0].usage == D3DDECLUSAGE_POSITION)) &&
-						    index == shader->output[i][0].index)
+						const sw::Shader::Semantic& output = shader->getOutput(i, 0);
+						if(((usage == output.usage) || (usage == D3DDECLUSAGE_POSITIONT && output.usage == D3DDECLUSAGE_POSITION)) &&
+						   (index == output.index))
 						{
 							renderer->setInputStream(i, attribute);
 
@@ -6270,8 +6271,8 @@ namespace D3D9
 
 			if(source->hasStencil())
 			{
-				byte *sourceBuffer = (byte*)source->lockStencil(0, sw::PUBLIC);
-				byte *destBuffer = (byte*)dest->lockStencil(0, sw::PUBLIC);
+				byte *sourceBuffer = (byte*)source->lockStencil(0, 0, 0, sw::PUBLIC);
+				byte *destBuffer = (byte*)dest->lockStencil(0, 0, 0, sw::PUBLIC);
 
 				unsigned int width = source->getWidth();
 				unsigned int height = source->getHeight();

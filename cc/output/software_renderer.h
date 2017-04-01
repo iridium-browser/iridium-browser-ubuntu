@@ -7,8 +7,8 @@
 
 #include "base/macros.h"
 #include "cc/base/cc_export.h"
-#include "cc/output/compositor_frame.h"
 #include "cc/output/direct_renderer.h"
+#include "ui/events/latency_info.h"
 
 namespace cc {
 class DebugBorderDrawQuad;
@@ -29,7 +29,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
 
   ~SoftwareRenderer() override;
 
-  void SwapBuffers(CompositorFrameMetadata metadata) override;
+  void SwapBuffers(std::vector<ui::LatencyInfo> latency_info) override;
 
   void SetDisablePictureQuadImageFiltering(bool disable) {
     disable_picture_quad_image_filtering_ = disable;
@@ -77,7 +77,9 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
                     const TileDrawQuad* quad);
   void DrawUnsupportedQuad(const DrawingFrame* frame,
                            const DrawQuad* quad);
-  bool ShouldApplyBackgroundFilters(const RenderPassDrawQuad* quad) const;
+  bool ShouldApplyBackgroundFilters(
+      const RenderPassDrawQuad* quad,
+      const FilterOperations* background_filters) const;
   sk_sp<SkImage> ApplyImageFilter(SkImageFilter* filter,
                                   const RenderPassDrawQuad* quad,
                                   const SkBitmap& to_filter,
@@ -85,7 +87,9 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   gfx::Rect GetBackdropBoundingBoxForRenderPassQuad(
       const DrawingFrame* frame,
       const RenderPassDrawQuad* quad,
-      const gfx::Transform& contents_device_transform) const;
+      const gfx::Transform& contents_device_transform,
+      const FilterOperations* background_filters,
+      gfx::Rect* unclipped_rect) const;
   SkBitmap GetBackdropBitmap(const gfx::Rect& bounding_rect) const;
   sk_sp<SkShader> GetBackgroundFilterShader(
       const DrawingFrame* frame,
@@ -103,7 +107,7 @@ class CC_EXPORT SoftwareRenderer : public DirectRenderer {
   SkPaint current_paint_;
   std::unique_ptr<ResourceProvider::ScopedWriteLockSoftware>
       current_framebuffer_lock_;
-  sk_sp<SkCanvas> current_framebuffer_canvas_;
+  std::unique_ptr<SkCanvas> current_framebuffer_canvas_;
 
   DISALLOW_COPY_AND_ASSIGN(SoftwareRenderer);
 };

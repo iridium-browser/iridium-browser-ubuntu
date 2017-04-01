@@ -9,6 +9,7 @@
 #include "chrome/browser/ui/cocoa/accelerators_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
+#import "chrome/browser/ui/cocoa/fullscreen/fullscreen_toolbar_controller.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/views/exclusive_access_bubble_views.h"
 #include "chrome/browser/ui/views/new_back_shortcut_bubble.h"
@@ -80,11 +81,6 @@ void ExclusiveAccessController::Destroy() {
   bubble_type_ = EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE;
 }
 
-void ExclusiveAccessController::Layout(CGFloat max_y) {
-  if (views_bubble_)
-    views_bubble_->RepositionIfVisible();
-}
-
 Profile* ExclusiveAccessController::GetProfile() {
   return browser_->profile();
 }
@@ -99,9 +95,8 @@ void ExclusiveAccessController::UpdateUIForTabFullscreen(
 }
 
 void ExclusiveAccessController::UpdateFullscreenToolbar() {
-  PrefService* prefs = GetProfile()->GetPrefs();
-  bool showToolbar = prefs->GetBoolean(prefs::kShowFullscreenToolbar);
-  [controller_ setFullscreenToolbarVisible:showToolbar];
+  [[controller_ fullscreenToolbarController]
+      updateToolbarStyleExitingTabFullscreen:NO];
 }
 
 // See the Fullscreen terminology section and the (Fullscreen) interface

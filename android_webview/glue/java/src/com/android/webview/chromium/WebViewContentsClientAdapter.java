@@ -4,6 +4,7 @@
 
 package com.android.webview.chromium;
 
+import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -16,7 +17,6 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Message;
-import android.util.Log;
 import android.view.KeyEvent;
 import android.view.View;
 import android.webkit.ClientCertRequest;
@@ -43,11 +43,13 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsClientBridge;
 import org.chromium.android_webview.AwHttpAuthHandler;
+import org.chromium.android_webview.AwRenderProcessGoneDetail;
 import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.JsPromptResultReceiver;
 import org.chromium.android_webview.JsResultReceiver;
 import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.android_webview.permission.Resource;
+import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 
@@ -80,7 +82,7 @@ import java.util.WeakHashMap;
 @SuppressWarnings("deprecation")
 // You shouldn't change TargetApi, please see how Android M API was added.
 @TargetApi(Build.VERSION_CODES.LOLLIPOP)
-public class WebViewContentsClientAdapter extends AwContentsClient {
+class WebViewContentsClientAdapter extends AwContentsClient {
     // TAG is chosen for consistency with classic webview tracing.
     private static final String TAG = "WebViewCallback";
     // Enables API callback tracing
@@ -88,17 +90,19 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
     // Default WebViewClient used to avoid null checks.
     private static WebViewClient sNullWebViewClient = new WebViewClient();
     // The WebView instance that this adapter is serving.
-    private final WebView mWebView;
+    protected final WebView mWebView;
     // The Context to use. This is different from mWebView.getContext(), which should not be used.
     private final Context mContext;
     // The WebViewClient instance that was passed to WebView.setWebViewClient().
-    private WebViewClient mWebViewClient = sNullWebViewClient;
+    protected WebViewClient mWebViewClient = sNullWebViewClient;
     // The WebChromeClient instance that was passed to WebView.setContentViewClient().
     private WebChromeClient mWebChromeClient;
     // The listener receiving find-in-page API results.
     private WebView.FindListener mFindListener;
     // The listener receiving notifications of screen updates.
     private WebView.PictureListener mPictureListener;
+    // Whether the picture listener is invalidate only (i.e. receives a null Picture)
+    private boolean mPictureListenerInvalidateOnly;
 
     private WebViewDelegate mWebViewDelegate;
 
@@ -110,11 +114,13 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
 
     private WeakHashMap<AwPermissionRequest, WeakReference<PermissionRequestAdapter>>
             mOngoingPermissionRequests;
+
     /**
      * Adapter constructor.
      *
      * @param webView the {@link WebView} instance that this adapter is serving.
      */
+    @SuppressLint("HandlerLeak")
     WebViewContentsClientAdapter(WebView webView, Context context,
             WebViewDelegate webViewDelegate) {
         if (webView == null || webViewDelegate == null) {
@@ -166,8 +172,16 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         }
     }
 
+    WebViewClient getWebViewClient() {
+        return mWebViewClient;
+    }
+
     void setWebChromeClient(WebChromeClient client) {
         mWebChromeClient = client;
+    }
+
+    WebChromeClient getWebChromeClient() {
+        return mWebChromeClient;
     }
 
     void setDownloadListener(DownloadListener listener) {
@@ -178,8 +192,9 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         mFindListener = listener;
     }
 
-    void setPictureListener(WebView.PictureListener listener) {
+    void setPictureListener(WebView.PictureListener listener, boolean invalidateOnly) {
         mPictureListener = listener;
+        mPictureListenerInvalidateOnly = invalidateOnly;
     }
 
     //--------------------------------------------------------------------------------------------
@@ -327,13 +342,20 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
     /**
      * @see AwContentsClient#shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest)
      */
+    @TargetApi(Build.VERSION_CODES.N)
     @Override
     public boolean shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest request) {
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.shouldOverrideUrlLoading");
             if (TRACE) Log.d(TAG, "shouldOverrideUrlLoading=" + request.url);
             boolean result;
-            result = mWebViewClient.shouldOverrideUrlLoading(mWebView, request.url);
+            if (Build.VERSION.CODENAME.equals("N")
+                    || Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+                result = mWebViewClient.shouldOverrideUrlLoading(
+                        mWebView, new WebResourceRequestImpl(request));
+            } else {
+                result = mWebViewClient.shouldOverrideUrlLoading(mWebView, request.url);
+            }
             return result;
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.shouldOverrideUrlLoading");
@@ -539,7 +561,8 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
                     public void run() {
                         if (mPictureListener != null) {
                             if (TRACE) Log.d(TAG, "onPageFinished-fake");
-                            mPictureListener.onNewPicture(mWebView, new Picture());
+                            mPictureListener.onNewPicture(mWebView,
+                                    mPictureListenerInvalidateOnly ? null : new Picture());
                         }
                     }
                 }, 100);
@@ -1181,6 +1204,11 @@ public class WebViewContentsClientAdapter extends AwContentsClient {
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.getDefaultVideoPoster");
         }
+    }
+
+    @Override
+    public boolean onRenderProcessGone(AwRenderProcessGoneDetail detail) {
+        return false;
     }
 
     // TODO: Move to upstream.

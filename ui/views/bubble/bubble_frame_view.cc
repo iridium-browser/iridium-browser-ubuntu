@@ -11,6 +11,7 @@
 #include "ui/base/default_style.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/paint_context.h"
 #include "ui/compositor/paint_recorder.h"
@@ -19,11 +20,13 @@
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/skia_util.h"
+#include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/bubble/bubble_border.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/vector_icon_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -41,6 +44,14 @@ const SkColor kFootnoteBackgroundColor = SkColorSetRGB(245, 245, 245);
 
 // Color of the top border of the footnote.
 const SkColor kFootnoteBorderColor = SkColorSetRGB(229, 229, 229);
+
+constexpr int kClosePaddingRight = 7;
+constexpr int kClosePaddingTop = 6;
+
+// The MD spec states that the center of the "x" should be 16x16 from the top
+// right of the dialog.
+constexpr int kClosePaddingRightMd = 4;
+constexpr int kClosePaddingTopMd = 5;
 
 // Get the |vertical| or horizontal amount that |available_bounds| overflows
 // |window_bounds|.
@@ -93,29 +104,39 @@ BubbleFrameView::BubbleFrameView(const gfx::Insets& title_margins,
 
   close_ = CreateCloseButton(this);
   close_->SetVisible(false);
+#if defined(OS_WIN)
+  // Windows will automatically create a tooltip for the close button based on
+  // the HTCLOSE result from NonClientHitTest().
+  close_->SetTooltipText(base::string16());
+#endif
   AddChildView(close_);
 }
 
 BubbleFrameView::~BubbleFrameView() {}
 
 // static
-LabelButton* BubbleFrameView::CreateCloseButton(ButtonListener* listener) {
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  LabelButton* close = new LabelButton(listener, base::string16());
-  close->SetImage(CustomButton::STATE_NORMAL,
-                  *rb.GetImageNamed(IDR_CLOSE_DIALOG).ToImageSkia());
-  close->SetImage(CustomButton::STATE_HOVERED,
-                  *rb.GetImageNamed(IDR_CLOSE_DIALOG_H).ToImageSkia());
-  close->SetImage(CustomButton::STATE_PRESSED,
-                  *rb.GetImageNamed(IDR_CLOSE_DIALOG_P).ToImageSkia());
-  close->SetBorder(nullptr);
-  close->SetSize(close->GetPreferredSize());
-#if !defined(OS_WIN)
-  // Windows will automatically create a tooltip for the close button based on
-  // the HTCLOSE result from NonClientHitTest().
-  close->SetTooltipText(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
-#endif
-  return close;
+Button* BubbleFrameView::CreateCloseButton(VectorIconButtonDelegate* delegate) {
+  Button* close_button = nullptr;
+  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+    VectorIconButton* close = new VectorIconButton(delegate);
+    close->SetIcon(gfx::VectorIconId::BAR_CLOSE);
+    close->SetSize(close->GetPreferredSize());
+    close_button = close;
+  } else {
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+    LabelButton* close = new LabelButton(delegate, base::string16());
+    close->SetImage(CustomButton::STATE_NORMAL,
+                    *rb.GetImageNamed(IDR_CLOSE_DIALOG).ToImageSkia());
+    close->SetImage(CustomButton::STATE_HOVERED,
+                    *rb.GetImageNamed(IDR_CLOSE_DIALOG_H).ToImageSkia());
+    close->SetImage(CustomButton::STATE_PRESSED,
+                    *rb.GetImageNamed(IDR_CLOSE_DIALOG_P).ToImageSkia());
+    close->SetBorder(nullptr);
+    close->SetSize(close->GetPreferredSize());
+    close_button = close;
+  }
+  close_button->SetTooltipText(l10n_util::GetStringUTF16(IDS_APP_CLOSE));
+  return close_button;
 }
 
 gfx::Rect BubbleFrameView::GetBoundsForClientView() const {
@@ -301,7 +322,13 @@ void BubbleFrameView::Layout() {
 
   // The close button is positioned somewhat closer to the edge of the bubble.
   gfx::Point close_position = GetContentsBounds().top_right();
-  close_position += gfx::Vector2d(-close_->width() - 7, 6);
+  if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
+    close_position += gfx::Vector2d(-close_->width() - kClosePaddingRightMd,
+                                    kClosePaddingTopMd);
+  } else {
+    close_position +=
+        gfx::Vector2d(-close_->width() - kClosePaddingRight, kClosePaddingTop);
+  }
   close_->SetPosition(close_position);
 
   gfx::Size title_icon_pref_size(title_icon_->GetPreferredSize());
@@ -388,13 +415,13 @@ void BubbleFrameView::SetFootnoteView(View* view) {
   footnote_container_->set_background(
       Background::CreateSolidBackground(kFootnoteBackgroundColor));
   footnote_container_->SetBorder(
-      Border::CreateSolidSidedBorder(1, 0, 0, 0, kFootnoteBorderColor));
+      CreateSolidSidedBorder(1, 0, 0, 0, kFootnoteBorderColor));
   footnote_container_->AddChildView(view);
   AddChildView(footnote_container_);
 }
 
 gfx::Rect BubbleFrameView::GetUpdatedWindowBounds(const gfx::Rect& anchor_rect,
-                                                  gfx::Size client_size,
+                                                  const gfx::Size& client_size,
                                                   bool adjust_if_offscreen) {
   gfx::Size size(GetSizeForClientSize(client_size));
 

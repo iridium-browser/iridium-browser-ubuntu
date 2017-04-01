@@ -5,6 +5,7 @@
 #ifndef ElementVisibilityObserver_h
 #define ElementVisibilityObserver_h
 
+#include "core/CoreExport.h"
 #include "core/dom/IntersectionObserver.h"
 #include "platform/heap/Heap.h"
 #include "platform/heap/Member.h"
@@ -22,29 +23,34 @@ class Element;
 // The ElementVisibilityObserver is implemented on top of IntersectionObserver.
 // It is a layer meant to simplify the usage for C++ Blink code checking for the
 // visibility of an element.
-class ElementVisibilityObserver final : public GarbageCollectedFinalized<ElementVisibilityObserver> {
-    WTF_MAKE_NONCOPYABLE(ElementVisibilityObserver);
-public:
-    using VisibilityCallback = Function<void(bool), WTF::SameThreadAffinity>;
+class CORE_EXPORT ElementVisibilityObserver final
+    : public GarbageCollectedFinalized<ElementVisibilityObserver> {
+  WTF_MAKE_NONCOPYABLE(ElementVisibilityObserver);
 
-    ElementVisibilityObserver(Element*, std::unique_ptr<VisibilityCallback>);
-    virtual ~ElementVisibilityObserver();
+ public:
+  using VisibilityCallback = Function<void(bool), WTF::SameThreadAffinity>;
 
-    void start();
-    void stop();
+  ElementVisibilityObserver(Element*, std::unique_ptr<VisibilityCallback>);
+  virtual ~ElementVisibilityObserver();
 
-    DECLARE_VIRTUAL_TRACE();
+  void start();
+  void stop();
 
-private:
-    class ElementVisibilityCallback;
+  void deliverObservationsForTesting();
 
-    void onVisibilityChanged(const HeapVector<Member<IntersectionObserverEntry>>&);
+  DECLARE_VIRTUAL_TRACE();
 
-    Member<Element> m_element;
-    Member<IntersectionObserver> m_intersectionObserver;
-    std::unique_ptr<VisibilityCallback> m_callback;
+ private:
+  class ElementVisibilityCallback;
+
+  void onVisibilityChanged(
+      const HeapVector<Member<IntersectionObserverEntry>>&);
+
+  Member<Element> m_element;
+  Member<IntersectionObserver> m_intersectionObserver;
+  std::unique_ptr<VisibilityCallback> m_callback;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ElementVisibilityObserver_h
+#endif  // ElementVisibilityObserver_h

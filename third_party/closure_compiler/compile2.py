@@ -41,7 +41,6 @@ class Checker(object):
     """
     Args:
       verbose: Whether this class should output diagnostic messages.
-      strict: Whether the Closure Compiler should be invoked more strictly.
     """
     self._runner_jar = os.path.join(_CURRENT_DIR, "runner", "runner.jar")
     self._target = None
@@ -207,7 +206,7 @@ class Checker(object):
       (found_errors, stderr) A boolean indicating whether errors were found and
           the raw Closure compiler stderr (as a string).
     """
-    is_extern = lambda f: 'extern' in f
+    is_extern = lambda f: 'externs' in f
     externs_and_deps = [self._POLYMER_EXTERNS]
 
     if custom_sources:

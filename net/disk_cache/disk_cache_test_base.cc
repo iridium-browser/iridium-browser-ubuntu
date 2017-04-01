@@ -30,7 +30,7 @@ using net::test::IsOk;
 
 DiskCacheTest::DiskCacheTest() {
   CHECK(temp_dir_.CreateUniqueTempDir());
-  cache_path_ = temp_dir_.path();
+  cache_path_ = temp_dir_.GetPath();
   if (!base::MessageLoop::current())
     message_loop_.reset(new base::MessageLoopForIO());
 }
@@ -176,6 +176,15 @@ int DiskCacheTestWithCache::DoomEntriesSince(const base::Time initial_time) {
 int DiskCacheTestWithCache::CalculateSizeOfAllEntries() {
   net::TestCompletionCallback cb;
   int rv = cache_->CalculateSizeOfAllEntries(cb.callback());
+  return cb.GetResult(rv);
+}
+
+int DiskCacheTestWithCache::CalculateSizeOfEntriesBetween(
+    const base::Time initial_time,
+    const base::Time end_time) {
+  net::TestCompletionCallback cb;
+  int rv = cache_->CalculateSizeOfEntriesBetween(initial_time, end_time,
+                                                 cb.callback());
   return cb.GetResult(rv);
 }
 

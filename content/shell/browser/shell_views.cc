@@ -22,7 +22,7 @@
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/views/background.h"
-#include "ui/views/controls/button/label_button.h"
+#include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/controls/webview/webview.h"
@@ -38,6 +38,10 @@
 #include "ui/wm/test/wm_test_helper.h"
 #else  // !defined(OS_CHROMEOS)
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ui/wm/core/wm_state.h"
 #endif
 
 #if defined(OS_WIN)
@@ -88,7 +92,7 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
     // Resizing a widget on chromeos doesn't automatically resize the root, need
     // to explicitly do that.
 #if defined(OS_CHROMEOS)
-    GetWidget()->GetNativeWindow()->GetHost()->SetBounds(bounds);
+    GetWidget()->GetNativeWindow()->GetHost()->SetBoundsInPixels(bounds);
 #endif
   }
 
@@ -131,8 +135,8 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
       views::ColumnSet* toolbar_column_set =
           toolbar_layout->AddColumnSet(0);
       // Back button
-      back_button_ = new views::LabelButton(this, base::ASCIIToUTF16("Back"));
-      back_button_->SetStyle(views::Button::STYLE_BUTTON);
+      back_button_ =
+          views::MdTextButton::Create(this, base::ASCIIToUTF16("Back"));
       gfx::Size back_button_size = back_button_->GetPreferredSize();
       toolbar_column_set->AddColumn(views::GridLayout::CENTER,
                                     views::GridLayout::CENTER, 0,
@@ -141,8 +145,7 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
                                     back_button_size.width() / 2);
       // Forward button
       forward_button_ =
-          new views::LabelButton(this, base::ASCIIToUTF16("Forward"));
-      forward_button_->SetStyle(views::Button::STYLE_BUTTON);
+          views::MdTextButton::Create(this, base::ASCIIToUTF16("Forward"));
       gfx::Size forward_button_size = forward_button_->GetPreferredSize();
       toolbar_column_set->AddColumn(views::GridLayout::CENTER,
                                     views::GridLayout::CENTER, 0,
@@ -151,8 +154,7 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
                                     forward_button_size.width() / 2);
       // Refresh button
       refresh_button_ =
-          new views::LabelButton(this, base::ASCIIToUTF16("Refresh"));
-      refresh_button_->SetStyle(views::Button::STYLE_BUTTON);
+          views::MdTextButton::Create(this, base::ASCIIToUTF16("Refresh"));
       gfx::Size refresh_button_size = refresh_button_->GetPreferredSize();
       toolbar_column_set->AddColumn(views::GridLayout::CENTER,
                                     views::GridLayout::CENTER, 0,
@@ -160,8 +162,8 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
                                     refresh_button_size.width(),
                                     refresh_button_size.width() / 2);
       // Stop button
-      stop_button_ = new views::LabelButton(this, base::ASCIIToUTF16("Stop"));
-      stop_button_->SetStyle(views::Button::STYLE_BUTTON);
+      stop_button_ =
+          views::MdTextButton::Create(this, base::ASCIIToUTF16("Stop"));
       gfx::Size stop_button_size = stop_button_->GetPreferredSize();
       toolbar_column_set->AddColumn(views::GridLayout::CENTER,
                                     views::GridLayout::CENTER, 0,
@@ -253,7 +255,6 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
       shell_ = NULL;
     }
   }
-  View* GetContentsView() override { return this; }
 
   // Overridden from View
   gfx::Size GetMinimumSize() const override {
@@ -294,10 +295,10 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
 
   // Toolbar view contains forward/backward/reload button and URL entry
   View* toolbar_view_;
-  views::LabelButton* back_button_;
-  views::LabelButton* forward_button_;
-  views::LabelButton* refresh_button_;
-  views::LabelButton* stop_button_;
+  views::CustomButton* back_button_;
+  views::CustomButton* forward_button_;
+  views::CustomButton* refresh_button_;
+  views::CustomButton* stop_button_;
   views::Textfield* url_entry_;
 
   // Contents view contains the web contents view
@@ -310,10 +311,16 @@ class ShellWindowDelegateView : public views::WidgetDelegateView,
 }  // namespace
 
 #if defined(OS_CHROMEOS)
-wm::WMTestHelper* Shell::wm_test_helper_ = NULL;
-display::Screen* Shell::test_screen_ = NULL;
+// static
+wm::WMTestHelper* Shell::wm_test_helper_ = nullptr;
+// static
+display::Screen* Shell::test_screen_ = nullptr;
+#elif defined(USE_AURA)
+// static
+wm::WMState* Shell::wm_state_ = nullptr;
 #endif
-views::ViewsDelegate* Shell::views_delegate_ = NULL;
+// static
+views::ViewsDelegate* Shell::views_delegate_ = nullptr;
 
 // static
 void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
@@ -327,6 +334,9 @@ void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
   wm_test_helper_ = new wm::WMTestHelper(default_window_size,
                                          GetContextFactory());
 #else
+#if defined(USE_AURA)
+  wm_state_ = new wm::WMState;
+#endif
   display::Screen::SetScreenInstance(views::CreateDesktopScreen());
 #endif
   views_delegate_ = new views::DesktopTestViewsDelegate();
@@ -335,15 +345,19 @@ void Shell::PlatformInitialize(const gfx::Size& default_window_size) {
 void Shell::PlatformExit() {
 #if defined(OS_CHROMEOS)
   delete wm_test_helper_;
-  wm_test_helper_ = NULL;
+  wm_test_helper_ = nullptr;
 
   delete test_screen_;
-  test_screen_ = NULL;
+  test_screen_ = nullptr;
 #endif
   delete views_delegate_;
-  views_delegate_ = NULL;
+  views_delegate_ = nullptr;
   delete platform_;
-  platform_ = NULL;
+  platform_ = nullptr;
+#if defined(USE_AURA) && !defined(OS_CHROMEOS)
+  delete wm_state_;
+  wm_state_ = nullptr;
+#endif
 }
 
 void Shell::PlatformCleanUp() {

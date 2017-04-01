@@ -8,13 +8,16 @@ from __future__ import print_function
 
 import calendar
 import collections
+# We import mock so that we can identify mock.MagicMock instances in tests
+# that use mock.
+import mock
 import os
 import random
 import re
 import time
 
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
@@ -22,14 +25,6 @@ from chromite.lib import gob_util
 
 
 site_config = config_lib.GetConfig()
-
-
-# We import mock so that we can identify mock.MagicMock instances in tests
-# that use mock.
-try:
-  import mock
-except ImportError:
-  mock = None
 
 
 _MAXIMUM_GERRIT_NUMBER_LENGTH = 7
@@ -185,8 +180,8 @@ class PatchException(Exception):
   inflight = False
 
   def __init__(self, patch, message=None):
-    is_mock = mock is not None and isinstance(patch, mock.MagicMock)
-    if not isinstance(patch, GitRepoPatch) and not is_mock:
+    if (not isinstance(patch, GitRepoPatch) and
+        not isinstance(patch, mock.MagicMock)):
       raise TypeError(
           'Patch must be a GitRepoPatch derivative; got type %s: %r'
           % (type(patch), patch))
@@ -469,7 +464,7 @@ def ParsePatchDep(text, no_change_id=False, no_sha1=False,
     no_full_change_id: Do not allow full change-ID.
     no_gerrit_number: Do not allow gerrit_number.
 
-  Retruns:
+  Returns:
     A PatchQuery object.
   """
   original_text = text
@@ -707,7 +702,7 @@ class PatchQuery(object):
       return self.id == other
 
     if self.id is not None:
-      return self.id == other.id
+      return self.id == getattr(other, 'id', None)
 
     return ((self.remote, self.project, self.tracking_branch,
              self.gerrit_number, self.change_id, self.sha1) ==
@@ -928,8 +923,12 @@ class GitRepoPatch(PatchQuery):
     sha1 = self.HasBeenFetched(git_repo)
 
     if sha1 is None:
+      fields = {'project_url': self.project_url}
       git.RunGit(git_repo, ['fetch', '-f', self.project_url, self.ref],
-                 print_cmd=True)
+                 print_cmd=True,
+                 mon_name=constants.MON_GIT_FETCH_COUNT,
+                 mon_retry_name=constants.MON_GIT_FETCH_RETRY_COUNT,
+                 mon_fields=fields)
 
     return self.UpdateMetadataFromRepo(git_repo, sha1=sha1 or self.sha1)
 
@@ -1274,8 +1273,7 @@ class GitRepoPatch(PatchQuery):
       ChangeMatchesMultipleCheckouts if there are multiple checkouts that
       match this change.
     """
-    checkouts = manifest.FindCheckouts(self.project, self.tracking_branch,
-                                       only_patchable=True)
+    checkouts = manifest.FindCheckouts(self.project, self.tracking_branch)
     if len(checkouts) != 1:
       if len(checkouts) > 1:
         raise ChangeMatchesMultipleCheckouts(self)
@@ -1714,9 +1712,15 @@ class GerritPatch(GerritFetchOnlyPatch):
             })
 
         date = current_revision_info['commit']['committer']['date']
+        for proto in ('http', 'https', 'repo', 'sso'):
+          if proto in current_revision_info['fetch']:
+            ref = current_revision_info['fetch'][proto]['ref']
+            break
+        else:
+          raise ValueError('Missing ref info')
         patch_dict['currentPatchSet'] = {
             'approvals': approvals,
-            'ref': current_revision_info['fetch']['http']['ref'],
+            'ref': ref,
             'revision': current_revision,
             'number': str(current_revision_info['_number']),
             'date': _convert_tm(date),
@@ -1998,7 +2002,7 @@ def PrepareLocalPatches(manifest, patches):
   for patch in patches:
     project, branch = patch.split(':')
     project_patch_info = []
-    for checkout in manifest.FindCheckouts(project, only_patchable=True):
+    for checkout in manifest.FindCheckouts(project):
       tracking_branch = checkout['tracking_branch']
       project_dir = checkout.GetPath(absolute=True)
       remote = checkout['remote']

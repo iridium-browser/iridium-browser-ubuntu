@@ -18,6 +18,7 @@
 #include "media/base/android/media_resource_getter.h"
 #include "media/base/timestamp_constants.h"
 #include "net/base/escape.h"
+#include "third_party/WebKit/public/platform/modules/remoteplayback/WebRemotePlaybackAvailability.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
 
@@ -48,11 +49,7 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
           player_id,
           manager,
           base::Bind(&DoNothing),
-          manager->GetLocalPlayer(player_id)->frame_url(),
-          // TODO(davve): Media session interaction with remote
-          // playback not defined. Use invalid session id for now.
-          // https://github.com/whatwg/mediasession/issues/123
-          media::kInvalidMediaSessionId),
+          manager->GetLocalPlayer(player_id)->frame_url()),
       width_(0),
       height_(0),
       url_(manager->GetLocalPlayer(player_id)->GetUrl()),
@@ -62,7 +59,7 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = base::android::AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
   ScopedJavaLocalRef<jstring> j_url_string;
   if (url_.is_valid()) {
     // Escape the URL to make it safe to use. Don't escape existing escape
@@ -84,7 +81,7 @@ RemoteMediaPlayerBridge::RemoteMediaPlayerBridge(
 
 RemoteMediaPlayerBridge::~RemoteMediaPlayerBridge() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
   Java_RemoteMediaPlayerBridge_destroy(env, java_bridge_);
   Release();
 }
@@ -184,6 +181,14 @@ void RemoteMediaPlayerBridge::OnCastStarting(
   }
 }
 
+void RemoteMediaPlayerBridge::OnCastStarted(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  static_cast<RemoteMediaPlayerManager*>(manager())->OnRemotePlaybackStarted(
+      player_id());
+}
+
 void RemoteMediaPlayerBridge::OnCastStopping(JNIEnv* env,
                                              const JavaParamRef<jobject>& obj) {
   static_cast<RemoteMediaPlayerManager*>(manager())
@@ -248,9 +253,11 @@ void RemoteMediaPlayerBridge::OnPlaybackFinished(
 void RemoteMediaPlayerBridge::OnRouteAvailabilityChanged(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    jboolean available) {
+    int availability) {
   static_cast<RemoteMediaPlayerManager *>(manager())->
-      OnRouteAvailabilityChanged(player_id(), available);
+      OnRouteAvailabilityChanged(
+          player_id(),
+          static_cast<blink::WebRemotePlaybackAvailability>(availability));
 }
 
 // static
@@ -266,7 +273,7 @@ void RemoteMediaPlayerBridge::RequestRemotePlayback() {
   if (!local_player)
     return;
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
 
   Java_RemoteMediaPlayerBridge_requestRemotePlayback(
       env, java_bridge_, local_player->GetCurrentTime().InMilliseconds());
@@ -275,15 +282,23 @@ void RemoteMediaPlayerBridge::RequestRemotePlayback() {
 void RemoteMediaPlayerBridge::RequestRemotePlaybackControl() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
 
   Java_RemoteMediaPlayerBridge_requestRemotePlaybackControl(env, java_bridge_);
+}
+
+void RemoteMediaPlayerBridge::RequestRemotePlaybackStop() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  JNIEnv* env = AttachCurrentThread();
+  DCHECK(env);
+
+  Java_RemoteMediaPlayerBridge_requestRemotePlaybackStop(env, java_bridge_);
 }
 
 void RemoteMediaPlayerBridge::SetNativePlayer() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
 
   Java_RemoteMediaPlayerBridge_setNativePlayer(env, java_bridge_);
 }
@@ -291,7 +306,7 @@ void RemoteMediaPlayerBridge::SetNativePlayer() {
 void RemoteMediaPlayerBridge::OnPlayerCreated() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
 
   Java_RemoteMediaPlayerBridge_onPlayerCreated(env, java_bridge_);
 }
@@ -299,7 +314,7 @@ void RemoteMediaPlayerBridge::OnPlayerCreated() {
 void RemoteMediaPlayerBridge::OnPlayerDestroyed() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
 
   Java_RemoteMediaPlayerBridge_onPlayerDestroyed(env, java_bridge_);
 }
@@ -313,7 +328,7 @@ void RemoteMediaPlayerBridge::SetPosterBitmap(
     const std::vector<SkBitmap>& bitmaps) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
 
   if (bitmaps.empty()) {
     Java_RemoteMediaPlayerBridge_setPosterBitmap(env, java_bridge_, nullptr);
@@ -346,7 +361,7 @@ void RemoteMediaPlayerBridge::SeekTo(base::TimeDelta time) {
   }
 
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
   int time_msec = static_cast<int>(time.InMilliseconds());
   Java_RemoteMediaPlayerBridge_seekTo(env, java_bridge_, time_msec);
 }
@@ -363,7 +378,7 @@ void RemoteMediaPlayerBridge::UpdateEffectiveVolumeInternal(
     double effective_volume) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
   Java_RemoteMediaPlayerBridge_setVolume(env, java_bridge_,
                                          GetEffectiveVolume());
 }
@@ -397,7 +412,7 @@ base::TimeDelta RemoteMediaPlayerBridge::GetDuration() {
 bool RemoteMediaPlayerBridge::IsPlaying() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
   jboolean result = Java_RemoteMediaPlayerBridge_isPlaying(env, java_bridge_);
   return result;
 }
@@ -472,7 +487,7 @@ void RemoteMediaPlayerBridge::OnCookiesRetrieved(const std::string& cookies) {
   // authentication? MediaPlayerBridge does.
   cookies_ = cookies;
   JNIEnv* env = AttachCurrentThread();
-  CHECK(env);
+  DCHECK(env);
   Java_RemoteMediaPlayerBridge_setCookies(
       env, java_bridge_, ConvertUTF8ToJavaString(env, cookies));
 }

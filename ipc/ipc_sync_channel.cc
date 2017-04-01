@@ -45,9 +45,8 @@ void OnSyncHandleReady(bool* signal, bool* error, MojoResult result) {
 // is only used in cases where failure should be impossible) and runs
 // |callback|.
 void RunOnHandleReady(const base::Closure& callback, MojoResult result) {
-  DCHECK(result == MOJO_RESULT_OK || result == MOJO_RESULT_ABORTED);
-  if (result == MOJO_RESULT_OK)
-    callback.Run();
+  DCHECK_EQ(result, MOJO_RESULT_OK);
+  callback.Run();
 }
 
 class PumpMessagesEvent {
@@ -373,7 +372,7 @@ bool SyncChannel::SyncContext::Pop() {
   // can now unblock the listener thread.
   ipc_task_runner()->PostTask(
       FROM_HERE, base::Bind(&ReceivedSyncMsgQueue::DispatchReplies,
-                            received_sync_msgs_.get()));
+                            received_sync_msgs_));
 
   return result;
 }
@@ -542,8 +541,7 @@ void SyncChannel::SetRestrictDispatchChannelGroup(int group) {
 
 scoped_refptr<SyncMessageFilter> SyncChannel::CreateSyncMessageFilter() {
   scoped_refptr<SyncMessageFilter> filter = new SyncMessageFilter(
-      sync_context()->shutdown_event(),
-      sync_context()->IsChannelSendThreadSafe());
+      sync_context()->shutdown_event());
   AddFilter(filter.get());
   if (!did_init())
     pre_init_sync_message_filters_.push_back(filter);
@@ -680,11 +678,9 @@ void SyncChannel::WaitForReplyWithNestedMessageLoop(SyncContext* context) {
 }
 
 void SyncChannel::OnDispatchHandleReady(MojoResult result) {
-  DCHECK(result == MOJO_RESULT_OK || result == MOJO_RESULT_ABORTED);
-  if (result == MOJO_RESULT_OK) {
-    sync_context()->GetDispatchEvent()->Reset();
-    sync_context()->DispatchMessages();
-  }
+  DCHECK_EQ(result, MOJO_RESULT_OK);
+  sync_context()->GetDispatchEvent()->Reset();
+  sync_context()->DispatchMessages();
 }
 
 void SyncChannel::StartWatching() {
@@ -699,10 +695,6 @@ void SyncChannel::StartWatching() {
 }
 
 void SyncChannel::OnChannelInit() {
-  for (const auto& filter : pre_init_sync_message_filters_) {
-    filter->set_is_channel_send_thread_safe(
-        context()->IsChannelSendThreadSafe());
-  }
   pre_init_sync_message_filters_.clear();
 }
 

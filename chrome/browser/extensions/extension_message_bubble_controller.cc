@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -15,11 +15,11 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/common/url_constants.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
@@ -122,10 +122,14 @@ Profile* ExtensionMessageBubbleController::profile() {
 }
 
 bool ExtensionMessageBubbleController::ShouldShow() {
+  // In the case when there are multiple extensions in the list, we need to
+  // check if each extension entry is still installed, and, if not, remove it
+  // from the list.
+  UpdateExtensionIdList();
   std::set<Profile*>* profiles = GetProfileSet();
   return !profiles->count(profile()->GetOriginalProfile()) &&
          (!model_->has_active_bubble() || is_active_bubble_) &&
-         !GetExtensionList().empty();
+         !GetExtensionIdList().empty();
 }
 
 std::vector<base::string16>
@@ -139,10 +143,7 @@ ExtensionMessageBubbleController::GetExtensionList() {
   for (const std::string& id : *list) {
     const Extension* extension =
         registry->GetExtensionById(id, ExtensionRegistry::EVERYTHING);
-    // The extension may have been removed, since showing the bubble is an
-    // asynchronous process.
-    if (extension)
-      return_value.push_back(base::UTF8ToUTF16(extension->name()));
+    return_value.push_back(base::UTF8ToUTF16(extension->name()));
   }
   return return_value;
 }
@@ -168,6 +169,22 @@ base::string16 ExtensionMessageBubbleController::GetExtensionListForDisplay() {
 
 const ExtensionIdList& ExtensionMessageBubbleController::GetExtensionIdList() {
   return *GetOrCreateExtensionList();
+}
+
+void ExtensionMessageBubbleController::UpdateExtensionIdList() {
+  ExtensionIdList* extension_ids = GetOrCreateExtensionList();
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
+  int include_mask = delegate_->ShouldLimitToEnabledExtensions()
+                         ? ExtensionRegistry::ENABLED
+                         : ExtensionRegistry::EVERYTHING;
+  for (auto iter = extension_ids->begin(); iter != extension_ids->end();) {
+    const Extension* extension =
+        registry->GetExtensionById(*iter, include_mask);
+    if (extension)
+      ++iter;
+    else
+      iter = extension_ids->erase(iter);
+  }
 }
 
 bool ExtensionMessageBubbleController::CloseOnDeactivate() {
@@ -228,12 +245,10 @@ void ExtensionMessageBubbleController::OnLinkClicked() {
   // perform our cleanup here before opening the new tab.
   OnClose();
   if (!g_should_ignore_learn_more_for_testing) {
-    browser_->OpenURL(
-        content::OpenURLParams(delegate_->GetLearnMoreUrl(),
-                               content::Referrer(),
-                               NEW_FOREGROUND_TAB,
-                               ui::PAGE_TRANSITION_LINK,
-                               false));
+    browser_->OpenURL(content::OpenURLParams(
+        delegate_->GetLearnMoreUrl(), content::Referrer(),
+        WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
+        false));
   }
   // Warning: |this| may be deleted here!
 }

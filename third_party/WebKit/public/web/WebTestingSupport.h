@@ -33,13 +33,11 @@
 namespace blink {
 
 class WebTestingSupport {
-public:
-    static v8::Local<v8::Value> createInternalsObject(v8::Local<v8::Context>);
-    static void injectInternalsObject(WebLocalFrame*);
-    static void resetInternalsObject(WebLocalFrame*);
-    static void injectInternalsObject(v8::Local<v8::Context>);
+ public:
+  static void injectInternalsObject(WebLocalFrame*);
+  static void resetInternalsObject(WebLocalFrame*);
+  static void injectInternalsObject(v8::Local<v8::Context>);
 };
-
 }
 
 #endif

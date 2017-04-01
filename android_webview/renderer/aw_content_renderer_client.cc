@@ -14,19 +14,20 @@
 #include "android_webview/grit/aw_strings.h"
 #include "android_webview/renderer/aw_content_settings_client.h"
 #include "android_webview/renderer/aw_key_systems.h"
-#include "android_webview/renderer/aw_message_port_client.h"
 #include "android_webview/renderer/aw_print_web_view_helper_delegate.h"
 #include "android_webview/renderer/aw_render_frame_ext.h"
 #include "android_webview/renderer/aw_render_view_ext.h"
 #include "android_webview/renderer/print_render_frame_observer.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/content/renderer/autofill_agent.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
 #include "components/printing/renderer/print_web_view_helper.h"
+#include "components/spellcheck/spellcheck_build_features.h"
 #include "components/supervised_user_error_page/gin_wrapper.h"
 #include "components/supervised_user_error_page/supervised_user_error_page_android.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
@@ -39,7 +40,8 @@
 #include "content/public/renderer/render_view.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -52,7 +54,7 @@
 #include "url/gurl.h"
 #include "url/url_constants.h"
 
-#if defined(ENABLE_SPELLCHECK)
+#if BUILDFLAG(ENABLE_SPELLCHECK)
 #include "components/spellcheck/renderer/spellcheck.h"
 #include "components/spellcheck/renderer/spellcheck_provider.h"
 #endif
@@ -71,16 +73,10 @@ void AwContentRendererClient::RenderThreadStarted() {
   thread->AddObserver(aw_render_thread_observer_.get());
 
   visited_link_slave_.reset(new visitedlink::VisitedLinkSlave);
-  thread->AddObserver(visited_link_slave_.get());
+  thread->GetInterfaceRegistry()->AddInterface(
+      visited_link_slave_->GetBindCallback());
 
-  blink::WebString content_scheme(base::ASCIIToUTF16(url::kContentScheme));
-  blink::WebSecurityPolicy::registerURLSchemeAsLocal(content_scheme);
-
-  blink::WebString aw_scheme(
-      base::ASCIIToUTF16(android_webview::kAndroidWebViewVideoPosterScheme));
-  blink::WebSecurityPolicy::registerURLSchemeAsSecure(aw_scheme);
-
-#if defined(ENABLE_SPELLCHECK)
+#if BUILDFLAG(ENABLE_SPELLCHECK)
   if (!spellcheck_) {
     spellcheck_ = base::MakeUnique<SpellCheck>();
     thread->AddObserver(spellcheck_.get());
@@ -91,7 +87,7 @@ void AwContentRendererClient::RenderThreadStarted() {
 bool AwContentRendererClient::HandleNavigation(
     content::RenderFrame* render_frame,
     bool is_content_initiated,
-    int opener_id,
+    bool render_view_was_created_by_renderer,
     blink::WebFrame* frame,
     const blink::WebURLRequest& request,
     blink::WebNavigationType type,
@@ -128,7 +124,14 @@ bool AwContentRendererClient::HandleNavigation(
 
   // use NavigationInterception throttle to handle the call as that can
   // be deferred until after the java side has been constructed.
-  if (opener_id != MSG_ROUTING_NONE) {
+  //
+  // TODO(nick): |render_view_was_created_by_renderer| was plumbed in to
+  // preserve the existing code behavior, but it doesn't appear to be correct.
+  // In particular, this value will be true for the initial navigation of a
+  // RenderView created via window.open(), but it will also be true for all
+  // subsequent navigations in that RenderView, no matter how they are
+  // initiated.
+  if (render_view_was_created_by_renderer) {
     return false;
   }
 
@@ -147,8 +150,9 @@ void AwContentRendererClient::RenderFrameCreated(
     content::RenderFrame* render_frame) {
   new AwContentSettingsClient(render_frame);
   new PrintRenderFrameObserver(render_frame);
+  new printing::PrintWebViewHelper(
+      render_frame, base::MakeUnique<AwPrintWebViewHelperDelegate>());
   new AwRenderFrameExt(render_frame);
-  new AwMessagePortClient(render_frame);
 
   // TODO(jam): when the frame tree moves into content and parent() works at
   // RenderFrame construction, simplify this by just checking parent().
@@ -172,11 +176,7 @@ void AwContentRendererClient::RenderViewCreated(
     content::RenderView* render_view) {
   AwRenderViewExt::RenderViewCreated(render_view);
 
-  new printing::PrintWebViewHelper(
-      render_view, std::unique_ptr<printing::PrintWebViewHelper::Delegate>(
-                       new AwPrintWebViewHelperDelegate()));
-
-#if defined(ENABLE_SPELLCHECK)
+#if BUILDFLAG(ENABLE_SPELLCHECK)
   new SpellCheckProvider(render_view, spellcheck_.get());
 #endif
 }
@@ -224,7 +224,8 @@ void AwContentRendererClient::GetNavigationErrorStrings(
       render_frame->GetRemoteInterfaces()->GetInterface(
           &web_restrictions_service_);
       web_restrictions::mojom::ClientResultPtr result;
-      if (web_restrictions_service_->GetResult(mojo::String(url), &result)) {
+      if (web_restrictions_service_->GetResult(gurl.possibly_invalid_spec(),
+                                               &result)) {
         std::string detailed_error_html =
             supervised_user_error_page::BuildHtmlFromWebRestrictionsResult(
                 result, RenderThread::Get()->GetLocale());

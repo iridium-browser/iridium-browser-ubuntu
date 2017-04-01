@@ -51,7 +51,7 @@ GLContext::GLContext(GLShareGroup* share_group)
       swap_interval_(1),
       force_swap_interval_zero_(false) {
   if (!share_group_.get())
-    share_group_ = new GLShareGroup;
+    share_group_ = new gl::GLShareGroup();
 
   share_group_->AddContext(this);
 }
@@ -273,8 +273,8 @@ void GLContextReal::SetCurrent(GLSurface* surface) {
 
 scoped_refptr<GLContext> InitializeGLContext(scoped_refptr<GLContext> context,
                                              GLSurface* compatible_surface,
-                                             GpuPreference gpu_preference) {
-  if (!context->Initialize(compatible_surface, gpu_preference))
+                                             const GLContextAttribs& attribs) {
+  if (!context->Initialize(compatible_surface, attribs))
     return nullptr;
   return context;
 }

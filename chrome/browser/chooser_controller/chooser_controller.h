@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_CHOOSER_CONTROLLER_CHOOSER_CONTROLLER_H_
 #define CHROME_BROWSER_CHOOSER_CONTROLLER_CHOOSER_CONTROLLER_H_
 
+#include <vector>
+
 #include "base/macros.h"
 #include "base/strings/string16.h"
 
@@ -66,6 +68,12 @@ class ChooserController {
   // For WebBluetooth, it is a signal strength icon.
   virtual bool ShouldShowIconBeforeText() const;
 
+  // Returns if the chooser needs to show a footnote view.
+  virtual bool ShouldShowFootnoteView() const;
+
+  // Returns if the chooser allows multiple items to be selected.
+  virtual bool AllowMultipleSelection() const;
+
   // Returns the text to be displayed in the chooser when there are no options.
   virtual base::string16 GetNoOptionsText() const = 0;
 
@@ -85,6 +93,14 @@ class ChooserController {
   // The |index|th option string which is listed in the chooser.
   virtual base::string16 GetOption(size_t index) const = 0;
 
+  // Returns if the |index|th option is connected.
+  // This function returns false by default.
+  virtual bool IsConnected(size_t index) const;
+
+  // Returns if the |index|th option is paired.
+  // This function returns false by default.
+  virtual bool IsPaired(size_t index) const;
+
   // Refresh the list of options.
   virtual void RefreshOptions() = 0;
 
@@ -93,8 +109,9 @@ class ChooserController {
 
   // These three functions are called just before this object is destroyed:
 
-  // Called when the user selects the |index|th element from the dialog.
-  virtual void Select(size_t index) = 0;
+  // Called when the user selects elements from the dialog. |indices| contains
+  // the indices of the selected elements.
+  virtual void Select(const std::vector<size_t>& indices) = 0;
 
   // Called when the user presses the 'Cancel' button in the dialog.
   virtual void Cancel() = 0;
@@ -105,6 +122,9 @@ class ChooserController {
 
   // Open help center URL.
   virtual void OpenHelpCenterUrl() const = 0;
+
+  // Provide help information when the adapter is off.
+  virtual void OpenAdapterOffHelpUrl() const;
 
   // Only one view may be registered at a time.
   void set_view(View* view) { view_ = view; }

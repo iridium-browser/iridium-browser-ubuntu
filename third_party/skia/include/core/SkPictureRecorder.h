@@ -99,22 +99,6 @@ public:
      */
     sk_sp<SkDrawable> finishRecordingAsDrawable(uint32_t endFlags = 0);
 
-#ifdef SK_SUPPORT_LEGACY_PICTURE_PTR
-    SkPicture* SK_WARN_UNUSED_RESULT endRecordingAsPicture() {
-        return this->finishRecordingAsPicture().release();
-    }
-    SkPicture* SK_WARN_UNUSED_RESULT endRecordingAsPicture(const SkRect& cullRect) {
-        return this->finishRecordingAsPictureWithCull(cullRect).release();
-    }
-    SkDrawable* SK_WARN_UNUSED_RESULT endRecordingAsDrawable() {
-        return this->finishRecordingAsDrawable().release();
-    }
-    SkPicture* SK_WARN_UNUSED_RESULT endRecording() { return this->endRecordingAsPicture(); }
-#endif
-
-    // Strawman API.
-    void optimizeFor(GrContext* ctx) { fGrContextToOptimizeFor = ctx; }
-
 private:
     void reset();
 
@@ -127,15 +111,13 @@ private:
     friend class SkPictureRecorderReplayTester; // for unit testing
     void partialReplay(SkCanvas* canvas) const;
 
-    bool                          fActivelyRecording;
-    uint32_t                      fFlags;
-    SkRect                        fCullRect;
-    SkAutoTUnref<SkBBoxHierarchy> fBBH;
-    SkAutoTUnref<SkRecorder>      fRecorder;
-    SkAutoTUnref<SkRecord>        fRecord;
-    SkMiniRecorder                fMiniRecorder;
-
-    GrContext*                    fGrContextToOptimizeFor = nullptr;
+    bool                        fActivelyRecording;
+    uint32_t                    fFlags;
+    SkRect                      fCullRect;
+    sk_sp<SkBBoxHierarchy>      fBBH;
+    std::unique_ptr<SkRecorder> fRecorder;
+    sk_sp<SkRecord>             fRecord;
+    SkMiniRecorder              fMiniRecorder;
 
     typedef SkNoncopyable INHERITED;
 };

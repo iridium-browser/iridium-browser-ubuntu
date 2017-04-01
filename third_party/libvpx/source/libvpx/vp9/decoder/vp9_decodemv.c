@@ -241,7 +241,7 @@ static int read_mv_component(vpx_reader *r, const nmv_component *mvcomp,
 
   // Integer part
   if (class0) {
-    d = vpx_read_tree(r, vp9_mv_class0_tree, mvcomp->class0);
+    d = vpx_read(r, mvcomp->class0[0]);
     mag = 0;
   } else {
     int i;
@@ -770,6 +770,10 @@ static void read_inter_block_mode_info(VP9Decoder *const pbi,
     int idx, idy;
     PREDICTION_MODE b_mode;
     int_mv best_sub8x8[2];
+    const uint32_t invalid_mv = 0x80008000;
+    // Initialize the 2nd element as even though it won't be used meaningfully
+    // if is_compound is false, copying/clamping it may trigger a MSan warning.
+    best_sub8x8[1].as_int = invalid_mv;
     for (idy = 0; idy < 2; idy += num_4x4_h) {
       for (idx = 0; idx < 2; idx += num_4x4_w) {
         const int j = idy * 2 + idx;
@@ -826,8 +830,10 @@ static INLINE void copy_ref_frame_pair(MV_REFERENCE_FRAME *dst,
   memcpy(dst, src, sizeof(*dst) * 2);
 }
 
-void vp9_read_mode_info(VP9Decoder *const pbi, MACROBLOCKD *xd, int mi_row,
-                        int mi_col, vpx_reader *r, int x_mis, int y_mis) {
+void vp9_read_mode_info(TileWorkerData *twd, VP9Decoder *const pbi, int mi_row,
+                        int mi_col, int x_mis, int y_mis) {
+  vpx_reader *r = &twd->bit_reader;
+  MACROBLOCKD *const xd = &twd->xd;
   VP9_COMMON *const cm = &pbi->common;
   MODE_INFO *const mi = xd->mi[0];
   MV_REF *frame_mvs = cm->cur_frame->mvs + mi_row * cm->mi_cols + mi_col;

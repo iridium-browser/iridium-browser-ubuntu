@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #include "base/memory/weak_ptr.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -18,7 +18,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
-#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
@@ -34,15 +33,14 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/browser_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 #include "chrome/browser/supervised_user/child_accounts/child_account_feedback_reporter_android.h"
-#elif !defined(OS_ANDROID)
+#else
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -114,12 +112,13 @@ void SupervisedUserInterstitial::Show(
     WebContents* web_contents,
     const GURL& url,
     supervised_user_error_page::FilteringBehaviorReason reason,
+    bool initial_page_load,
     const base::Callback<void(bool)>& callback) {
   SupervisedUserInterstitial* interstitial =
       new SupervisedUserInterstitial(web_contents, url, reason, callback);
 
   // If Init() does not complete fully, immediately delete the interstitial.
-  if (!interstitial->Init())
+  if (!interstitial->Init(initial_page_load))
     delete interstitial;
   // Otherwise |interstitial_page_| is responsible for deleting it.
 }
@@ -141,7 +140,7 @@ SupervisedUserInterstitial::~SupervisedUserInterstitial() {
   DCHECK(!web_contents_);
 }
 
-bool SupervisedUserInterstitial::Init() {
+bool SupervisedUserInterstitial::Init(bool initial_page_load) {
   if (ShouldProceed()) {
     // It can happen that the site was only allowed very recently and the URL
     // filter on the IO thread had not been updated yet. Proceed with the
@@ -180,8 +179,8 @@ bool SupervisedUserInterstitial::Init() {
       SupervisedUserServiceFactory::GetForProfile(profile_);
   supervised_user_service->AddObserver(this);
 
-  interstitial_page_ =
-      content::InterstitialPage::Create(web_contents_, true, url_, this);
+  interstitial_page_ = content::InterstitialPage::Create(
+      web_contents_, initial_page_load, url_, this);
   interstitial_page_->Show();
 
   return true;
@@ -269,7 +268,7 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
             reason_, true, second_custodian.empty()));
     std::string message = l10n_util::GetStringFUTF8(
         IDS_BLOCK_INTERSTITIAL_DEFAULT_FEEDBACK_TEXT, reason);
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
     ReportChildAccountFeedback(web_contents_, message, url_);
 #else
     chrome::ShowFeedbackPage(chrome::FindBrowserWithWebContents(web_contents_),

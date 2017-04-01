@@ -19,6 +19,7 @@
 #include "cc/trees/mutator_host_client.h"
 #include "cc/trees/property_tree.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -29,14 +30,16 @@ namespace cc {
 
 namespace proto {
 class LayerTree;
-class LayerUpdate;
 }  // namespace proto
 
-class AnimationHost;
+class ClientPictureCache;
+class EnginePictureCache;
 class HeadsUpDisplayLayer;
 class Layer;
 class LayerTreeHost;
 class LayerTreeImpl;
+class LayerTreeSettings;
+class MutatorHost;
 struct PendingPageScaleAnimation;
 
 class CC_EXPORT LayerTree : public MutatorHostClient {
@@ -44,8 +47,7 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
   using LayerSet = std::unordered_set<Layer*>;
   using LayerIdMap = std::unordered_map<int, Layer*>;
 
-  LayerTree(std::unique_ptr<AnimationHost> animation_host,
-            LayerTreeHost* layer_tree_host);
+  LayerTree(MutatorHost* mutator_host, LayerTreeHost* layer_tree_host);
   virtual ~LayerTree();
 
   void SetRootLayer(scoped_refptr<Layer> root_layer);
@@ -69,6 +71,7 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
   }
 
   void RegisterSelection(const LayerSelection& selection);
+  const LayerSelection& selection() const { return inputs_.selection; }
 
   void SetHaveScrollEventHandlers(bool have_event_handlers);
   bool have_scroll_event_handlers() const {
@@ -87,20 +90,25 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
     return inputs_.device_viewport_size;
   }
 
-  void SetTopControlsHeight(float height, bool shrink);
-  void SetTopControlsShownRatio(float ratio);
+  void SetBrowserControlsHeight(float height, bool shrink);
+  void SetBrowserControlsShownRatio(float ratio);
   void SetBottomControlsHeight(float height);
 
   void SetPageScaleFactorAndLimits(float page_scale_factor,
                                    float min_page_scale_factor,
                                    float max_page_scale_factor);
   float page_scale_factor() const { return inputs_.page_scale_factor; }
+  float min_page_scale_factor() const { return inputs_.min_page_scale_factor; }
+  float max_page_scale_factor() const { return inputs_.max_page_scale_factor; }
 
   void set_background_color(SkColor color) { inputs_.background_color = color; }
   SkColor background_color() const { return inputs_.background_color; }
 
   void set_has_transparent_background(bool transparent) {
     inputs_.has_transparent_background = transparent;
+  }
+  bool has_transparent_background() const {
+    return inputs_.has_transparent_background;
   }
 
   void StartPageScaleAnimation(const gfx::Vector2d& target_offset,
@@ -113,21 +121,35 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
   float device_scale_factor() const { return inputs_.device_scale_factor; }
 
   void SetPaintedDeviceScaleFactor(float painted_device_scale_factor);
+  float painted_device_scale_factor() const {
+    return inputs_.painted_device_scale_factor;
+  }
 
-  gfx::Vector2dF elastic_overscroll() const { return elastic_overscroll_; }
+  void SetDeviceColorSpace(const gfx::ColorSpace& device_color_space);
+  const gfx::ColorSpace& device_color_space() const {
+    return inputs_.device_color_space;
+  }
 
   // Used externally by blink for setting the PropertyTrees when
   // |settings_.use_layer_lists| is true. This is a SPV2 setting.
   PropertyTrees* property_trees() { return &property_trees_; }
 
-  bool in_paint_layer_contents() const { return in_paint_layer_contents_; }
+  void SetNeedsDisplayOnAllLayers();
+
+  void SetNeedsCommit();
+
+  const LayerTreeSettings& GetSettings() const;
 
   // Methods which should only be used internally in cc ------------------
   void RegisterLayer(Layer* layer);
   void UnregisterLayer(Layer* layer);
   Layer* LayerById(int id) const;
+
+  size_t NumLayers() const;
+
   bool UpdateLayers(const LayerList& update_layer_list,
                     bool* content_is_suitable_for_gpu);
+  bool in_paint_layer_contents() const { return in_paint_layer_contents_; }
 
   void AddLayerShouldPushProperties(Layer* layer);
   void RemoveLayerShouldPushProperties(Layer* layer);
@@ -140,8 +162,22 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
     return needs_meta_info_recomputation_;
   }
 
+  void set_engine_picture_cache(EnginePictureCache* cache) {
+    engine_picture_cache_ = cache;
+  }
+  EnginePictureCache* engine_picture_cache() const {
+    return engine_picture_cache_;
+  }
+  void set_client_picture_cache(ClientPictureCache* cache) {
+    client_picture_cache_ = cache;
+  }
+  ClientPictureCache* client_picture_cache() const {
+    return client_picture_cache_;
+  }
+
   void SetPageScaleFromImplSide(float page_scale);
   void SetElasticOverscrollFromImplSide(gfx::Vector2dF elastic_overscroll);
+  gfx::Vector2dF elastic_overscroll() const { return elastic_overscroll_; }
 
   void UpdateHudLayer(bool show_hud_info);
   HeadsUpDisplayLayer* hud_layer() const { return hud_layer_.get(); }
@@ -149,15 +185,14 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
   virtual void SetNeedsFullTreeSync();
   bool needs_full_tree_sync() const { return needs_full_tree_sync_; }
 
-  void SetNeedsCommit();
   void SetPropertyTreesNeedRebuild();
 
-  void PushPropertiesTo(LayerTreeImpl* tree_impl);
+  void PushPropertiesTo(LayerTreeImpl* tree_impl,
+                        float unapplied_page_scale_delta);
 
   void ToProtobuf(proto::LayerTree* proto);
-  void FromProtobuf(const proto::LayerTree& proto);
 
-  AnimationHost* animation_host() const { return animation_host_.get(); }
+  MutatorHost* mutator_host() const { return mutator_host_; }
 
   Layer* LayerByElementId(ElementId element_id) const;
   void RegisterElement(ElementId element_id,
@@ -168,18 +203,16 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
                          Layer* layer);
   void SetElementIdsForTesting();
 
+  void BuildPropertyTreesForTesting();
+
   // Layer iterators.
   LayerListIterator<Layer> begin() const;
   LayerListIterator<Layer> end() const;
   LayerListReverseIterator<Layer> rbegin();
   LayerListReverseIterator<Layer> rend();
-
-  void SetNeedsDisplayOnAllLayers();
   // ---------------------------------------------------------------------
 
  private:
-  friend class LayerTreeHostSerializationTest;
-
   // MutatorHostClient implementation.
   bool IsElementInList(ElementId element_id,
                        ElementListType list_type) const override;
@@ -198,18 +231,12 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
       ElementId element_id,
       ElementListType list_type,
       const gfx::ScrollOffset& scroll_offset) override;
-  void ElementTransformIsAnimatingChanged(ElementId element_id,
-                                          ElementListType list_type,
-                                          AnimationChangeType change_type,
-                                          bool is_animating) override;
-  void ElementOpacityIsAnimatingChanged(ElementId element_id,
-                                        ElementListType list_type,
-                                        AnimationChangeType change_type,
-                                        bool is_animating) override;
-  void ElementFilterIsAnimatingChanged(ElementId element_id,
-                                       ElementListType list_type,
-                                       AnimationChangeType change_type,
-                                       bool is_animating) override;
+
+  void ElementIsAnimatingChanged(ElementId element_id,
+                                 ElementListType list_type,
+                                 const PropertyAnimationState& mask,
+                                 const PropertyAnimationState& state) override;
+
   void ScrollOffsetAnimationFinished() override {}
   gfx::ScrollOffset GetScrollOffsetForAnimation(
       ElementId element_id) const override;
@@ -228,7 +255,7 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
 
     float top_controls_height;
     float top_controls_shown_ratio;
-    bool top_controls_shrink_blink_size;
+    bool browser_controls_shrink_blink_size;
 
     float bottom_controls_height;
 
@@ -237,6 +264,7 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
     float page_scale_factor;
     float min_page_scale_factor;
     float max_page_scale_factor;
+    gfx::ColorSpace device_color_space;
 
     SkColor background_color;
     bool has_transparent_background;
@@ -274,8 +302,13 @@ class CC_EXPORT LayerTree : public MutatorHostClient {
 
   bool in_paint_layer_contents_;
 
-  std::unique_ptr<AnimationHost> animation_host_;
+  MutatorHost* mutator_host_;
   LayerTreeHost* layer_tree_host_;
+
+  // TODO(khushalsagar): Make these go away once we transition blimp to an
+  // external embedder.
+  EnginePictureCache* engine_picture_cache_;
+  ClientPictureCache* client_picture_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerTree);
 };

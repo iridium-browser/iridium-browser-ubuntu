@@ -11,7 +11,6 @@
 
 namespace base {
 class FilePath;
-class Version;
 }
 
 namespace upgrade_test {
@@ -42,14 +41,6 @@ base::string16 GenerateAlternatePEFileVersion(
     const base::FilePath& original_file,
     const base::FilePath& target_file,
     Direction direction);
-
-// Given a path to a PEImage in |original_file|, copy that file to
-// |target_file|, modifying the version of the copy according to |version|.
-// Any previous file at |target_file| is clobbered. Returns true on success.
-// Note that |target_file| may still be mutated on failure.
-bool GenerateSpecificPEFileVersion(const base::FilePath& original_file,
-                                   const base::FilePath& target_file,
-                                   const base::Version& version);
 
 }  // namespace upgrade_test
 

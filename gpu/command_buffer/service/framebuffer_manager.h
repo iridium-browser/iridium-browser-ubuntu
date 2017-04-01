@@ -27,7 +27,6 @@ class FramebufferCompletenessCache;
 class FramebufferManager;
 class Renderbuffer;
 class RenderbufferManager;
-class Texture;
 class TextureRef;
 class TextureManager;
 
@@ -63,7 +62,6 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
     virtual bool CanRenderTo(const FeatureInfo* feature_info) const = 0;
     virtual void DetachFromFramebuffer(Framebuffer* framebuffer) const = 0;
     virtual bool ValidForAttachmentType(GLenum attachment_type,
-                                        ContextType context_type,
                                         uint32_t max_color_attachments) = 0;
     virtual size_t GetSignatureSize(TextureManager* texture_manager) const = 0;
     virtual void AddToSignature(
@@ -196,6 +194,11 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
   bool ValidateAndAdjustDrawBuffers(uint32_t fragment_output_type_mask,
                                     uint32_t fragment_output_written_mask);
 
+  // Filter out the draw buffers that have no images attached but are not NONE
+  // through DrawBuffers, to be on the safe side.
+  // This is applied before a clear call.
+  void AdjustDrawBuffers();
+
   bool ContainsActiveIntegerAttachments() const;
 
   // Return true if any draw buffers has an alpha channel.
@@ -248,6 +251,9 @@ class GPU_EXPORT Framebuffer : public base::RefCounted<Framebuffer> {
   // If an attachment point has no image, it's set as UNDEFINED_TYPE.
   // This call is only valid on a complete fbo.
   void UpdateDrawBufferMasks();
+
+  // Helper for ValidateAndAdjustDrawBuffers() and AdjustDrawBuffers().
+  void AdjustDrawBuffersImpl(uint32_t desired_mask);
 
   // The managers that owns this.
   FramebufferManager* manager_;
@@ -310,7 +316,6 @@ class GPU_EXPORT FramebufferManager {
  public:
   FramebufferManager(uint32_t max_draw_buffers,
                      uint32_t max_color_attachments,
-                     ContextType context_type,
                      const scoped_refptr<FramebufferCompletenessCache>&
                          framebuffer_combo_complete_cache);
   ~FramebufferManager();
@@ -345,8 +350,6 @@ class GPU_EXPORT FramebufferManager {
         (framebuffer_state_change_count_ + 1) | 0x80000000U;
   }
 
-  ContextType context_type() const { return context_type_; }
-
  private:
   friend class Framebuffer;
 
@@ -374,8 +377,6 @@ class GPU_EXPORT FramebufferManager {
 
   uint32_t max_draw_buffers_;
   uint32_t max_color_attachments_;
-
-  ContextType context_type_;
 
   scoped_refptr<FramebufferCompletenessCache> framebuffer_combo_complete_cache_;
 

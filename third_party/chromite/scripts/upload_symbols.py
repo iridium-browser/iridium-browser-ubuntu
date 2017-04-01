@@ -15,7 +15,6 @@ import hashlib
 import httplib
 import itertools
 import os
-import poster
 import socket
 import sys
 import textwrap
@@ -24,7 +23,29 @@ import time
 import urllib2
 import urlparse
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
+
+# The isolateserver includes a bunch of third_party python packages that clash
+# with chromite's bundled third_party python packages (like oauth2client).
+# Since upload_symbols is not imported in to other parts of chromite, and there
+# are no deps in third_party we care about, purge the chromite copy.  This way
+# we can use isolateserver for deduping.
+# TODO: If we ever sort out third_party/ handling and make it per-script opt-in,
+# we can purge this logic.
+third_party = os.path.join(constants.CHROMITE_DIR, 'third_party')
+while True:
+  try:
+    sys.path.remove(third_party)
+  except ValueError:
+    break
+sys.path.insert(0, os.path.join(third_party, 'swarming.client'))
+sys.path.insert(0, os.path.join(third_party, 'upload_symbols'))
+del third_party
+
+# Has to be after sys.path manipulation above.
+# And our sys.path muckery confuses pylint.
+import poster  # pylint: disable=import-error
+
 from chromite.lib import cache
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
@@ -32,7 +53,7 @@ from chromite.lib import cros_logging as logging
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import path_util
-from chromite.lib import retry_util
+from chromite.lib import retry_stats
 from chromite.lib import timeout_util
 from chromite.scripts import cros_generate_breakpad_symbols
 
@@ -40,7 +61,8 @@ from chromite.scripts import cros_generate_breakpad_symbols
 # We don't want to import the general keyring module as that will implicitly
 # try to import & connect to a dbus server.  That's a waste of time.
 sys.modules['keyring'] = None
-import isolateserver
+# And our sys.path muckery confuses pylint.
+import isolateserver  # pylint: disable=import-error
 
 
 # We need this to run once per process. Do it at module import time as that
@@ -57,7 +79,7 @@ STAGING_UPLOAD_URL = 'http://clients2.google.com/cr/staging_symbol'
 
 
 # The crash server rejects files that are this big.
-CRASH_SERVER_FILE_LIMIT = 350 * 1024 * 1024
+CRASH_SERVER_FILE_LIMIT = 500 * 1024 * 1024
 # Give ourselves a little breathing room from what the server expects.
 DEFAULT_FILE_LIMIT = CRASH_SERVER_FILE_LIMIT - (10 * 1024 * 1024)
 
@@ -108,6 +130,9 @@ MAX_RETRIES = 6
 # Number of total errors, before uploads are no longer attempted.
 # This is used to avoid lots of errors causing unreasonable delays.
 MAX_TOTAL_ERRORS_FOR_RETRY = 30
+
+# Category to use for collection upload retry stats.
+UPLOAD_STATS = 'UPLOAD'
 
 
 def BatchGenerator(iterator, batch_size):
@@ -191,7 +216,7 @@ class DedupeItem(isolateserver.BufferItem):
   ALGO = hashlib.sha1
 
   def __init__(self, symbol):
-    super(DedupeItem, self).__init__(str(symbol.header), self.ALGO)
+    isolateserver.BufferItem.__init__(self, str(symbol.header), self.ALGO)
     self.symbol = symbol
 
 
@@ -502,14 +527,17 @@ def PerformSymbolsFileUpload(symbols, upload_url, product_name='ChromeOS'):
       try:
         # This command retries the upload multiple times with growing delays. We
         # only consider the upload a failure if these retries fail.
-        cros_build_lib.TimedCommand(
-            retry_util.RetryException,
-            (urllib2.HTTPError, urllib2.URLError), MAX_RETRIES,
-            UploadSymbolFile,
-            upload_url, s, product_name,
-            sleep=INITIAL_RETRY_DELAY,
-            timed_log_msg=('upload of %10i bytes took %%(delta)s' %
-                           s.FileSize()))
+        def ShouldRetryUpload(exception):
+          return isinstance(exception, (urllib2.HTTPError, urllib2.URLError))
+
+        with cros_build_lib.TimedSection() as timer:
+          retry_stats.RetryWithStats(
+              UPLOAD_STATS, ShouldRetryUpload, MAX_RETRIES,
+              UploadSymbolFile,
+              upload_url, s, product_name,
+              sleep=INITIAL_RETRY_DELAY,
+              log_all_retries=True)
+        logging.info('upload of %10i bytes took %s', s.FileSize(), timer.delta)
         s.status = SymbolFile.UPLOADED
       except urllib2.HTTPError as e:
         logging.warning('could not upload: %s: HTTP %s: %s',
@@ -550,14 +578,22 @@ def ReportResults(symbols, failed_list):
     if s.status in [SymbolFile.INITIAL, SymbolFile.ERROR]:
       upload_failures.append(s)
 
+  # Report retry numbers.
+  _, _, retries = retry_stats.CategoryStats(UPLOAD_STATS)
+  if retries:
+    logging.warning('%d upload retries performed.', retries)
+
   logging.info('Uploaded %(uploaded)d, Skipped %(duplicate)d duplicates.',
                result_counts)
 
-  if result_counts[SymbolFile.INITIAL] or result_counts[SymbolFile.ERROR]:
+  if result_counts[SymbolFile.ERROR]:
     logging.PrintBuildbotStepWarnings()
-    logging.warning('%d non-recoverable upload errors caused %d skipped'
-                    ' uploads.',
-                    result_counts[SymbolFile.ERROR],
+    logging.warning('%d non-recoverable upload errors',
+                    result_counts[SymbolFile.ERROR])
+
+  if result_counts[SymbolFile.INITIAL]:
+    logging.PrintBuildbotStepWarnings()
+    logging.warning('%d upload(s) were skipped because of excessive errors',
                     result_counts[SymbolFile.INITIAL])
 
   if failed_list is not None:
@@ -586,6 +622,8 @@ def UploadSymbols(sym_paths, upload_url, product_name, dedupe_namespace=None,
   Returns:
     The number of errors that were encountered.
   """
+  retry_stats.SetupStats()
+
   # Note: This method looks like each step of processing is performed
   # sequentially for all SymbolFiles, but instead each step is a generator that
   # produces the next iteration only when it's read. This means that (except for

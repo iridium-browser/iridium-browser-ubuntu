@@ -24,7 +24,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
-#include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
+#include "chrome/browser/ui/cocoa/test/cocoa_profile_test.h"
 #import "chrome/browser/ui/cocoa/view_resizer_pong.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_profile.h"
@@ -32,7 +32,7 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
-#include "components/syncable_prefs/testing_pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #include "testing/platform_test.h"
@@ -747,7 +747,7 @@ TEST_F(BookmarkBarControllerTest, OpenBookmark) {
 
   [bar_ openBookmark:button];
   EXPECT_EQ(noOpenBar()->urls_[0], node->url());
-  EXPECT_EQ(noOpenBar()->dispositions_[0], CURRENT_TAB);
+  EXPECT_EQ(noOpenBar()->dispositions_[0], WindowOpenDisposition::CURRENT_TAB);
 }
 
 TEST_F(BookmarkBarControllerTest, TestAddRemoveAndClear) {
@@ -1018,21 +1018,12 @@ TEST_F(BookmarkBarControllerTest, BookmarkButtonSizing) {
   // Make sure the internal bookmark button also is the correct height.
   NSArray* buttons = [bar_ buttons];
   EXPECT_GT([buttons count], 0u);
-  const bool kIsModeMaterial = ui::MaterialDesignController::IsModeMaterial();
 
   for (NSButton* button in buttons) {
-    if (kIsModeMaterial) {
-      EXPECT_FLOAT_EQ(
-          (chrome::kBookmarkBarHeight +
-              bookmarks::kMaterialVisualHeightOffset) -
-                  2 * bookmarks::BookmarkVerticalPadding(),
-          [button frame].size.height);
-    } else {
-      EXPECT_FLOAT_EQ(
-          (chrome::kBookmarkBarHeight + bookmarks::kVisualHeightOffset) -
-              2 * bookmarks::BookmarkVerticalPadding(),
-          [button frame].size.height);
-    }
+    EXPECT_FLOAT_EQ((chrome::kMinimumBookmarkBarHeight +
+                     bookmarks::kMaterialVisualHeightOffset) -
+                        2 * bookmarks::kBookmarkVerticalPadding,
+                    [button frame].size.height);
   }
 }
 
@@ -1577,6 +1568,46 @@ TEST_F(BookmarkBarControllerTest, ShrinkOrHideView) {
   EXPECT_TRUE([view isHidden]);
 }
 
+// Simulate coarse browser window width change and ensure that the bookmark
+// buttons that should be visible are visible.
+TEST_F(BookmarkBarControllerTest, RedistributeButtonsOnBarAsNeeded) {
+  // Hide the apps shortcut.
+  profile()->GetPrefs()->SetBoolean(
+      bookmarks::prefs::kShowAppsShortcutInBookmarkBar, false);
+  ASSERT_TRUE([bar_ appsPageShortcutButtonIsHidden]);
+
+  // Add three buttons to the bookmark bar.
+  BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile());
+  const BookmarkNode* root = model->bookmark_bar_node();
+  // Make long labels to test coarse resizes. After 16 digits, text eliding
+  // starts.
+  const std::string model_string(
+      "0000000000000000 1111111111111111 2222222222222222 ");
+  bookmarks::test::AddNodesFromModelString(model, root, model_string);
+  NSRect frame = [[bar_ view] frame];
+  frame.size.width = 400;  // Typical minimum browser size.
+  [[bar_ view] setFrame:frame];
+  EXPECT_EQ(2, [bar_ displayedButtonCount]);
+
+  {
+    base::mac::ScopedNSAutoreleasePool pool;
+    frame.size.width = 800;
+    [[bar_ view] setFrame:frame];
+    EXPECT_EQ(3, [bar_ displayedButtonCount]);
+
+    const BookmarkNode* last = model->bookmark_bar_node()->GetChild(2);
+    EXPECT_TRUE(last);
+    [bar_ startPulsingBookmarkNode:last];
+
+    frame.size.width = 400;
+    [[bar_ view] setFrame:frame];
+    EXPECT_EQ(2, [bar_ displayedButtonCount]);
+  }
+
+  // Regression test for http://crbug.com/616051.
+  [bar_ stopPulsingBookmarkNode];
+}
+
 // Simiulate browser window width change and ensure that the bookmark buttons
 // that should be visible are visible.
 // Appears to fail on Mac 10.11 bot on the waterfall; http://crbug.com/612640.
@@ -1612,43 +1643,26 @@ TEST_F(BookmarkBarControllerTest, DISABLED_LastBookmarkResizeBehavior) {
   //
   // The default font changed between OSX Mavericks, OSX Yosemite, and
   // OSX El Capitan, so this test requires different widths to trigger the
-  // appropriate results. Button widths and locations also changed with
-  // Material Design.
+  // appropriate results.
   CGFloat view_widths_el_capitan[] =
-      { 121.0, 122.0, 149.0, 150.0, 151.0, 152.0,
-        153.0, 200.0, 153.0, 152.0, 151.0, 150.0,
-        149.0, 122.0, 121.0 };
-  CGFloat view_widths_yosemite[] =
-      { 121.0, 122.0, 148.0, 149.0, 150.0, 151.0,
-        152.0, 200.0, 152.0, 151.0, 150.0, 149.0,
-        148.0, 122.0, 121.0 };
-  CGFloat view_widths_rest[] =
-      { 123.0, 124.0, 151.0, 152.0, 153.0, 154.0,
-        155.0, 200.0, 155.0, 154.0, 153.0, 152.0,
-        151.0, 124.0, 123.0 };
-  CGFloat material_view_widths_el_capitan[] =
       { 139.0, 140.0, 150.0, 151.0, 152.0, 153.0,
         154.0, 200.0, 154.0, 153.0, 152.0, 151.0,
         150.0, 140.0, 139.0 };
-  CGFloat material_view_widths_yosemite[] =
+  CGFloat view_widths_yosemite[] =
       { 140.0, 141.0, 150.0, 151.0, 152.0, 153.0,
         154.0, 200.0, 154.0, 153.0, 152.0, 151.0,
         150.0, 141.0, 140.0 };
-  CGFloat material_view_widths_rest[] =
+  CGFloat view_widths_rest[] =
       { 142.0, 143.0, 153.0, 154.0, 155.0, 156.0,
         157.0, 200.0, 157.0, 156.0, 155.0, 154.0,
         153.0, 143.0, 142.0 };
   CGFloat* view_widths = NULL;
-  bool is_mode_material = ui::MaterialDesignController::IsModeMaterial();
-  if (base::mac::IsOSElCapitan()) {
-    view_widths = is_mode_material ? material_view_widths_el_capitan
-                                   : view_widths_el_capitan;
-  } else if (base::mac::IsOSYosemite()) {
-    view_widths = is_mode_material ? material_view_widths_yosemite
-                                   : view_widths_yosemite;
+  if (base::mac::IsOS10_11()) {
+    view_widths = view_widths_el_capitan;
+  } else if (base::mac::IsOS10_10()) {
+    view_widths = view_widths_yosemite;
   } else {
-    view_widths = is_mode_material ? material_view_widths_rest
-                                   : view_widths_rest;
+    view_widths = view_widths_rest;
   }
 
   BOOL off_the_side_button_is_hidden_results[] =
@@ -1657,7 +1671,7 @@ TEST_F(BookmarkBarControllerTest, DISABLED_LastBookmarkResizeBehavior) {
       { 1, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 1 };
   for (unsigned int i = 0; i < arraysize(view_widths_yosemite); ++i) {
     NSRect frame = [[bar_ view] frame];
-    frame.size.width = view_widths[i] + bookmarks::BookmarkRightMargin();
+    frame.size.width = view_widths[i] + bookmarks::kBookmarkRightMargin;
     [[bar_ view] setFrame:frame];
     EXPECT_EQ(off_the_side_button_is_hidden_results[i],
               [bar_ offTheSideButtonIsHidden]);
@@ -1716,7 +1730,7 @@ TEST_F(BookmarkBarControllerTest, BookmarksWithoutAppsPageShortcut) {
 
 TEST_F(BookmarkBarControllerTest, ManagedShowAppsShortcutInBookmarksBar) {
   // By default the pref is not managed and the apps shortcut is shown.
-  syncable_prefs::TestingPrefServiceSyncable* prefs =
+  sync_preferences::TestingPrefServiceSyncable* prefs =
       profile()->GetTestingPrefService();
   EXPECT_FALSE(prefs->IsManagedPreference(
       bookmarks::prefs::kShowAppsShortcutInBookmarkBar));
@@ -1793,8 +1807,9 @@ TEST_F(BookmarkBarControllerOpenAllTest, CommandClickOnFolder) {
   [first performClick:first];
 
   size_t dispositionCount = noOpenBar()->dispositions_.size();
-  EXPECT_EQ(originalDispositionCount+1, dispositionCount);
-  EXPECT_EQ(noOpenBar()->dispositions_[dispositionCount-1], NEW_BACKGROUND_TAB);
+  EXPECT_EQ(originalDispositionCount + 1, dispositionCount);
+  EXPECT_EQ(noOpenBar()->dispositions_[dispositionCount - 1],
+            WindowOpenDisposition::NEW_BACKGROUND_TAB);
 
   // Replace NSApp
   NSApp = oldApp;
@@ -2114,8 +2129,8 @@ TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
   BookmarkButton* targetButton = [bar_ buttonWithTitleEqualTo:@"1b"];
   ASSERT_TRUE(targetButton);
   NSPoint targetPoint = [targetButton left];
-  CGFloat leftMarginIndicatorPosition = bookmarks::BookmarkLeftMargin() - 0.5 *
-                                        bookmarks::BookmarkHorizontalPadding();
+  CGFloat leftMarginIndicatorPosition = bookmarks::kBookmarkLeftMargin - 0.5 *
+                                        bookmarks::kBookmarkHorizontalPadding;
   const CGFloat baseOffset = targetPoint.x;
   CGFloat expected = leftMarginIndicatorPosition;
   CGFloat actual = [bar_ indicatorPosForDragToPoint:targetPoint];
@@ -2128,7 +2143,7 @@ TEST_F(BookmarkBarControllerDragDropTest, DropPositionIndicator) {
   targetButton = [bar_ buttonWithTitleEqualTo:@"4b"];
   targetPoint = [targetButton right];
   targetPoint.x += 100;  // Somewhere off to the right.
-  CGFloat xDelta = 0.5 * bookmarks::BookmarkHorizontalPadding();
+  CGFloat xDelta = 0.5 * bookmarks::kBookmarkHorizontalPadding;
   expected = NSMaxX([targetButton frame]) + xDelta;
   actual = [bar_ indicatorPosForDragToPoint:targetPoint];
   EXPECT_CGFLOAT_EQ(expected, actual);
@@ -2142,11 +2157,11 @@ TEST_F(BookmarkBarControllerDragDropTest, PulseButton) {
                                            ASCIIToUTF16("title"), gurl);
 
   BookmarkButton* button = [[bar_ buttons] objectAtIndex:0];
-  EXPECT_FALSE([button isContinuousPulsing]);
+  EXPECT_FALSE([button isPulseStuckOn]);
   [bar_ startPulsingBookmarkNode:node];
-  EXPECT_TRUE([button isContinuousPulsing]);
+  EXPECT_TRUE([button isPulseStuckOn]);
   [bar_ stopPulsingBookmarkNode];
-  EXPECT_FALSE([button isContinuousPulsing]);
+  EXPECT_FALSE([button isPulseStuckOn]);
 
   // Pulsing a node within a folder should pulse the folder button.
   const BookmarkNode* folder =
@@ -2155,26 +2170,26 @@ TEST_F(BookmarkBarControllerDragDropTest, PulseButton) {
       model->AddURL(folder, folder->child_count(), ASCIIToUTF16("inner"), gurl);
 
   BookmarkButton* folder_button = [[bar_ buttons] objectAtIndex:1];
-  EXPECT_FALSE([folder_button isContinuousPulsing]);
+  EXPECT_FALSE([folder_button isPulseStuckOn]);
   [bar_ startPulsingBookmarkNode:inner];
-  EXPECT_TRUE([folder_button isContinuousPulsing]);
+  EXPECT_TRUE([folder_button isPulseStuckOn]);
   [bar_ stopPulsingBookmarkNode];
-  EXPECT_FALSE([folder_button isContinuousPulsing]);
+  EXPECT_FALSE([folder_button isPulseStuckOn]);
 
   // Stop pulsing if the node moved.
   [bar_ startPulsingBookmarkNode:inner];
-  EXPECT_TRUE([folder_button isContinuousPulsing]);
+  EXPECT_TRUE([folder_button isPulseStuckOn]);
   const BookmarkNode* folder2 =
       model->AddFolder(root, root->child_count(), ASCIIToUTF16("folder2"));
   model->Move(inner, folder2, 0);
-  EXPECT_FALSE([folder_button isContinuousPulsing]);
+  EXPECT_FALSE([folder_button isPulseStuckOn]);
 
   // Removing a pulsing folder is allowed.
   [bar_ startPulsingBookmarkNode:inner];
   BookmarkButton* folder2_button = [[bar_ buttons] objectAtIndex:2];
-  EXPECT_TRUE([folder2_button isContinuousPulsing]);
+  EXPECT_TRUE([folder2_button isPulseStuckOn]);
   model->Remove(folder2);
-  EXPECT_FALSE([folder2_button isContinuousPulsing]);
+  EXPECT_FALSE([folder2_button isPulseStuckOn]);
   [bar_ stopPulsingBookmarkNode];  // Should not crash.
 }
 

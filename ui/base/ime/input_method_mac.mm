@@ -4,6 +4,8 @@
 
 #include "ui/base/ime/input_method_mac.h"
 
+#import <Cocoa/Cocoa.h>
+
 namespace ui {
 
 InputMethodMac::InputMethodMac(internal::InputMethodDelegate* delegate) {
@@ -27,13 +29,10 @@ void InputMethodMac::OnCaretBoundsChanged(const TextInputClient* client) {
 }
 
 void InputMethodMac::CancelComposition(const TextInputClient* client) {
-}
+  if (!IsTextInputClientFocused(client))
+    return;
 
-void InputMethodMac::OnInputLocaleChanged() {
-}
-
-std::string InputMethodMac::GetInputLocale() {
-  return "";
+  [[NSTextInputContext currentInputContext] discardMarkedText];
 }
 
 bool InputMethodMac::IsCandidatePopupOpen() const {

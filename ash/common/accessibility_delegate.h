@@ -105,6 +105,9 @@ class ASH_EXPORT AccessibilityDelegate {
   // Cancel all current and queued speech immediately.
   virtual void SilenceSpokenFeedback() const = 0;
 
+  // Clear the focus highlight
+  virtual void ClearFocusHighlight() const = 0;
+
   // Saves the zoom scale of the full screen magnifier.
   virtual void SaveScreenMagnifierScale(double scale) = 0;
 
@@ -117,6 +120,13 @@ class ASH_EXPORT AccessibilityDelegate {
 
   // Gets the last accessibility alert that was triggered.
   virtual AccessibilityAlert GetLastAccessibilityAlert() = 0;
+
+  // Whether or not to enable toggling spoken feedback via holding down
+  // two fingers on the screen.
+  virtual bool ShouldToggleSpokenFeedbackViaTouch() = 0;
+
+  // Play tick sound indicating spoken feedback will be toggled after countdown.
+  virtual void PlaySpokenFeedbackToggleCountdown(int tick_count) = 0;
 
   // Plays an earcon. Earcons are brief and distinctive sounds that indicate
   // when their mapped event has occurred. The sound key enums can be found in

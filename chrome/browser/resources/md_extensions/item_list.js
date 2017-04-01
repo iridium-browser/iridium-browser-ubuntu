@@ -28,7 +28,6 @@ cr.define('extensions', function() {
 
     listeners: {
       'list.extension-item-size-changed': 'itemSizeChanged_',
-      'list.extension-item-show-details': 'showItemDetails_',
     },
 
     ready: function() {
@@ -36,6 +35,14 @@ cr.define('extensions', function() {
       this.animationHelper = new extensions.AnimationHelper(this, this.$.list);
       this.animationHelper.setEntryAnimation(extensions.Animation.FADE_IN);
       this.animationHelper.setExitAnimation(extensions.Animation.HERO);
+    },
+
+    /**
+     * Called when a subpage for a given item is about to be shown.
+     * @param {string} id
+     */
+    willShowItemSubpage: function(id) {
+      this.sharedElements = {hero: this.$$('#' + id)};
     },
 
     /**

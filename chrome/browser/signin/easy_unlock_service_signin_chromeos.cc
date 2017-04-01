@@ -11,7 +11,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -24,8 +24,8 @@
 #include "chrome/browser/signin/easy_unlock_metrics.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/tpm/tpm_token_loader.h"
+#include "components/cryptauth/remote_device.h"
 #include "components/proximity_auth/logging/logging.h"
-#include "components/proximity_auth/remote_device.h"
 #include "components/proximity_auth/switches.h"
 
 namespace {
@@ -284,8 +284,6 @@ void EasyUnlockServiceSignin::ShutdownInternal() {
   weak_ptr_factory_.InvalidateWeakPtrs();
   proximity_auth::ScreenlockBridge::Get()->RemoveObserver(this);
   chromeos::LoginState::Get()->RemoveObserver(this);
-  base::STLDeleteContainerPairSecondPointers(user_data_.begin(),
-                                             user_data_.end());
   user_data_.clear();
 }
 
@@ -380,9 +378,10 @@ void EasyUnlockServiceSignin::LoadCurrentUserDataIfNeeded() {
 
   const auto it = user_data_.find(account_id_);
   if (it == user_data_.end())
-    user_data_.insert(std::make_pair(account_id_, new UserData()));
+    user_data_.insert(
+        std::make_pair(account_id_, base::MakeUnique<UserData>()));
 
-  UserData* data = user_data_[account_id_];
+  UserData* data = user_data_[account_id_].get();
 
   if (data->state != USER_DATA_STATE_INITIAL)
     return;
@@ -401,7 +400,7 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
     const chromeos::EasyUnlockDeviceKeyDataList& devices) {
   allow_cryptohome_backoff_ = false;
 
-  UserData* data = user_data_[account_id];
+  UserData* data = user_data_[account_id].get();
   data->state = USER_DATA_STATE_LOADED;
   if (success) {
     data->devices = devices;
@@ -429,7 +428,7 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
   if (devices.empty())
     return;
 
-  proximity_auth::RemoteDeviceList remote_devices;
+  cryptauth::RemoteDeviceList remote_devices;
   for (const auto& device : devices) {
     std::string decoded_public_key, decoded_psk, decoded_challenge;
     if (!base::Base64UrlDecode(device.public_key,
@@ -445,11 +444,11 @@ void EasyUnlockServiceSignin::OnUserDataLoaded(
                     << device.public_key;
       continue;
     }
-    proximity_auth::RemoteDevice::BluetoothType bluetooth_type =
+    cryptauth::RemoteDevice::BluetoothType bluetooth_type =
         device.bluetooth_type == chromeos::EasyUnlockDeviceKeyData::BLUETOOTH_LE
-            ? proximity_auth::RemoteDevice::BLUETOOTH_LE
-            : proximity_auth::RemoteDevice::BLUETOOTH_CLASSIC;
-    proximity_auth::RemoteDevice remote_device(
+            ? cryptauth::RemoteDevice::BLUETOOTH_LE
+            : cryptauth::RemoteDevice::BLUETOOTH_CLASSIC;
+    cryptauth::RemoteDevice remote_device(
         account_id.GetUserEmail(), std::string(), decoded_public_key,
         bluetooth_type, device.bluetooth_address, decoded_psk,
         decoded_challenge);
@@ -475,5 +474,5 @@ const EasyUnlockServiceSignin::UserData*
     return nullptr;
   if (it->second->state != USER_DATA_STATE_LOADED)
     return nullptr;
-  return it->second;
+  return it->second.get();
 }

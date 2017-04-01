@@ -6,34 +6,27 @@
 #define COMPONENTS_SYNC_DRIVER_DATA_TYPE_CONTROLLER_H__
 
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/callback.h"
 #include "base/location.h"
-#include "base/memory/ref_counted.h"
-#include "base/memory/ref_counted_delete_on_message_loop.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/memory/weak_ptr.h"
+#include "base/threading/thread_checker.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/unrecoverable_error_handler.h"
-#include "components/sync/core/data_type_error_handler.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}
+#include "components/sync/engine/cycle/status_counters.h"
+#include "components/sync/model/data_type_error_handler.h"
 
 namespace syncer {
+
+class ModelTypeConfigurer;
 class SyncError;
 class SyncMergeResult;
-}
 
-namespace sync_driver {
-class BackendDataTypeConfigurer;
-
-// Data type controllers need to be refcounted threadsafe, as they may
-// need to run model associator or change processor on other threads.
-class DataTypeController
-    : public base::RefCountedDeleteOnMessageLoop<DataTypeController>,
-      public syncer::DataTypeErrorHandler {
+// DataTypeControllers are responsible for managing the state of a single data
+// type. They are not thread safe and should only be used on the UI thread.
+class DataTypeController : public base::SupportsWeakPtr<DataTypeController> {
  public:
   enum State {
     NOT_RUNNING,     // The controller has never been started or has previously
@@ -68,17 +61,21 @@ class DataTypeController
     MAX_CONFIGURE_RESULT
   };
 
-  typedef base::Callback<void(ConfigureResult,
-                              const syncer::SyncMergeResult&,
-                              const syncer::SyncMergeResult&)>
+  typedef base::Callback<
+      void(ConfigureResult, const SyncMergeResult&, const SyncMergeResult&)>
       StartCallback;
 
-  typedef base::Callback<void(syncer::ModelType, syncer::SyncError)>
-      ModelLoadCallback;
+  typedef base::Callback<void(ModelType, const SyncError&)> ModelLoadCallback;
 
-  typedef std::map<syncer::ModelType, scoped_refptr<DataTypeController>>
-      TypeMap;
-  typedef std::map<syncer::ModelType, DataTypeController::State> StateMap;
+  typedef base::Callback<void(const ModelType,
+                              std::unique_ptr<base::ListValue>)>
+      AllNodesCallback;
+
+  typedef base::Callback<void(ModelType, const StatusCounters&)>
+      StatusCountersCallback;
+
+  typedef std::map<ModelType, std::unique_ptr<DataTypeController>> TypeMap;
+  typedef std::map<ModelType, DataTypeController::State> StateMap;
 
   // Returns true if the start result should trigger an unrecoverable error.
   // Public so unit tests can use this function as well.
@@ -86,6 +83,8 @@ class DataTypeController
 
   // Returns true if the datatype started successfully.
   static bool IsSuccessfulResult(ConfigureResult result);
+
+  virtual ~DataTypeController();
 
   // Returns true if DataTypeManager should wait for LoadModels to complete
   // successfully before starting configuration. Directory based types should
@@ -101,9 +100,10 @@ class DataTypeController
 
   // Registers with sync backend if needed. This function is called by
   // DataTypeManager before downloading initial data. Non-blocking types need to
-  // pass activation context containing progress marker to sync backend before
-  // initial download starts.
-  virtual void RegisterWithBackend(BackendDataTypeConfigurer* configurer) = 0;
+  // pass activation context containing progress marker to sync backend and use
+  // |set_downloaded| to inform the manager whether their initial sync is done.
+  virtual void RegisterWithBackend(base::Callback<void(bool)> set_downloaded,
+                                   ModelTypeConfigurer* configurer) = 0;
 
   // Will start a potentially asynchronous operation to perform the
   // model association. Once the model association is done the callback will
@@ -114,11 +114,11 @@ class DataTypeController
   // one of the implementation specific methods provided by the |configurer|.
   // This is called (on UI thread) after the data type configuration has
   // completed successfully.
-  virtual void ActivateDataType(BackendDataTypeConfigurer* configurer) = 0;
+  virtual void ActivateDataType(ModelTypeConfigurer* configurer) = 0;
 
   // Called by DataTypeManager to deactivate the controlled data type.
   // See comments for ModelAssociationManager::OnSingleDataTypeWillStop.
-  virtual void DeactivateDataType(BackendDataTypeConfigurer* configurer) = 0;
+  virtual void DeactivateDataType(ModelTypeConfigurer* configurer) = 0;
 
   // Synchronously stops the data type. If StartAssociating has already been
   // called but is not done yet it will be aborted. Similarly if LoadModels
@@ -130,21 +130,14 @@ class DataTypeController
   // propagate from sync again from point where Stop() is called.
   virtual void Stop() = 0;
 
-  // Unique model type for this data type controller.
-  virtual syncer::ModelType type() const = 0;
-
   // Name of this data type.  For logging purposes only.
   virtual std::string name() const = 0;
 
   // Current state of the data type controller.
   virtual State state() const = 0;
 
-  // Partial implementation of DataTypeErrorHandler.
-  // This is thread safe.
-  syncer::SyncError CreateAndUploadError(
-      const tracked_objects::Location& location,
-      const std::string& message,
-      syncer::ModelType type) override;
+  // Unique model type for this data type controller.
+  ModelType type() const { return type_; }
 
   // Whether the DataTypeController is ready to start. This is useful if the
   // datatype itself must make the decision about whether it should be enabled
@@ -153,28 +146,30 @@ class DataTypeController
   // Returns true by default.
   virtual bool ReadyForStart() const;
 
+  // Returns a ListValue representing all nodes for this data type through
+  // |callback| on this thread.
+  // Used for populating nodes in Sync Node Browser of chrome://sync-internals.
+  virtual void GetAllNodes(const AllNodesCallback& callback) = 0;
+
+  // Collects StatusCounters for this datatype and passes them to |callback|,
+  // which should be wrapped with syncer::BindToCurrentThread already.
+  // Used to display entity counts in chrome://sync-internals.
+  virtual void GetStatusCounters(const StatusCountersCallback& callback) = 0;
+
  protected:
-  friend class base::RefCountedDeleteOnMessageLoop<DataTypeController>;
-  friend class base::DeleteHelper<DataTypeController>;
+  explicit DataTypeController(ModelType type);
 
-  DataTypeController(
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
-      const base::Closure& error_callback);
-
-  ~DataTypeController() override;
-
-  const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread() const {
-    return ui_thread_;
-  }
-
-  // The callback that will be invoked when an unrecoverable error occurs.
-  // TODO(sync): protected for use by legacy controllers.
-  base::Closure error_callback_;
+  // Allows subclasses to DCHECK that they're on the correct thread.
+  bool CalledOnValidThread() const;
 
  private:
-  const scoped_refptr<base::SingleThreadTaskRunner> ui_thread_;
+  // The type this object is responsible for controlling.
+  const ModelType type_;
+
+  // Used to check that functions are called on the correct thread.
+  base::ThreadChecker thread_checker_;
 };
 
-}  // namespace sync_driver
+}  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_DRIVER_DATA_TYPE_CONTROLLER_H__

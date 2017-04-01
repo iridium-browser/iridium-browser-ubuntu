@@ -4,7 +4,6 @@
 
 #include "chrome/browser/sessions/session_service_test_helper.h"
 
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "components/sessions/core/base_session_service_test_helper.h"
@@ -57,10 +56,10 @@ void SessionServiceTestHelper::SetForceBrowserNotAliveWithNoWindows(
 
 // Be sure and null out service to force closing the file.
 void SessionServiceTestHelper::ReadWindows(
-    std::vector<sessions::SessionWindow*>* windows,
+    std::vector<std::unique_ptr<sessions::SessionWindow>>* windows,
     SessionID::id_type* active_window_id) {
   Time last_time;
-  ScopedVector<sessions::SessionCommand> read_commands;
+  std::vector<std::unique_ptr<sessions::SessionCommand>> read_commands;
   sessions::BaseSessionServiceTestHelper test_helper(
       service_->GetBaseSessionServiceForTest());
   test_helper.ReadLastSessionCommands(&read_commands);
@@ -100,7 +99,7 @@ void SessionServiceTestHelper::AssertNavigationEquals(
 }
 
 void SessionServiceTestHelper::AssertSingleWindowWithSingleTab(
-    const std::vector<sessions::SessionWindow*>& windows,
+    const std::vector<std::unique_ptr<sessions::SessionWindow>>& windows,
     size_t nav_count) {
   ASSERT_EQ(1U, windows.size());
   EXPECT_EQ(1U, windows[0]->tabs.size());

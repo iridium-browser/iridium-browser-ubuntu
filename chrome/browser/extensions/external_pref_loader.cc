@@ -14,7 +14,7 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,7 +24,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/chrome_paths.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -129,11 +129,11 @@ void ExternalPrefLoader::StartLoading() {
       (profile_ && profile_->IsSyncAllowed())) {
     if (!PostLoadIfPrioritySyncReady()) {
       DCHECK(profile_);
-      syncable_prefs::PrefServiceSyncable* prefs =
+      sync_preferences::PrefServiceSyncable* prefs =
           PrefServiceSyncableFromProfile(profile_);
       DCHECK(prefs);
       syncable_pref_observer_.Add(prefs);
-      ProfileSyncService* service =
+      browser_sync::ProfileSyncService* service =
           ProfileSyncServiceFactory::GetForProfile(profile_);
       DCHECK(service);
       if (service->CanSyncStart() && (service->IsFirstSetupComplete() ||
@@ -155,7 +155,7 @@ void ExternalPrefLoader::OnIsSyncingChanged() {
 }
 
 void ExternalPrefLoader::OnStateChanged() {
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
   DCHECK(service);
   if (!service->CanSyncStart()) {
@@ -167,7 +167,7 @@ bool ExternalPrefLoader::PostLoadIfPrioritySyncReady() {
   DCHECK(options_ & DELAY_LOAD_UNTIL_PRIORITY_SYNC);
   DCHECK(profile_);
 
-  syncable_prefs::PrefServiceSyncable* prefs =
+  sync_preferences::PrefServiceSyncable* prefs =
       PrefServiceSyncableFromProfile(profile_);
   DCHECK(prefs);
   if (prefs->IsPrioritySyncing()) {
@@ -179,12 +179,12 @@ bool ExternalPrefLoader::PostLoadIfPrioritySyncReady() {
 }
 
 void ExternalPrefLoader::PostLoadAndRemoveObservers() {
-  syncable_prefs::PrefServiceSyncable* prefs =
+  sync_preferences::PrefServiceSyncable* prefs =
       PrefServiceSyncableFromProfile(profile_);
   DCHECK(prefs);
   syncable_pref_observer_.Remove(prefs);
 
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
   DCHECK(service);
   service->RemoveObserver(this);

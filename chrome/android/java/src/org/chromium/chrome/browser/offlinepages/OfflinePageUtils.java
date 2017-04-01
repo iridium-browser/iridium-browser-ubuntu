@@ -8,7 +8,8 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.graphics.Bitmap;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.BatteryManager;
@@ -32,15 +33,19 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.offlinepages.SavePageResult;
+import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.ConnectionType;
 import org.chromium.net.NetworkChangeNotifier;
+import org.chromium.ui.base.PageTransition;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -158,11 +163,14 @@ public class OfflinePageUtils {
      * @param tab The current tab.
      */
     public static void showOfflineSnackbarIfNecessary(ChromeActivity activity, Tab tab) {
-        if (OfflinePageTabObserver.getInstance() == null) {
+        if (OfflinePageTabObserver.getInstance() == null
+                || !OfflinePageTabObserver.getInstance().isCurrentContext(
+                           activity.getBaseContext())) {
             SnackbarController snackbarController =
                     createReloadSnackbarController(activity.getTabModelSelector());
-            OfflinePageTabObserver.init(
-                    activity.getBaseContext(), activity.getSnackbarManager(), snackbarController);
+            OfflinePageTabObserver.init(activity.getBaseContext(),
+                    activity.getTabModelSelector().getModel(false), activity.getSnackbarManager(),
+                    snackbarController);
         }
 
         showOfflineSnackbarIfNecessary(tab);
@@ -228,8 +236,34 @@ public class OfflinePageUtils {
         };
     }
 
+    /**
+     * Returns a class encapsulating the current power, battery, and network conditions.
+     */
     public static DeviceConditions getDeviceConditions(Context context) {
         return getInstance().getDeviceConditionsImpl(context);
+    }
+
+    /**
+     * Return true if the device is plugged into wall power.
+     */
+    public static boolean getPowerConditions(Context context) {
+        // TODO(petewil): refactor to get power, network, and battery directly from both here and
+        // getDeviceConditionsImpl instead of always making a DeviceConditions object.
+        return getInstance().getDeviceConditionsImpl(context).isPowerConnected();
+    }
+
+    /**
+     * Get the percentage of battery remaining
+     */
+    public static int getBatteryConditions(Context context) {
+        return getInstance().getDeviceConditionsImpl(context).getBatteryPercentage();
+    }
+
+    /**
+     * Returns an enum representing the type of the network connection.
+     */
+    public static int getNetworkConditions(Context context) {
+        return getInstance().getDeviceConditionsImpl(context).getNetConnectionType();
     }
 
     /**
@@ -274,19 +308,16 @@ public class OfflinePageUtils {
      * @param mainActivity Activity that is used to access package manager.
      * @param text Text to be shared. If both |text| and |url| are supplied, they are concatenated
      *             with a space.
-     * @param onlineUrl Online URL associated with the offline page that is used to access the
-     *                  offline page file path.
-     * @param bitmap Screenshot of the page to be shared.
+     * @param screenshotUri Screenshot of the page to be shared.
      * @param callback Optional callback to be called when user makes a choice. Will not be called
      *                 if receiving a response when the user makes a choice is not supported (see
      *                 TargetChosenReceiver#isSupported()).
-     * @param currentTab Tab that is used to access offlineUrl and tile.
+     * @param currentTab The current tab for which sharing is being done.
      */
     public static void shareOfflinePage(final boolean shareDirectly, final boolean saveLastUsed,
-            final Activity mainActivity, final String text, final String onlineUrl,
-            final Bitmap bitmap, final ShareHelper.TargetChosenCallback callback,
-            final Tab currentTab, boolean isOfflinePage) {
-        final String offlineUrl = currentTab.getUrl();
+            final Activity mainActivity, final String text, final Uri screenshotUri,
+            final ShareHelper.TargetChosenCallback callback, final Tab currentTab) {
+        final String url = currentTab.getUrl();
         final String title = currentTab.getTitle();
         final OfflinePageBridge offlinePageBridge =
                 OfflinePageBridge.getForProfile(currentTab.getProfile());
@@ -296,21 +327,20 @@ public class OfflinePageUtils {
             return;
         }
 
-        Callback<OfflinePageItem> prepareForSharing = onGotOfflinePageItemToShare(shareDirectly,
-                saveLastUsed, mainActivity, title, text, onlineUrl, bitmap, callback);
-
-        if (isOfflinePage) {
+        OfflinePageItem offlinePage = currentTab.getOfflinePage();
+        if (offlinePage != null) {
             // If we're currently on offline page get the saved file directly.
-            offlinePageBridge.getPageByOfflineUrl(offlineUrl, prepareForSharing);
+            prepareFileAndShare(shareDirectly, saveLastUsed, mainActivity, title, text,
+                                url, screenshotUri, callback, offlinePage.getFilePath());
             return;
         }
 
         // If this is an online page, share the offline copy of it.
-        WebContents webContents = currentTab.getWebContents();
-        int tabId = currentTab.getId();
-
-        offlinePageBridge.selectPageForOnlineUrl(onlineUrl, tabId,
-                selectPageForOnlineUrlCallback(webContents, offlinePageBridge, prepareForSharing));
+        Callback<OfflinePageItem> prepareForSharing = onGotOfflinePageItemToShare(shareDirectly,
+                saveLastUsed, mainActivity, title, text, url, screenshotUri, callback);
+        offlinePageBridge.selectPageForOnlineUrl(url, currentTab.getId(),
+                selectPageForOnlineUrlCallback(currentTab.getWebContents(), offlinePageBridge,
+                        prepareForSharing));
     }
 
     /**
@@ -321,20 +351,20 @@ public class OfflinePageUtils {
      * @param title Title of the page.
      * @param onlineUrl Online URL associated with the offline page that is used to access the
      *                  offline page file path.
-     * @param bitmap Screenshot of the page to be shared.
+     * @param screenshotUri Screenshot of the page to be shared.
      * @param mContext The application context.
      * @return a callback of OfflinePageItem
      */
     private static Callback<OfflinePageItem> onGotOfflinePageItemToShare(
             final boolean shareDirectly, final boolean saveLastUsed, final Activity mainActivity,
-            final String title, final String text, final String onlineUrl, final Bitmap bitmap,
+            final String title, final String text, final String onlineUrl, final Uri screenshotUri,
             final ShareHelper.TargetChosenCallback callback) {
         return new Callback<OfflinePageItem>() {
             @Override
             public void onResult(OfflinePageItem item) {
                 String offlineFilePath = (item == null) ? null : item.getFilePath();
                 prepareFileAndShare(shareDirectly, saveLastUsed, mainActivity, title, text,
-                        onlineUrl, bitmap, callback, offlineFilePath);
+                        onlineUrl, screenshotUri, callback, offlineFilePath);
             }
         };
     }
@@ -357,7 +387,8 @@ public class OfflinePageUtils {
             public void onResult(OfflinePageItem item) {
                 if (item == null) {
                     // If the page has no offline copy, save the page offline.
-                    ClientId clientId = ClientId.createClientIdForTabSharing();
+                    ClientId clientId = ClientId.createGuidClientIdForNamespace(
+                            OfflinePageBridge.SHARE_NAMESPACE);
                     offlinePageBridge.savePage(webContents, clientId,
                             savePageCallback(prepareForSharing, offlinePageBridge));
                     return;
@@ -406,7 +437,7 @@ public class OfflinePageUtils {
      *             with a space.
      * @param onlineUrl Online URL associated with the offline page that is used to access the
      *                  offline page file path.
-     * @param bitmap Screenshot of the page to be shared.
+     * @param screenshotUri Screenshot of the page to be shared.
      * @param callback Optional callback to be called when user makes a choice. Will not be called
      *                 if receiving a response when the user makes a choice is not supported (on
      *                 older Android versions).
@@ -414,7 +445,7 @@ public class OfflinePageUtils {
      */
     private static void prepareFileAndShare(final boolean shareDirectly, final boolean saveLastUsed,
             final Activity activity, final String title, final String text, final String onlineUrl,
-            final Bitmap bitmap, final ShareHelper.TargetChosenCallback callback,
+            final Uri screenshotUri, final ShareHelper.TargetChosenCallback callback,
             final String filePath) {
         new AsyncTask<Void, Void, File>() {
             @Override
@@ -459,7 +490,7 @@ public class OfflinePageUtils {
                     offlineUri = Uri.fromFile(offlinePageShareable);
                 }
                 ShareHelper.share(shareDirectly, saveLastUsed, activity, title, text, onlineUrl,
-                        offlineUri, bitmap, callback);
+                        offlineUri, screenshotUri, callback);
             }
         }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
@@ -526,6 +557,7 @@ public class OfflinePageUtils {
      * @param context Context that is used to access external cache directory.
      */
     public static void clearSharedOfflineFiles(final Context context) {
+        if (!OfflinePageBridge.isPageSharingEnabled()) return;
         new AsyncTask<Void, Void, Void>() {
             @Override
             protected Void doInBackground(Void... params) {
@@ -547,6 +579,60 @@ public class OfflinePageUtils {
         OfflinePageBridge offlinePageBridge = getInstance().getOfflinePageBridge(tab.getProfile());
         if (offlinePageBridge == null) return "";
         return offlinePageBridge.getOfflinePageHeaderForReload(tab.getWebContents());
+    }
+
+    /**
+     * A load url parameters to open offline version of the offline page (i.e. to ensure no
+     * automatic redirection based on the connection status).
+     * @param url       The url of the offline page to open.
+     * @param offlineId The ID of the offline page to open.
+     * @return The LoadUrlParams with a special header.
+     */
+    public static LoadUrlParams getLoadUrlParamsForOpeningOfflineVersion(
+            String url, long offlineId) {
+        LoadUrlParams params = new LoadUrlParams(url);
+        Map<String, String> headers = new HashMap<String, String>();
+        headers.put("X-Chrome-offline", "persist=1 reason=download id=" + Long.toString(offlineId));
+        params.setExtraHeaders(headers);
+        return params;
+    }
+
+    /**
+     * @return True if an offline preview is being shown.
+     * @param tab The current tab.
+     */
+    public static boolean isShowingOfflinePreview(Tab tab) {
+        OfflinePageBridge offlinePageBridge = getInstance().getOfflinePageBridge(tab.getProfile());
+        if (offlinePageBridge == null) return false;
+        return offlinePageBridge.isShowingOfflinePreview(tab.getWebContents());
+    }
+
+    /**
+     * Reloads specified tab, which should allow to open an online version of the page.
+     * @param tab The tab to be reloaded.
+     */
+    public static void reload(Tab tab) {
+        // If current page is an offline page, reload it with custom behavior defined in extra
+        // header respected.
+        LoadUrlParams params =
+                new LoadUrlParams(tab.getOriginalUrl(), PageTransition.RELOAD);
+        params.setVerbatimHeaders(getOfflinePageHeaderForReload(tab));
+        tab.loadUrl(params);
+    }
+
+    /**
+     * Navigates the given tab to the saved local snapshot of the offline page identified by the URL
+     * and the offline ID. No automatic redirection is happening based on the connection status.
+     * @param url       The URL of the offine page.
+     * @param offlineId The ID of the offline page.
+     * @param tab       The tab to navigate to the page.
+     */
+    public static void openInExistingTab(String url, long offlineId, Tab tab) {
+        LoadUrlParams params =
+                OfflinePageUtils.getLoadUrlParamsForOpeningOfflineVersion(url, offlineId);
+        // Extra headers are not read in loadUrl, but verbatim headers are.
+        params.setVerbatimHeaders(params.getExtraHeadersString());
+        tab.loadUrl(params);
     }
 
     private static boolean isPowerConnected(Intent batteryStatus) {
@@ -579,9 +665,41 @@ public class OfflinePageUtils {
         Intent batteryStatus = context.registerReceiver(null, filter);
         if (batteryStatus == null) return null;
 
-        return new DeviceConditions(isPowerConnected(batteryStatus),
-                batteryPercentage(batteryStatus),
-                NetworkChangeNotifier.getInstance().getCurrentConnectionType());
+        // Get the connection type from chromium's internal object.
+        int connectionType = NetworkChangeNotifier.getInstance().getCurrentConnectionType();
+
+        // Sometimes the NetworkConnectionNotifier lags the actual connection type, especially when
+        // the GCM NM wakes us from doze state.  If we are really connected, report the connection
+        // type from android.
+        if (connectionType == ConnectionType.CONNECTION_NONE) {
+            // Get the connection type from android in case chromium's type is not yet set.
+            ConnectivityManager cm =
+                    (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
+            boolean isConnected = activeNetwork != null && activeNetwork.isConnectedOrConnecting();
+            if (isConnected) {
+                connectionType = convertAndroidNetworkTypeToConnectionType(activeNetwork.getType());
+            }
+        }
+
+        return new DeviceConditions(
+                isPowerConnected(batteryStatus), batteryPercentage(batteryStatus), connectionType);
+    }
+
+    /** Returns the NCN network type corresponding to the connectivity manager network type */
+    protected int convertAndroidNetworkTypeToConnectionType(int connectivityManagerNetworkType) {
+        if (connectivityManagerNetworkType == ConnectivityManager.TYPE_WIFI) {
+            return ConnectionType.CONNECTION_WIFI;
+        }
+        // for mobile, we don't know if it is 2G, 3G, or 4G, default to worst case of 2G.
+        if (connectivityManagerNetworkType == ConnectivityManager.TYPE_MOBILE) {
+            return ConnectionType.CONNECTION_2G;
+        }
+        if (connectivityManagerNetworkType == ConnectivityManager.TYPE_BLUETOOTH) {
+            return ConnectionType.CONNECTION_BLUETOOTH;
+        }
+        // Since NetworkConnectivityManager doesn't understand the other types, call them UNKNOWN.
+        return ConnectionType.CONNECTION_UNKNOWN;
     }
 
     @VisibleForTesting

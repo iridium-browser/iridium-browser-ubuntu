@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/macros.h"
-#include "base/strings/stringprintf.h"
 #include "chrome/browser/sync/test/integration/extensions_helper.h"
 #include "chrome/browser/sync/test/integration/performance/sync_timing_helper.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
@@ -18,6 +17,8 @@ using extensions_helper::InstallExtension;
 using extensions_helper::InstallExtensionsPendingForSync;
 using extensions_helper::IsExtensionEnabled;
 using extensions_helper::UninstallExtension;
+using sync_timing_helper::PrintResult;
+using sync_timing_helper::TimeMutualSyncCycle;
 
 // TODO(braffert): Replicate these tests for apps.
 
@@ -83,21 +84,20 @@ IN_PROC_BROWSER_TEST_F(ExtensionsSyncPerfTest, P0) {
 
   // TCM ID - 7563874.
   AddExtensions(0, kNumExtensions);
-  base::TimeDelta dt =
-      SyncTimingHelper::TimeMutualSyncCycle(GetClient(0), GetClient(1));
+  base::TimeDelta dt = TimeMutualSyncCycle(GetClient(0), GetClient(1));
   InstallExtensionsPendingForSync(GetProfile(1));
   ASSERT_EQ(expected_extension_count, GetExtensionCount(1));
-  SyncTimingHelper::PrintResult("extensions", "add_extensions", dt);
+  PrintResult("extensions", "add_extensions", dt);
 
   // TCM ID - 7655397.
   UpdateExtensions(0);
-  dt = SyncTimingHelper::TimeMutualSyncCycle(GetClient(0), GetClient(1));
+  dt = TimeMutualSyncCycle(GetClient(0), GetClient(1));
   ASSERT_EQ(expected_extension_count, GetExtensionCount(1));
-  SyncTimingHelper::PrintResult("extensions", "update_extensions", dt);
+  PrintResult("extensions", "update_extensions", dt);
 
   // TCM ID - 7567721.
   RemoveExtensions(0);
-  dt = SyncTimingHelper::TimeMutualSyncCycle(GetClient(0), GetClient(1));
+  dt = TimeMutualSyncCycle(GetClient(0), GetClient(1));
   ASSERT_EQ(num_default_extensions, GetExtensionCount(1));
-  SyncTimingHelper::PrintResult("extensions", "delete_extensions", dt);
+  PrintResult("extensions", "delete_extensions", dt);
 }

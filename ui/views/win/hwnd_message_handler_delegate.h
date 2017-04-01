@@ -8,7 +8,6 @@
 #include "ui/views/views_export.h"
 
 namespace gfx {
-class Canvas;
 class Insets;
 class Path;
 class Point;
@@ -25,11 +24,10 @@ class TouchEvent;
 namespace views {
 
 enum class FrameMode {
-  SYSTEM_DRAWN,  // "glass" frame
-  CUSTOM_DRAWN   // "opaque" frame
+  SYSTEM_DRAWN,              // "glass" frame
+  SYSTEM_DRAWN_NO_CONTROLS,  // "glass" frame but with custom window controls
+  CUSTOM_DRAWN               // "opaque" frame
 };
-
-class InputMethod;
 
 // Implemented by the object that uses the HWNDMessageHandler to handle
 // notifications from the underlying HWND and service requests for data.
@@ -46,6 +44,7 @@ class VIEWS_EXPORT HWNDMessageHandlerDelegate {
   // that don't have a visible frame. Those usually have the WS_POPUP style, for
   // which Windows will remove the frame automatically if the frame mode is
   // SYSTEM_DRAWN.
+  // TODO(bsep): Investigate deleting this when v2 Apps support is removed.
   virtual bool HasFrame() const = 0;
 
   virtual void SchedulePaint() = 0;

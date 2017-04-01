@@ -20,17 +20,14 @@
 #include "media/filters/context_3d.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/skia/include/core/SkXfermode.h"
 
 class SkCanvas;
-class SkImage;
 
 namespace gfx {
 class RectF;
 }
 
 namespace media {
-class VideoImageGenerator;
 
 // Handles rendering of VideoFrames to SkCanvases.
 class MEDIA_EXPORT SkCanvasVideoRenderer {
@@ -47,8 +44,7 @@ class MEDIA_EXPORT SkCanvasVideoRenderer {
   void Paint(const scoped_refptr<VideoFrame>& video_frame,
              SkCanvas* canvas,
              const gfx::RectF& dest_rect,
-             uint8_t alpha,
-             SkXfermode::Mode mode,
+             SkPaint& paint,
              VideoRotation video_rotation,
              const Context3D& context_3d);
 
@@ -69,12 +65,13 @@ class MEDIA_EXPORT SkCanvasVideoRenderer {
   // Copy the contents of texture of |video_frame| to texture |texture|.
   // |level|, |internal_format|, |type| specify target texture |texture|.
   // The format of |video_frame| must be VideoFrame::NATIVE_TEXTURE.
+  // Assumes |texture| has already been allocated with the appropriate
+  // size and a compatible format, internal format and type; this is
+  // effectively a "TexSubImage" operation.
   static void CopyVideoFrameSingleTextureToGLTexture(
       gpu::gles2::GLES2Interface* gl,
       VideoFrame* video_frame,
       unsigned int texture,
-      unsigned int internal_format,
-      unsigned int type,
       bool premultiply_alpha,
       bool flip_y);
 
@@ -83,22 +80,59 @@ class MEDIA_EXPORT SkCanvasVideoRenderer {
   // |level|, |internal_format|, |type| specify target texture |texture|.
   // The format of |video_frame| must be VideoFrame::NATIVE_TEXTURE.
   // |context_3d| has a GrContext that may be used during the copy.
+  // Assumes |texture| has already been allocated with the appropriate
+  // size and a compatible format, internal format and type; this is
+  // effectively a "TexSubImage" operation.
   // Returns true on success.
   bool CopyVideoFrameTexturesToGLTexture(
       const Context3D& context_3d,
       gpu::gles2::GLES2Interface* destination_gl,
       const scoped_refptr<VideoFrame>& video_frame,
       unsigned int texture,
-      unsigned int internal_format,
-      unsigned int type,
       bool premultiply_alpha,
       bool flip_y);
+
+  // Converts unsigned 16-bit value to target |format| for Y16 format and
+  // calls WebGL texImage2D.
+  // |level|, |internal_format|, |format|, |type| are WebGL texImage2D
+  // parameters.
+  // Returns false if there is no implementation for given parameters.
+  static bool TexImage2D(unsigned target,
+                         gpu::gles2::GLES2Interface* gl,
+                         VideoFrame* video_frame,
+                         int level,
+                         int internalformat,
+                         unsigned format,
+                         unsigned type,
+                         bool flip_y,
+                         bool premultiply_alpha);
+
+  // Converts unsigned 16-bit value to target |format| for Y16 format and
+  // calls WebGL texSubImage2D.
+  // |level|, |format|, |type|, |xoffset| and |yoffset| are texSubImage2D
+  // parameters.
+  // Returns false if there is no implementation for given parameters.
+  static bool TexSubImage2D(unsigned target,
+                            gpu::gles2::GLES2Interface* gl,
+                            VideoFrame* video_frame,
+                            int level,
+                            unsigned format,
+                            unsigned type,
+                            int xoffset,
+                            int yoffset,
+                            bool flip_y,
+                            bool premultiply_alpha);
 
   // In general, We hold the most recently painted frame to increase the
   // performance for the case that the same frame needs to be painted
   // repeatedly. Call this function if you are sure the most recent frame will
   // never be painted again, so we can release the resource.
   void ResetCache();
+
+  void CorrectLastImageDimensions(const SkIRect& visible_rect);
+
+  // Used for unit test.
+  SkISize LastImageDimensionsForTesting();
 
  private:
   // Update the cache holding the most-recently-painted frame. Returns false
@@ -115,6 +149,9 @@ class MEDIA_EXPORT SkCanvasVideoRenderer {
 
   // Used for DCHECKs to ensure method calls executed in the correct thread.
   base::ThreadChecker thread_checker_;
+
+  // Used for unit test.
+  SkISize last_image_dimensions_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(SkCanvasVideoRenderer);
 };

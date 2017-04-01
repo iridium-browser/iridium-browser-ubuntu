@@ -42,21 +42,15 @@ class AppWindowLauncherItemController : public LauncherItemController,
   void SetActiveWindow(aura::Window* window);
   ui::BaseWindow* GetAppWindow(aura::Window* window);
 
-  const std::string& app_shelf_id() const { return app_shelf_id_; }
-
   // LauncherItemController overrides:
-  bool IsOpen() const override;
-  bool IsVisible() const override;
   void Launch(ash::LaunchSource source, int event_flags) override;
   ash::ShelfItemDelegate::PerformedAction Activate(
       ash::LaunchSource source) override;
   ChromeLauncherAppMenuItems GetApplicationList(int event_flags) override;
+  AppWindowLauncherItemController* AsAppWindowLauncherItemController() override;
   ash::ShelfItemDelegate::PerformedAction ItemSelected(
       const ui::Event& event) override;
-  base::string16 GetTitle() override;
-  bool IsDraggable() override;
-  bool CanPin() const override;
-  bool ShouldShowTooltip() override;
+  ash::ShelfMenuModel* CreateApplicationMenu(int event_flags) override;
   void Close() override;
 
   // aura::WindowObserver overrides:
@@ -73,9 +67,8 @@ class AppWindowLauncherItemController : public LauncherItemController,
   const WindowList& windows() const { return windows_; }
 
  protected:
-  AppWindowLauncherItemController(Type type,
-                                  const std::string& app_shelf_id,
-                                  const std::string& app_id,
+  AppWindowLauncherItemController(const std::string& app_id,
+                                  const std::string& launch_id,
                                   ChromeLauncherController* controller);
 
   // Called when app window is removed from controller.
@@ -101,10 +94,6 @@ class AppWindowLauncherItemController : public LauncherItemController,
 
   // Pointer to the most recently active app window
   ui::BaseWindow* last_active_window_ = nullptr;
-
-  // The launcher id associated with this set of windows. There is one
-  // AppLauncherItemController for each |app_shelf_id_|.
-  const std::string app_shelf_id_;
 
   // Scoped list of observed windows (for removal on destruction)
   ScopedObserver<aura::Window, aura::WindowObserver> observed_windows_;

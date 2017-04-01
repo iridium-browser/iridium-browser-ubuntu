@@ -28,6 +28,7 @@
 @synthesize candidateNetworkPolicy = _candidateNetworkPolicy;
 @synthesize continualGatheringPolicy = _continualGatheringPolicy;
 @synthesize audioJitterBufferMaxPackets = _audioJitterBufferMaxPackets;
+@synthesize audioJitterBufferFastAccelerate = _audioJitterBufferFastAccelerate;
 @synthesize iceConnectionReceivingTimeout = _iceConnectionReceivingTimeout;
 @synthesize iceBackupCandidatePairPingInterval =
     _iceBackupCandidatePairPingInterval;
@@ -41,7 +42,8 @@
   if (self = [super init]) {
     _iceServers = [NSMutableArray array];
     // Copy defaults.
-    webrtc::PeerConnectionInterface::RTCConfiguration config;
+    webrtc::PeerConnectionInterface::RTCConfiguration config(
+        webrtc::PeerConnectionInterface::RTCConfigurationType::kAggressive);
     _iceTransportPolicy =
         [[self class] transportPolicyForTransportsType:config.type];
     _bundlePolicy =
@@ -57,6 +59,7 @@
     _continualGatheringPolicy =
         [[self class] continualGatheringPolicyForNativePolicy:nativePolicy];
     _audioJitterBufferMaxPackets = config.audio_jitter_buffer_max_packets;
+    _audioJitterBufferFastAccelerate = config.audio_jitter_buffer_fast_accelerate;
     _iceConnectionReceivingTimeout = config.ice_connection_receiving_timeout;
     _iceBackupCandidatePairPingInterval =
         config.ice_backup_candidate_pair_ping_interval;
@@ -71,7 +74,7 @@
 
 - (NSString *)description {
   return [NSString stringWithFormat:
-      @"RTCConfiguration: {\n%@\n%@\n%@\n%@\n%@\n%@\n%@\n%d\n%d\n%d\n%d\n%d\n%d\n}\n",
+      @"RTCConfiguration: {\n%@\n%@\n%@\n%@\n%@\n%@\n%@\n%d\n%d\n%d\n%d\n%d\n%d\n%d\n}\n",
       _iceServers,
       [[self class] stringForTransportPolicy:_iceTransportPolicy],
       [[self class] stringForBundlePolicy:_bundlePolicy],
@@ -81,6 +84,7 @@
       [[self class]
           stringForContinualGatheringPolicy:_continualGatheringPolicy],
       _audioJitterBufferMaxPackets,
+      _audioJitterBufferFastAccelerate,
       _iceConnectionReceivingTimeout,
       _iceBackupCandidatePairPingInterval,
       _iceCandidatePoolSize,
@@ -93,7 +97,8 @@
 - (webrtc::PeerConnectionInterface::RTCConfiguration *)
     createNativeConfiguration {
   std::unique_ptr<webrtc::PeerConnectionInterface::RTCConfiguration>
-      nativeConfig(new webrtc::PeerConnectionInterface::RTCConfiguration());
+      nativeConfig(new webrtc::PeerConnectionInterface::RTCConfiguration(
+          webrtc::PeerConnectionInterface::RTCConfigurationType::kAggressive));
 
   for (RTCIceServer *iceServer in _iceServers) {
     nativeConfig->servers.push_back(iceServer.nativeServer);
@@ -111,6 +116,8 @@
   nativeConfig->continual_gathering_policy = [[self class]
       nativeContinualGatheringPolicyForPolicy:_continualGatheringPolicy];
   nativeConfig->audio_jitter_buffer_max_packets = _audioJitterBufferMaxPackets;
+  nativeConfig->audio_jitter_buffer_fast_accelerate =
+      _audioJitterBufferFastAccelerate  ? true : false;
   nativeConfig->ice_connection_receiving_timeout =
       _iceConnectionReceivingTimeout;
   nativeConfig->ice_backup_candidate_pair_ping_interval =

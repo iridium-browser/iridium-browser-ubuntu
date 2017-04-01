@@ -12,9 +12,7 @@
 #if SK_ANGLE
     #include "gl/angle/GLTestContext_angle.h"
 #endif
-#if SK_COMMAND_BUFFER
-    #include "gl/command_buffer/GLTestContext_command_buffer.h"
-#endif
+#include "gl/command_buffer/GLTestContext_command_buffer.h"
 #include "gl/debug/DebugGLTestContext.h"
 #if SK_MESA
     #include "gl/mesa/GLTestContext_mesa.h"
@@ -26,12 +24,26 @@
 #include "gl/GrGLGpu.h"
 #include "GrCaps.h"
 
+#if defined(SK_BUILD_FOR_WIN32) && defined(SK_ENABLE_DISCRETE_GPU)
+extern "C" {
+    // NVIDIA documents that the presence and value of this symbol programmatically enable the high
+    // performance GPU in laptops with switchable graphics.
+    //   https://docs.nvidia.com/gameworks/content/technologies/desktop/optimus.htm
+    // From testing, including this symbol, even if it is set to 0, we still get the NVIDIA GPU.
+    _declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+
+    // AMD has a similar mechanism, although I don't have an AMD laptop, so this is untested.
+    //   https://community.amd.com/thread/169965
+    __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+#endif
+
 namespace sk_gpu_test {
 GrContextFactory::GrContextFactory() { }
 
 GrContextFactory::GrContextFactory(const GrContextOptions& opts)
     : fGlobalOptions(opts) {
-    // In this factory, instanced rendering is specified with kUseInstanced_ContextOptions.
+    // In this factory, instanced rendering is specified with ContextOptions::kUseInstanced.
     SkASSERT(!fGlobalOptions.fEnableInstancedRendering);
 }
 
@@ -103,7 +115,7 @@ ContextInfo GrContextFactory::getContextInfo(ContextType type, ContextOptions op
             return ContextInfo(context.fBackend, context.fTestContext, context.fGrContext);
         }
     }
-    SkAutoTDelete<TestContext> testCtx;
+    std::unique_ptr<TestContext> testCtx;
     sk_sp<GrContext> grCtx;
     GrBackendContext backendContext = 0;
     sk_sp<const GrGLInterface> glInterface;
@@ -119,27 +131,32 @@ ContextInfo GrContextFactory::getContextInfo(ContextType type, ContextOptions op
                     glCtx = CreatePlatformGLTestContext(kGLES_GrGLStandard);
                     break;
 #if SK_ANGLE
-#   ifdef SK_BUILD_FOR_WIN
-                case kANGLE_ContextType:
-                    glCtx = CreateANGLEDirect3DGLTestContext();
+                case kANGLE_D3D9_ES2_ContextType:
+                    glCtx = MakeANGLETestContext(ANGLEBackend::kD3D9, ANGLEContextVersion::kES2).release();
                     break;
-#   endif
-                case kANGLE_GL_ContextType:
-                    glCtx = CreateANGLEOpenGLGLTestContext();
+                case kANGLE_D3D11_ES2_ContextType:
+                    glCtx = MakeANGLETestContext(ANGLEBackend::kD3D11, ANGLEContextVersion::kES2).release();
+                    break;
+                case kANGLE_D3D11_ES3_ContextType:
+                    glCtx = MakeANGLETestContext(ANGLEBackend::kD3D11, ANGLEContextVersion::kES3).release();
+                    break;
+                case kANGLE_GL_ES2_ContextType:
+                    glCtx = MakeANGLETestContext(ANGLEBackend::kOpenGL, ANGLEContextVersion::kES2).release();
+                    break;
+                case kANGLE_GL_ES3_ContextType:
+                    glCtx = MakeANGLETestContext(ANGLEBackend::kOpenGL, ANGLEContextVersion::kES3).release();
                     break;
 #endif
-#if SK_COMMAND_BUFFER
                 case kCommandBuffer_ContextType:
                     glCtx = CommandBufferGLTestContext::Create();
                     break;
-#endif
 #if SK_MESA
                 case kMESA_ContextType:
                     glCtx = CreateMesaGLTestContext();
                     break;
 #endif
                 case kNullGL_ContextType:
-                    glCtx = CreateNullGLTestContext(kEnableNVPR_ContextOptions & options);
+                    glCtx = CreateNullGLTestContext(ContextOptions::kEnableNVPR & options);
                     break;
                 case kDebugGL_ContextType:
                     glCtx = CreateDebugGLTestContext();
@@ -154,7 +171,7 @@ ContextInfo GrContextFactory::getContextInfo(ContextType type, ContextOptions op
             glInterface.reset(SkRef(glCtx->gl()));
             // Block NVPR from non-NVPR types. We don't block NVPR from contexts that will use
             // instanced rendering because that would prevent us from testing mixed samples.
-            if (!((kEnableNVPR_ContextOptions | kUseInstanced_ContextOptions) & options)) {
+            if (!((ContextOptions::kEnableNVPR | ContextOptions::kUseInstanced) & options)) {
                 glInterface.reset(GrGLInterfaceRemoveNVPR(glInterface.get()));
                 if (!glInterface) {
                     return ContextInfo();
@@ -166,7 +183,7 @@ ContextInfo GrContextFactory::getContextInfo(ContextType type, ContextOptions op
 #ifdef SK_VULKAN
         case kVulkan_GrBackend:
             SkASSERT(kVulkan_ContextType == type);
-            if (kEnableNVPR_ContextOptions & options) {
+            if (ContextOptions::kEnableNVPR & options) {
                 return ContextInfo();
             }
             testCtx.reset(CreatePlatformVkTestContext());
@@ -192,24 +209,26 @@ ContextInfo GrContextFactory::getContextInfo(ContextType type, ContextOptions op
     testCtx->makeCurrent();
     SkASSERT(testCtx && testCtx->backend() == backend);
     GrContextOptions grOptions = fGlobalOptions;
-    if (kUseInstanced_ContextOptions & options) {
+    if (ContextOptions::kUseInstanced & options) {
         grOptions.fEnableInstancedRendering = true;
     }
+    grOptions.fRequireDecodeDisableForSRGB =
+        SkToBool(ContextOptions::kRequireSRGBDecodeDisableSupport & options);
     grCtx.reset(GrContext::Create(backend, backendContext, grOptions));
     if (!grCtx.get()) {
         return ContextInfo();
     }
-    if (kEnableNVPR_ContextOptions & options) {
+    if (ContextOptions::kEnableNVPR & options) {
         if (!grCtx->caps()->shaderCaps()->pathRenderingSupport()) {
             return ContextInfo();
         }
     }
-    if (kUseInstanced_ContextOptions & options) {
+    if (ContextOptions::kUseInstanced & options) {
         if (GrCaps::InstancedSupport::kNone == grCtx->caps()->instancedSupport()) {
             return ContextInfo();
         }
     }
-    if (kRequireSRGBSupport_ContextOptions & options) {
+    if (ContextOptions::kRequireSRGBSupport & options) {
         if (!grCtx->caps()->srgbSupport()) {
             return ContextInfo();
         }

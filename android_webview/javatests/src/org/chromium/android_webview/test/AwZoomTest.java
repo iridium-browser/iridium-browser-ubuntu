@@ -6,7 +6,7 @@ package org.chromium.android_webview.test;
 
 import android.app.Activity;
 import android.content.pm.ActivityInfo;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.view.View;
 import android.view.ViewConfiguration;
 
@@ -14,6 +14,7 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 
 import java.util.Locale;
 import java.util.concurrent.Callable;
@@ -187,6 +188,7 @@ public class AwZoomTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @RetryOnFailure  // Flaky (times out). See http://crbug.com/661879.
     public void testMagnification() throws Throwable {
         getAwSettingsOnUiThread(mAwContents).setSupportZoom(true);
         runMagnificationTest();
@@ -196,6 +198,7 @@ public class AwZoomTest extends AwTestBase {
     // even if supportZoom is turned off.
     @SmallTest
     @Feature({"AndroidWebView"})
+    @RetryOnFailure
     public void testMagnificationWithZoomSupportOff() throws Throwable {
         getAwSettingsOnUiThread(mAwContents).setSupportZoom(false);
         runMagnificationTest();
@@ -221,6 +224,7 @@ public class AwZoomTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @RetryOnFailure
     public void testZoomControls() throws Throwable {
         AwSettings webSettings = getAwSettingsOnUiThread(mAwContents);
         webSettings.setUseWideViewPort(true);

@@ -12,20 +12,16 @@
 
 #include <memory>
 
-#include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/base/checks.h"
 #include "webrtc/base/constructormagic.h"
 #include "webrtc/base/task_queue.h"
 #include "webrtc/base/thread.h"
 #include "webrtc/base/thread_checker.h"
+#include "webrtc/test/gtest.h"
 
 // Duplicated from base/threading/thread_checker.h so that we can be
 // good citizens there and undef the macro.
-#if !defined(NDEBUG) || defined(DCHECK_ALWAYS_ON)
-#define ENABLE_THREAD_CHECKER 1
-#else
-#define ENABLE_THREAD_CHECKER 0
-#endif
+#define ENABLE_THREAD_CHECKER RTC_DCHECK_IS_ON
 
 namespace rtc {
 

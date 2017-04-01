@@ -7,42 +7,80 @@
 
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "modules/ModulesExport.h"
+#include "platform/Timer.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/modules/mediasession/WebMediaMetadata.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class ExecutionContext;
-class MediaArtwork;
+class ExceptionState;
+class MediaImage;
 class MediaMetadataInit;
+class MediaSession;
+class ScriptState;
 
 // Implementation of MediaMetadata interface from the Media Session API.
+// The MediaMetadata object is linked to a MediaSession that owns it. When one
+// of its properties are updated, the object will notify its MediaSession if
+// any. The notification will be made asynchronously in order to combine changes
+// made inside the same event loop. When a MediaMetadata is created and assigned
+// to a MediaSession, the MediaSession will automatically update.
 class MODULES_EXPORT MediaMetadata final
-    : public GarbageCollectedFinalized<MediaMetadata>
-    , public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static MediaMetadata* create(ExecutionContext*, const MediaMetadataInit&);
+    : public GarbageCollectedFinalized<MediaMetadata>,
+      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    String title() const;
-    String artist() const;
-    String album() const;
-    const HeapVector<Member<MediaArtwork>>& artwork() const;
+ public:
+  static MediaMetadata* create(ScriptState*,
+                               const MediaMetadataInit&,
+                               ExceptionState&);
 
-    explicit operator WebMediaMetadata() const;
+  String title() const;
+  String artist() const;
+  String album() const;
+  Vector<v8::Local<v8::Value>> artwork(ScriptState*) const;
 
-    DECLARE_VIRTUAL_TRACE();
+  // Internal use only, returns a reference to m_artwork instead of a Frozen
+  // copy of a MediaImage array.
+  const HeapVector<MediaImage>& artwork() const;
 
-private:
-    MediaMetadata(ExecutionContext*, const MediaMetadataInit&);
+  void setTitle(const String&);
+  void setArtist(const String&);
+  void setAlbum(const String&);
+  void setArtwork(ScriptState*, const HeapVector<MediaImage>&, ExceptionState&);
 
-    String m_title;
-    String m_artist;
-    String m_album;
-    HeapVector<Member<MediaArtwork>> m_artwork;
+  // Called by MediaSession to associate or de-associate itself.
+  void setSession(MediaSession*);
+
+  DECLARE_VIRTUAL_TRACE();
+
+ private:
+  MediaMetadata(ScriptState*, const MediaMetadataInit&, ExceptionState&);
+
+  // Called when one of the metadata fields is updated from script. It will
+  // notify the session asynchronously in order to bundle multiple call in one
+  // notification.
+  void notifySessionAsync();
+
+  // Called asynchronously after at least one field of MediaMetadata has been
+  // modified.
+  void notifySessionTimerFired(TimerBase*);
+
+  // Make an internal copy of the MediaImage vector with some internal steps
+  // such as parsing of the src property.
+  void setArtworkInternal(ScriptState*,
+                          const HeapVector<MediaImage>&,
+                          ExceptionState&);
+
+  String m_title;
+  String m_artist;
+  String m_album;
+  HeapVector<MediaImage> m_artwork;
+
+  Member<MediaSession> m_session;
+  Timer<MediaMetadata> m_notifySessionTimer;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MediaMetadata_h
+#endif  // MediaMetadata_h

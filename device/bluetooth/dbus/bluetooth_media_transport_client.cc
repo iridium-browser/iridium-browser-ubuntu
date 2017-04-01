@@ -92,15 +92,15 @@ class BluetoothMediaTransportClientImpl
   void ObjectAdded(const dbus::ObjectPath& object_path,
                    const std::string& interface_name) override {
     VLOG(1) << "Remote Media Transport added: " << object_path.value();
-    FOR_EACH_OBSERVER(BluetoothMediaTransportClient::Observer, observers_,
-                      MediaTransportAdded(object_path));
+    for (auto& observer : observers_)
+      observer.MediaTransportAdded(object_path);
   }
 
   void ObjectRemoved(const dbus::ObjectPath& object_path,
                      const std::string& interface_name) override {
     VLOG(1) << "Remote Media Transport removed: " << object_path.value();
-    FOR_EACH_OBSERVER(BluetoothMediaTransportClient::Observer, observers_,
-                      MediaTransportRemoved(object_path));
+    for (auto& observer : observers_)
+      observer.MediaTransportRemoved(object_path);
   }
 
   // BluetoothMediaTransportClient overrides.
@@ -206,9 +206,8 @@ class BluetoothMediaTransportClientImpl
     VLOG(1) << "Name of the changed property: " << property_name;
 
     // Dispatches the change to the corresponding property-changed handler.
-    FOR_EACH_OBSERVER(
-        BluetoothMediaTransportClient::Observer, observers_,
-        MediaTransportPropertyChanged(object_path, property_name));
+    for (auto& observer : observers_)
+      observer.MediaTransportPropertyChanged(object_path, property_name);
   }
 
   // Called when a response for successful method call is received.
@@ -223,7 +222,7 @@ class BluetoothMediaTransportClientImpl
                         dbus::Response* response) {
     DCHECK(response);
 
-    dbus::FileDescriptor fd;
+    base::ScopedFD fd;
     uint16_t read_mtu;
     uint16_t write_mtu;
 
@@ -231,15 +230,14 @@ class BluetoothMediaTransportClientImpl
     dbus::MessageReader reader(response);
     if (reader.PopFileDescriptor(&fd) && reader.PopUint16(&read_mtu) &&
         reader.PopUint16(&write_mtu)) {
-      fd.CheckValidity();
       DCHECK(fd.is_valid());
 
-      VLOG(1) << "OnAcquireSuccess - fd: " << fd.value()
+      VLOG(1) << "OnAcquireSuccess - fd: " << fd.get()
               << ", read MTU: " << read_mtu << ", write MTU: " << write_mtu;
 
       // The ownership of the file descriptor is transferred to the user
       // application.
-      callback.Run(&fd, read_mtu, write_mtu);
+      callback.Run(std::move(fd), read_mtu, write_mtu);
       return;
     }
 

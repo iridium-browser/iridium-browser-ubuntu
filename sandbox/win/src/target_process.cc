@@ -12,7 +12,6 @@
 
 #include "base/macros.h"
 #include "base/memory/free_deleter.h"
-#include "base/win/pe_image.h"
 #include "base/win/startup_information.h"
 #include "base/win/windows_version.h"
 #include "sandbox/win/src/crosscall_client.h"
@@ -50,26 +49,6 @@ SANDBOX_INTERCEPT HANDLE g_shared_section;
 SANDBOX_INTERCEPT size_t g_shared_IPC_size;
 SANDBOX_INTERCEPT size_t g_shared_policy_size;
 
-// Returns the address of the main exe module in memory taking in account
-// address space layout randomization.
-void* GetBaseAddress(const wchar_t* exe_name, void* entry_point) {
-  HMODULE exe = ::LoadLibrary(exe_name);
-  if (NULL == exe)
-    return exe;
-
-  base::win::PEImage pe(exe);
-  if (!pe.VerifyMagic()) {
-    ::FreeLibrary(exe);
-    return exe;
-  }
-  PIMAGE_NT_HEADERS nt_header = pe.GetNTHeaders();
-  char* base = reinterpret_cast<char*>(entry_point) -
-    nt_header->OptionalHeader.AddressOfEntryPoint;
-
-  ::FreeLibrary(exe);
-  return base;
-}
-
 TargetProcess::TargetProcess(base::win::ScopedHandle initial_token,
                              base::win::ScopedHandle lockdown_token,
                              HANDLE job,
@@ -84,30 +63,17 @@ TargetProcess::TargetProcess(base::win::ScopedHandle initial_token,
       base_address_(NULL) {}
 
 TargetProcess::~TargetProcess() {
-  DWORD exit_code = 0;
   // Give a chance to the process to die. In most cases the JOB_KILL_ON_CLOSE
   // will take effect only when the context changes. As far as the testing went,
   // this wait was enough to switch context and kill the processes in the job.
   // If this process is already dead, the function will return without waiting.
-  // TODO(nsylvain):  If the process is still alive at the end, we should kill
-  // it. http://b/893891
   // For now, this wait is there only to do a best effort to prevent some leaks
   // from showing up in purify.
   if (sandbox_process_info_.IsValid()) {
     ::WaitForSingleObject(sandbox_process_info_.process_handle(), 50);
-    // At this point, the target process should have been killed.  Check.
-    if (!::GetExitCodeProcess(sandbox_process_info_.process_handle(),
-                              &exit_code) || (STILL_ACTIVE == exit_code)) {
-      // Something went wrong.  We don't know if the target is in a state where
-      // it can manage to do another IPC call.  If it can, and we've destroyed
-      // the |ipc_server_|, it will crash the broker.  So we intentionally leak
-      // that.
-      if (shared_section_.IsValid())
-        shared_section_.Take();
-      ignore_result(ipc_server_.release());
-      sandbox_process_info_.TakeProcessHandle();
-      return;
-    }
+    // Terminate the process if it's still alive, as its IPC server is going
+    // away. 1 is RESULT_CODE_KILLED.
+    ::TerminateProcess(sandbox_process_info_.process_handle(), 1);
   }
 
   // ipc_server_ references our process handle, so make sure the former is shut
@@ -180,31 +146,20 @@ ResultCode TargetProcess::Create(
     initial_token_.Close();
   }
 
-  CONTEXT context;
-  context.ContextFlags = CONTEXT_ALL;
-  if (!::GetThreadContext(process_info.thread_handle(), &context)) {
-    *win_error = ::GetLastError();
-    ::TerminateProcess(process_info.process_handle(), 0);
-    return SBOX_ERROR_GET_THREAD_CONTEXT;
-  }
-
-#if defined(_WIN64)
-  void* entry_point = reinterpret_cast<void*>(context.Rcx);
-#else
-#pragma warning(push)
-#pragma warning(disable: 4312)
-  // This cast generates a warning because it is 32 bit specific.
-  void* entry_point = reinterpret_cast<void*>(context.Eax);
-#pragma warning(pop)
-#endif  // _WIN64
-
   if (!target_info->DuplicateFrom(process_info)) {
     *win_error = ::GetLastError();  // This may or may not be correct.
     ::TerminateProcess(process_info.process_handle(), 0);
     return SBOX_ERROR_DUPLICATE_TARGET_INFO;
   }
 
-  base_address_ = GetBaseAddress(exe_path, entry_point);
+  base_address_ = GetProcessBaseAddress(process_info.process_handle());
+  DCHECK(base_address_);
+  if (!base_address_) {
+    *win_error = ::GetLastError();
+    ::TerminateProcess(process_info.process_handle(), 0);
+    return SBOX_ERROR_CANNOT_FIND_BASE_ADDRESS;
+  }
+
   sandbox_process_info_.Set(process_info.Take());
   return SBOX_ALL_OK;
 }

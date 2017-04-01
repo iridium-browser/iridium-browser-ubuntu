@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/common/chrome_switches.h"
@@ -16,15 +15,6 @@
 #include "content/public/browser/browser_thread.h"
 
 namespace safe_browsing {
-
-#ifdef NDEBUG
-namespace {
-const base::Feature kSafeBrowsingV4LocalDatabaseManagerEnabled {
-    "SafeBrowsingV4LocalDatabaseManagerEnabled",
-    base::FEATURE_DISABLED_BY_DEFAULT
-};
-}  // namespace
-#endif
 
 // static
 std::unique_ptr<ServicesDelegate> ServicesDelegate::Create(
@@ -64,8 +54,24 @@ void ServicesDelegateImpl::InitializeCsdService(
 #endif  // defined(SAFE_BROWSING_CSD)
 }
 
+ExtendedReportingLevel
+ServicesDelegateImpl::GetEstimatedExtendedReportingLevel() const {
+  return safe_browsing_service_->estimated_extended_reporting_by_prefs();
+}
+
+const scoped_refptr<SafeBrowsingDatabaseManager>&
+ServicesDelegateImpl::v4_local_database_manager() const {
+  return v4_local_database_manager_;
+}
+
 void ServicesDelegateImpl::Initialize() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  v4_local_database_manager_ = V4LocalDatabaseManager::Create(
+      SafeBrowsingService::GetBaseFilename(),
+      base::Bind(&ServicesDelegateImpl::GetEstimatedExtendedReportingLevel,
+                 base::Unretained(this)));
+
   download_service_.reset(
       (services_creator_ &&
        services_creator_->CanCreateDownloadProtectionService())
@@ -81,10 +87,6 @@ void ServicesDelegateImpl::Initialize() {
        services_creator_->CanCreateResourceRequestDetector())
           ? services_creator_->CreateResourceRequestDetector()
           : CreateResourceRequestDetector());
-
-  if (IsV4LocalDatabaseManagerEnabled()) {
-    v4_local_database_manager_ = CreateV4LocalDatabaseManager();
-  }
 }
 
 void ServicesDelegateImpl::ShutdownServices() {
@@ -179,19 +181,6 @@ void ServicesDelegateImpl::StopOnIOThread(bool shutdown) {
   if (v4_local_database_manager_.get()) {
     v4_local_database_manager_->StopOnIOThread(shutdown);
   }
-}
-
-V4LocalDatabaseManager* ServicesDelegateImpl::CreateV4LocalDatabaseManager() {
-  return new V4LocalDatabaseManager(SafeBrowsingService::GetBaseFilename());
-}
-
-bool ServicesDelegateImpl::IsV4LocalDatabaseManagerEnabled() {
-#ifndef NDEBUG
-  return true;
-#else
-  return base::FeatureList::IsEnabled(
-      kSafeBrowsingV4LocalDatabaseManagerEnabled);
-#endif
 }
 
 }  // namespace safe_browsing

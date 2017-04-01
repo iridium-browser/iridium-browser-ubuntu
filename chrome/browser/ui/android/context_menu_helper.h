@@ -26,8 +26,11 @@ class ContextMenuHelper
  public:
   ~ContextMenuHelper() override;
 
-  bool ShowContextMenu(content::RenderFrameHost* render_frame_host,
+  void ShowContextMenu(content::RenderFrameHost* render_frame_host,
                        const content::ContextMenuParams& params);
+
+  void OnContextMenuClosed(JNIEnv* env,
+                           const base::android::JavaParamRef<jobject>& obj);
 
   void SetPopulator(jobject jpopulator);
 

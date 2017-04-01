@@ -11,7 +11,6 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "net/base/load_flags.h"
@@ -61,7 +60,7 @@ class Delegate : public URLRequest::Delegate {
                           const RedirectInfo& redirect_info,
                           bool* defer_redirect) override;
 
-  void OnResponseStarted(URLRequest* request) override;
+  void OnResponseStarted(URLRequest* request, int net_error) override;
 
   void OnAuthRequired(URLRequest* request,
                       AuthChallengeInfo* auth_info) override;
@@ -116,6 +115,7 @@ class WebSocketStreamRequestImpl : public WebSocketStreamRequest {
         WebSocketHandshakeStreamBase::CreateHelper::DataKey(),
         handshake_stream_create_helper_);
     url_request_->SetLoadFlags(LOAD_DISABLE_CACHE | LOAD_BYPASS_CACHE);
+    connect_delegate_->OnCreateRequest(url_request_.get());
   }
 
   // Destroying this object destroys the URLRequest, which cancels the request
@@ -148,14 +148,17 @@ class WebSocketStreamRequestImpl : public WebSocketStreamRequest {
 
     timer_->Stop();
 
+    std::unique_ptr<URLRequest> url_request = std::move(url_request_);
     WebSocketHandshakeStreamBase* handshake_stream = handshake_stream_;
     handshake_stream_ = nullptr;
     connect_delegate_->OnSuccess(handshake_stream->Upgrade());
+
+    // This is safe even if |this| has already been deleted.
+    url_request->CancelWithError(ERR_WS_UPGRADE);
   }
 
-  std::string FailureMessageFromNetError() {
-    int error = url_request_->status().error();
-    if (error == ERR_TUNNEL_CONNECTION_FAILED) {
+  std::string FailureMessageFromNetError(int net_error) {
+    if (net_error == ERR_TUNNEL_CONNECTION_FAILED) {
       // This error is common and confusing, so special-case it.
       // TODO(ricea): Include the HostPortPair of the selected proxy server in
       // the error message. This is not currently possible because it isn't set
@@ -163,26 +166,26 @@ class WebSocketStreamRequestImpl : public WebSocketStreamRequest {
       return "Establishing a tunnel via proxy server failed.";
     } else {
       return std::string("Error in connection establishment: ") +
-             ErrorToString(url_request_->status().error());
+             ErrorToString(net_error);
     }
   }
 
-  void ReportFailure() {
+  void ReportFailure(int net_error) {
     DCHECK(timer_);
     timer_->Stop();
     if (failure_message_.empty()) {
-      switch (url_request_->status().status()) {
-        case URLRequestStatus::SUCCESS:
-        case URLRequestStatus::IO_PENDING:
+      switch (net_error) {
+        case OK:
+        case ERR_IO_PENDING:
           break;
-        case URLRequestStatus::CANCELED:
-          if (url_request_->status().error() == ERR_TIMED_OUT)
-            failure_message_ = "WebSocket opening handshake timed out";
-          else
-            failure_message_ = "WebSocket opening handshake was canceled";
+        case ERR_ABORTED:
+          failure_message_ = "WebSocket opening handshake was canceled";
           break;
-        case URLRequestStatus::FAILED:
-          failure_message_ = FailureMessageFromNetError();
+        case ERR_TIMED_OUT:
+          failure_message_ = "WebSocket opening handshake timed out";
+          break;
+        default:
+          failure_message_ = FailureMessageFromNetError(net_error);
           break;
       }
     }
@@ -282,14 +285,14 @@ void Delegate::OnReceivedRedirect(URLRequest* request,
   }
 }
 
-void Delegate::OnResponseStarted(URLRequest* request) {
+void Delegate::OnResponseStarted(URLRequest* request, int net_error) {
+  DCHECK_NE(ERR_IO_PENDING, net_error);
   // All error codes, including OK and ABORTED, as with
   // Net.ErrorCodesForMainFrame3
-  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.WebSocket.ErrorCodes",
-                              -request->status().error());
-  if (!request->status().is_success()) {
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.WebSocket.ErrorCodes", -net_error);
+  if (net_error != OK) {
     DVLOG(3) << "OnResponseStarted (request failed)";
-    owner_->ReportFailure();
+    owner_->ReportFailure(net_error);
     return;
   }
   const int response_code = request->GetResponseCode();
@@ -315,7 +318,7 @@ void Delegate::OnResponseStarted(URLRequest* request) {
 
     default:
       result_ = FAILED;
-      owner_->ReportFailure();
+      owner_->ReportFailure(net_error);
   }
 }
 
@@ -365,7 +368,7 @@ std::unique_ptr<WebSocketStreamRequest> WebSocketStream::CreateAndConnectStream(
     const GURL& first_party_for_cookies,
     const std::string& additional_headers,
     URLRequestContext* url_request_context,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     std::unique_ptr<ConnectDelegate> connect_delegate) {
   std::unique_ptr<WebSocketStreamRequestImpl> request(
       new WebSocketStreamRequestImpl(
@@ -384,7 +387,7 @@ WebSocketStream::CreateAndConnectStreamForTesting(
     const GURL& first_party_for_cookies,
     const std::string& additional_headers,
     URLRequestContext* url_request_context,
-    const BoundNetLog& net_log,
+    const NetLogWithSource& net_log,
     std::unique_ptr<WebSocketStream::ConnectDelegate> connect_delegate,
     std::unique_ptr<base::Timer> timer) {
   std::unique_ptr<WebSocketStreamRequestImpl> request(
@@ -404,9 +407,9 @@ void WebSocketDispatchOnFinishOpeningHandshake(
   DCHECK(connect_delegate);
   if (headers.get()) {
     connect_delegate->OnFinishOpeningHandshake(
-        base::WrapUnique(new WebSocketHandshakeResponseInfo(
+        base::MakeUnique<WebSocketHandshakeResponseInfo>(
             url, headers->response_code(), headers->GetStatusText(), headers,
-            response_time)));
+            response_time));
   }
 }
 

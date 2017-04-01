@@ -21,12 +21,6 @@
 // The expression is a compile-time constant, and therefore can be
 // used in defining new arrays, for example.  If you use arraysize on
 // a pointer by mistake, you will get a compile-time error.
-//
-// One caveat is that arraysize() doesn't accept any array of an
-// anonymous type or a type defined inside a function.  In these rare
-// cases, you have to use the unsafe ARRAYSIZE_UNSAFE() macro below.  This is
-// due to a limitation in C++'s template system.  The limitation might
-// eventually be removed, but it hasn't happened yet.
 #define arraysize(array) (sizeof(ArraySizeHelper(array)))
 
 
@@ -287,24 +281,5 @@ template <typename T>
 inline T RoundUp(T x, intptr_t m) {
   return RoundDown<T>(static_cast<T>(x + m - 1), m);
 }
-
-
-namespace v8 {
-namespace base {
-
-// TODO(yangguo): This is a poor man's replacement for std::is_fundamental,
-// which requires C++11. Switch to std::is_fundamental once possible.
-template <typename T>
-inline bool is_fundamental() {
-  return false;
-}
-
-template <>
-inline bool is_fundamental<uint8_t>() {
-  return true;
-}
-
-}  // namespace base
-}  // namespace v8
 
 #endif   // V8_BASE_MACROS_H_

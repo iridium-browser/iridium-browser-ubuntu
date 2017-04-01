@@ -8,9 +8,10 @@
 #include <stdint.h>
 
 #include "base/memory/shared_memory_handle.h"
+#include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
-#include "net/base/ip_endpoint.h"
 #include "remoting/host/chromoting_param_traits.h"
+#include "remoting/host/desktop_environment_options.h"
 #include "remoting/host/screen_resolution.h"
 #include "remoting/protocol/errors.h"
 #include "remoting/protocol/transport.h"
@@ -54,17 +55,13 @@ IPC_MESSAGE_CONTROL1(ChromotingDaemonNetworkMsg_TerminalDisconnected,
                      int /* terminal_id */)
 
 // Notifies the network process that |terminal_id| is now attached to
-// a desktop integration process. |desktop_process| is the handle of the desktop
-// process. |desktop_pipe| is the client end of the desktop-to-network pipe
-// opened.
-//
-// Windows only: |desktop_pipe| has to be duplicated from the desktop process
-// by the receiver of the message. |desktop_process| is already duplicated by
-// the sender.
+// a desktop integration process. |session_id| is the id of the desktop session
+// being attached. |desktop_pipe| is the client end of the desktop-to-network
+// pipe opened.
 IPC_MESSAGE_CONTROL3(ChromotingDaemonNetworkMsg_DesktopAttached,
                      int /* terminal_id */,
-                     base::ProcessHandle /* desktop_process */,
-                     IPC::PlatformFileForTransit /* desktop_pipe */)
+                     int /* session_id */,
+                     IPC::ChannelHandle /* desktop_pipe */)
 
 //-----------------------------------------------------------------------------
 // Chromoting messages sent from the network to the daemon process.
@@ -89,8 +86,10 @@ IPC_MESSAGE_CONTROL2(ChromotingNetworkDaemonMsg_SetScreenResolution,
 // Serialized remoting::protocol::TransportRoute structure.
 IPC_STRUCT_BEGIN(SerializedTransportRoute)
   IPC_STRUCT_MEMBER(remoting::protocol::TransportRoute::RouteType, type)
-  IPC_STRUCT_MEMBER(net::IPEndPoint, remote_address)
-  IPC_STRUCT_MEMBER(net::IPEndPoint, local_address)
+  IPC_STRUCT_MEMBER(std::vector<uint8_t>, remote_ip)
+  IPC_STRUCT_MEMBER(uint16_t, remote_port)
+  IPC_STRUCT_MEMBER(std::vector<uint8_t>, local_ip)
+  IPC_STRUCT_MEMBER(uint16_t, local_port)
 IPC_STRUCT_END()
 
 IPC_ENUM_TRAITS_MAX_VALUE(remoting::protocol::TransportRoute::RouteType,
@@ -126,11 +125,8 @@ IPC_MESSAGE_CONTROL0(ChromotingNetworkDaemonMsg_HostShutdown)
 // Notifies the daemon that a desktop integration process has been initialized.
 // |desktop_pipe| specifies the client end of the desktop pipe. It is to be
 // forwarded to the desktop environment stub.
-//
-// Windows only: |desktop_pipe| has to be duplicated from the desktop process by
-// the receiver of the message.
 IPC_MESSAGE_CONTROL1(ChromotingDesktopDaemonMsg_DesktopAttached,
-                     IPC::PlatformFileForTransit /* desktop_pipe */)
+                     IPC::ChannelHandle /* desktop_pipe */)
 
 // Asks the daemon to inject Secure Attention Sequence (SAS) in the session
 // where the desktop process is running.
@@ -210,7 +206,7 @@ IPC_MESSAGE_CONTROL1(ChromotingDesktopNetworkMsg_AudioPacket,
 IPC_MESSAGE_CONTROL3(ChromotingNetworkDesktopMsg_StartSessionAgent,
                      std::string /* authenticated_jid */,
                      remoting::ScreenResolution /* resolution */,
-                     bool /* virtual_terminal */)
+                     remoting::DesktopEnvironmentOptions /* options */)
 
 IPC_MESSAGE_CONTROL0(ChromotingNetworkDesktopMsg_CaptureFrame)
 
@@ -254,24 +250,15 @@ IPC_MESSAGE_CONTROL1(ChromotingRemoteSecurityKeyToNetworkMsg_Request,
 
 //---------------------------------------------------------
 // Chromoting messages sent from the network process to the remote_security_key
-// process.  The network process uses two types of IPC channels to communicate
-// with the remote_security_key process.  The first is the 'service' channel.
-// It uses a hard-coded path known by the client and server classes and its job
-// is to create a new, private IPC channel for the client and provide the path
-// to that channel over the original IPC channel.  This purpose for this
-// mechanism is to allow the network process to service multiple concurrent
-// security key requests.  Once a client receives the connection details for
-// its private IPC channel, the server channel is reset and can be called by
-// another client.
-// The second type of IPC channel is strictly used for passing security key
-// request and response messages.  It is destroyed once the client disconnects.
+// process.
 
-// The IPC channel path for this remote_security_key connection.  This message
-// is sent from the well-known IPC server channel.
-IPC_MESSAGE_CONTROL1(ChromotingNetworkToRemoteSecurityKeyMsg_ConnectionDetails,
-                     std::string /* IPC Server path */)
-
-// The array of bytes representing a security key response from the remote
-// client.  This message is sent over the per-client IPC channel.
+// The array of bytes representing the security key response from the client.
 IPC_MESSAGE_CONTROL1(ChromotingNetworkToRemoteSecurityKeyMsg_Response,
                      std::string /* response bytes */)
+
+// Indicates the channel used for security key message passing is ready for use.
+IPC_MESSAGE_CONTROL0(ChromotingNetworkToRemoteSecurityKeyMsg_ConnectionReady)
+
+// Error indicating the request originated from outside the remoted session.
+// The IPC channel will be disconnected after this message has been sent.
+IPC_MESSAGE_CONTROL0(ChromotingNetworkToRemoteSecurityKeyMsg_InvalidSession)

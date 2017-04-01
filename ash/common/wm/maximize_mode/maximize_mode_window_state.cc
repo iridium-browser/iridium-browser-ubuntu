@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_window_manager.h"
 #include "ash/common/wm/window_animation_types.h"
 #include "ash/common/wm/window_state_util.h"
@@ -14,6 +13,7 @@
 #include "ash/common/wm/wm_screen_util.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -142,6 +142,10 @@ void MaximizeModeWindowState::OnWMEvent(wm::WindowState* window_state,
       if (!WmShell::Get()->IsPinned())
         UpdateWindow(window_state, wm::WINDOW_STATE_TYPE_PINNED, true);
       break;
+    case wm::WM_EVENT_TRUSTED_PIN:
+      if (!WmShell::Get()->IsPinned())
+        UpdateWindow(window_state, wm::WINDOW_STATE_TYPE_TRUSTED_PINNED, true);
+      break;
     case wm::WM_EVENT_TOGGLE_MAXIMIZE_CAPTION:
     case wm::WM_EVENT_TOGGLE_VERTICAL_MAXIMIZE:
     case wm::WM_EVENT_TOGGLE_HORIZONTAL_MAXIMIZE:
@@ -176,7 +180,8 @@ void MaximizeModeWindowState::OnWMEvent(wm::WindowState* window_state,
           window_state->SetRestoreBoundsInParent(bounds_in_parent);
       } else if (current_state_type_ != wm::WINDOW_STATE_TYPE_MINIMIZED &&
                  current_state_type_ != wm::WINDOW_STATE_TYPE_FULLSCREEN &&
-                 current_state_type_ != wm::WINDOW_STATE_TYPE_PINNED) {
+                 current_state_type_ != wm::WINDOW_STATE_TYPE_PINNED &&
+                 current_state_type_ != wm::WINDOW_STATE_TYPE_TRUSTED_PINNED) {
         // In all other cases (except for minimized windows) we respect the
         // requested bounds and center it to a fully visible area on the screen.
         gfx::Rect bounds_in_parent =
@@ -232,7 +237,8 @@ void MaximizeModeWindowState::AttachState(
   if (current_state_type_ != wm::WINDOW_STATE_TYPE_MAXIMIZED &&
       current_state_type_ != wm::WINDOW_STATE_TYPE_MINIMIZED &&
       current_state_type_ != wm::WINDOW_STATE_TYPE_FULLSCREEN &&
-      current_state_type_ != wm::WINDOW_STATE_TYPE_PINNED) {
+      current_state_type_ != wm::WINDOW_STATE_TYPE_PINNED &&
+      current_state_type_ != wm::WINDOW_STATE_TYPE_TRUSTED_PINNED) {
     UpdateWindow(window_state, GetMaximizedOrCenteredWindowType(window_state),
                  true);
   }
@@ -253,6 +259,7 @@ void MaximizeModeWindowState::UpdateWindow(wm::WindowState* window_state,
   DCHECK(target_state == wm::WINDOW_STATE_TYPE_MINIMIZED ||
          target_state == wm::WINDOW_STATE_TYPE_MAXIMIZED ||
          target_state == wm::WINDOW_STATE_TYPE_PINNED ||
+         target_state == wm::WINDOW_STATE_TYPE_TRUSTED_PINNED ||
          (target_state == wm::WINDOW_STATE_TYPE_NORMAL &&
           !window_state->CanMaximize()) ||
          target_state == wm::WINDOW_STATE_TYPE_FULLSCREEN);
@@ -283,7 +290,9 @@ void MaximizeModeWindowState::UpdateWindow(wm::WindowState* window_state,
   window_state->NotifyPostStateTypeChange(old_state_type);
 
   if (old_state_type == wm::WINDOW_STATE_TYPE_PINNED ||
-      target_state == wm::WINDOW_STATE_TYPE_PINNED) {
+      target_state == wm::WINDOW_STATE_TYPE_PINNED ||
+      old_state_type == wm::WINDOW_STATE_TYPE_TRUSTED_PINNED ||
+      target_state == wm::WINDOW_STATE_TYPE_TRUSTED_PINNED) {
     WmShell::Get()->SetPinnedWindow(window_state->window());
   }
 

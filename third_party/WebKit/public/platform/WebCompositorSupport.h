@@ -32,6 +32,8 @@
 #include "WebScrollbar.h"
 #include "WebScrollbarThemePainter.h"
 
+#include <memory>
+
 namespace cc {
 class Layer;
 class TextureLayerClient;
@@ -48,29 +50,35 @@ class WebScrollbarLayer;
 class WebScrollbarThemeGeometry;
 
 class WebCompositorSupport {
-public:
+ public:
+  // Layers -------------------------------------------------------
 
-    // Layers -------------------------------------------------------
+  virtual std::unique_ptr<WebLayer> createLayer() = 0;
 
-    virtual WebLayer* createLayer() { return nullptr; }
+  virtual std::unique_ptr<WebLayer> createLayerFromCCLayer(cc::Layer*) = 0;
 
-    virtual WebLayer* createLayerFromCCLayer(cc::Layer*) { return nullptr; }
+  virtual std::unique_ptr<WebContentLayer> createContentLayer(
+      WebContentLayerClient*) = 0;
 
-    virtual WebContentLayer* createContentLayer(WebContentLayerClient*) { return nullptr; }
+  virtual std::unique_ptr<WebExternalTextureLayer> createExternalTextureLayer(
+      cc::TextureLayerClient*) = 0;
 
-    virtual WebExternalTextureLayer* createExternalTextureLayer(cc::TextureLayerClient*) { return nullptr; }
+  virtual std::unique_ptr<WebImageLayer> createImageLayer() = 0;
 
-    virtual WebImageLayer* createImageLayer() { return nullptr; }
+  virtual std::unique_ptr<WebScrollbarLayer> createScrollbarLayer(
+      std::unique_ptr<WebScrollbar>,
+      WebScrollbarThemePainter,
+      std::unique_ptr<WebScrollbarThemeGeometry>) = 0;
 
-    // The ownership of the WebScrollbarThemeGeometry pointer is passed to Chromium.
-    virtual WebScrollbarLayer* createScrollbarLayer(WebScrollbar*, WebScrollbarThemePainter, WebScrollbarThemeGeometry*) { return nullptr; }
+  virtual std::unique_ptr<WebScrollbarLayer> createSolidColorScrollbarLayer(
+      WebScrollbar::Orientation,
+      int thumbThickness,
+      int trackStart,
+      bool isLeftSideVerticalScrollbar) = 0;
 
-    virtual WebScrollbarLayer* createSolidColorScrollbarLayer(WebScrollbar::Orientation, int thumbThickness, int trackStart, bool isLeftSideVerticalScrollbar) { return nullptr; }
-
-protected:
-    virtual ~WebCompositorSupport() { }
+ protected:
+  virtual ~WebCompositorSupport() {}
 };
-
 }
 
-#endif // WebCompositorSupport_h
+#endif  // WebCompositorSupport_h

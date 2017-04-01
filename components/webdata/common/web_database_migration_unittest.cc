@@ -88,7 +88,7 @@ class WebDatabaseMigrationTest : public testing::Test {
   base::FilePath GetDatabasePath() {
     const base::FilePath::CharType kWebDatabaseFilename[] =
         FILE_PATH_LITERAL("TestWebDatabase.sqlite3");
-    return temp_dir_.path().Append(base::FilePath(kWebDatabaseFilename));
+    return temp_dir_.GetPath().Append(base::FilePath(kWebDatabaseFilename));
   }
 
   // The textual contents of |file| are read from
@@ -130,7 +130,7 @@ class WebDatabaseMigrationTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 67;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 70;
 
 void WebDatabaseMigrationTest::LoadDatabase(
     const base::FilePath::StringType& file) {
@@ -164,6 +164,7 @@ TEST_F(WebDatabaseMigrationTest, VersionXxSqlFilesAreGolden) {
     ASSERT_NO_FATAL_FAILURE(LoadDatabase(file_name.value()))
         << "Failed to load " << file_name.MaybeAsASCII();
     DoMigration();
+
     EXPECT_EQ(expected_schema, RemoveQuotes(connection.GetSchema()))
         << "For version " << i;
   }
@@ -1067,5 +1068,101 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion66ToCurrent) {
     ASSERT_TRUE(read_masked.Step());
     EXPECT_EQ("Alice", read_masked.ColumnString(0));
     EXPECT_TRUE(read_masked.ColumnString(1).empty());
+  }
+}
+
+// Tests deletion of show_in_default_list column in keywords table.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion67ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_67.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 67, 67));
+
+    EXPECT_TRUE(connection.DoesColumnExist("keywords", "show_in_default_list"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    EXPECT_FALSE(
+        connection.DoesColumnExist("keywords", "show_in_default_list"));
+  }
+}
+
+// Tests addition of last_visited column in keywords table.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion68ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_68.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 68, 68));
+
+    EXPECT_FALSE(connection.DoesColumnExist("keywords", "last_visited"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    EXPECT_TRUE(
+        connection.DoesColumnExist("keywords", "last_visited"));
+  }
+}
+
+// Tests addition of sync metadata and model type state tables.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion69ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_69.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 69, 69));
+
+    EXPECT_FALSE(connection.DoesTableExist("autofill_sync_metadata"));
+    EXPECT_FALSE(connection.DoesTableExist("autofill_model_type_state"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    EXPECT_TRUE(connection.DoesTableExist("autofill_sync_metadata"));
+    EXPECT_TRUE(connection.DoesTableExist("autofill_model_type_state"));
   }
 }

@@ -177,11 +177,8 @@ bool CopyDirectory(const FilePath& from_path, const FilePath& to_path,
   FilePath real_from_path = MakeAbsoluteFilePath(from_path);
   if (real_from_path.empty())
     return false;
-  if (real_to_path.value().size() >= real_from_path.value().size() &&
-      real_to_path.value().compare(0, real_from_path.value().size(),
-                                   real_from_path.value()) == 0) {
+  if (real_to_path == real_from_path || real_from_path.IsParent(real_to_path))
     return false;
-  }
 
   int traverse_type = FileEnumerator::FILES;
   if (recursive)
@@ -557,26 +554,6 @@ bool NormalizeToNativeFilePath(const FilePath& path, FilePath* nt_path) {
   }
   ::UnmapViewOfFile(file_view);
   return success;
-}
-
-bool IsOnNetworkDrive(const base::FilePath& path) {
-  win::ScopedHandle handle(
-      ::CreateFileW(path.value().c_str(),
-                    GENERIC_READ,
-                    kFileShareAll,
-                    NULL,
-                    OPEN_EXISTING,
-                    FILE_FLAG_BACKUP_SEMANTICS,  // Needed to open directory.
-                    NULL));
-
-  if (!handle.IsValid())
-    return false;
-
-  // If able to get network information, then the file is on a network.
-  FILE_REMOTE_PROTOCOL_INFO remote_proto_info = {0};
-  return !!::GetFileInformationByHandleEx(handle.Get(), FileRemoteProtocolInfo,
-                                          &remote_proto_info,
-                                          sizeof(remote_proto_info));
 }
 
 // TODO(rkc): Work out if we want to handle NTFS junctions here or not, handle

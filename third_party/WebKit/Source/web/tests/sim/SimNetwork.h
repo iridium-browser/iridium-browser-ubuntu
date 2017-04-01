@@ -13,7 +13,6 @@
 namespace blink {
 
 class SimRequest;
-class WebURLLoader;
 class WebURLLoaderClient;
 class WebURLResponse;
 
@@ -21,29 +20,38 @@ class WebURLResponse;
 // return, write data, and finish in a specific order in a unit test. One of
 // these must be created before using the SimRequest to issue requests.
 class SimNetwork final : public WebURLLoaderTestDelegate {
-public:
-    SimNetwork();
-    ~SimNetwork();
+ public:
+  SimNetwork();
+  ~SimNetwork();
 
-private:
-    friend class SimRequest;
+ private:
+  friend class SimRequest;
 
-    static SimNetwork& current();
+  static SimNetwork& current();
 
-    void servePendingRequests();
-    void addRequest(SimRequest&);
-    void removeRequest(SimRequest&);
+  void servePendingRequests();
+  void addRequest(SimRequest&);
+  void removeRequest(SimRequest&);
 
-    // WebURLLoaderTestDelegate
-    void didReceiveResponse(WebURLLoaderClient*, WebURLLoader*, const WebURLResponse&) override;
-    void didReceiveData(WebURLLoaderClient*, WebURLLoader*, const char* data, int dataLength, int encodedDataLength) override;
-    void didFail(WebURLLoaderClient*, WebURLLoader*, const WebURLError&) override;
-    void didFinishLoading(WebURLLoaderClient*, WebURLLoader*, double finishTime, int64_t totalEncodedDataLength) override;
+  // WebURLLoaderTestDelegate
+  void didReceiveResponse(WebURLLoaderClient*,
+                          const WebURLResponse&) override;
+  void didReceiveData(WebURLLoaderClient*,
+                      const char* data,
+                      int dataLength) override;
+  void didFail(WebURLLoaderClient*,
+               const WebURLError&,
+               int64_t totalEncodedDataLength,
+               int64_t totalEncodedBodyLength) override;
+  void didFinishLoading(WebURLLoaderClient*,
+                        double finishTime,
+                        int64_t totalEncodedDataLength,
+                        int64_t totalEncodedBodyLength) override;
 
-    SimRequest* m_currentRequest;
-    HashMap<String, SimRequest*> m_requests;
+  SimRequest* m_currentRequest;
+  HashMap<String, SimRequest*> m_requests;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

@@ -35,7 +35,7 @@ class TestRenderWidget : public RenderWidget {
 
 class TestSyncMessageFilter : public IPC::SyncMessageFilter {
  public:
-  TestSyncMessageFilter() : IPC::SyncMessageFilter(NULL, false) {}
+  TestSyncMessageFilter() : IPC::SyncMessageFilter(nullptr) {}
 
   bool Send(IPC::Message* message) override {
     messages_.push_back(base::WrapUnique(message));
@@ -120,7 +120,8 @@ class QueueMessageSwapPromiseTest : public testing::Test {
          ++i) {
       if (*i) {
         (*i)->DidActivate();
-        (*i)->DidSwap(NULL);
+        (*i)->WillSwap(NULL);
+        (*i)->DidSwap();
       }
     }
   }
@@ -150,11 +151,12 @@ TEST_F(QueueMessageSwapPromiseTest, NextSwapPolicySchedulesMessageForNextSwap) {
 
   ASSERT_TRUE(promises_[0]);
   promises_[0]->DidActivate();
-  promises_[0]->DidSwap(NULL);
+  promises_[0]->WillSwap(NULL);
+  promises_[0]->DidSwap();
 
   EXPECT_TRUE(DirectSendMessages().empty());
   EXPECT_FALSE(frame_swap_message_queue_->Empty());
-  // frame_swap_message_queue_->DidSwap(1);
+  // frame_swap_message_queue_->WillSwap(1);
   EXPECT_TRUE(NextSwapHasMessage(messages_[0]));
 }
 
@@ -254,7 +256,8 @@ TEST_F(QueueMessageSwapPromiseTest, VisualStateSwapPromiseDidActivate) {
   QueueMessages(data, arraysize(data));
 
   promises_[0]->DidActivate();
-  promises_[0]->DidSwap(NULL);
+  promises_[0]->WillSwap(NULL);
+  promises_[0]->DidSwap();
   ASSERT_FALSE(promises_[1]);
   std::vector<std::unique_ptr<IPC::Message>> messages;
   messages.swap(NextSwapMessages());
@@ -266,10 +269,11 @@ TEST_F(QueueMessageSwapPromiseTest, VisualStateSwapPromiseDidActivate) {
   promises_[2]->DidActivate();
   promises_[2]->DidNotSwap(cc::SwapPromise::SWAP_FAILS);
   messages.swap(NextSwapMessages());
-  EXPECT_EQ(1u, messages.size());
-  EXPECT_TRUE(ContainsMessage(messages, messages_[2]));
+  EXPECT_TRUE(messages.empty());
 
-  EXPECT_TRUE(DirectSendMessages().empty());
+  EXPECT_EQ(1u, DirectSendMessages().size());
+  EXPECT_TRUE(ContainsMessage(DirectSendMessages(), messages_[2]));
+
   EXPECT_TRUE(NextSwapMessages().empty());
   EXPECT_TRUE(frame_swap_message_queue_->Empty());
 }

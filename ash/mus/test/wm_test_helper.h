@@ -9,27 +9,33 @@
 
 #include "ash/mus/window_manager_application.h"
 #include "base/macros.h"
-#include "services/ui/public/cpp/tests/test_window_tree_client_setup.h"
+#include "ui/aura/test/mus/test_window_tree_client_setup.h"
+
+namespace aura {
+class WindowTreeClientPrivate;
+}
 
 namespace base {
 class MessageLoop;
-}
-
-namespace gfx {
-class Rect;
+class SequencedWorkerPoolOwner;
 }
 
 namespace ui {
-class Window;
+class WindowTreeClientPrivate;
+}
+
+namespace views {
+class ViewsDelegate;
 }
 
 namespace ash {
+
+class RootWindowController;
+
 namespace mus {
 
-class WmTestScreen;
-
 // WMTestHelper is responsible for configuring a WindowTreeClient that
-// does not talk to mus. Additionally a test Screen (WmTestScreen) is created.
+// does not talk to mus.
 class WmTestHelper {
  public:
   WmTestHelper();
@@ -38,16 +44,44 @@ class WmTestHelper {
   void Init();
 
   WindowManagerApplication* window_manager_app() {
-    return &window_manager_app_;
+    return window_manager_app_.get();
   }
 
-  WmTestScreen* screen() { return screen_; }
+  // Returns the RootWindowControllers ordered by display id (which we assume
+  // correlates with creation order).
+  std::vector<RootWindowController*> GetRootsOrderedByDisplayId();
+
+  void UpdateDisplay(const std::string& display_spec);
 
  private:
+  // Creates a new RootWindowController given |display_spec|, which is the
+  // configuration of the display. On entry |next_x| is the x-coordinate to
+  // place the display at, on exit |next_x| is set to the x-coordinate to place
+  // the next display at.
+  RootWindowController* CreateRootWindowController(
+      const std::string& display_spec,
+      int* next_x);
+
+  // Updates the display of an existing RootWindowController. See
+  // CreateRootWindowController() for details on |next_x|.
+  void UpdateDisplay(RootWindowController* root_window_controller,
+                     const std::string& display_spec,
+                     int* next_x);
+
+  // Destroys a RootWindowController.
+  void DestroyRootWindowController(
+      RootWindowController* root_window_controller);
+
   std::unique_ptr<base::MessageLoop> message_loop_;
-  ui::TestWindowTreeClientSetup window_tree_client_setup_;
-  WindowManagerApplication window_manager_app_;
-  WmTestScreen* screen_ = nullptr;  // Owned by |window_manager_app_|.
+  std::unique_ptr<views::ViewsDelegate> views_delegate_;
+  aura::TestWindowTreeClientSetup window_tree_client_setup_;
+  std::unique_ptr<WindowManagerApplication> window_manager_app_;
+  std::unique_ptr<aura::WindowTreeClientPrivate> window_tree_client_private_;
+
+  // Id for the next Display created by CreateRootWindowController().
+  int64_t next_display_id_ = 1;
+
+  std::unique_ptr<base::SequencedWorkerPoolOwner> blocking_pool_owner_;
 
   DISALLOW_COPY_AND_ASSIGN(WmTestHelper);
 };

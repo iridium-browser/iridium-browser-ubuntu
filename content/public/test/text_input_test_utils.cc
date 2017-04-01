@@ -6,6 +6,7 @@
 
 #include <unordered_set>
 
+#include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
@@ -256,6 +257,11 @@ bool RequestCompositionInfoFromActiveWidget(WebContents* web_contents) {
   return true;
 }
 
+bool DoesFrameHaveFocusedEditableElement(RenderFrameHost* frame) {
+  return static_cast<RenderFrameHostImpl*>(frame)
+      ->has_focused_editable_element();
+}
+
 size_t GetRegisteredViewsCountFromTextInputManager(WebContents* web_contents) {
   std::unordered_set<RenderWidgetHostView*> views;
   TextInputManager* manager =
@@ -388,10 +394,6 @@ void TextInputStateSender::SetCanComposeInline(bool can_compose_inline) {
 
 void TextInputStateSender::SetShowImeIfNeeded(bool show_ime_if_needed) {
   text_input_state_->show_ime_if_needed = show_ime_if_needed;
-}
-
-void TextInputStateSender::SetIsNonImeChange(bool is_non_ime_change) {
-  text_input_state_->is_non_ime_change = is_non_ime_change;
 }
 
 TestInputMethodObserver::TestInputMethodObserver() {}

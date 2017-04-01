@@ -20,14 +20,14 @@ namespace base {
 struct UserMetricsAction;
 }
 
-namespace shell {
+namespace service_manager {
 class InterfaceProvider;
 class InterfaceRegistry;
 }
 
 namespace content {
 
-class MojoShellConnection;
+class ServiceManagerConnection;
 
 // An abstract base class that contains logic shared between most child
 // processes of the embedder.
@@ -67,17 +67,17 @@ class CONTENT_EXPORT ChildThread : public IPC::Sender {
   // actions in chrome/tools/extract_actions.py.
   virtual void RecordComputedAction(const std::string& action) = 0;
 
-  // Returns the MojoShellConnection for the thread (from which a
-  // shell::Connector can be obtained).
-  virtual MojoShellConnection* GetMojoShellConnection() = 0;
+  // Returns the ServiceManagerConnection for the thread (from which a
+  // service_manager::Connector can be obtained).
+  virtual ServiceManagerConnection* GetServiceManagerConnection() = 0;
 
   // Returns the InterfaceRegistry that this process uses to expose interfaces
   // to the browser.
-  virtual shell::InterfaceRegistry* GetInterfaceRegistry() = 0;
+  virtual service_manager::InterfaceRegistry* GetInterfaceRegistry() = 0;
 
   // Returns the InterfaceProvider that this process can use to bind
   // interfaces exposed to it by the browser.
-  virtual shell::InterfaceProvider* GetRemoteInterfaces() = 0;
+  virtual service_manager::InterfaceProvider* GetRemoteInterfaces() = 0;
 };
 
 }  // namespace content

@@ -20,7 +20,7 @@ class SingleThreadTaskRunner;
 namespace chromecast {
 namespace media {
 class AudioDecoderAlsa;
-class VideoDecoderDefault;
+class VideoDecoderNull;
 
 class MediaPipelineBackendAlsa : public MediaPipelineBackend {
  public:
@@ -34,7 +34,7 @@ class MediaPipelineBackendAlsa : public MediaPipelineBackend {
   VideoDecoder* CreateVideoDecoder() override;
   bool Initialize() override;
   bool Start(int64_t start_pts) override;
-  bool Stop() override;
+  void Stop() override;
   bool Pause() override;
   bool Resume() override;
   bool SetPlaybackRate(float rate) override;
@@ -54,7 +54,7 @@ class MediaPipelineBackendAlsa : public MediaPipelineBackend {
   State state_;
 
   const MediaPipelineDeviceParams params_;
-  std::unique_ptr<VideoDecoderDefault> video_decoder_;
+  std::unique_ptr<VideoDecoderNull> video_decoder_;
   std::unique_ptr<AudioDecoderAlsa> audio_decoder_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaPipelineBackendAlsa);

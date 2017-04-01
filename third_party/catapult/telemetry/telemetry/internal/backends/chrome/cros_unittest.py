@@ -7,9 +7,10 @@ import urllib2
 import os
 
 from telemetry.core import exceptions
-from telemetry.core import util
 from telemetry import decorators
 from telemetry.internal.backends.chrome import cros_test_case
+
+import py_utils
 
 
 class CrOSCryptohomeTest(cros_test_case.CrOSTestCase):
@@ -38,22 +39,41 @@ class CrOSCryptohomeTest(cros_test_case.CrOSTestCase):
 
 
 class CrOSLoginTest(cros_test_case.CrOSTestCase):
-  def _GetCredentials(self):
+  def _GetCredentials(self, credentials=None):
     """Read username and password from credentials.txt. The file is a single
-    line of the format username:password"""
-    username = None
-    password = None
+    line of the format username:password. Alternatively, |credentials| is used,
+    also of the same format."""
     credentials_file = os.path.join(os.path.dirname(__file__),
                                     'credentials.txt')
-    if os.path.exists(credentials_file):
+    if not credentials and os.path.exists(credentials_file):
       with open(credentials_file) as f:
-        username, password = f.read().strip().split(':')
-        # Remove dots.
-        username = username.replace('.', '')
-        # Canonicalize.
-        if username.find('@') == -1:
-          username += '@gmail.com'
-    return (username, password)
+        credentials = f.read().strip()
+
+    if not credentials:
+      return (None, None)
+
+    user, password = credentials.split(':')
+    # Canonicalize.
+    if user.find('@') == -1:
+      username = user
+      domain = 'gmail.com'
+    else:
+      username, domain = user.split('@')
+
+    # Remove dots.
+    if domain == 'gmail.com':
+      username = username.replace('.', '')
+    return ('%s@%s' % (username, domain), password)
+
+  @decorators.Enabled('chromeos')
+  def testGetCredentials(self):
+    (username, password) = self._GetCredentials('user.1:foo.1')
+    self.assertEquals(username, 'user1@gmail.com')
+    self.assertEquals(password, 'foo.1')
+
+    (username, password) = self._GetCredentials('user.1@chromium.org:bar.1')
+    self.assertEquals(username, 'user.1@chromium.org')
+    self.assertEquals(password, 'bar.1')
 
   @decorators.Enabled('chromeos')
   def testLoginStatus(self):
@@ -80,7 +100,7 @@ class CrOSLoginTest(cros_test_case.CrOSTestCase):
         extension.ExecuteJavaScript('chrome.autotestPrivate.logout();')
       except exceptions.Error:
         pass
-      util.WaitFor(lambda: not self._IsCryptohomeMounted(), 20)
+      py_utils.WaitFor(lambda: not self._IsCryptohomeMounted(), 20)
 
   @decorators.Disabled('all')
   def testGaiaLogin(self):
@@ -97,7 +117,7 @@ class CrOSLoginTest(cros_test_case.CrOSTestCase):
     with self._CreateBrowser(gaia_login=True,
                              username=username,
                              password=password):
-      self.assertTrue(util.WaitFor(self._IsCryptohomeMounted, 10))
+      self.assertTrue(py_utils.WaitFor(self._IsCryptohomeMounted, 10))
 
   @decorators.Enabled('chromeos')
   def testEnterpriseEnroll(self):
@@ -117,7 +137,7 @@ class CrOSLoginTest(cros_test_case.CrOSTestCase):
                                      for_user_triggered_enrollment=True)
 
     # Check for the existence of the device policy file.
-    self.assertTrue(util.WaitFor(lambda: self._cri.FileExistsOnDevice(
+    self.assertTrue(py_utils.WaitFor(lambda: self._cri.FileExistsOnDevice(
         '/home/.shadow/install_attributes.pb'), 15))
 
 
@@ -140,7 +160,7 @@ class CrOSScreenLockerTest(cros_test_case.CrOSTestCase):
           browser.oobe.EvaluateJavaScript("typeof Oobe == 'function'") and
           browser.oobe.EvaluateJavaScript(
           "typeof Oobe.authenticateForTesting == 'function'"))
-    util.WaitFor(ScreenLocked, 10)
+    py_utils.WaitFor(ScreenLocked, 10)
     self.assertTrue(self._IsScreenLocked(browser))
 
   def _AttemptUnlockBadPassword(self, browser):
@@ -150,18 +170,20 @@ class CrOSScreenLockerTest(cros_test_case.CrOSTestCase):
           document.getElementById('bubble').hidden
       ''')
     self.assertFalse(ErrorBubbleVisible())
+    # TODO(catapult:#3028): Fix interpolation of JavaScript values.
     browser.oobe.ExecuteJavaScript('''
         Oobe.authenticateForTesting('%s', 'bad');
     ''' % self._username)
-    util.WaitFor(ErrorBubbleVisible, 10)
+    py_utils.WaitFor(ErrorBubbleVisible, 10)
     self.assertTrue(self._IsScreenLocked(browser))
 
   def _UnlockScreen(self, browser):
     logging.info('Unlocking')
+    # TODO(catapult:#3028): Fix interpolation of JavaScript values.
     browser.oobe.ExecuteJavaScript('''
         Oobe.authenticateForTesting('%s', '%s');
     ''' % (self._username, self._password))
-    util.WaitFor(lambda: not browser.oobe_exists, 10)
+    py_utils.WaitFor(lambda: not browser.oobe_exists, 10)
     self.assertFalse(self._IsScreenLocked(browser))
 
   @decorators.Disabled('all')

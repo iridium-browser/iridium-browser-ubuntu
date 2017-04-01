@@ -49,14 +49,22 @@
 #include "net/base/network_change_notifier.h"
 #include "net/base/priority_queue.h"
 #include "net/base/request_priority.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/stream_socket.h"
 
+namespace base {
+class DictionaryValue;
+namespace trace_event {
+class ProcessMemoryDump;
+}
+}
+
 namespace net {
 
 class ClientSocketHandle;
+struct NetLogSource;
 
 // ConnectJob provides an abstract interface for "connecting" a socket.
 // The connection may involve host resolution, tcp connection, ssl connection,
@@ -84,12 +92,12 @@ class NET_EXPORT_PRIVATE ConnectJob {
              RequestPriority priority,
              ClientSocketPool::RespectLimits respect_limits,
              Delegate* delegate,
-             const BoundNetLog& net_log);
+             const NetLogWithSource& net_log);
   virtual ~ConnectJob();
 
   // Accessors
   const std::string& group_name() const { return group_name_; }
-  const BoundNetLog& net_log() { return net_log_; }
+  const NetLogWithSource& net_log() { return net_log_; }
 
   // Releases ownership of the underlying socket to the caller.
   // Returns the released socket, or NULL if there was a connection
@@ -115,7 +123,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
     return connect_timing_;
   }
 
-  const BoundNetLog& net_log() const { return net_log_; }
+  const NetLogWithSource& net_log() const { return net_log_; }
 
  protected:
   RequestPriority priority() const { return priority_; }
@@ -148,7 +156,7 @@ class NET_EXPORT_PRIVATE ConnectJob {
   base::OneShotTimer timer_;
   Delegate* delegate_;
   std::unique_ptr<StreamSocket> socket_;
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   // A ConnectJob is idle until Connect() has been called.
   bool idle_;
 
@@ -181,7 +189,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
             RequestPriority priority,
             ClientSocketPool::RespectLimits respect_limits,
             Flags flags,
-            const BoundNetLog& net_log);
+            const NetLogWithSource& net_log);
 
     virtual ~Request();
 
@@ -192,7 +200,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
       return respect_limits_;
     }
     Flags flags() const { return flags_; }
-    const BoundNetLog& net_log() const { return net_log_; }
+    const NetLogWithSource& net_log() const { return net_log_; }
 
     // TODO(eroman): Temporary until crbug.com/467797 is solved.
     void CrashIfInvalid() const;
@@ -210,7 +218,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     const RequestPriority priority_;
     const ClientSocketPool::RespectLimits respect_limits_;
     const Flags flags_;
-    const BoundNetLog net_log_;
+    const NetLogWithSource net_log_;
 
     // TODO(eroman): Temporary until crbug.com/467797 is solved.
     Liveness liveness_ = ALIVE;
@@ -333,6 +341,11 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
       const std::string& name,
       const std::string& type) const;
 
+  // Dumps memory allocation stats. |parent_dump_absolute_name| is the name
+  // used by the parent MemoryAllocatorDump in the memory dump hierarchy.
+  void DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
+                       const std::string& parent_dump_absolute_name) const;
+
   base::TimeDelta ConnectionTimeout() const {
     return connect_job_factory_->ConnectionTimeout();
   }
@@ -363,11 +376,6 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     // SETTINGS frame.
     bool IsUsable() const;
 
-    // An idle socket should be removed if it can't be reused, or has been idle
-    // for too long. |now| is the current time value (TimeTicks::Now()).
-    // |timeout| is the length of time to wait before timing out an idle socket.
-    bool ShouldCleanup(base::TimeTicks now, base::TimeDelta timeout) const;
-
     StreamSocket* socket;
     base::TimeTicks start_time;
   };
@@ -380,6 +388,8 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   // |active_socket_count| tracks the number of sockets held by clients.
   class Group {
    public:
+    using JobList = std::list<std::unique_ptr<ConnectJob>>;
+
     Group();
     ~Group();
 
@@ -464,7 +474,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     void DecrementActiveSocketCount() { active_socket_count_--; }
 
     int unassigned_job_count() const { return unassigned_job_count_; }
-    const std::list<ConnectJob*>& jobs() const { return jobs_; }
+    const JobList& jobs() const { return jobs_; }
     const std::list<IdleSocket>& idle_sockets() const { return idle_sockets_; }
     int active_socket_count() const { return active_socket_count_; }
     std::list<IdleSocket>* mutable_idle_sockets() { return &idle_sockets_; }
@@ -493,7 +503,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     size_t unassigned_job_count_;
 
     std::list<IdleSocket> idle_sockets_;
-    std::list<ConnectJob*> jobs_;
+    JobList jobs_;
     RequestQueue pending_requests_;
     int active_socket_count_;  // number of active sockets used by clients
     // A timer for when to start the backup job.
@@ -547,7 +557,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
                      ClientSocketHandle* handle,
                      base::TimeDelta time_idle,
                      Group* group,
-                     const BoundNetLog& net_log);
+                     const NetLogWithSource& net_log);
 
   // Adds |socket| to the list of idle sockets for |group|.
   void AddIdleSocket(std::unique_ptr<StreamSocket> socket, Group* group);
@@ -574,7 +584,8 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
   bool AssignIdleSocketToRequest(const Request& request, Group* group);
 
   static void LogBoundConnectJobToRequest(
-      const NetLog::Source& connect_job_source, const Request& request);
+      const NetLogSource& connect_job_source,
+      const Request& request);
 
   // Same as CloseOneIdleSocket() except it won't close an idle socket in
   // |group|.  If |group| is NULL, it is ignored.  Returns true if it closed a
@@ -668,7 +679,7 @@ class ClientSocketPoolBase {
             ClientSocketPool::RespectLimits respect_limits,
             internal::ClientSocketPoolBaseHelper::Flags flags,
             const scoped_refptr<SocketParams>& params,
-            const BoundNetLog& net_log)
+            const NetLogWithSource& net_log)
         : internal::ClientSocketPoolBaseHelper::Request(handle,
                                                         callback,
                                                         priority,
@@ -741,7 +752,7 @@ class ClientSocketPoolBase {
                     ClientSocketPool::RespectLimits respect_limits,
                     ClientSocketHandle* handle,
                     const CompletionCallback& callback,
-                    const BoundNetLog& net_log) {
+                    const NetLogWithSource& net_log) {
     std::unique_ptr<const Request> request(new Request(
         handle, callback, priority, respect_limits,
         internal::ClientSocketPoolBaseHelper::NORMAL, params, net_log));
@@ -754,7 +765,7 @@ class ClientSocketPoolBase {
   void RequestSockets(const std::string& group_name,
                       const scoped_refptr<SocketParams>& params,
                       int num_sockets,
-                      const BoundNetLog& net_log) {
+                      const NetLogWithSource& net_log) {
     const Request request(nullptr /* no handle */, CompletionCallback(), IDLE,
                           ClientSocketPool::RespectLimits::ENABLED,
                           internal::ClientSocketPoolBaseHelper::NO_IDLE_SOCKETS,
@@ -788,6 +799,11 @@ class ClientSocketPoolBase {
   LoadState GetLoadState(const std::string& group_name,
                          const ClientSocketHandle* handle) const {
     return helper_.GetLoadState(group_name, handle);
+  }
+
+  void DumpMemoryStats(base::trace_event::ProcessMemoryDump* pmd,
+                       const std::string& parent_dump_absolute_name) const {
+    return helper_.DumpMemoryStats(pmd, parent_dump_absolute_name);
   }
 
   virtual void OnConnectJobComplete(int result, ConnectJob* job) {

@@ -28,7 +28,7 @@ PbufferSurfaceCGL::PbufferSurfaceCGL(const egl::SurfaceState &state,
       mHeight(height),
       mFunctions(functions),
       mStateManager(renderer->getStateManager()),
-      mWorkarounds(renderer->getWorkarounds()),
+      mRenderer(renderer),
       mFramebuffer(0),
       mColorRenderbuffer(0),
       mDSRenderbuffer(0)
@@ -55,7 +55,7 @@ PbufferSurfaceCGL::~PbufferSurfaceCGL()
     }
 }
 
-egl::Error PbufferSurfaceCGL::initialize()
+egl::Error PbufferSurfaceCGL::initialize(const DisplayImpl *displayImpl)
 {
     mFunctions->genRenderbuffers(1, &mColorRenderbuffer);
     mStateManager->bindRenderbuffer(GL_RENDERBUFFER, mColorRenderbuffer);
@@ -80,7 +80,7 @@ egl::Error PbufferSurfaceCGL::makeCurrent()
     return egl::Error(EGL_SUCCESS);
 }
 
-egl::Error PbufferSurfaceCGL::swap()
+egl::Error PbufferSurfaceCGL::swap(const DisplayImpl *displayImpl)
 {
     return egl::Error(EGL_SUCCESS);
 }
@@ -136,7 +136,8 @@ EGLint PbufferSurfaceCGL::getSwapBehavior() const
 FramebufferImpl *PbufferSurfaceCGL::createDefaultFramebuffer(const gl::FramebufferState &state)
 {
     // TODO(cwallez) assert it happens only once?
-    return new FramebufferGL(mFramebuffer, state, mFunctions, mWorkarounds, mStateManager);
+    return new FramebufferGL(mFramebuffer, state, mFunctions, mRenderer->getWorkarounds(),
+                             mRenderer->getBlitter(), mStateManager);
 }
 
-}
+}  // namespace rx

@@ -7,8 +7,16 @@
 namespace headless {
 namespace switches {
 
+// Instructs headless_shell to cause network fetches to complete in order of
+// creation. This removes a significant source of network related
+// non-determinism at the cost of slower page loads.
+const char kDeterministicFetch[] = "deterministic-fetch";
+
 // Instructs headless_shell to print document.body.innerHTML to stdout.
 const char kDumpDom[] = "dump-dom";
+
+// Hide scrollbars from screenshots.
+const char kHideScrollbars[] = "hide-scrollbars";
 
 // Uses a specified proxy server, overrides system settings. This switch only
 // affects HTTP and HTTPS requests.
@@ -27,6 +35,10 @@ const char kRepl[] = "repl";
 // Save a screenshot of the loaded page.
 const char kScreenshot[] = "screenshot";
 
+// Issues a stop after the specified number of milliseconds.  This cancels all
+// navigation and causes the DOMContentLoaded event to fire.
+const char kTimeout[] = "timeout";
+
 // Sets the GL implementation to use. Use a blank string to disable GL
 // rendering.
 const char kUseGL[] = "use-gl";
@@ -42,7 +54,7 @@ const char kUserDataDir[] = "user-data-dir";
 // specified virtual time budget is exhausted.
 const char kVirtualTimeBudget[] = "virtual-time-budget";
 
-// Sets the initial window size. Provided as string in the format "800x600".
+// Sets the initial window size. Provided as string in the format "800,600".
 const char kWindowSize[] = "window-size";
 
 }  // namespace switches

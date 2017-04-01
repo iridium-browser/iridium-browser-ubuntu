@@ -41,6 +41,7 @@
 #include "net/http/http_cache.h"
 #include "net/http/http_stream_factory.h"
 #include "net/log/net_log.h"
+#include "net/net_features.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/next_proto.h"
 #include "net/ssl/channel_id_service.h"
@@ -59,6 +60,7 @@ namespace android_webview {
 namespace {
 
 const base::FilePath::CharType kChannelIDFilename[] = "Origin Bound Certs";
+const char kProxyServerSwitch[] = "proxy-server";
 
 void ApplyCmdlineOverridesToHostResolver(
     net::MappedHostResolver* host_resolver) {
@@ -134,10 +136,8 @@ std::unique_ptr<net::URLRequestJobFactory> CreateJobFactory(
   // it cannot be used by child processes until access to it is granted via
   // ChildProcessSecurityPolicy::GrantScheme(). This is done in
   // AwContentBrowserClient.
-  request_interceptors.push_back(
-      CreateAndroidContentRequestInterceptor().release());
-  request_interceptors.push_back(
-      CreateAndroidAssetFileRequestInterceptor().release());
+  request_interceptors.push_back(CreateAndroidContentRequestInterceptor());
+  request_interceptors.push_back(CreateAndroidAssetFileRequestInterceptor());
   // The AwRequestInterceptor must come after the content and asset file job
   // factories. This for WebViewClassic compatibility where it was not
   // possible to intercept resource loads to resolvable content:// and
@@ -145,20 +145,18 @@ std::unique_ptr<net::URLRequestJobFactory> CreateJobFactory(
   // This logical dependency is also the reason why the Content
   // URLRequestInterceptor has to be added as an interceptor rather than as a
   // ProtocolHandler.
-  request_interceptors.push_back(new AwRequestInterceptor());
+  request_interceptors.push_back(base::MakeUnique<AwRequestInterceptor>());
 
   // The chain of responsibility will execute the handlers in reverse to the
   // order in which the elements of the chain are created.
   std::unique_ptr<net::URLRequestJobFactory> job_factory(
       std::move(aw_job_factory));
-  for (content::URLRequestInterceptorScopedVector::reverse_iterator i =
-           request_interceptors.rbegin();
-       i != request_interceptors.rend();
+  for (auto i = request_interceptors.rbegin(); i != request_interceptors.rend();
        ++i) {
     job_factory.reset(new net::URLRequestInterceptingJobFactory(
-        std::move(job_factory), base::WrapUnique(*i)));
+        std::move(job_factory), std::move(*i)));
   }
-  request_interceptors.weak_clear();
+  request_interceptors.clear();
 
   return job_factory;
 }
@@ -206,7 +204,7 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   DCHECK(browser_context);
 
   builder.set_network_delegate(base::MakeUnique<AwNetworkDelegate>());
-#if !defined(DISABLE_FTP_SUPPORT)
+#if !BUILDFLAG(DISABLE_FTP_SUPPORT)
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
 #endif
   DCHECK(proxy_config_service_.get());
@@ -228,8 +226,16 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   // Android provides a local HTTP proxy that handles all the proxying.
   // Create the proxy without a resolver since we rely on this local HTTP proxy.
   // TODO(sgurun) is this behavior guaranteed through SDK?
-  builder.set_proxy_service(net::ProxyService::CreateWithoutProxyResolver(
-      std::move(proxy_config_service_), net_log_.get()));
+
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(kProxyServerSwitch)) {
+    std::string proxy = command_line.GetSwitchValueASCII(kProxyServerSwitch);
+    builder.set_proxy_service(net::ProxyService::CreateFixed(proxy));
+  } else {
+    builder.set_proxy_service(net::ProxyService::CreateWithoutProxyResolver(
+        std::move(proxy_config_service_), net_log_.get()));
+  }
   builder.set_net_log(net_log_.get());
   builder.SetCookieAndChannelIdStores(base::MakeUnique<AwCookieStoreWrapper>(),
                                       std::move(channel_id_service));

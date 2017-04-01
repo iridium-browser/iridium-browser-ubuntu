@@ -13,12 +13,14 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_config.h"
 #include "base/trace_event/trace_event.h"
-#include "services/shell/public/cpp/connection.h"
-#include "services/shell/public/cpp/connector.h"
+#include "services/service_manager/public/cpp/connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "services/tracing/public/cpp/switches.h"
+#include "services/tracing/public/interfaces/constants.mojom.h"
 
 namespace tracing {
 namespace {
@@ -28,12 +30,8 @@ namespace {
 base::LazyInstance<base::Lock>::Leaky g_singleton_lock =
     LAZY_INSTANCE_INITIALIZER;
 
-// Whether we are the first TracingImpl to be created in this mojo
-// application. The first TracingImpl in a physical mojo application connects
-// to the mojo:tracing service.
-//
-// If this is a ContentHandler, it will outlive all its served Applications. If
-// this is a raw mojo application, it is the only Application served.
+// Whether we are the first TracingImpl to be created in this service. The first
+// TracingImpl in a physical service connects to the tracing service.
 bool g_tracing_singleton_created = false;
 
 }
@@ -45,23 +43,10 @@ Provider::~Provider() {
   StopTracing();
 }
 
-void Provider::Initialize(shell::Connector* connector, const std::string& url) {
-  {
-    base::AutoLock lock(g_singleton_lock.Get());
-    if (g_tracing_singleton_created)
-      return;
-    g_tracing_singleton_created = true;
-  }
-
-  // This will only set the name for the first app in a loaded mojo file. It's
-  // up to something like CoreServices to name its own child threads.
-  base::PlatformThread::SetName(url);
-
-  mojom::FactoryPtr factory;
-  connector->ConnectToInterface("mojo:tracing", &factory);
+void Provider::InitializeWithFactoryInternal(mojom::FactoryPtr* factory) {
   mojom::ProviderPtr provider;
-  Bind(GetProxy(&provider));
-  factory->CreateRecorder(std::move(provider));
+  Bind(MakeRequest(&provider));
+  (*factory)->CreateRecorder(std::move(provider));
 #ifdef NDEBUG
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           tracing::kEarlyTracing)) {
@@ -70,6 +55,32 @@ void Provider::Initialize(shell::Connector* connector, const std::string& url) {
 #else
   ForceEnableTracing();
 #endif
+}
+
+void Provider::InitializeWithFactory(mojom::FactoryPtr* factory) {
+  {
+    base::AutoLock lock(g_singleton_lock.Get());
+    if (g_tracing_singleton_created)
+      return;
+    g_tracing_singleton_created = true;
+  }
+  InitializeWithFactoryInternal(factory);
+}
+
+void Provider::Initialize(service_manager::Connector* connector,
+                          const std::string& url) {
+  {
+    base::AutoLock lock(g_singleton_lock.Get());
+    if (g_tracing_singleton_created)
+      return;
+    g_tracing_singleton_created = true;
+  }
+  mojom::FactoryPtr factory;
+  connector->BindInterface(tracing::mojom::kServiceName, &factory);
+  InitializeWithFactoryInternal(&factory);
+  // This will only set the name for the first app in a loaded mojo file. It's
+  // up to something like CoreServices to name its own child threads.
+  base::PlatformThread::SetName(url);
 }
 
 void Provider::Bind(mojom::ProviderRequest request) {
@@ -107,7 +118,7 @@ void Provider::ForceEnableTracing() {
       base::trace_event::TraceConfig("*", base::trace_event::RECORD_UNTIL_FULL),
       base::trace_event::TraceLog::RECORDING_MODE);
   tracing_forced_ = true;
-  base::MessageLoop::current()->task_runner()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(&Provider::DelayedStop, weak_factory_.GetWeakPtr()));
 }
@@ -116,7 +127,7 @@ void Provider::DelayedStop() {
   // We use this indirection to account for cases where the Initialize method
   // takes more than one second to finish; thus we start the countdown only when
   // the current thread is unblocked.
-  base::MessageLoop::current()->task_runner()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&Provider::StopIfForced, weak_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(1));
@@ -139,7 +150,7 @@ void Provider::SendChunk(
   // The string will be empty if an error eccured or there were no trace
   // events. Empty string is not a valid chunk to record so skip in this case.
   if (!events_str->data().empty()) {
-    recorder_->Record(mojo::String(events_str->data()));
+    recorder_->Record(events_str->data());
   }
   if (!has_more_events) {
     recorder_.reset();

@@ -4,6 +4,7 @@ Copyright (c) 2016 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
+
 <link rel="import" href="/tracing/base/iteration_helpers.html">
 <link rel="import" href="/tracing/base/settings.html">
 <link rel="import" href="/tracing/ui/base/dropdown.html">
@@ -11,56 +12,38 @@ found in the LICENSE file.
 <dom-module id='tr-ui-b-grouping-table-groupby-picker'>
   <template>
     <style>
-    :host {
+    #container {
       display: flex;
-      flex-direction: row;
-      align-items: center;
     }
-    groups {
-      -webkit-user-select: none;
-      display: flex;
-      flex-direction: row;
-      padding-left: 10px;
-    }
-
-    group, possible-group {
-      display: span;
-      padding-right: 10px;
-      padding-left: 10px;
-    }
-
-    group {
-      border-left: 1px solid rgba(0,0,0,0);
-      cursor: move;
-    }
-
-    group.dragging {
-      opacity: 0.2;
-    }
-
-    group.drop-targeted {
+    #container *:not(:first-child) {
+      padding-left: 3px;
       border-left: 1px solid black;
-    }
-
-
-    #remove {
-      cursor: default;
-    }
-
-    #remove:not([hovered]) {
-      visibility: hidden;
+      margin-left: 3px;
     }
     </style>
-    <groups>
-    </groups>
-    <tr-ui-b-dropdown id="add-group"></tr-ui-b-dropdown>
+
+    <div id="container"></div>
   </template>
 </dom-module>
 
-<template id="tr-ui-b-grouping-table-groupby-picker-group-template">
-  <span id="key"></span>
-  <span id="remove">&times;</span>
-</template>
+<dom-module id="tr-ui-b-grouping-table-groupby-picker-group">
+  <template>
+    <style>
+    :host {
+      white-space: nowrap;
+    }
+    #left, #right {
+      user-select: none;
+      cursor: pointer;
+    }
+    </style>
+
+    <span id="left" on-click="moveLeft_">&#9664;</span>
+    <input type="checkbox" id="enabled" on-change="onEnableChanged_">
+    <label for="enabled" id="label"></label>
+    <span id="right" on-click="moveRight_">&#9654;</span>
+  </template>
+</dom-module>
 
 <script>
 'use strict';
@@ -69,39 +52,74 @@ tr.exportTo('tr.ui.b', function() {
   var THIS_DOC = document.currentScript.ownerDocument;
 
   Polymer({
+    is: 'tr-ui-b-grouping-table-groupby-picker-group',
+
+    created: function() {
+      this.picker_ = undefined;
+      this.group_ = undefined;
+    },
+
+    get picker() {
+      return this.picker_;
+    },
+
+    set picker(picker) {
+      this.picker_ = picker;
+    },
+
+    get group() {
+      return this.group_;
+    },
+
+    set group(g) {
+      this.group_ = g;
+      this.$.label.textContent = g.label;
+    },
+
+    get enabled() {
+      return this.$.enabled.checked;
+    },
+
+    set enabled(enabled) {
+      this.$.enabled.checked = enabled;
+      if (!this.enabled) {
+        this.$.left.style.display = 'none';
+        this.$.right.style.display = 'none';
+      }
+    },
+
+    set isFirst(isFirst) {
+      this.$.left.style.display = (!this.enabled || isFirst) ? 'none' :
+        'inline';
+    },
+
+    set isLast(isLast) {
+      this.$.right.style.display = (!this.enabled || isLast) ? 'none' :
+        'inline';
+    },
+
+    moveLeft_: function() {
+      this.picker.moveLeft_(this);
+    },
+
+    moveRight_: function() {
+      this.picker.moveRight_(this);
+    },
+
+    onEnableChanged_: function() {
+      if (!this.enabled) {
+        this.$.left.style.display = 'none';
+        this.$.right.style.display = 'none';
+      }
+      this.picker.onEnableChanged_(this);
+    }
+  });
+
+  Polymer({
     is: 'tr-ui-b-grouping-table-groupby-picker',
 
     created: function() {
-      this.needsInit_ = true;
-      this.defaultGroupKeys_ = undefined;
-      this.possibleGroups_ = [];
-      this.settingsKey_ = [];
-
-      this.currentGroupKeys_ = undefined;
-
-      this.dragging_ = false;
-    },
-
-    get defaultGroupKeys() {
-      return this.defaultGroupKeys_;
-    },
-
-    set defaultGroupKeys(defaultGroupKeys) {
-      if (!this.needsInit_)
-        throw new Error('Already initialized.');
-      this.defaultGroupKeys_ = defaultGroupKeys;
-      this.maybeInit_();
-    },
-
-    get possibleGroups() {
-      return this.possibleGroups_;
-    },
-
-    set possibleGroups(possibleGroups) {
-      if (!this.needsInit_)
-        throw new Error('Already initialized.');
-      this.possibleGroups_ = possibleGroups;
-      this.maybeInit_();
+      this.settingsKey_ = undefined;
     },
 
     get settingsKey() {
@@ -109,206 +127,127 @@ tr.exportTo('tr.ui.b', function() {
     },
 
     set settingsKey(settingsKey) {
-      if (!this.needsInit_)
-        throw new Error('Already initialized.');
       this.settingsKey_ = settingsKey;
-      this.maybeInit_();
-    },
-
-    maybeInit_: function() {
-      if (!this.needsInit_)
-        return;
-
-      if (this.settingsKey_ === undefined)
-        return;
-      if (this.defaultGroupKeys_ === undefined)
-        return;
-      if (this.possibleGroups_ === undefined)
-        return;
-
-      this.needsInit_ = false;
-
-      var addGroupEl = Polymer.dom(this.root).querySelector('#add-group');
-      Polymer.dom(addGroupEl.iconElement).textContent = 'Add another...';
-
-      this.currentGroupKeys = tr.b.Settings.get(
-        this.settingsKey_, this.defaultGroupKeys_);
-    },
-
-    get currentGroupKeys() {
-      return this.currentGroupKeys_;
-    },
-
-    get currentGroups() {
-      var groupsByKey = {};
-      this.possibleGroups_.forEach(function(group) {
-        groupsByKey[group.key] = group;
-      });
-      return this.currentGroupKeys_.map(function(groupKey) {
-        return groupsByKey[groupKey];
-      });
-    },
-
-    set currentGroupKeys(currentGroupKeys) {
-      if (this.currentGroupKeys_ === currentGroupKeys)
-        return;
-
-      if (!(currentGroupKeys instanceof Array))
-        throw new Error('Must be array');
-
-      this.currentGroupKeys_ = currentGroupKeys;
-      this.updateGroups_();
-
-      tr.b.Settings.set(
-        this.settingsKey_, this.currentGroupKeys_);
-
-      var e = new tr.b.Event('current-groups-changed');
-      this.dispatchEvent(e);
-    },
-
-    updateGroups_: function() {
-      var groupsEl = Polymer.dom(this.root).querySelector('groups');
-      var addGroupEl = Polymer.dom(this.root).querySelector('#add-group');
-
-      Polymer.dom(groupsEl).textContent = '';
-      Polymer.dom(addGroupEl).textContent = '';
-
-      var unusedGroups = {};
-      var groupsByKey = {};
-      this.possibleGroups_.forEach(function(group) {
-        unusedGroups[group.key] = group;
-        groupsByKey[group.key] = group;
-      });
-
-      this.currentGroupKeys_.forEach(function(key) {
-        delete unusedGroups[key];
-      });
-
-      // Create groups.
-      var groupTemplateEl = Polymer.dom(THIS_DOC).querySelector(
-          '#tr-ui-b-grouping-table-groupby-picker-group-template');
-      this.currentGroupKeys_.forEach(function(key, index) {
-        var group = groupsByKey[key];
-        var groupEl = document.createElement('group');
-        groupEl.groupKey = key;
-        Polymer.dom(groupEl).appendChild(
-            document.importNode(groupTemplateEl.content, true));
-        Polymer.dom(Polymer.dom(groupEl).querySelector('#key')).textContent =
-            group.label;
-        Polymer.dom(groupsEl).appendChild(groupEl);
-
-        this.configureRemoveButtonForGroup_(groupEl);
-        this.configureDragAndDropForGroup_(groupEl);
-      }, this);
-
-      // Adjust dropdown.
-      tr.b.iterItems(unusedGroups, function(key, group) {
-        var groupEl = document.createElement('possible-group');
-        Polymer.dom(groupEl).textContent = group.label;
-        groupEl.addEventListener('click', function() {
-          var newKeys = this.currentGroupKeys.slice();
-          newKeys.push(key);
-          this.currentGroupKeys = newKeys;
-          addGroupEl.close();
-        }.bind(this));
-        Polymer.dom(addGroupEl).appendChild(groupEl);
-      }, this);
-
-      // Hide dropdown if needed.
-      if (tr.b.dictionaryLength(unusedGroups) == 0) {
-        addGroupEl.style.display = 'none';
-      } else {
-        addGroupEl.style.display = '';
+      if (this.$.container.children.length) {
+        this.restoreSetting_();
       }
     },
 
-    configureRemoveButtonForGroup_: function(groupEl) {
-      var removeEl = Polymer.dom(groupEl).querySelector('#remove');
-      removeEl.addEventListener('click', function() {
-        var newKeys = this.currentGroupKeys.slice();
-        var i = newKeys.indexOf(groupEl.groupKey);
-        newKeys.splice(i, 1);
-        this.currentGroupKeys = newKeys;
-      }.bind(this));
-
-      groupEl.addEventListener('mouseenter', function() {
-        Polymer.dom(removeEl).setAttribute('hovered', true);
-      });
-      groupEl.addEventListener('mouseleave', function() {
-        Polymer.dom(removeEl).removeAttribute('hovered');
-      });
+    restoreSetting_: function() {
+      this.currentGroupKeys = tr.b.Settings.get(this.settingsKey_,
+          this.currentGroupKeys);
     },
 
-    configureDragAndDropForGroup_: function(groupEl) {
-      var groupsEl = groupEl.parentElement;
+    get possibleGroups() {
+      return [...this.$.container.children].map(groupEl => groupEl.group);
+    },
 
-      Polymer.dom(groupEl).setAttribute('draggable', true);
+    set possibleGroups(possibleGroups) {
+      Polymer.dom(this.$.container).textContent = '';
+      for (var i = 0; i < possibleGroups.length; ++i) {
+        var groupEl = document.createElement(
+            'tr-ui-b-grouping-table-groupby-picker-group');
+        groupEl.picker = this;
+        groupEl.group = possibleGroups[i];
+        Polymer.dom(this.$.container).appendChild(groupEl);
+      }
+      this.restoreSetting_();
+      this.updateFirstLast_();
+    },
 
-      groupEl.addEventListener('dragstart', function(e) {
-        e.dataTransfer.setData('groupKey', groupEl.groupKey);
-        Polymer.dom(Polymer.dom(groupEl).querySelector(
-            '#remove')).removeAttribute('hovered');
-        Polymer.dom(groupEl).classList.add('dragging');
-        this.dragging_ = true;
-      }.bind(this));
+    updateFirstLast_: function() {
+      var groupEls = this.$.container.children;
+      var enabledGroupEls = [...groupEls].filter(el => el.enabled);
+      for (var i = 0; i < enabledGroupEls.length; ++i) {
+        enabledGroupEls[i].isFirst = i === 0;
+        enabledGroupEls[i].isLast = i === enabledGroupEls.length - 1;
+      }
+    },
 
-      groupEl.addEventListener('dragend', function(e) {
-        console.log(e.type, groupEl.groupKey);
-        for (var i = 0; i < groupsEl.children.length; i++)
-          Polymer.dom(groupsEl.children[i]).classList.remove('drop-targeted');
-        Polymer.dom(groupEl).classList.remove('dragging');
-        this.dragging_ = false;
-      }.bind(this));
+    get currentGroupKeys() {
+      return this.currentGroups.map(group => group.key);
+    },
 
-      // Drop targeting.
-      groupEl.addEventListener('dragenter', function(e) {
-        if (!this.dragging_)
-          return;
-        Polymer.dom(groupEl).classList.add('drop-targeted');
-        if (this.dragging_)
-          e.preventDefault();
-      }.bind(this));
+    get currentGroups() {
+      var groups = [];
+      for (var groupEl of this.$.container.children) {
+        if (groupEl.enabled) {
+          groups.push(groupEl.group);
+        }
+      }
+      return groups;
+    },
 
-      groupEl.addEventListener('dragleave', function(e) {
-        if (!this.dragging_)
-          return;
-        Polymer.dom(groupEl).classList.remove('drop-targeted');
-        e.preventDefault();
-      }.bind(this));
+    set currentGroupKeys(newKeys) {
+      if (!tr.b.compareArrays(this.currentGroupKeys, newKeys,
+            (x, y) => x.localeCompare(y))) {
+        return;
+      }
 
+      var possibleGroups = new Map();
+      for (var group of this.possibleGroups) {
+        possibleGroups.set(group.key, group);
+      }
 
-      // Drop logic.
-      groupEl.addEventListener('dragover', function(e) {
-        if (!this.dragging_)
-          return;
-        e.preventDefault();
-        Polymer.dom(groupEl).classList.add('drop-targeted');
-      }.bind(this));
+      var groupEls = this.$.container.children;
 
-      groupEl.addEventListener('drop', function(e) {
-        if (!this.dragging_)
-          return;
+      var i = 0;
+      for (i = 0; i < newKeys.length; ++i) {
+        var group = possibleGroups.get(newKeys[i]);
+        if (group === undefined) {
+          newKeys.splice(i, 1);
+          --i;
+          continue;
+        }
+        groupEls[i].group = group;
+        groupEls[i].enabled = true;
+        possibleGroups.delete(newKeys[i]);
+      }
 
-        var srcKey = e.dataTransfer.getData('groupKey');
-        var dstKey = groupEl.groupKey;
+      for (var group of possibleGroups.values()) {
+        groupEls[i].group = group;
+        groupEls[i].enabled = false;
+        ++i;
+      }
 
-        if (srcKey === dstKey)
-          return;
+      this.updateFirstLast_();
+      this.onCurrentGroupsChanged_();
+    },
 
-        var newKeys = this.currentGroupKeys_.slice();
+    moveLeft_: function(groupEl) {
+      var reference = groupEl.previousSibling;
+      Polymer.dom(this.$.container).removeChild(groupEl);
+      Polymer.dom(this.$.container).insertBefore(groupEl, reference);
+      this.updateFirstLast_();
 
-        var srcIndex = this.currentGroupKeys_.indexOf(srcKey);
-        newKeys.splice(srcIndex, 1);
+      if (groupEl.enabled) {
+        this.onCurrentGroupsChanged_();
+      }
+    },
 
-        var dstIndex = this.currentGroupKeys_.indexOf(dstKey);
-        newKeys.splice(dstIndex, 0, srcKey);
+    moveRight_: function(groupEl) {
+      var reference = groupEl.nextSibling.nextSibling;
+      Polymer.dom(this.$.container).removeChild(groupEl);
+      if (reference) {
+        Polymer.dom(this.$.container).insertBefore(groupEl, reference);
+      } else {
+        Polymer.dom(this.$.container).appendChild(groupEl);
+      }
+      this.updateFirstLast_();
 
-        this.currentGroupKeys = newKeys;
+      if (groupEl.enabled) {
+        this.onCurrentGroupsChanged_();
+      }
+    },
 
-        e.dataTransfer.clearData();
-        e.preventDefault();
-        e.stopPropagation();
-      }.bind(this));
+    onCurrentGroupsChanged_: function() {
+      this.dispatchEvent(new tr.b.Event('current-groups-changed'));
+      tr.b.Settings.set(this.settingsKey_, this.currentGroupKeys);
+    },
+
+    onEnableChanged_: function(groupEl) {
+      this.updateFirstLast_();
+      this.onCurrentGroupsChanged_();
     }
   });
 

@@ -20,7 +20,6 @@
 #include "net/base/request_priority.h"
 
 namespace net {
-class HostPortPair;
 class URLRequest;
 }
 
@@ -105,17 +104,6 @@ class CONTENT_EXPORT ResourceScheduler : public base::NonThreadSafe {
                            int intra_priority_value);
 
  private:
-  // Returns true if limiting of outstanding requests is enabled.
-  bool limit_outstanding_requests() const {
-    return limit_outstanding_requests_;
-  }
-
-  // Returns the outstanding request limit.  Only valid if
-  // |IsLimitingOutstandingRequests()|.
-  size_t outstanding_request_limit() const {
-    return outstanding_request_limit_;
-  }
-
   // Returns the maximum number of delayable requests to all be in-flight at
   // any point in time (across all hosts).
   size_t max_num_delayable_requests() const {
@@ -145,10 +133,12 @@ class CONTENT_EXPORT ResourceScheduler : public base::NonThreadSafe {
   Client* GetClient(int child_id, int route_id);
 
   ClientMap client_map_;
-  bool limit_outstanding_requests_;
-  size_t outstanding_request_limit_;
   size_t max_num_delayable_requests_;
   RequestSet unowned_requests_;
+
+  // True if requests to servers that support priorities (e.g., H2/QUIC) can
+  // be delayed.
+  bool priority_requests_delayable_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceScheduler);
 };

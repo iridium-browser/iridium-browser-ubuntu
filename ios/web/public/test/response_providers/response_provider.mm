@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/public/test/response_providers/response_provider.h"
+#import "ios/web/public/test/response_providers/response_provider.h"
 
 #include "base/strings/stringprintf.h"
 #include "net/http/http_response_headers.h"
@@ -47,6 +47,23 @@ scoped_refptr<net::HttpResponseHeaders> ResponseProvider::GetResponseHeaders(
 scoped_refptr<net::HttpResponseHeaders>
 ResponseProvider::GetDefaultResponseHeaders() {
   return GetResponseHeaders("text/html", net::HTTP_OK);
+}
+
+// static
+std::map<GURL, scoped_refptr<net::HttpResponseHeaders>>
+ResponseProvider::GetDefaultResponseHeaders(
+    const std::map<GURL, std::pair<std::string, std::string>>& responses) {
+  std::map<GURL, scoped_refptr<net::HttpResponseHeaders>> headers;
+  for (const auto& pair : responses) {
+    std::string cookie = pair.second.first;
+    scoped_refptr<net::HttpResponseHeaders> result =
+        GetDefaultResponseHeaders();
+    if (!cookie.empty()) {
+      result->AddCookie(cookie);
+    }
+    headers.insert(std::make_pair(pair.first, result));
+  }
+  return headers;
 }
 
 // static

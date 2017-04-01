@@ -660,8 +660,8 @@ void Simulator::set_last_debugger_input(char* input) {
   last_debugger_input_ = input;
 }
 
-void Simulator::FlushICache(base::HashMap* i_cache, void* start_addr,
-                            size_t size) {
+void Simulator::FlushICache(base::CustomMatcherHashMap* i_cache,
+                            void* start_addr, size_t size) {
   intptr_t start = reinterpret_cast<intptr_t>(start_addr);
   int intra_line = (start & CachePage::kLineMask);
   start -= intra_line;
@@ -681,7 +681,8 @@ void Simulator::FlushICache(base::HashMap* i_cache, void* start_addr,
   }
 }
 
-CachePage* Simulator::GetCachePage(base::HashMap* i_cache, void* page) {
+CachePage* Simulator::GetCachePage(base::CustomMatcherHashMap* i_cache,
+                                   void* page) {
   base::HashMap::Entry* entry = i_cache->LookupOrInsert(page, ICacheHash(page));
   if (entry->value == NULL) {
     CachePage* new_page = new CachePage();
@@ -691,7 +692,8 @@ CachePage* Simulator::GetCachePage(base::HashMap* i_cache, void* page) {
 }
 
 // Flush from start up to and not including start + size.
-void Simulator::FlushOnePage(base::HashMap* i_cache, intptr_t start, int size) {
+void Simulator::FlushOnePage(base::CustomMatcherHashMap* i_cache,
+                             intptr_t start, int size) {
   DCHECK(size <= CachePage::kPageSize);
   DCHECK(AllOnOnePage(start, size - 1));
   DCHECK((start & CachePage::kLineMask) == 0);
@@ -703,7 +705,8 @@ void Simulator::FlushOnePage(base::HashMap* i_cache, intptr_t start, int size) {
   memset(valid_bytemap, CachePage::LINE_INVALID, size >> CachePage::kLineShift);
 }
 
-void Simulator::CheckICache(base::HashMap* i_cache, Instruction* instr) {
+void Simulator::CheckICache(base::CustomMatcherHashMap* i_cache,
+                            Instruction* instr) {
   intptr_t address = reinterpret_cast<intptr_t>(instr);
   void* page = reinterpret_cast<void*>(address & (~CachePage::kPageMask));
   void* line = reinterpret_cast<void*>(address & (~CachePage::kLineMask));
@@ -740,6 +743,18 @@ void Simulator::EvalTableInit() {
     EvalTable[i] = &Simulator::Evaluate_Unknown;
   }
 
+#define S390_SUPPORTED_VECTOR_OPCODE_LIST(V)                 \
+  V(vfs, VFS, 0xE7E2) /* type = VRR_C VECTOR FP SUBTRACT  */ \
+  V(vfa, VFA, 0xE7E3) /* type = VRR_C VECTOR FP ADD  */      \
+  V(vfd, VFD, 0xE7E5) /* type = VRR_C VECTOR FP DIVIDE  */   \
+  V(vfm, VFM, 0xE7E7) /* type = VRR_C VECTOR FP MULTIPLY  */
+
+#define CREATE_EVALUATE_TABLE(name, op_name, op_value) \
+  EvalTable[op_name] = &Simulator::Evaluate_##op_name;
+  S390_SUPPORTED_VECTOR_OPCODE_LIST(CREATE_EVALUATE_TABLE);
+#undef CREATE_EVALUATE_TABLE
+
+  EvalTable[DUMY] = &Simulator::Evaluate_DUMY;
   EvalTable[BKPT] = &Simulator::Evaluate_BKPT;
   EvalTable[SPM] = &Simulator::Evaluate_SPM;
   EvalTable[BALR] = &Simulator::Evaluate_BALR;
@@ -950,6 +965,7 @@ void Simulator::EvalTableInit() {
   EvalTable[ALSIH] = &Simulator::Evaluate_ALSIH;
   EvalTable[ALSIHN] = &Simulator::Evaluate_ALSIHN;
   EvalTable[CIH] = &Simulator::Evaluate_CIH;
+  EvalTable[CLIH] = &Simulator::Evaluate_CLIH;
   EvalTable[STCK] = &Simulator::Evaluate_STCK;
   EvalTable[CFC] = &Simulator::Evaluate_CFC;
   EvalTable[IPM] = &Simulator::Evaluate_IPM;
@@ -1469,7 +1485,7 @@ void Simulator::EvalTableInit() {
 Simulator::Simulator(Isolate* isolate) : isolate_(isolate) {
   i_cache_ = isolate_->simulator_i_cache();
   if (i_cache_ == NULL) {
-    i_cache_ = new base::HashMap(&ICacheMatch);
+    i_cache_ = new base::CustomMatcherHashMap(&ICacheMatch);
     isolate_->set_simulator_i_cache(i_cache_);
   }
   Initialize(isolate);
@@ -1609,7 +1625,8 @@ class Redirection {
 };
 
 // static
-void Simulator::TearDown(base::HashMap* i_cache, Redirection* first) {
+void Simulator::TearDown(base::CustomMatcherHashMap* i_cache,
+                         Redirection* first) {
   Redirection::DeleteChain(first);
   if (i_cache != nullptr) {
     for (base::HashMap::Entry* entry = i_cache->Start(); entry != nullptr;
@@ -5678,7 +5695,7 @@ void Simulator::CallInternal(byte* entry, int reg_arg_count) {
 
   // Set up the non-volatile registers with a known value. To be able to check
   // that they are preserved properly across JS execution.
-  intptr_t callee_saved_value = icount_;
+  uintptr_t callee_saved_value = icount_;
   if (reg_arg_count < 5) {
     set_register(r6, callee_saved_value + 6);
   }
@@ -5696,15 +5713,15 @@ void Simulator::CallInternal(byte* entry, int reg_arg_count) {
 // Check that the non-volatile registers have been preserved.
 #ifndef V8_TARGET_ARCH_S390X
   if (reg_arg_count < 5) {
-    DCHECK_EQ(callee_saved_value + 6, get_low_register<int32_t>(r6));
+    DCHECK_EQ(callee_saved_value + 6, get_low_register<uint32_t>(r6));
   }
-  DCHECK_EQ(callee_saved_value + 7, get_low_register<int32_t>(r7));
-  DCHECK_EQ(callee_saved_value + 8, get_low_register<int32_t>(r8));
-  DCHECK_EQ(callee_saved_value + 9, get_low_register<int32_t>(r9));
-  DCHECK_EQ(callee_saved_value + 10, get_low_register<int32_t>(r10));
-  DCHECK_EQ(callee_saved_value + 11, get_low_register<int32_t>(r11));
-  DCHECK_EQ(callee_saved_value + 12, get_low_register<int32_t>(r12));
-  DCHECK_EQ(callee_saved_value + 13, get_low_register<int32_t>(r13));
+  DCHECK_EQ(callee_saved_value + 7, get_low_register<uint32_t>(r7));
+  DCHECK_EQ(callee_saved_value + 8, get_low_register<uint32_t>(r8));
+  DCHECK_EQ(callee_saved_value + 9, get_low_register<uint32_t>(r9));
+  DCHECK_EQ(callee_saved_value + 10, get_low_register<uint32_t>(r10));
+  DCHECK_EQ(callee_saved_value + 11, get_low_register<uint32_t>(r11));
+  DCHECK_EQ(callee_saved_value + 12, get_low_register<uint32_t>(r12));
+  DCHECK_EQ(callee_saved_value + 13, get_low_register<uint32_t>(r13));
 #else
   if (reg_arg_count < 5) {
     DCHECK_EQ(callee_saved_value + 6, get_register(r6));
@@ -5758,7 +5775,7 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
   // Remaining arguments passed on stack.
   int64_t original_stack = get_register(sp);
   // Compute position of stack on entry to generated code.
-  intptr_t entry_stack =
+  uintptr_t entry_stack =
       (original_stack -
        (kCalleeRegisterSaveAreaSize + stack_arg_count * sizeof(intptr_t)));
   if (base::OS::ActivationFrameAlignment() != 0) {
@@ -5794,7 +5811,7 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
 
   // Set up the non-volatile registers with a known value. To be able to check
   // that they are preserved properly across JS execution.
-  intptr_t callee_saved_value = icount_;
+  uintptr_t callee_saved_value = icount_;
   if (reg_arg_count < 5) {
     set_register(r6, callee_saved_value + 6);
   }
@@ -5812,15 +5829,15 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
 // Check that the non-volatile registers have been preserved.
 #ifndef V8_TARGET_ARCH_S390X
   if (reg_arg_count < 5) {
-    DCHECK_EQ(callee_saved_value + 6, get_low_register<int32_t>(r6));
+    DCHECK_EQ(callee_saved_value + 6, get_low_register<uint32_t>(r6));
   }
-  DCHECK_EQ(callee_saved_value + 7, get_low_register<int32_t>(r7));
-  DCHECK_EQ(callee_saved_value + 8, get_low_register<int32_t>(r8));
-  DCHECK_EQ(callee_saved_value + 9, get_low_register<int32_t>(r9));
-  DCHECK_EQ(callee_saved_value + 10, get_low_register<int32_t>(r10));
-  DCHECK_EQ(callee_saved_value + 11, get_low_register<int32_t>(r11));
-  DCHECK_EQ(callee_saved_value + 12, get_low_register<int32_t>(r12));
-  DCHECK_EQ(callee_saved_value + 13, get_low_register<int32_t>(r13));
+  DCHECK_EQ(callee_saved_value + 7, get_low_register<uint32_t>(r7));
+  DCHECK_EQ(callee_saved_value + 8, get_low_register<uint32_t>(r8));
+  DCHECK_EQ(callee_saved_value + 9, get_low_register<uint32_t>(r9));
+  DCHECK_EQ(callee_saved_value + 10, get_low_register<uint32_t>(r10));
+  DCHECK_EQ(callee_saved_value + 11, get_low_register<uint32_t>(r11));
+  DCHECK_EQ(callee_saved_value + 12, get_low_register<uint32_t>(r12));
+  DCHECK_EQ(callee_saved_value + 13, get_low_register<uint32_t>(r13));
 #else
   if (reg_arg_count < 5) {
     DCHECK_EQ(callee_saved_value + 6, get_register(r6));
@@ -5846,7 +5863,7 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
 // Pop stack passed arguments.
 
 #ifndef V8_TARGET_ARCH_S390X
-  DCHECK_EQ(entry_stack, get_low_register<int32_t>(sp));
+  DCHECK_EQ(entry_stack, get_low_register<uint32_t>(sp));
 #else
   DCHECK_EQ(entry_stack, get_register(sp));
 #endif
@@ -6045,6 +6062,15 @@ uintptr_t Simulator::PopAddress() {
   int d2 = AS(RXEInstruction)->D2Value();      \
   int length = 6;
 
+#define DECODE_VRR_C_INSTRUCTION(r1, r2, r3, m6, m5, m4) \
+  int r1 = AS(VRR_C_Instruction)->R1Value();             \
+  int r2 = AS(VRR_C_Instruction)->R2Value();             \
+  int r3 = AS(VRR_C_Instruction)->R3Value();             \
+  int m6 = AS(VRR_C_Instruction)->M6Value();             \
+  int m5 = AS(VRR_C_Instruction)->M5Value();             \
+  int m4 = AS(VRR_C_Instruction)->M4Value();             \
+  int length = 6;
+
 #define GET_ADDRESS(index_reg, base_reg, offset)       \
   (((index_reg) == 0) ? 0 : get_register(index_reg)) + \
       (((base_reg) == 0) ? 0 : get_register(base_reg)) + offset
@@ -6052,6 +6078,77 @@ uintptr_t Simulator::PopAddress() {
 int Simulator::Evaluate_Unknown(Instruction* instr) {
   UNREACHABLE();
   return 0;
+}
+
+EVALUATE(VFA) {
+  DCHECK_OPCODE(VFA);
+  DECODE_VRR_C_INSTRUCTION(r1, r2, r3, m6, m5, m4);
+  USE(m6);
+  USE(m5);
+  USE(m4);
+  DCHECK(m5 == 8);
+  DCHECK(m4 == 3);
+  double r2_val = get_double_from_d_register(r2);
+  double r3_val = get_double_from_d_register(r3);
+  double r1_val = r2_val + r3_val;
+  set_d_register_from_double(r1, r1_val);
+  return length;
+}
+
+EVALUATE(VFS) {
+  DCHECK_OPCODE(VFS);
+  DECODE_VRR_C_INSTRUCTION(r1, r2, r3, m6, m5, m4);
+  USE(m6);
+  USE(m5);
+  USE(m4);
+  DCHECK(m5 == 8);
+  DCHECK(m4 == 3);
+  double r2_val = get_double_from_d_register(r2);
+  double r3_val = get_double_from_d_register(r3);
+  double r1_val = r2_val - r3_val;
+  set_d_register_from_double(r1, r1_val);
+  return length;
+}
+
+EVALUATE(VFM) {
+  DCHECK_OPCODE(VFM);
+  DECODE_VRR_C_INSTRUCTION(r1, r2, r3, m6, m5, m4);
+  USE(m6);
+  USE(m5);
+  USE(m4);
+  DCHECK(m5 == 8);
+  DCHECK(m4 == 3);
+  double r2_val = get_double_from_d_register(r2);
+  double r3_val = get_double_from_d_register(r3);
+  double r1_val = r2_val * r3_val;
+  set_d_register_from_double(r1, r1_val);
+  return length;
+}
+
+EVALUATE(VFD) {
+  DCHECK_OPCODE(VFD);
+  DECODE_VRR_C_INSTRUCTION(r1, r2, r3, m6, m5, m4);
+  USE(m6);
+  USE(m5);
+  USE(m4);
+  DCHECK(m5 == 8);
+  DCHECK(m4 == 3);
+  double r2_val = get_double_from_d_register(r2);
+  double r3_val = get_double_from_d_register(r3);
+  double r1_val = r2_val / r3_val;
+  set_d_register_from_double(r1, r1_val);
+  return length;
+}
+
+EVALUATE(DUMY) {
+  DCHECK_OPCODE(DUMY);
+  DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
+  USE(r1);
+  USE(x2);
+  USE(b2);
+  USE(d2);
+  // dummy instruction does nothing.
+  return length;
 }
 
 EVALUATE(CLR) {
@@ -6470,9 +6567,18 @@ EVALUATE(CLCL) {
 }
 
 EVALUATE(LPR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(LPR);
+  // Load Positive (32)
+  DECODE_RR_INSTRUCTION(r1, r2);
+  int32_t r2_val = get_low_register<int32_t>(r2);
+  // If negative, then negate it.
+  r2_val = (r2_val < 0) ? -r2_val : r2_val;
+  set_low_register(r1, r2_val);
+  SetS390ConditionCode<int32_t>(r2_val, 0);
+  if (r2_val == (static_cast<int32_t>(1) << 31)) {
+    SetS390OverflowCode(true);
+  }
+  return length;
 }
 
 EVALUATE(LNR) {
@@ -6500,7 +6606,6 @@ EVALUATE(LCR) {
   DCHECK_OPCODE(LCR);
   DECODE_RR_INSTRUCTION(r1, r2);
   int32_t r2_val = get_low_register<int32_t>(r2);
-  int32_t original_r2_val = r2_val;
   r2_val = ~r2_val;
   r2_val = r2_val + 1;
   set_low_register(r1, r2_val);
@@ -6509,7 +6614,7 @@ EVALUATE(LCR) {
   // Cannot do int comparison due to GCC 4.8 bug on x86.
   // Detect INT_MIN alternatively, as it is the only value where both
   // original and result are negative due to overflow.
-  if (r2_val < 0 && original_r2_val < 0) {
+  if (r2_val == (static_cast<int32_t>(1) << 31)) {
     SetS390OverflowCode(true);
   }
   return length;
@@ -7674,47 +7779,38 @@ EVALUATE(TMLH) {
 EVALUATE(TMLL) {
   DCHECK_OPCODE(TMLL);
   DECODE_RI_A_INSTRUCTION(instr, r1, i2);
-  int mask = i2 & 0x0000FFFF;
-  if (mask == 0) {
-    condition_reg_ = 0x0;
-    return length;
-  }
+  uint32_t mask = i2 & 0x0000FFFF;
   uint32_t r1_val = get_low_register<uint32_t>(r1);
   r1_val = r1_val & 0x0000FFFF;  // uses only the last 16bits
 
-  // Test if all selected bits are Zero
-  bool allSelectedBitsAreZeros = true;
-  for (int i = 0; i < 15; i++) {
-    if (mask & (1 << i)) {
-      if (r1_val & (1 << i)) {
-        allSelectedBitsAreZeros = false;
-        break;
-      }
-    }
-  }
-  if (allSelectedBitsAreZeros) {
+  // Test if all selected bits are zeros or mask is zero
+  if (0 == (mask & r1_val)) {
     condition_reg_ = 0x8;
     return length;  // Done!
   }
 
+  DCHECK(mask != 0);
   // Test if all selected bits are one
-  bool allSelectedBitsAreOnes = true;
-  for (int i = 0; i < 15; i++) {
-    if (mask & (1 << i)) {
-      if (!(r1_val & (1 << i))) {
-        allSelectedBitsAreOnes = false;
-        break;
-      }
-    }
-  }
-  if (allSelectedBitsAreOnes) {
+  if (mask == (mask & r1_val)) {
     condition_reg_ = 0x1;
     return length;  // Done!
   }
 
   // Now we know selected bits mixed zeros and ones
   // Test if the leftmost bit is zero or one
-  for (int i = 14; i >= 0; i--) {
+#if defined(__GNUC__)
+  int leadingZeros = __builtin_clz(mask);
+  mask = 0x80000000u >> leadingZeros;
+  if (mask & r1_val) {
+    // leftmost bit is one
+    condition_reg_ = 0x4;
+  } else {
+    // leftmost bit is zero
+    condition_reg_ = 0x2;
+  }
+  return length;  // Done!
+#else
+  for (int i = 15; i >= 0; i--) {
     if (mask & (1 << i)) {
       if (r1_val & (1 << i)) {
         // leftmost bit is one
@@ -7726,6 +7822,8 @@ EVALUATE(TMLL) {
       return length;  // Done!
     }
   }
+#endif
+  UNREACHABLE();
   return length;
 }
 
@@ -8217,9 +8315,15 @@ EVALUATE(BRCTH) {
 }
 
 EVALUATE(AIH) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(AIH);
+  DECODE_RIL_A_INSTRUCTION(r1, i2);
+  int32_t r1_val = get_high_register<int32_t>(r1);
+  bool isOF = CheckOverflowForIntAdd(r1_val, static_cast<int32_t>(i2), int32_t);
+  r1_val += static_cast<int32_t>(i2);
+  set_high_register(r1, r1_val);
+  SetS390ConditionCode<int32_t>(r1_val, 0);
+  SetS390OverflowCode(isOF);
+  return length;
 }
 
 EVALUATE(ALSIH) {
@@ -8235,9 +8339,19 @@ EVALUATE(ALSIHN) {
 }
 
 EVALUATE(CIH) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(CIH);
+  DECODE_RIL_A_INSTRUCTION(r1, imm);
+  int32_t r1_val = get_high_register<int32_t>(r1);
+  SetS390ConditionCode<int32_t>(r1_val, static_cast<int32_t>(imm));
+  return length;
+}
+
+EVALUATE(CLIH) {
+  DCHECK_OPCODE(CLIH);
+  // Compare Logical with Immediate (32)
+  DECODE_RIL_A_INSTRUCTION(r1, imm);
+  SetS390ConditionCode<uint32_t>(get_high_register<uint32_t>(r1), imm);
+  return length;
 }
 
 EVALUATE(STCK) {
@@ -9797,9 +9911,17 @@ EVALUATE(RRXTR) {
 }
 
 EVALUATE(LPGR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(LPGR);
+  // Load Positive (32)
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  int64_t r2_val = get_register(r2);
+  r2_val = (r2_val < 0) ? -r2_val : r2_val;  // If negative, then negate it.
+  set_register(r1, r2_val);
+  SetS390ConditionCode<int64_t>(r2_val, 0);
+  if (r2_val == (static_cast<int64_t>(1) << 63)) {
+    SetS390OverflowCode(true);
+  }
+  return length;
 }
 
 EVALUATE(LNGR) {
@@ -9833,7 +9955,7 @@ EVALUATE(LCGR) {
   set_register(r1, r2_val);
   SetS390ConditionCode<int64_t>(r2_val, 0);
   // if the input is INT_MIN, loading its compliment would be overflowing
-  if (r2_val < 0 && (r2_val + 1) > 0) {
+  if (r2_val == (static_cast<int64_t>(1) << 63)) {
     SetS390OverflowCode(true);
   }
   return length;
@@ -9898,9 +10020,15 @@ EVALUATE(LRVGR) {
 }
 
 EVALUATE(LPGFR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(LPGFR);
+  // Load Positive (32)
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  int32_t r2_val = get_low_register<int32_t>(r2);
+  // If negative, then negate it.
+  int64_t r1_val = static_cast<int64_t>((r2_val < 0) ? -r2_val : r2_val);
+  set_register(r1, r1_val);
+  SetS390ConditionCode<int64_t>(r1_val, 0);
+  return length;
 }
 
 EVALUATE(LNGFR) {
@@ -11017,9 +11145,9 @@ EVALUATE(CGH) {
 }
 
 EVALUATE(PFD) {
-  UNIMPLEMENTED();
+  DCHECK_OPCODE(PFD);
   USE(instr);
-  return 0;
+  return 6;
 }
 
 EVALUATE(STRV) {

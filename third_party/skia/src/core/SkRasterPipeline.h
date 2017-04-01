@@ -8,9 +8,12 @@
 #ifndef SkRasterPipeline_DEFINED
 #define SkRasterPipeline_DEFINED
 
+#include "SkImageInfo.h"
 #include "SkNx.h"
 #include "SkTArray.h"
 #include "SkTypes.h"
+#include <functional>
+#include <vector>
 
 /**
  * SkRasterPipeline provides a cheap way to chain together a pixel processing pipeline.
@@ -26,13 +29,16 @@
  * are designed to maximize the amount of data we can pass along the pipeline cheaply.
  * On many machines all arguments stay in registers the entire time.
  *
- * The meaning of the arguments to Fn are sometimes fixed...
+ * The meaning of the arguments to Fn are sometimes fixed:
  *    - The Stage* always represents the current stage, mainly providing access to ctx().
- *    - The size_t is always the destination x coordinate.  If you need y, put it in your context.
+ *    - The first size_t is always the destination x coordinate.
+ *      (If you need y, put it in your context.)
+ *    - The second size_t is always tail: 0 when working on a full 4-pixel slab,
+ *      or 1..3 when using only the bottom 1..3 lanes of each register.
  *    - By the time the shader's done, the first four vectors should hold source red,
  *      green, blue, and alpha, up to 4 pixels' worth each.
  *
- * ...and sometimes flexible:
+ * Sometimes arguments are flexible:
  *    - In the shader, the first four vectors can be used for anything, e.g. sample coordinates.
  *    - The last four vectors are scratch registers that can be used to communicate between
  *      stages; transfer modes use these to hold the original destination pixel components.
@@ -43,108 +49,87 @@
  *   1) call st->next() with its mutated arguments, chaining to the next stage of the pipeline; or
  *   2) return, indicating the pipeline is complete for these pixels.
  *
- * Some obvious stages that typically return are those that write a color to a destination pointer,
+ * Some stages that typically return are those that write a color to a destination pointer,
  * but any stage can short-circuit the rest of the pipeline by returning instead of calling next().
- *
- * TODO: explain EasyFn and SK_RASTER_STAGE
  */
+
+// TODO: There may be a better place to stuff tail, e.g. in the bottom alignment bits of
+// the Stage*.  This mostly matters on 64-bit Windows where every register is precious.
+
+#define SK_RASTER_PIPELINE_STAGES(M)                             \
+    M(trace) M(registers)                                        \
+    M(move_src_dst) M(move_dst_src) M(swap)                      \
+    M(clamp_0) M(clamp_1) M(clamp_a)                             \
+    M(unpremul) M(premul)                                        \
+    M(set_rgb) M(swap_rb)                                        \
+    M(from_srgb) M(to_srgb)                                      \
+    M(from_2dot2) M(to_2dot2)                                    \
+    M(constant_color) M(store_f32)                               \
+    M(load_a8)   M(store_a8)                                     \
+    M(load_565)  M(store_565)                                    \
+    M(load_f16)  M(store_f16)                                    \
+    M(load_8888) M(store_8888)                                   \
+    M(load_u16_be)                                               \
+    M(load_tables) M(load_tables_u16_be) M(store_tables)         \
+    M(scale_u8) M(scale_1_float)                                 \
+    M(lerp_u8) M(lerp_565) M(lerp_1_float)                       \
+    M(dstatop) M(dstin) M(dstout) M(dstover)                     \
+    M(srcatop) M(srcin) M(srcout) M(srcover)                     \
+    M(clear) M(modulate) M(multiply) M(plus_) M(screen) M(xor_)  \
+    M(colorburn) M(colordodge) M(darken) M(difference)           \
+    M(exclusion) M(hardlight) M(lighten) M(overlay) M(softlight) \
+    M(luminance_to_alpha)                                        \
+    M(matrix_2x3) M(matrix_3x4) M(matrix_4x5)                    \
+    M(matrix_perspective)                                        \
+    M(parametric_r) M(parametric_g) M(parametric_b)              \
+    M(parametric_a)                                              \
+    M(table_r) M(table_g) M(table_b) M(table_a)                  \
+    M(color_lookup_table) M(lab_to_xyz)                          \
+    M(clamp_x) M(mirror_x) M(repeat_x)                           \
+    M(clamp_y) M(mirror_y) M(repeat_y)                           \
+    M(gather_a8) M(gather_g8) M(gather_i8)                       \
+    M(gather_565) M(gather_4444) M(gather_8888) M(gather_f16)    \
+    M(bilinear_nx) M(bilinear_px) M(bilinear_ny) M(bilinear_py)  \
+    M(bicubic_n3x) M(bicubic_n1x) M(bicubic_p1x) M(bicubic_p3x)  \
+    M(bicubic_n3y) M(bicubic_n1y) M(bicubic_p1y) M(bicubic_p3y)  \
+    M(save_xy) M(accumulate)
 
 class SkRasterPipeline {
 public:
-    struct Stage;
-    using Fn = void(SK_VECTORCALL *)(Stage*, size_t, Sk4f,Sk4f,Sk4f,Sk4f,
-                                                     Sk4f,Sk4f,Sk4f,Sk4f);
-    using EasyFn = void(void*, size_t, Sk4f&, Sk4f&, Sk4f&, Sk4f&,
-                                       Sk4f&, Sk4f&, Sk4f&, Sk4f&);
-
-    struct Stage {
-        template <typename T>
-        T ctx() { return static_cast<T>(fCtx); }
-
-        void SK_VECTORCALL next(size_t x, Sk4f v0, Sk4f v1, Sk4f v2, Sk4f v3,
-                                          Sk4f v4, Sk4f v5, Sk4f v6, Sk4f v7) {
-            // Stages are logically a pipeline, and physically are contiguous in an array.
-            // To get to the next stage, we just increment our pointer to the next array element.
-            fNext(this+1, x, v0,v1,v2,v3, v4,v5,v6,v7);
-        }
-
-        // It makes next() a good bit cheaper if we hold the next function to call here,
-        // rather than logically simpler choice of the function implementing this stage.
-        Fn fNext;
-        void* fCtx;
-    };
-
-
     SkRasterPipeline();
 
-    // Run the pipeline constructed with append(), walking x through [x,x+n),
-    // generally in 4 pixel steps, but sometimes 1 pixel at a time.
-    void run(size_t x, size_t n);
-    void run(size_t n) { this->run(0, n); }
-
-    // Use this append() if your stage is sensitive to the number of pixels you're working with:
-    //   - body will always be called for a full 4 pixels
-    //   - tail will always be called for a single pixel
-    // Typically this is only an essential distintion for stages that read or write memory.
-    void append(Fn body, const void* body_ctx,
-                Fn tail, const void* tail_ctx);
-
-    // Most stages don't actually care if they're working on 4 or 1 pixel.
-    void append(Fn fn, const void* ctx = nullptr) {
-        this->append(fn, ctx, fn, ctx);
-    }
-
-    // Most 4 pixel or 1 pixel variants share the same context pointer.
-    void append(Fn body, Fn tail, const void* ctx = nullptr) {
-        this->append(body, ctx, tail, ctx);
-    }
-
-
-    // Versions of append that can be used with static EasyFns (see SK_RASTER_STAGE).
-    template <EasyFn body, EasyFn tail>
-    void append(const void* body_ctx, const void* tail_ctx) {
-        this->append(Easy<body>, body_ctx,
-                     Easy<tail>, tail_ctx);
-    }
-
-    template <EasyFn fn>
-    void append(const void* ctx = nullptr) { this->append<fn, fn>(ctx, ctx); }
-
-    template <EasyFn body, EasyFn tail>
-    void append(const void* ctx = nullptr) { this->append<body, tail>(ctx, ctx); }
-
+    enum StockStage {
+    #define M(stage) stage,
+        SK_RASTER_PIPELINE_STAGES(M)
+    #undef M
+    };
+    void append(StockStage, void* = nullptr);
+    void append(StockStage stage, const void* ctx) { this->append(stage, const_cast<void*>(ctx)); }
 
     // Append all stages to this pipeline.
     void extend(const SkRasterPipeline&);
 
+    // Runs the pipeline walking x through [x,x+n), holding y constant.
+    void run(size_t x, size_t y, size_t n) const;
+
+    // If you're going to run() the pipeline more than once, it's best to compile it.
+    std::function<void(size_t x, size_t y, size_t n)> compile() const;
+
+    void dump() const;
+
+    struct Stage {
+        StockStage stage;
+        void*        ctx;
+    };
+
+    // Conversion from sRGB can be subtly tricky when premultiplication is involved.
+    // Use these helpers to keep things sane.
+    void append_from_srgb(SkAlphaType);
+
 private:
-    using Stages = SkSTArray<10, Stage, /*MEM_COPY=*/true>;
+    std::function<void(size_t, size_t, size_t)> jit() const;
 
-    // This no-op default makes fBodyStart and fTailStart unconditionally safe to call,
-    // and is always the last stage's fNext as a sort of safety net to make sure even a
-    // buggy pipeline can't walk off its own end.
-    static void SK_VECTORCALL JustReturn(Stage*, size_t, Sk4f,Sk4f,Sk4f,Sk4f,
-                                                         Sk4f,Sk4f,Sk4f,Sk4f);
-
-    template <EasyFn kernel>
-    static void SK_VECTORCALL Easy(SkRasterPipeline::Stage* st, size_t x,
-                                   Sk4f  r, Sk4f  g, Sk4f  b, Sk4f  a,
-                                   Sk4f dr, Sk4f dg, Sk4f db, Sk4f da) {
-        kernel(st->ctx<void*>(), x, r,g,b,a, dr,dg,db,da);
-        st->next(x, r,g,b,a, dr,dg,db,da);
-    }
-
-    Stages fBody,
-           fTail;
-    Fn fBodyStart = &JustReturn,
-       fTailStart = &JustReturn;
+    std::vector<Stage> fStages;
 };
-
-// These are always static, and we _really_ want them to inline.
-// If you find yourself wanting a non-inline stage, write a SkRasterPipeline::Fn directly.
-#define SK_RASTER_STAGE(name)                                       \
-    static SK_ALWAYS_INLINE void name(void* ctx, size_t x,          \
-                            Sk4f&  r, Sk4f&  g, Sk4f&  b, Sk4f&  a, \
-                            Sk4f& dr, Sk4f& dg, Sk4f& db, Sk4f& da)
 
 #endif//SkRasterPipeline_DEFINED

@@ -95,11 +95,6 @@ public:
 
     /** Returns the default typeface, which is never nullptr. */
     static sk_sp<SkTypeface> MakeDefault(Style style = SkTypeface::kNormal);
-#ifdef SK_SUPPORT_LEGACY_TYPEFACE_PTR
-    static SkTypeface* RefDefault(Style style = SkTypeface::kNormal) {
-        return MakeDefault(style).release();
-    }
-#endif
 
   /** Creates a new reference to the typeface that most closely matches the
       requested familyName and fontStyle. This method allows extended font
@@ -111,12 +106,6 @@ public:
               unref() when they are done.
     */
   static sk_sp<SkTypeface> MakeFromName(const char familyName[], SkFontStyle fontStyle);
-
-#ifdef SK_SUPPORT_LEGACY_TYPEFACE_PTR
-    static SkTypeface* CreateFromName(const char familyName[], Style style) {
-        return MakeFromName(familyName, SkFontStyle::FromOldStyle(style)).release();
-    }
-#endif
 
     /** Return the typeface that most closely matches the requested typeface and style.
         Use this to pick a new style from the same family of the existing typeface.
@@ -132,28 +121,17 @@ public:
         not a valid font file, returns nullptr.
     */
     static sk_sp<SkTypeface> MakeFromFile(const char path[], int index = 0);
-#ifdef SK_SUPPORT_LEGACY_TYPEFACE_PTR
-    static SkTypeface* CreateFromFile(const char path[], int index = 0) {
-        return MakeFromFile(path, index).release();
-    }
-#endif
 
     /** Return a new typeface given a stream. If the stream is
         not a valid font file, returns nullptr. Ownership of the stream is
         transferred, so the caller must not reference it again.
     */
     static sk_sp<SkTypeface> MakeFromStream(SkStreamAsset* stream, int index = 0);
-#ifdef SK_SUPPORT_LEGACY_TYPEFACE_PTR
-    static SkTypeface* CreateFromStream(SkStreamAsset* stream, int index = 0) {
-        return MakeFromStream(stream, index).release();
-    }
-#endif
 
     /** Return a new typeface given font data and configuration. If the data
-        is not valid font data, returns nullptr. Ownership of the font data is
-        transferred, so the caller must not reference it again.
+        is not valid font data, returns nullptr.
     */
-    static sk_sp<SkTypeface> MakeFromFontData(SkFontData*);
+    static sk_sp<SkTypeface> MakeFromFontData(std::unique_ptr<SkFontData>);
 
     /** Write a unique signature to a stream, sufficient to reconstruct a
         typeface referencing the same font when Deserialize is called.
@@ -300,18 +278,18 @@ public:
     SkStreamAsset* openStream(int* ttcIndex) const;
 
     /**
-     *  Return the font data, or NULL on failure.
-     *  The caller is responsible for deleting the font data.
+     *  Return the font data, or nullptr on failure.
      */
-    SkFontData* createFontData() const;
+    std::unique_ptr<SkFontData> makeFontData() const;
 
     /**
      *  Return a scalercontext for the given descriptor. If this fails, then
      *  if allowFailure is true, this returns NULL, else it returns a
      *  dummy scalercontext that will not crash, but will draw nothing.
      */
-    SkScalerContext* createScalerContext(const SkScalerContextEffects&, const SkDescriptor*,
-                                         bool allowFailure = false) const;
+    std::unique_ptr<SkScalerContext> createScalerContext(const SkScalerContextEffects&,
+                                                         const SkDescriptor*,
+                                                         bool allowFailure = false) const;
 
     /**
      *  Return a rectangle (scaled to 1-pt) that represents the union of the bounds of all
@@ -361,7 +339,7 @@ protected:
 
     virtual SkStreamAsset* onOpenStream(int* ttcIndex) const = 0;
     // TODO: make pure virtual.
-    virtual SkFontData* onCreateFontData() const;
+    virtual std::unique_ptr<SkFontData> onMakeFontData() const;
 
     virtual void onGetFontDescriptor(SkFontDescriptor*, bool* isLocal) const = 0;
 

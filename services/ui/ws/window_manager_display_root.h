@@ -19,10 +19,6 @@ class ServerWindow;
 class WindowManagerState;
 class WindowServer;
 
-namespace test {
-class WindowManagerDisplayRootTestApi;
-}
-
 // Owns the root window of a window manager for one display. Each window manager
 // has one WindowManagerDisplayRoot for each Display. The root window is
 // parented to the root of a Display.
@@ -44,6 +40,7 @@ class WindowManagerDisplayRoot {
 
  private:
   friend class Display;
+  friend class WindowManagerState;
 
   WindowServer* window_server();
 

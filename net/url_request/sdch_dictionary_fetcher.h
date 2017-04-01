@@ -17,6 +17,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
+#include "net/base/net_export.h"
 #include "net/base/sdch_manager.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request.h"
@@ -24,9 +25,8 @@
 
 namespace net {
 
-class BoundNetLog;
+class NetLogWithSource;
 class URLRequest;
-class URLRequestThrottlerEntryInterface;
 
 // This class is used by embedder SDCH policy object to fetch
 // dictionaries. It queues requests for dictionaries and dispatches
@@ -38,7 +38,7 @@ class NET_EXPORT SdchDictionaryFetcher : public URLRequest::Delegate,
  public:
   typedef base::Callback<void(const std::string& dictionary_text,
                               const GURL& dictionary_url,
-                              const BoundNetLog& net_log,
+                              const NetLogWithSource& net_log,
                               bool was_from_cache)>
       OnDictionaryFetchedCallback;
 
@@ -65,7 +65,7 @@ class NET_EXPORT SdchDictionaryFetcher : public URLRequest::Delegate,
   void OnReceivedRedirect(URLRequest* request,
                           const RedirectInfo& redirect_info,
                           bool* defer_redirect) override;
-  void OnResponseStarted(URLRequest* request) override;
+  void OnResponseStarted(URLRequest* request, int net_error) override;
   void OnReadCompleted(URLRequest* request, int bytes_read) override;
 
  private:

@@ -4,20 +4,20 @@
 
 #import "ios/web/public/web_state/crw_web_view_scroll_view_proxy.h"
 
+#import <objc/runtime.h>
+
 #include "base/auto_reset.h"
 #import "base/ios/crb_protocol_observers.h"
-#import "base/ios/weak_nsobject.h"
 #include "base/mac/foundation_util.h"
 #import "base/mac/scoped_nsobject.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 @interface CRWWebViewScrollViewProxy () {
-  base::WeakNSObject<UIScrollView> _scrollView;
+  __weak UIScrollView* _scrollView;
   base::scoped_nsobject<id> _observers;
-  // When |_ignoreScroll| is set to YES, do not pass on -scrollViewDidScroll
-  // calls to observers.  This is used by -setContentInsetFast, which needs to
-  // update and reset the contentOffset to force a fast update.  These updates
-  // should be a no-op for the contentOffset, so the callbacks can be ignored.
-  BOOL _ignoreScroll;
 }
 
 // Returns the key paths that need to be observed for UIScrollView.
@@ -36,15 +36,13 @@
   self = [super init];
   if (self) {
     Protocol* protocol = @protocol(CRWWebViewScrollViewProxyObserver);
-    _observers.reset(
-        [[CRBProtocolObservers observersWithProtocol:protocol] retain]);
+    _observers.reset([CRBProtocolObservers observersWithProtocol:protocol]);
   }
   return self;
 }
 
 - (void)dealloc {
   [self stopObservingScrollView:_scrollView];
-  [super dealloc];
 }
 
 - (void)addGestureRecognizer:(UIGestureRecognizer*)gestureRecognizer {
@@ -71,7 +69,7 @@
   DCHECK(!scrollView.delegate);
   scrollView.delegate = self;
   [self startObservingScrollView:scrollView];
-  _scrollView.reset(scrollView);
+  _scrollView = scrollView;
   [_observers webViewScrollViewProxyDidSetScrollView:self];
 }
 
@@ -109,41 +107,6 @@
 
 - (CGPoint)contentOffset {
   return _scrollView ? [_scrollView contentOffset] : CGPointZero;
-}
-
-- (void)setContentInsetFast:(UIEdgeInsets)contentInset {
-  if (!_scrollView)
-    return;
-
-  // The method -scrollViewSetContentInsetImpl below is bypassing UIWebView's
-  // subclassed UIScrollView implemention of setContentOffset.  UIKIt's
-  // implementation calls the internal method |_updateViewSettings| after
-  // updating the contentInsets.  This ensures things like absolute positions
-  // are correctly updated.  The problem is |_updateViewSettings| does lots of
-  // other things and is very very slow.  The workaround below simply sets the
-  // scrollView's content insets directly, and then fiddles with the
-  // contentOffset below to correct the absolute positioning of elements.
-  static void (*scrollViewSetContentInsetImpl)(id, SEL, UIEdgeInsets);
-  static SEL setContentInset;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-      setContentInset = @selector(setContentInset:);
-      scrollViewSetContentInsetImpl =
-          (void (*)(id, SEL, UIEdgeInsets))class_getMethodImplementation(
-              [UIScrollView class], setContentInset);
-  });
-  scrollViewSetContentInsetImpl(_scrollView, setContentInset, contentInset);
-
-  // Change and then reset the contentOffset to force the view into updating the
-  // absolute position of elements and content frame. Updating the
-  // contentOffset will cause the -scrollViewDidScroll callback to fire.
-  // Because we are eventually setting the contentOffset back to it's original
-  // position, we can ignore these calls.
-  base::AutoReset<BOOL> autoReset(&_ignoreScroll, YES);
-  CGPoint contentOffset = [_scrollView contentOffset];
-  _scrollView.get().contentOffset =
-      CGPointMake(contentOffset.x, contentOffset.y + 1);
-  _scrollView.get().contentOffset = contentOffset;
 }
 
 - (void)setContentInset:(UIEdgeInsets)contentInset {
@@ -187,9 +150,7 @@
 
 - (void)scrollViewDidScroll:(UIScrollView*)scrollView {
   DCHECK_EQ(_scrollView, scrollView);
-  if (!_ignoreScroll) {
-    [_observers webViewScrollViewDidScroll:self];
-  }
+  [_observers webViewScrollViewDidScroll:self];
 }
 
 - (void)scrollViewWillBeginDragging:(UIScrollView*)scrollView {
@@ -264,7 +225,7 @@
                       ofObject:(id)object
                         change:(NSDictionary*)change
                        context:(void*)context {
-  DCHECK_EQ(object, _scrollView.get());
+  DCHECK_EQ(object, _scrollView);
   if ([keyPath isEqualToString:@"contentSize"])
     [_observers webViewScrollViewDidResetContentSize:self];
 }

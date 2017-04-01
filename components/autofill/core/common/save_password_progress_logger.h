@@ -90,6 +90,7 @@ class SavePasswordProgressLogger {
     STRING_FORM_BLACKLISTED,
     STRING_INVALID_FORM,
     STRING_SYNC_CREDENTIAL,
+    STRING_BLOCK_PASSWORD_SAME_ORIGIN_INSECURE_SCHEME,
     STRING_PROVISIONALLY_SAVED_FORM,
     STRING_IGNORE_POSSIBLE_USERNAMES,
     STRING_ON_PASSWORD_FORMS_RENDERED_METHOD,
@@ -116,7 +117,7 @@ class SavePasswordProgressLogger {
     STRING_BEST_SCORE,
     STRING_ON_GET_STORE_RESULTS_METHOD,
     STRING_NUMBER_RESULTS,
-    STRING_FETCH_LOGINS_METHOD,
+    STRING_FETCH_METHOD,
     STRING_NO_STORE,
     STRING_CREATE_LOGIN_MANAGERS_METHOD,
     STRING_OLD_NUMBER_LOGIN_MANAGERS,
@@ -129,7 +130,7 @@ class SavePasswordProgressLogger {
     STRING_PROCESS_FRAME_METHOD,
     STRING_FORM_SIGNATURE,
     STRING_ADDING_SIGNATURE,
-    STRING_FORM_MANAGER_STATE,
+    STRING_FORM_FETCHER_STATE,
     STRING_UNOWNED_INPUTS_VISIBLE,
     STRING_ON_FILL_PASSWORD_FORM_METHOD,
     STRING_ON_SHOW_INITIAL_PASSWORD_ACCOUNT_SUGGESTIONS,
@@ -146,6 +147,9 @@ class SavePasswordProgressLogger {
     STRING_PASSWORD_FILLED,
     STRING_FORM_NAME,
     STRING_FIELDS,
+    STRING_SERVER_PREDICTIONS,
+    STRING_FORM_VOTES,
+    STRING_REUSE_FOUND,
     STRING_INVALID,  // Represents a string returned in a case of an error.
     STRING_MAX = STRING_INVALID
   };
@@ -164,6 +168,10 @@ class SavePasswordProgressLogger {
   void LogNumber(StringID label, int signed_number);
   void LogNumber(StringID label, size_t unsigned_number);
   void LogMessage(StringID message);
+
+  // Removes privacy sensitive parts of |url| (currently all but host and
+  // scheme).
+  static std::string ScrubURL(const GURL& url);
 
  protected:
   // Sends |log| immediately for display.
@@ -184,10 +192,6 @@ class SavePasswordProgressLogger {
 
   // Translates the StringID values into the corresponding strings.
   static std::string GetStringFromID(SavePasswordProgressLogger::StringID id);
-
-  // Removes privacy sensitive parts of |url| (currently all but host and
-  // scheme).
-  static std::string ScrubURL(const GURL& url);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SavePasswordProgressLogger);

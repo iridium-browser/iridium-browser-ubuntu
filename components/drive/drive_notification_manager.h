@@ -13,11 +13,9 @@
 #include "components/invalidation/public/invalidation_handler.h"
 #include "components/keyed_service/core/keyed_service.h"
 
-class ProfileSyncService;
-
 namespace invalidation {
 class InvalidationService;
-}
+}  // namespace invalidation
 
 namespace drive {
 

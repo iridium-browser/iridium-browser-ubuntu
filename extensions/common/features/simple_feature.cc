@@ -126,6 +126,22 @@ std::string GetDisplayName(version_info::Channel channel) {
   return "";
 }
 
+std::string GetDisplayName(FeatureSessionType session_type) {
+  switch (session_type) {
+    case FeatureSessionType::INITIAL:
+      return "user-less";
+    case FeatureSessionType::UNKNOWN:
+      return "unknown";
+    case FeatureSessionType::KIOSK:
+      return "kiosk app";
+    case FeatureSessionType::AUTOLAUNCHED_KIOSK:
+      return "auto-launched kiosk app";
+    case FeatureSessionType::REGULAR:
+      return "regular user";
+  }
+  return "";
+}
+
 // Gets a human-readable list of the display names (pluralized, comma separated
 // with the "and" in the correct place) for each of |enum_types|.
 template <typename EnumType>
@@ -245,6 +261,10 @@ Feature::Availability SimpleFeature::IsAvailableToManifest(
   if (channel_ && *channel_ < GetCurrentChannel())
     return CreateAvailability(UNSUPPORTED_CHANNEL, *channel_);
 
+  const FeatureSessionType session_type = GetCurrentFeatureSessionType();
+  if (!MatchesSessionTypes(session_type))
+    return CreateAvailability(INVALID_SESSION_TYPE, session_type);
+
   return CheckDependencies(base::Bind(&IsAvailableToManifestForBind,
                                       extension_id,
                                       type,
@@ -255,7 +275,7 @@ Feature::Availability SimpleFeature::IsAvailableToManifest(
 
 Feature::Availability SimpleFeature::IsAvailableToContext(
     const Extension* extension,
-    SimpleFeature::Context context,
+    Feature::Context context,
     const GURL& url,
     SimpleFeature::Platform platform) const {
   if (extension) {
@@ -283,10 +303,15 @@ Feature::Availability SimpleFeature::IsAvailableToContext(
     return CreateAvailability(INVALID_URL, url);
   }
 
+  const FeatureSessionType session_type = GetCurrentFeatureSessionType();
+  if (!MatchesSessionTypes(session_type)) {
+    return CreateAvailability(INVALID_SESSION_TYPE, session_type);
+  }
+
   // TODO(kalman): Assert that if the context was a webpage or WebUI context
   // then at some point a "matches" restriction was checked.
-  return CheckDependencies(base::Bind(
-      &IsAvailableToContextForBind, extension, context, url, platform));
+  return CheckDependencies(base::Bind(&IsAvailableToContextForBind, extension,
+                                      context, url, platform));
 }
 
 std::string SimpleFeature::GetAvailabilityMessage(
@@ -294,7 +319,8 @@ std::string SimpleFeature::GetAvailabilityMessage(
     Manifest::Type type,
     const GURL& url,
     Context context,
-    version_info::Channel channel) const {
+    version_info::Channel channel,
+    FeatureSessionType session_type) const {
   switch (result) {
     case IS_AVAILABLE:
       return std::string();
@@ -338,6 +364,14 @@ std::string SimpleFeature::GetAvailabilityMessage(
           "'%s' requires manifest version of %d or lower.",
           name().c_str(),
           max_manifest_version_);
+    case INVALID_SESSION_TYPE:
+      return base::StringPrintf(
+          "'%s' is only allowed to run in %s sessions, but this is %s session.",
+          name().c_str(),
+          ListDisplayNames(std::vector<FeatureSessionType>(
+                               session_types_.begin(), session_types_.end()))
+              .c_str(),
+          GetDisplayName(session_type).c_str());
     case NOT_PRESENT:
       return base::StringPrintf(
           "'%s' requires a different Feature that is not present.",
@@ -360,25 +394,26 @@ std::string SimpleFeature::GetAvailabilityMessage(
 Feature::Availability SimpleFeature::CreateAvailability(
     AvailabilityResult result) const {
   return Availability(
-      result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN, GURL(),
-                                     UNSPECIFIED_CONTEXT,
-                                     version_info::Channel::UNKNOWN));
+      result, GetAvailabilityMessage(
+                  result, Manifest::TYPE_UNKNOWN, GURL(), UNSPECIFIED_CONTEXT,
+                  version_info::Channel::UNKNOWN, FeatureSessionType::UNKNOWN));
 }
 
 Feature::Availability SimpleFeature::CreateAvailability(
     AvailabilityResult result, Manifest::Type type) const {
   return Availability(
       result, GetAvailabilityMessage(result, type, GURL(), UNSPECIFIED_CONTEXT,
-                                     version_info::Channel::UNKNOWN));
+                                     version_info::Channel::UNKNOWN,
+                                     FeatureSessionType::UNKNOWN));
 }
 
 Feature::Availability SimpleFeature::CreateAvailability(
     AvailabilityResult result,
     const GURL& url) const {
   return Availability(
-      result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN, url,
-                                     UNSPECIFIED_CONTEXT,
-                                     version_info::Channel::UNKNOWN));
+      result, GetAvailabilityMessage(
+                  result, Manifest::TYPE_UNKNOWN, url, UNSPECIFIED_CONTEXT,
+                  version_info::Channel::UNKNOWN, FeatureSessionType::UNKNOWN));
 }
 
 Feature::Availability SimpleFeature::CreateAvailability(
@@ -386,7 +421,8 @@ Feature::Availability SimpleFeature::CreateAvailability(
     Context context) const {
   return Availability(
       result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN, GURL(),
-                                     context, version_info::Channel::UNKNOWN));
+                                     context, version_info::Channel::UNKNOWN,
+                                     FeatureSessionType::UNKNOWN));
 }
 
 Feature::Availability SimpleFeature::CreateAvailability(
@@ -394,7 +430,17 @@ Feature::Availability SimpleFeature::CreateAvailability(
     version_info::Channel channel) const {
   return Availability(
       result, GetAvailabilityMessage(result, Manifest::TYPE_UNKNOWN, GURL(),
-                                     UNSPECIFIED_CONTEXT, channel));
+                                     UNSPECIFIED_CONTEXT, channel,
+                                     FeatureSessionType::UNKNOWN));
+}
+
+Feature::Availability SimpleFeature::CreateAvailability(
+    AvailabilityResult result,
+    FeatureSessionType session_type) const {
+  return Availability(
+      result, GetAvailabilityMessage(
+                  result, Manifest::TYPE_UNKNOWN, GURL(), UNSPECIFIED_CONTEXT,
+                  version_info::Channel::UNKNOWN, session_type));
 }
 
 bool SimpleFeature::IsInternal() const {
@@ -450,6 +496,20 @@ bool SimpleFeature::MatchesManifestLocation(
   return false;
 }
 
+bool SimpleFeature::MatchesSessionTypes(FeatureSessionType session_type) const {
+  if (session_types_.empty())
+    return true;
+
+  if (base::ContainsValue(session_types_, session_type))
+    return true;
+
+  // AUTOLAUNCHED_KIOSK session type is subset of KIOSK - accept auto-lauched
+  // kiosk session if kiosk session is allowed. This is the only exception to
+  // rejecting session type that is not present in |session_types_|
+  return session_type == FeatureSessionType::AUTOLAUNCHED_KIOSK &&
+         base::ContainsValue(session_types_, FeatureSessionType::KIOSK);
+}
+
 Feature::Availability SimpleFeature::CheckDependencies(
     const base::Callback<Availability(const Feature*)>& checker) const {
   for (const auto& dep_name : dependencies_) {
@@ -496,6 +556,11 @@ void SimpleFeature::set_dependencies(
 void SimpleFeature::set_extension_types(
     std::initializer_list<Manifest::Type> types) {
   extension_types_ = types;
+}
+
+void SimpleFeature::set_session_types(
+    std::initializer_list<FeatureSessionType> types) {
+  session_types_ = types;
 }
 
 void SimpleFeature::set_matches(

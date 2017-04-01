@@ -15,9 +15,24 @@ include_rules = [
   "+skia/ext",
   "+third_party/khronos/GLES2/gl2.h",
   "+third_party/khronos/GLES2/gl2ext.h",
+  "+third_party/libyuv",
   "+third_party/skia/include",
   "+ui/events/latency_info.h",
   "+ui/gfx",
   "+ui/gl",
   "-cc/blink",
 ]
+  
+specific_include_rules = {
+  "in_process_context_provider\.cc": [
+    "+gpu/command_buffer/client",
+    "+gpu/command_buffer/common",
+    "+gpu/command_buffer/service",
+    "+gpu/ipc",
+    "+gpu/skia_bindings",
+  ],
+  "in_process_context_provider\.h": [
+    "+gpu/command_buffer/common",
+    "+gpu/ipc",
+  ],
+}

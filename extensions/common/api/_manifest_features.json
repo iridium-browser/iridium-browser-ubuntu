@@ -173,6 +173,10 @@
     "channel": "stable",
     "extension_types": ["platform_app"]
   },
+  "kiosk.always_update": {
+    "channel": "stable",
+    "extension_types": ["platform_app"]
+  },
   "kiosk.required_platform_version": {
     "channel": "stable",
     "extension_types": ["platform_app"]
@@ -280,6 +284,12 @@
   "options_ui": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app"]
+  },
+  "permissions": {
+    "channel": "stable",
+    "extension_types": [
+      "extension", "legacy_packaged_app", "hosted_app", "platform_app"
+    ]
   },
   "sandbox": {
     "channel": "stable",

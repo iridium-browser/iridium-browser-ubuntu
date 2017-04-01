@@ -4,14 +4,14 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fpdfapi/include/cpdf_pagerendercontext.h"
+#include "core/fpdfapi/cpdf_pagerendercontext.h"
 
-#include "core/fpdfapi/fpdf_render/include/cpdf_progressiverenderer.h"
-#include "core/fpdfapi/fpdf_render/include/cpdf_rendercontext.h"
-#include "core/fpdfapi/fpdf_render/include/cpdf_renderoptions.h"
-#include "core/fpdfdoc/include/cpdf_annotlist.h"
-#include "core/fpdfdoc/include/cpdf_occontext.h"
-#include "core/fxge/include/cfx_renderdevice.h"
+#include "core/fpdfapi/render/cpdf_progressiverenderer.h"
+#include "core/fpdfapi/render/cpdf_rendercontext.h"
+#include "core/fpdfapi/render/cpdf_renderoptions.h"
+#include "core/fpdfdoc/cpdf_annotlist.h"
+#include "core/fpdfdoc/cpdf_occontext.h"
+#include "core/fxge/cfx_renderdevice.h"
 
 CPDF_PageRenderContext::CPDF_PageRenderContext() {}
 

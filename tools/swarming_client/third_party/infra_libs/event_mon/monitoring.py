@@ -183,11 +183,6 @@ def _get_service_event(event_type,
       version = event.service_event.code_version.add()
       version.source_url = version_d['source_url']
       if 'revision' in version_d:
-        # Rely on the url to switch between svn and git because an
-        # abbreviated sha1 can sometimes be confused with an int.
-        if version.source_url.startswith('svn://'):
-          version.svn_revision = int(version_d['revision'])
-        else:
           version.git_hash = version_d['revision']
 
       if 'version' in version_d:
@@ -233,7 +228,7 @@ def send_service_event(event_type,
 
     code_version (list/tuple of dict or None): required keys are
         'source_url' -> full url to the repository
-        'revision' -> (string) git sha1 or svn revision number.
+        'revision' -> (string) git sha1
       optional keys are
         'dirty' -> boolean. True if the local source tree has local
             modification.
@@ -272,7 +267,9 @@ def get_build_event(event_type,
                     goma_error=None,
                     goma_crash_report_id=None,
                     patch_url=None,
-                    bbucket_id=None):
+                    bbucket_id=None,
+                    category=None,
+                    head_revision_git_hash=None):
   """Compute a ChromeInfraEvent filled with a BuildEvent.
 
   Arguments are identical to those in send_build_event(), please refer
@@ -344,6 +341,16 @@ def get_build_event(event_type,
       event.build_event.bbucket_id = int(bbucket_id)
     except (ValueError, TypeError):
       pass
+
+  if category:
+    event.build_event.category = {
+      'cq': BuildEvent.CATEGORY_CQ,
+      'cq_experimental': BuildEvent.CATEGORY_CQ_EXPERIMENTAL,
+      'git_cl_try': BuildEvent.CATEGORY_GIT_CL_TRY,
+    }.get(category.lower(), BuildEvent.CATEGORY_UNKNOWN)
+
+  if head_revision_git_hash:
+    event.build_event.head_revision.git_hash = head_revision_git_hash
 
   if event.build_event.step_name:
     if event_type != 'STEP':
@@ -439,7 +446,9 @@ def send_build_event(event_type,
                      goma_error=None,
                      goma_crash_report_id=None,
                      patch_url=None,
-                     bbucket_id=None):
+                     bbucket_id=None,
+                     category=None,
+                     head_revision_git_hash=None):
   """Send a ChromeInfraEvent filled with a BuildEvent
 
   Args:
@@ -468,6 +477,8 @@ def send_build_event(event_type,
     goma_crash_report_id (string): id of goma crash report.
     patch_url (string): URL of the patch that triggered build
     bbucket_id (long): Buildbucket ID of the build.
+    category (string): Build category, e.g. cq or git_cl_try.
+    head_revision_git_hash (string): Revision fetched from the Git repository.
 
   Returns:
     success (bool): False if some error happened.
@@ -488,7 +499,9 @@ def send_build_event(event_type,
                          goma_error=goma_error,
                          goma_crash_report_id=goma_crash_report_id,
                          patch_url=patch_url,
-                         bbucket_id=bbucket_id).send()
+                         bbucket_id=bbucket_id,
+                         category=category,
+                         head_revision_git_hash=head_revision_git_hash).send()
 
 
 def send_events(events):

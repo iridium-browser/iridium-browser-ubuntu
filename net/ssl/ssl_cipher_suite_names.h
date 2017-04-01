@@ -19,11 +19,15 @@ namespace net {
 // wire and recorded at
 // http://www.iana.org/assignments/tls-parameters/tls-parameters.xml
 // If the cipher suite is unknown, the strings are set to "???".
-// In the case of an AEAD cipher suite, *mac_str is NULL and *is_aead is true.
+// In the case of an AEAD cipher suite, *mac_str is nullptr and *is_aead is
+// true.
+// In the case of a TLS 1.3 AEAD-only cipher suite, *key_exchange_str is nullptr
+// and *is_tls13 is true.
 NET_EXPORT void SSLCipherSuiteToStrings(const char** key_exchange_str,
                                         const char** cipher_str,
                                         const char** mac_str,
                                         bool* is_aead,
+                                        bool* is_tls13,
                                         uint16_t cipher_suite);
 
 // SSLVersionToString returns the name of the SSL protocol version
@@ -72,12 +76,6 @@ NET_EXPORT int ObsoleteSSLStatus(int connection_status);
 // Returns true if |cipher_suite| is suitable for use with HTTP/2. See
 // https://http2.github.io/http2-spec/#rfc.section.9.2.2.
 NET_EXPORT bool IsTLSCipherSuiteAllowedByHTTP2(uint16_t cipher_suite);
-
-// Returns the static curve name of |key_exchange_info| if the |cipher_suite|
-// is an elliptic curve, and a name is known. Returns nullptr otherwise.
-// Only defined for OpenSSL, returns nullptr otherwise.
-NET_EXPORT const char* ECCurveName(uint16_t cipher_suite,
-                                   int key_exchange_info);
 
 }  // namespace net
 

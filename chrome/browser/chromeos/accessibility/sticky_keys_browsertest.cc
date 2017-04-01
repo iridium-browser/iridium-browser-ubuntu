@@ -56,7 +56,9 @@ class StickyKeysBrowserTest : public InProcessBrowserTest {
 
   void SendKeyPress(ui::KeyboardCode key) {
     event_generator_->PressKey(key, ui::EF_NONE);
+    content::RunAllPendingInMessageLoop();
     event_generator_->ReleaseKey(key, ui::EF_NONE);
+    content::RunAllPendingInMessageLoop();
   }
 
   content::NotificationRegistrar registrar_;
@@ -157,10 +159,10 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, SearchLeftOmnibox) {
       browser()->window()->GetLocationBar()->GetOmniboxView();
 
   // Give the omnibox focus.
-  omnibox->ShowURL();
+  omnibox->SetFocus();
 
-  // Make sure that the AppList is not erronously displayed and the omnibox
-  // doesn't lost focus
+  // Make sure that the AppList is not erroneously displayed and the omnibox
+  // doesn't lose focus.
   EXPECT_FALSE(ash::WmShell::Get()->GetAppListTargetVisibility());
   EXPECT_TRUE(omnibox->GetNativeView()->HasFocus());
 

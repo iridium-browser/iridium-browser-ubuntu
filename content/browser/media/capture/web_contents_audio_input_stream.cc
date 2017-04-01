@@ -78,6 +78,10 @@ class WebContentsAudioInputStream::Impl
   void StartMirroring();
   void StopMirroring();
 
+  // Increment/decrement the capturer count on the UI BrowserThread.
+  void IncrementCapturerCount();
+  void DecrementCapturerCount();
+
   // Invoked on the UI thread to make sure WebContents muting is turned off for
   // successful audio capture.
   void UnmuteWebContentsAudio();
@@ -165,12 +169,20 @@ bool WebContentsAudioInputStream::Impl::Open() {
     return false;
 
   state_ = OPENED;
-
   tracker_->Start(
       initial_render_process_id_, initial_main_render_frame_id_,
       base::Bind(&Impl::OnTargetChanged, this));
+  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                          base::Bind(&Impl::IncrementCapturerCount, this));
 
   return true;
+}
+
+void WebContentsAudioInputStream::Impl::IncrementCapturerCount() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (WebContents* contents = tracker_->web_contents())
+    contents->IncrementCapturerCount(gfx::Size());
 }
 
 void WebContentsAudioInputStream::Impl::Start(AudioInputCallback* callback) {
@@ -222,12 +234,21 @@ void WebContentsAudioInputStream::Impl::Close() {
 
   if (state_ == OPENED) {
     state_ = CONSTRUCTED;
+    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                            base::Bind(&Impl::DecrementCapturerCount, this));
     tracker_->Stop();
     mixer_stream_->Close();
   }
 
   DCHECK_EQ(CONSTRUCTED, state_);
   state_ = CLOSED;
+}
+
+void WebContentsAudioInputStream::Impl::DecrementCapturerCount() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  if (WebContents* contents = tracker_->web_contents())
+    contents->DecrementCapturerCount();
 }
 
 void WebContentsAudioInputStream::Impl::ReportError() {
@@ -349,22 +370,19 @@ WebContentsAudioInputStream* WebContentsAudioInputStream::Create(
     const std::string& device_id,
     const media::AudioParameters& params,
     const scoped_refptr<base::SingleThreadTaskRunner>& worker_task_runner,
-    AudioMirroringManager* audio_mirroring_manager,
-    bool is_duplication) {
-  int render_process_id;
-  int main_render_frame_id;
-  if (!WebContentsMediaCaptureId::ExtractTabCaptureTarget(
-          device_id, &render_process_id, &main_render_frame_id)) {
+    AudioMirroringManager* audio_mirroring_manager) {
+  WebContentsMediaCaptureId media_id;
+  if (!WebContentsMediaCaptureId::Parse(device_id, &media_id)) {
     return NULL;
   }
 
   return new WebContentsAudioInputStream(
-      render_process_id, main_render_frame_id, audio_mirroring_manager,
-      new WebContentsTracker(false),
+      media_id.render_process_id, media_id.main_render_frame_id,
+      audio_mirroring_manager, new WebContentsTracker(false),
       new media::VirtualAudioInputStream(
           params, worker_task_runner,
           media::VirtualAudioInputStream::AfterCloseCallback()),
-      is_duplication);
+      !media_id.disable_local_echo);
 }
 
 WebContentsAudioInputStream::WebContentsAudioInputStream(

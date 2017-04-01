@@ -6,7 +6,7 @@
 
 #include "src/field-type.h"
 #include "src/ic/call-optimization.h"
-#include "src/ic/handler-configuration.h"
+#include "src/ic/handler-configuration-inl.h"
 #include "src/ic/ic-inl.h"
 #include "src/ic/ic.h"
 #include "src/isolate-inl.h"
@@ -23,57 +23,6 @@ Handle<Code> PropertyHandlerCompiler::Find(Handle<Name> name,
   if (code == nullptr) return Handle<Code>();
   return handle(code);
 }
-
-
-Handle<Code> NamedLoadHandlerCompiler::ComputeLoadNonexistent(
-    Handle<Name> name, Handle<Map> receiver_map) {
-  Isolate* isolate = name->GetIsolate();
-  if (receiver_map->prototype()->IsNull(isolate)) {
-    // TODO(jkummerow/verwaest): If there is no prototype and the property
-    // is nonexistent, introduce a builtin to handle this (fast properties
-    // -> return undefined, dictionary properties -> do negative lookup).
-    return Handle<Code>();
-  }
-  CacheHolderFlag flag;
-  Handle<Map> stub_holder_map =
-      IC::GetHandlerCacheHolder(receiver_map, false, isolate, &flag);
-
-  // If no dictionary mode objects are present in the prototype chain, the load
-  // nonexistent IC stub can be shared for all names for a given map and we use
-  // the empty string for the map cache in that case. If there are dictionary
-  // mode objects involved, we need to do negative lookups in the stub and
-  // therefore the stub will be specific to the name.
-  Handle<Name> cache_name =
-      receiver_map->is_dictionary_map()
-          ? name
-          : Handle<Name>::cast(isolate->factory()->nonexistent_symbol());
-  Handle<Map> current_map = stub_holder_map;
-  Handle<JSObject> last(JSObject::cast(receiver_map->prototype()));
-  while (true) {
-    if (current_map->is_dictionary_map()) cache_name = name;
-    if (current_map->prototype()->IsNull(isolate)) break;
-    if (name->IsPrivate()) {
-      // TODO(verwaest): Use nonexistent_private_symbol.
-      cache_name = name;
-      if (!current_map->has_hidden_prototype()) break;
-    }
-
-    last = handle(JSObject::cast(current_map->prototype()));
-    current_map = handle(last->map());
-  }
-  // Compile the stub that is either shared for all names or
-  // name specific if there are global objects involved.
-  Handle<Code> handler = PropertyHandlerCompiler::Find(
-      cache_name, stub_holder_map, Code::LOAD_IC, flag);
-  if (!handler.is_null()) return handler;
-
-  TRACE_HANDLER_STATS(isolate, LoadIC_LoadNonexistent);
-  NamedLoadHandlerCompiler compiler(isolate, receiver_map, last, flag);
-  handler = compiler.CompileLoadNonexistent(cache_name);
-  Map::UpdateCodeCache(stub_holder_map, cache_name, handler);
-  return handler;
-}
-
 
 Handle<Code> PropertyHandlerCompiler::GetCode(Code::Kind kind,
                                               Handle<Name> name) {
@@ -95,24 +44,23 @@ Register NamedLoadHandlerCompiler::FrontendHeader(Register object_reg,
                                                   Handle<Name> name,
                                                   Label* miss,
                                                   ReturnHolder return_what) {
-  PrototypeCheckType check_type = SKIP_RECEIVER;
-  int function_index = map()->IsPrimitiveMap()
-                           ? map()->GetConstructorFunctionIndex()
-                           : Map::kNoConstructorFunctionIndex;
-  if (function_index != Map::kNoConstructorFunctionIndex) {
-    GenerateDirectLoadGlobalFunctionPrototype(masm(), function_index,
-                                              scratch1(), miss);
-    Object* function = isolate()->native_context()->get(function_index);
-    Object* prototype = JSFunction::cast(function)->instance_prototype();
-    Handle<Map> map(JSObject::cast(prototype)->map());
-    set_map(map);
-    object_reg = scratch1();
-    check_type = CHECK_ALL_MAPS;
+  if (map()->IsPrimitiveMap() || map()->IsJSGlobalProxyMap()) {
+    // If the receiver is a global proxy and if we get to this point then
+    // the compile-time (current) native context has access to global proxy's
+    // native context. Since access rights revocation is not supported at all,
+    // we can generate a check that an execution-time native context is either
+    // the same as compile-time native context or has the same access token.
+    Handle<Context> native_context = isolate()->native_context();
+    Handle<WeakCell> weak_cell(native_context->self_weak_cell(), isolate());
+
+    bool compare_native_contexts_only = map()->IsPrimitiveMap();
+    GenerateAccessCheck(weak_cell, scratch1(), scratch2(), miss,
+                        compare_native_contexts_only);
   }
 
   // Check that the maps starting from the prototype haven't changed.
   return CheckPrototypes(object_reg, scratch1(), scratch2(), scratch3(), name,
-                         miss, check_type, return_what);
+                         miss, return_what);
 }
 
 
@@ -122,109 +70,34 @@ Register NamedStoreHandlerCompiler::FrontendHeader(Register object_reg,
                                                    Handle<Name> name,
                                                    Label* miss,
                                                    ReturnHolder return_what) {
+  if (map()->IsJSGlobalProxyMap()) {
+    Handle<Context> native_context = isolate()->native_context();
+    Handle<WeakCell> weak_cell(native_context->self_weak_cell(), isolate());
+    GenerateAccessCheck(weak_cell, scratch1(), scratch2(), miss, false);
+  }
+
   return CheckPrototypes(object_reg, this->name(), scratch1(), scratch2(), name,
-                         miss, SKIP_RECEIVER, return_what);
+                         miss, return_what);
 }
 
 
 Register PropertyHandlerCompiler::Frontend(Handle<Name> name) {
   Label miss;
-  if (IC::ICUseVector(kind())) {
+  if (IC::ShouldPushPopSlotAndVector(kind())) {
     PushVectorAndSlot();
   }
   Register reg = FrontendHeader(receiver(), name, &miss, RETURN_HOLDER);
   FrontendFooter(name, &miss);
   // The footer consumes the vector and slot from the stack if miss occurs.
-  if (IC::ICUseVector(kind())) {
+  if (IC::ShouldPushPopSlotAndVector(kind())) {
     DiscardVectorAndSlot();
   }
   return reg;
 }
 
-
-void PropertyHandlerCompiler::NonexistentFrontendHeader(Handle<Name> name,
-                                                        Label* miss,
-                                                        Register scratch1,
-                                                        Register scratch2) {
-  Register holder_reg;
-  Handle<Map> last_map;
-  if (holder().is_null()) {
-    holder_reg = receiver();
-    last_map = map();
-    // If |type| has null as its prototype, |holder()| is
-    // Handle<JSObject>::null().
-    DCHECK(last_map->prototype() == isolate()->heap()->null_value());
-  } else {
-    last_map = handle(holder()->map());
-    // This condition matches the branches below.
-    bool need_holder =
-        last_map->is_dictionary_map() && !last_map->IsJSGlobalObjectMap();
-    holder_reg =
-        FrontendHeader(receiver(), name, miss,
-                       need_holder ? RETURN_HOLDER : DONT_RETURN_ANYTHING);
-  }
-
-  if (last_map->is_dictionary_map()) {
-    if (last_map->IsJSGlobalObjectMap()) {
-      Handle<JSGlobalObject> global =
-          holder().is_null()
-              ? Handle<JSGlobalObject>::cast(isolate()->global_object())
-              : Handle<JSGlobalObject>::cast(holder());
-      GenerateCheckPropertyCell(masm(), global, name, scratch1, miss);
-    } else {
-      if (!name->IsUniqueName()) {
-        DCHECK(name->IsString());
-        name = factory()->InternalizeString(Handle<String>::cast(name));
-      }
-      DCHECK(holder().is_null() ||
-             holder()->property_dictionary()->FindEntry(name) ==
-                 NameDictionary::kNotFound);
-      GenerateDictionaryNegativeLookup(masm(), miss, holder_reg, name, scratch1,
-                                       scratch2);
-    }
-  }
-}
-
-
-Handle<Code> NamedLoadHandlerCompiler::CompileLoadField(Handle<Name> name,
-                                                        FieldIndex field) {
-  Register reg = Frontend(name);
-  __ Move(receiver(), reg);
-  LoadFieldStub stub(isolate(), field);
-  GenerateTailCall(masm(), stub.GetCode());
-  return GetCode(kind(), name);
-}
-
-
-Handle<Code> NamedLoadHandlerCompiler::CompileLoadConstant(Handle<Name> name,
-                                                           int constant_index) {
-  Register reg = Frontend(name);
-  __ Move(receiver(), reg);
-  LoadConstantStub stub(isolate(), constant_index);
-  GenerateTailCall(masm(), stub.GetCode());
-  return GetCode(kind(), name);
-}
-
-
-Handle<Code> NamedLoadHandlerCompiler::CompileLoadNonexistent(
-    Handle<Name> name) {
-  Label miss;
-  if (IC::ICUseVector(kind())) {
-    DCHECK(kind() == Code::LOAD_IC);
-    PushVectorAndSlot();
-  }
-  NonexistentFrontendHeader(name, &miss, scratch2(), scratch3());
-  if (IC::ICUseVector(kind())) {
-    DiscardVectorAndSlot();
-  }
-  GenerateLoadConstant(isolate()->factory()->undefined_value());
-  FrontendFooter(name, &miss);
-  return GetCode(kind(), name);
-}
-
 Handle<Code> NamedLoadHandlerCompiler::CompileLoadCallback(
     Handle<Name> name, Handle<AccessorInfo> callback, Handle<Code> slow_stub) {
-  if (FLAG_runtime_call_stats) {
+  if (V8_UNLIKELY(FLAG_runtime_stats)) {
     GenerateTailCall(masm(), slow_stub);
   }
   Register reg = Frontend(name);
@@ -236,7 +109,7 @@ Handle<Code> NamedLoadHandlerCompiler::CompileLoadCallback(
     Handle<Name> name, const CallOptimization& call_optimization,
     int accessor_index, Handle<Code> slow_stub) {
   DCHECK(call_optimization.is_simple_api_call());
-  if (FLAG_runtime_call_stats) {
+  if (V8_UNLIKELY(FLAG_runtime_stats)) {
     GenerateTailCall(masm(), slow_stub);
   }
   Register holder = Frontend(name);
@@ -247,7 +120,7 @@ Handle<Code> NamedLoadHandlerCompiler::CompileLoadCallback(
 
 
 void NamedLoadHandlerCompiler::InterceptorVectorSlotPush(Register holder_reg) {
-  if (IC::ICUseVector(kind())) {
+  if (IC::ShouldPushPopSlotAndVector(kind())) {
     if (holder_reg.is(receiver())) {
       PushVectorAndSlot();
     } else {
@@ -260,7 +133,7 @@ void NamedLoadHandlerCompiler::InterceptorVectorSlotPush(Register holder_reg) {
 
 void NamedLoadHandlerCompiler::InterceptorVectorSlotPop(Register holder_reg,
                                                         PopMode mode) {
-  if (IC::ICUseVector(kind())) {
+  if (IC::ShouldPushPopSlotAndVector(kind())) {
     if (mode == DISCARD) {
       DiscardVectorAndSlot();
     } else {
@@ -290,10 +163,13 @@ Handle<Code> NamedLoadHandlerCompiler::CompileLoadInterceptor(
     case LookupIterator::NOT_FOUND:
     case LookupIterator::INTEGER_INDEXED_EXOTIC:
       break;
-    case LookupIterator::DATA:
-      inline_followup =
-          it->property_details().type() == DATA && !it->is_dictionary_holder();
+    case LookupIterator::DATA: {
+      PropertyDetails details = it->property_details();
+      inline_followup = details.kind() == kData &&
+                        details.location() == kField &&
+                        !it->is_dictionary_holder();
       break;
+    }
     case LookupIterator::ACCESSOR: {
       Handle<Object> accessors = it->GetAccessors();
       if (accessors->IsAccessorInfo()) {
@@ -401,9 +277,13 @@ void NamedLoadHandlerCompiler::GenerateLoadPostInterceptor(
     case LookupIterator::TRANSITION:
       UNREACHABLE();
     case LookupIterator::DATA: {
-      DCHECK_EQ(DATA, it->property_details().type());
-      __ Move(receiver(), reg);
-      LoadFieldStub stub(isolate(), it->GetFieldIndex());
+      DCHECK_EQ(kData, it->property_details().kind());
+      DCHECK_EQ(kField, it->property_details().location());
+      __ Move(LoadFieldDescriptor::ReceiverRegister(), reg);
+      Handle<Object> smi_handler =
+          LoadIC::SimpleFieldLoad(isolate(), it->GetFieldIndex());
+      __ Move(LoadFieldDescriptor::SmiHandlerRegister(), smi_handler);
+      LoadFieldStub stub(isolate());
       GenerateTailCall(masm(), stub.GetCode());
       break;
     }
@@ -432,124 +312,6 @@ Handle<Code> NamedLoadHandlerCompiler::CompileLoadViaGetter(
   return GetCode(kind(), name);
 }
 
-
-// TODO(verwaest): Cleanup. holder() is actually the receiver.
-Handle<Code> NamedStoreHandlerCompiler::CompileStoreTransition(
-    Handle<Map> transition, Handle<Name> name) {
-  Label miss;
-
-  PushVectorAndSlot();
-
-  // Check that we are allowed to write this.
-  bool is_nonexistent = holder()->map() == transition->GetBackPointer();
-  if (is_nonexistent) {
-    // Find the top object.
-    Handle<JSObject> last;
-    PrototypeIterator::WhereToEnd end =
-        name->IsPrivate() ? PrototypeIterator::END_AT_NON_HIDDEN
-                          : PrototypeIterator::END_AT_NULL;
-    PrototypeIterator iter(isolate(), holder(), kStartAtPrototype, end);
-    while (!iter.IsAtEnd()) {
-      last = PrototypeIterator::GetCurrent<JSObject>(iter);
-      iter.Advance();
-    }
-    if (!last.is_null()) set_holder(last);
-    NonexistentFrontendHeader(name, &miss, scratch1(), scratch2());
-  } else {
-    FrontendHeader(receiver(), name, &miss, DONT_RETURN_ANYTHING);
-    DCHECK(holder()->HasFastProperties());
-  }
-
-  int descriptor = transition->LastAdded();
-  Handle<DescriptorArray> descriptors(transition->instance_descriptors());
-  PropertyDetails details = descriptors->GetDetails(descriptor);
-  Representation representation = details.representation();
-  DCHECK(!representation.IsNone());
-
-  // Stub is never generated for objects that require access checks.
-  DCHECK(!transition->is_access_check_needed());
-
-  // Call to respective StoreTransitionStub.
-  bool virtual_args = StoreTransitionHelper::HasVirtualSlotArg();
-  Register map_reg = StoreTransitionHelper::MapRegister();
-
-  if (details.type() == DATA_CONSTANT) {
-    DCHECK(descriptors->GetValue(descriptor)->IsJSFunction());
-    Register tmp =
-        virtual_args ? StoreWithVectorDescriptor::VectorRegister() : map_reg;
-    GenerateRestoreMap(transition, tmp, scratch2(), &miss);
-    GenerateConstantCheck(tmp, descriptor, value(), scratch2(), &miss);
-    if (virtual_args) {
-      // This will move the map from tmp into map_reg.
-      RearrangeVectorAndSlot(tmp, map_reg);
-    } else {
-      PopVectorAndSlot();
-    }
-    GenerateRestoreName(name);
-    StoreTransitionStub stub(isolate());
-    GenerateTailCall(masm(), stub.GetCode());
-
-  } else {
-    if (representation.IsHeapObject()) {
-      GenerateFieldTypeChecks(descriptors->GetFieldType(descriptor), value(),
-                              &miss);
-    }
-    StoreTransitionStub::StoreMode store_mode =
-        Map::cast(transition->GetBackPointer())->unused_property_fields() == 0
-            ? StoreTransitionStub::ExtendStorageAndStoreMapAndValue
-            : StoreTransitionStub::StoreMapAndValue;
-
-    Register tmp =
-        virtual_args ? StoreWithVectorDescriptor::VectorRegister() : map_reg;
-    GenerateRestoreMap(transition, tmp, scratch2(), &miss);
-    if (virtual_args) {
-      RearrangeVectorAndSlot(tmp, map_reg);
-    } else {
-      PopVectorAndSlot();
-    }
-    GenerateRestoreName(name);
-    StoreTransitionStub stub(isolate(),
-                             FieldIndex::ForDescriptor(*transition, descriptor),
-                             representation, store_mode);
-    GenerateTailCall(masm(), stub.GetCode());
-  }
-
-  GenerateRestoreName(&miss, name);
-  PopVectorAndSlot();
-  TailCallBuiltin(masm(), MissBuiltin(kind()));
-
-  return GetCode(kind(), name);
-}
-
-bool NamedStoreHandlerCompiler::RequiresFieldTypeChecks(
-    FieldType* field_type) const {
-  return field_type->IsClass();
-}
-
-
-Handle<Code> NamedStoreHandlerCompiler::CompileStoreField(LookupIterator* it) {
-  Label miss;
-  DCHECK(it->representation().IsHeapObject());
-
-  FieldType* field_type = *it->GetFieldType();
-  bool need_save_restore = false;
-  if (RequiresFieldTypeChecks(field_type)) {
-    need_save_restore = IC::ICUseVector(kind());
-    if (need_save_restore) PushVectorAndSlot();
-    GenerateFieldTypeChecks(field_type, value(), &miss);
-    if (need_save_restore) PopVectorAndSlot();
-  }
-
-  StoreFieldStub stub(isolate(), it->GetFieldIndex(), it->representation());
-  GenerateTailCall(masm(), stub.GetCode());
-
-  __ bind(&miss);
-  if (need_save_restore) PopVectorAndSlot();
-  TailCallBuiltin(masm(), MissBuiltin(kind()));
-  return GetCode(kind(), it->name());
-}
-
-
 Handle<Code> NamedStoreHandlerCompiler::CompileStoreViaSetter(
     Handle<JSObject> object, Handle<Name> name, int accessor_index,
     int expected_arguments) {
@@ -564,10 +326,13 @@ Handle<Code> NamedStoreHandlerCompiler::CompileStoreCallback(
     Handle<JSObject> object, Handle<Name> name,
     const CallOptimization& call_optimization, int accessor_index,
     Handle<Code> slow_stub) {
-  if (FLAG_runtime_call_stats) {
+  if (V8_UNLIKELY(FLAG_runtime_stats)) {
     GenerateTailCall(masm(), slow_stub);
   }
   Register holder = Frontend(name);
+  if (Descriptor::kPassLastArgsOnStack) {
+    __ LoadParameterFromStack<Descriptor>(value(), Descriptor::kValue);
+  }
   GenerateApiAccessorCall(masm(), call_optimization, handle(object->map()),
                           receiver(), scratch2(), true, value(), holder,
                           accessor_index);
@@ -601,28 +366,20 @@ Handle<Object> ElementHandlerCompiler::GetKeyedLoadHandler(
     TRACE_HANDLER_STATS(isolate, KeyedLoadIC_KeyedLoadSloppyArgumentsStub);
     return KeyedLoadSloppyArgumentsStub(isolate).GetCode();
   }
+  bool is_js_array = instance_type == JS_ARRAY_TYPE;
   if (elements_kind == DICTIONARY_ELEMENTS) {
-    TRACE_HANDLER_STATS(isolate, KeyedLoadIC_LoadDictionaryElementStub);
-    return LoadDictionaryElementStub(isolate).GetCode();
+    TRACE_HANDLER_STATS(isolate, KeyedLoadIC_LoadElementDH);
+    return LoadHandler::LoadElement(isolate, elements_kind, false, is_js_array);
   }
   DCHECK(IsFastElementsKind(elements_kind) ||
          IsFixedTypedArrayElementsKind(elements_kind));
-  bool is_js_array = instance_type == JS_ARRAY_TYPE;
+  // TODO(jkummerow): Use IsHoleyElementsKind(elements_kind).
   bool convert_hole_to_undefined =
       is_js_array && elements_kind == FAST_HOLEY_ELEMENTS &&
       *receiver_map == isolate->get_initial_js_array_map(elements_kind);
-  if (FLAG_tf_load_ic_stub) {
-    int config = KeyedLoadElementsKind::encode(elements_kind) |
-                 KeyedLoadConvertHole::encode(convert_hole_to_undefined) |
-                 KeyedLoadIsJsArray::encode(is_js_array) |
-                 LoadHandlerTypeBit::encode(kLoadICHandlerForElements);
-    return handle(Smi::FromInt(config), isolate);
-  } else {
-    TRACE_HANDLER_STATS(isolate, KeyedLoadIC_LoadFastElementStub);
-    return LoadFastElementStub(isolate, is_js_array, elements_kind,
-                               convert_hole_to_undefined)
-        .GetCode();
-  }
+  TRACE_HANDLER_STATS(isolate, KeyedLoadIC_LoadElementDH);
+  return LoadHandler::LoadElement(isolate, elements_kind,
+                                  convert_hole_to_undefined, is_js_array);
 }
 
 void ElementHandlerCompiler::CompileElementHandlers(

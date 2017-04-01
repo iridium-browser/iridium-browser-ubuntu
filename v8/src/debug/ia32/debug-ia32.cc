@@ -4,8 +4,10 @@
 
 #if V8_TARGET_ARCH_IA32
 
-#include "src/codegen.h"
 #include "src/debug/debug.h"
+
+#include "src/codegen.h"
+#include "src/debug/liveedit.h"
 #include "src/ia32/frames-ia32.h"
 
 namespace v8 {
@@ -127,7 +129,7 @@ void DebugCodegen::GenerateFrameDropperLiveEdit(MacroAssembler* masm) {
   __ pop(ebp);
 
   ParameterCount dummy(0);
-  __ FloodFunctionIfStepping(edi, no_reg, dummy, dummy);
+  __ CheckDebugHook(edi, no_reg, dummy, dummy);
 
   // Load context from the function.
   __ mov(esi, FieldOperand(edi, JSFunction::kContextOffset));

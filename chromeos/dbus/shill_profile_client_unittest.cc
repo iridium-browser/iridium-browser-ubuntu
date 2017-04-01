@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/run_loop.h"
+#include "base/test/mock_callback.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill_client_unittest_base.h"
 #include "chromeos/dbus/shill_profile_client.h"
@@ -44,7 +46,7 @@ class ShillProfileClientTest : public ShillClientUnittestBase {
     client_.reset(ShillProfileClient::Create());
     client_->Init(mock_bus_.get());
     // Run the message loop to run the signal connection result callback.
-    message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
   }
 
   void TearDown() override { ShillClientUnittestBase::TearDown(); }
@@ -64,7 +66,7 @@ TEST_F(ShillProfileClientTest, PropertyChanged) {
 
   // Set expectations.
   base::ListValue value;
-  value.Append(new base::StringValue(kExampleEntryPath));
+  value.AppendString(kExampleEntryPath);
   MockPropertyChangeObserver observer;
   EXPECT_CALL(observer,
               OnPropertyChanged(
@@ -106,7 +108,7 @@ TEST_F(ShillProfileClientTest, GetProperties) {
 
   // Create the expected value.
   base::ListValue* entries = new base::ListValue;
-  entries->Append(new base::StringValue(kExampleEntryPath));
+  entries->AppendString(kExampleEntryPath);
   base::DictionaryValue value;
   value.SetWithoutPathExpansion(shill::kEntriesProperty, entries);
   // Set expectations.
@@ -114,15 +116,15 @@ TEST_F(ShillProfileClientTest, GetProperties) {
                        base::Bind(&ExpectNoArgument),
                        response.get());
   // Call method.
-  MockErrorCallback error_callback;
-  client_->GetProperties(dbus::ObjectPath(kDefaultProfilePath),
-                         base::Bind(&ExpectDictionaryValueResultWithoutStatus,
-                                    &value),
-                         error_callback.GetCallback());
+  base::MockCallback<ShillProfileClient::ErrorCallback> error_callback;
+  client_->GetProperties(
+      dbus::ObjectPath(kDefaultProfilePath),
+      base::Bind(&ExpectDictionaryValueResultWithoutStatus, &value),
+      error_callback.Get());
   EXPECT_CALL(error_callback, Run(_, _)).Times(0);
 
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(ShillProfileClientTest, GetEntry) {
@@ -147,15 +149,14 @@ TEST_F(ShillProfileClientTest, GetEntry) {
                        base::Bind(&ExpectStringArgument, kExampleEntryPath),
                        response.get());
   // Call method.
-  MockErrorCallback error_callback;
-  client_->GetEntry(dbus::ObjectPath(kDefaultProfilePath),
-                    kExampleEntryPath,
-                    base::Bind(&ExpectDictionaryValueResultWithoutStatus,
-                               &value),
-                    error_callback.GetCallback());
+  base::MockCallback<ShillProfileClient::ErrorCallback> error_callback;
+  client_->GetEntry(
+      dbus::ObjectPath(kDefaultProfilePath), kExampleEntryPath,
+      base::Bind(&ExpectDictionaryValueResultWithoutStatus, &value),
+      error_callback.Get());
   EXPECT_CALL(error_callback, Run(_, _)).Times(0);
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 TEST_F(ShillProfileClientTest, DeleteEntry) {
@@ -171,17 +172,15 @@ TEST_F(ShillProfileClientTest, DeleteEntry) {
                        base::Bind(&ExpectStringArgument, kExampleEntryPath),
                        response.get());
   // Call method.
-  MockClosure mock_closure;
-  MockErrorCallback mock_error_callback;
-  client_->DeleteEntry(dbus::ObjectPath(kDefaultProfilePath),
-                       kExampleEntryPath,
-                       mock_closure.GetCallback(),
-                       mock_error_callback.GetCallback());
+  base::MockCallback<base::Closure> mock_closure;
+  base::MockCallback<ShillProfileClient::ErrorCallback> mock_error_callback;
+  client_->DeleteEntry(dbus::ObjectPath(kDefaultProfilePath), kExampleEntryPath,
+                       mock_closure.Get(), mock_error_callback.Get());
   EXPECT_CALL(mock_closure, Run()).Times(1);
   EXPECT_CALL(mock_error_callback, Run(_, _)).Times(0);
 
   // Run the message loop.
-  message_loop_.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
 }
 
 }  // namespace chromeos

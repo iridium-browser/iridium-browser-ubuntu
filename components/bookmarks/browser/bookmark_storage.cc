@@ -12,13 +12,14 @@
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
+#include "base/json/json_reader.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "components/bookmarks/browser/bookmark_codec.h"
-#include "components/bookmarks/browser/bookmark_index.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/browser/titled_url_index.h"
 #include "components/bookmarks/common/bookmark_constants.h"
 
 using base::TimeTicks;
@@ -57,7 +58,10 @@ void LoadCallback(const base::FilePath& path,
   bool load_index = false;
   bool bookmark_file_exists = base::PathExists(path);
   if (bookmark_file_exists) {
-    JSONFileValueDeserializer deserializer(path);
+    // Titles may end up containing invalid utf and we shouldn't throw away
+    // all bookmarks if some titles have invalid utf.
+    JSONFileValueDeserializer deserializer(
+        path, base::JSON_REPLACE_INVALID_CHARACTERS);
     std::unique_ptr<base::Value> root = deserializer.Deserialize(NULL, NULL);
 
     if (root.get()) {
@@ -101,7 +105,7 @@ void LoadCallback(const base::FilePath& path,
     AddBookmarksToIndex(details.get(), details->other_folder_node());
     AddBookmarksToIndex(details.get(), details->mobile_folder_node());
     for (size_t i = 0; i < extra_nodes.size(); ++i)
-      AddBookmarksToIndex(details.get(), extra_nodes[i]);
+      AddBookmarksToIndex(details.get(), extra_nodes[i].get());
     UMA_HISTOGRAM_TIMES("Bookmarks.CreateBookmarkIndexTime",
                         TimeTicks::Now() - start_time);
   }
@@ -120,7 +124,7 @@ BookmarkLoadDetails::BookmarkLoadDetails(
     BookmarkPermanentNode* other_folder_node,
     BookmarkPermanentNode* mobile_folder_node,
     const LoadExtraCallback& load_extra_callback,
-    BookmarkIndex* index,
+    TitledUrlIndex* index,
     int64_t max_id)
     : bb_node_(bb_node),
       other_folder_node_(other_folder_node),

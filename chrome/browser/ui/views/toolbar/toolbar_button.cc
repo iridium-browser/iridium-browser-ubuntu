@@ -12,16 +12,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
-#include "chrome/browser/ui/layout_constants.h"
-#include "chrome/browser/ui/views/location_bar/location_bar_view.h"
-#include "ui/accessibility/ax_view_state.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/models/menu_model.h"
-#include "ui/base/theme_provider.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
-#include "ui/strings/grit/ui_strings.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
@@ -39,10 +33,8 @@ ToolbarButton::ToolbarButton(Profile* profile,
       show_menu_factory_(this) {
   set_has_ink_drop_action_on_click(true);
   set_context_menu_controller(this);
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    SetInkDropMode(InkDropMode::ON);
-    SetFocusPainter(nullptr);
-  }
+  SetInkDropMode(InkDropMode::ON);
+  SetFocusPainter(nullptr);
 }
 
 ToolbarButton::~ToolbarButton() {}
@@ -61,24 +53,10 @@ bool ToolbarButton::IsMenuShowing() const {
 }
 
 gfx::Size ToolbarButton::GetPreferredSize() const {
-  gfx::Size size(image()->GetPreferredSize());
-  gfx::Size label_size = label()->GetPreferredSize();
-  if (label_size.width() > 0) {
-    size.Enlarge(
-        label_size.width() + GetLayoutConstant(LOCATION_BAR_HORIZONTAL_PADDING),
-        0);
-  }
-  // For non-material assets the entire size of the button is captured in the
-  // image resource. For Material Design the excess whitespace is being removed
-  // from the image assets. Enlarge the button by the theme provided insets.
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    const ui::ThemeProvider* provider = GetThemeProvider();
-    if (provider) {
-      gfx::Insets insets(GetLayoutInsets(TOOLBAR_BUTTON));
-      size.Enlarge(insets.width(), insets.height());
-    }
-  }
-  return size;
+  DCHECK(label()->text().empty());
+  gfx::Rect rect(gfx::Size(image()->GetPreferredSize()));
+  rect.Inset(gfx::Insets(-kInteriorPadding));
+  return rect.size();
 }
 
 bool ToolbarButton::OnMousePressed(const ui::MouseEvent& event) {
@@ -148,11 +126,14 @@ void ToolbarButton::OnGestureEvent(ui::GestureEvent* event) {
   LabelButton::OnGestureEvent(event);
 }
 
-void ToolbarButton::GetAccessibleState(ui::AXViewState* state) {
-  CustomButton::GetAccessibleState(state);
-  state->role = ui::AX_ROLE_BUTTON_DROP_DOWN;
-  state->default_action = l10n_util::GetStringUTF16(IDS_APP_ACCACTION_PRESS);
-  state->AddStateFlag(ui::AX_STATE_HASPOPUP);
+void ToolbarButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  CustomButton::GetAccessibleNodeData(node_data);
+  node_data->role = ui::AX_ROLE_BUTTON_DROP_DOWN;
+  node_data->AddStateFlag(ui::AX_STATE_HASPOPUP);
+  if (enabled()) {
+    node_data->AddIntAttribute(ui::AX_ATTR_ACTION,
+                               ui::AX_SUPPORTED_ACTION_PRESS);
+  }
 }
 
 std::unique_ptr<views::LabelButtonBorder> ToolbarButton::CreateDefaultBorder()
@@ -161,7 +142,7 @@ std::unique_ptr<views::LabelButtonBorder> ToolbarButton::CreateDefaultBorder()
       views::LabelButton::CreateDefaultBorder();
 
   if (ThemeServiceFactory::GetForProfile(profile_)->UsingSystemTheme())
-    border->set_insets(GetLayoutInsets(TOOLBAR_BUTTON));
+    border->set_insets(gfx::Insets(kInteriorPadding));
 
   return border;
 }
@@ -244,11 +225,6 @@ void ToolbarButton::OnMenuClosed() {
   AnimateInkDrop(views::InkDropState::DEACTIVATED, nullptr /* event */);
 
   menu_showing_ = false;
-
-  // Need to explicitly clear mouse handler so that events get sent
-  // properly after the menu finishes running. If we don't do this, then
-  // the first click to other parts of the UI is eaten.
-  SetMouseHandler(nullptr);
 
   // Set the state back to normal after the drop down menu is closed.
   if (state() != STATE_DISABLED)

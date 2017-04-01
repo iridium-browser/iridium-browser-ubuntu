@@ -10,6 +10,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/profiler/stack_sampling_profiler.h"
+#include "components/metrics/call_stack_profile_params.h"
 #include "components/metrics/metrics_provider.h"
 
 namespace metrics {
@@ -18,32 +19,18 @@ class ChromeUserMetricsExtension;
 // Performs metrics logging for the stack sampling profiler.
 class CallStackProfileMetricsProvider : public MetricsProvider {
  public:
-  // The event that triggered the profile collection.
-  // This enum should be kept in sync with content/common/profiled_stack_state.h
-  enum Trigger {
-    UNKNOWN,
-    PROCESS_STARTUP,
-    JANKY_TASK,
-    THREAD_HUNG,
-    TRIGGER_LAST = THREAD_HUNG
-  };
+  // These milestones of a process lifetime can be passed as process "mile-
+  // stones" to StackSmaplingProfile::SetProcessMilestone(). Be sure to update
+  // the translation constants at the top of the .cc file when this is changed.
+  enum Milestones : int {
+    MAIN_LOOP_START,
+    MAIN_NAVIGATION_START,
+    MAIN_NAVIGATION_FINISHED,
+    FIRST_NONEMPTY_PAINT,
 
-  // Parameters to pass back to the metrics provider.
-  struct Params {
-    explicit Params(Trigger trigger);
-    Params(Trigger trigger, bool preserve_sample_ordering);
+    SHUTDOWN_START,
 
-    // The triggering event.
-    Trigger trigger;
-
-    // True if sample ordering is important and should be preserved when the
-    // associated profiles are compressed. This should only be set to true if
-    // the intended use of the requires that the sequence of call stacks within
-    // a particular profile be preserved. The default value of false provides
-    // better compression of the encoded profile and is sufficient for the
-    // typical use case of recording profiles for stack frequency analysis in
-    // aggregate.
-    bool preserve_sample_ordering;
+    MILESTONES_MAX_VALUE
   };
 
   CallStackProfileMetricsProvider();
@@ -54,7 +41,16 @@ class CallStackProfileMetricsProvider : public MetricsProvider {
   // StackSamplingProfiler, and should not be reused between
   // StackSamplingProfilers. This function may be called on any thread.
   static base::StackSamplingProfiler::CompletedCallback GetProfilerCallback(
-      const Params& params);
+      const CallStackProfileParams& params);
+
+  // Provides completed stack profiles to the metrics provider. Intended for use
+  // when receiving profiles over IPC. In-process StackSamplingProfiler users
+  // should use GetProfilerCallback() instead. |profiles| is not const& because
+  // it must be passed with std::move.
+  static void ReceiveCompletedProfiles(
+      const CallStackProfileParams& params,
+      base::TimeTicks start_timestamp,
+      base::StackSamplingProfiler::CallStackProfiles profiles);
 
   // MetricsProvider:
   void OnRecordingEnabled() override;

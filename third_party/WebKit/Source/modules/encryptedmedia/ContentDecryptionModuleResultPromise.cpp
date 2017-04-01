@@ -6,6 +6,7 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
@@ -14,106 +15,107 @@
 
 namespace blink {
 
-ExceptionCode WebCdmExceptionToExceptionCode(WebContentDecryptionModuleException cdmException)
-{
-    switch (cdmException) {
+ExceptionCode WebCdmExceptionToExceptionCode(
+    WebContentDecryptionModuleException cdmException) {
+  switch (cdmException) {
+    case WebContentDecryptionModuleExceptionTypeError:
+      return V8TypeError;
     case WebContentDecryptionModuleExceptionNotSupportedError:
-        return NotSupportedError;
+      return NotSupportedError;
     case WebContentDecryptionModuleExceptionInvalidStateError:
-        return InvalidStateError;
-    case WebContentDecryptionModuleExceptionInvalidAccessError:
-        return InvalidAccessError;
+      return InvalidStateError;
     case WebContentDecryptionModuleExceptionQuotaExceededError:
-        return QuotaExceededError;
+      return QuotaExceededError;
     case WebContentDecryptionModuleExceptionUnknownError:
-        return UnknownError;
-    case WebContentDecryptionModuleExceptionClientError:
-    case WebContentDecryptionModuleExceptionOutputError:
-        // Currently no matching DOMException for these 2 errors.
-        // FIXME: Update DOMException to handle these if actually added to
-        // the EME spec.
-        return UnknownError;
-    }
+      return UnknownError;
+  }
 
-    NOTREACHED();
-    return UnknownError;
+  NOTREACHED();
+  return UnknownError;
 }
 
-ContentDecryptionModuleResultPromise::ContentDecryptionModuleResultPromise(ScriptState* scriptState)
-    : m_resolver(ScriptPromiseResolver::create(scriptState))
-{
+ContentDecryptionModuleResultPromise::ContentDecryptionModuleResultPromise(
+    ScriptState* scriptState)
+    : m_resolver(ScriptPromiseResolver::create(scriptState)) {}
+
+ContentDecryptionModuleResultPromise::~ContentDecryptionModuleResultPromise() {}
+
+void ContentDecryptionModuleResultPromise::complete() {
+  NOTREACHED();
+  if (!isValidToFulfillPromise())
+    return;
+  reject(InvalidStateError, "Unexpected completion.");
 }
 
-ContentDecryptionModuleResultPromise::~ContentDecryptionModuleResultPromise()
-{
+void ContentDecryptionModuleResultPromise::completeWithContentDecryptionModule(
+    WebContentDecryptionModule* cdm) {
+  NOTREACHED();
+  if (!isValidToFulfillPromise())
+    return;
+  reject(InvalidStateError, "Unexpected completion.");
 }
 
-void ContentDecryptionModuleResultPromise::complete()
-{
-    NOTREACHED();
-    reject(InvalidStateError, "Unexpected completion.");
+void ContentDecryptionModuleResultPromise::completeWithSession(
+    WebContentDecryptionModuleResult::SessionStatus status) {
+  NOTREACHED();
+  if (!isValidToFulfillPromise())
+    return;
+  reject(InvalidStateError, "Unexpected completion.");
 }
 
-void ContentDecryptionModuleResultPromise::completeWithContentDecryptionModule(WebContentDecryptionModule* cdm)
-{
-    NOTREACHED();
-    reject(InvalidStateError, "Unexpected completion.");
+void ContentDecryptionModuleResultPromise::completeWithError(
+    WebContentDecryptionModuleException exceptionCode,
+    unsigned long systemCode,
+    const WebString& errorMessage) {
+  if (!isValidToFulfillPromise())
+    return;
+
+  // Non-zero |systemCode| is appended to the |errorMessage|. If the
+  // |errorMessage| is empty, we'll report "Rejected with system code
+  // (systemCode)".
+  StringBuilder result;
+  result.append(errorMessage);
+  if (systemCode != 0) {
+    if (result.isEmpty())
+      result.append("Rejected with system code");
+    result.append(" (");
+    result.appendNumber(systemCode);
+    result.append(')');
+  }
+  reject(WebCdmExceptionToExceptionCode(exceptionCode), result.toString());
 }
 
-void ContentDecryptionModuleResultPromise::completeWithSession(WebContentDecryptionModuleResult::SessionStatus status)
-{
-    NOTREACHED();
-    reject(InvalidStateError, "Unexpected completion.");
+ScriptPromise ContentDecryptionModuleResultPromise::promise() {
+  return m_resolver->promise();
 }
 
-void ContentDecryptionModuleResultPromise::completeWithError(WebContentDecryptionModuleException exceptionCode, unsigned long systemCode, const WebString& errorMessage)
-{
-    // Non-zero |systemCode| is appended to the |errorMessage|. If the
-    // |errorMessage| is empty, we'll report "Rejected with system code
-    // (systemCode)".
-    StringBuilder result;
-    result.append(errorMessage);
-    if (systemCode != 0) {
-        if (result.isEmpty())
-            result.append("Rejected with system code");
-        result.append(" (");
-        result.appendNumber(systemCode);
-        result.append(')');
-    }
-    reject(WebCdmExceptionToExceptionCode(exceptionCode), result.toString());
+void ContentDecryptionModuleResultPromise::reject(ExceptionCode code,
+                                                  const String& errorMessage) {
+  DCHECK(isValidToFulfillPromise());
+
+  ScriptState::Scope scope(m_resolver->getScriptState());
+  v8::Isolate* isolate = m_resolver->getScriptState()->isolate();
+  m_resolver->reject(
+      V8ThrowException::createDOMException(isolate, code, errorMessage));
+  m_resolver.clear();
 }
 
-ScriptPromise ContentDecryptionModuleResultPromise::promise()
-{
-    return m_resolver->promise();
+ExecutionContext* ContentDecryptionModuleResultPromise::getExecutionContext()
+    const {
+  return m_resolver->getExecutionContext();
 }
 
-void ContentDecryptionModuleResultPromise::reject(ExceptionCode code, const String& errorMessage)
-{
-    // Reject the promise asynchronously. This avoids problems when gc is
-    // destroying objects that result in unfulfilled promises being rejected.
-    // (Resolving promises is still done synchronously as there may be events
-    // already posted that need to happen only after the promise is resolved.)
-    // TODO(jrummell): Make resolving a promise asynchronous as well (including
-    // making sure events still happen after the promise is resolved).
-    getExecutionContext()->postTask(BLINK_FROM_HERE, createSameThreadTask(&ContentDecryptionModuleResultPromise::rejectInternal, wrapPersistent(this), code, errorMessage));
+bool ContentDecryptionModuleResultPromise::isValidToFulfillPromise() {
+  // getExecutionContext() is no longer valid once the context is destroyed.
+  // isContextDestroyed() is called to see if the context is in the
+  // process of being destroyed. If it is, there is no need to fulfill this
+  // promise which is about to go away anyway.
+  return getExecutionContext() && !getExecutionContext()->isContextDestroyed();
 }
 
-void ContentDecryptionModuleResultPromise::rejectInternal(ExceptionCode code, const String& errorMessage)
-{
-    m_resolver->reject(DOMException::create(code, errorMessage));
-    m_resolver.clear();
+DEFINE_TRACE(ContentDecryptionModuleResultPromise) {
+  visitor->trace(m_resolver);
+  ContentDecryptionModuleResult::trace(visitor);
 }
 
-ExecutionContext* ContentDecryptionModuleResultPromise::getExecutionContext() const
-{
-    return m_resolver->getExecutionContext();
-}
-
-DEFINE_TRACE(ContentDecryptionModuleResultPromise)
-{
-    visitor->trace(m_resolver);
-    ContentDecryptionModuleResult::trace(visitor);
-}
-
-} // namespace blink
+}  // namespace blink

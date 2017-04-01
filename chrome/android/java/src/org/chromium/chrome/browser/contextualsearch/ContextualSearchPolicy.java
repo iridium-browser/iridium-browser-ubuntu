@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.contextualsearch;
 
 import android.content.Context;
+import android.net.Uri;
+import android.telephony.TelephonyManager;
 import android.text.TextUtils;
 
 import org.chromium.base.VisibleForTesting;
@@ -27,6 +29,8 @@ import javax.annotation.Nullable;
  */
 class ContextualSearchPolicy {
     private static final Pattern CONTAINS_WHITESPACE_PATTERN = Pattern.compile("\\s");
+    private static final String DOMAIN_GOOGLE = "google";
+    private static final String PATH_AMP = "/amp/";
     private static final int REMAINING_NOT_APPLICABLE = -1;
     private static final int ONE_DAY_IN_MILLIS = 24 * 60 * 60 * 1000;
     private static final int TAP_TRIGGERED_PROMO_LIMIT = 50;
@@ -401,6 +405,14 @@ class ContextualSearchPolicy {
         return ContextualSearchFieldTrial.isQuickAnswersEnabled();
     }
 
+    /**
+     * @return Whether the given URL is used for Accelerated Mobile Pages by Google.
+     */
+    boolean isAmpUrl(String url) {
+        Uri uri = Uri.parse(url);
+        return uri.getHost().contains(DOMAIN_GOOGLE) && uri.getPath().startsWith(PATH_AMP);
+    }
+
     // --------------------------------------------------------------------------------------------
     // Testing support.
     // --------------------------------------------------------------------------------------------
@@ -495,6 +507,23 @@ class ContextualSearchPolicy {
         if (isForceTranslationOneboxDisabled()) return true;
 
         return ContextualSearchFieldTrial.isAutoDetectTranslationOneboxDisabled();
+    }
+
+    /**
+     * @return The ISO country code for the user's home country, or an empty string if not
+     *         available or privacy-enabled.
+     */
+    String getHomeCountry(Context context) {
+        if (!ContextualSearchFieldTrial.isSendHomeCountryEnabled()) return "";
+
+        TelephonyManager telephonyManager =
+                (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
+        if (telephonyManager == null) return "";
+
+        String simCountryIso = telephonyManager.getSimCountryIso();
+        if (TextUtils.isEmpty(simCountryIso)) return "";
+
+        return simCountryIso;
     }
 
     /**

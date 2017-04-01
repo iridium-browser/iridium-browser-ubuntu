@@ -4,6 +4,8 @@
 
 #include "chrome/browser/permissions/permission_uma_util.h"
 
+#include <memory>
+
 #include "base/test/scoped_command_line.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -12,15 +14,17 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
-#include "components/browser_sync/browser/profile_sync_service_mock.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/browser_sync/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service_mock.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/driver/glue/sync_backend_host_mock.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/base/sync_prefs.h"
+#include "components/sync/engine/fake_sync_engine.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using browser_sync::ProfileSyncServiceMock;
 
 namespace {
 constexpr char kTestingGaiaId[] = "gaia_id";
@@ -55,7 +59,7 @@ class PermissionUmaUtilTest : public testing::Test {
     preferences->SetBoolean(prefs::kSafeBrowsingEnabled, enabled);
   }
 
-  ProfileSyncService* GetProfileSyncService() {
+  browser_sync::ProfileSyncService* GetProfileSyncService() {
     return ProfileSyncServiceFactory::GetForProfile(profile());
   }
 

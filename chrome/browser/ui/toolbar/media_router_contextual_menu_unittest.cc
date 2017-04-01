@@ -2,11 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/macros.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/extensions/browser_action_test_util.h"
+#include "chrome/browser/extensions/extension_action_test_util.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/media_router_action.h"
 #include "chrome/browser/ui/toolbar/media_router_contextual_menu.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
@@ -18,6 +22,11 @@ class MediaRouterContextualMenuUnitTest : public BrowserWithTestWindowTest {
 
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
+
+    toolbar_actions_model_ =
+        extensions::extension_action_test_util::CreateToolbarModelForProfile(
+            profile());
+
     signin_manager_ =
         SigninManagerFactory::GetInstance()->GetForProfile(profile());
     browser_action_test_util_.reset(
@@ -35,19 +44,31 @@ class MediaRouterContextualMenuUnitTest : public BrowserWithTestWindowTest {
 
   SigninManagerBase* signin_manager() { return signin_manager_; }
   ui::SimpleMenuModel* model() { return model_; }
+  ToolbarActionsModel* toolbar_actions_model() {
+    return toolbar_actions_model_;
+  }
 
  private:
   std::unique_ptr<BrowserActionTestUtil> browser_action_test_util_;
   std::unique_ptr<MediaRouterAction> action_;
   SigninManagerBase* signin_manager_;
   ui::SimpleMenuModel* model_;
+  ToolbarActionsModel* toolbar_actions_model_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterContextualMenuUnitTest);
 };
 
 // Tests the basic state of the contextual menu.
 TEST_F(MediaRouterContextualMenuUnitTest, Basic) {
-  int expected_number_items = 7;
+  // About
+  // -----
+  // Learn more
+  // Help
+  // Always show icon (checkbox)
+  // -----
+  // Enable cloud services (checkbox)
+  // Report an issue
+  int expected_number_items = 8;
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   // On all platforms except Linux, there's an additional menu item to access
@@ -55,26 +76,16 @@ TEST_F(MediaRouterContextualMenuUnitTest, Basic) {
   expected_number_items++;
 #endif  // defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
 
-#if defined(GOOGLE_CHROME_BUILD)
-  // In official Chrome builds, there's an additional menu item to toggle cloud
-  // services settings.
-  expected_number_items++;
-#endif  // GOOGLE_CHROME_BUILD
-
   // Verify the number of menu items, including separators.
   EXPECT_EQ(model()->GetItemCount(), expected_number_items);
 
   for (int i = 0; i < expected_number_items; i++) {
     EXPECT_TRUE(model()->IsEnabledAt(i));
-    bool expected_visibility = true;
 
-#if defined(GOOGLE_CHROME_BUILD)
-    // In official Chrome builds, the cloud services toggle exists and is
-    // enabled, but not visible until the user has authenticated their account.
-    expected_visibility =
+    // The cloud services toggle exists and is enabled, but not visible until
+    // the user has authenticated their account.
+    const bool expected_visibility =
         model()->GetCommandIdAt(i) != IDC_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE;
-#endif  // GOOGLE_CHROME_BUILD
-
     EXPECT_EQ(expected_visibility, model()->IsVisibleAt(i));
   }
 
@@ -90,7 +101,6 @@ TEST_F(MediaRouterContextualMenuUnitTest, Basic) {
   }
 }
 
-#if defined(GOOGLE_CHROME_BUILD)
 // Tests whether the cloud services item is correctly toggled. This menu item
 // is only availble on official Chrome builds.
 TEST_F(MediaRouterContextualMenuUnitTest, ToggleCloudServicesItem) {
@@ -114,4 +124,29 @@ TEST_F(MediaRouterContextualMenuUnitTest, ToggleCloudServicesItem) {
   EXPECT_FALSE(menu.IsCommandIdChecked(
       IDC_MEDIA_ROUTER_CLOUD_SERVICES_TOGGLE));
 }
-#endif  // GOOGLE_CHROME_BUILD
+
+TEST_F(MediaRouterContextualMenuUnitTest, ToggleAlwaysShowIconItem) {
+  MediaRouterContextualMenu menu(browser());
+  extensions::ComponentMigrationHelper* const component_migration_helper =
+      toolbar_actions_model()->component_migration_helper();
+
+  // Whether the option is checked should reflect the pref.
+  component_migration_helper->SetComponentActionPref(
+      ComponentToolbarActionsFactory::kMediaRouterActionId, true);
+  EXPECT_TRUE(
+      menu.IsCommandIdChecked(IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION));
+
+  component_migration_helper->SetComponentActionPref(
+      ComponentToolbarActionsFactory::kMediaRouterActionId, false);
+  EXPECT_FALSE(
+      menu.IsCommandIdChecked(IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION));
+
+  // Executing the option should toggle the pref.
+  menu.ExecuteCommand(IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION, 0);
+  EXPECT_TRUE(component_migration_helper->GetComponentActionPref(
+      ComponentToolbarActionsFactory::kMediaRouterActionId));
+
+  menu.ExecuteCommand(IDC_MEDIA_ROUTER_ALWAYS_SHOW_TOOLBAR_ACTION, 0);
+  EXPECT_FALSE(component_migration_helper->GetComponentActionPref(
+      ComponentToolbarActionsFactory::kMediaRouterActionId));
+}

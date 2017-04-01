@@ -13,17 +13,19 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/safe_browsing_db/safe_browsing_prefs.h"
+#include "components/sync/base/sync_prefs.h"
 #include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "extensions/features/features.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/command_line.h"
@@ -31,7 +33,7 @@
 #include "chromeos/chromeos_switches.h"
 #endif
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "extensions/browser/pref_names.h"
 #endif
 
@@ -79,12 +81,12 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kSearchSuggestEnabled,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   registry->RegisterStringPref(
       prefs::kContextualSearchEnabled,
       std::string(),
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-#endif
+#endif  // defined(OS_ANDROID)
   registry->RegisterBooleanPref(prefs::kSessionExitedCleanly, true);
   registry->RegisterStringPref(prefs::kSessionExitType, std::string());
   registry->RegisterInt64Pref(prefs::kSiteEngagementLastUpdateTime, 0,
@@ -95,6 +97,9 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(prefs::kSafeBrowsingExtendedReportingEnabled,
                                 false);
+  registry->RegisterBooleanPref(prefs::kSafeBrowsingScoutReportingEnabled,
+                                false);
+  registry->RegisterBooleanPref(prefs::kSafeBrowsingScoutGroupSelected, false);
   registry->RegisterBooleanPref(prefs::kSafeBrowsingProceedAnywayDisabled,
                                 false);
   registry->RegisterBooleanPref(prefs::kSSLErrorOverrideAllowed, true);
@@ -106,7 +111,7 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // TODO(skare): Remove or rename ENABLE_GOOGLE_NOW: http://crbug.com/459827.
   registry->RegisterBooleanPref(prefs::kGoogleNowLauncherEnabled, true);
   registry->RegisterBooleanPref(prefs::kDisableExtensions, false);
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   registry->RegisterBooleanPref(extensions::pref_names::kAlertsInitialized,
                                 false);
 #endif
@@ -153,7 +158,6 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
 #endif
 
 #if defined(ENABLE_MEDIA_ROUTER)
-#if defined(GOOGLE_CHROME_BUILD)
   registry->RegisterBooleanPref(
       prefs::kMediaRouterCloudServicesPrefSet,
       false,
@@ -162,11 +166,11 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       prefs::kMediaRouterEnableCloudServices,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-#endif  // defined(GOOGLE_CHROME_BUILD)
   registry->RegisterBooleanPref(
       prefs::kMediaRouterFirstRunFlowAcknowledged,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kMediaRouterTabMirroringSources);
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -200,8 +204,8 @@ bool Profile::IsSystemProfile() const {
 bool Profile::IsNewProfile() {
   // The profile has been shut down if the prefs were loaded from disk, unless
   // first-run autoimport wrote them and reloaded the pref service.
-  // TODO(dconnelly): revisit this when crbug.com/22142 (unifying the profile
-  // import code) is fixed.
+  // TODO(crbug.com/660346): revisit this when crbug.com/22142 (unifying the
+  // profile import code) is fixed.
   return GetOriginalProfile()->GetPrefs()->GetInitializationStatus() ==
       PrefService::INITIALIZATION_STATUS_CREATED_NEW_PREF_STORE;
 }
@@ -213,8 +217,9 @@ bool Profile::IsSyncAllowed() {
 
   // No ProfileSyncService created yet - we don't want to create one, so just
   // infer the accessible state by looking at prefs/command line flags.
-  sync_driver::SyncPrefs prefs(GetPrefs());
-  return ProfileSyncService::IsSyncAllowedByFlag() && !prefs.IsManaged();
+  syncer::SyncPrefs prefs(GetPrefs());
+  return browser_sync::ProfileSyncService::IsSyncAllowedByFlag() &&
+         !prefs.IsManaged();
 }
 
 void Profile::MaybeSendDestroyedNotification() {

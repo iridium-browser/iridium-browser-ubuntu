@@ -14,7 +14,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -261,10 +261,9 @@ void ExtensionDownloader::DoStartAllPending() {
   for (FetchMap::iterator it = fetches_preparing_.begin();
        it != fetches_preparing_.end();
        ++it) {
-    std::vector<linked_ptr<ManifestFetchData>>& list = it->second;
-    for (size_t i = 0; i < list.size(); ++i) {
-      StartUpdateCheck(std::unique_ptr<ManifestFetchData>(list[i].release()));
-    }
+    std::vector<std::unique_ptr<ManifestFetchData>>& list = it->second;
+    for (size_t i = 0; i < list.size(); ++i)
+      StartUpdateCheck(std::move(list[i]));
   }
   fetches_preparing_.clear();
 }
@@ -382,11 +381,13 @@ bool ExtensionDownloader::AddExtensionData(const std::string& id,
   if (!added) {
     // Otherwise add a new element to the list, if the list doesn't exist or
     // if its last element is already full.
-    linked_ptr<ManifestFetchData> fetch(
+    std::unique_ptr<ManifestFetchData> fetch(
         CreateManifestFetchData(update_url, request_id));
-    fetches_preparing_[std::make_pair(request_id, update_url)].push_back(fetch);
-    added = fetch->AddExtension(id, version.GetString(), optional_ping_data,
-                                extra.update_url_data, install_source);
+    ManifestFetchData* fetch_ptr = fetch.get();
+    fetches_preparing_[std::make_pair(request_id, update_url)].push_back(
+        std::move(fetch));
+    added = fetch_ptr->AddExtension(id, version.GetString(), optional_ping_data,
+                                    extra.update_url_data, install_source);
     DCHECK(added);
   }
 

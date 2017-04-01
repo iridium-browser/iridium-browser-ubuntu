@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
@@ -31,12 +32,15 @@ class AccessibilityFocusRingController : public FocusRingLayerDelegate {
   // ring should persist or fade out.
   void SetFocusRing(const std::vector<gfx::Rect>& rects,
                     FocusRingBehavior focus_ring_behavior);
+  void HideFocusRing();
 
   // Draw a ring around the mouse cursor. It fades out automatically.
   void SetCursorRing(const gfx::Point& location);
+  void HideCursorRing();
 
   // Draw a ring around the text caret. It fades out automatically.
   void SetCaretRing(const gfx::Point& location);
+  void HideCaretRing();
 
   // Don't fade in / out, for testing.
   void SetNoFadeForTesting();
@@ -56,6 +60,9 @@ class AccessibilityFocusRingController : public FocusRingLayerDelegate {
   virtual int GetMargin() const;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(AccessibilityFocusRingControllerTest,
+                           CursorWorksOnMultipleDisplays);
+
   // FocusRingLayerDelegate overrides.
   void OnDeviceScaleFactorChanged() override;
   void OnAnimationStep(base::TimeTicks timestamp) override;

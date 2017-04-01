@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/public/common/appcache_info.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/url_constants.h"
 #include "url/gurl.h"
@@ -18,14 +19,13 @@ namespace content {
 bool ShouldMakeNetworkRequestForURL(const GURL& url) {
   CHECK(IsBrowserSideNavigationEnabled());
 
-  // Data URLs, Javascript URLs, about:blank, srcdoc should not send a request
+  // Javascript URLs, about:blank, srcdoc should not send a request
   // to the network stack.
   // TODO(clamy): same document navigations should not send requests to the
   // network stack. Neither should pushState/popState.
-  return !url.SchemeIs(url::kDataScheme) && url != GURL(url::kAboutBlankURL) &&
-         !url.SchemeIs(url::kJavaScriptScheme) && !url.is_empty() &&
-         !url.SchemeIs(url::kContentIDScheme) &&
-         url != GURL(content::kAboutSrcDocURL);
+  return url != url::kAboutBlankURL && !url.SchemeIs(url::kJavaScriptScheme) &&
+         !url.is_empty() && !url.SchemeIs(url::kContentIDScheme) &&
+         url != content::kAboutSrcDocURL;
 }
 
 CommonNavigationParams::CommonNavigationParams()
@@ -34,7 +34,7 @@ CommonNavigationParams::CommonNavigationParams()
       allow_download(true),
       should_replace_current_entry(false),
       report_type(FrameMsg_UILoadMetricsReportType::NO_REPORT),
-      lofi_state(LOFI_UNSPECIFIED),
+      previews_state(PREVIEWS_UNSPECIFIED),
       navigation_start(base::TimeTicks::Now()),
       method("GET") {}
 
@@ -49,7 +49,7 @@ CommonNavigationParams::CommonNavigationParams(
     FrameMsg_UILoadMetricsReportType::Value report_type,
     const GURL& base_url_for_data_url,
     const GURL& history_url_for_data_url,
-    LoFiState lofi_state,
+    PreviewsState previews_state,
     const base::TimeTicks& navigation_start,
     std::string method,
     const scoped_refptr<ResourceRequestBodyImpl>& post_data)
@@ -63,7 +63,7 @@ CommonNavigationParams::CommonNavigationParams(
       report_type(report_type),
       base_url_for_data_url(base_url_for_data_url),
       history_url_for_data_url(history_url_for_data_url),
-      lofi_state(lofi_state),
+      previews_state(previews_state),
       navigation_start(navigation_start),
       method(method),
       post_data(post_data) {
@@ -84,43 +84,41 @@ BeginNavigationParams::BeginNavigationParams()
     : load_flags(0),
       has_user_gesture(false),
       skip_service_worker(false),
-      request_context_type(REQUEST_CONTEXT_TYPE_LOCATION) {}
+      request_context_type(REQUEST_CONTEXT_TYPE_LOCATION),
+      mixed_content_context_type(blink::WebMixedContentContextType::Blockable) {
+}
 
 BeginNavigationParams::BeginNavigationParams(
     std::string headers,
     int load_flags,
     bool has_user_gesture,
     bool skip_service_worker,
-    RequestContextType request_context_type)
+    RequestContextType request_context_type,
+    blink::WebMixedContentContextType mixed_content_context_type,
+    const base::Optional<url::Origin>& initiator_origin)
     : headers(headers),
       load_flags(load_flags),
       has_user_gesture(has_user_gesture),
       skip_service_worker(skip_service_worker),
-      request_context_type(request_context_type) {}
+      request_context_type(request_context_type),
+      mixed_content_context_type(mixed_content_context_type),
+      initiator_origin(initiator_origin) {}
 
 BeginNavigationParams::BeginNavigationParams(
     const BeginNavigationParams& other) = default;
 
+BeginNavigationParams::~BeginNavigationParams() {}
+
 StartNavigationParams::StartNavigationParams()
-    :
-#if defined(OS_ANDROID)
-      has_user_gesture(false),
-#endif
-      transferred_request_child_id(-1),
+    : transferred_request_child_id(-1),
       transferred_request_request_id(-1) {
 }
 
 StartNavigationParams::StartNavigationParams(
     const std::string& extra_headers,
-#if defined(OS_ANDROID)
-    bool has_user_gesture,
-#endif
     int transferred_request_child_id,
     int transferred_request_request_id)
     : extra_headers(extra_headers),
-#if defined(OS_ANDROID)
-      has_user_gesture(has_user_gesture),
-#endif
       transferred_request_child_id(transferred_request_child_id),
       transferred_request_request_id(transferred_request_request_id) {
 }
@@ -134,8 +132,6 @@ StartNavigationParams::~StartNavigationParams() {
 RequestNavigationParams::RequestNavigationParams()
     : is_overriding_user_agent(false),
       can_load_local_resources(false),
-      request_time(base::Time::Now()),
-      page_id(-1),
       nav_entry_id(0),
       is_same_document_history_load(false),
       is_history_navigation_in_new_child(false),
@@ -146,32 +142,33 @@ RequestNavigationParams::RequestNavigationParams()
       current_history_list_length(0),
       is_view_source(false),
       should_clear_history_list(false),
-      should_create_service_worker(false) {}
+      should_create_service_worker(false),
+      service_worker_provider_id(kInvalidServiceWorkerProviderId),
+      appcache_host_id(kAppCacheNoHostId),
+      has_user_gesture(false) {
+}
 
 RequestNavigationParams::RequestNavigationParams(
     bool is_overriding_user_agent,
     const std::vector<GURL>& redirects,
     bool can_load_local_resources,
-    base::Time request_time,
     const PageState& page_state,
-    int32_t page_id,
     int nav_entry_id,
     bool is_same_document_history_load,
     bool is_history_navigation_in_new_child,
-    std::set<std::string> subframe_unique_names,
+    std::map<std::string, bool> subframe_unique_names,
     bool has_committed_real_load,
     bool intended_as_new_entry,
     int pending_history_list_offset,
     int current_history_list_offset,
     int current_history_list_length,
     bool is_view_source,
-    bool should_clear_history_list)
+    bool should_clear_history_list,
+    bool has_user_gesture)
     : is_overriding_user_agent(is_overriding_user_agent),
       redirects(redirects),
       can_load_local_resources(can_load_local_resources),
-      request_time(request_time),
       page_state(page_state),
-      page_id(page_id),
       nav_entry_id(nav_entry_id),
       is_same_document_history_load(is_same_document_history_load),
       is_history_navigation_in_new_child(is_history_navigation_in_new_child),
@@ -183,7 +180,11 @@ RequestNavigationParams::RequestNavigationParams(
       current_history_list_length(current_history_list_length),
       is_view_source(is_view_source),
       should_clear_history_list(should_clear_history_list),
-      should_create_service_worker(false) {}
+      should_create_service_worker(false),
+      service_worker_provider_id(kInvalidServiceWorkerProviderId),
+      appcache_host_id(kAppCacheNoHostId),
+      has_user_gesture(has_user_gesture) {
+}
 
 RequestNavigationParams::RequestNavigationParams(
     const RequestNavigationParams& other) = default;

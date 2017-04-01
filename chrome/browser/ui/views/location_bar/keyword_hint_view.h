@@ -19,7 +19,6 @@ class FontList;
 }
 
 namespace views {
-class ImageView;
 class Label;
 }
 
@@ -62,7 +61,7 @@ class KeywordHintView : public views::View {
   views::View* tab_key_view_;
   views::Label* trailing_label_;
 
-  // Height of the tab key view (only used in MD).
+  // Height of the tab key view.
   int tab_key_height_;
 
   base::string16 keyword_;

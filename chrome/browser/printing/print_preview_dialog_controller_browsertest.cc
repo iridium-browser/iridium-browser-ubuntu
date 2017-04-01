@@ -10,6 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
@@ -37,6 +38,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 using content::WebContents;
 using content::WebContentsObserver;
@@ -56,7 +58,8 @@ class RequestPrintPreviewObserver : public WebContentsObserver {
 
  private:
   // content::WebContentsObserver implementation.
-  bool OnMessageReceived(const IPC::Message& message) override {
+  bool OnMessageReceived(const IPC::Message& message,
+                         content::RenderFrameHost* render_frame_host) override {
     IPC_BEGIN_MESSAGE_MAP(RequestPrintPreviewObserver, message)
       IPC_MESSAGE_HANDLER(PrintHostMsg_RequestPrintPreview,
                           OnRequestPrintPreview)
@@ -90,8 +93,8 @@ class PrintPreviewDialogClonedObserver : public WebContentsObserver {
   // content::WebContentsObserver implementation.
   void DidCloneToNewWebContents(WebContents* old_web_contents,
                                 WebContents* new_web_contents) override {
-    request_preview_dialog_observer_.reset(
-        new RequestPrintPreviewObserver(new_web_contents));
+    request_preview_dialog_observer_ =
+        base::MakeUnique<RequestPrintPreviewObserver>(new_web_contents);
   }
 
   std::unique_ptr<RequestPrintPreviewObserver> request_preview_dialog_observer_;
@@ -124,11 +127,6 @@ void PluginsLoadedCallback(
   quit_closure.Run();
 }
 
-void PluginEnabledCallback(const base::Closure& quit_closure, bool can_enable) {
-  EXPECT_TRUE(can_enable);
-  quit_closure.Run();
-}
-
 bool GetPdfPluginInfo(content::WebPluginInfo* info) {
   base::FilePath pdf_plugin_path = base::FilePath::FromUTF8Unsafe(
       ChromeContentClient::kPDFPluginPath);
@@ -149,12 +147,8 @@ void CheckPdfPluginForRenderFrame(content::RenderFrameHost* frame) {
 
   ChromePluginServiceFilter* filter = ChromePluginServiceFilter::GetInstance();
   EXPECT_TRUE(filter->IsPluginAvailable(
-      frame->GetProcess()->GetID(),
-      frame->GetRoutingID(),
-      nullptr,
-      GURL(kDummyPrintUrl),
-      GURL(),
-      &pdf_plugin_info));
+      frame->GetProcess()->GetID(), frame->GetRoutingID(), nullptr,
+      GURL(kDummyPrintUrl), url::Origin(), &pdf_plugin_info));
 }
 
 }  // namespace
@@ -181,6 +175,11 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
     return dialog_controller->GetPrintPreviewForContents(initiator_);
   }
 
+  void SetAlwaysOpenPdfExternallyForTests(bool always_open_pdf_externally) {
+    PluginPrefs::GetForProfile(browser()->profile())
+        ->SetAlwaysOpenPdfExternallyForTests(always_open_pdf_externally);
+  }
+
  private:
   void SetUpOnMainThread() override {
     WebContents* first_tab =
@@ -192,7 +191,8 @@ class PrintPreviewDialogControllerBrowserTest : public InProcessBrowserTest {
     // PrintPreviewMessageHandler gets created. Thus enabling
     // RequestPrintPreviewObserver to get messages first for the purposes of
     // this test.
-    cloned_tab_observer_.reset(new PrintPreviewDialogClonedObserver(first_tab));
+    cloned_tab_observer_ =
+        base::MakeUnique<PrintPreviewDialogClonedObserver>(first_tab);
     chrome::DuplicateTab(browser());
 
     initiator_ = browser()->tab_strip_model()->GetActiveWebContents();
@@ -263,7 +263,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   // Reload the initiator. Make sure reloading destroys the print preview
   // dialog.
   PrintPreviewDialogDestroyedObserver dialog_destroyed_observer(preview_dialog);
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   content::WaitForLoadStop(
       browser()->tab_strip_model()->GetActiveWebContents());
   ASSERT_TRUE(dialog_destroyed_observer.dialog_destroyed());
@@ -292,14 +292,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   ASSERT_TRUE(GetPdfPluginInfo(&pdf_plugin_info));
 
   // Disable the PDF plugin.
-  {
-    base::RunLoop run_loop;
-    PluginPrefs::GetForProfile(browser()->profile())->EnablePlugin(
-        false,
-        base::FilePath::FromUTF8Unsafe(ChromeContentClient::kPDFPluginPath),
-        base::Bind(&PluginEnabledCallback, run_loop.QuitClosure()));
-    run_loop.Run();
-  }
+  SetAlwaysOpenPdfExternallyForTests(true);
 
   // Make sure it is actually disabled for webpages.
   ChromePluginServiceFilter* filter = ChromePluginServiceFilter::GetInstance();
@@ -307,10 +300,8 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   EXPECT_FALSE(filter->IsPluginAvailable(
       initiator()->GetRenderProcessHost()->GetID(),
       initiator()->GetMainFrame()->GetRoutingID(),
-      browser()->profile()->GetResourceContext(),
-      GURL("http://google.com"),
-      GURL(),
-      &dummy_pdf_plugin_info));
+      browser()->profile()->GetResourceContext(), GURL(),
+      url::Origin(GURL("http://google.com")), &dummy_pdf_plugin_info));
 
   PrintPreview();
 
@@ -339,7 +330,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
   preview_dialog->ForEachFrame(base::Bind(&CheckPdfPluginForRenderFrame));
 }
 
-#if defined(ENABLE_TASK_MANAGER)
+#if !defined(OS_ANDROID)
 
 namespace {
 
@@ -405,4 +396,4 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewDialogControllerBrowserTest,
 
 }  // namespace
 
-#endif  // defined(ENABLE_TASK_MANAGER)
+#endif  // !defined(OS_ANDROID)

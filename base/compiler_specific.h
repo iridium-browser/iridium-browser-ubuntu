@@ -100,6 +100,14 @@
 #define NOINLINE
 #endif
 
+#if COMPILER_GCC && defined(NDEBUG)
+#define ALWAYS_INLINE inline __attribute__((__always_inline__))
+#elif COMPILER_MSVC && defined(NDEBUG)
+#define ALWAYS_INLINE __forceinline
+#else
+#define ALWAYS_INLINE inline
+#endif
+
 // Specify memory alignment for structs, classes, etc.
 // Use like:
 //   class ALIGNAS(16) MyClass { ... }
@@ -149,6 +157,16 @@
 // If available, it would look like:
 //   __attribute__((format(wprintf, format_param, dots_param)))
 
+// Sanitizers annotations.
+#if defined(__has_attribute)
+#if __has_attribute(no_sanitize)
+#define NO_SANITIZE(what) __attribute__((no_sanitize(what)))
+#endif
+#endif
+#if !defined(NO_SANITIZE)
+#define NO_SANITIZE(what)
+#endif
+
 // MemorySanitizer annotations.
 #if defined(MEMORY_SANITIZER) && !defined(OS_NACL)
 #include <sanitizer/msan_interface.h>
@@ -169,6 +187,15 @@
 #define MSAN_CHECK_MEM_IS_INITIALIZED(p, size)
 #endif  // MEMORY_SANITIZER
 
+// DISABLE_CFI_PERF -- Disable Control Flow Integrity for perf reasons.
+#if !defined(DISABLE_CFI_PERF)
+#if defined(__clang__) && defined(OFFICIAL_BUILD)
+#define DISABLE_CFI_PERF __attribute__((no_sanitize("cfi")))
+#else
+#define DISABLE_CFI_PERF
+#endif
+#endif
+
 // Macro useful for writing cross-platform function pointers.
 #if !defined(CDECL)
 #if defined(OS_WIN)
@@ -186,6 +213,14 @@
 #define UNLIKELY(x) (x)
 #endif  // defined(COMPILER_GCC)
 #endif  // !defined(UNLIKELY)
+
+#if !defined(LIKELY)
+#if defined(COMPILER_GCC)
+#define LIKELY(x) __builtin_expect(!!(x), 1)
+#else
+#define LIKELY(x) (x)
+#endif  // defined(COMPILER_GCC)
+#endif  // !defined(LIKELY)
 
 // Compiler feature-detection.
 // clang.llvm.org/docs/LanguageExtensions.html#has-feature-and-has-extension

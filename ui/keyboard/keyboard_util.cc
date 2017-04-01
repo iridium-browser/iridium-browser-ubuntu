@@ -9,7 +9,7 @@
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
 #include "media/audio/audio_manager.h"
 #include "ui/aura/client/aura_constants.h"
@@ -25,6 +25,7 @@
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
 #include "ui/keyboard/keyboard_ui.h"
+#include "ui/keyboard/scoped_keyboard_disabler.h"
 
 namespace {
 
@@ -111,6 +112,9 @@ std::string GetKeyboardLayout() {
 }
 
 bool IsKeyboardEnabled() {
+  // Blocks keyboard from showing up regardless of other settings.
+  if (ScopedKeyboardDisabler::GetForceDisableVirtualKeyboard())
+    return false;
   // Accessibility setting prioritized over policy setting.
   if (g_accessibility_keyboard_enabled)
     return true;

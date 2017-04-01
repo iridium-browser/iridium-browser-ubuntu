@@ -12,10 +12,13 @@
 #include "SkRefCnt.h"
 #include "SkSurfaceProps.h"
 
-#include "SkImageInfo.h" // for SkAlphaType
+#include "SkImageFilter.h" // for OutputProperties
+#include "SkImageInfo.h"   // for SkAlphaType
 
 class GrContext;
+class GrSurfaceProxy;
 class GrTexture;
+class GrTextureProxy;
 class SkBitmap;
 class SkCanvas;
 class SkImage;
@@ -70,6 +73,7 @@ public:
 
     static sk_sp<SkSpecialImage> MakeFromImage(const SkIRect& subset,
                                                sk_sp<SkImage>,
+                                               SkColorSpace* dstColorSpace,
                                                const SkSurfaceProps* = nullptr);
     static sk_sp<SkSpecialImage> MakeFromRaster(const SkIRect& subset,
                                                 const SkBitmap&,
@@ -81,18 +85,30 @@ public:
                                              sk_sp<SkColorSpace>,
                                              const SkSurfaceProps* = nullptr,
                                              SkAlphaType at = kPremul_SkAlphaType);
+
+    static sk_sp<SkSpecialImage> MakeDeferredFromGpu(GrContext*,
+                                                     const SkIRect& subset,
+                                                     uint32_t uniqueID,
+                                                     sk_sp<GrSurfaceProxy>,
+                                                     sk_sp<SkColorSpace>,
+                                                     const SkSurfaceProps* = nullptr,
+                                                     SkAlphaType at = kPremul_SkAlphaType);
 #endif
 
     /**
      *  Create a new special surface with a backend that is compatible with this special image.
      */
-    sk_sp<SkSpecialSurface> makeSurface(const SkImageInfo&) const;
+    sk_sp<SkSpecialSurface> makeSurface(const SkImageFilter::OutputProperties& outProps,
+                                        const SkISize& size,
+                                        SkAlphaType at = kPremul_SkAlphaType) const;
 
     /**
      * Create a new surface with a backend that is compatible with this special image.
      * TODO: switch this to makeSurface once we resolved the naming issue
      */
-    sk_sp<SkSurface> makeTightSurface(const SkImageInfo&) const;
+    sk_sp<SkSurface> makeTightSurface(const SkImageFilter::OutputProperties& outProps,
+                                      const SkISize& size,
+                                      SkAlphaType at = kPremul_SkAlphaType) const;
 
     /**
      * Extract a subset of this special image and return it as a special image.
@@ -124,6 +140,11 @@ public:
      *  The active portion of the texture can be retrieved via 'subset'.
      */
     sk_sp<GrTexture> asTextureRef(GrContext*) const;
+
+    /**
+     *  The same as above but return the contents as a GrTextureProxy.
+     */
+    sk_sp<GrTextureProxy> asTextureProxy(GrContext*) const;
 #endif
 
     // TODO: hide this whe the imagefilter all have a consistent draw path (see skbug.com/5063)

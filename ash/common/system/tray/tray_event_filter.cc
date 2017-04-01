@@ -4,13 +4,13 @@
 
 #include "ash/common/system/tray/tray_event_filter.h"
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/tray_background_view.h"
 #include "ash/common/system/tray/tray_bubble_wrapper.h"
 #include "ash/common/wm/container_finder.h"
 #include "ash/common/wm_lookup.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -25,8 +25,8 @@ void TrayEventFilter::AddWrapper(TrayBubbleWrapper* wrapper) {
   bool was_empty = wrappers_.empty();
   wrappers_.insert(wrapper);
   if (was_empty && !wrappers_.empty()) {
-    const bool wants_moves = false;
-    WmShell::Get()->AddPointerWatcher(this, wants_moves);
+    WmShell::Get()->AddPointerWatcher(this,
+                                      views::PointerWatcherEventTypes::BASIC);
   }
 }
 

@@ -6,7 +6,9 @@
 
 #include "base/mac/foundation_util.h"
 #include "base/mac/sdk_forward_declarations.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
+#import "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "ui/base/cocoa/nsview_additions.h"
@@ -153,10 +155,6 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
 @synthesize handleMiddleClick = handleMiddleClick_;
 
 + (NSSize)toolbarButtonSize {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return NSMakeSize(29, 29);
-  }
-
   return kMDButtonBounds.size;
 }
 
@@ -207,21 +205,22 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
                                    yRadius:2] fill];
 }
 
-- (gfx::VectorIconId)vectorIconId {
+- (const gfx::VectorIcon*)vectorIcon {
+  BOOL isRTL = cocoa_l10n_util::ShouldDoExperimentalRTLLayout();
   switch ([self viewID]) {
     case VIEW_ID_BACK_BUTTON:
-      return gfx::VectorIconId::NAVIGATE_BACK;
+      return isRTL ? &kNavigateForwardIcon : &kNavigateBackIcon;
     case VIEW_ID_FORWARD_BUTTON:
-      return gfx::VectorIconId::NAVIGATE_FORWARD;
+      return isRTL ? &kNavigateBackIcon : &kNavigateForwardIcon;
     case VIEW_ID_HOME_BUTTON:
-      return gfx::VectorIconId::NAVIGATE_HOME;
+      return &kNavigateHomeIcon;
     case VIEW_ID_APP_MENU:
-      return gfx::VectorIconId::BROWSER_TOOLS;
+      return &kBrowserToolsIcon;
     default:
       break;
   }
 
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
+  return nullptr;
 }
 
 - (SkColor)vectorIconColor:(BOOL)themeIsDark {
@@ -235,11 +234,7 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
       [[BrowserToolsImageRep alloc]
           initWithDrawSelector:@selector(drawBrowserToolsIcon:)
                       delegate:[BrowserToolsImageRep class]]);
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    [imageRep setFillColor:skia::SkColorToCalibratedNSColor(fillColor)];
-  } else {
-    [imageRep setFillColor:skia::SkColorToSRGBNSColor(fillColor)];
-  }
+  [imageRep setFillColor:skia::SkColorToSRGBNSColor(fillColor)];
 
   // Create the image from the image rep.
   NSImage* browserToolsIcon =
@@ -271,19 +266,11 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
 }
 
 - (NSImage*)image {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return [super image];
-  }
   // setImage: stores the image in an ivar.
   return image_.get();
 }
 
 - (void)setImage:(NSImage*)anImage {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    [super setImage:anImage];
-    return;
-  }
-
   // We want to set the default image as the image for kDefaultState. Setting it
   // as the default image (via setImage:) can cause ghosting from the two
   // default images being drawn over each other. However we also need to keep
@@ -294,15 +281,13 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
 }
 
 - (void)resetButtonStateImages {
-  DCHECK(ui::MaterialDesignController::IsModeMaterial());
-
   NSImage* normalIcon = nil;
   NSImage* disabledIcon = nil;
   BOOL isDarkTheme = NO;
 
-  gfx::VectorIconId iconId = [self vectorIconId];
-  if (iconId == gfx::VectorIconId::VECTOR_ICON_NONE) {
-    // If the button does not have a vector icon id (e.g. it's an extension
+  const gfx::VectorIcon* icon = [self vectorIcon];
+  if (!icon) {
+    // If the button does not have a vector icon (e.g. it's an extension
     // button), use its image. The hover, etc. images will be created using
     // imageForIcon:withBackgroundStyle: so do the same for the default image.
     // If we don't do this, the icon may not appear in the same place as in the
@@ -322,19 +307,19 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
 
     // Create the normal and disabled state icons. These icons are always the
     // same shape but use a different color.
-    if (iconId == gfx::VectorIconId::BROWSER_TOOLS) {
+    if (icon == &kBrowserToolsIcon) {
       normalIcon = [self browserToolsIconForFillColor:normalColor];
       disabledIcon = [self browserToolsIconForFillColor:disabledColor];
     } else {
       normalIcon = NSImageFromImageSkia(
-          gfx::CreateVectorIcon(iconId,
+          gfx::CreateVectorIcon(*icon,
                                 kMDButtonIconSize.width,
                                 normalColor));
 
       // The home button has no icon for its disabled state.
-      if (iconId != gfx::VectorIconId::NAVIGATE_RELOAD) {
+      if (icon != &kNavigateReloadIcon) {
         disabledIcon = NSImageFromImageSkia(
-            gfx::CreateVectorIcon(iconId,
+            gfx::CreateVectorIcon(*icon,
                                   kMDButtonIconSize.width,
                                   disabledColor));
       }
@@ -383,7 +368,7 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
   // In Material Design we want to catch when the button is attached to its
   // window so that we can configure its appearance based on the window's
   // theme.
-  if ([self window] && ui::MaterialDesignController::IsModeMaterial()) {
+  if ([self window]) {
     [self resetButtonStateImages];
   }
 }
@@ -392,9 +377,7 @@ const NSSize kMDButtonIconSize = NSMakeSize(16, 16);
 
 - (void)windowDidChangeTheme {
   // Update the hover and pressed image backgrounds to match the current theme.
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    [self resetButtonStateImages];
-  }
+  [self resetButtonStateImages];
 }
 
 - (void)windowDidChangeActive {

@@ -110,6 +110,8 @@ typedef struct {
   int Sharpness;
   int cpu_used;
   unsigned int rc_max_intra_bitrate_pct;
+  /* percent of rate boost for golden frame in CBR mode. */
+  unsigned int gf_cbr_boost_pct;
   unsigned int screen_content_mode;
 
   /* mode ->
@@ -251,7 +253,7 @@ int vp8_receive_raw_frame(struct VP8_COMP *comp, unsigned int frame_flags,
                           YV12_BUFFER_CONFIG *sd, int64_t time_stamp,
                           int64_t end_time_stamp);
 int vp8_get_compressed_data(struct VP8_COMP *comp, unsigned int *frame_flags,
-                            unsigned long *size, unsigned char *dest,
+                            size_t *size, unsigned char *dest,
                             unsigned char *dest_end, int64_t *time_stamp,
                             int64_t *time_end, int flush);
 int vp8_get_preview_raw_frame(struct VP8_COMP *comp, YV12_BUFFER_CONFIG *dest,

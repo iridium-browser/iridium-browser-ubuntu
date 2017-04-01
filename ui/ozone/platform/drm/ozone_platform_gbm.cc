@@ -17,9 +17,10 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "services/shell/public/cpp/interface_factory.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_factory.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/base/cursor/ozone/bitmap_cursor_factory_ozone.h"
+#include "ui/base/ui_features.h"
 #include "ui/events/ozone/device/device_manager.h"
 #include "ui/events/ozone/evdev/event_factory_evdev.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
@@ -28,7 +29,6 @@
 #include "ui/ozone/platform/drm/gpu/drm_device_generator.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_display_manager.h"
-#include "ui/ozone/platform/drm/gpu/drm_gpu_platform_support.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread_message_proxy.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread_proxy.h"
 #include "ui/ozone/platform/drm/gpu/gbm_surface_factory.h"
@@ -44,12 +44,11 @@
 #include "ui/ozone/platform/drm/host/drm_window_host_manager.h"
 #include "ui/ozone/platform/drm/mus_thread_proxy.h"
 #include "ui/ozone/public/cursor_factory_ozone.h"
-#include "ui/ozone/public/gpu_platform_support.h"
 #include "ui/ozone/public/gpu_platform_support_host.h"
 #include "ui/ozone/public/ozone_platform.h"
 #include "ui/ozone/public/ozone_switches.h"
 
-#if defined(USE_XKBCOMMON)
+#if BUILDFLAG(USE_XKBCOMMON)
 #include "ui/events/ozone/layout/xkb/xkb_evdev_codes.h"
 #include "ui/events/ozone/layout/xkb/xkb_keyboard_layout_engine.h"
 #else
@@ -82,7 +81,7 @@ class GlApiLoader {
 
 class OzonePlatformGbm
     : public OzonePlatform,
-      public shell::InterfaceFactory<ozone::mojom::DeviceCursor> {
+      public service_manager::InterfaceFactory<ozone::mojom::DeviceCursor> {
  public:
   OzonePlatformGbm() : using_mojo_(false), single_process_(false) {}
   ~OzonePlatformGbm() override {}
@@ -100,8 +99,8 @@ class OzonePlatformGbm
   InputController* GetInputController() override {
     return event_factory_ozone_->input_controller();
   }
-  GpuPlatformSupport* GetGpuPlatformSupport() override {
-    return gpu_platform_support_.get();
+  IPC::MessageFilter* GetGpuMessageFilter() override {
+    return gpu_message_filter_.get();
   }
   GpuPlatformSupportHost* GetGpuPlatformSupportHost() override {
     return gpu_platform_support_host_.get();
@@ -109,21 +108,24 @@ class OzonePlatformGbm
   std::unique_ptr<SystemInputInjector> CreateSystemInputInjector() override {
     return event_factory_ozone_->CreateSystemInputInjector();
   }
-  void AddInterfaces(shell::InterfaceRegistry* registry) override {
+  void AddInterfaces(service_manager::InterfaceRegistry* registry) override {
     registry->AddInterface<ozone::mojom::DeviceCursor>(this);
   }
-  // shell::InterfaceFactory<mojom::ozone::Cursor> implementation.
-  void Create(const shell::Identity& remote_identity,
+  // service_manager::InterfaceFactory<ozone::mojom::DeviceCursor>:
+  void Create(const service_manager::Identity& remote_identity,
               ozone::mojom::DeviceCursorRequest request) override {
-    DCHECK(drm_thread_);
-    drm_thread_->AddBinding(std::move(request));
+    if (drm_thread_proxy_)
+      drm_thread_proxy_->AddBinding(std::move(request));
+    else
+      pending_cursor_requests_.push_back(std::move(request));
   }
   std::unique_ptr<PlatformWindow> CreatePlatformWindow(
       PlatformWindowDelegate* delegate,
       const gfx::Rect& bounds) override {
     GpuThreadAdapter* adapter = gpu_platform_support_host_.get();
     if (using_mojo_ || single_process_) {
-      DCHECK(drm_thread_) << "drm_thread_ should exist (and be running) here.";
+      DCHECK(drm_thread_proxy_)
+          << "drm_thread_proxy_ should exist (and be running) here.";
       adapter = mus_thread_proxy_.get();
     }
 
@@ -133,7 +135,7 @@ class OzonePlatformGbm
     platform_window->Initialize();
     return std::move(platform_window);
   }
-  std::unique_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate()
+  std::unique_ptr<display::NativeDisplayDelegate> CreateNativeDisplayDelegate()
       override {
     return base::MakeUnique<DrmNativeDisplayDelegate>(display_manager_.get());
   }
@@ -159,7 +161,7 @@ class OzonePlatformGbm
     device_manager_ = CreateDeviceManager();
     window_manager_.reset(new DrmWindowHostManager());
     cursor_.reset(new DrmCursor(window_manager_.get()));
-#if defined(USE_XKBCOMMON)
+#if BUILDFLAG(USE_XKBCOMMON)
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(
         base::MakeUnique<XkbKeyboardLayoutEngine>(xkb_evdev_code_converter_));
 #else
@@ -210,7 +212,7 @@ class OzonePlatformGbm
     InitializeGPU(default_params);
   }
   void InitializeGPU(const InitParams& args) override {
-    // TODO(rjkroege): services/ui should initalize this with a connector.
+    // TODO(rjkroege): services/ui should initialize this with a connector.
     // However, in-progress refactorings in services/ui make it difficult to
     // require this at present. Set using_mojo_ like below once this is
     // complete.
@@ -224,18 +226,21 @@ class OzonePlatformGbm
       scoped_refptr<DrmThreadMessageProxy> message_proxy(
           new DrmThreadMessageProxy());
       itmp = message_proxy.get();
-      gpu_platform_support_.reset(new DrmGpuPlatformSupport(message_proxy));
+      gpu_message_filter_ = std::move(message_proxy);
     }
 
     // NOTE: Can't start the thread here since this is called before sandbox
     // initialization in multi-process Chrome. In mus, we start the DRM thread.
-    drm_thread_.reset(new DrmThreadProxy());
-    drm_thread_->BindThreadIntoMessagingProxy(itmp);
+    drm_thread_proxy_.reset(new DrmThreadProxy());
+    drm_thread_proxy_->BindThreadIntoMessagingProxy(itmp);
 
-    surface_factory_.reset(new GbmSurfaceFactory(drm_thread_.get()));
+    surface_factory_.reset(new GbmSurfaceFactory(drm_thread_proxy_.get()));
     if (using_mojo_ || single_process_) {
       mus_thread_proxy_->StartDrmThread();
     }
+    for (auto& request : pending_cursor_requests_)
+      drm_thread_proxy_->AddBinding(std::move(request));
+    pending_cursor_requests_.clear();
   }
 
  private:
@@ -243,11 +248,12 @@ class OzonePlatformGbm
   bool single_process_;
 
   // Objects in the GPU process.
-  // TODO(rjk): rename drm_thread_ to drm_thread_proxy_;
-  std::unique_ptr<DrmThreadProxy> drm_thread_;
+  std::unique_ptr<DrmThreadProxy> drm_thread_proxy_;
   std::unique_ptr<GlApiLoader> gl_api_loader_;
   std::unique_ptr<GbmSurfaceFactory> surface_factory_;
-  std::unique_ptr<DrmGpuPlatformSupport> gpu_platform_support_;
+  scoped_refptr<IPC::MessageFilter> gpu_message_filter_;
+  // TODO(sad): Once the mus gpu process split happens, this can go away.
+  std::vector<ozone::mojom::DeviceCursorRequest> pending_cursor_requests_;
 
   // Objects in the Browser process.
   std::unique_ptr<DeviceManager> device_manager_;
@@ -262,7 +268,7 @@ class OzonePlatformGbm
   // Bridges the DRM, GPU and main threads in mus.
   std::unique_ptr<MusThreadProxy> mus_thread_proxy_;
 
-#if defined(USE_XKBCOMMON)
+#if BUILDFLAG(USE_XKBCOMMON)
   XkbEvdevCodes xkb_evdev_code_converter_;
 #endif
 

@@ -4,66 +4,38 @@
 
 #include "core/css/cssom/CSSStyleVariableReferenceValue.h"
 
-#include "core/css/cssom/CSSTokenStreamValue.h"
+#include "core/css/cssom/CSSUnparsedValue.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace blink {
 
-namespace {
+TEST(CSSVariableReferenceValueTest, EmptyList) {
+  HeapVector<StringOrCSSVariableReferenceValue> fragments;
+  CSSUnparsedValue* unparsedValue = CSSUnparsedValue::create(fragments);
 
-StringOrCSSVariableReferenceValue getStringOrCSSVariableReferenceValue(String str)
-{
-    StringOrCSSVariableReferenceValue temp;
-    temp.setString(str);
-    return temp;
+  CSSStyleVariableReferenceValue* variableReferenceValue =
+      CSSStyleVariableReferenceValue::create("test", unparsedValue);
+
+  EXPECT_EQ(variableReferenceValue->variable(), "test");
+  EXPECT_EQ(variableReferenceValue->fallback(), unparsedValue);
 }
 
-StringOrCSSVariableReferenceValue getStringOrCSSVariableReferenceValue(CSSStyleVariableReferenceValue* ref)
-{
-    StringOrCSSVariableReferenceValue temp;
-    temp.setCSSVariableReferenceValue(ref);
-    return temp;
+TEST(CSSVariableReferenceValueTest, MixedList) {
+  HeapVector<StringOrCSSVariableReferenceValue> fragments;
+  fragments.push_back(StringOrCSSVariableReferenceValue::fromString("string"));
+  fragments.push_back(
+      StringOrCSSVariableReferenceValue::fromCSSVariableReferenceValue(
+          CSSStyleVariableReferenceValue::create(
+              "Variable", CSSUnparsedValue::fromString("Fallback"))));
+  fragments.push_back(StringOrCSSVariableReferenceValue());
+
+  CSSUnparsedValue* unparsedValue = CSSUnparsedValue::create(fragments);
+
+  CSSStyleVariableReferenceValue* variableReferenceValue =
+      CSSStyleVariableReferenceValue::create("test", unparsedValue);
+
+  EXPECT_EQ(variableReferenceValue->variable(), "test");
+  EXPECT_EQ(variableReferenceValue->fallback(), unparsedValue);
 }
 
-CSSTokenStreamValue* tokenStreamValueFromString(String str)
-{
-    HeapVector<StringOrCSSVariableReferenceValue> fragments;
-    fragments.append(getStringOrCSSVariableReferenceValue(str));
-    return CSSTokenStreamValue::create(fragments);
-}
-
-TEST(CSSVariableReferenceValueTest, EmptyList)
-{
-    HeapVector<StringOrCSSVariableReferenceValue> fragments;
-
-    CSSTokenStreamValue* tokenStreamValue = CSSTokenStreamValue::create(fragments);
-
-    CSSStyleVariableReferenceValue* ref = CSSStyleVariableReferenceValue::create("test", tokenStreamValue);
-
-    EXPECT_EQ(ref->variable(), "test");
-    EXPECT_EQ(ref->fallback(), tokenStreamValue);
-}
-
-TEST(CSSVariableReferenceValueTest, MixedList)
-{
-    HeapVector<StringOrCSSVariableReferenceValue> fragments;
-
-    StringOrCSSVariableReferenceValue x = getStringOrCSSVariableReferenceValue("Str");
-    StringOrCSSVariableReferenceValue y = getStringOrCSSVariableReferenceValue(CSSStyleVariableReferenceValue::create("Variable", tokenStreamValueFromString("Fallback")));
-    StringOrCSSVariableReferenceValue z;
-
-    fragments.append(x);
-    fragments.append(y);
-    fragments.append(z);
-
-    CSSTokenStreamValue* tokenStreamValue = CSSTokenStreamValue::create(fragments);
-
-    CSSStyleVariableReferenceValue* ref = CSSStyleVariableReferenceValue::create("test", tokenStreamValue);
-
-    EXPECT_EQ(ref->variable(), "test");
-    EXPECT_EQ(ref->fallback(), tokenStreamValue);
-}
-
-} // namespace
-
-} // namespace blink
+}  // namespace blink

@@ -23,7 +23,7 @@
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #import "ui/base/cocoa/menu_controller.h"
@@ -213,16 +213,6 @@ void ToolbarActionViewDelegateBridge::DoShowContextMenu() {
         accessibilitySetOverrideValue:base::SysUTF16ToNSString(
             viewController_->GetAccessibleName([controller currentWebContents]))
         forAttribute:NSAccessibilityDescriptionAttribute];
-    if (!ui::MaterialDesignController::IsModeMaterial()) {
-      [cell setImageID:IDR_BROWSER_ACTION
-        forButtonState:image_button_cell::kDefaultState];
-      [cell setImageID:IDR_BROWSER_ACTION_H
-        forButtonState:image_button_cell::kHoverState];
-      [cell setImageID:IDR_BROWSER_ACTION_P
-        forButtonState:image_button_cell::kPressedState];
-      [cell setImageID:IDR_BROWSER_ACTION
-        forButtonState:image_button_cell::kDisabledState];
-    }
     [self setTitle:@""];
     [self setButtonType:NSMomentaryChangeButton];
     [self setShowsBorderOnlyWhileMouseInside:YES];

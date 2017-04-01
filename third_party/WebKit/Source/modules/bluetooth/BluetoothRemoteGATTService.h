@@ -10,7 +10,6 @@
 #include "modules/bluetooth/BluetoothDevice.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/Heap.h"
-#include "public/platform/modules/bluetooth/WebBluetoothRemoteGATTService.h"
 #include "public/platform/modules/bluetooth/web_bluetooth.mojom-blink.h"
 #include "wtf/text/WTFString.h"
 #include <memory>
@@ -18,7 +17,6 @@
 namespace blink {
 
 class ScriptPromise;
-class ScriptPromiseResolver;
 class ScriptState;
 
 // Represents a GATT Service within a Bluetooth Peripheral, a collection of
@@ -30,34 +28,51 @@ class ScriptState;
 // "Interface required by CallbackPromiseAdapter" section and the
 // CallbackPromiseAdapter class comments.
 class BluetoothRemoteGATTService final
-    : public GarbageCollectedFinalized<BluetoothRemoteGATTService>
-    , public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    explicit BluetoothRemoteGATTService(std::unique_ptr<WebBluetoothRemoteGATTService>, BluetoothDevice*);
+    : public GarbageCollectedFinalized<BluetoothRemoteGATTService>,
+      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
 
-    // Interface required by CallbackPromiseAdapter:
-    using WebType = std::unique_ptr<WebBluetoothRemoteGATTService>;
-    static BluetoothRemoteGATTService* take(ScriptPromiseResolver*, std::unique_ptr<WebBluetoothRemoteGATTService>, BluetoothDevice*);
+ public:
+  BluetoothRemoteGATTService(mojom::blink::WebBluetoothRemoteGATTServicePtr,
+                             bool isPrimary,
+                             const String& deviceInstanceId,
+                             BluetoothDevice*);
 
-    // Interface required by garbage collection.
-    DECLARE_VIRTUAL_TRACE();
+  // Interface required by garbage collection.
+  DECLARE_VIRTUAL_TRACE();
 
-    // IDL exposed interface:
-    String uuid() { return m_webService->uuid; }
-    bool isPrimary() { return m_webService->isPrimary; }
-    BluetoothDevice* device() { return m_device; }
-    ScriptPromise getCharacteristic(ScriptState*, const StringOrUnsignedLong& characteristic, ExceptionState&);
-    ScriptPromise getCharacteristics(ScriptState*, const StringOrUnsignedLong& characteristic, ExceptionState&);
-    ScriptPromise getCharacteristics(ScriptState*, ExceptionState&);
+  // IDL exposed interface:
+  String uuid() { return m_service->uuid; }
+  bool isPrimary() { return m_isPrimary; }
+  BluetoothDevice* device() { return m_device; }
+  ScriptPromise getCharacteristic(ScriptState*,
+                                  const StringOrUnsignedLong& characteristic,
+                                  ExceptionState&);
+  ScriptPromise getCharacteristics(ScriptState*,
+                                   const StringOrUnsignedLong& characteristic,
+                                   ExceptionState&);
+  ScriptPromise getCharacteristics(ScriptState*, ExceptionState&);
 
-private:
-    ScriptPromise getCharacteristicsImpl(ScriptState*, mojom::blink::WebBluetoothGATTQueryQuantity, String characteristicUUID = String());
+ private:
+  void GetCharacteristicsCallback(
+      const String& serviceInstanceId,
+      mojom::blink::WebBluetoothGATTQueryQuantity,
+      ScriptPromiseResolver*,
+      mojom::blink::WebBluetoothResult,
+      Optional<Vector<mojom::blink::WebBluetoothRemoteGATTCharacteristicPtr>>
+          characteristics);
 
-    std::unique_ptr<WebBluetoothRemoteGATTService> m_webService;
-    Member<BluetoothDevice> m_device;
+  ScriptPromise getCharacteristicsImpl(
+      ScriptState*,
+      mojom::blink::WebBluetoothGATTQueryQuantity,
+      const String& characteristicUUID = String());
+
+  mojom::blink::WebBluetoothRemoteGATTServicePtr m_service;
+  const bool m_isPrimary;
+  const String m_deviceInstanceId;
+  Member<BluetoothDevice> m_device;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // BluetoothRemoteGATTService_h
+#endif  // BluetoothRemoteGATTService_h

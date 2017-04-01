@@ -14,7 +14,6 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/single_thread_task_runner.h"
@@ -163,9 +162,8 @@ management::ExtensionInfo CreateExtensionInfo(
     for (icon_iter = icons.begin(); icon_iter != icons.end(); ++icon_iter) {
       management::IconInfo icon_info;
       icon_info.size = icon_iter->first;
-      GURL url =
-          delegate->GetIconURL(&extension, icon_info.size,
-                               ExtensionIconSet::MATCH_EXACTLY, false, nullptr);
+      GURL url = delegate->GetIconURL(&extension, icon_info.size,
+                                      ExtensionIconSet::MATCH_EXACTLY, false);
       icon_info.url = url.spec();
       info.icons->push_back(std::move(icon_info));
     }
@@ -347,7 +345,7 @@ bool ManagementGetPermissionWarningsByManifestFunction::RunAsync() {
 
 void ManagementGetPermissionWarningsByManifestFunction::OnParseSuccess(
     std::unique_ptr<base::Value> value) {
-  if (!value->IsType(base::Value::TYPE_DICTIONARY)) {
+  if (!value->IsType(base::Value::Type::DICTIONARY)) {
     OnParseFailure(keys::kManifestParseError);
     return;
   }
@@ -679,12 +677,15 @@ bool ManagementCreateAppShortcutFunction::RunAsync() {
     return true;
   }
 
+  std::string error;
   if (ManagementAPI::GetFactoryInstance()
           ->Get(browser_context())
           ->GetDelegate()
-          ->CreateAppShortcutFunctionDelegate(this, extension)) {
+          ->CreateAppShortcutFunctionDelegate(this, extension, &error)) {
     // Matched with a Release() in OnCloseShortcutPrompt().
     AddRef();
+  } else {
+    SetError(error);
   }
 
   // Response is sent async in OnCloseShortcutPrompt().

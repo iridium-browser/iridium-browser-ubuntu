@@ -29,26 +29,41 @@
 
 namespace blink {
 
-class BidiContext;
 class InlineBox;
 
 struct BidiRun : BidiCharacterRun {
-    BidiRun(int start, int stop, LineLayoutItem lineLayoutItem, BidiContext* context, WTF::Unicode::CharDirection dir)
-        : BidiCharacterRun(start, stop, context, dir)
-        , m_lineLayoutItem(lineLayoutItem)
-        , m_box(nullptr)
-    {
-        // Stored in base class to save space.
-        m_hasHyphen = false;
-    }
+  BidiRun(bool override,
+          unsigned char level,
+          int start,
+          int stop,
+          LineLayoutItem lineLayoutItem,
+          WTF::Unicode::CharDirection dir,
+          WTF::Unicode::CharDirection overrideDir)
+      : BidiCharacterRun(override, level, start, stop, dir, overrideDir),
+        m_lineLayoutItem(lineLayoutItem),
+        m_box(nullptr) {
+    // Stored in base class to save space.
+    m_hasHyphen = false;
+  }
 
-    BidiRun* next() { return static_cast<BidiRun*>(m_next); }
+  BidiRun(int start,
+          int stop,
+          unsigned char level,
+          LineLayoutItem lineLayoutItem)
+      : BidiCharacterRun(start, stop, level),
+        m_lineLayoutItem(lineLayoutItem),
+        m_box(nullptr) {
+    // Stored in base class to save space.
+    m_hasHyphen = false;
+  }
 
-public:
-    LineLayoutItem m_lineLayoutItem;
-    InlineBox* m_box;
+  BidiRun* next() { return static_cast<BidiRun*>(m_next); }
+
+ public:
+  LineLayoutItem m_lineLayoutItem;
+  InlineBox* m_box;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // BidiRun_h
+#endif  // BidiRun_h

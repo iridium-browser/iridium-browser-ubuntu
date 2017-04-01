@@ -75,6 +75,9 @@ BlinkGCPluginConsumer::BlinkGCPluginConsumer(
 
   // Ignore GC implementation files.
   options_.ignored_directories.push_back("/heap/");
+
+  if (!options_.use_chromium_style_naming)
+    Config::UseLegacyNames();
 }
 
 void BlinkGCPluginConsumer::HandleTranslationUnit(ASTContext& context) {
@@ -143,7 +146,7 @@ void BlinkGCPluginConsumer::ParseFunctionTemplates(TranslationUnitDecl* decl) {
 
     // Force parsing and AST building of the yet-uninstantiated function
     // template trace method bodies.
-    clang::LateParsedTemplate* lpt = sema.LateParsedTemplateMap[fd];
+    clang::LateParsedTemplate* lpt = sema.LateParsedTemplateMap[fd].get();
     sema.LateTemplateParser(sema.OpaqueParser, *lpt);
   }
 }
@@ -177,13 +180,6 @@ void BlinkGCPluginConsumer::CheckClass(RecordInfo* info) {
   if (!info)
     return;
 
-  // Check consistency of stack-allocated hierarchies.
-  if (info->IsStackAllocated()) {
-    for (auto& base : info->GetBases())
-      if (!base.second.info()->IsStackAllocated())
-        reporter_.DerivesNonStackAllocated(info, &base.second);
-  }
-
   if (CXXMethodDecl* trace = info->GetTraceMethod()) {
     if (trace->isPure())
       reporter_.ClassDeclaresPureVirtualTrace(info, trace);
@@ -206,6 +202,17 @@ void BlinkGCPluginConsumer::CheckClass(RecordInfo* info) {
   }
 
   if (info->IsGCDerived()) {
+    // It is illegal for a class to be both stack allocated and garbage
+    // collected.
+    if (info->IsStackAllocated()) {
+      for (auto& base : info->GetBases()) {
+        RecordInfo* base_info = base.second.info();
+        if (Config::IsGCBase(base_info->name()) || base_info->IsGCDerived()) {
+          reporter_.StackAllocatedDerivesGarbageCollected(info, &base.second);
+        }
+      }
+    }
+
     if (!info->IsGCMixin()) {
       CheckLeftMostDerived(info);
       CheckDispatch(info);

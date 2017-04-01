@@ -31,20 +31,21 @@
 #ifndef NavigatorID_h
 #define NavigatorID_h
 
+#include "core/CoreExport.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class NavigatorID {
-public:
-    String appCodeName();
-    String appName();
-    String appVersion();
-    String platform();
-    String product();
-    virtual String userAgent() const = 0;
+class CORE_EXPORT NavigatorID {
+ public:
+  String appCodeName();
+  String appName();
+  String appVersion();
+  String platform();
+  String product();
+  virtual String userAgent() const = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // NavigatorID_h
+#endif  // NavigatorID_h

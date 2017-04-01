@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/process/process.h"
+#include "content/common/render_message_filter.mojom.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/global_request_id.h"
@@ -21,18 +22,7 @@
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "ui/gfx/native_widget_types.h"
 
-namespace IPC {
-class Message;
-}
-
-namespace base {
-class TimeDelta;
-}
-
-struct ViewHostMsg_CreateWindow_Params;
-
 namespace content {
-class GpuProcessHost;
 class ResourceDispatcherHostImpl;
 class SessionStorageNamespace;
 
@@ -98,10 +88,9 @@ class RenderWidgetHelper
 
   // IO THREAD ONLY -----------------------------------------------------------
 
-  void CreateNewWindow(const ViewHostMsg_CreateWindow_Params& params,
+  void CreateNewWindow(mojom::CreateNewWindowParamsPtr params,
                        bool no_javascript_access,
-                       base::ProcessHandle render_process,
-                       int32_t* route_id,
+                       int32_t* render_view_route_id,
                        int32_t* main_frame_route_id,
                        int32_t* main_frame_widget_route_id,
                        SessionStorageNamespace* session_storage_namespace);
@@ -118,11 +107,12 @@ class RenderWidgetHelper
   ~RenderWidgetHelper();
 
   // Called on the UI thread to finish creating a window.
-  void OnCreateWindowOnUI(const ViewHostMsg_CreateWindow_Params& params,
-                          int32_t route_id,
-                          int32_t main_frame_route_id,
-                          int32_t main_frame_widget_route_id,
-                          SessionStorageNamespace* session_storage_namespace);
+  void OnCreateNewWindowOnUI(
+      mojom::CreateNewWindowParamsPtr params,
+      int32_t render_view_route_id,
+      int32_t main_frame_route_id,
+      int32_t main_frame_widget_route_id,
+      SessionStorageNamespace* session_storage_namespace);
 
   // Called on the UI thread to finish creating a widget.
   void OnCreateWidgetOnUI(int32_t opener_id,

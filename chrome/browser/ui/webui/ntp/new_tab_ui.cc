@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/i18n/rtl.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -14,24 +15,21 @@
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
-#include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
+#include "chrome/browser/ui/webui/theme_handler.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_system.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
-
-#if defined(ENABLE_THEMES)
-#include "chrome/browser/ui/webui/theme_handler.h"
-#endif
 
 using content::BrowserThread;
 using content::WebUIController;
@@ -61,22 +59,20 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
 
   Profile* profile = GetProfile();
   if (!profile->IsOffTheRecord()) {
-    web_ui->AddMessageHandler(new MetricsHandler());
-    web_ui->AddMessageHandler(new FaviconWebUIHandler());
-    web_ui->AddMessageHandler(new CoreAppLauncherHandler());
+    web_ui->AddMessageHandler(base::MakeUnique<MetricsHandler>());
+    web_ui->AddMessageHandler(base::MakeUnique<CoreAppLauncherHandler>());
 
     ExtensionService* service =
         extensions::ExtensionSystem::Get(profile)->extension_service();
     // We might not have an ExtensionService (on ChromeOS when not logged in
     // for example).
-    if (service)
-      web_ui->AddMessageHandler(new AppLauncherHandler(service));
+    if (service) {
+      web_ui->AddMessageHandler(base::MakeUnique<AppLauncherHandler>(service));
+    }
   }
 
-#if defined(ENABLE_THEMES)
   if (!profile->IsGuestSession())
-    web_ui->AddMessageHandler(new ThemeHandler());
-#endif
+    web_ui->AddMessageHandler(base::MakeUnique<ThemeHandler>());
 
   std::unique_ptr<NewTabHTMLSource> html_source(
       new NewTabHTMLSource(profile->GetOriginalProfile()));
@@ -180,8 +176,7 @@ std::string NewTabUI::NewTabHTMLSource::GetSource() const {
 
 void NewTabUI::NewTabHTMLSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -205,8 +200,9 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(
     return;
   }
 
+  content::WebContents* web_contents = wc_getter.Run();
   content::RenderProcessHost* render_host =
-      content::RenderProcessHost::FromID(render_process_id);
+      web_contents ? web_contents->GetRenderProcessHost() : nullptr;
   NTPResourceCache::WindowType win_type = NTPResourceCache::GetWindowType(
       profile_, render_host);
   scoped_refptr<base::RefCountedMemory> html_bytes(

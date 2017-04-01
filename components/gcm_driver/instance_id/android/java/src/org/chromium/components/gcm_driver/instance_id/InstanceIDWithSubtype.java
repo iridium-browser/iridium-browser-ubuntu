@@ -26,12 +26,12 @@ public class InstanceIDWithSubtype extends InstanceID {
     /** Cached instances. May be accessed from multiple threads; synchronize on InstanceID.class. */
     @VisibleForTesting
     @SuppressFBWarnings("MS_MUTABLE_COLLECTION_PKGPROTECT")
-    protected static final Map<String, InstanceIDWithSubtype> sSubtypeInstances = new HashMap<>();
+    public static final Map<String, InstanceIDWithSubtype> sSubtypeInstances = new HashMap<>();
 
     /** Fake subclasses can set this so getInstance creates instances of them. */
     @VisibleForTesting
     @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
-    protected static FakeFactory sFakeFactoryForTesting = null;
+    protected static FakeFactory sFakeFactoryForTesting;
 
     protected InstanceIDWithSubtype(Context context, String subtype) {
         super(context, subtype, null /* options */);

@@ -33,6 +33,9 @@ function updateCrashList(
   $('disabledMode').hidden = enabled;
   $('crashUploadStatus').hidden = !enabled || !dynamicBackend;
 
+  // Make the height fixed while clearing the
+  // element in order to maintain scroll position.
+  crashSection.style.height = getComputedStyle(crashSection).height;
   // Clear any previous list.
   crashSection.textContent = '';
 
@@ -46,6 +49,7 @@ function updateCrashList(
     var crashBlock = document.createElement('div');
     if (crash.state != 'uploaded')
       crashBlock.className = 'notUploaded';
+
     var title = document.createElement('h3');
     var uploaded = crash.state == 'uploaded';
     if (uploaded) {
@@ -57,11 +61,20 @@ function updateCrashList(
                                                   crash.local_id);
     }
     crashBlock.appendChild(title);
+
     if (uploaded) {
       var date = document.createElement('p');
-      date.textContent = loadTimeData.getStringF('crashTimeFormat',
-                                                 crash.time);
+      date.textContent = ""
+      if (crash.capture_time) {
+        date.textContent += loadTimeData.getStringF(
+            'crashCaptureAndUploadTimeFormat', crash.capture_time,
+            crash.upload_time);
+      } else {
+        date.textContent += loadTimeData.getStringF('crashUploadTimeFormat',
+                                                    crash.upload_time);
+      }
       crashBlock.appendChild(date);
+
       var linkBlock = document.createElement('p');
       var link = document.createElement('a');
       var commentLines = [
@@ -101,23 +114,30 @@ function updateCrashList(
       link.textContent = loadTimeData.getString('bugLinkText');
       linkBlock.appendChild(link);
       crashBlock.appendChild(linkBlock);
-    } else if (crash.state == 'pending_user_requested') {
-      var userRequested = document.createElement('p');
-      userRequested.textContent =
-          loadTimeData.getStringF('crashUserRequested', crash.time);
-      crashBlock.appendChild(userRequested);
-    } else if (crash.state == 'pending' || crash.state == 'not_uploaded') {
-      if (crash.state == 'pending')
+    } else {
+      if (crash.state == 'pending_user_requested')
+        var textContentKey = 'crashUserRequested';
+      else if (crash.state == 'pending')
         var textContentKey = 'crashPending';
-      else
+      else if (crash.state == 'not_uploaded')
         var textContentKey = 'crashNotUploaded';
+      else
+        continue;
 
-      var notUploaded = document.createElement('p');
-      notUploaded.textContent = loadTimeData.getStringF(textContentKey,
-                                                    crash.time);
-      crashBlock.appendChild(notUploaded);
+      var crashText = document.createElement('p');
+      crashText.textContent = loadTimeData.getStringF(textContentKey,
+                                                      crash.capture_time);
+      crashBlock.appendChild(crashText);
 
-      if (manualUploads) {
+      if (crash.file_size != '') {
+        var crashSizeText =  document.createElement('p');
+        crashSizeText.textContent = loadTimeData.getStringF('crashSizeMessage',
+                                                            crash.file_size);
+        crashBlock.appendChild(crashSizeText);
+      }
+
+      // Do not show "Send now" link for already requested crashes.
+      if (crash.state != 'pending_user_requested' && manualUploads) {
         var uploadNowLinkBlock = document.createElement('p');
         var link = document.createElement('a');
         link.href = '';
@@ -133,6 +153,8 @@ function updateCrashList(
     crashSection.appendChild(crashBlock);
   }
 
+  // Reset the height, in order to accommodate for the new content.
+  crashSection.style.height = "";
   $('noCrashes').hidden = crashes.length != 0;
 }
 

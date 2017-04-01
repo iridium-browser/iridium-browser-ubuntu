@@ -23,11 +23,11 @@
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/test/test_history_database.h"
-#include "components/sync/api/fake_sync_change_processor.h"
-#include "components/sync/api/sync_change_processor_wrapper_for_test.h"
-#include "components/sync/api/sync_error.h"
-#include "components/sync/api/sync_error_factory_mock.h"
-#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/model/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/model/fake_sync_change_processor.h"
+#include "components/sync/model/sync_change_processor_wrapper_for_test.h"
+#include "components/sync/model/sync_error.h"
+#include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/protocol/typed_url_specifics.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -219,8 +219,8 @@ class TypedUrlSyncableServiceTest : public testing::Test {
   void SetUp() override {
     fake_history_backend_ = new TestHistoryBackend();
     ASSERT_TRUE(test_dir_.CreateUniqueTempDir());
-    fake_history_backend_->Init(false,
-        TestHistoryDatabaseParamsForPath(test_dir_.path()));
+    fake_history_backend_->Init(
+        false, TestHistoryDatabaseParamsForPath(test_dir_.GetPath()));
     typed_url_sync_service_ =
         fake_history_backend_->GetTypedUrlSyncableService();
     fake_change_processor_.reset(new syncer::FakeSyncChangeProcessor);

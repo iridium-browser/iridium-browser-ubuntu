@@ -109,11 +109,13 @@ public class StripLayoutHelperManager implements SceneOverlay {
     public void destroy() {
         mTabStripTreeProvider.destroy();
         mTabStripTreeProvider = null;
+        mIncognitoHelper.destroy();
+        mNormalHelper.destroy();
     }
 
     @Override
-    public SceneOverlayLayer getUpdatedSceneOverlayTree(LayerTitleCache layerTitleCache,
-            ResourceManager resourceManager, float yOffset) {
+    public SceneOverlayLayer getUpdatedSceneOverlayTree(RectF viewport, RectF visibleViewport,
+            LayerTitleCache layerTitleCache, ResourceManager resourceManager, float yOffset) {
         assert mTabStripTreeProvider != null;
 
         Tab selectedTab = mTabModelSelector.getCurrentModel().getTabAt(
@@ -128,7 +130,7 @@ public class StripLayoutHelperManager implements SceneOverlay {
     @Override
     public boolean isSceneOverlayTreeShowing() {
         // TODO(mdjones): This matches existing behavior but can be improved to return false if
-        // the top controls offset is equal to the top controls height.
+        // the browser controls offset is equal to the browser controls height.
         return true;
     }
 
@@ -171,7 +173,7 @@ public class StripLayoutHelperManager implements SceneOverlay {
     }
 
     @Override
-    public boolean shouldHideAndroidTopControls() {
+    public boolean shouldHideAndroidBrowserControls() {
         return false;
     }
 
@@ -280,11 +282,8 @@ public class StripLayoutHelperManager implements SceneOverlay {
         if (incognito == mIsIncognito) return;
         mIsIncognito = incognito;
 
-        if (mIsIncognito) {
-            mIncognitoHelper.tabModelSelected();
-        } else {
-            mNormalHelper.tabModelSelected();
-        }
+        mIncognitoHelper.tabModelSelected(mIsIncognito);
+        mNormalHelper.tabModelSelected(!mIsIncognito);
 
         updateModelSwitcherButton();
 

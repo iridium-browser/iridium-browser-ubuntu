@@ -9,8 +9,8 @@ from gpu_tests import gpu_integration_test
 from gpu_tests import context_lost_expectations
 from gpu_tests import path_util
 
+import py_utils
 from telemetry.core import exceptions
-from telemetry.core import util
 
 data_path = os.path.join(
     path_util.GetChromiumSrcDir(), 'content', 'test', 'data', 'gpu')
@@ -70,17 +70,17 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
 
   @classmethod
   def GenerateGpuTests(cls, options):
-    tests = (('GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash',
+    tests = (('GpuCrash_GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash',
               'gpu_process_crash.html'),
-             ('WebGLContextLostFromGPUProcessExit',
+             ('ContextLost_WebGLContextLostFromGPUProcessExit',
               'webgl.html?query=kill_after_notification'),
-             ('WebGLContextLostFromLoseContextExtension',
+             ('ContextLost_WebGLContextLostFromLoseContextExtension',
               'webgl.html?query=WEBGL_lose_context'),
-             ('WebGLContextLostFromQuantity',
+             ('ContextLost_WebGLContextLostFromQuantity',
               'webgl.html?query=forced_quantity_loss'),
-             ('WebGLContextLostFromSelectElement',
+             ('ContextLost_WebGLContextLostFromSelectElement',
               'webgl_with_select_element.html'),
-             ('WebGLContextLostInHiddenTab',
+             ('ContextLost_WebGLContextLostInHiddenTab',
               'webgl.html?query=kill_after_notification'))
     for t in tests:
       yield (t[0], t[1], ('_' + t[0]))
@@ -102,11 +102,11 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     cls.CustomizeOptions()
     cls.SetBrowserOptions(cls._finder_options)
     cls.StartBrowser()
-    cls.SetStaticServerDir(data_path)
+    cls.SetStaticServerDirs([data_path])
 
   def _WaitForPageToFinish(self, tab):
     try:
-      util.WaitFor(lambda: tab.EvaluateJavaScript(
+      py_utils.WaitFor(lambda: tab.EvaluateJavaScript(
         'window.domAutomationController._finished'), wait_timeout)
       return True
     except exceptions.TimeoutException:
@@ -128,7 +128,7 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
       # If we're running the GPU process crash test, we need the test
       # to have fully reset before crashing the GPU process.
       if check_crash_count:
-        util.WaitFor(lambda: tab.EvaluateJavaScript(
+        py_utils.WaitFor(lambda: tab.EvaluateJavaScript(
           'window.domAutomationController._finished'), wait_timeout)
 
       # Crash the GPU process.
@@ -212,24 +212,25 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
   # given in GenerateGpuTests, so in order to hand-write our tests but
   # also go through the _RunGpuTest trampoline, the test needs to be
   # slightly differently named.
-  def _GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash(self, test_path):
+  def _GpuCrash_GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash(
+      self, test_path):
     self._NavigateAndWaitForLoad(test_path)
     self._KillGPUProcess(2, True)
     self._RestartBrowser('must restart after tests that kill the GPU process')
 
-  def _WebGLContextLostFromGPUProcessExit(self, test_path):
+  def _ContextLost_WebGLContextLostFromGPUProcessExit(self, test_path):
     self._NavigateAndWaitForLoad(test_path)
     self._KillGPUProcess(1, False)
     self._RestartBrowser('must restart after tests that kill the GPU process')
 
-  def _WebGLContextLostFromLoseContextExtension(self, test_path):
+  def _ContextLost_WebGLContextLostFromLoseContextExtension(self, test_path):
     url = self.UrlOfStaticFilePath(test_path)
     tab = self.tab
     tab.Navigate(url, script_to_evaluate_on_commit=harness_script)
     tab.action_runner.WaitForJavaScriptCondition(
       'window.domAutomationController._finished')
 
-  def _WebGLContextLostFromQuantity(self, test_path):
+  def _ContextLost_WebGLContextLostFromQuantity(self, test_path):
     self._NavigateAndWaitForLoad(test_path)
     # Try to coerce GC to clean up any contexts not attached to the page.
     # This method seems unreliable, so the page will also attempt to
@@ -237,11 +238,11 @@ class ContextLostIntegrationTest(gpu_integration_test.GpuIntegrationTest):
     self.tab.CollectGarbage()
     self._WaitForTabAndCheckCompletion()
 
-  def _WebGLContextLostFromSelectElement(self, test_path):
+  def _ContextLost_WebGLContextLostFromSelectElement(self, test_path):
     self._NavigateAndWaitForLoad(test_path)
     self._WaitForTabAndCheckCompletion()
 
-  def _WebGLContextLostInHiddenTab(self, test_path):
+  def _ContextLost_WebGLContextLostInHiddenTab(self, test_path):
     self._NavigateAndWaitForLoad(test_path)
     # Test losing a context in a hidden tab. This test passes if the tab
     # doesn't crash.

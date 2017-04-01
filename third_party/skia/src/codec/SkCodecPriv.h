@@ -9,7 +9,10 @@
 #define SkCodecPriv_DEFINED
 
 #include "SkColorPriv.h"
+#include "SkColorSpaceXform.h"
+#include "SkColorSpaceXformPriv.h"
 #include "SkColorTable.h"
+#include "SkEncodedInfo.h"
 #include "SkImageInfo.h"
 #include "SkTypes.h"
 
@@ -107,32 +110,6 @@ static inline bool valid_alpha(SkAlphaType dstAlpha, SkAlphaType srcAlpha) {
 }
 
 /*
- * Most of our codecs support the same conversions:
- * - opaque to any alpha type
- * - 565 only if opaque
- * - premul to unpremul and vice versa
- * - always support N32
- * - otherwise match the src color type
- */
-static inline bool conversion_possible(const SkImageInfo& dst, const SkImageInfo& src) {
-    // Ensure the alpha type is valid
-    if (!valid_alpha(dst.alphaType(), src.alphaType())) {
-        return false;
-    }
-
-    // Check for supported color types
-    switch (dst.colorType()) {
-        case kRGBA_8888_SkColorType:
-        case kBGRA_8888_SkColorType:
-            return true;
-        case kRGB_565_SkColorType:
-            return kOpaque_SkAlphaType == src.alphaType();
-        default:
-            return dst.colorType() == src.colorType();
-    }
-}
-
-/*
  * If there is a color table, get a pointer to the colors, otherwise return nullptr
  */
 static inline const SkPMColor* get_color_ptr(SkColorTable* colorTable) {
@@ -142,10 +119,10 @@ static inline const SkPMColor* get_color_ptr(SkColorTable* colorTable) {
 /*
  * Given that the encoded image uses a color table, return the fill value
  */
-static inline uint32_t get_color_table_fill_value(SkColorType colorType, const SkPMColor* colorPtr,
-        uint8_t fillIndex) {
+static inline uint64_t get_color_table_fill_value(SkColorType dstColorType, SkAlphaType alphaType,
+        const SkPMColor* colorPtr, uint8_t fillIndex, SkColorSpaceXform* colorXform) {
     SkASSERT(nullptr != colorPtr);
-    switch (colorType) {
+    switch (dstColorType) {
         case kRGBA_8888_SkColorType:
         case kBGRA_8888_SkColorType:
             return colorPtr[fillIndex];
@@ -153,6 +130,14 @@ static inline uint32_t get_color_table_fill_value(SkColorType colorType, const S
             return SkPixel32ToPixel16(colorPtr[fillIndex]);
         case kIndex_8_SkColorType:
             return fillIndex;
+        case kRGBA_F16_SkColorType: {
+            SkASSERT(colorXform);
+            uint64_t dstColor;
+            uint32_t srcColor = colorPtr[fillIndex];
+            SkAssertResult(colorXform->apply(select_xform_format(dstColorType), &dstColor,
+                    SkColorSpaceXform::kRGBA_8888_ColorFormat, &srcColor, 1, alphaType));
+            return dstColor;
+        }
         default:
             SkASSERT(false);
             return 0;
@@ -310,15 +295,13 @@ static inline PackColorProc choose_pack_color_proc(bool isPremul, SkColorType co
     }
 }
 
-static inline bool needs_premul(const SkImageInfo& dstInfo, const SkImageInfo& srcInfo) {
+static inline bool needs_premul(const SkImageInfo& dstInfo, const SkEncodedInfo& encodedInfo) {
     return kPremul_SkAlphaType == dstInfo.alphaType() &&
-           kUnpremul_SkAlphaType == srcInfo.alphaType();
+           SkEncodedInfo::kUnpremul_Alpha == encodedInfo.alpha();
 }
 
-static inline bool needs_color_xform(const SkImageInfo& dstInfo, const SkImageInfo& srcInfo) {
-    // Color xform is necessary in order to correctly perform premultiply in linear space.
-    bool needsPremul = needs_premul(dstInfo, srcInfo);
-
+static inline bool needs_color_xform(const SkImageInfo& dstInfo, const SkImageInfo& srcInfo,
+                                     bool needsPremul) {
     // F16 is by definition a linear space, so we always must perform a color xform.
     bool isF16 = kRGBA_F16_SkColorType == dstInfo.colorType();
 
@@ -329,6 +312,52 @@ static inline bool needs_color_xform(const SkImageInfo& dstInfo, const SkImageIn
     bool isLegacy = nullptr == dstInfo.colorSpace();
 
     return !isLegacy && (needsPremul || isF16 || srcDstNotEqual);
+}
+
+static inline SkAlphaType select_xform_alpha(SkAlphaType dstAlphaType, SkAlphaType srcAlphaType) {
+    return (kOpaque_SkAlphaType == srcAlphaType) ? kOpaque_SkAlphaType : dstAlphaType;
+}
+
+static inline bool apply_xform_on_decode(SkColorType dstColorType, SkEncodedInfo::Color srcColor) {
+    // We will apply the color xform when reading the color table, unless F16 is requested.
+    return SkEncodedInfo::kPalette_Color != srcColor || kRGBA_F16_SkColorType == dstColorType;
+}
+
+/*
+ * Alpha Type Conversions
+ * - kOpaque to kOpaque, kUnpremul, kPremul is valid
+ * - kUnpremul to kUnpremul, kPremul is valid
+ *
+ * Color Type Conversions
+ * - Always support kRGBA_8888, kBGRA_8888
+ * - Support kRGBA_F16 when there is a linear dst color space
+ * - Support kIndex8 if it matches the src
+ * - Support k565 if kOpaque and color correction is not required
+ * - Support k565 if it matches the src, kOpaque, and color correction is not required
+ */
+static inline bool conversion_possible(const SkImageInfo& dst, const SkImageInfo& src) {
+    // Ensure the alpha type is valid.
+    if (!valid_alpha(dst.alphaType(), src.alphaType())) {
+        return false;
+    }
+
+    // Check for supported color types.
+    switch (dst.colorType()) {
+        case kRGBA_8888_SkColorType:
+        case kBGRA_8888_SkColorType:
+            return true;
+        case kRGBA_F16_SkColorType:
+            return dst.colorSpace() && dst.colorSpace()->gammaIsLinear();
+        case kIndex_8_SkColorType:
+            return kIndex_8_SkColorType == src.colorType();
+        case kRGB_565_SkColorType:
+            return kOpaque_SkAlphaType == src.alphaType() && !needs_color_xform(dst, src, false);
+        case kGray_8_SkColorType:
+            return kGray_8_SkColorType == src.colorType() &&
+                   kOpaque_SkAlphaType == src.alphaType() && !needs_color_xform(dst, src, false);
+        default:
+            return false;
+    }
 }
 
 #endif // SkCodecPriv_DEFINED

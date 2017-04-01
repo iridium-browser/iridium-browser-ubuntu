@@ -6,11 +6,10 @@ source_set("tests") {
   testonly = true
 
   sources = [
-    "array_common_test.h",
-    "array_unittest.cc",
     "associated_interface_unittest.cc",
     "bind_task_runner_unittest.cc",
     "binding_callback_unittest.cc",
+    "binding_set_unittest.cc",
     "binding_unittest.cc",
     "buffer_unittest.cc",
     "connector_unittest.cc",
@@ -20,9 +19,8 @@ source_set("tests") {
     "data_view_unittest.cc",
     "equals_unittest.cc",
     "handle_passing_unittest.cc",
+    "hash_unittest.cc",
     "interface_ptr_unittest.cc",
-    "map_common_test.h",
-    "map_unittest.cc",
     "message_queue.cc",
     "message_queue.h",
     "multiplex_router_unittest.cc",
@@ -30,11 +28,8 @@ source_set("tests") {
     "request_response_unittest.cc",
     "router_test_util.cc",
     "router_test_util.h",
-    "router_unittest.cc",
     "sample_service_unittest.cc",
     "serialization_warning_unittest.cc",
-    "stl_converters_unittest.cc",
-    "string_unittest.cc",
     "struct_unittest.cc",
     "sync_method_unittest.cc",
     "type_conversion_unittest.cc",
@@ -46,12 +41,14 @@ source_set("tests") {
 
   deps = [
     ":mojo_public_bindings_test_utils",
+    "//base/test:test_support",
     "//mojo/edk/system",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",
     "//mojo/public/cpp/test_support:test_utils",
     "//mojo/public/interfaces/bindings/tests:test_associated_interfaces",
     "//mojo/public/interfaces/bindings/tests:test_export_component",
+    "//mojo/public/interfaces/bindings/tests:test_exported_import",
     "//mojo/public/interfaces/bindings/tests:test_interfaces",
     "//mojo/public/interfaces/bindings/tests:test_interfaces_experimental",
     "//mojo/public/interfaces/bindings/tests:test_struct_traits_interfaces",
@@ -79,20 +76,20 @@ if (!is_ios) {
     testonly = true
 
     sources = [
-      "array_common_test.h",
       "container_test_util.cc",
       "container_test_util.h",
-      "map_common_test.h",
       "variant_test_util.h",
-      "wtf_array_unittest.cc",
-      "wtf_map_unittest.cc",
+      "wtf_hash_unittest.cc",
       "wtf_types_unittest.cc",
     ]
 
     deps = [
       "//mojo/public/cpp/bindings",
       "//mojo/public/cpp/system",
+      "//mojo/public/interfaces/bindings/tests:test_export_blink_component",
+      "//mojo/public/interfaces/bindings/tests:test_exported_import_blink",
       "//mojo/public/interfaces/bindings/tests:test_interfaces",
+      "//mojo/public/interfaces/bindings/tests:test_interfaces_blink",
       "//mojo/public/interfaces/bindings/tests:test_wtf_types",
       "//mojo/public/interfaces/bindings/tests:test_wtf_types_blink",
       "//testing/gtest",
@@ -125,6 +122,7 @@ source_set("perftests") {
 
   deps = [
     "//base/test:test_support",
+    "//mojo/edk/system",
     "//mojo/edk/test:test_support",
     "//mojo/public/cpp/bindings",
     "//mojo/public/cpp/system",

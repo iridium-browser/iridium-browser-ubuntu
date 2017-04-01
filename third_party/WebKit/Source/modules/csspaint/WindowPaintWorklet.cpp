@@ -11,44 +11,37 @@
 namespace blink {
 
 WindowPaintWorklet::WindowPaintWorklet(LocalDOMWindow& window)
-    : DOMWindowProperty(window.frame())
-{
-}
+    : Supplement<LocalDOMWindow>(window) {}
 
-const char* WindowPaintWorklet::supplementName()
-{
-    return "WindowPaintWorklet";
+const char* WindowPaintWorklet::supplementName() {
+  return "WindowPaintWorklet";
 }
 
 // static
-WindowPaintWorklet& WindowPaintWorklet::from(LocalDOMWindow& window)
-{
-    WindowPaintWorklet* supplement = static_cast<WindowPaintWorklet*>(Supplement<LocalDOMWindow>::from(window, supplementName()));
-    if (!supplement) {
-        supplement = new WindowPaintWorklet(window);
-        provideTo(window, supplementName(), supplement);
-    }
-    return *supplement;
+WindowPaintWorklet& WindowPaintWorklet::from(LocalDOMWindow& window) {
+  WindowPaintWorklet* supplement = static_cast<WindowPaintWorklet*>(
+      Supplement<LocalDOMWindow>::from(window, supplementName()));
+  if (!supplement) {
+    supplement = new WindowPaintWorklet(window);
+    provideTo(window, supplementName(), supplement);
+  }
+  return *supplement;
 }
 
 // static
-Worklet* WindowPaintWorklet::paintWorklet(DOMWindow& window)
-{
-    return from(toLocalDOMWindow(window)).paintWorklet();
+Worklet* WindowPaintWorklet::paintWorklet(DOMWindow& window) {
+  return from(toLocalDOMWindow(window)).paintWorklet();
 }
 
-PaintWorklet* WindowPaintWorklet::paintWorklet()
-{
-    if (!m_paintWorklet && frame())
-        m_paintWorklet = PaintWorklet::create(frame());
-    return m_paintWorklet.get();
+PaintWorklet* WindowPaintWorklet::paintWorklet() {
+  if (!m_paintWorklet && supplementable()->frame())
+    m_paintWorklet = PaintWorklet::create(supplementable()->frame());
+  return m_paintWorklet.get();
 }
 
-DEFINE_TRACE(WindowPaintWorklet)
-{
-    visitor->trace(m_paintWorklet);
-    Supplement<LocalDOMWindow>::trace(visitor);
-    DOMWindowProperty::trace(visitor);
+DEFINE_TRACE(WindowPaintWorklet) {
+  visitor->trace(m_paintWorklet);
+  Supplement<LocalDOMWindow>::trace(visitor);
 }
 
-} // namespace blink
+}  // namespace blink

@@ -47,8 +47,6 @@ template("fuzzer_test") {
           rebase_path(invoker.seed_corpus),
           "--output",
           rebase_path(out),
-          "--fuzzer",
-          rebase_path("$root_build_dir/$target_name"),
         ]
 
         outputs = [
@@ -108,6 +106,7 @@ template("fuzzer_test") {
       forward_variables_from(invoker,
                              [
                                "check_includes",
+                               "defines",
                                "include_dirs",
                                "sources",
                              ])
@@ -144,6 +143,8 @@ template("fuzzer_test") {
       assert(invoker.seed_corpus == [] || invoker.seed_corpus != [])
     }
     assert(!defined(invoker.check_includes) || invoker.check_includes != [])
+    assert(!defined(invoker.include_dirs) || invoker.include_dirs != [])
+    assert(!defined(invoker.defines) || invoker.defines != [])
 
     group(target_name) {
     }

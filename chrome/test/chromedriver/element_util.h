@@ -12,7 +12,6 @@
 
 namespace base {
 class DictionaryValue;
-class ListValue;
 class Value;
 }
 
@@ -20,9 +19,10 @@ struct Session;
 class Status;
 class WebView;
 
-base::DictionaryValue* CreateElement(const std::string& element_id);
+std::unique_ptr<base::DictionaryValue> CreateElement(
+    const std::string& element_id);
 
-base::Value* CreateValueFrom(const WebPoint& point);
+std::unique_ptr<base::DictionaryValue> CreateValueFrom(const WebPoint& point);
 
 // |root_element_id| could be null when no root element is given.
 Status FindElement(int interval_ms,

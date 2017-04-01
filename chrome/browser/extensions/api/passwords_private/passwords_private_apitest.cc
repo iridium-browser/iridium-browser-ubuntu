@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
@@ -78,9 +77,8 @@ class TestDelegate : public PasswordsPrivateDelegate {
       router->OnSavedPasswordsListChanged(current_entries_);
   }
 
-  const std::vector<api::passwords_private::PasswordUiEntry>*
-  GetSavedPasswordsList() const override {
-    return &current_entries_;
+  void GetSavedPasswordsList(const UiEntriesCallback& callback) override {
+    callback.Run(current_entries_);
   }
 
   void SendPasswordExceptionsList() override {
@@ -90,9 +88,9 @@ class TestDelegate : public PasswordsPrivateDelegate {
       router->OnPasswordExceptionsListChanged(current_exceptions_);
   }
 
-  const std::vector<api::passwords_private::ExceptionPair>*
-  GetPasswordExceptionsList() const override {
-    return &current_exceptions_;
+  void GetPasswordExceptionsList(
+      const ExceptionPairsCallback& callback) override {
+    callback.Run(current_exceptions_);
   }
 
   void RemoveSavedPassword(

@@ -8,6 +8,7 @@
 #include <jni.h>
 
 #include <map>
+#include <memory>
 
 #include "base/android/jni_weak_ref.h"
 #include "base/callback.h"
@@ -15,26 +16,28 @@
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "components/invalidation/public/invalidation_util.h"
-#include "components/sync/driver/sync_prefs.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
-namespace sync_driver {
-class SyncSetupInProgressHandle;
+class Profile;
+
+namespace browser_sync {
+class ProfileSyncService;
 }
 
-class Profile;
-class ProfileSyncService;
+namespace syncer {
+class SyncSetupInProgressHandle;
+}
 
 // Android wrapper of the ProfileSyncService which provides access from the Java
 // layer. Note that on Android, there's only a single profile, and therefore
 // a single instance of this wrapper. The name of the Java class is
 // ProfileSyncService.
 // This class should only be accessed from the UI thread.
-class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
+class ProfileSyncServiceAndroid : public syncer::SyncServiceObserver {
  public:
-
   ProfileSyncServiceAndroid(JNIEnv* env, jobject obj);
   ~ProfileSyncServiceAndroid() override;
 
@@ -42,7 +45,7 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   // Returns false if we didn't get a ProfileSyncService.
   bool Init();
 
-  // sync_driver::SyncServiceObserver:
+  // syncer::SyncServiceObserver:
   void OnStateChanged() override;
 
   // Pure ProfileSyncService calls.
@@ -56,9 +59,8 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
                    const base::android::JavaParamRef<jobject>& obj);
   jboolean IsSyncActive(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj);
-  jboolean IsBackendInitialized(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
+  jboolean IsEngineInitialized(JNIEnv* env,
+                               const base::android::JavaParamRef<jobject>& obj);
   void SetSetupInProgress(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           jboolean in_progress);
@@ -199,14 +201,14 @@ class ProfileSyncServiceAndroid : public sync_driver::SyncServiceObserver {
   Profile* profile_;
 
   // A reference to the sync service for this profile.
-  ProfileSyncService* sync_service_;
+  browser_sync::ProfileSyncService* sync_service_;
 
   // Prevents Sync from running until configuration is complete.
-  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
+  std::unique_ptr<syncer::SyncSetupInProgressHandle> sync_blocker_;
 
   // The class that handles getting, setting, and persisting sync
   // preferences.
-  std::unique_ptr<sync_driver::SyncPrefs> sync_prefs_;
+  std::unique_ptr<syncer::SyncPrefs> sync_prefs_;
 
   // Java-side ProfileSyncService object.
   JavaObjectWeakGlobalRef weak_java_profile_sync_service_;

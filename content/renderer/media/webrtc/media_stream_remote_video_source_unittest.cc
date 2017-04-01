@@ -18,7 +18,6 @@
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebHeap.h"
-#include "third_party/webrtc/media/engine/webrtcvideoframe.h"
 
 namespace content {
 
@@ -41,9 +40,7 @@ class MediaStreamRemoteVideoSourceTest
   MediaStreamRemoteVideoSourceTest()
       : child_process_(new ChildProcess()),
         mock_factory_(new MockPeerConnectionDependencyFactory()),
-        webrtc_video_track_(mock_factory_->CreateLocalVideoTrack(
-            "test",
-            static_cast<cricket::VideoCapturer*>(NULL))),
+        webrtc_video_track_(MockWebRtcVideoTrack::Create("test")),
         remote_source_(new MediaStreamRemoteVideoSourceUnderTest(
             std::unique_ptr<TrackObserver>(
                 new TrackObserver(base::ThreadTaskRunnerHandle::Get(),
@@ -134,7 +131,7 @@ TEST_F(MediaStreamRemoteVideoSourceTest, StartTrack) {
   buffer->SetToBlack();
 
   source()->SinkInterfaceForTest()->OnFrame(
-      cricket::WebRtcVideoFrame(buffer, 1, webrtc::kVideoRotation_0));
+      webrtc::VideoFrame(buffer, webrtc::kVideoRotation_0, 1000));
   run_loop.Run();
 
   EXPECT_EQ(1, sink.number_of_frames());

@@ -5,8 +5,8 @@
 package org.chromium.chrome.browser.omnibox;
 
 import android.content.res.Resources;
+import android.support.test.filters.MediumTest;
 import android.test.UiThreadTest;
-import android.test.suitebuilder.annotation.MediumTest;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 
@@ -173,8 +173,8 @@ public class OmniboxUrlEmphasizerTest extends NativeLibraryTestBase {
     public void testLongInsecureHTTPSUrl() {
         Spannable url = new SpannableStringBuilder(
                 "https://www.google.com/q?query=abc123&results=1");
-        OmniboxUrlEmphasizer.emphasizeUrl(url, mResources, mProfile,
-                ConnectionSecurityLevel.SECURITY_ERROR, false, true, true);
+        OmniboxUrlEmphasizer.emphasizeUrl(
+                url, mResources, mProfile, ConnectionSecurityLevel.DANGEROUS, false, true, true);
         EmphasizedUrlSpanHelper[] spans = EmphasizedUrlSpanHelper.getSpansForEmphasizedUrl(url);
 
         assertEquals("Unexpected number of spans:", 5, spans.length);

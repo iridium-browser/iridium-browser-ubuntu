@@ -18,25 +18,31 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/sha1.h"
-#include "base/stl_util.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_errors.h"
+#include "net/base/trace_constants.h"
 #include "net/cert/cert_verify_proc.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/crl_set.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_certificate_net_log_param.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_capture_mode.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source.h"
+#include "net/log/net_log_source_type.h"
+#include "net/log/net_log_with_source.h"
 
 #if defined(USE_NSS_CERTS)
 #include <private/pprthred.h>  // PR_DetachThread
 #endif
 
 namespace net {
+
+class NetLogCaptureMode;
 
 ////////////////////////////////////////////////////////////////////////////
 //
@@ -125,20 +131,20 @@ class CertVerifierRequest : public base::LinkNode<CertVerifierRequest>,
   CertVerifierRequest(CertVerifierJob* job,
                       const CompletionCallback& callback,
                       CertVerifyResult* verify_result,
-                      const BoundNetLog& net_log)
+                      const NetLogWithSource& net_log)
       : job_(job),
         callback_(callback),
         verify_result_(verify_result),
         net_log_(net_log) {
-    net_log_.BeginEvent(NetLog::TYPE_CERT_VERIFIER_REQUEST);
+    net_log_.BeginEvent(NetLogEventType::CERT_VERIFIER_REQUEST);
   }
 
   // Cancels the request.
   ~CertVerifierRequest() override {
     if (job_) {
       // Cancel the outstanding request.
-      net_log_.AddEvent(NetLog::TYPE_CANCELLED);
-      net_log_.EndEvent(NetLog::TYPE_CERT_VERIFIER_REQUEST);
+      net_log_.AddEvent(NetLogEventType::CANCELLED);
+      net_log_.EndEvent(NetLogEventType::CERT_VERIFIER_REQUEST);
 
       // Remove the request from the Job. No attempt is made to cancel the job
       // even though it may no longer have any requests attached to it. Because
@@ -153,7 +159,7 @@ class CertVerifierRequest : public base::LinkNode<CertVerifierRequest>,
     DCHECK(job_);
     job_ = nullptr;
 
-    net_log_.EndEvent(NetLog::TYPE_CERT_VERIFIER_REQUEST);
+    net_log_.EndEvent(NetLogEventType::CERT_VERIFIER_REQUEST);
     *verify_result_ = verify_result.result;
 
     base::ResetAndReturn(&callback_).Run(verify_result.error);
@@ -164,13 +170,13 @@ class CertVerifierRequest : public base::LinkNode<CertVerifierRequest>,
     callback_.Reset();
   }
 
-  const BoundNetLog& net_log() const { return net_log_; }
+  const NetLogWithSource& net_log() const { return net_log_; }
 
  private:
   CertVerifierJob* job_;  // Not owned.
   CompletionCallback callback_;
   CertVerifyResult* verify_result_;
-  const BoundNetLog net_log_;
+  const NetLogWithSource net_log_;
 };
 
 // DoVerifyOnWorkerThread runs the verification synchronously on a worker
@@ -184,7 +190,7 @@ void DoVerifyOnWorkerThread(const scoped_refptr<CertVerifyProc>& verify_proc,
                             const CertificateList& additional_trust_anchors,
                             int* error,
                             CertVerifyResult* result) {
-  TRACE_EVENT0("net", "DoVerifyOnWorkerThread");
+  TRACE_EVENT0(kNetTracingCategory, "DoVerifyOnWorkerThread");
   *error = verify_proc->Verify(cert.get(), hostname, ocsp_response, flags,
                                crl_set.get(), additional_trust_anchors, result);
 
@@ -208,11 +214,12 @@ class CertVerifierJob {
                   MultiThreadedCertVerifier* cert_verifier)
       : key_(key),
         start_time_(base::TimeTicks::Now()),
-        net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_CERT_VERIFIER_JOB)),
+        net_log_(NetLogWithSource::Make(net_log,
+                                        NetLogSourceType::CERT_VERIFIER_JOB)),
         cert_verifier_(cert_verifier),
         is_first_job_(false),
         weak_ptr_factory_(this) {
-    net_log_.BeginEvent(NetLog::TYPE_CERT_VERIFIER_JOB,
+    net_log_.BeginEvent(NetLogEventType::CERT_VERIFIER_JOB,
                         base::Bind(&NetLogX509CertificateCallback,
                                    base::Unretained(key.certificate().get())));
   }
@@ -251,8 +258,8 @@ class CertVerifierJob {
     if (cert_verifier_) {
       cert_verifier_ = nullptr;
 
-      net_log_.AddEvent(NetLog::TYPE_CANCELLED);
-      net_log_.EndEvent(NetLog::TYPE_CERT_VERIFIER_JOB);
+      net_log_.AddEvent(NetLogEventType::CANCELLED);
+      net_log_.EndEvent(NetLogEventType::CERT_VERIFIER_JOB);
 
       // Notify each request of the cancellation.
       for (base::LinkNode<CertVerifierRequest>* it = requests_.head();
@@ -266,12 +273,12 @@ class CertVerifierJob {
   std::unique_ptr<CertVerifierRequest> CreateRequest(
       const CompletionCallback& callback,
       CertVerifyResult* verify_result,
-      const BoundNetLog& net_log) {
+      const NetLogWithSource& net_log) {
     std::unique_ptr<CertVerifierRequest> request(
         new CertVerifierRequest(this, callback, verify_result, net_log));
 
     request->net_log().AddEvent(
-        NetLog::TYPE_CERT_VERIFIER_REQUEST_BOUND_TO_JOB,
+        NetLogEventType::CERT_VERIFIER_REQUEST_BOUND_TO_JOB,
         net_log_.source().ToEventParametersCallback());
 
     requests_.Append(request.get());
@@ -284,7 +291,7 @@ class CertVerifierJob {
   // Called on completion of the Job to log UMA metrics and NetLog events.
   void LogMetrics(const ResultHelper& verify_result) {
     net_log_.EndEvent(
-        NetLog::TYPE_CERT_VERIFIER_JOB,
+        NetLogEventType::CERT_VERIFIER_JOB,
         base::Bind(&CertVerifyResultCallback, verify_result.result));
     base::TimeDelta latency = base::TimeTicks::Now() - start_time_;
     UMA_HISTOGRAM_CUSTOM_TIMES("Net.CertVerifier_Job_Latency",
@@ -302,7 +309,7 @@ class CertVerifierJob {
   }
 
   void OnJobCompleted(std::unique_ptr<ResultHelper> verify_result) {
-    TRACE_EVENT0("net", "CertVerifierJob::OnJobCompleted");
+    TRACE_EVENT0(kNetTracingCategory, "CertVerifierJob::OnJobCompleted");
     std::unique_ptr<CertVerifierJob> keep_alive =
         cert_verifier_->RemoveJob(this);
 
@@ -326,7 +333,7 @@ class CertVerifierJob {
 
   RequestList requests_;  // Non-owned.
 
-  const BoundNetLog net_log_;
+  const NetLogWithSource net_log_;
   MultiThreadedCertVerifier* cert_verifier_;  // Non-owned.
 
   bool is_first_job_;
@@ -338,7 +345,6 @@ MultiThreadedCertVerifier::MultiThreadedCertVerifier(
     : requests_(0), inflight_joins_(0), verify_proc_(verify_proc) {}
 
 MultiThreadedCertVerifier::~MultiThreadedCertVerifier() {
-  base::STLDeleteElements(&inflight_);
 }
 
 int MultiThreadedCertVerifier::Verify(const RequestParams& params,
@@ -346,7 +352,7 @@ int MultiThreadedCertVerifier::Verify(const RequestParams& params,
                                       CertVerifyResult* verify_result,
                                       const CompletionCallback& callback,
                                       std::unique_ptr<Request>* out_req,
-                                      const BoundNetLog& net_log) {
+                                      const NetLogWithSource& net_log) {
   out_req->reset();
 
   DCHECK(CalledOnValidThread());
@@ -364,8 +370,8 @@ int MultiThreadedCertVerifier::Verify(const RequestParams& params,
     inflight_joins_++;
   } else {
     // Need to make a new job.
-    std::unique_ptr<CertVerifierJob> new_job(
-        new CertVerifierJob(params, net_log.net_log(), this));
+    std::unique_ptr<CertVerifierJob> new_job =
+        base::MakeUnique<CertVerifierJob>(params, net_log.net_log(), this);
 
     if (!new_job->Start(verify_proc_, crl_set)) {
       // TODO(wtc): log to the NetLog.
@@ -373,8 +379,8 @@ int MultiThreadedCertVerifier::Verify(const RequestParams& params,
       return ERR_INSUFFICIENT_RESOURCES;  // Just a guess.
     }
 
-    job = new_job.release();
-    inflight_.insert(job);
+    job = new_job.get();
+    inflight_[job] = std::move(new_job);
 
     if (requests_ == 1)
       job->set_is_first_job(true);
@@ -399,15 +405,18 @@ bool MultiThreadedCertVerifier::JobComparator::operator()(
 std::unique_ptr<CertVerifierJob> MultiThreadedCertVerifier::RemoveJob(
     CertVerifierJob* job) {
   DCHECK(CalledOnValidThread());
-  bool erased_job = inflight_.erase(job) == 1;
-  DCHECK(erased_job);
-  return base::WrapUnique(job);
+  auto it = inflight_.find(job);
+  DCHECK(it != inflight_.end());
+  std::unique_ptr<CertVerifierJob> job_ptr = std::move(it->second);
+  inflight_.erase(it);
+  return job_ptr;
 }
 
 struct MultiThreadedCertVerifier::JobToRequestParamsComparator {
-  bool operator()(const CertVerifierJob* job,
+  bool operator()(const std::pair<CertVerifierJob* const,
+                                  std::unique_ptr<CertVerifierJob>>& item,
                   const CertVerifier::RequestParams& value) const {
-    return job->key() < value;
+    return item.first->key() < value;
   }
 };
 
@@ -418,8 +427,8 @@ CertVerifierJob* MultiThreadedCertVerifier::FindJob(const RequestParams& key) {
   // search.
   auto it = std::lower_bound(inflight_.begin(), inflight_.end(), key,
                              JobToRequestParamsComparator());
-  if (it != inflight_.end() && !(key < (*it)->key()))
-    return *it;
+  if (it != inflight_.end() && !(key < it->first->key()))
+    return it->first;
   return nullptr;
 }
 

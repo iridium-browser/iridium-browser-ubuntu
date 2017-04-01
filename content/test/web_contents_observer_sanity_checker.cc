@@ -201,9 +201,6 @@ void WebContentsObserverSanityChecker::DidFinishNavigation(
   CHECK(!(navigation_handle->HasCommitted() &&
           !navigation_handle->IsErrorPage()) ||
         navigation_handle->GetNetErrorCode() == net::OK);
-  CHECK(!(navigation_handle->HasCommitted() &&
-          navigation_handle->IsErrorPage()) ||
-        navigation_handle->GetNetErrorCode() != net::OK);
   CHECK_EQ(navigation_handle->GetWebContents(), web_contents());
 
   CHECK(!navigation_handle->HasCommitted() ||
@@ -215,8 +212,7 @@ void WebContentsObserverSanityChecker::DidFinishNavigation(
 void WebContentsObserverSanityChecker::DidStartProvisionalLoadForFrame(
     RenderFrameHost* render_frame_host,
     const GURL& validated_url,
-    bool is_error_page,
-    bool is_iframe_srcdoc) {
+    bool is_error_page) {
   AssertRenderFrameExists(render_frame_host);
 }
 
@@ -277,12 +273,6 @@ void WebContentsObserverSanityChecker::DidFailLoad(
   AssertRenderFrameExists(render_frame_host);
 }
 
-void WebContentsObserverSanityChecker::DidGetRedirectForResourceRequest(
-    RenderFrameHost* render_frame_host,
-    const ResourceRedirectDetails& details) {
-  AssertRenderFrameExists(render_frame_host);
-}
-
 void WebContentsObserverSanityChecker::DidOpenRequestedURL(
     WebContents* new_contents,
     RenderFrameHost* source_render_frame_host,
@@ -294,6 +284,7 @@ void WebContentsObserverSanityChecker::DidOpenRequestedURL(
 }
 
 void WebContentsObserverSanityChecker::MediaStartedPlaying(
+    const MediaPlayerInfo& media_info,
     const MediaPlayerId& id) {
   CHECK(!web_contents_destroyed_);
   CHECK(std::find(active_media_players_.begin(), active_media_players_.end(),
@@ -302,6 +293,7 @@ void WebContentsObserverSanityChecker::MediaStartedPlaying(
 }
 
 void WebContentsObserverSanityChecker::MediaStoppedPlaying(
+    const MediaPlayerInfo& media_info,
     const MediaPlayerId& id) {
   CHECK(!web_contents_destroyed_);
   CHECK(std::find(active_media_players_.begin(), active_media_players_.end(),

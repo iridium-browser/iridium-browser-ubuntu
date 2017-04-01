@@ -43,19 +43,6 @@ static const struct {
 };
 }  // namespace
 
-#ifdef SK_SUPPORT_LEGACY_DOCUMENT_API
-void SkPDFMetadata::SetMetadataByKey(const SkString& key,
-                                     const SkString& value,
-                                     SkDocument::PDFMetadata* metadata) {
-    for (const auto keyValuePtr : gMetadataKeys) {
-        if (key.equals(keyValuePtr.key)) {
-            metadata->*(keyValuePtr.valuePtr) = value;
-        }
-    }
-}
-
-#endif
-
 sk_sp<SkPDFObject> SkPDFMetadata::MakeDocumentInformationDict(
         const SkDocument::PDFMetadata& metadata) {
     auto dict = sk_make_sp<SkPDFDict>();
@@ -177,7 +164,7 @@ public:
         stream->write(streamBegin, strlen(streamBegin));
         // Do not compress this.  The standard requires that a
         // program that does not understand PDF can grep for
-        // "<?xpacket" and extracť the entire XML.
+        // "<?xpacket" and extract the entire XML.
         stream->write(fXML.c_str(), fXML.size());
         static const char streamEnd[] = "\nendstream";
         stream->write(streamEnd, strlen(streamEnd));

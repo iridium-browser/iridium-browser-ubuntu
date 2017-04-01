@@ -21,6 +21,7 @@ class SkImageFilterCache;
 struct SkIRect;
 class SkMatrix;
 class SkMetaData;
+class SkRasterHandleAllocator;
 class SkRegion;
 class SkSpecialImage;
 class GrRenderTarget;
@@ -112,6 +113,8 @@ public:
      */
     const SkIPoint& getOrigin() const { return fOrigin; }
 
+    virtual void* getRasterHandle() const { return nullptr; }
+
 protected:
     enum TileUsage {
         kPossible_TileUsage,    //!< the created device may be drawn tiled
@@ -130,25 +133,6 @@ protected:
 
     virtual bool onShouldDisableLCD(const SkPaint&) const { return false; }
 
-    /**
-     *
-     *  DEPRECATED: This will be removed in a future change. Device subclasses
-     *  should use the matrix and clip from the SkDraw passed to draw functions.
-     *
-     *  Called with the correct matrix and clip before this device is drawn
-     *  to using those settings. If your subclass overrides this, be sure to
-     *  call through to the base class as well.
-     *
-     *  The clipstack is another view of the clip. It records the actual
-     *  geometry that went into building the region. It is present for devices
-     *  that want to parse it, but is not required: the region is a complete
-     *  picture of the current clip. (i.e. if you regionize all of the geometry
-     *  in the clipstack, you will arrive at an equivalent region to the one
-     *  passed in).
-     */
-     virtual void setMatrixClip(const SkMatrix&, const SkRegion&,
-                                const SkClipStack&) {};
-
     /** These are called inside the per-device-layer loop for each draw call.
      When these are called, we have already applied any saveLayer operations,
      and are handling any looping from the paint, and any effects from the
@@ -159,6 +143,8 @@ protected:
                             const SkPoint[], const SkPaint& paint) = 0;
     virtual void drawRect(const SkDraw&, const SkRect& r,
                           const SkPaint& paint) = 0;
+    virtual void drawRegion(const SkDraw&, const SkRegion& r,
+                            const SkPaint& paint);
     virtual void drawOval(const SkDraw&, const SkRect& oval,
                           const SkPaint& paint) = 0;
     /** By the time this is called we know that abs(sweepAngle) is in the range [0, 360). */
@@ -223,7 +209,7 @@ protected:
                              const SkPoint& offset, const SkPaint& paint) = 0;
     virtual void drawVertices(const SkDraw&, SkCanvas::VertexMode, int vertexCount,
                               const SkPoint verts[], const SkPoint texs[],
-                              const SkColor colors[], SkXfermode* xmode,
+                              const SkColor colors[], SkBlendMode,
                               const uint16_t indices[], int indexCount,
                               const SkPaint& paint) = 0;
     // default implementation unrolls the blob runs.
@@ -231,11 +217,11 @@ protected:
                               const SkPaint& paint, SkDrawFilter* drawFilter);
     // default implementation calls drawVertices
     virtual void drawPatch(const SkDraw&, const SkPoint cubics[12], const SkColor colors[4],
-                           const SkPoint texCoords[4], SkXfermode* xmode, const SkPaint& paint);
+                           const SkPoint texCoords[4], SkBlendMode, const SkPaint& paint);
 
     // default implementation calls drawPath
     virtual void drawAtlas(const SkDraw&, const SkImage* atlas, const SkRSXform[], const SkRect[],
-                           const SkColor[], int count, SkXfermode::Mode, const SkPaint&);
+                           const SkColor[], int count, SkBlendMode, const SkPaint&);
 
     virtual void drawAnnotation(const SkDraw&, const SkRect&, const char[], SkData*) {}
 
@@ -272,7 +258,6 @@ protected:
 
     virtual GrContext* context() const { return nullptr; }
 
-protected:
     virtual sk_sp<SkSurface> makeSurface(const SkImageInfo&, const SkSurfaceProps&);
     virtual bool onPeekPixels(SkPixmap*) { return false; }
 
@@ -310,15 +295,18 @@ protected:
         CreateInfo(const SkImageInfo& info,
                    TileUsage tileUsage,
                    SkPixelGeometry geo,
-                   bool preserveLCDText)
+                   bool preserveLCDText,
+                   SkRasterHandleAllocator* allocator)
             : fInfo(info)
             , fTileUsage(tileUsage)
             , fPixelGeometry(AdjustGeometry(info, tileUsage, geo, preserveLCDText))
+            , fAllocator(allocator)
         {}
 
         const SkImageInfo       fInfo;
         const TileUsage         fTileUsage;
         const SkPixelGeometry   fPixelGeometry;
+        SkRasterHandleAllocator* fAllocator = nullptr;
     };
 
     /**
@@ -360,7 +348,7 @@ private:
     /**
      * Don't call this!
      */
-    virtual GrDrawContext* accessDrawContext() { return nullptr; }
+    virtual GrRenderTargetContext* accessRenderTargetContext() { return nullptr; }
 
     // just called by SkCanvas when built as a layer
     void setOrigin(int x, int y) { fOrigin.set(x, y); }
@@ -375,6 +363,10 @@ private:
     void privateResize(int w, int h) {
         *const_cast<SkImageInfo*>(&fInfo) = fInfo.makeWH(w, h);
     }
+
+    bool drawExternallyScaledImage(const SkDraw& draw, const SkImage* image, const SkRect* src,
+                                   const SkRect& dst, const SkPaint& paint,
+                                   SkCanvas::SrcRectConstraint constraint);
 
     SkIPoint    fOrigin;
     SkMetaData* fMetaData;

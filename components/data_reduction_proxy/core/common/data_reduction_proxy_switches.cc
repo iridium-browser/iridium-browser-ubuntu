@@ -7,10 +7,6 @@
 namespace data_reduction_proxy {
 namespace switches {
 
-// Clear data savings on Chrome startup.
-const char kClearDataReductionProxyDataSavings[] =
-    "clear-data-reduction-proxy-data-savings";
-
 // The origin of the data reduction proxy.
 const char kDataReductionProxy[]         = "spdy-proxy-auth-origin";
 
@@ -59,11 +55,6 @@ const char kDataReductionProxySecureProxyCheckURL[] =
 const char kDataReductionProxyServerExperimentsDisabled[] =
     "data-reduction-proxy-server-experiments-disabled";
 
-// Starts the secure Data Reduction Proxy in the disabled state until the secure
-// proxy check succeeds.
-const char kDataReductionProxyStartSecureDisabled[] =
-    "data-reduction-proxy-secure-proxy-disabled";
-
 // Sets a URL to fetch to warm up the data reduction proxy on startup and
 // network changes.
 const char kDataReductionProxyWarmupURL[] = "data-reduction-proxy-warmup-url";
@@ -79,15 +70,23 @@ const char kEnableDataReductionProxyBypassWarning[] =
 const char kEnableDataReductionProxyCarrierTest[] =
     "enable-data-reduction-proxy-carrier-test";
 
-// Enables preview mode for Lo-Fi. This means a preview should be requested
-// instead of placeholders whenever Lo-Fi mode is on. Lo-Fi must also be enabled
-// via a flag or field trial.
-const char kEnableDataReductionProxyLoFiPreview[] =
-    "enable-data-reduction-proxy-lo-fi-preview";
+// Enables lite page from the data reduction proxy. This means a lite page
+// should be requested instead of placeholders whenever Lo-Fi mode is on. Lo-fi
+// must also be enabled via a flag or field trial.
+const char kEnableDataReductionProxyLitePage[] =
+    "enable-data-reduction-proxy-lite-page";
 
 // Enables sending a pageload metrics pingback after every page load.
 const char kEnableDataReductionProxyForcePingback[] =
     "enable-data-reduction-proxy-force-pingback";
+
+// If set, enables use of QUIC with non core data reduction proxies.
+const char kDataReductionProxyEnableQuicOnNonCoreProxies[] =
+    "data-reduction-proxy-enable-quic-on-non-core-proxies";
+
+// Enables a 1 MB savings promo for the data reduction proxy.
+const char kEnableDataReductionProxySavingsPromo[] =
+    "enable-data-reduction-proxy-savings-promo";
 
 }  // namespace switches
 }  // namespace data_reduction_proxy

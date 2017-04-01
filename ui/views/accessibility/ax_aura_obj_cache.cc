@@ -4,8 +4,10 @@
 
 #include "ui/views/accessibility/ax_aura_obj_cache.h"
 
+#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
-#include "base/stl_util.h"
+#include "base/strings/string_util.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/window.h"
 #include "ui/views/accessibility/ax_aura_obj_wrapper.h"
@@ -74,17 +76,21 @@ void AXAuraObjCache::Remove(Widget* widget) {
     RemoveViewSubtree(widget->GetRootView());
 }
 
-void AXAuraObjCache::Remove(aura::Window* window) {
+void AXAuraObjCache::Remove(aura::Window* window, aura::Window* parent) {
+  int id = GetIDInternal(parent, window_to_id_map_);
+  AXAuraObjWrapper* parent_window_obj = Get(id);
   RemoveInternal(window, window_to_id_map_);
+  if (parent && delegate_)
+    delegate_->OnChildWindowRemoved(parent_window_obj);
 }
 
 AXAuraObjWrapper* AXAuraObjCache::Get(int32_t id) {
-  std::map<int32_t, AXAuraObjWrapper*>::iterator it = cache_.find(id);
+  auto it = cache_.find(id);
 
   if (it == cache_.end())
-    return NULL;
+    return nullptr;
 
-  return it->second;
+  return it->second.get();
 }
 
 void AXAuraObjCache::Remove(int32_t id) {
@@ -94,14 +100,12 @@ void AXAuraObjCache::Remove(int32_t id) {
     return;
 
   cache_.erase(id);
-  delete obj;
 }
 
 void AXAuraObjCache::GetTopLevelWindows(
     std::vector<AXAuraObjWrapper*>* children) {
-  for (std::map<aura::Window*, int32_t>::iterator it =
-           window_to_id_map_.begin();
-       it != window_to_id_map_.end(); ++it) {
+  for (auto it = window_to_id_map_.begin(); it != window_to_id_map_.end();
+       ++it) {
     if (!it->first->parent())
       children->push_back(GetOrCreate(it->first));
   }
@@ -114,15 +118,20 @@ AXAuraObjWrapper* AXAuraObjCache::GetFocus() {
   return nullptr;
 }
 
+void AXAuraObjCache::OnFocusedViewChanged() {
+  View* view = GetFocusedView();
+  if (view)
+    view->NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
+}
+
 AXAuraObjCache::AXAuraObjCache()
     : current_id_(1),
       focus_client_(nullptr),
-      is_destroying_(false) {
-}
+      is_destroying_(false),
+      delegate_(nullptr) {}
 
 AXAuraObjCache::~AXAuraObjCache() {
   is_destroying_ = true;
-  base::STLDeleteContainerPairSecondPointers(cache_.begin(), cache_.end());
   cache_.clear();
 }
 
@@ -150,14 +159,22 @@ View* AXAuraObjCache::GetFocusedView() {
   if (!focus_manager)
     return nullptr;
 
-  return focus_manager->GetFocusedView();
+  View* focused_view = focus_manager->GetFocusedView();
+  if (focused_view)
+    return focused_view;
+
+  if (focused_window->GetProperty(
+          aura::client::kAccessibilityFocusFallsbackToWidgetKey)) {
+    // If no view is focused, falls back to root view.
+    return focused_widget->GetRootView();
+  }
+
+  return nullptr;
 }
 
 void AXAuraObjCache::OnWindowFocused(aura::Window* gained_focus,
                                      aura::Window* lost_focus) {
-  View* view = GetFocusedView();
-  if (view)
-    view->NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
+  OnFocusedViewChanged();
 }
 
 void AXAuraObjCache::OnWindowDestroying(aura::Window* window) {
@@ -169,17 +186,16 @@ AXAuraObjWrapper* AXAuraObjCache::CreateInternal(
     AuraView* aura_view,
     std::map<AuraView*, int32_t>& aura_view_to_id_map) {
   if (!aura_view)
-    return NULL;
+    return nullptr;
 
-  typename std::map<AuraView*, int32_t>::iterator it =
-      aura_view_to_id_map.find(aura_view);
+  auto it = aura_view_to_id_map.find(aura_view);
 
   if (it != aura_view_to_id_map.end())
     return Get(it->second);
 
   AXAuraObjWrapper* wrapper = new AuraViewWrapper(aura_view);
   aura_view_to_id_map[aura_view] = current_id_;
-  cache_[current_id_] = wrapper;
+  cache_[current_id_] = base::WrapUnique(wrapper);
   current_id_++;
   return wrapper;
 }

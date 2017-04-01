@@ -33,19 +33,17 @@
 #include "ui/gfx/native_widget_types.h"
 
 namespace base {
-class RunLoop;
 class SingleThreadTaskRunner;
 }
 
 namespace cc {
+class AnimationHost;
 class AnimationTimeline;
 class ContextProvider;
 class Layer;
 class LayerTreeDebugState;
 class LayerTreeHost;
 class RendererSettings;
-class SharedBitmapManager;
-class SurfaceIdAllocator;
 class SurfaceManager;
 class TaskGraphRunner;
 }
@@ -58,7 +56,6 @@ class Size;
 
 namespace gpu {
 class GpuMemoryBufferManager;
-struct Mailbox;
 }
 
 namespace ui {
@@ -68,7 +65,7 @@ class CompositorVSyncManager;
 class LatencyInfo;
 class Layer;
 class Reflector;
-class Texture;
+class ScopedAnimationDurationScaleMode;
 
 #if defined(USE_AURA)
 class Window;
@@ -90,59 +87,27 @@ class COMPOSITOR_EXPORT ContextFactoryObserver {
   virtual void OnLostResources() = 0;
 };
 
-// This class abstracts the creation of the 3D context for the compositor. It is
-// a global object.
-class COMPOSITOR_EXPORT ContextFactory {
+// This is privileged interface to the compositor. It is a global object.
+class COMPOSITOR_EXPORT ContextFactoryPrivate {
  public:
-  virtual ~ContextFactory() {}
-
-  // Creates an output surface for the given compositor. The factory may keep
-  // per-compositor data (e.g. a shared context), that needs to be cleaned up
-  // by calling RemoveCompositor when the compositor gets destroyed.
-  virtual void CreateOutputSurface(base::WeakPtr<Compositor> compositor) = 0;
-
   // Creates a reflector that copies the content of the |mirrored_compositor|
   // onto |mirroring_layer|.
   virtual std::unique_ptr<Reflector> CreateReflector(
       Compositor* mirrored_compositor,
       Layer* mirroring_layer) = 0;
+
   // Removes the reflector, which stops the mirroring.
   virtual void RemoveReflector(Reflector* reflector) = 0;
 
-  // Return a reference to a shared offscreen context provider usable from the
-  // main thread.
-  virtual scoped_refptr<cc::ContextProvider>
-      SharedMainThreadContextProvider() = 0;
-
-  // Destroys per-compositor data.
-  virtual void RemoveCompositor(Compositor* compositor) = 0;
-
-  // When true, the factory uses test contexts that do not do real GL
-  // operations.
-  virtual bool DoesCreateTestContexts() = 0;
-
-  // Returns the OpenGL target to use for image textures.
-  virtual uint32_t GetImageTextureTarget(gfx::BufferFormat format,
-                                         gfx::BufferUsage usage) = 0;
-
-  // Gets the shared bitmap manager for software mode.
-  virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
-
-  // Gets the GPU memory buffer manager.
-  virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
-
-  // Gets the task graph runner.
-  virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
-
   // Allocate a new client ID for the display compositor.
-  virtual uint32_t AllocateSurfaceClientId() = 0;
+  virtual cc::FrameSinkId AllocateFrameSinkId() = 0;
 
   // Gets the surface manager.
   virtual cc::SurfaceManager* GetSurfaceManager() = 0;
 
   // Inform the display corresponding to this compositor if it is visible. When
   // false it does not need to produce any frames. Visibility is reset for each
-  // call to CreateOutputSurface.
+  // call to CreateCompositorFrameSink.
   virtual void SetDisplayVisible(ui::Compositor* compositor, bool visible) = 0;
 
   // Resize the display corresponding to this compositor to a particular size.
@@ -156,12 +121,47 @@ class COMPOSITOR_EXPORT ContextFactory {
   virtual void SetAuthoritativeVSyncInterval(ui::Compositor* compositor,
                                              base::TimeDelta interval) = 0;
   // Mac path for transporting vsync parameters to the display.  Other platforms
-  // update it via the BrowserCompositorOutputSurface directly.
+  // update it via the BrowserCompositorCompositorFrameSink directly.
   virtual void SetDisplayVSyncParameters(ui::Compositor* compositor,
                                          base::TimeTicks timebase,
                                          base::TimeDelta interval) = 0;
 
   virtual void SetOutputIsSecure(Compositor* compositor, bool secure) = 0;
+};
+
+// This class abstracts the creation of the 3D context for the compositor. It is
+// a global object.
+class COMPOSITOR_EXPORT ContextFactory {
+ public:
+  virtual ~ContextFactory() {}
+
+  // Creates an output surface for the given compositor. The factory may keep
+  // per-compositor data (e.g. a shared context), that needs to be cleaned up
+  // by calling RemoveCompositor when the compositor gets destroyed.
+  virtual void CreateCompositorFrameSink(
+      base::WeakPtr<Compositor> compositor) = 0;
+
+  // Return a reference to a shared offscreen context provider usable from the
+  // main thread.
+  virtual scoped_refptr<cc::ContextProvider>
+  SharedMainThreadContextProvider() = 0;
+
+  // Destroys per-compositor data.
+  virtual void RemoveCompositor(Compositor* compositor) = 0;
+
+  // When true, the factory uses test contexts that do not do real GL
+  // operations.
+  virtual bool DoesCreateTestContexts() = 0;
+
+  // Returns the OpenGL target to use for image textures.
+  virtual uint32_t GetImageTextureTarget(gfx::BufferFormat format,
+                                         gfx::BufferUsage usage) = 0;
+
+  // Gets the GPU memory buffer manager.
+  virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
+
+  // Gets the task graph runner.
+  virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
 
   virtual void AddObserver(ContextFactoryObserver* observer) = 0;
 
@@ -203,19 +203,22 @@ class COMPOSITOR_EXPORT Compositor
     : NON_EXPORTED_BASE(public cc::LayerTreeHostClient),
       NON_EXPORTED_BASE(public cc::LayerTreeHostSingleThreadClient) {
  public:
-  Compositor(ui::ContextFactory* context_factory,
+  Compositor(const cc::FrameSinkId& frame_sink_id,
+             ui::ContextFactory* context_factory,
+             ui::ContextFactoryPrivate* context_factory_private,
              scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   ~Compositor() override;
 
   ui::ContextFactory* context_factory() { return context_factory_; }
 
-  void AddSurfaceClient(uint32_t client_id);
-  void RemoveSurfaceClient(uint32_t client_id);
-  const std::unordered_map<uint32_t, uint32_t>& SurfaceClientsForTesting() {
-    return surface_clients_;
+  ui::ContextFactoryPrivate* context_factory_private() {
+    return context_factory_private_;
   }
 
-  void SetOutputSurface(std::unique_ptr<cc::OutputSurface> surface);
+  void AddFrameSink(const cc::FrameSinkId& frame_sink_id);
+  void RemoveFrameSink(const cc::FrameSinkId& frame_sink_id);
+
+  void SetCompositorFrameSink(std::unique_ptr<cc::CompositorFrameSink> surface);
 
   // Schedules a redraw of the layer tree associated with this compositor.
   void ScheduleDraw();
@@ -287,7 +290,8 @@ class COMPOSITOR_EXPORT Compositor
   // context.
   void SetAuthoritativeVSyncInterval(const base::TimeDelta& interval);
 
-  // Most platforms set their vsync info via BrowerCompositorOutputSurface's
+  // Most platforms set their vsync info via
+  // BrowerCompositorCompositorFrameSink's
   // OnUpdateVSyncParametersFromGpu, but Mac routes vsync info via the
   // browser compositor instead through this path.
   void SetDisplayVSyncParameters(base::TimeTicks timebase,
@@ -360,18 +364,18 @@ class COMPOSITOR_EXPORT Compositor
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
-  void RequestNewOutputSurface() override;
-  void DidInitializeOutputSurface() override;
-  void DidFailToInitializeOutputSurface() override;
+  void RequestNewCompositorFrameSink() override;
+  void DidInitializeCompositorFrameSink() override {}
+  void DidFailToInitializeCompositorFrameSink() override;
   void WillCommit() override {}
   void DidCommit() override;
-  void DidCommitAndDrawFrame() override;
-  void DidCompleteSwapBuffers() override;
+  void DidCommitAndDrawFrame() override {}
+  void DidReceiveCompositorFrameAck() override;
   void DidCompletePageScaleAnimation() override {}
 
   // cc::LayerTreeHostSingleThreadClient implementation.
-  void DidPostSwapBuffers() override;
-  void DidAbortSwapBuffers() override;
+  void DidSubmitCompositorFrame() override;
+  void DidLoseCompositorFrameSink() override {}
 
   bool IsLocked() { return compositor_lock_ != NULL; }
 
@@ -385,9 +389,7 @@ class COMPOSITOR_EXPORT Compositor
     return &layer_animator_collection_;
   }
 
-  cc::SurfaceIdAllocator* surface_id_allocator() {
-    return surface_id_allocator_.get();
-  }
+  const cc::FrameSinkId& frame_sink_id() const { return frame_sink_id_; }
 
  private:
   friend class base::RefCounted<Compositor>;
@@ -402,6 +404,7 @@ class COMPOSITOR_EXPORT Compositor
   gfx::Size size_;
 
   ui::ContextFactory* context_factory_;
+  ui::ContextFactoryPrivate* context_factory_private_;
 
   // The root of the Layer tree drawn by this compositor.
   Layer* root_layer_;
@@ -413,11 +416,13 @@ class COMPOSITOR_EXPORT Compositor
 #if defined(USE_AURA)
   ui::Window* window_;
 #endif
-  std::unordered_map<uint32_t, uint32_t> surface_clients_;
+  // A map from child id to parent id.
+  std::unordered_set<cc::FrameSinkId, cc::FrameSinkIdHash> child_frame_sinks_;
   bool widget_valid_;
-  bool output_surface_requested_;
-  std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
+  bool compositor_frame_sink_requested_;
+  const cc::FrameSinkId frame_sink_id_;
   scoped_refptr<cc::Layer> root_web_layer_;
+  std::unique_ptr<cc::AnimationHost> animation_host_;
   std::unique_ptr<cc::LayerTreeHost> host_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
@@ -433,6 +438,9 @@ class COMPOSITOR_EXPORT Compositor
 
   LayerAnimatorCollection layer_animator_collection_;
   scoped_refptr<cc::AnimationTimeline> animation_timeline_;
+  std::unique_ptr<ScopedAnimationDurationScaleMode> slow_animations_;
+
+  gfx::ColorSpace color_space_;
 
   base::WeakPtrFactory<Compositor> weak_ptr_factory_;
 

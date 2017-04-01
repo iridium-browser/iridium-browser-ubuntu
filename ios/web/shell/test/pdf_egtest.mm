@@ -4,14 +4,14 @@
 
 #import <EarlGrey/EarlGrey.h>
 
-#include "base/test/ios/wait_util.h"
-#include "ios/testing/earl_grey/wait_util.h"
+#import "base/test/ios/wait_util.h"
+#import "ios/testing/wait_util.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #import "ios/web/public/test/http_server.h"
 #include "ios/web/public/test/http_server_util.h"
-#include "ios/web/shell/test/app/navigation_test_util.h"
 #import "ios/web/shell/test/app/web_shell_test_util.h"
 #import "ios/web/shell/test/earl_grey/shell_base_test_case.h"
+#import "ios/web/shell/test/earl_grey/shell_earl_grey.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -26,18 +26,10 @@ const char kTestPDFURL[] =
 id<GREYMatcher> webViewWithPdf() {
   web::WebState* web_state = web::shell_test_util::GetCurrentWebState();
   MatchesBlock matches = ^BOOL(UIView* view) {
-    __block BOOL did_succeed = NO;
-    NSDate* deadline =
-        [NSDate dateWithTimeIntervalSinceNow:testing::kWaitForUIElementTimeout];
-    while ([[NSDate date] compare:deadline] != NSOrderedDescending) {
-      if (web_state->GetContentsMimeType() == "application/pdf") {
-        did_succeed = YES;
-        break;
-      }
-      base::test::ios::SpinRunLoopWithMaxDelay(
-          base::TimeDelta::FromSecondsD(testing::kSpinDelaySeconds));
-    }
-    return did_succeed;
+    return testing::WaitUntilConditionOrTimeout(
+        testing::kWaitForUIElementTimeout, ^{
+          return web_state->GetContentsMimeType() == "application/pdf";
+        });
   };
 
   DescribeToBlock describe = ^(id<GREYDescription> description) {
@@ -53,7 +45,6 @@ id<GREYMatcher> webViewWithPdf() {
 
 }  // namespace
 
-using web::shell_test_util::LoadUrl;
 using web::test::HttpServer;
 
 // PDF test cases for the web shell.
@@ -65,7 +56,7 @@ using web::test::HttpServer;
 // Tests MIME type of the loaded PDF document.
 - (void)testMIMEType {
   web::test::SetUpFileBasedHttpServer();
-  LoadUrl(HttpServer::MakeUrl(kTestPDFURL));
+  [ShellEarlGrey loadURL:HttpServer::MakeUrl(kTestPDFURL)];
   [[EarlGrey selectElementWithMatcher:webViewWithPdf()]
       assertWithMatcher:grey_notNil()];
 }

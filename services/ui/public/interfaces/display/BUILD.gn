@@ -7,13 +7,13 @@ import("//mojo/public/tools/bindings/mojom.gni")
 mojom("display") {
   sources = [
     "display.mojom",
+    "display_controller.mojom",
+    "test_display_controller.mojom",
   ]
 
   public_deps = [
     "//ui/gfx/geometry/mojo",
   ]
-
-  use_new_wrapper_types = false
 }
 
 mojom("test_interfaces") {
@@ -24,6 +24,4 @@ mojom("test_interfaces") {
   public_deps = [
     ":display",
   ]
-
-  use_new_wrapper_types = false
 }

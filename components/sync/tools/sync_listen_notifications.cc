@@ -25,8 +25,8 @@
 #include "components/invalidation/public/invalidation_handler.h"
 #include "components/invalidation/public/invalidation_util.h"
 #include "components/invalidation/public/object_id_invalidation_map.h"
+#include "components/sync/base/invalidation_helper.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/driver/invalidation_helper.h"
 #include "components/sync/tools/null_invalidation_state_tracker.h"
 #include "jingle/notifier/base/notification_method.h"
 #include "jingle/notifier/base/notifier_options.h"
@@ -82,7 +82,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
  public:
   MyTestURLRequestContext() : TestURLRequestContext(true) {
     context_storage_.set_host_resolver(
-        net::HostResolver::CreateDefaultResolver(NULL));
+        net::HostResolver::CreateDefaultResolver(nullptr));
     context_storage_.set_transport_security_state(
         base::MakeUnique<net::TransportSecurityState>());
     Init();
@@ -101,7 +101,7 @@ class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
     // Construct |context_| lazily so it gets constructed on the right
     // thread (the IO thread).
     if (!context_)
-      context_.reset(new MyTestURLRequestContext());
+      context_ = base::MakeUnique<MyTestURLRequestContext>();
     return context_.get();
   }
 
@@ -165,7 +165,7 @@ int SyncListenNotificationsMain(int argc, char* argv[]) {
         "Usage: %s --%s=foo@bar.com --%s=token\n"
         "[--%s=host:port] [--%s] [--%s]\n"
         "Run chrome and set a breakpoint on\n"
-        "syncer::SyncManagerImpl::UpdateCredentials() "
+        "SyncManagerImpl::UpdateCredentials() "
         "after logging into\n"
         "sync to get the token to pass into this utility.\n",
         argv[0], kEmailSwitch, kTokenSwitch, kHostPortSwitch,
@@ -179,9 +179,8 @@ int SyncListenNotificationsMain(int argc, char* argv[]) {
 
   const notifier::NotifierOptions& notifier_options = ParseNotifierOptions(
       command_line, new MyTestURLRequestContextGetter(io_thread.task_runner()));
-  syncer::NetworkChannelCreator network_channel_creator =
-      syncer::NonBlockingInvalidator::MakePushClientChannelCreator(
-          notifier_options);
+  NetworkChannelCreator network_channel_creator =
+      NonBlockingInvalidator::MakePushClientChannelCreator(notifier_options);
   const char kClientInfo[] = "sync_listen_notifications";
   NullInvalidationStateTracker null_invalidation_state_tracker;
   std::unique_ptr<Invalidator> invalidator(new NonBlockingInvalidator(

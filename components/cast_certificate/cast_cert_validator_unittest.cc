@@ -5,6 +5,7 @@
 #include "components/cast_certificate/cast_cert_validator.h"
 
 #include "components/cast_certificate/cast_cert_validator_test_helpers.h"
+#include "net/cert/internal/cert_errors.h"
 #include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/internal/trust_store_in_memory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -79,9 +80,10 @@ void RunTest(TestResult expected_result,
       ASSERT_FALSE(certs.empty());
 
       // Parse the root certificate of the chain.
+      net::CertErrors errors;
       scoped_refptr<net::ParsedCertificate> root =
-          net::ParsedCertificate::CreateFromCertificateCopy(certs.back(), {});
-      ASSERT_TRUE(root);
+          net::ParsedCertificate::Create(certs.back(), {}, &errors);
+      ASSERT_TRUE(root) << errors.ToDebugString();
 
       // Remove it from the chain.
       certs.pop_back();
@@ -107,15 +109,9 @@ void RunTest(TestResult expected_result,
   std::unique_ptr<CertVerificationContext> context;
   CastDeviceCertPolicy policy;
 
-  bool result;
-  if (trust_store.get()) {
-    result =
-        VerifyDeviceCertForTest(certs, time, &context, &policy, nullptr,
-                                CRLPolicy::CRL_OPTIONAL, trust_store.get());
-  } else {
-    result = VerifyDeviceCert(certs, time, &context, &policy, nullptr,
-                              CRLPolicy::CRL_OPTIONAL);
-  }
+  bool result = VerifyDeviceCertUsingCustomTrustStore(
+      certs, time, &context, &policy, nullptr, CRLPolicy::CRL_OPTIONAL,
+      trust_store.get());
 
   if (expected_result == RESULT_FAIL) {
     ASSERT_FALSE(result);

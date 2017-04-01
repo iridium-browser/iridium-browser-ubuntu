@@ -32,7 +32,7 @@ class Label {
   Label(const Label& other);
   ~Label();
 
-  // Resolives a string from a build file that may be relative to the
+  // Resolves a string from a build file that may be relative to the
   // current directory into a fully qualified label. On failure returns an
   // is_null() label and sets the error.
   static Label Resolve(const SourceDir& current_dir,
@@ -122,5 +122,7 @@ template<> struct hash<Label> {
 inline void swap(Label& lhs, Label& rhs) {
   lhs.swap(rhs);
 }
+
+extern const char kLabels_Help[];
 
 #endif  // TOOLS_GN_LABEL_H_

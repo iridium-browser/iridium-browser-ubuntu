@@ -6,6 +6,7 @@
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_AUTOFILL_CLIENT_H_
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -16,27 +17,25 @@
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
+class GURL;
 class IdentityProvider;
+class PrefService;
 
 namespace content {
 class RenderFrameHost;
 }
 
 namespace gfx {
-class Rect;
 class RectF;
 }
 
 namespace rappor {
-class RapporService;
+class RapporServiceImpl;
 }
 
-namespace sync_driver {
+namespace syncer {
 class SyncService;
 }
-
-class GURL;
-class PrefService;
 
 namespace autofill {
 
@@ -46,7 +45,6 @@ class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
 class PersonalDataManager;
-struct FormData;
 struct Suggestion;
 
 // A client interface that needs to be supplied to the Autofill component by the
@@ -100,13 +98,13 @@ class AutofillClient {
   virtual PrefService* GetPrefs() = 0;
 
   // Gets the sync service associated with the client.
-  virtual sync_driver::SyncService* GetSyncService() = 0;
+  virtual syncer::SyncService* GetSyncService() = 0;
 
   // Gets the IdentityProvider associated with the client (for OAuth2).
   virtual IdentityProvider* GetIdentityProvider() = 0;
 
-  // Gets the RapporService associated with the client (for metrics).
-  virtual rappor::RapporService* GetRapporService() = 0;
+  // Gets the RapporServiceImpl associated with the client (for metrics).
+  virtual rappor::RapporServiceImpl* GetRapporServiceImpl() = 0;
 
   // Causes the Autofill settings UI to be shown.
   virtual void ShowAutofillSettings() = 0;
@@ -191,6 +189,9 @@ class AutofillClient {
   // Starts the signin flow. Should not be called if ShouldShowSigninPromo()
   // returns false.
   virtual void StartSigninFlow() = 0;
+
+  // Shows the explanation of http not secure warning message.
+  virtual void ShowHttpNotSecureExplanation() = 0;
 };
 
 }  // namespace autofill

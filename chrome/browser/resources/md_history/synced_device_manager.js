@@ -22,12 +22,12 @@ Polymer({
      */
     sessionList: {
       type: Array,
-      observer: 'updateSyncedDevices'
+      observer: 'updateSyncedDevices',
     },
 
     searchTerm: {
       type: String,
-      observer: 'searchTermChanged'
+      observer: 'searchTermChanged',
     },
 
     /**
@@ -36,7 +36,9 @@ Polymer({
      */
     syncedDevices_: {
       type: Array,
-      value: function() { return []; }
+      value: function() {
+        return [];
+      },
     },
 
     /** @private */
@@ -57,16 +59,28 @@ Polymer({
       value: false,
     },
 
+    /** @private */
     hasSeenForeignData_: Boolean,
+
+    /**
+     * The session ID referring to the currently active action menu.
+     * @private {?string}
+     */
+    actionMenuModel_: String,
   },
 
   listeners: {
-    'toggle-menu': 'onToggleMenu_',
-    'scroll': 'onListScroll_'
+    'open-menu': 'onOpenMenu_',
+    'update-focus-grid': 'updateFocusGrid_',
   },
+
+  /** @type {?cr.ui.FocusGrid} */
+  focusGrid_: null,
 
   /** @override */
   attached: function() {
+    this.focusGrid_ = new cr.ui.FocusGrid();
+
     // Update the sign in state.
     chrome.send('otherDevicesInitialized');
     md_history.BrowserService.getInstance().recordHistogram(
@@ -74,12 +88,20 @@ Polymer({
         SyncedTabsHistogram.LIMIT);
   },
 
+  /** @override */
+  detached: function() {
+    this.focusGrid_.destroy();
+  },
+
   /** @return {HTMLElement} */
-  getContentScrollTarget: function() { return this; },
+  getContentScrollTarget: function() {
+    return this;
+  },
 
   /**
    * @param {!ForeignSession} session
    * @return {!ForeignDeviceInternal}
+   * @private
    */
   createInternalDevice_: function(session) {
     var tabs = [];
@@ -123,46 +145,65 @@ Polymer({
     };
   },
 
+  /** @private */
   onSignInTap_: function() {
     chrome.send('startSignInFlow');
   },
 
-  onListScroll_: function() {
-    var menu = this.$.menu.getIfExists();
-    if (menu)
-      menu.closeMenu();
+  /** @private */
+  onOpenMenu_: function(e) {
+    var menu = /** @type {CrActionMenuElement} */ this.$.menu.get();
+    this.actionMenuModel_ = e.detail.tag;
+    menu.showAt(e.detail.target);
+    md_history.BrowserService.getInstance().recordHistogram(
+        SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.SHOW_SESSION_MENU,
+        SyncedTabsHistogram.LIMIT);
   },
 
-  onToggleMenu_: function(e) {
-    this.$.menu.get().then(function(menu) {
-      menu.toggleMenu(e.detail.target, e.detail.tag);
-      if (menu.menuOpen) {
-        md_history.BrowserService.getInstance().recordHistogram(
-            SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.SHOW_SESSION_MENU,
-            SyncedTabsHistogram.LIMIT);
-      }
-    });
-  },
-
+  /** @private */
   onOpenAllTap_: function() {
     var menu = assert(this.$.menu.getIfExists());
     var browserService = md_history.BrowserService.getInstance();
     browserService.recordHistogram(
         SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.OPEN_ALL,
         SyncedTabsHistogram.LIMIT);
-    browserService.openForeignSessionAllTabs(
-        menu.itemData);
-    menu.closeMenu();
+    browserService.openForeignSessionAllTabs(assert(this.actionMenuModel_));
+    this.actionMenuModel_ = null;
+    menu.close();
   },
 
+  /** @private */
+  updateFocusGrid_: function() {
+    if (!this.focusGrid_)
+      return;
+
+    this.focusGrid_.destroy();
+
+    this.debounce('updateFocusGrid', function() {
+      Polymer.dom(this.root)
+          .querySelectorAll('history-synced-device-card')
+          .reduce(
+              function(prev, cur) {
+                return prev.concat(cur.createFocusRows());
+              },
+              [])
+          .forEach(function(row) {
+            this.focusGrid_.addRow(row);
+          }.bind(this));
+      this.focusGrid_.ensureRowActive(1);
+    });
+  },
+
+  /** @private */
   onDeleteSessionTap_: function() {
     var menu = assert(this.$.menu.getIfExists());
     var browserService = md_history.BrowserService.getInstance();
     browserService.recordHistogram(
         SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.HIDE_FOR_NOW,
         SyncedTabsHistogram.LIMIT);
-    browserService.deleteForeignSession(menu.itemData);
-    menu.closeMenu();
+    browserService.deleteForeignSession(assert(this.actionMenuModel_));
+    this.actionMenuModel_ = null;
+    menu.close();
   },
 
   /** @private */
@@ -205,12 +246,13 @@ Polymer({
   /**
    * Decide what message should be displayed when user is logged in and there
    * are no synced tabs.
-   * @param {boolean} fetchingSyncedTabs
    * @return {string}
    */
-  noSyncedTabsMessage: function(fetchingSyncedTabs) {
-    return loadTimeData.getString(
-        fetchingSyncedTabs ? 'loading' : 'noSyncedResults');
+  noSyncedTabsMessage: function() {
+    var stringName = this.fetchingSyncedTabs_ ? 'loading' : 'noSyncedResults';
+    if (this.searchTerm !== '')
+      stringName = 'noSearchResults';
+    return loadTimeData.getString(stringName);
   },
 
   /**
@@ -230,40 +272,18 @@ Polymer({
     if (sessionList.length > 0 && !this.hasSeenForeignData_) {
       this.hasSeenForeignData_ = true;
       md_history.BrowserService.getInstance().recordHistogram(
-        SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.HAS_FOREIGN_DATA,
-        SyncedTabsHistogram.LIMIT);
+          SYNCED_TABS_HISTOGRAM_NAME, SyncedTabsHistogram.HAS_FOREIGN_DATA,
+          SyncedTabsHistogram.LIMIT);
     }
 
-    // First, update any existing devices that have changed.
-    var updateCount = Math.min(sessionList.length, this.syncedDevices_.length);
-    for (var i = 0; i < updateCount; i++) {
-      var oldDevice = this.syncedDevices_[i];
-      if (oldDevice.tag != sessionList[i].tag ||
-          oldDevice.timestamp != sessionList[i].timestamp) {
-        this.splice(
-            'syncedDevices_', i, 1, this.createInternalDevice_(sessionList[i]));
-      }
-    }
+    var devices = [];
+    sessionList.forEach(function(session) {
+      var device = this.createInternalDevice_(session);
+      if (device.tabs.length != 0)
+        devices.push(device);
+    }.bind(this));
 
-    if (sessionList.length >= this.syncedDevices_.length) {
-      // The list grew; append new items.
-      for (var i = updateCount; i < sessionList.length; i++) {
-        this.push('syncedDevices_', this.createInternalDevice_(sessionList[i]));
-      }
-    } else {
-      // The list shrank; remove deleted items.
-      this.splice(
-          'syncedDevices_', updateCount,
-          this.syncedDevices_.length - updateCount);
-    }
-  },
-
-  /**
-   * End fetching synced tabs when sync is disabled.
-   */
-  tabSyncDisabled: function() {
-    this.fetchingSyncedTabs_ = false;
-    this.clearDisplayedSyncedDevices_();
+    this.syncedDevices_ = devices;
   },
 
   /**

@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.browser.sync.ui;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.widget.CheckedTextView;
 import android.widget.ListView;
 
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.sync.SyncTestBase;
 import org.chromium.components.sync.PassphraseType;
@@ -17,6 +18,7 @@ import org.chromium.components.sync.PassphraseType;
 /**
  * Tests to make sure that PassphraseTypeDialogFragment presents the correct options.
  */
+@RetryOnFailure  // crbug.com/637448
 public class PassphraseTypeDialogFragmentTest extends SyncTestBase {
     private static final String TAG = "PassphraseTypeDialogFragmentTest";
 

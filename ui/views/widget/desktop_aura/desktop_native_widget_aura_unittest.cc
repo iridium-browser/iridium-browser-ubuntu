@@ -11,7 +11,7 @@
 #include "build/build_config.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
-#include "ui/aura/client/window_tree_client.h"
+#include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -612,6 +612,25 @@ TEST_F(WidgetTest, WindowMouseModalityTest) {
 
   modal_dialog_widget->CloseNow();
   top_level_widget.CloseNow();
+}
+
+TEST_F(WidgetTest, SetScreenBoundsOnNativeWindow) {
+  Widget widget;
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+  params.native_widget =
+      CreatePlatformDesktopNativeWidgetImpl(params, &widget, nullptr);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(10, 10, 100, 100);
+  widget.Init(params);
+  widget.Show();
+  aura::Window* window = widget.GetNativeWindow();
+  display::Screen* screen = display::Screen::GetScreen();
+
+  const gfx::Rect new_screen_bounds(50, 50, 150, 150);
+  window->SetBoundsInScreen(new_screen_bounds,
+                            screen->GetPrimaryDisplay());
+  EXPECT_EQ(new_screen_bounds, widget.GetWindowBoundsInScreen());
+  widget.CloseNow();
 }
 
 #if defined(OS_WIN)

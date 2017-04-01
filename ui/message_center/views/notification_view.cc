@@ -8,7 +8,6 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "components/url_formatter/elide_url.h"
@@ -29,7 +28,6 @@
 #include "ui/message_center/views/constants.h"
 #include "ui/message_center/views/message_center_controller.h"
 #include "ui/message_center/views/notification_button.h"
-#include "ui/message_center/views/notification_progress_bar.h"
 #include "ui/message_center/views/padded_button.h"
 #include "ui/message_center/views/proportional_image_view.h"
 #include "ui/native_theme/native_theme.h"
@@ -54,12 +52,15 @@ namespace {
 // Dimensions.
 const int kProgressBarBottomPadding = 0;
 
+constexpr int kCloseIconTopPadding = 5;
+constexpr int kCloseIconRightPadding = 5;
+
 // static
 std::unique_ptr<views::Border> MakeEmptyBorder(int top,
                                                int left,
                                                int bottom,
                                                int right) {
-  return views::Border::CreateEmptyBorder(top, left, bottom, right);
+  return views::CreateEmptyBorder(top, left, bottom, right);
 }
 
 // static
@@ -85,7 +86,7 @@ std::unique_ptr<views::Border> MakeProgressBarBorder(int top, int bottom) {
 std::unique_ptr<views::Border> MakeSeparatorBorder(int top,
                                                    int left,
                                                    SkColor color) {
-  return views::Border::CreateSolidSidedBorder(top, left, 0, 0, color);
+  return views::CreateSolidSidedBorder(top, left, 0, 0, color);
 }
 
 // ItemView ////////////////////////////////////////////////////////////////////
@@ -296,6 +297,16 @@ void NotificationView::Layout() {
                                      settings_size.height());
   }
 
+  // Close button.
+  if (close_button_) {
+    gfx::Rect content_bounds = GetContentsBounds();
+    gfx::Size close_size(close_button_->GetPreferredSize());
+    gfx::Rect close_rect(content_bounds.right() - close_size.width(),
+                         content_bounds.y(), close_size.width(),
+                         close_size.height());
+    close_button_->SetBoundsRect(close_rect);
+  }
+
   bottom_view_->SetBounds(insets.left(), bottom_y,
                           content_width, bottom_height);
 }
@@ -323,6 +334,7 @@ void NotificationView::UpdateWithNotification(
   MessageView::UpdateWithNotification(notification);
 
   CreateOrUpdateViews(notification);
+  CreateOrUpdateCloseButtonView(notification);
   Layout();
   SchedulePaint();
 }
@@ -333,6 +345,13 @@ void NotificationView::ButtonPressed(views::Button* sender,
   // we send to other parts of the code.
   // TODO(dewittj): Remove this hack.
   std::string id(notification_id());
+
+  if (close_button_ && sender == close_button_.get()) {
+    // Warning: This causes the NotificationView itself to be deleted, so don't
+    // do anything afterwards.
+    controller()->RemoveNotification(id, true /* by_user */);
+    return;
+  }
 
   if (sender == settings_button_view_) {
     controller()->ClickOnSettingsButton(id);
@@ -346,25 +365,36 @@ void NotificationView::ButtonPressed(views::Button* sender,
       return;
     }
   }
+}
 
-  // Let the superclass handle everything else.
-  // Warning: This may cause the NotificationView itself to be deleted,
-  // so don't do anything afterwards.
-  MessageView::ButtonPressed(sender, event);
+bool NotificationView::IsCloseButtonFocused() const {
+  if (!close_button_)
+    return false;
+
+  const views::FocusManager* focus_manager = GetFocusManager();
+  return focus_manager &&
+         focus_manager->GetFocusedView() == close_button_.get();
+}
+
+void NotificationView::RequestFocusOnCloseButton() {
+  if (close_button_)
+    close_button_->RequestFocus();
+}
+
+bool NotificationView::IsPinned() const {
+  return !close_button_;
 }
 
 void NotificationView::CreateOrUpdateTitleView(
     const Notification& notification) {
   if (notification.title().empty()) {
-    if (title_view_) {
-      // Deletion will also remove |title_view_| from its parent.
-      delete title_view_;
-      title_view_ = NULL;
-    }
+    // Deletion will also remove |title_view_| from its parent.
+    delete title_view_;
+    title_view_ = nullptr;
     return;
   }
 
-  DCHECK(top_view_ != NULL);
+  DCHECK(top_view_);
 
   const gfx::FontList& font_list =
       views::Label().font_list().DeriveWithSizeDelta(2);
@@ -393,11 +423,9 @@ void NotificationView::CreateOrUpdateTitleView(
 void NotificationView::CreateOrUpdateMessageView(
     const Notification& notification) {
   if (notification.message().empty()) {
-    if (message_view_) {
-      // Deletion will also remove |message_view_| from its parent.
-      delete message_view_;
-      message_view_ = NULL;
-    }
+    // Deletion will also remove |message_view_| from its parent.
+    delete message_view_;
+    message_view_ = nullptr;
     return;
   }
 
@@ -440,11 +468,9 @@ void NotificationView::CreateOrUpdateContextMessageView(
     const Notification& notification) {
   if (notification.context_message().empty() &&
       !notification.UseOriginAsContextMessage()) {
-    if (context_message_view_) {
-      // Deletion will also remove |context_message_view_| from its parent.
-      delete context_message_view_;
-      context_message_view_ = NULL;
-    }
+    // Deletion will also remove |context_message_view_| from its parent.
+    delete context_message_view_;
+    context_message_view_ = nullptr;
     return;
   }
 
@@ -469,10 +495,8 @@ void NotificationView::CreateOrUpdateContextMessageView(
 
 void NotificationView::CreateOrUpdateSettingsButtonView(
     const Notification& notification) {
-  if (settings_button_view_) {
-    delete settings_button_view_;
-    settings_button_view_ = NULL;
-  }
+  delete settings_button_view_;
+  settings_button_view_ = nullptr;
 
   if (!settings_button_view_ && notification.delegate() &&
       notification.delegate()->ShouldDisplaySettingsButton()) {
@@ -497,44 +521,29 @@ void NotificationView::CreateOrUpdateSettingsButtonView(
 void NotificationView::CreateOrUpdateProgressBarView(
     const Notification& notification) {
   if (notification.type() != NOTIFICATION_TYPE_PROGRESS) {
-    if (progress_bar_view_) {
-      // Deletion will also remove |progress_bar_view_| from its parent.
-      delete progress_bar_view_;
-      progress_bar_view_ = NULL;
-    }
+    // Deletion will also remove |progress_bar_view_| from its parent.
+    delete progress_bar_view_;
+    progress_bar_view_ = nullptr;
     return;
   }
 
-  DCHECK(top_view_ != NULL);
-
-  bool is_indeterminate = (notification.progress() < 0);
-  if (progress_bar_view_ &&
-      progress_bar_view_->is_indeterminate() != is_indeterminate) {
-    delete progress_bar_view_;
-    progress_bar_view_ = NULL;
-  }
+  DCHECK(top_view_);
 
   if (!progress_bar_view_) {
-    if (!is_indeterminate)
-      progress_bar_view_ = new NotificationProgressBar();
-    else
-      progress_bar_view_ = new NotificationIndeterminateProgressBar();
-
+    progress_bar_view_ = new views::ProgressBar();
     progress_bar_view_->SetBorder(MakeProgressBarBorder(
         message_center::kProgressBarTopPadding, kProgressBarBottomPadding));
     top_view_->AddChildView(progress_bar_view_);
   }
 
-  if (!is_indeterminate)
-    progress_bar_view_->SetValue(notification.progress() / 100.0);
-
+  progress_bar_view_->SetValue(notification.progress() / 100.0);
   progress_bar_view_->SetVisible(notification.items().empty());
 }
 
 void NotificationView::CreateOrUpdateListItemViews(
     const Notification& notification) {
-  for (size_t i = 0; i < item_views_.size(); ++i)
-    delete item_views_[i];
+  for (auto item_view : item_views_)
+    delete item_view;
   item_views_.clear();
 
   int padding = kMessageLineHeight - views::Label().font_list().GetHeight();
@@ -602,7 +611,7 @@ void NotificationView::CreateOrUpdateImageView(
   gfx::Size scaled_size = message_center::GetImageSizeForContainerSize(
       ideal_size, notification.image().Size());
   image_view_->SetBorder(ideal_size != scaled_size
-                             ? views::Border::CreateSolidBorder(
+                             ? views::CreateSolidBorder(
                                    message_center::kNotificationImageBorderSize,
                                    SK_ColorTRANSPARENT)
                              : NULL);
@@ -614,9 +623,12 @@ void NotificationView::CreateOrUpdateActionButtonViews(
   bool new_buttons = action_buttons_.size() != buttons.size();
 
   if (new_buttons || buttons.size() == 0) {
-    // STLDeleteElements also clears the container.
-    base::STLDeleteElements(&separators_);
-    base::STLDeleteElements(&action_buttons_);
+    for (auto item : separators_)
+      delete item;
+    separators_.clear();
+    for (auto item : action_buttons_)
+      delete item;
+    action_buttons_.clear();
   }
 
   DCHECK(bottom_view_);
@@ -649,6 +661,27 @@ void NotificationView::CreateOrUpdateActionButtonViews(
       widget->SetSize(widget->GetContentsView()->GetPreferredSize());
       GetWidget()->SynthesizeMouseMoveEvent();
     }
+  }
+}
+
+void NotificationView::CreateOrUpdateCloseButtonView(
+    const Notification& notification) {
+  if (!notification.pinned() && !close_button_) {
+    PaddedButton* close = new PaddedButton(this);
+    close->SetPadding(-kCloseIconRightPadding, kCloseIconTopPadding);
+    close->SetNormalImage(IDR_NOTIFICATION_CLOSE);
+    close->SetHoveredImage(IDR_NOTIFICATION_CLOSE_HOVER);
+    close->SetPressedImage(IDR_NOTIFICATION_CLOSE_PRESSED);
+    close->set_animate_on_state_change(false);
+    close->SetAccessibleName(l10n_util::GetStringUTF16(
+        IDS_MESSAGE_CENTER_CLOSE_NOTIFICATION_BUTTON_ACCESSIBLE_NAME));
+    close->SetTooltipText(l10n_util::GetStringUTF16(
+        IDS_MESSAGE_CENTER_CLOSE_NOTIFICATION_BUTTON_TOOLTIP));
+    close->set_owned_by_client();
+    AddChildView(close);
+    close_button_.reset(close);
+  } else if (notification.pinned() && close_button_) {
+    close_button_.reset();
   }
 }
 

@@ -27,8 +27,8 @@
 #include "components/history/ios/browser/history_database_helper.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
-#include "components/syncable_prefs/testing_pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/user_prefs/user_prefs.h"
 #include "components/webdata_services/web_data_service_wrapper.h"
 #include "ios/chrome/browser/application_context.h"
@@ -47,6 +47,10 @@
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/web/public/web_thread.h"
 #include "net/url_request/url_request_test_util.h"
+
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
 
 namespace {
 std::unique_ptr<KeyedService> BuildHistoryService(web::BrowserState* context) {
@@ -112,7 +116,7 @@ base::FilePath CreateTempBrowserStateDir(base::ScopedTempDir* temp_dir) {
       CHECK(temp_dir->Set(system_tmp_dir));
     }
   }
-  return temp_dir->path();
+  return temp_dir->GetPath();
 }
 }  // namespace
 
@@ -129,7 +133,7 @@ TestChromeBrowserState::TestChromeBrowserState(
 
 TestChromeBrowserState::TestChromeBrowserState(
     const base::FilePath& path,
-    std::unique_ptr<syncable_prefs::PrefServiceSyncable> prefs,
+    std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs,
     const TestingFactories& testing_factories,
     const RefcountedTestingFactories& refcounted_testing_factories)
     : state_path_(path),
@@ -174,8 +178,6 @@ void TestChromeBrowserState::Init() {
   // Normally this would happen during browser startup, but for tests we need to
   // trigger creation of BrowserState-related services.
   EnsureBrowserStateKeyedServiceFactoriesBuilt();
-  if (ios::GetChromeBrowserProvider())
-    ios::GetChromeBrowserProvider()->AssertBrowserContextKeyedFactoriesBuilt();
 
   if (prefs_) {
     // If user passed a custom PrefServiceSyncable, then leave |testing_prefs_|
@@ -187,7 +189,7 @@ void TestChromeBrowserState::Init() {
     prefs_ =
         CreateIncognitoBrowserStatePrefs(original_browser_state_->prefs_.get());
   } else {
-    testing_prefs_ = new syncable_prefs::TestingPrefServiceSyncable();
+    testing_prefs_ = new sync_preferences::TestingPrefServiceSyncable();
     RegisterBrowserStatePrefs(testing_prefs_->registry());
     prefs_.reset(testing_prefs_);
   }
@@ -360,9 +362,10 @@ void TestChromeBrowserState::DestroyHistoryService() {
   if (!history_service)
     return;
 
+  base::RunLoop run_loop;
+
   history_service->ClearCachedDataForContextID(0);
-  history_service->SetOnBackendDestroyTask(
-      base::MessageLoop::QuitWhenIdleClosure());
+  history_service->SetOnBackendDestroyTask(run_loop.QuitWhenIdleClosure());
   history_service->Shutdown();
   history_service = nullptr;
 
@@ -374,16 +377,10 @@ void TestChromeBrowserState::DestroyHistoryService() {
   // moving to the next test. Note: if this never terminates, somebody is
   // probably leaking a reference to the history backend, so it never calls
   // our destroy task.
-  base::MessageLoop::current()->Run();
-
-  // Make sure we don't have any event pending that could disrupt the next
-  // test.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
-  base::MessageLoop::current()->Run();
+  run_loop.Run();
 }
 
-syncable_prefs::TestingPrefServiceSyncable*
+sync_preferences::TestingPrefServiceSyncable*
 TestChromeBrowserState::GetTestingPrefService() {
   DCHECK(prefs_);
   DCHECK(testing_prefs_);
@@ -414,7 +411,7 @@ void TestChromeBrowserState::Builder::SetPath(const base::FilePath& path) {
 }
 
 void TestChromeBrowserState::Builder::SetPrefService(
-    std::unique_ptr<syncable_prefs::PrefServiceSyncable> prefs) {
+    std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs) {
   DCHECK(!build_called_);
   pref_service_ = std::move(prefs);
 }

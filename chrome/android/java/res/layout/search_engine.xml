@@ -9,15 +9,13 @@
     android:background="?android:attr/selectableItemBackground"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingTop="6dp"
-    android:paddingBottom="6dp">
+    android:padding="6dp">
 
     <android.widget.RadioButton
         android:id="@+id/radiobutton"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginStart="21dp"
-        android:layout_marginEnd="16dp"
+        android:layout_marginEnd="21dp"
         android:clickable="false" />
 
     <LinearLayout
@@ -26,16 +24,22 @@
         android:layout_weight="1"
         android:orientation="vertical">
         <TextView
-            android:id="@+id/description"
+            android:id="@+id/name"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="17sp" />
+            android:textSize="17sp"
+            android:textColor="@color/default_text_color" />
         <TextView
-            android:id="@+id/link"
+            android:id="@+id/url"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="16sp"
+            android:textColor="@color/descriptive_text_color" />
+        <TextView
+            android:id="@+id/location_permission"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="-12dp"
-            android:layout_marginEnd="21dp"
             android:layout_marginTop="-12dp"
             android:gravity="center_vertical"
             android:minHeight="48dp"

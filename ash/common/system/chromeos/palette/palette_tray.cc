@@ -4,20 +4,26 @@
 
 #include "ash/common/system/chromeos/palette/palette_tray.h"
 
+#include "ash/common/material_design/material_design_controller.h"
+#include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/shelf_constants.h"
 #include "ash/common/shelf/wm_shelf.h"
 #include "ash/common/shelf/wm_shelf_util.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/chromeos/palette/palette_tool_manager.h"
 #include "ash/common/system/chromeos/palette/palette_utils.h"
+#include "ash/common/system/tray/system_menu_button.h"
+#include "ash/common/system/tray/system_tray_controller.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_bubble_wrapper.h"
 #include "ash/common/system/tray/tray_constants.h"
 #include "ash/common/system/tray/tray_popup_header_button.h"
+#include "ash/common/system/tray/tray_popup_item_style.h"
 #include "ash/common/wm_lookup.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
+#include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/root_window_controller.h"
 #include "base/metrics/histogram_macros.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
@@ -39,35 +45,24 @@ namespace {
 
 // Predefined padding for the icon used in this tray. These are to be set to the
 // border of the icon, depending on the current |shelf_alignment()|.
-const int kHorizontalShelfHorizontalPadding = 8;
-const int kHorizontalShelfVerticalPadding = 4;
-const int kVerticalShelfHorizontalPadding = 2;
-const int kVerticalShelfVerticalPadding = 5;
+constexpr int kHorizontalShelfHorizontalPadding = 8;
+constexpr int kHorizontalShelfVerticalPadding = 4;
+constexpr int kVerticalShelfHorizontalPadding = 2;
+constexpr int kVerticalShelfVerticalPadding = 5;
 
 // Width of the palette itself (dp).
-const int kPaletteWidth = 332;
+constexpr int kPaletteWidth = 332;
 
-// Size of icon in the shelf (dp).
-const int kShelfIconSize = 18;
+// Padding at the top/bottom of the palette (dp).
+constexpr int kPalettePaddingOnTop = 4;
+constexpr int kPalettePaddingOnBottom = 2;
 
 // Margins between the title view and the edges around it (dp).
-const int kPaddingBetweenTitleAndTopEdge = 4;
-const int kPaddingBetweenTitleAndLeftEdge = 12;
-const int kPaddingBetweenTitleAndSeparator = 3;
+constexpr int kPaddingBetweenTitleAndLeftEdge = 12;
+constexpr int kPaddingBetweenTitleAndSeparator = 3;
 
-// Margin between the separator beneath the title and the first action (dp).
-const int kPaddingActionsAndTopSeparator = 4;
-
-// Size of the header icons (dp).
-const int kIconSize = 20;
-
-// Creates a separator.
-views::Separator* CreateSeparator(views::Separator::Orientation orientation) {
-  views::Separator* separator =
-      new views::Separator(views::Separator::HORIZONTAL);
-  separator->SetColor(ash::kBorderDarkColor);
-  return separator;
-}
+// Color of the separator.
+const SkColor kPaletteSeparatorColor = SkColorSetARGB(0x1E, 0x00, 0x00, 0x00);
 
 // Returns true if we are in a user session that can show the stylus tools.
 bool IsInUserSession() {
@@ -75,7 +70,7 @@ bool IsInUserSession() {
       WmShell::Get()->GetSessionStateDelegate();
   return !session_state_delegate->IsUserSessionBlocked() &&
          session_state_delegate->GetSessionState() ==
-             SessionStateDelegate::SESSION_STATE_ACTIVE &&
+             session_manager::SessionState::ACTIVE &&
          WmShell::Get()->system_tray_delegate()->GetUserLoginStatus() !=
              LoginStatus::KIOSK_APP;
 }
@@ -83,61 +78,84 @@ bool IsInUserSession() {
 class TitleView : public views::View, public views::ButtonListener {
  public:
   explicit TitleView(PaletteTray* palette_tray) : palette_tray_(palette_tray) {
-    auto& rb = ui::ResourceBundle::GetSharedInstance();
-
+    // TODO(tdanderson|jdufault): Use TriView to handle the layout of the title.
+    // See crbug.com/614453.
     auto* box_layout =
         new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0);
     SetLayoutManager(box_layout);
 
-    views::Label* text_label =
+    title_label_ =
         new views::Label(l10n_util::GetStringUTF16(IDS_ASH_STYLUS_TOOLS_TITLE));
-    text_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    text_label->SetFontList(rb.GetFontList(ui::ResourceBundle::BoldFont));
-    AddChildView(text_label);
-    box_layout->SetFlexForView(text_label, 1);
+    title_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    AddChildView(title_label_);
+    box_layout->SetFlexForView(title_label_, 1);
+    if (MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      help_button_ =
+          new SystemMenuButton(this, TrayPopupInkDropStyle::HOST_CENTERED,
+                               kSystemMenuHelpIcon, IDS_ASH_STATUS_TRAY_HELP);
+      settings_button_ = new SystemMenuButton(
+          this, TrayPopupInkDropStyle::HOST_CENTERED, kSystemMenuSettingsIcon,
+          IDS_ASH_STATUS_TRAY_SETTINGS);
+    } else {
+      gfx::ImageSkia help_icon =
+          gfx::CreateVectorIcon(kSystemMenuHelpIcon, kMenuIconColor);
+      gfx::ImageSkia settings_icon =
+          gfx::CreateVectorIcon(kSystemMenuSettingsIcon, kMenuIconColor);
 
-    gfx::ImageSkia settings_icon = CreateVectorIcon(
-        gfx::VectorIconId::SETTINGS, kIconSize, gfx::kChromeIconGrey);
-    gfx::ImageSkia help_icon = CreateVectorIcon(
-        gfx::VectorIconId::HELP, kIconSize, gfx::kChromeIconGrey);
+      auto* help_button = new ash::TrayPopupHeaderButton(
+          this, help_icon, IDS_ASH_STATUS_TRAY_HELP);
+      help_button->SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_HELP));
+      help_button_ = help_button;
 
-    help_button_ = new ash::TrayPopupHeaderButton(this, help_icon,
-                                                  IDS_ASH_STATUS_TRAY_HELP);
-    help_button_->SetTooltipText(
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_HELP));
+      auto* settings_button = new ash::TrayPopupHeaderButton(
+          this, settings_icon, IDS_ASH_STATUS_TRAY_SETTINGS);
+      settings_button->SetTooltipText(
+          l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SETTINGS));
+      settings_button_ = settings_button;
+    }
+
     AddChildView(help_button_);
-
-    settings_button_ = new ash::TrayPopupHeaderButton(
-        this, settings_icon, IDS_ASH_STATUS_TRAY_SETTINGS);
-    settings_button_->SetTooltipText(
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SETTINGS));
     AddChildView(settings_button_);
   }
 
   ~TitleView() override {}
 
  private:
+  // views::View:
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override {
+    UpdateStyle();
+  }
+
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     if (sender == settings_button_) {
       palette_tray_->RecordPaletteOptionsUsage(
           PaletteTrayOptions::PALETTE_SETTINGS_BUTTON);
-      WmShell::Get()->system_tray_delegate()->ShowPaletteSettings();
+      WmShell::Get()->system_tray_controller()->ShowPaletteSettings();
       palette_tray_->HidePalette();
     } else if (sender == help_button_) {
       palette_tray_->RecordPaletteOptionsUsage(
           PaletteTrayOptions::PALETTE_HELP_BUTTON);
-      WmShell::Get()->system_tray_delegate()->ShowPaletteHelp();
+      WmShell::Get()->system_tray_controller()->ShowPaletteHelp();
       palette_tray_->HidePalette();
     } else {
       NOTREACHED();
     }
   }
 
+  void UpdateStyle() {
+    TrayPopupItemStyle style(GetNativeTheme(),
+                             TrayPopupItemStyle::FontStyle::TITLE);
+    style.SetupLabel(title_label_);
+  }
+
   // Unowned pointers to button views so we can determine which button was
   // clicked.
-  ash::TrayPopupHeaderButton* settings_button_;
-  ash::TrayPopupHeaderButton* help_button_;
+  views::View* settings_button_;
+  views::View* help_button_;
+  // Needed for UpdateStyles()
+  views::Label* title_label_;
   PaletteTray* palette_tray_;
 
   DISALLOW_COPY_AND_ASSIGN(TitleView);
@@ -154,7 +172,12 @@ PaletteTray::PaletteTray(WmShelf* wm_shelf)
 
   PaletteTool::RegisterToolInstances(palette_tool_manager_.get());
 
-  SetContentsBackground();
+  if (MaterialDesignController::IsShelfMaterial()) {
+    SetInkDropMode(InkDropMode::ON);
+    SetContentsBackground(false);
+  } else {
+    SetContentsBackground(true);
+  }
 
   SetLayoutManager(new views::FillLayout());
   icon_ = new views::ImageView();
@@ -170,13 +193,6 @@ PaletteTray::PaletteTray(WmShelf* wm_shelf)
         base::Bind(&PaletteTray::OnStylusStateChanged,
                    weak_factory_.GetWeakPtr()));
   }
-
-  // OnPaletteEnabledPrefChanged will get called with the initial pref value,
-  // which will take care of showing the palette.
-  palette_enabled_subscription_ =
-      WmShell::Get()->palette_delegate()->AddPaletteEnableListener(
-          base::Bind(&PaletteTray::OnPaletteEnabledPrefChanged,
-                     weak_factory_.GetWeakPtr()));
 }
 
 PaletteTray::~PaletteTray() {
@@ -202,39 +218,54 @@ bool PaletteTray::ShowPalette() {
   if (bubble_)
     return false;
 
-  views::TrayBubbleView::InitParams init_params(
-      views::TrayBubbleView::ANCHOR_TYPE_TRAY, GetAnchorAlignment(),
-      kPaletteWidth, kPaletteWidth);
-  init_params.first_item_has_no_margin = true;
+  DCHECK(tray_container());
+
+  views::TrayBubbleView::InitParams init_params(GetAnchorAlignment(),
+                                                kPaletteWidth, kPaletteWidth);
   init_params.can_activate = true;
   init_params.close_on_deactivate = true;
 
   DCHECK(tray_container());
 
-  // Create view, customize it.
-  views::TrayBubbleView* bubble_view =
-      views::TrayBubbleView::Create(tray_container(), this, &init_params);
-  bubble_view->SetArrowPaintType(views::BubbleBorder::PAINT_NONE);
-  bubble_view->UseCompactMargins();
-  bubble_view->set_margins(gfx::Insets(0, 0, 0, 0));
+  // The views::TrayBubbleView ctor will cause a shelf auto hide update check.
+  // Make sure to block auto hiding before that check happens.
+  should_block_shelf_auto_hide_ = true;
 
-  // Add child views.
+  // TODO(tdanderson): Refactor into common row layout code.
+  // TODO(tdanderson|jdufault): Add material design ripple effects to the menu
+  // rows.
+
+  // Create and customize bubble view.
+  views::TrayBubbleView* bubble_view =
+      views::TrayBubbleView::Create(GetBubbleAnchor(), this, &init_params);
+  bubble_view->set_anchor_view_insets(GetBubbleAnchorInsets());
+  bubble_view->set_margins(
+      gfx::Insets(kPalettePaddingOnTop, 0, kPalettePaddingOnBottom, 0));
+
+  // Add title.
   auto* title_view = new TitleView(this);
-  title_view->SetBorder(views::Border::CreateEmptyBorder(gfx::Insets(
-      kPaddingBetweenTitleAndTopEdge, kPaddingBetweenTitleAndLeftEdge,
-      kPaddingBetweenTitleAndSeparator, 0)));
+  title_view->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets(0, kPaddingBetweenTitleAndLeftEdge, 0, 0)));
   bubble_view->AddChildView(title_view);
 
-  views::Separator* separator = CreateSeparator(views::Separator::HORIZONTAL);
-  separator->SetBorder(views::Border::CreateEmptyBorder(
-      gfx::Insets(0, 0, kPaddingActionsAndTopSeparator, 0)));
+  // Add horizontal separator.
+  views::Separator* separator =
+      new views::Separator(views::Separator::HORIZONTAL);
+  separator->SetColor(kPaletteSeparatorColor);
+  separator->SetBorder(views::CreateEmptyBorder(gfx::Insets(
+      kPaddingBetweenTitleAndSeparator, 0, kMenuSeparatorVerticalPadding, 0)));
   bubble_view->AddChildView(separator);
-  AddToolsToView(bubble_view);
+
+  // Add palette tools.
+  // TODO(tdanderson|jdufault): Use SystemMenuButton to get the material design
+  // ripples.
+  std::vector<PaletteToolView> views = palette_tool_manager_->CreateViews();
+  for (const PaletteToolView& view : views)
+    bubble_view->AddChildView(view.view);
 
   // Show the bubble.
   bubble_.reset(new ash::TrayBubbleWrapper(this, bubble_view));
-
-  SetDrawBackgroundAsActive(true);
+  SetIsActive(true);
   return true;
 }
 
@@ -245,14 +276,7 @@ bool PaletteTray::ContainsPointInScreen(const gfx::Point& point) {
   return bubble_ && bubble_->bubble_view()->GetBoundsInScreen().Contains(point);
 }
 
-void PaletteTray::AddToolsToView(views::View* host) {
-  std::vector<PaletteToolView> views = palette_tool_manager_->CreateViews();
-  for (const PaletteToolView& view : views)
-    host->AddChildView(view.view);
-}
-
-void PaletteTray::SessionStateChanged(
-    SessionStateDelegate::SessionState state) {
+void PaletteTray::SessionStateChanged(session_manager::SessionState state) {
   UpdateIconVisibility();
 }
 
@@ -282,7 +306,7 @@ void PaletteTray::HideBubbleWithView(const views::TrayBubbleView* bubble_view) {
 
 void PaletteTray::BubbleViewDestroyed() {
   palette_tool_manager_->NotifyViewsDestroyed();
-  SetDrawBackgroundAsActive(false);
+  SetIsActive(false);
 }
 
 void PaletteTray::OnMouseEnteredView() {}
@@ -291,31 +315,6 @@ void PaletteTray::OnMouseExitedView() {}
 
 base::string16 PaletteTray::GetAccessibleNameForBubble() {
   return GetAccessibleNameForTray();
-}
-
-gfx::Rect PaletteTray::GetAnchorRect(
-    views::Widget* anchor_widget,
-    views::TrayBubbleView::AnchorType anchor_type,
-    views::TrayBubbleView::AnchorAlignment anchor_alignment) const {
-  gfx::Rect r =
-      GetBubbleAnchorRect(anchor_widget, anchor_type, anchor_alignment);
-
-  // Move the palette to the left so the right edge of the palette aligns with
-  // the right edge of the tray button.
-  if (IsHorizontalAlignment(shelf_alignment())) {
-    // TODO(jdufault): Figure out a more robust adjustment method that does not
-    // break in md-shelf.
-    int icon_size = tray_container()->width();
-    if (tray_container()->border())
-      icon_size -= tray_container()->border()->GetInsets().width();
-
-    r.Offset(-r.width() + icon_size, 0);
-  } else {
-    // Vertical layout doesn't need the border adjustment that horizontal needs.
-    r.Offset(0, -r.height() + tray_container()->height());
-  }
-
-  return r;
 }
 
 void PaletteTray::OnBeforeBubbleWidgetInit(
@@ -335,9 +334,18 @@ void PaletteTray::HideBubble(const views::TrayBubbleView* bubble_view) {
 }
 
 void PaletteTray::HidePalette() {
+  should_block_shelf_auto_hide_ = false;
   is_bubble_auto_opened_ = false;
   num_actions_in_bubble_ = 0;
   bubble_.reset();
+
+  shelf()->UpdateAutoHideState();
+}
+
+void PaletteTray::HidePaletteImmediately() {
+  if (bubble_)
+    bubble_->bubble_widget()->SetVisibilityChangedAnimationsEnabled(false);
+  HidePalette();
 }
 
 void PaletteTray::RecordPaletteOptionsUsage(PaletteTrayOptions option) {
@@ -362,7 +370,7 @@ void PaletteTray::RecordPaletteModeCancellation(PaletteModeCancelType type) {
 }
 
 bool PaletteTray::ShouldBlockShelfAutoHide() const {
-  return !!bubble_;
+  return should_block_shelf_auto_hide_;
 }
 
 void PaletteTray::OnActiveToolChanged() {
@@ -387,22 +395,32 @@ void PaletteTray::AnchorUpdated() {
     bubble_->bubble_view()->UpdateBubble();
 }
 
+void PaletteTray::Initialize() {
+  // OnPaletteEnabledPrefChanged will get called with the initial pref value,
+  // which will take care of showing the palette.
+  palette_enabled_subscription_ =
+      WmShell::Get()->palette_delegate()->AddPaletteEnableListener(
+          base::Bind(&PaletteTray::OnPaletteEnabledPrefChanged,
+                     weak_factory_.GetWeakPtr()));
+}
+
 void PaletteTray::SetIconBorderForShelfAlignment() {
   // TODO(tdanderson): Ensure PaletteTray follows material design specs. See
   // crbug.com/630464.
   if (IsHorizontalAlignment(shelf_alignment())) {
-    icon_->SetBorder(views::Border::CreateEmptyBorder(gfx::Insets(
+    icon_->SetBorder(views::CreateEmptyBorder(gfx::Insets(
         kHorizontalShelfVerticalPadding, kHorizontalShelfHorizontalPadding)));
   } else {
-    icon_->SetBorder(views::Border::CreateEmptyBorder(gfx::Insets(
+    icon_->SetBorder(views::CreateEmptyBorder(gfx::Insets(
         kVerticalShelfVerticalPadding, kVerticalShelfHorizontalPadding)));
   }
 }
 
 void PaletteTray::UpdateTrayIcon() {
-  gfx::VectorIconId icon = palette_tool_manager_->GetActiveTrayIcon(
-      palette_tool_manager_->GetActiveTool(ash::PaletteGroup::MODE));
-  icon_->SetImage(CreateVectorIcon(icon, kShelfIconSize, kShelfIconColor));
+  icon_->SetImage(CreateVectorIcon(
+      palette_tool_manager_->GetActiveTrayIcon(
+          palette_tool_manager_->GetActiveTool(ash::PaletteGroup::MODE)),
+      kTrayIconSize, kShelfIconColor));
 }
 
 void PaletteTray::OnStylusStateChanged(ui::StylusState stylus_state) {
@@ -429,6 +447,8 @@ void PaletteTray::OnStylusStateChanged(ui::StylusState stylus_state) {
 }
 
 void PaletteTray::OnPaletteEnabledPrefChanged(bool enabled) {
+  is_palette_enabled_ = enabled;
+
   if (!enabled) {
     SetVisible(false);
     palette_tool_manager_->DisableActiveTool(PaletteGroup::MODE);
@@ -438,7 +458,7 @@ void PaletteTray::OnPaletteEnabledPrefChanged(bool enabled) {
 }
 
 void PaletteTray::UpdateIconVisibility() {
-  SetVisible(IsInUserSession());
+  SetVisible(is_palette_enabled_ && IsInUserSession());
 }
 
 }  // namespace ash

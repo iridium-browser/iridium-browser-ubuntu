@@ -6,6 +6,7 @@
 
 #include <drm_fourcc.h>
 
+#include <algorithm>
 #include <set>
 #include <utility>
 
@@ -92,13 +93,14 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
   std::set<uint32_t> plane_ids;
   for (uint32_t i = 0; i < num_planes; ++i) {
     ScopedDrmPlanePtr drm_plane(
-        drmModeGetPlane(drm->get_fd(), plane_resources->planes[i]));
+        drmModeGetPlane2(drm->get_fd(), plane_resources->planes[i]));
     if (!drm_plane) {
       PLOG(ERROR) << "Failed to get plane " << i;
       return false;
     }
 
     uint32_t formats_size = drm_plane->count_formats;
+    uint32_t format_modifiers_size = drm_plane->count_format_modifiers;
     plane_ids.insert(drm_plane->plane_id);
     std::unique_ptr<HardwareDisplayPlane> plane(
         CreatePlane(drm_plane->plane_id, drm_plane->possible_crtcs));
@@ -107,7 +109,18 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
     for (uint32_t j = 0; j < formats_size; j++)
       supported_formats[j] = drm_plane->formats[j];
 
-    if (plane->Initialize(drm, supported_formats, false, false)) {
+    std::vector<drm_format_modifier> supported_format_modifiers(
+        format_modifiers_size);
+    for (uint32_t j = 0; j < format_modifiers_size; j++)
+      supported_format_modifiers[j] = drm_plane->format_modifiers[j];
+    std::sort(supported_format_modifiers.begin(),
+              supported_format_modifiers.end(),
+              [](drm_format_modifier l, drm_format_modifier r) {
+                return l.modifier < r.modifier;
+              });
+
+    if (plane->Initialize(drm, supported_formats, supported_format_modifiers,
+                          false, false)) {
       // CRTC controllers always assume they have a cursor plane and the cursor
       // plane is updated via cursor specific DRM API. Hence, we dont keep
       // track of Cursor plane here to avoid re-using it for any other purpose.
@@ -125,7 +138,8 @@ bool HardwareDisplayPlaneManager::Initialize(DrmDevice* drm) {
       if (plane_ids.find(resources->crtcs[i] - 1) == plane_ids.end()) {
         std::unique_ptr<HardwareDisplayPlane> dummy_plane(
             CreatePlane(resources->crtcs[i] - 1, (1 << i)));
-        if (dummy_plane->Initialize(drm, std::vector<uint32_t>(), true,
+        if (dummy_plane->Initialize(drm, std::vector<uint32_t>(),
+                                    std::vector<drm_format_modifier>(), true,
                                     false)) {
           planes_.push_back(std::move(dummy_plane));
         }
@@ -232,8 +246,6 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
   }
 
   size_t plane_idx = 0;
-  HardwareDisplayPlane* primary_plane = nullptr;
-  gfx::Rect primary_display_bounds;
   for (const auto& plane : overlay_list) {
     HardwareDisplayPlane* hw_plane =
         FindNextUnusedPlane(&plane_idx, crtc_index, plane);
@@ -244,7 +256,6 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
     }
 
     gfx::Rect fixed_point_rect;
-    uint32_t fourcc_format = plane.buffer->GetFramebufferPixelFormat();
     if (hw_plane->type() != HardwareDisplayPlane::kDummy) {
       const gfx::Size& size = plane.buffer->GetSize();
       gfx::RectF crop_rect = plane.crop_rect;
@@ -258,32 +269,6 @@ bool HardwareDisplayPlaneManager::AssignOverlayPlanes(
                                    to_fixed_point(crop_rect.y()),
                                    to_fixed_point(crop_rect.width()),
                                    to_fixed_point(crop_rect.height()));
-    }
-
-    // If Overlay completely covers primary and isn't transparent, than use
-    // it as primary. This reduces the no of planes which need to be read in
-    // display controller side.
-    if (primary_plane) {
-      // TODO(dcastagna): Check if we can move this optimization to
-      // GLRenderer::ScheduleOverlays.
-      // Note that Chromium compositor promotes buffers to overlays (ABGR
-      // ones too) only if blending is not needed.
-      // TODO(dcastagna): this should check if the format is the same as
-      // primary_plane->format minus alpha. Changing the format of the primary
-      // plane currently works on rockchip with 3.14 kernel and won't work with
-      // newer kernels. Remove this hack as soon as we can switch the primary
-      // plane format to match overlay buffers formats.
-      if ((fourcc_format == DRM_FORMAT_XBGR8888 ||
-           fourcc_format == DRM_FORMAT_ABGR8888 ||
-           fourcc_format == DRM_FORMAT_XRGB8888 ||
-           fourcc_format == DRM_FORMAT_ARGB8888) &&
-          primary_display_bounds == plane.display_bounds) {
-        ResetCurrentPlaneList(plane_list);
-        hw_plane = primary_plane;
-      }
-    } else {
-      primary_plane = hw_plane;
-      primary_display_bounds = plane.display_bounds;
     }
 
     if (!SetPlaneData(plane_list, hw_plane, plane, crtc_id, fixed_point_rect,
@@ -335,6 +320,21 @@ bool HardwareDisplayPlaneManager::IsFormatSupported(uint32_t fourcc_format,
   }
 
   return format_supported;
+}
+
+std::vector<uint64_t> HardwareDisplayPlaneManager::GetFormatModifiers(
+    uint32_t crtc_id,
+    uint32_t format) {
+  int crtc_index = LookupCrtcIndex(crtc_id);
+
+  for (const auto& plane : planes_) {
+    if (plane->CanUseForCrtc(crtc_index) &&
+        plane->type() == HardwareDisplayPlane::kPrimary) {
+      return plane->ModifiersForFormat(format);
+    }
+  }
+
+  return std::vector<uint64_t>();
 }
 
 }  // namespace ui

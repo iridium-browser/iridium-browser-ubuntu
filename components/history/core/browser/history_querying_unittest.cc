@@ -65,7 +65,7 @@ bool NthResultIs(const QueryResults& results,
     return false;
 
   // Now check the URL & title.
-  return result.url() == GURL(test_entries[test_entry_index].url) &&
+  return result.url() == test_entries[test_entry_index].url &&
          result.title() ==
              base::UTF8ToUTF16(test_entries[test_entry_index].title);
 }
@@ -162,7 +162,7 @@ class HistoryQueryTest : public testing::Test {
  private:
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
+    history_dir_ = temp_dir_.GetPath().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
 
     history_.reset(new HistoryService);

@@ -40,7 +40,7 @@ static bool font_name_is_local(const char* fontName, SkFontStyle style) {
 static int whitelist_name_index(const SkTypeface* tf) {
 
     SkString fontNameStr;
-    SkAutoTUnref<SkTypeface::LocalizedStrings> nameIter(
+    sk_sp<SkTypeface::LocalizedStrings> nameIter(
         SkOTUtils::LocalizedStrings_NameTable::CreateForFamilyNames(*tf));
     SkTypeface::LocalizedString familyNameLocalized;
     while (nameIter->next(&familyNameLocalized)) {
@@ -53,7 +53,7 @@ static int whitelist_name_index(const SkTypeface* tf) {
         }
     }
 #if WHITELIST_DEBUG
-    SkAutoTUnref<SkTypeface::LocalizedStrings> debugIter(
+    sk_sp<SkTypeface::LocalizedStrings> debugIter(
         SkOTUtils::LocalizedStrings_NameTable::CreateForFamilyNames(*tf));
     while (debugIter->next(&familyNameLocalized)) {
         SkDebugf("no match fontName=\"%s\"\n", familyNameLocalized.fString.c_str());
@@ -63,7 +63,7 @@ static int whitelist_name_index(const SkTypeface* tf) {
 }
 
 static uint32_t compute_checksum(const SkTypeface* tf) {
-    SkFontData* fontData = tf->createFontData();
+    std::unique_ptr<SkFontData> fontData = tf->makeFontData();
     if (!fontData) {
         return 0;
     }
@@ -118,7 +118,7 @@ static void serialize_full(const SkTypeface* tf, SkWStream* wstream) {
 
     // Embed font data if it's a local font.
     if (isLocal && !desc.hasFontData()) {
-        desc.setFontData(tf->createFontData());
+        desc.setFontData(tf->makeFontData());
     }
     desc.serialize(wstream);
 }
@@ -190,9 +190,9 @@ sk_sp<SkTypeface> WhitelistDeserializeTypeface(SkStream* stream) {
         return nullptr;
     }
 
-    SkFontData* data = desc.detachFontData();
+    std::unique_ptr<SkFontData> data = desc.detachFontData();
     if (data) {
-        sk_sp<SkTypeface> typeface(SkTypeface::MakeFromFontData(data));
+        sk_sp<SkTypeface> typeface(SkTypeface::MakeFromFontData(std::move(data)));
         if (typeface) {
             return typeface;
         }

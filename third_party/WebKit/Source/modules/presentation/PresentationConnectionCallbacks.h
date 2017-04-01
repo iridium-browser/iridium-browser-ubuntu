@@ -13,7 +13,7 @@ namespace blink {
 
 class PresentationRequest;
 class ScriptPromiseResolver;
-class WebPresentationConnectionClient;
+struct WebPresentationSessionInfo;
 struct WebPresentationError;
 
 // PresentationConnectionCallbacks extends WebCallbacks to resolve the
@@ -21,21 +21,22 @@ struct WebPresentationError;
 // the PresentationRequest object that originated the call in its constructor
 // and will pass it to the created PresentationConnection.
 class PresentationConnectionCallbacks final
-    : public WebCallbacks<std::unique_ptr<WebPresentationConnectionClient>, const WebPresentationError&> {
-public:
-    PresentationConnectionCallbacks(ScriptPromiseResolver*, PresentationRequest*);
-    ~PresentationConnectionCallbacks() override = default;
+    : public WebCallbacks<const WebPresentationSessionInfo&,
+                          const WebPresentationError&> {
+ public:
+  PresentationConnectionCallbacks(ScriptPromiseResolver*, PresentationRequest*);
+  ~PresentationConnectionCallbacks() override = default;
 
-    void onSuccess(std::unique_ptr<WebPresentationConnectionClient>) override;
-    void onError(const WebPresentationError&) override;
+  void onSuccess(const WebPresentationSessionInfo&) override;
+  void onError(const WebPresentationError&) override;
 
-private:
-    Persistent<ScriptPromiseResolver> m_resolver;
-    Persistent<PresentationRequest> m_request;
+ private:
+  Persistent<ScriptPromiseResolver> m_resolver;
+  Persistent<PresentationRequest> m_request;
 
-    WTF_MAKE_NONCOPYABLE(PresentationConnectionCallbacks);
+  WTF_MAKE_NONCOPYABLE(PresentationConnectionCallbacks);
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PresentationConnectionCallbacks_h
+#endif  // PresentationConnectionCallbacks_h

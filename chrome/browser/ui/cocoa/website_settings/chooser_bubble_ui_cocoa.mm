@@ -18,7 +18,7 @@
 #import "chrome/browser/ui/cocoa/base_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
-#import "chrome/browser/ui/cocoa/chooser_content_view_cocoa.h"
+#import "chrome/browser/ui/cocoa/device_chooser_content_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
@@ -29,8 +29,8 @@
 #include "ui/base/cocoa/window_size_constants.h"
 
 std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
-  return base::WrapUnique(
-      new ChooserBubbleUiCocoa(browser_, std::move(chooser_controller_)));
+  return base::MakeUnique<ChooserBubbleUiCocoa>(browser_,
+                                                std::move(chooser_controller_));
 }
 
 @interface ChooserBubbleUiController
@@ -40,7 +40,8 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
   ChooserBubbleUiCocoa* bridge_;  // Weak.
   bool buttonPressed_;
 
-  base::scoped_nsobject<ChooserContentViewCocoa> chooserContentView_;
+  base::scoped_nsobject<DeviceChooserContentViewCocoa>
+      deviceChooserContentView_;
   NSTableView* tableView_;   // Weak.
   NSButton* connectButton_;  // Weak.
   NSButton* cancelButton_;   // Weak.
@@ -105,7 +106,7 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
   if ((self = [super initWithWindow:window
                        parentWindow:[self getExpectedParentWindow]
                          anchoredAt:NSZeroPoint])) {
-    [self setShouldCloseOnResignKey:NO];
+    [self setShouldCloseOnResignKey:YES];
     [self setShouldOpenAsKeyWindow:YES];
     [[self bubble] setArrowLocation:[self getExpectedArrowLocation]];
     bridge_ = bridge;
@@ -116,13 +117,13 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
                  object:[self getExpectedParentWindow]];
 
     base::string16 chooserTitle = chooserController->GetTitle();
-    chooserContentView_.reset([[ChooserContentViewCocoa alloc]
+    deviceChooserContentView_.reset([[DeviceChooserContentViewCocoa alloc]
         initWithChooserTitle:base::SysUTF16ToNSString(chooserTitle)
            chooserController:std::move(chooserController)]);
 
-    tableView_ = [chooserContentView_ tableView];
-    connectButton_ = [chooserContentView_ connectButton];
-    cancelButton_ = [chooserContentView_ cancelButton];
+    tableView_ = [deviceChooserContentView_ tableView];
+    connectButton_ = [deviceChooserContentView_ connectButton];
+    cancelButton_ = [deviceChooserContentView_ cancelButton];
 
     [connectButton_ setTarget:self];
     [connectButton_ setAction:@selector(onConnect:)];
@@ -131,7 +132,7 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
     [tableView_ setDelegate:self];
     [tableView_ setDataSource:self];
 
-    [[[self window] contentView] addSubview:chooserContentView_.get()];
+    [[[self window] contentView] addSubview:deviceChooserContentView_.get()];
   }
 
   return self;
@@ -143,7 +144,7 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
                 name:NSWindowDidMoveNotification
               object:nil];
   if (!buttonPressed_)
-    [chooserContentView_ close];
+    [deviceChooserContentView_ close];
   bridge_->OnBubbleClosing();
   [super windowWillClose:notification];
 }
@@ -163,7 +164,7 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
 
 - (void)show {
   NSRect bubbleFrame =
-      [[self window] frameRectForContentRect:[chooserContentView_ frame]];
+      [[self window] frameRectForContentRect:[deviceChooserContentView_ frame]];
   if ([[self window] isVisible]) {
     // Unfortunately, calling -setFrame followed by -setFrameOrigin  (called
     // within -setAnchorPoint) causes flickering.  Avoid the flickering by
@@ -185,13 +186,13 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView*)tableView {
-  return [chooserContentView_ numberOfOptions];
+  return [deviceChooserContentView_ numberOfOptions];
 }
 
 - (NSView*)tableView:(NSTableView*)tableView
     viewForTableColumn:(NSTableColumn*)tableColumn
-                   row:(NSInteger)rowIndex {
-  return [chooserContentView_ createTableRowView:rowIndex].autorelease();
+                   row:(NSInteger)row {
+  return [deviceChooserContentView_ createTableRowView:row].autorelease();
 }
 
 - (BOOL)tableView:(NSTableView*)aTableView
@@ -201,14 +202,21 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
 }
 
 - (CGFloat)tableView:(NSTableView*)tableView heightOfRow:(NSInteger)row {
-  return [chooserContentView_ tableRowViewHeight:row];
+  return [deviceChooserContentView_ tableRowViewHeight:row];
 }
 
 - (void)updateTableView {
-  [chooserContentView_ updateTableView];
+  [deviceChooserContentView_ updateTableView];
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification*)aNotification {
+  [deviceChooserContentView_ updateContentRowColor];
+  [connectButton_ setEnabled:[tableView_ numberOfSelectedRows] > 0];
+}
+
+// Selection changes (while the mouse button is still down).
+- (void)tableViewSelectionIsChanging:(NSNotification*)aNotification {
+  [deviceChooserContentView_ updateContentRowColor];
   [connectButton_ setEnabled:[tableView_ numberOfSelectedRows] > 0];
 }
 
@@ -265,15 +273,17 @@ std::unique_ptr<BubbleUi> ChooserBubbleDelegate::BuildBubbleUi() {
 
 - (void)onConnect:(id)sender {
   buttonPressed_ = true;
-  [chooserContentView_ accept];
-  self.bubbleReference->CloseBubble(BUBBLE_CLOSE_ACCEPTED);
+  [deviceChooserContentView_ accept];
+  if (self.bubbleReference)
+    self.bubbleReference->CloseBubble(BUBBLE_CLOSE_ACCEPTED);
   [self close];
 }
 
 - (void)onCancel:(id)sender {
   buttonPressed_ = true;
-  [chooserContentView_ cancel];
-  self.bubbleReference->CloseBubble(BUBBLE_CLOSE_CANCELED);
+  [deviceChooserContentView_ cancel];
+  if (self.bubbleReference)
+    self.bubbleReference->CloseBubble(BUBBLE_CLOSE_CANCELED);
   [self close];
 }
 

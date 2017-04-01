@@ -7,7 +7,8 @@
 #include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "base/metrics/sparse_histogram.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "device/bluetooth/bluetooth_adapter_android.h"
 #include "device/bluetooth/bluetooth_remote_gatt_service_android.h"
@@ -15,6 +16,7 @@
 
 using base::android::AttachCurrentThread;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace device {
 namespace {
@@ -34,7 +36,8 @@ void RecordConnectionTerminatedResult(int32_t status) {
 
 BluetoothDeviceAndroid* BluetoothDeviceAndroid::Create(
     BluetoothAdapterAndroid* adapter,
-    jobject bluetooth_device_wrapper) {  // Java Type: bluetoothDeviceWrapper
+    const JavaRef<jobject>&
+        bluetooth_device_wrapper) {  // Java Type: bluetoothDeviceWrapper
   BluetoothDeviceAndroid* device = new BluetoothDeviceAndroid(adapter);
 
   device->j_device_.Reset(Java_ChromeBluetoothDevice_create(
@@ -219,10 +222,7 @@ void BluetoothDeviceAndroid::OnConnectionStateChange(
   } else {
     // Otherwise an existing connection was terminated.
     RecordConnectionTerminatedResult(status);
-    gatt_services_.clear();
-    device_uuids_.ClearServiceUUIDs();
-    SetGattServicesDiscoveryComplete(false);
-    DidDisconnectGatt();
+    DidDisconnectGatt(true /* notifyDeviceChanged */);
   }
 }
 
@@ -244,17 +244,17 @@ void BluetoothDeviceAndroid::CreateGattRemoteService(
   std::string instance_id_string =
       base::android::ConvertJavaStringToUTF8(env, instance_id);
 
-  if (gatt_services_.contains(instance_id_string))
+  if (base::ContainsKey(gatt_services_, instance_id_string))
     return;
 
-  BluetoothDevice::GattServiceMap::iterator service_iterator =
-      gatt_services_.set(
-          instance_id_string,
-          BluetoothRemoteGattServiceAndroid::Create(
-              GetAndroidAdapter(), this, bluetooth_gatt_service_wrapper,
-              instance_id_string, j_device_.obj()));
+  std::unique_ptr<BluetoothRemoteGattServiceAndroid> service =
+      BluetoothRemoteGattServiceAndroid::Create(GetAndroidAdapter(), this,
+                                                bluetooth_gatt_service_wrapper,
+                                                instance_id_string, j_device_);
+  BluetoothRemoteGattServiceAndroid* service_ptr = service.get();
+  gatt_services_[instance_id_string] = std::move(service);
 
-  adapter_->NotifyGattServiceAdded(service_iterator->second);
+  adapter_->NotifyGattServiceAdded(service_ptr);
 }
 
 BluetoothDeviceAndroid::BluetoothDeviceAndroid(BluetoothAdapterAndroid* adapter)

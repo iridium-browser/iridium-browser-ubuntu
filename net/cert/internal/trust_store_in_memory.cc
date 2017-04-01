@@ -19,10 +19,10 @@ void TrustStoreInMemory::AddTrustAnchor(scoped_refptr<TrustAnchor> anchor) {
                                  std::move(anchor)));
 }
 
-void TrustStoreInMemory::FindTrustAnchorsByNormalizedName(
-    const der::Input& normalized_name,
+void TrustStoreInMemory::FindTrustAnchorsForCert(
+    const scoped_refptr<ParsedCertificate>& cert,
     TrustAnchors* matches) const {
-  auto range = anchors_.equal_range(normalized_name.AsStringPiece());
+  auto range = anchors_.equal_range(cert->normalized_issuer().AsStringPiece());
   for (auto it = range.first; it != range.second; ++it)
     matches->push_back(it->second);
 }

@@ -7,21 +7,18 @@
 
 #include "base/macros.h"
 #include "chrome/common/shell_handler_win.mojom.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 // Implements the ShellHandler mojo interface.
-class ShellHandlerImpl : public mojom::ShellHandler {
+class ShellHandlerImpl : public chrome::mojom::ShellHandler {
  public:
-  static void Create(mojom::ShellHandlerRequest request);
-
- private:
-  explicit ShellHandlerImpl(mojom::ShellHandlerRequest request);
+  ShellHandlerImpl();
   ~ShellHandlerImpl() override;
 
-  // mojom::ShellHandler:
-  void IsPinnedToTaskbar(const IsPinnedToTaskbarCallback& callback) override;
+  static void Create(chrome::mojom::ShellHandlerRequest request);
 
-  mojo::StrongBinding<ShellHandler> binding_;
+ private:
+  // chrome::mojom::ShellHandler:
+  void IsPinnedToTaskbar(const IsPinnedToTaskbarCallback& callback) override;
 
   DISALLOW_COPY_AND_ASSIGN(ShellHandlerImpl);
 };

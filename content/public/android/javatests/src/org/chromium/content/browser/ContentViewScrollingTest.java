@@ -6,12 +6,13 @@ package org.chromium.content.browser;
 
 import android.content.res.Configuration;
 import android.os.SystemClock;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.content.browser.ContentViewCore.InternalAccessDelegate;
 import org.chromium.content.browser.test.util.Criteria;
@@ -85,8 +86,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
         }
     }
 
-    private void assertWaitForScroll(final boolean hugLeft, final boolean hugTop)
-            throws InterruptedException {
+    private void assertWaitForScroll(final boolean hugLeft, final boolean hugTop) {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
@@ -162,6 +162,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
 
     @SmallTest
     @Feature({"Main"})
+    @RetryOnFailure
     public void testFling() throws Throwable {
         // Scaling the initial velocity by the device scale factor ensures that
         // it's of sufficient magnitude for all displays densities.
@@ -193,6 +194,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
+    @RetryOnFailure
     public void testScrollTo() throws Throwable {
         // Vertical scroll to lower-left.
         scrollTo(0, 2500);
@@ -218,6 +220,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
+    @RetryOnFailure
     public void testScrollBy() throws Throwable {
         scrollTo(0, 0);
         assertWaitForScroll(true, true);
@@ -282,6 +285,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
+    @RetryOnFailure
     public void testOverScroll() throws Throwable {
         // Overscroll lower-left.
         scrollTo(-10000, 10000);
@@ -311,6 +315,7 @@ public class ContentViewScrollingTest extends ContentShellTestBase {
     @SmallTest
     @RerunWithUpdatedContainerView
     @Feature({"Main"})
+    @RetryOnFailure
     public void testOnScrollChanged() throws Throwable {
         final int scrollToX = getContentViewCore().getNativeScrollXForTest() + 2500;
         final int scrollToY = getContentViewCore().getNativeScrollYForTest() + 2500;

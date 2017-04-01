@@ -13,10 +13,9 @@
 #include <map>
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "ui/aura/window.h"
@@ -35,10 +34,8 @@
 #if defined(OS_CHROMEOS)
 #include "ui/base/ime/chromeos/ime_keymap.h"
 #elif defined(OS_WIN)
-#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_codes_win.h"
 #elif defined(OS_LINUX)
-#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_codes_posix.h"
 #endif
 
@@ -163,7 +160,9 @@ InputMethodEngineBase::InputMethodEngineBase()
       sent_key_event_(nullptr),
       profile_(nullptr),
       next_request_id_(1),
+      composition_changed_(false),
       text_(""),
+      commit_text_changed_(false),
       handling_key_event_(false) {}
 
 InputMethodEngineBase::~InputMethodEngineBase() {}
@@ -349,6 +348,10 @@ void InputMethodEngineBase::Reset() {
   observer_->OnReset(active_component_id_);
 }
 
+void InputMethodEngineBase::MaybeSwitchEngine() {
+  observer_->OnRequestEngineSwitch();
+}
+
 bool InputMethodEngineBase::IsInterestedInKeyEvent() const {
   return observer_->IsInterestedInKeyEvent();
 }
@@ -391,19 +394,21 @@ void InputMethodEngineBase::KeyEventHandled(const std::string& extension_id,
   // and setComposition calls.
   ui::IMEInputContextHandlerInterface* input_context =
       ui::IMEBridge::Get()->GetInputContextHandler();
-  if (!text_.empty()) {
+  if (commit_text_changed_) {
     if (input_context) {
       input_context->CommitText(text_);
     }
     text_ = "";
+    commit_text_changed_ = false;
   }
 
-  if (!composition_.text.empty()) {
+  if (composition_changed_) {
     if (input_context) {
       input_context->UpdateCompositionText(
           composition_, composition_.selection.start(), true);
     }
     composition_.Clear();
+    composition_changed_ = false;
   }
 
   RequestMap::iterator request = request_map_.find(request_id);

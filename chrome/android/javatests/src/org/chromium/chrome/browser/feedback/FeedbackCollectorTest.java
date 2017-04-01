@@ -7,10 +7,11 @@ package org.chromium.chrome.browser.feedback;
 import android.app.Activity;
 import android.graphics.Bitmap;
 import android.os.Bundle;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -31,6 +32,7 @@ import javax.annotation.Nullable;
 /**
  * Test for {@link FeedbackCollector}.
  */
+@RetryOnFailure
 public class FeedbackCollectorTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final int CONNECTIVITY_TASK_TIMEOUT_MS = 10;
 

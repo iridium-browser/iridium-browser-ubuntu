@@ -17,7 +17,7 @@
 #include "base/files/memory_mapped_file.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/sys_info.h"
@@ -419,9 +419,9 @@ void V8Initializer::Initialize(IsolateHolder::ScriptMode mode,
   }
 
   const char* ignition_enabled_crash_key = "N";
-  if (base::FeatureList::IsEnabled(features::kV8Ignition)) {
+  if (base::FeatureList::IsEnabled(features::kV8Future)) {
     ignition_enabled_crash_key = "Y";
-    std::string flag("--ignition-staging");
+    std::string flag("--future");
     v8::V8::SetFlagsFromString(flag.c_str(), static_cast<int>(flag.size()));
   } else if (base::FeatureList::IsEnabled(features::kV8IgnitionLowEnd) &&
              base::SysInfo::IsLowEndDevice()) {

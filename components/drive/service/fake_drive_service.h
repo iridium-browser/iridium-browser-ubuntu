@@ -11,6 +11,7 @@
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "components/drive/service/drive_service_interface.h"
 
@@ -379,8 +380,7 @@ class FakeDriveService : public DriveServiceInterface {
   // The class is expected to run on UI thread.
   base::ThreadChecker thread_checker_;
 
-  typedef std::map<std::string, EntryInfo*> EntryInfoMap;
-  EntryInfoMap entries_;
+  std::map<std::string, std::unique_ptr<EntryInfo>> entries_;
   std::unique_ptr<google_apis::AboutResource> about_resource_;
   std::unique_ptr<base::DictionaryValue> app_info_value_;
   std::map<GURL, UploadSession> upload_sessions_;

@@ -164,9 +164,12 @@ std::unique_ptr<developer::ProfileInfo> CreateProfileInfo(Profile* profile) {
   std::unique_ptr<developer::ProfileInfo> info(new developer::ProfileInfo());
   info->is_supervised = profile->IsSupervised();
   PrefService* prefs = profile->GetPrefs();
+  const PrefService::Preference* pref =
+      prefs->FindPreference(prefs::kExtensionsUIDeveloperMode);
   info->is_incognito_available =
       IncognitoModePrefs::GetAvailability(prefs) !=
           IncognitoModePrefs::DISABLED;
+  info->is_developer_mode_controlled_by_policy = pref->IsManaged();
   info->in_developer_mode =
       !info->is_supervised &&
       prefs->GetBoolean(prefs::kExtensionsUIDeveloperMode);
@@ -1163,10 +1166,10 @@ void DeveloperPrivateChoosePathFunction::FileSelectionCanceled() {
 
 DeveloperPrivateChoosePathFunction::~DeveloperPrivateChoosePathFunction() {}
 
-bool DeveloperPrivateIsProfileManagedFunction::RunSync() {
-  SetResult(
-      base::MakeUnique<base::FundamentalValue>(GetProfile()->IsSupervised()));
-  return true;
+ExtensionFunction::ResponseAction
+DeveloperPrivateIsProfileManagedFunction::Run() {
+  return RespondNow(OneArgument(base::MakeUnique<base::FundamentalValue>(
+      Profile::FromBrowserContext(browser_context())->IsSupervised())));
 }
 
 DeveloperPrivateIsProfileManagedFunction::

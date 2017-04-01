@@ -23,9 +23,6 @@
         'skia_lib.gyp:skia_lib',
         'zlib.gyp:zlib',
       ],
-      'includes': [
-        'pdf.gypi',
-      ],
       'include_dirs': [
         '../include/private',
         '../src/core', # needed to get SkGlyphCache.h and SkTextFormatParams.h
@@ -33,18 +30,20 @@
         '../src/utils', # needed to get SkBitSet.h
       ],
       'sources': [
-        'pdf.gypi', # Makes the gypi appear in IDEs (but does not modify the build).
+        '<!@(python read_gni.py ../gn/pdf.gni skia_pdf_sources)',
       ],
       'conditions': [
         [ 'skia_pdf_use_sfntly and not skia_android_framework and \
            skia_os in ["win", "android", "linux", "mac"]',
-          { 'dependencies': [ 'sfntly.gyp:sfntly' ] }
+          {
+            'dependencies': [ 'sfntly.gyp:sfntly' ],
+            'defines': [ 'SK_PDF_USE_SFNTLY' ],
+          }
         ],
         [ 'skia_android_framework', {
             # Add SFTNLY support for PDF (which in turns depends on ICU)
-            'include_dirs': [
-              'external/sfntly/cpp/src',
-            ],
+            'include_dirs': [ 'external/sfntly/cpp/src' ],
+            'defines': [ 'SK_PDF_USE_SFNTLY' ],
             'libraries': [
               'libsfntly.a',
               '-licuuc',

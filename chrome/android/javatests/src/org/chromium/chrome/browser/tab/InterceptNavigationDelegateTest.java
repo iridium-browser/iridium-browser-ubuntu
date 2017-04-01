@@ -4,11 +4,11 @@
 
 package org.chromium.chrome.browser.tab;
 
-import android.os.Environment;
-import android.test.suitebuilder.annotation.MediumTest;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.MediumTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationParams;
@@ -27,6 +27,7 @@ import java.util.concurrent.TimeoutException;
 /**
  * Tests for InterceptNavigationDelegate
  */
+@RetryOnFailure
 public class InterceptNavigationDelegateTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final String BASE_PAGE = "/chrome/test/data/navigation_interception/";
     private static final String NAVIGATION_FROM_TIMEOUT_PAGE =
@@ -87,17 +88,13 @@ public class InterceptNavigationDelegateTest extends ChromeActivityTestCaseBase<
     }
 
     private void waitTillExpectedCallsComplete(int count, long timeout) {
-        try {
-            CriteriaHelper.pollUiThread(
-                    Criteria.equals(count, new Callable<Integer>() {
-                        @Override
-                        public Integer call() {
-                            return mNavParamHistory.size();
-                        }
-                    }), timeout, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
-        } catch (InterruptedException e) {
-            fail("Failed while waiting for all calls to complete." + e);
-        }
+        CriteriaHelper.pollUiThread(
+                Criteria.equals(count, new Callable<Integer>() {
+                    @Override
+                    public Integer call() {
+                        return mNavParamHistory.size();
+                    }
+                }), timeout, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }
 
     @Override
@@ -112,8 +109,7 @@ public class InterceptNavigationDelegateTest extends ChromeActivityTestCaseBase<
                 tab.setInterceptNavigationDelegate(mInterceptNavigationDelegate);
             }
         });
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 
     @Override

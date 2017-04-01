@@ -10,13 +10,14 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.os.SystemClock;
 import android.provider.Browser;
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
 import android.test.mock.MockContext;
 import android.test.mock.MockPackageManager;
-import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.ui.base.PageTransition;
 
 import java.net.URISyntaxException;
@@ -311,6 +312,7 @@ public class TabRedirectHandlerTest extends InstrumentationTestCase {
 
     @SmallTest
     @Feature({"IntentHandling"})
+    @RetryOnFailure
     public void testNavigationFromLinkWithoutUserGesture() {
         TabRedirectHandler handler = new TabRedirectHandler(mContext);
         handler.updateIntent(sYtIntent);
@@ -342,6 +344,7 @@ public class TabRedirectHandlerTest extends InstrumentationTestCase {
 
     @SmallTest
     @Feature({"IntentHandling"})
+    @RetryOnFailure
     public void testNavigationFromReload() {
         TabRedirectHandler handler = new TabRedirectHandler(mContext);
         handler.updateIntent(sYtIntent);
@@ -373,6 +376,7 @@ public class TabRedirectHandlerTest extends InstrumentationTestCase {
 
     @SmallTest
     @Feature({"IntentHandling"})
+    @RetryOnFailure
     public void testNavigationWithForwardBack() {
         TabRedirectHandler handler = new TabRedirectHandler(mContext);
         handler.updateIntent(sYtIntent);

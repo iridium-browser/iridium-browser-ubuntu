@@ -7,22 +7,22 @@
 
 #include "base/lazy_instance.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "cc/debug/lap_timer.h"
 #include "cc/raster/raster_buffer.h"
 #include "cc/test/begin_frame_args_test.h"
+#include "cc/test/fake_compositor_frame_sink.h"
+#include "cc/test/fake_compositor_frame_sink_client.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
-#include "cc/test/fake_output_surface.h"
-#include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_picture_layer_impl.h"
 #include "cc/test/fake_raster_source.h"
 #include "cc/test/fake_tile_manager.h"
 #include "cc/test/fake_tile_manager_client.h"
 #include "cc/test/fake_tile_task_manager.h"
 #include "cc/test/test_layer_tree_host_base.h"
-#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "cc/test/test_tile_priorities.h"
 #include "cc/tiles/tile.h"
@@ -39,9 +39,6 @@ static const int kTimeLimitMillis = 2000;
 static const int kWarmupRuns = 5;
 static const int kTimeCheckInterval = 10;
 
-base::LazyInstance<FakeTileTaskManagerImpl> g_fake_tile_task_manager =
-    LAZY_INSTANCE_INITIALIZER;
-
 class TileManagerPerfTest : public TestLayerTreeHostBase {
  public:
   TileManagerPerfTest()
@@ -51,9 +48,9 @@ class TileManagerPerfTest : public TestLayerTreeHostBase {
 
   void InitializeRenderer() override {
     host_impl()->SetVisible(true);
-    host_impl()->InitializeRenderer(output_surface());
+    host_impl()->InitializeRenderer(compositor_frame_sink());
     tile_manager()->SetTileTaskManagerForTesting(
-        g_fake_tile_task_manager.Pointer());
+        base::MakeUnique<FakeTileTaskManagerImpl>());
   }
 
   void SetupDefaultTreesWithFixedTileSize(const gfx::Size& layer_bounds,
@@ -220,7 +217,6 @@ class TileManagerPerfTest : public TestLayerTreeHostBase {
 
     // Ensure that we start with blank trees and no tiles.
     host_impl()->ResetTreesForTesting();
-    tile_manager()->FreeResourcesAndCleanUpReleasedTilesForTesting();
 
     gfx::Size layer_bounds(width, height);
     gfx::Size viewport(width / 5, height / 5);

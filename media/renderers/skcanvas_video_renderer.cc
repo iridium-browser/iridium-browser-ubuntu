@@ -4,12 +4,14 @@
 
 #include "media/renderers/skcanvas_video_renderer.h"
 
+#include <GLES3/gl3.h>
 #include <limits>
 
 #include "base/macros.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
+#include "media/base/data_buffer.h"
 #include "media/base/video_frame.h"
 #include "media/base/yuv_convert.h"
 #include "skia/ext/texture_handle.h"
@@ -86,6 +88,8 @@ sk_sp<SkImage> NewSkImageFromVideoFrameYUVTextures(
     const VideoFrame* video_frame,
     const Context3D& context_3d) {
   DCHECK(video_frame->HasTextures());
+  // TODO: We should compare the DCHECK vs when UpdateLastImage calls this
+  // function. (crbug.com/674185)
   DCHECK(video_frame->format() == PIXEL_FORMAT_I420 ||
          video_frame->format() == PIXEL_FORMAT_NV12);
 
@@ -116,8 +120,8 @@ sk_sp<SkImage> NewSkImageFromVideoFrameYUVTextures(
       gl->GenTextures(1, &texture_copy);
       DCHECK(texture_copy);
       gl->BindTexture(GL_TEXTURE_2D, texture_copy);
-      gl->CopyTextureCHROMIUM(source_textures[i].fID, texture_copy, GL_RGB,
-                              GL_UNSIGNED_BYTE, false, true, false);
+      gl->CopyTextureCHROMIUM(source_textures[i].fID, 0, texture_copy, 0,
+                              GL_RGB, GL_UNSIGNED_BYTE, false, true, false);
 
       gl->DeleteTextures(1, &source_textures[i].fID);
       source_textures[i].fID = texture_copy;
@@ -182,9 +186,12 @@ sk_sp<SkImage> NewSkImageFromVideoFrameNative(VideoFrame* video_frame,
     gl->GenTextures(1, &source_texture);
     DCHECK(source_texture);
     gl->BindTexture(GL_TEXTURE_2D, source_texture);
+    const gfx::Size& natural_size = video_frame->natural_size();
+    gl->TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, natural_size.width(),
+                   natural_size.height(), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                   nullptr);
     SkCanvasVideoRenderer::CopyVideoFrameSingleTextureToGLTexture(
-        gl, video_frame, source_texture, GL_RGBA, GL_UNSIGNED_BYTE, true,
-        false);
+        gl, video_frame, source_texture, true, false);
   } else {
     gl->WaitSyncTokenCHROMIUM(mailbox_holder.sync_token.GetConstData());
     source_texture = gl->CreateAndConsumeTextureCHROMIUM(
@@ -332,27 +339,26 @@ SkCanvasVideoRenderer::~SkCanvasVideoRenderer() {
 void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
                                   SkCanvas* canvas,
                                   const gfx::RectF& dest_rect,
-                                  uint8_t alpha,
-                                  SkXfermode::Mode mode,
+                                  SkPaint& paint,
                                   VideoRotation video_rotation,
                                   const Context3D& context_3d) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (alpha == 0) {
+  if (paint.getAlpha() == 0) {
     return;
   }
 
   SkRect dest;
   dest.set(dest_rect.x(), dest_rect.y(), dest_rect.right(), dest_rect.bottom());
 
-  SkPaint paint;
-  paint.setAlpha(alpha);
-
   // Paint black rectangle if there isn't a frame available or the
   // frame has an unexpected format.
   if (!video_frame.get() || video_frame->natural_size().IsEmpty() ||
       !(media::IsYuvPlanar(video_frame->format()) ||
+        video_frame->format() == media::PIXEL_FORMAT_Y16 ||
         video_frame->HasTextures())) {
-    canvas->drawRect(dest, paint);
+    SkPaint blackWithAlphaPaint;
+    blackWithAlphaPaint.setAlpha(paint.getAlpha());
+    canvas->drawRect(dest, blackWithAlphaPaint);
     canvas->flush();
     return;
   }
@@ -361,8 +367,10 @@ void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
   if (!UpdateLastImage(video_frame, context_3d))
     return;
 
-  paint.setXfermodeMode(mode);
-  paint.setFilterQuality(kLow_SkFilterQuality);
+  SkPaint videoPaint;
+  videoPaint.setAlpha(paint.getAlpha());
+  videoPaint.setBlendMode(paint.getBlendMode());
+  videoPaint.setFilterQuality(paint.getFilterQuality());
 
   const bool need_rotation = video_rotation != VIDEO_ROTATION_0;
   const bool need_scaling =
@@ -412,9 +420,9 @@ void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
   // threads. (skbug.com/4321).
   if (canvas->imageInfo().colorType() == kUnknown_SkColorType) {
     sk_sp<SkImage> swImage = last_image_->makeNonTextureImage();
-    canvas->drawImage(swImage, 0, 0, &paint);
+    canvas->drawImage(swImage, 0, 0, &videoPaint);
   } else {
-    canvas->drawImage(last_image_.get(), 0, 0, &paint);
+    canvas->drawImage(last_image_.get(), 0, 0, &videoPaint);
   }
 
   if (need_transform)
@@ -432,8 +440,11 @@ void SkCanvasVideoRenderer::Paint(const scoped_refptr<VideoFrame>& video_frame,
 void SkCanvasVideoRenderer::Copy(const scoped_refptr<VideoFrame>& video_frame,
                                  SkCanvas* canvas,
                                  const Context3D& context_3d) {
-  Paint(video_frame, canvas, gfx::RectF(video_frame->visible_rect()), 0xff,
-        SkXfermode::kSrc_Mode, media::VIDEO_ROTATION_0, context_3d);
+  SkPaint paint;
+  paint.setBlendMode(SkBlendMode::kSrc);
+  paint.setFilterQuality(kLow_SkFilterQuality);
+  Paint(video_frame, canvas, gfx::RectF(video_frame->visible_rect()), paint,
+        media::VIDEO_ROTATION_0, context_3d);
 }
 
 namespace {
@@ -445,19 +456,48 @@ scoped_refptr<VideoFrame> DownShiftHighbitVideoFrame(
   VideoPixelFormat format;
   int shift = 1;
   switch (video_frame->format()) {
-    case PIXEL_FORMAT_YUV420P10:
-      shift = 2;
-    case PIXEL_FORMAT_YUV420P9:
+    case PIXEL_FORMAT_YUV420P12:
+      shift = 4;
       format = PIXEL_FORMAT_I420;
       break;
-    case PIXEL_FORMAT_YUV422P10:
+
+    case PIXEL_FORMAT_YUV420P10:
       shift = 2;
-    case PIXEL_FORMAT_YUV422P9:
+      format = PIXEL_FORMAT_I420;
+      break;
+
+    case PIXEL_FORMAT_YUV420P9:
+      shift = 1;
+      format = PIXEL_FORMAT_I420;
+      break;
+
+    case PIXEL_FORMAT_YUV422P12:
+      shift = 4;
       format = PIXEL_FORMAT_YV16;
       break;
+
+    case PIXEL_FORMAT_YUV422P10:
+      shift = 2;
+      format = PIXEL_FORMAT_YV16;
+      break;
+
+    case PIXEL_FORMAT_YUV422P9:
+      shift = 1;
+      format = PIXEL_FORMAT_YV16;
+      break;
+
+    case PIXEL_FORMAT_YUV444P12:
+      shift = 4;
+      format = PIXEL_FORMAT_YV24;
+      break;
+
     case PIXEL_FORMAT_YUV444P10:
       shift = 2;
+      format = PIXEL_FORMAT_YV24;
+      break;
+
     case PIXEL_FORMAT_YUV444P9:
+      shift = 1;
       format = PIXEL_FORMAT_YV24;
       break;
 
@@ -471,9 +511,7 @@ scoped_refptr<VideoFrame> DownShiftHighbitVideoFrame(
 
   // Copy all metadata.
   // (May be enough to copy color space)
-  base::DictionaryValue tmp;
-  video_frame->metadata()->MergeInternalValuesInto(&tmp);
-  ret->metadata()->MergeInternalValuesFrom(tmp);
+  ret->metadata()->MergeMetadataFrom(video_frame->metadata());
 
   for (int plane = VideoFrame::kYPlane; plane <= VideoFrame::kVPlane; ++plane) {
     int width = ret->row_bytes(plane);
@@ -490,7 +528,103 @@ scoped_refptr<VideoFrame> DownShiftHighbitVideoFrame(
   }
   return ret;
 }
+
+// Converts 16-bit data to |out| buffer of specified GL |type|.
+// When the |format| is RGBA, the converted value is fed as luminance.
+void FlipAndConvertY16(const VideoFrame* video_frame,
+                       uint8_t* out,
+                       unsigned format,
+                       unsigned type,
+                       bool flip_y,
+                       size_t output_row_bytes) {
+  const uint8_t* row_head = video_frame->visible_data(0);
+  const size_t stride = video_frame->stride(0);
+  const int height = video_frame->visible_rect().height();
+  for (int i = 0; i < height; ++i, row_head += stride) {
+    uint8_t* out_row_head = flip_y ? out + output_row_bytes * (height - i - 1)
+                                   : out + output_row_bytes * i;
+    const uint16_t* row = reinterpret_cast<const uint16_t*>(row_head);
+    const uint16_t* row_end = row + video_frame->visible_rect().width();
+    if (type == GL_FLOAT) {
+      float* out_row = reinterpret_cast<float*>(out_row_head);
+      if (format == GL_RGBA) {
+        while (row < row_end) {
+          float gray_value = *row++ / 65535.f;
+          *out_row++ = gray_value;
+          *out_row++ = gray_value;
+          *out_row++ = gray_value;
+          *out_row++ = 1.0f;
+        }
+        continue;
+      } else if (format == GL_RED) {
+        while (row < row_end)
+          *out_row++ = *row++ / 65535.f;
+        continue;
+      }
+      // For other formats, hit NOTREACHED bellow.
+    } else if (type == GL_UNSIGNED_BYTE) {
+      // We take the upper 8 bits of 16-bit data and convert it as luminance to
+      // ARGB.  We loose the precision here, but it is important not to render
+      // Y16 as RG_88.  To get the full precision use float textures with WebGL1
+      // and e.g. R16UI or R32F textures with WebGL2.
+      DCHECK_EQ(static_cast<unsigned>(GL_RGBA), format);
+      uint32_t* rgba = reinterpret_cast<uint32_t*>(out_row_head);
+      while (row < row_end) {
+        uint32_t gray_value = *row++ >> 8;
+        *rgba++ = SkColorSetRGB(gray_value, gray_value, gray_value);
+      }
+      continue;
+    }
+    NOTREACHED() << "Unsupported Y16 conversion for format: 0x" << std::hex
+                 << format << " and type: 0x" << std::hex << type;
+  }
 }
+
+// Common functionality of SkCanvasVideoRenderer's TexImage2D and TexSubImage2D.
+// Allocates a buffer required for conversion and converts |frame| content to
+// desired |format|.
+// Returns true if calling glTex(Sub)Image is supported for provided |frame|
+// format and parameters.
+bool TexImageHelper(VideoFrame* frame,
+                    unsigned format,
+                    unsigned type,
+                    bool flip_y,
+                    scoped_refptr<DataBuffer>* temp_buffer) {
+  unsigned output_bytes_per_pixel = 0;
+  switch (frame->format()) {
+    case PIXEL_FORMAT_Y16:
+      // Converting single component unsigned short here to FLOAT luminance.
+      switch (format) {
+        case GL_RGBA:
+          if (type == GL_FLOAT) {
+            output_bytes_per_pixel = 4 * sizeof(GLfloat);
+            break;
+          }
+          return false;
+        case GL_RED:
+          if (type == GL_FLOAT) {
+            output_bytes_per_pixel = sizeof(GLfloat);
+            break;
+          }
+          return false;
+        default:
+          return false;
+      }
+      break;
+    default:
+      return false;
+  }
+
+  size_t output_row_bytes =
+      frame->visible_rect().width() * output_bytes_per_pixel;
+  *temp_buffer =
+      new DataBuffer(output_row_bytes * frame->visible_rect().height());
+  FlipAndConvertY16(frame, (*temp_buffer)->writable_data(), format, type,
+                    flip_y, output_row_bytes);
+  return true;
+}
+
+}  // anonymous namespace
 
 // static
 void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
@@ -499,10 +633,6 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
     size_t row_bytes) {
   if (!video_frame->IsMappable()) {
     NOTREACHED() << "Cannot extract pixels from non-CPU frame formats.";
-    return;
-  }
-  if (!media::IsYuvPlanar(video_frame->format())) {
-    NOTREACHED() << "Non YUV formats are not supported";
     return;
   }
 
@@ -542,6 +672,7 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
       }
       break;
     case PIXEL_FORMAT_YV16:
+    case PIXEL_FORMAT_I422:
       LIBYUV_I422_TO_ARGB(video_frame->visible_data(VideoFrame::kYPlane),
                           video_frame->stride(VideoFrame::kYPlane),
                           video_frame->visible_data(VideoFrame::kUPlane),
@@ -586,13 +717,23 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
     case PIXEL_FORMAT_YUV444P9:
     case PIXEL_FORMAT_YUV420P10:
     case PIXEL_FORMAT_YUV422P10:
-    case PIXEL_FORMAT_YUV444P10: {
+    case PIXEL_FORMAT_YUV444P10:
+    case PIXEL_FORMAT_YUV420P12:
+    case PIXEL_FORMAT_YUV422P12:
+    case PIXEL_FORMAT_YUV444P12: {
       scoped_refptr<VideoFrame> temporary_frame =
           DownShiftHighbitVideoFrame(video_frame);
       ConvertVideoFrameToRGBPixels(temporary_frame.get(), rgb_pixels,
                                    row_bytes);
       break;
     }
+
+    case PIXEL_FORMAT_Y16:
+      // Since it is grayscale conversion, we disregard SK_PMCOLOR_BYTE_ORDER
+      // and always use GL_RGBA.
+      FlipAndConvertY16(video_frame, static_cast<uint8_t*>(rgb_pixels), GL_RGBA,
+                        GL_UNSIGNED_BYTE, false /*flip_y*/, row_bytes);
+      break;
 
     case PIXEL_FORMAT_NV12:
     case PIXEL_FORMAT_NV21:
@@ -604,8 +745,9 @@ void SkCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
     case PIXEL_FORMAT_RGB32:
     case PIXEL_FORMAT_MJPEG:
     case PIXEL_FORMAT_MT21:
+    case PIXEL_FORMAT_Y8:
     case PIXEL_FORMAT_UNKNOWN:
-      NOTREACHED();
+      NOTREACHED() << "Only YUV formats and Y16 are supported.";
   }
 }
 
@@ -614,8 +756,6 @@ void SkCanvasVideoRenderer::CopyVideoFrameSingleTextureToGLTexture(
     gpu::gles2::GLES2Interface* gl,
     VideoFrame* video_frame,
     unsigned int texture,
-    unsigned int internal_format,
-    unsigned int type,
     bool premultiply_alpha,
     bool flip_y) {
   DCHECK(video_frame);
@@ -637,8 +777,15 @@ void SkCanvasVideoRenderer::CopyVideoFrameSingleTextureToGLTexture(
   // value down to get the expected result.
   // "flip_y == true" means to reverse the video orientation while
   // "flip_y == false" means to keep the intrinsic orientation.
-  gl->CopyTextureCHROMIUM(source_texture, texture, internal_format, type,
-                          flip_y, premultiply_alpha, false);
+
+  // The video's texture might be larger than the natural size because
+  // the encoder might have had to round up to the size of a macroblock.
+  // Make sure to only copy the natural size to avoid putting garbage
+  // into the bottom of the destination texture.
+  const gfx::Size& natural_size = video_frame->natural_size();
+  gl->CopySubTextureCHROMIUM(source_texture, 0, texture, 0, 0, 0, 0, 0,
+                             natural_size.width(), natural_size.height(),
+                             flip_y, premultiply_alpha, false);
   gl->DeleteTextures(1, &source_texture);
   gl->Flush();
 
@@ -651,8 +798,6 @@ bool SkCanvasVideoRenderer::CopyVideoFrameTexturesToGLTexture(
     gpu::gles2::GLES2Interface* destination_gl,
     const scoped_refptr<VideoFrame>& video_frame,
     unsigned int texture,
-    unsigned int internal_format,
-    unsigned int type,
     bool premultiply_alpha,
     bool flip_y) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -689,9 +834,14 @@ bool SkCanvasVideoRenderer::CopyVideoFrameTexturesToGLTexture(
         destination_gl->CreateAndConsumeTextureCHROMIUM(
             mailbox_holder.texture_target, mailbox_holder.mailbox.name);
 
-    destination_gl->CopyTextureCHROMIUM(intermediate_texture, texture,
-                                        internal_format, type, flip_y,
-                                        premultiply_alpha, false);
+    // The video's texture might be larger than the natural size because
+    // the encoder might have had to round up to the size of a macroblock.
+    // Make sure to only copy the natural size to avoid putting garbage
+    // into the bottom of the destination texture.
+    const gfx::Size& natural_size = video_frame->natural_size();
+    destination_gl->CopySubTextureCHROMIUM(
+        intermediate_texture, 0, texture, 0, 0, 0, 0, 0, natural_size.width(),
+        natural_size.height(), flip_y, premultiply_alpha, false);
     destination_gl->DeleteTextures(1, &intermediate_texture);
 
     // Wait for destination context to consume mailbox before deleting it in
@@ -707,10 +857,54 @@ bool SkCanvasVideoRenderer::CopyVideoFrameTexturesToGLTexture(
     video_frame->UpdateReleaseSyncToken(&client);
   } else {
     CopyVideoFrameSingleTextureToGLTexture(destination_gl, video_frame.get(),
-                                           texture, internal_format, type,
-                                           premultiply_alpha, flip_y);
+                                           texture, premultiply_alpha, flip_y);
   }
 
+  return true;
+}
+
+bool SkCanvasVideoRenderer::TexImage2D(unsigned target,
+                                       gpu::gles2::GLES2Interface* gl,
+                                       VideoFrame* frame,
+                                       int level,
+                                       int internalformat,
+                                       unsigned format,
+                                       unsigned type,
+                                       bool flip_y,
+                                       bool premultiply_alpha) {
+  DCHECK(frame);
+  DCHECK(!frame->HasTextures());
+
+  scoped_refptr<DataBuffer> temp_buffer;
+  if (!TexImageHelper(frame, format, type, flip_y, &temp_buffer))
+    return false;
+
+  gl->TexImage2D(target, level, internalformat, frame->visible_rect().width(),
+                 frame->visible_rect().height(), 0, format, type,
+                 temp_buffer->data());
+  return true;
+}
+
+bool SkCanvasVideoRenderer::TexSubImage2D(unsigned target,
+                                          gpu::gles2::GLES2Interface* gl,
+                                          VideoFrame* frame,
+                                          int level,
+                                          unsigned format,
+                                          unsigned type,
+                                          int xoffset,
+                                          int yoffset,
+                                          bool flip_y,
+                                          bool premultiply_alpha) {
+  DCHECK(frame);
+  DCHECK(!frame->HasTextures());
+
+  scoped_refptr<DataBuffer> temp_buffer;
+  if (!TexImageHelper(frame, format, type, flip_y, &temp_buffer))
+    return false;
+
+  gl->TexSubImage2D(
+      target, level, xoffset, yoffset, frame->visible_rect().width(),
+      frame->visible_rect().height(), format, type, temp_buffer->data());
   return true;
 }
 
@@ -745,6 +939,7 @@ bool SkCanvasVideoRenderer::UpdateLastImage(
       auto* video_generator = new VideoImageGenerator(video_frame);
       last_image_ = SkImage::MakeFromGenerator(video_generator);
     }
+    CorrectLastImageDimensions(gfx::RectToSkIRect(video_frame->visible_rect()));
     if (!last_image_)  // Couldn't create the SkImage.
       return false;
     last_timestamp_ = video_frame->timestamp();
@@ -752,6 +947,21 @@ bool SkCanvasVideoRenderer::UpdateLastImage(
   last_image_deleting_timer_.Reset();
   DCHECK(!!last_image_);
   return true;
+}
+
+void SkCanvasVideoRenderer::CorrectLastImageDimensions(
+    const SkIRect& visible_rect) {
+  last_image_dimensions_for_testing_ = visible_rect.size();
+  if (!last_image_)
+    return;
+  if (last_image_->dimensions() != visible_rect.size() &&
+      last_image_->bounds().contains(visible_rect)) {
+    last_image_ = last_image_->makeSubset(visible_rect);
+  }
+}
+
+SkISize SkCanvasVideoRenderer::LastImageDimensionsForTesting() {
+  return last_image_dimensions_for_testing_;
 }
 
 }  // namespace media

@@ -25,10 +25,7 @@
 
 #include "core/CoreExport.h"
 #include "core/SVGNames.h"
-#include "core/svg/SVGAnimatedBoolean.h"
 #include "core/svg/SVGAnimatedEnumeration.h"
-#include "core/svg/SVGAnimatedInteger.h"
-#include "core/svg/SVGAnimatedIntegerOptionalInteger.h"
 #include "core/svg/SVGAnimatedLength.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGURIReference.h"
@@ -37,49 +34,48 @@
 
 namespace blink {
 
-class SVGResourceClient;
+class CORE_EXPORT SVGFilterElement final : public SVGElement,
+                                           public SVGURIReference {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(SVGFilterElement);
 
-class CORE_EXPORT SVGFilterElement final : public SVGElement, public SVGURIReference {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(SVGFilterElement);
-public:
-    DECLARE_NODE_FACTORY(SVGFilterElement);
-    DECLARE_VIRTUAL_TRACE();
+ public:
+  DECLARE_NODE_FACTORY(SVGFilterElement);
+  DECLARE_VIRTUAL_TRACE();
 
-    ~SVGFilterElement() override;
+  ~SVGFilterElement() override;
 
-    void addClient(SVGResourceClient*);
-    void removeClient(SVGResourceClient*);
+  SVGAnimatedLength* x() const { return m_x.get(); }
+  SVGAnimatedLength* y() const { return m_y.get(); }
+  SVGAnimatedLength* width() const { return m_width.get(); }
+  SVGAnimatedLength* height() const { return m_height.get(); }
+  SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* filterUnits() {
+    return m_filterUnits.get();
+  }
+  SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* primitiveUnits() {
+    return m_primitiveUnits.get();
+  }
 
-    SVGAnimatedLength* x() const { return m_x.get(); }
-    SVGAnimatedLength* y() const { return m_y.get(); }
-    SVGAnimatedLength* width() const { return m_width.get(); }
-    SVGAnimatedLength* height() const { return m_height.get(); }
-    SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* filterUnits() { return m_filterUnits.get(); }
-    SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* primitiveUnits() { return m_primitiveUnits.get(); }
+ private:
+  explicit SVGFilterElement(Document&);
 
-private:
-    explicit SVGFilterElement(Document&);
+  bool needsPendingResourceHandling() const override { return false; }
 
-    bool needsPendingResourceHandling() const override { return false; }
+  void svgAttributeChanged(const QualifiedName&) override;
+  void childrenChanged(const ChildrenChange&) override;
 
-    void svgAttributeChanged(const QualifiedName&) override;
-    void childrenChanged(const ChildrenChange&) override;
+  LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
-    LayoutObject* createLayoutObject(const ComputedStyle&) override;
+  bool selfHasRelativeLengths() const override;
 
-    bool selfHasRelativeLengths() const override;
-
-    Member<SVGAnimatedLength> m_x;
-    Member<SVGAnimatedLength> m_y;
-    Member<SVGAnimatedLength> m_width;
-    Member<SVGAnimatedLength> m_height;
-    Member<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_filterUnits;
-    Member<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_primitiveUnits;
-
-    HeapHashSet<WeakMember<SVGResourceClient>> m_clientsToAdd;
+  Member<SVGAnimatedLength> m_x;
+  Member<SVGAnimatedLength> m_y;
+  Member<SVGAnimatedLength> m_width;
+  Member<SVGAnimatedLength> m_height;
+  Member<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_filterUnits;
+  Member<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_primitiveUnits;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // SVGFilterElement_h
+#endif  // SVGFilterElement_h

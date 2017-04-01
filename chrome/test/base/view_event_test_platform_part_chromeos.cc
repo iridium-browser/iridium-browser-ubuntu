@@ -6,12 +6,11 @@
 
 #include <memory>
 
-#include "ash/common/ash_switches.h"
 #include "ash/common/material_design/material_design_controller.h"
+#include "ash/common/test/test_session_state_delegate.h"
 #include "ash/shell.h"
 #include "ash/shell_init_params.h"
 #include "ash/test/ash_test_helper.h"
-#include "ash/test/test_session_state_delegate.h"
 #include "ash/test/test_shell_delegate.h"
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -22,6 +21,7 @@
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/display/display_switches.h"
 #include "ui/message_center/message_center.h"
 #include "ui/wm/core/wm_state.h"
 
@@ -30,8 +30,9 @@ namespace {
 // ViewEventTestPlatformPart implementation for ChromeOS (chromeos=1).
 class ViewEventTestPlatformPartChromeOS : public ViewEventTestPlatformPart {
  public:
-  explicit ViewEventTestPlatformPartChromeOS(
-      ui::ContextFactory* context_factory);
+  ViewEventTestPlatformPartChromeOS(
+      ui::ContextFactory* context_factory,
+      ui::ContextFactoryPrivate* context_factory_private);
   ~ViewEventTestPlatformPartChromeOS() override;
 
   // Overridden from ViewEventTestPlatformPart:
@@ -47,15 +48,15 @@ class ViewEventTestPlatformPartChromeOS : public ViewEventTestPlatformPart {
 };
 
 ViewEventTestPlatformPartChromeOS::ViewEventTestPlatformPartChromeOS(
-    ui::ContextFactory* context_factory) {
+    ui::ContextFactory* context_factory,
+    ui::ContextFactoryPrivate* context_factory_private) {
   // Ash Shell can't just live on its own without a browser process, we need to
   // also create the message center.
   message_center::MessageCenter::Initialize();
   chromeos::DBusThreadManager::Initialize();
   bluez::BluezDBusManager::Initialize(
       chromeos::DBusThreadManager::Get()->GetSystemBus(),
-      chromeos::DBusThreadManager::Get()->IsUsingStub(
-          chromeos::DBusClientBundle::BLUETOOTH));
+      chromeos::DBusThreadManager::Get()->IsUsingFakes());
   chromeos::CrasAudioHandler::InitializeForTesting();
   chromeos::NetworkHandler::Initialize();
   ash::MaterialDesignController::Initialize();
@@ -66,9 +67,10 @@ ViewEventTestPlatformPartChromeOS::ViewEventTestPlatformPartChromeOS(
   ash::ShellInitParams init_params;
   init_params.delegate = shell_delegate;
   init_params.context_factory = context_factory;
+  init_params.context_factory_private = context_factory_private;
   init_params.blocking_pool = content::BrowserThread::GetBlockingPool();
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      ash::switches::kAshHostWindowBounds, "0+0-1280x800");
+      switches::kHostWindowBounds, "0+0-1280x800");
   ash::Shell::CreateInstance(init_params);
   ash::test::AshTestHelper::GetTestSessionStateDelegate()->
       SetActiveUserSessionStarted(true);
@@ -92,6 +94,8 @@ ViewEventTestPlatformPartChromeOS::~ViewEventTestPlatformPartChromeOS() {
 
 // static
 ViewEventTestPlatformPart* ViewEventTestPlatformPart::Create(
-    ui::ContextFactory* context_factory) {
-  return new ViewEventTestPlatformPartChromeOS(context_factory);
+    ui::ContextFactory* context_factory,
+    ui::ContextFactoryPrivate* context_factory_private) {
+  return new ViewEventTestPlatformPartChromeOS(context_factory,
+                                               context_factory_private);
 }

@@ -91,7 +91,6 @@ int SkiaAndroidApp::message_callback(int fd, int events, void* data) {
     auto skiaAndroidApp = (SkiaAndroidApp*)data;
     Message message;
     skiaAndroidApp->readMessage(&message);
-    SkDebugf("message_callback %d", message.fType);
     SkASSERT(message.fType != kUndefined);
 
     switch (message.fType) {
@@ -182,7 +181,16 @@ void* SkiaAndroidApp::pthread_main(void* arg) {
     ALooper_addFd(looper, skiaAndroidApp->fPipes[0], LOOPER_ID_MESSAGEPIPE, ALOOPER_EVENT_INPUT,
                   message_callback, skiaAndroidApp);
 
-    skiaAndroidApp->fApp = Application::Create(0, nullptr, skiaAndroidApp);
+    static const char* gCmdLine[] = {
+        "viewer",
+        // TODO: figure out how to use am start with extra params to pass in additional arguments at
+        // runtime. Or better yet make an in app switch to enable
+        // "--atrace",
+    };
+
+    skiaAndroidApp->fApp = Application::Create(SK_ARRAY_COUNT(gCmdLine),
+                                               const_cast<char**>(gCmdLine),
+                                               skiaAndroidApp);
 
     while (true) {
         const int ident = ALooper_pollAll(0, nullptr, nullptr, nullptr);

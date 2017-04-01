@@ -8,6 +8,7 @@
 
 #include <iterator>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 
@@ -15,6 +16,7 @@
 #include "base/i18n/rtl.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
@@ -23,6 +25,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
@@ -71,10 +74,10 @@ void AddOptgroupOtherLayouts(base::ListValue* input_methods_list) {
   optgroup->SetString(
       "optionGroupName",
       l10n_util::GetStringUTF16(IDS_OOBE_OTHER_KEYBOARD_LAYOUTS));
-  input_methods_list->Append(optgroup.release());
+  input_methods_list->Append(std::move(optgroup));
 }
 
-base::DictionaryValue* CreateLanguageEntry(
+std::unique_ptr<base::DictionaryValue> CreateLanguageEntry(
     const std::string& language_code,
     const base::string16& language_display_name,
     const base::string16& language_native_display_name) {
@@ -87,13 +90,12 @@ base::DictionaryValue* CreateLanguageEntry(
       base::i18n::StringContainsStrongRTLChars(display_name);
   const std::string directionality = has_rtl_chars ? "rtl" : "ltr";
 
-  std::unique_ptr<base::DictionaryValue> dictionary(
-      new base::DictionaryValue());
+  auto dictionary = base::MakeUnique<base::DictionaryValue>();
   dictionary->SetString("code", language_code);
   dictionary->SetString("displayName", language_display_name);
   dictionary->SetString("textDirection", directionality);
   dictionary->SetString("nativeDisplayName", language_native_display_name);
-  return dictionary.release();
+  return dictionary;
 }
 
 // Gets the list of languages with |descriptors| based on |base_language_codes|.
@@ -267,9 +269,9 @@ std::unique_ptr<base::ListValue> GetLanguageList(
     base::string16 display_name(out_display_names[i]);
     if (insert_divider && display_name == divider16) {
       // Insert divider.
-      base::DictionaryValue* dictionary = new base::DictionaryValue();
+      auto dictionary = base::MakeUnique<base::DictionaryValue>();
       dictionary->SetString("code", kMostRelevantLanguagesDivider);
-      language_list->Append(dictionary);
+      language_list->Append(std::move(dictionary));
       continue;
     }
 
@@ -322,8 +324,7 @@ void GetKeyboardLayoutsForResolvedLocale(
         util->GetInputMethodDescriptorFromId(*it);
     if (!InsertString(ime->id(), &input_methods_added))
       continue;
-    input_methods_list->Append(
-        CreateInputMethodsEntry(*ime, selected).release());
+    input_methods_list->Append(CreateInputMethodsEntry(*ime, selected));
   }
 
   callback.Run(std::move(input_methods_list));
@@ -535,8 +536,7 @@ std::unique_ptr<base::ListValue> GetAndActivateLoginKeyboardLayouts(
     // Do not crash in case of misconfiguration.
     if (ime) {
       input_methods_added.insert(*i);
-      input_methods_list->Append(
-          CreateInputMethodsEntry(*ime, selected).release());
+      input_methods_list->Append(CreateInputMethodsEntry(*ime, selected));
     } else {
       NOTREACHED();
     }
@@ -552,8 +552,8 @@ std::unique_ptr<base::ListValue> GetAndActivateLoginKeyboardLayouts(
       optgroup_added = true;
       AddOptgroupOtherLayouts(input_methods_list.get());
     }
-    input_methods_list->Append(CreateInputMethodsEntry((*input_methods)[i],
-                                                       selected).release());
+    input_methods_list->Append(
+        CreateInputMethodsEntry((*input_methods)[i], selected));
   }
 
   // "xkb:us::eng" should always be in the list of available layouts.
@@ -567,8 +567,8 @@ std::unique_ptr<base::ListValue> GetAndActivateLoginKeyboardLayouts(
       optgroup_added = true;
       AddOptgroupOtherLayouts(input_methods_list.get());
     }
-    input_methods_list->Append(CreateInputMethodsEntry(*us_eng_descriptor,
-                                                       selected).release());
+    input_methods_list->Append(
+        CreateInputMethodsEntry(*us_eng_descriptor, selected));
     manager->GetActiveIMEState()->EnableInputMethod(us_keyboard_id);
   }
   return input_methods_list;

@@ -16,102 +16,103 @@ class ScrollableArea;
 
 // Scrolls to compensate for layout movements (bit.ly/scroll-anchoring).
 class CORE_EXPORT ScrollAnchor final {
-    DISALLOW_NEW();
+  DISALLOW_NEW();
 
-public:
-    ScrollAnchor();
-    explicit ScrollAnchor(ScrollableArea*);
-    ~ScrollAnchor();
+ public:
+  ScrollAnchor();
+  explicit ScrollAnchor(ScrollableArea*);
+  ~ScrollAnchor();
 
-    // The scroller that is scrolled to componsate for layout movements. Note
-    // that the scroller can only be initialized once.
-    void setScroller(ScrollableArea*);
+  // The scroller that is scrolled to componsate for layout movements. Note
+  // that the scroller can only be initialized once.
+  void setScroller(ScrollableArea*);
 
-    // Returns true if the underlying scroller is set.
-    bool hasScroller() const { return m_scroller; }
+  // Returns true if the underlying scroller is set.
+  bool hasScroller() const { return m_scroller; }
 
-    // The LayoutObject we are currently anchored to. Lazily computed during
-    // save() and cached until the next call to clear().
-    LayoutObject* anchorObject() const { return m_anchorObject; }
+  // The LayoutObject we are currently anchored to. Lazily computed during
+  // notifyBeforeLayout() and cached until the next call to clear().
+  LayoutObject* anchorObject() const { return m_anchorObject; }
 
-    // Indicates that the next save() should compute a new anchor. (In certain
-    // cases the previous anchor will be reused; see comments in restore.)
-    void clear();
+  // Indicates that this ScrollAnchor, and all ancestor ScrollAnchors, should
+  // compute new anchor nodes on their next notifyBeforeLayout().
+  void clear();
 
-    // Records the anchor's location in relation to the scroller. Should be
-    // called when the scroller is about to be laid out.
-    void save();
+  // Indicates that this ScrollAnchor should compute a new anchor node on the
+  // next call to notifyBeforeLayout().
+  void clearSelf();
 
-    // Scrolls to compensate for any change in the anchor's relative location
-    // since the most recent call to save(). Should be called immediately after
-    // the scroller has been laid out.
-    void restore();
+  // Records the anchor's location in relation to the scroller. Should be
+  // called when the scroller is about to be laid out.
+  void notifyBeforeLayout();
 
-    enum class Corner {
-        TopLeft = 0,
-        TopRight,
-    };
-    // Which corner of the anchor object we are currently anchored to.
-    // Only meaningful if anchorObject() is non-null.
-    Corner corner() const { return m_corner; }
+  // Scrolls to compensate for any change in the anchor's relative location.
+  // Should be called at the end of the animation frame.
+  void adjust();
 
-    // Checks if we hold any references to the specified object.
-    bool refersTo(const LayoutObject*) const;
+  enum class Corner {
+    TopLeft = 0,
+    TopRight,
+  };
+  // Which corner of the anchor object we are currently anchored to.
+  // Only meaningful if anchorObject() is non-null.
+  Corner corner() const { return m_corner; }
 
-    // Notifies us that an object will be removed from the layout tree.
-    void notifyRemoved(LayoutObject*);
+  // Checks if we hold any references to the specified object.
+  bool refersTo(const LayoutObject*) const;
 
-    DEFINE_INLINE_TRACE() { visitor->trace(m_scroller); }
+  // Notifies us that an object will be removed from the layout tree.
+  void notifyRemoved(LayoutObject*);
 
-private:
-    void findAnchor();
-    bool computeScrollAnchorDisablingStyleChanged();
+  DEFINE_INLINE_TRACE() { visitor->trace(m_scroller); }
 
-    enum WalkStatus {
-        Skip = 0,
-        Constrain,
-        Continue,
-        Return
-    };
-    struct ExamineResult {
-        ExamineResult(WalkStatus s)
-            : status(s)
-            , viable(false)
-            , corner(Corner::TopLeft) {}
+ private:
+  void findAnchor();
+  bool computeScrollAnchorDisablingStyleChanged();
 
-        ExamineResult(WalkStatus s, Corner c)
-            : status(s)
-            , viable(true)
-            , corner(c) {}
+  enum WalkStatus { Skip = 0, Constrain, Continue, Return };
+  struct ExamineResult {
+    ExamineResult(WalkStatus s)
+        : status(s), viable(false), corner(Corner::TopLeft) {}
 
-        WalkStatus status;
-        bool viable;
-        Corner corner;
-    };
-    ExamineResult examine(const LayoutObject*) const;
+    ExamineResult(WalkStatus s, Corner c)
+        : status(s), viable(true), corner(c) {}
 
-    IntSize computeAdjustment() const;
+    WalkStatus status;
+    bool viable;
+    Corner corner;
+  };
+  ExamineResult examine(const LayoutObject*) const;
 
-    // The scroller that owns and is adjusted by this ScrollAnchor.
-    Member<ScrollableArea> m_scroller;
+  IntSize computeAdjustment() const;
 
-    // The LayoutObject we should anchor to.
-    LayoutObject* m_anchorObject;
+  // The scroller to be adjusted by this ScrollAnchor. This is also the scroller
+  // that owns us, unless it is the RootFrameViewport in which case we are owned
+  // by the layout viewport.
+  Member<ScrollableArea> m_scroller;
 
-    // Which corner of m_anchorObject's bounding box to anchor to.
-    Corner m_corner;
+  // The LayoutObject we should anchor to.
+  LayoutObject* m_anchorObject;
 
-    // Location of m_layoutObject relative to scroller at time of save().
-    LayoutPoint m_savedRelativeOffset;
+  // Which corner of m_anchorObject's bounding box to anchor to.
+  Corner m_corner;
 
-    // We suppress scroll anchoring after a style change on the anchor node or
-    // one of its ancestors, if that change might have caused the node to move.
-    // This bit tracks whether we have had a scroll-anchor-disabling style
-    // change since the last layout.  It is recomputed in save(), and used to
-    // suppress the adjustment in restore().  More at http://bit.ly/sanaclap.
-    bool m_scrollAnchorDisablingStyleChanged;
+  // Location of m_layoutObject relative to scroller at time of
+  // notifyBeforeLayout().
+  LayoutPoint m_savedRelativeOffset;
+
+  // We suppress scroll anchoring after a style change on the anchor node or
+  // one of its ancestors, if that change might have caused the node to move.
+  // This bit tracks whether we have had a scroll-anchor-disabling style
+  // change since the last layout.  It is recomputed in notifyBeforeLayout(),
+  // and used to suppress adjustment in adjust().  See http://bit.ly/sanaclap.
+  bool m_scrollAnchorDisablingStyleChanged;
+
+  // True iff an adjustment check has been queued with the FrameView but not yet
+  // performed.
+  bool m_queued;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ScrollAnchor_h
+#endif  // ScrollAnchor_h

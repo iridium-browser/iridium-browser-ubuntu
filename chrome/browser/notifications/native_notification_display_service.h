@@ -14,6 +14,10 @@
 #include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 
+namespace base {
+class NullableString16;
+}
+
 class Notification;
 class NotificationHandler;
 class NotificationPlatformBridge;
@@ -35,14 +39,14 @@ class NativeNotificationDisplayService : public NotificationDisplayService {
   void Close(NotificationCommon::Type notification_type,
              const std::string& notification_id) override;
   bool GetDisplayed(std::set<std::string>* notifications) const override;
-  bool SupportsNotificationCenter() const override;
 
   // Used by the notification bridge to propagate back events (click, close...).
   void ProcessNotificationOperation(NotificationCommon::Operation operation,
                                     NotificationCommon::Type notification_type,
                                     const std::string& origin,
                                     const std::string& notification_id,
-                                    int action_index);
+                                    int action_index,
+                                    const base::NullableString16& reply);
 
   // Registers an implementation object to handle notification operations
   // for |notification_type|.

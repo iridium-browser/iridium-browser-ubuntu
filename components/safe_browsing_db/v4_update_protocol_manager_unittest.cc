@@ -15,6 +15,7 @@
 #include "base/time/time.h"
 #include "components/safe_browsing_db/safebrowsing.pb.h"
 #include "components/safe_browsing_db/util.h"
+#include "components/safe_browsing_db/v4_test_util.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -24,14 +25,6 @@
 
 using base::Time;
 using base::TimeDelta;
-
-namespace {
-
-const char kClient[] = "unittest";
-const char kAppVer[] = "1.0";
-const char kKeyParam[] = "test_key_param";
-
-}  // namespace
 
 namespace safe_browsing {
 
@@ -65,30 +58,32 @@ class V4UpdateProtocolManagerTest : public PlatformTest {
     }
   }
 
+  ExtendedReportingLevel GetExtendedReportingLevel(ExtendedReportingLevel erl) {
+    return erl;
+  }
+
   std::unique_ptr<V4UpdateProtocolManager> CreateProtocolManager(
-      const std::vector<ListUpdateResponse>& expected_lurs) {
-    V4ProtocolConfig config;
-    config.client_name = kClient;
-    config.version = kAppVer;
-    config.key_param = kKeyParam;
-    config.disable_auto_update = false;
+      const std::vector<ListUpdateResponse>& expected_lurs,
+      bool disable_auto_update = false,
+      ExtendedReportingLevel erl = SBER_LEVEL_OFF) {
     return V4UpdateProtocolManager::Create(
-        NULL, config,
+        NULL, GetTestV4ProtocolConfig(disable_auto_update),
         base::Bind(&V4UpdateProtocolManagerTest::ValidateGetUpdatesResults,
-                   base::Unretained(this), expected_lurs));
+                   base::Unretained(this), expected_lurs),
+        base::Bind(&V4UpdateProtocolManagerTest::GetExtendedReportingLevel,
+                   base::Unretained(this), erl));
   }
 
   void SetupStoreStates() {
     store_state_map_ = base::MakeUnique<StoreStateMap>();
 
-    UpdateListIdentifier win_url_malware(WINDOWS_PLATFORM, URL, MALWARE_THREAT);
+    ListIdentifier win_url_malware(WINDOWS_PLATFORM, URL, MALWARE_THREAT);
     store_state_map_->insert({win_url_malware, "initial_state_1"});
 
-    UpdateListIdentifier win_url_uws(WINDOWS_PLATFORM, URL, UNWANTED_SOFTWARE);
+    ListIdentifier win_url_uws(WINDOWS_PLATFORM, URL, UNWANTED_SOFTWARE);
     store_state_map_->insert({win_url_uws, "initial_state_2"});
 
-    UpdateListIdentifier win_exe_uws(WINDOWS_PLATFORM, EXECUTABLE,
-                                     UNWANTED_SOFTWARE);
+    ListIdentifier win_exe_uws(WINDOWS_PLATFORM, EXECUTABLE, UNWANTED_SOFTWARE);
     store_state_map_->insert({win_exe_uws, "initial_state_3"});
   }
 
@@ -141,7 +136,6 @@ class V4UpdateProtocolManagerTest : public PlatformTest {
   std::unique_ptr<StoreStateMap> store_state_map_;
 };
 
-// TODO(vakh): Add many more tests.
 TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesErrorHandlingNetwork) {
   scoped_refptr<base::TestSimpleTaskRunner> runner(
       new base::TestSimpleTaskRunner());
@@ -160,8 +154,6 @@ TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesErrorHandlingNetwork) {
   pm->IssueUpdateRequest();
 
   EXPECT_FALSE(pm->IsUpdateScheduled());
-
-  runner->RunPendingTasks();
 
   net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
   DCHECK(fetcher);
@@ -194,8 +186,6 @@ TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesErrorHandlingResponseCode) {
   pm->IssueUpdateRequest();
 
   EXPECT_FALSE(pm->IsUpdateScheduled());
-
-  runner->RunPendingTasks();
 
   net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
   DCHECK(fetcher);
@@ -231,8 +221,6 @@ TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesNoError) {
 
   EXPECT_FALSE(pm->IsUpdateScheduled());
 
-  runner->RunPendingTasks();
-
   net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
   DCHECK(fetcher);
   fetcher->set_status(net::URLRequestStatus());
@@ -266,8 +254,6 @@ TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesWithOneBackoff) {
 
   EXPECT_FALSE(pm->IsUpdateScheduled());
 
-  runner->RunPendingTasks();
-
   net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
   DCHECK(fetcher);
   fetcher->set_status(net::URLRequestStatus());
@@ -283,6 +269,7 @@ TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesWithOneBackoff) {
 
   // Retry, now no backoff.
   expect_callback_to_be_called_ = true;
+  // Call RunPendingTasks to ensure that the request is sent after backoff.
   runner->RunPendingTasks();
 
   fetcher = factory.GetFetcherByID(1);
@@ -302,28 +289,103 @@ TEST_F(V4UpdateProtocolManagerTest, TestBase64EncodingUsesUrlEncoding) {
   // NOTE(vakh): I handpicked this value for state by generating random strings
   // and picked the one that leads to a '-' in the base64 url encoded request
   // output.
-  std::string state_minus = "z-R~3ruViQH";
-  StoreStateMap store_state_map_minus{
-      {UpdateListIdentifier(LINUX_PLATFORM, URL, MALWARE_THREAT), state_minus}};
-  std::string encoded_request_with_minus =
-      V4UpdateProtocolManager::GetBase64SerializedUpdateRequestProto(
-          store_state_map_minus);
-  EXPECT_EQ("GhkIARACGgt6LVJ-M3J1VmlRSCIEIAEgAigB", encoded_request_with_minus);
+  store_state_map_->clear();
+  (*store_state_map_)[ListIdentifier(LINUX_PLATFORM, URL, MALWARE_THREAT)] =
+      "h8xfYqY>:R";
+  std::unique_ptr<V4UpdateProtocolManager> pm(
+      CreateProtocolManager(std::vector<ListUpdateResponse>({})));
+  pm->store_state_map_ = std::move(store_state_map_);
 
-  // NOTE(vakh): Same process for chosing this string. I am representing it
-  // in base64 encoded form because the actual state value contains non-ASCII
-  // characters.
-  std::string base64_encoded_state_underscore = "VTFfITBf4lBM";
-  std::string state_underscore;
-  base::Base64Decode(base64_encoded_state_underscore, &state_underscore);
-  StoreStateMap store_state_map_underscore{
-      {UpdateListIdentifier(LINUX_PLATFORM, URL, MALWARE_THREAT),
-       state_underscore}};
-  std::string encoded_request_with_underscore =
-      V4UpdateProtocolManager::GetBase64SerializedUpdateRequestProto(
-          store_state_map_underscore);
-  EXPECT_EQ("GhcIARACGglVMV8hMF_iUEwiBCABIAIoAQ==",
-            encoded_request_with_underscore);
+  std::string encoded_request_with_minus =
+      pm->GetBase64SerializedUpdateRequestProto();
+  EXPECT_EQ("Cg8KCHVuaXR0ZXN0EgMxLjAaGAgBEAIaCmg4eGZZcVk-OlIiBCABIAIoASICCAE=",
+            encoded_request_with_minus);
+
+  // TODO(vakh): Add a similar test for underscore for completeness, although
+  // the '-' case is sufficient to prove that we are using URL encoding.
+}
+
+TEST_F(V4UpdateProtocolManagerTest, TestDisableAutoUpdates) {
+  scoped_refptr<base::TestSimpleTaskRunner> runner(
+      new base::TestSimpleTaskRunner());
+  base::ThreadTaskRunnerHandle runner_handler(runner);
+  net::TestURLFetcherFactory factory;
+  std::unique_ptr<V4UpdateProtocolManager> pm(CreateProtocolManager(
+      std::vector<ListUpdateResponse>(), true /* disable_auto_update */));
+
+  // Initial state. No errors.
+  pm->ScheduleNextUpdate(std::move(store_state_map_));
+  EXPECT_FALSE(pm->IsUpdateScheduled());
+
+  runner->RunPendingTasks();
+  EXPECT_FALSE(pm->IsUpdateScheduled());
+
+  net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
+  DCHECK(!fetcher);
+}
+
+TEST_F(V4UpdateProtocolManagerTest, TestGetUpdatesHasTimeout) {
+  scoped_refptr<base::TestSimpleTaskRunner> runner(
+      new base::TestSimpleTaskRunner());
+  base::ThreadTaskRunnerHandle runner_handler(runner);
+  net::TestURLFetcherFactory factory;
+  std::vector<ListUpdateResponse> expected_lurs;
+  SetupExpectedListUpdateResponse(&expected_lurs);
+  std::unique_ptr<V4UpdateProtocolManager> pm(
+      CreateProtocolManager(expected_lurs));
+  runner->ClearPendingTasks();
+
+  // Initial state. No errors.
+  EXPECT_EQ(0ul, pm->update_error_count_);
+  EXPECT_EQ(1ul, pm->update_back_off_mult_);
+  expect_callback_to_be_called_ = true;
+  pm->store_state_map_ = std::move(store_state_map_);
+  pm->IssueUpdateRequest();
+
+  net::TestURLFetcher* timeout_fetcher = factory.GetFetcherByID(0);
+  DCHECK(timeout_fetcher);
+  // Don't set anything on the fetcher. Let it time out.
+  runner->RunPendingTasks();
+
+  net::TestURLFetcher* fetcher = factory.GetFetcherByID(1);
+  DCHECK(!fetcher);
+  // Now wait for the next request to be scheduled.
+  runner->RunPendingTasks();
+
+  // There should be another fetcher now.
+  fetcher = factory.GetFetcherByID(1);
+  DCHECK(fetcher);
+  fetcher->set_status(net::URLRequestStatus());
+  fetcher->set_response_code(net::HTTP_OK);
+  fetcher->SetResponseString(GetExpectedV4UpdateResponse(expected_lurs));
+  fetcher->delegate()->OnURLFetchComplete(fetcher);
+
+  // No error, back off multiplier is unchanged.
+  EXPECT_EQ(0ul, pm->update_error_count_);
+  EXPECT_EQ(1ul, pm->update_back_off_mult_);
+}
+
+TEST_F(V4UpdateProtocolManagerTest, TestExtendedReportingLevelIncluded) {
+  store_state_map_->clear();
+  (*store_state_map_)[ListIdentifier(LINUX_PLATFORM, URL, MALWARE_THREAT)] =
+      "state";
+  std::string base = "Cg8KCHVuaXR0ZXN0EgMxLjAaEwgBEAIaBXN0YXRlIgQgASACKAEiAgg";
+
+  std::unique_ptr<V4UpdateProtocolManager> pm_with_off(CreateProtocolManager(
+      std::vector<ListUpdateResponse>({}), false, SBER_LEVEL_OFF));
+  pm_with_off->store_state_map_ = std::move(store_state_map_);
+  EXPECT_EQ(base + "B", pm_with_off->GetBase64SerializedUpdateRequestProto());
+
+  std::unique_ptr<V4UpdateProtocolManager> pm_with_legacy(CreateProtocolManager(
+      std::vector<ListUpdateResponse>({}), false, SBER_LEVEL_LEGACY));
+  pm_with_legacy->store_state_map_ = std::move(pm_with_off->store_state_map_);
+  EXPECT_EQ(base + "C",
+            pm_with_legacy->GetBase64SerializedUpdateRequestProto());
+
+  std::unique_ptr<V4UpdateProtocolManager> pm_with_scout(CreateProtocolManager(
+      std::vector<ListUpdateResponse>({}), false, SBER_LEVEL_SCOUT));
+  pm_with_scout->store_state_map_ = std::move(pm_with_legacy->store_state_map_);
+  EXPECT_EQ(base + "D", pm_with_scout->GetBase64SerializedUpdateRequestProto());
 }
 
 }  // namespace safe_browsing

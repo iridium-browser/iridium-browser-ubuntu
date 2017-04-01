@@ -4,11 +4,14 @@
 
 #include "chrome/browser/chromeos/hats/hats_notification_controller.h"
 
+#include "ash/common/strings/grit/ash_strings.h"
 #include "ash/common/system/system_notifier.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/hats/hats_dialog.h"
+#include "chrome/browser/chromeos/hats/hats_finch_helper.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -17,13 +20,12 @@
 #include "chrome/browser/search/suggestions/image_decoder_impl.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/theme_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/network/network_state.h"
 #include "components/image_fetcher/image_fetcher_impl.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "grit/ash_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_rep.h"
@@ -151,17 +153,23 @@ bool HatsNotificationController::ShouldShowSurveyToProfile(Profile* profile) {
   if (profile->IsGuestSession())
     return false;
 
-  // Do not show the survey if the current user is not an owner.
-  if (!ProfileHelper::IsOwnerProfile(profile))
+  const bool is_enterprise_enrolled = g_browser_process->platform_part()
+                                          ->browser_policy_connector_chromeos()
+                                          ->IsEnterpriseManaged();
+
+  // Do not show survey if this is a non dogfood enterprise enrolled device.
+  if (is_enterprise_enrolled && !IsGoogleUser(profile->GetProfileUserName()))
     return false;
 
-  // Do not show survey if this is an non google enterprise managed device.
-  if (g_browser_process->platform_part()
-          ->browser_policy_connector_chromeos()
-          ->IsEnterpriseManaged() &&
-      !IsGoogleUser(profile->GetProfileUserName())) {
+  // In an enterprise enrolled device, the user can never be the owner, hence
+  // only check for ownership on a non enrolled device.
+  if (!is_enterprise_enrolled && !ProfileHelper::IsOwnerProfile(profile))
     return false;
-  }
+
+  // Call finch helper only after all the profile checks are complete.
+  HatsFinchHelper hats_finch_helper(profile);
+  if (!hats_finch_helper.IsDeviceSelectedForCurrentCycle())
+    return false;
 
   int threshold_days = IsGoogleUser(profile->GetProfileUserName())
                            ? kHatsGooglerThresholdDays
@@ -180,7 +188,12 @@ std::string HatsNotificationController::id() const {
 }
 
 // message_center::NotificationDelegate override:
-void HatsNotificationController::ButtonClick(int button_index) {
+void HatsNotificationController::Click() {
+  ButtonClick(0 /* unused */);
+}
+
+// message_center::NotificationDelegate override:
+void HatsNotificationController::ButtonClick(int /* button_index */) {
   UpdateLastInteractionTime();
 
   // The dialog deletes itslef on close.

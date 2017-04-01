@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/autofill/save_card_bubble_controller.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/legal_message_line.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/border.h"
@@ -192,7 +192,7 @@ std::unique_ptr<views::View> SaveCardBubbleViews::CreateMainContentView() {
           .AsImageSkia());
   card_type_icon->SetTooltipText(card.TypeForDisplay());
   card_type_icon->SetBorder(
-      views::Border::CreateSolidBorder(1, SkColorSetA(SK_ColorBLACK, 10)));
+      views::CreateSolidBorder(1, SkColorSetA(SK_ColorBLACK, 10)));
   description_view->AddChildView(card_type_icon);
 
   description_view->AddChildView(new views::Label(

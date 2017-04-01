@@ -9,12 +9,14 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "net/base/net_export.h"
 #include "net/url_request/url_request_job_factory.h"
 
 namespace net {
 
 class FtpAuthCache;
 class FtpTransactionFactory;
+class HostResolver;
 class NetworkDelegate;
 class URLRequestJob;
 
@@ -22,8 +24,18 @@ class URLRequestJob;
 class NET_EXPORT FtpProtocolHandler :
     public URLRequestJobFactory::ProtocolHandler {
  public:
-  explicit FtpProtocolHandler(FtpTransactionFactory* ftp_transaction_factory);
   ~FtpProtocolHandler() override;
+
+  // Creates an FtpProtocolHandler using an FtpTransactionFactoryImpl and the
+  // specified HostResolver.
+  static std::unique_ptr<FtpProtocolHandler> Create(
+      HostResolver* host_resolver);
+
+  // Creates an FtpProtocolHandler using the specified FtpTransactionFactory, to
+  // allow a mock to be used for testing.
+  static std::unique_ptr<FtpProtocolHandler> CreateForTesting(
+      std::unique_ptr<FtpTransactionFactory> ftp_transaction_factory);
+
   URLRequestJob* MaybeCreateJob(
       URLRequest* request,
       NetworkDelegate* network_delegate) const override;
@@ -31,7 +43,10 @@ class NET_EXPORT FtpProtocolHandler :
  private:
   friend class FtpTestURLRequestContext;
 
-  FtpTransactionFactory* ftp_transaction_factory_;
+  explicit FtpProtocolHandler(
+      std::unique_ptr<FtpTransactionFactory> ftp_transaction_factory);
+
+  std::unique_ptr<FtpTransactionFactory> ftp_transaction_factory_;
   std::unique_ptr<FtpAuthCache> ftp_auth_cache_;
 
   DISALLOW_COPY_AND_ASSIGN(FtpProtocolHandler);

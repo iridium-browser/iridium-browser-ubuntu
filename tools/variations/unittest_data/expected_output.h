@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // GENERATED FROM THE SCHEMA DEFINITION AND DESCRIPTION IN
-//   fieldtrial_testing_config_schema.json
+//   field_trial_testing_config_schema.json
 //   test_config.json
 // DO NOT EDIT.
 
@@ -13,30 +13,31 @@
 #include <cstddef>
 
 
-struct FieldTrialTestingGroupParams {
+struct FieldTrialTestingExperimentParams {
   const char* const key;
   const char* const value;
 };
 
-struct FieldTrialTestingGroup {
+struct FieldTrialTestingExperiment {
   const char* const name;
-  const FieldTrialTestingGroupParams * params;
+  const FieldTrialTestingExperimentParams * params;
   const size_t params_size;
   const char* const * enable_features;
   const size_t enable_features_size;
   const char* const * disable_features;
   const size_t disable_features_size;
+  const char* const forcing_flag;
 };
 
-struct FieldTrialTestingTrial {
+struct FieldTrialTestingStudy {
   const char* const name;
-  const FieldTrialTestingGroup * groups;
-  const size_t groups_size;
+  const FieldTrialTestingExperiment * experiments;
+  const size_t experiments_size;
 };
 
 struct FieldTrialTestingConfig {
-  const FieldTrialTestingTrial * trials;
-  const size_t trials_size;
+  const FieldTrialTestingStudy * studies;
+  const size_t studies_size;
 };
 
 

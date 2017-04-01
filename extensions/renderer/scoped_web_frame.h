@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef SCOPED_WEB_FRAME_H_
-#define SCOPED_WEB_FRAME_H_
+#ifndef EXTENSIONS_RENDERER_SCOPED_WEB_FRAME_H_
+#define EXTENSIONS_RENDERER_SCOPED_WEB_FRAME_H_
 
 #include "base/macros.h"
+#include "third_party/WebKit/public/web/WebFrameClient.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 
@@ -21,14 +22,17 @@ public:
   blink::WebLocalFrame* frame() { return frame_; }
 
 private:
-  // The webview and the frame are kept alive by the ScopedWebFrame
-  // because they are not destructed unless ~ScopedWebFrame explicitly
-  // closes the webview and the frame.
-  blink::WebView* view_;
-  blink::WebLocalFrame* frame_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedWebFrame);
+ blink::WebFrameClient frame_client_;
+
+ // The webview and the frame are kept alive by the ScopedWebFrame
+ // because they are not destructed unless ~ScopedWebFrame explicitly
+ // closes the WebView.
+ blink::WebView* view_;
+ blink::WebLocalFrame* frame_;
+
+ DISALLOW_COPY_AND_ASSIGN(ScopedWebFrame);
 };
 
 }  // namespace extensions
 
-#endif  // SCOPED_WEB_FRAME_H_
+#endif  // EXTENSIONS_RENDERER_SCOPED_WEB_FRAME_H_

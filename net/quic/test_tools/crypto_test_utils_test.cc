@@ -6,6 +6,7 @@
 
 #include "net/quic/core/crypto/crypto_server_config_protobuf.h"
 #include "net/quic/core/quic_utils.h"
+#include "net/quic/platform/api/quic_text_utils.h"
 #include "net/quic/test_tools/mock_clock.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -16,48 +17,95 @@ using std::string;
 namespace net {
 namespace test {
 
-class ShloVerifier : public ValidateClientHelloResultCallback {
+class ShloVerifier {
  public:
-  ShloVerifier(QuicCryptoServerConfig* crypto_config,
-               IPAddress server_ip,
-               IPEndPoint client_addr,
-               const QuicClock* clock,
-               QuicCryptoProof* proof,
-               QuicCompressedCertsCache* compressed_certs_cache)
+  ShloVerifier(
+      QuicCryptoServerConfig* crypto_config,
+      QuicSocketAddress server_addr,
+      QuicSocketAddress client_addr,
+      const QuicClock* clock,
+      QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config,
+      QuicCompressedCertsCache* compressed_certs_cache)
       : crypto_config_(crypto_config),
-        server_ip_(server_ip),
+        server_addr_(server_addr),
         client_addr_(client_addr),
         clock_(clock),
-        proof_(proof),
-        compressed_certs_cache_(compressed_certs_cache) {}
+        signed_config_(signed_config),
+        compressed_certs_cache_(compressed_certs_cache),
+        params_(new QuicCryptoNegotiatedParameters) {}
 
-  // Verify that the output message is a SHLO.
-  void RunImpl(const CryptoHandshakeMessage& chlo,
-               const ValidateClientHelloResultCallback::Result& result,
-               std::unique_ptr<ProofSource::Details> /* details */) override {
-    QuicCryptoNegotiatedParameters params;
-    string error_details;
-    DiversificationNonce diversification_nonce;
-    CryptoHandshakeMessage out;
-    crypto_config_->ProcessClientHello(
-        result, /*reject_only=*/false, /*connection_id=*/1, server_ip_,
-        client_addr_, AllSupportedVersions().front(), AllSupportedVersions(),
-        /*use_stateless_rejects=*/true, /*server_designated_connection_id=*/0,
-        clock_, QuicRandom::GetInstance(), compressed_certs_cache_, &params,
-        proof_, /*total_framing_overhead=*/50, kDefaultMaxPacketSize, &out,
-        &diversification_nonce, &error_details);
-    // Verify output is a SHLO.
-    EXPECT_EQ(out.tag(), kSHLO) << "Fail to pass validation. Get "
-                                << out.DebugString();
+  class ValidateClientHelloCallback : public ValidateClientHelloResultCallback {
+   public:
+    explicit ValidateClientHelloCallback(ShloVerifier* shlo_verifier)
+        : shlo_verifier_(shlo_verifier) {}
+    void Run(QuicReferenceCountedPointer<
+                 ValidateClientHelloResultCallback::Result> result,
+             std::unique_ptr<ProofSource::Details> /* details */) override {
+      shlo_verifier_->ValidateClientHelloDone(result);
+    }
+
+   private:
+    ShloVerifier* shlo_verifier_;
+  };
+
+  std::unique_ptr<ValidateClientHelloCallback>
+  GetValidateClientHelloCallback() {
+    return std::unique_ptr<ValidateClientHelloCallback>(
+        new ValidateClientHelloCallback(this));
   }
 
- protected:
+ private:
+  void ValidateClientHelloDone(
+      const QuicReferenceCountedPointer<
+          ValidateClientHelloResultCallback::Result>& result) {
+    result_ = result;
+    crypto_config_->ProcessClientHello(
+        result_, /*reject_only=*/false, /*connection_id=*/1, server_addr_,
+        client_addr_, AllSupportedVersions().front(), AllSupportedVersions(),
+        /*use_stateless_rejects=*/true, /*server_designated_connection_id=*/0,
+        clock_, QuicRandom::GetInstance(), compressed_certs_cache_, params_,
+        signed_config_, /*total_framing_overhead=*/50, kDefaultMaxPacketSize,
+        GetProcessClientHelloCallback());
+  }
+
+  class ProcessClientHelloCallback : public ProcessClientHelloResultCallback {
+   public:
+    explicit ProcessClientHelloCallback(ShloVerifier* shlo_verifier)
+        : shlo_verifier_(shlo_verifier) {}
+    void Run(
+        QuicErrorCode error,
+        const string& error_details,
+        std::unique_ptr<CryptoHandshakeMessage> message,
+        std::unique_ptr<DiversificationNonce> diversification_nonce,
+        std::unique_ptr<ProofSource::Details> proof_source_details) override {
+      shlo_verifier_->ProcessClientHelloDone(std::move(message));
+    }
+
+   private:
+    ShloVerifier* shlo_verifier_;
+  };
+
+  std::unique_ptr<ProcessClientHelloCallback> GetProcessClientHelloCallback() {
+    return std::unique_ptr<ProcessClientHelloCallback>(
+        new ProcessClientHelloCallback(this));
+  }
+
+  void ProcessClientHelloDone(std::unique_ptr<CryptoHandshakeMessage> message) {
+    // Verify output is a SHLO.
+    EXPECT_EQ(message->tag(), kSHLO)
+        << "Fail to pass validation. Get " << message->DebugString();
+  }
+
   QuicCryptoServerConfig* crypto_config_;
-  IPAddress server_ip_;
-  IPEndPoint client_addr_;
+  QuicSocketAddress server_addr_;
+  QuicSocketAddress client_addr_;
   const QuicClock* clock_;
-  QuicCryptoProof* proof_;
+  QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config_;
   QuicCompressedCertsCache* compressed_certs_cache_;
+
+  QuicReferenceCountedPointer<QuicCryptoNegotiatedParameters> params_;
+  QuicReferenceCountedPointer<ValidateClientHelloResultCallback::Result>
+      result_;
 };
 
 TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
@@ -65,9 +113,10 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
   QuicCryptoServerConfig crypto_config(
       QuicCryptoServerConfig::TESTING, QuicRandom::GetInstance(),
       CryptoTestUtils::ProofSourceForTesting());
-  IPAddress server_ip;
-  IPEndPoint client_addr(IPAddress::IPv4Localhost(), 1);
-  QuicCryptoProof proof;
+  QuicSocketAddress server_addr;
+  QuicSocketAddress client_addr(QuicIpAddress::Loopback4(), 1);
+  QuicReferenceCountedPointer<QuicSignedServerConfig> signed_config(
+      new QuicSignedServerConfig);
   QuicCompressedCertsCache compressed_certs_cache(
       QuicCompressedCertsCache::kQuicCompressedCertsCacheSize);
   CryptoHandshakeMessage full_chlo;
@@ -82,7 +131,7 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
                                    new_config_options));
   primary_config->set_primary_time(clock.WallNow().ToUNIXSeconds());
   std::unique_ptr<CryptoHandshakeMessage> msg(
-      crypto_config.AddConfig(primary_config.get(), clock.WallNow()));
+      crypto_config.AddConfig(std::move(primary_config), clock.WallNow()));
   StringPiece orbit;
   ASSERT_TRUE(msg->GetStringPiece(kORBT, &orbit));
   string nonce;
@@ -91,12 +140,12 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
       StringPiece(reinterpret_cast<const char*>(orbit.data()),
                   sizeof(orbit.size())),
       &nonce);
-  string nonce_hex = "#" + QuicUtils::HexEncode(nonce);
+  string nonce_hex = "#" + QuicTextUtils::HexEncode(nonce);
 
   char public_value[32];
   memset(public_value, 42, sizeof(public_value));
   string pub_hex =
-      "#" + QuicUtils::HexEncode(public_value, sizeof(public_value));
+      "#" + QuicTextUtils::HexEncode(public_value, sizeof(public_value));
 
   QuicVersion version(AllSupportedVersions().front());
   // clang-format off
@@ -108,19 +157,20 @@ TEST(CryptoTestUtilsTest, TestGenerateFullCHLO) {
     "COPT", "SREJ",
     "PUBS", pub_hex.c_str(),
     "NONC", nonce_hex.c_str(),
-    "VER\0", QuicUtils::TagToString(QuicVersionToQuicTag(version)).c_str(),
+    "VER\0", QuicTagToString(QuicVersionToQuicTag(version)).c_str(),
     "$padding", static_cast<int>(kClientHelloMinimumSize),
     nullptr);
   // clang-format on
 
-  CryptoTestUtils::GenerateFullCHLO(inchoate_chlo, &crypto_config, server_ip,
-                                    client_addr, version, &clock, &proof,
+  CryptoTestUtils::GenerateFullCHLO(inchoate_chlo, &crypto_config, server_addr,
+                                    client_addr, version, &clock, signed_config,
                                     &compressed_certs_cache, &full_chlo);
   // Verify that full_chlo can pass crypto_config's verification.
+  ShloVerifier shlo_verifier(&crypto_config, server_addr, client_addr, &clock,
+                             signed_config, &compressed_certs_cache);
   crypto_config.ValidateClientHello(
-      full_chlo, client_addr.address(), server_ip, version, &clock, &proof,
-      new ShloVerifier(&crypto_config, server_ip, client_addr, &clock, &proof,
-                       &compressed_certs_cache));
+      full_chlo, client_addr.host(), server_addr, version, &clock,
+      signed_config, shlo_verifier.GetValidateClientHelloCallback());
 }
 
 }  // namespace test

@@ -3,12 +3,12 @@
 // found in the LICENSE file.
 
 #include <map>
+#include <memory>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/menu_manager_factory.h"
@@ -27,7 +27,6 @@
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_test.h"
 #include "components/arc/test/fake_app_instance.h"
-#include "components/arc/test/fake_arc_bridge_service.h"
 #endif
 
 namespace {
@@ -380,8 +379,8 @@ TEST_F(AppContextMenuTest, ArcMenu) {
 
   menu->ActivatedAt(0);
 
-  const ScopedVector<arc::FakeAppInstance::Request>& launch_requests =
-      arc_test.app_instance()->launch_requests();
+  const std::vector<std::unique_ptr<arc::FakeAppInstance::Request>>&
+      launch_requests = arc_test.app_instance()->launch_requests();
   ASSERT_EQ(1u, launch_requests.size());
   EXPECT_TRUE(launch_requests[0]->IsForApp(app_info));
 

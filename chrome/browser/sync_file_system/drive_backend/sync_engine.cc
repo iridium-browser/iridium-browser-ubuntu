@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
@@ -201,7 +201,7 @@ std::unique_ptr<SyncEngine> SyncEngine::CreateForBrowserContext(
       ui_task_runner.get(), worker_task_runner.get(), drive_task_runner.get(),
       worker_pool.get(), GetSyncFileSystemDir(context->GetPath()), task_logger,
       notification_manager, extension_service, signin_manager, token_service,
-      request_context.get(), base::WrapUnique(new DriveServiceFactory()),
+      request_context.get(), base::MakeUnique<DriveServiceFactory>(),
       nullptr /* env_override */));
 
   sync_engine->Initialize();
@@ -748,10 +748,8 @@ SyncEngine::SyncEngine(
 }
 
 void SyncEngine::OnPendingFileListUpdated(int item_count) {
-  FOR_EACH_OBSERVER(
-      SyncServiceObserver,
-      service_observers_,
-      OnRemoteChangeQueueUpdated(item_count));
+  for (auto& observer : service_observers_)
+    observer.OnRemoteChangeQueueUpdated(item_count);
 }
 
 void SyncEngine::OnFileStatusChanged(const storage::FileSystemURL& url,
@@ -759,19 +757,18 @@ void SyncEngine::OnFileStatusChanged(const storage::FileSystemURL& url,
                                      SyncFileStatus file_status,
                                      SyncAction sync_action,
                                      SyncDirection direction) {
-  FOR_EACH_OBSERVER(FileStatusObserver,
-                    file_status_observers_,
-                    OnFileStatusChanged(
-                        url, file_type, file_status, sync_action, direction));
+  for (auto& observer : file_status_observers_) {
+    observer.OnFileStatusChanged(url, file_type, file_status, sync_action,
+                                 direction);
+  }
 }
 
 void SyncEngine::UpdateServiceState(RemoteServiceState state,
                                     const std::string& description) {
   service_state_ = state;
 
-  FOR_EACH_OBSERVER(
-      SyncServiceObserver, service_observers_,
-      OnRemoteServiceStateUpdated(GetCurrentState(), description));
+  for (auto& observer : service_observers_)
+    observer.OnRemoteServiceStateUpdated(GetCurrentState(), description);
 }
 
 SyncStatusCallback SyncEngine::TrackCallback(

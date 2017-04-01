@@ -21,8 +21,8 @@ SynchronousTaskGraphRunner::~SynchronousTaskGraphRunner() {
   DCHECK(!work_queue_.HasReadyToRunTasks());
 }
 
-NamespaceToken SynchronousTaskGraphRunner::GetNamespaceToken() {
-  return work_queue_.GetNamespaceToken();
+NamespaceToken SynchronousTaskGraphRunner::GenerateNamespaceToken() {
+  return work_queue_.GenerateNamespaceToken();
 }
 
 void SynchronousTaskGraphRunner::ScheduleTasks(NamespaceToken token,
@@ -85,11 +85,9 @@ bool SynchronousTaskGraphRunner::RunTask() {
 
   const uint16_t category = found->first;
   auto prioritized_task = work_queue_.GetNextTaskToRun(category);
+  prioritized_task.task->RunOnWorkerThread();
 
-  Task* task = prioritized_task.task;
-  task->RunOnWorkerThread();
-
-  work_queue_.CompleteTask(prioritized_task);
+  work_queue_.CompleteTask(std::move(prioritized_task));
 
   return true;
 }

@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
@@ -27,11 +28,13 @@
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_context_egl.h"
 #include "ui/gl/gl_context_stub_with_extensions.h"
 #include "ui/gl/gl_image_ref_counted_memory.h"
 #include "ui/gl/gl_share_group.h"
 #include "ui/gl/gl_stub_api.h"
 #include "ui/gl/gl_surface.h"
+#include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_surface_stub.h"
 #include "ui/gl/init/gl_factory.h"
 #include "ui/gl/test/gl_surface_test_support.h"
@@ -44,6 +47,43 @@ const size_t kTransferBufferSize = 16384;
 const size_t kSmallTransferBufferSize = 16;
 const size_t kTinyTransferBufferSize = 3;
 
+#if !defined(GPU_FUZZER_USE_ANGLE)
+static const char kExtensions[] =
+    "GL_AMD_compressed_ATC_texture "
+    "GL_ANGLE_texture_compression_dxt3 "
+    "GL_ANGLE_texture_compression_dxt5 "
+    "GL_ANGLE_texture_usage "
+    "GL_APPLE_ycbcr_422 "
+    "GL_ARB_texture_rectangle "
+    "GL_EXT_blend_func_extended "
+    "GL_EXT_color_buffer_float "
+    "GL_EXT_disjoint_timer_query "
+    "GL_EXT_draw_buffers "
+    "GL_EXT_frag_depth "
+    "GL_EXT_multisample_compatibility "
+    "GL_EXT_multisampled_render_to_texture "
+    "GL_EXT_occlusion_query_boolean "
+    "GL_EXT_read_format_bgra "
+    "GL_EXT_shader_texture_lod "
+    "GL_EXT_texture_compression_s3tc "
+    "GL_EXT_texture_filter_anisotropic "
+    "GL_IMG_texture_compression_pvrtc "
+    "GL_KHR_blend_equation_advanced "
+    "GL_KHR_blend_equation_advanced_coherent "
+    "GL_KHR_texture_compression_astc_ldr "
+    "GL_NV_EGL_stream_consumer_external "
+    "GL_NV_framebuffer_mixed_samples "
+    "GL_NV_path_rendering "
+    "GL_OES_compressed_ETC1_RGB8_texture "
+    "GL_OES_depth24 "
+    "GL_OES_EGL_image_external "
+    "GL_OES_rgb8_rgba8 "
+    "GL_OES_texture_float "
+    "GL_OES_texture_float_linear "
+    "GL_OES_texture_half_float "
+    "GL_OES_texture_half_float_linear";
+#endif
+
 class CommandBufferSetup {
  public:
   CommandBufferSetup()
@@ -52,17 +92,33 @@ class CommandBufferSetup {
         sync_point_order_data_(SyncPointOrderData::Create()),
         mailbox_manager_(new gles2::MailboxManagerImpl),
         share_group_(new gl::GLShareGroup),
-        surface_(new gl::GLSurfaceStub),
-        context_(new gl::GLContextStub(share_group_.get())),
         command_buffer_id_(CommandBufferId::FromUnsafeValue(1)) {
     logging::SetMinLogLevel(logging::LOG_FATAL);
     base::CommandLine::Init(0, NULL);
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableUnsafeES3APIs);
-    gpu_preferences_.enable_unsafe_es3_apis = true;
 
+#if defined(GPU_FUZZER_USE_ANGLE)
+    auto* command_line = base::CommandLine::ForCurrentProcess();
+    command_line->AppendSwitchASCII(switches::kUseGL,
+                                    gl::kGLImplementationANGLEName);
+    command_line->AppendSwitchASCII(switches::kUseANGLE,
+                                    gl::kANGLEImplementationNullName);
+    gl::init::InitializeGLOneOffImplementation(gl::kGLImplementationEGLGLES2,
+                                               false, false, false);
+    surface_ = new gl::PbufferGLSurfaceEGL(gfx::Size());
+    surface_->Initialize();
+
+    context_ = new gl::GLContextEGL(share_group_.get());
+    context_->Initialize(surface_.get(), gl::GLContextAttribs());
+#else
+    surface_ = new gl::GLSurfaceStub;
+    context_ = new gl::GLContextStub(share_group_.get());
     gl::GLSurfaceTestSupport::InitializeOneOffWithMockBindings();
-    gl::SetStubGLApi(&api_);
+
+    api_ = base::MakeUnique<gl::GLStubApi>();
+    api_->set_version("OpenGL ES 3.1");
+    api_->set_extensions(kExtensions);
+    gl::SetStubGLApi(api_.get());
+#endif
 
     sync_point_client_ = sync_point_manager_->CreateSyncPointClient(
         sync_point_order_data_, CommandBufferNamespace::IN_PROCESS,
@@ -79,7 +135,7 @@ class CommandBufferSetup {
     scoped_refptr<gles2::ContextGroup> context_group = new gles2::ContextGroup(
         gpu_preferences_, mailbox_manager_.get(), nullptr, translator_cache_,
         completeness_cache_, feature_info, true /* bind_generates_resource */,
-        nullptr /* ImageFactory */);
+        nullptr /* image_factory */, nullptr /* progress_reporter */);
     command_buffer_.reset(
         new CommandBufferService(context_group->transfer_buffer_manager()));
     command_buffer_->SetPutOffsetChangeCallback(
@@ -223,7 +279,6 @@ class CommandBufferSetup {
 
   base::AtExitManager atexit_manager_;
 
-  gl::GLStubApi api_;
   GpuPreferences gpu_preferences_;
 
   std::unique_ptr<SyncPointManager> sync_point_manager_;
@@ -231,9 +286,13 @@ class CommandBufferSetup {
   std::unique_ptr<SyncPointClient> sync_point_client_;
   scoped_refptr<gles2::MailboxManager> mailbox_manager_;
   scoped_refptr<gl::GLShareGroup> share_group_;
+  const gpu::CommandBufferId command_buffer_id_;
+
   scoped_refptr<gl::GLSurface> surface_;
   scoped_refptr<gl::GLContext> context_;
-  const gpu::CommandBufferId command_buffer_id_;
+#if !defined(GPU_FUZZER_USE_ANGLE)
+  std::unique_ptr<gl::GLStubApi> api_;
+#endif
 
   scoped_refptr<gles2::ShaderTranslatorCache> translator_cache_;
   scoped_refptr<gles2::FramebufferCompletenessCache> completeness_cache_;
@@ -250,16 +309,17 @@ class CommandBufferSetup {
   int32_t buffer_id_ = 0;
 };
 
+// Intentionally leaked because asan tries to exit cleanly after a crash, but
+// the decoder is usually in a bad state at that point.
+// We need to load ANGLE libraries before the fuzzer infrastructure starts,
+// because it gets confused about new coverage counters being dynamically
+// registered, causing crashes.
+CommandBufferSetup* g_setup = new CommandBufferSetup();
+
 }  // anonymous namespace
 }  // namespace gpu
 
-
-static gpu::CommandBufferSetup& GetSetup() {
-  static gpu::CommandBufferSetup setup;
-  return setup;
-}
-
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-  GetSetup().RunCommandBuffer(data, size);
+  gpu::g_setup->RunCommandBuffer(data, size);
   return 0;
 }

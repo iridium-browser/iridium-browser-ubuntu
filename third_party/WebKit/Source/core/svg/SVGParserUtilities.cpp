@@ -28,190 +28,200 @@
 namespace blink {
 
 template <typename FloatType>
-static inline bool isValidRange(const FloatType& x)
-{
-    static const FloatType max = std::numeric_limits<FloatType>::max();
-    return x >= -max && x <= max;
+static inline bool isValidRange(const FloatType x) {
+  static const FloatType max = std::numeric_limits<FloatType>::max();
+  return x >= -max && x <= max;
 }
 
-// We use this generic parseNumber function to allow the Path parsing code to work
-// at a higher precision internally, without any unnecessary runtime cost or code
-// complexity.
+template <typename FloatType>
+static inline bool isValidExponent(const FloatType x) {
+  return x >= std::numeric_limits<FloatType>::min_exponent10 &&
+         x <= std::numeric_limits<FloatType>::max_exponent10;
+}
+
+// We use this generic parseNumber function to allow the Path parsing code to
+// work at a higher precision internally, without any unnecessary runtime cost
+// or code complexity.
 template <typename CharType, typename FloatType>
-static bool genericParseNumber(const CharType*& cursor, const CharType* end, FloatType& number, WhitespaceMode mode)
-{
-    FloatType integer, decimal, frac, exponent;
-    int sign, expsign;
+static bool genericParseNumber(const CharType*& cursor,
+                               const CharType* end,
+                               FloatType& number,
+                               WhitespaceMode mode) {
+  if (mode & AllowLeadingWhitespace)
+    skipOptionalSVGSpaces(cursor, end);
 
-    exponent = 0;
-    integer = 0;
-    frac = 1;
-    decimal = 0;
-    sign = 1;
-    expsign = 1;
+  const CharType* ptr = cursor;
+  // read the sign
+  int sign = 1;
+  if (ptr < end && *ptr == '+')
+    ptr++;
+  else if (ptr < end && *ptr == '-') {
+    ptr++;
+    sign = -1;
+  }
 
-    if (mode & AllowLeadingWhitespace)
-        skipOptionalSVGSpaces(cursor, end);
+  if (ptr == end || ((*ptr < '0' || *ptr > '9') && *ptr != '.'))
+    // The first character of a number must be one of [0-9+-.]
+    return false;
 
-    const CharType* ptr = cursor;
-    // read the sign
-    if (ptr < end && *ptr == '+')
-        ptr++;
-    else if (ptr < end && *ptr == '-') {
-        ptr++;
-        sign = -1;
+  // read the integer part, build right-to-left
+  const CharType* digitsStart = ptr;
+  while (ptr < end && *ptr >= '0' && *ptr <= '9')
+    ++ptr;  // Advance to first non-digit.
+
+  FloatType integer = 0;
+  if (ptr != digitsStart) {
+    const CharType* ptrScanIntPart = ptr - 1;
+    FloatType multiplier = 1;
+    while (ptrScanIntPart >= digitsStart) {
+      integer += multiplier * static_cast<FloatType>(*(ptrScanIntPart--) - '0');
+      multiplier *= 10;
+    }
+    // Bail out early if this overflows.
+    if (!isValidRange(integer))
+      return false;
+  }
+
+  FloatType decimal = 0;
+  if (ptr < end && *ptr == '.') {  // read the decimals
+    ptr++;
+
+    // There must be a least one digit following the .
+    if (ptr >= end || *ptr < '0' || *ptr > '9')
+      return false;
+
+    FloatType frac = 1;
+    while (ptr < end && *ptr >= '0' && *ptr <= '9') {
+      frac *= static_cast<FloatType>(0.1);
+      decimal += (*(ptr++) - '0') * frac;
+    }
+  }
+
+  // When we get here we should have consumed either a digit for the integer
+  // part or a fractional part (with at least one digit after the '.'.)
+  DCHECK_NE(digitsStart, ptr);
+
+  number = integer + decimal;
+  number *= sign;
+
+  // read the exponent part
+  if (ptr + 1 < end && (*ptr == 'e' || *ptr == 'E') &&
+      (ptr[1] != 'x' && ptr[1] != 'm')) {
+    ptr++;
+
+    // read the sign of the exponent
+    bool exponentIsNegative = false;
+    if (*ptr == '+')
+      ptr++;
+    else if (*ptr == '-') {
+      ptr++;
+      exponentIsNegative = true;
     }
 
-    if (ptr == end || ((*ptr < '0' || *ptr > '9') && *ptr != '.'))
-        // The first character of a number must be one of [0-9+-.]
-        return false;
+    // There must be an exponent
+    if (ptr >= end || *ptr < '0' || *ptr > '9')
+      return false;
 
-    // read the integer part, build right-to-left
-    const CharType* digitsStart = ptr;
-    while (ptr < end && *ptr >= '0' && *ptr <= '9')
-        ++ptr; // Advance to first non-digit.
-
-    if (ptr != digitsStart) {
-        const CharType* ptrScanIntPart = ptr - 1;
-        FloatType multiplier = 1;
-        while (ptrScanIntPart >= digitsStart) {
-            integer += multiplier * static_cast<FloatType>(*(ptrScanIntPart--) - '0');
-            multiplier *= 10;
-        }
-        // Bail out early if this overflows.
-        if (!isValidRange(integer))
-            return false;
+    FloatType exponent = 0;
+    while (ptr < end && *ptr >= '0' && *ptr <= '9') {
+      exponent *= static_cast<FloatType>(10);
+      exponent += *ptr - '0';
+      ptr++;
     }
-
-    if (ptr < end && *ptr == '.') { // read the decimals
-        ptr++;
-
-        // There must be a least one digit following the .
-        if (ptr >= end || *ptr < '0' || *ptr > '9')
-            return false;
-
-        while (ptr < end && *ptr >= '0' && *ptr <= '9')
-            decimal += (*(ptr++) - '0') * (frac *= static_cast<FloatType>(0.1));
-    }
-
-    // When we get here we should have consumed either a digit for the integer
-    // part or a fractional part (with at least one digit after the '.'.)
-    ASSERT(digitsStart != ptr);
-
-    // read the exponent part
-    if (ptr + 1 < end && (*ptr == 'e' || *ptr == 'E')
-        && (ptr[1] != 'x' && ptr[1] != 'm')) {
-        ptr++;
-
-        // read the sign of the exponent
-        if (*ptr == '+')
-            ptr++;
-        else if (*ptr == '-') {
-            ptr++;
-            expsign = -1;
-        }
-
-        // There must be an exponent
-        if (ptr >= end || *ptr < '0' || *ptr > '9')
-            return false;
-
-        while (ptr < end && *ptr >= '0' && *ptr <= '9') {
-            exponent *= static_cast<FloatType>(10);
-            exponent += *ptr - '0';
-            ptr++;
-        }
-        // Make sure exponent is valid.
-        if (!isValidRange(exponent) || exponent > std::numeric_limits<FloatType>::max_exponent)
-            return false;
-    }
-
-    number = integer + decimal;
-    number *= sign;
-
+    if (exponentIsNegative)
+      exponent = -exponent;
+    // Make sure exponent is valid.
+    if (!isValidExponent(exponent))
+      return false;
     if (exponent)
-        number *= static_cast<FloatType>(pow(10.0, expsign * static_cast<int>(exponent)));
+      number *= static_cast<FloatType>(pow(10.0, static_cast<int>(exponent)));
+  }
 
-    // Don't return Infinity() or NaN().
-    if (!isValidRange(number))
-        return false;
+  // Don't return Infinity() or NaN().
+  if (!isValidRange(number))
+    return false;
 
-    // A valid number has been parsed. Commit cursor.
-    cursor = ptr;
+  // A valid number has been parsed. Commit cursor.
+  cursor = ptr;
 
-    if (mode & AllowTrailingWhitespace)
-        skipOptionalSVGSpacesOrDelimiter(cursor, end);
+  if (mode & AllowTrailingWhitespace)
+    skipOptionalSVGSpacesOrDelimiter(cursor, end);
 
-    return true;
+  return true;
 }
 
-bool parseNumber(const LChar*& ptr, const LChar* end, float& number, WhitespaceMode mode)
-{
-    return genericParseNumber(ptr, end, number, mode);
+bool parseNumber(const LChar*& ptr,
+                 const LChar* end,
+                 float& number,
+                 WhitespaceMode mode) {
+  return genericParseNumber(ptr, end, number, mode);
 }
 
-bool parseNumber(const UChar*& ptr, const UChar* end, float& number, WhitespaceMode mode)
-{
-    return genericParseNumber(ptr, end, number, mode);
+bool parseNumber(const UChar*& ptr,
+                 const UChar* end,
+                 float& number,
+                 WhitespaceMode mode) {
+  return genericParseNumber(ptr, end, number, mode);
 }
 
 // only used to parse largeArcFlag and sweepFlag which must be a "0" or "1"
 // and might not have any whitespace/comma after it
 template <typename CharType>
-bool genericParseArcFlag(const CharType*& ptr, const CharType* end, bool& flag)
-{
-    if (ptr >= end)
-        return false;
-    const CharType flagChar = *ptr;
-    if (flagChar == '0')
-        flag = false;
-    else if (flagChar == '1')
-        flag = true;
-    else
-        return false;
+bool genericParseArcFlag(const CharType*& ptr,
+                         const CharType* end,
+                         bool& flag) {
+  if (ptr >= end)
+    return false;
+  const CharType flagChar = *ptr;
+  if (flagChar == '0')
+    flag = false;
+  else if (flagChar == '1')
+    flag = true;
+  else
+    return false;
 
-    ptr++;
-    skipOptionalSVGSpacesOrDelimiter(ptr, end);
+  ptr++;
+  skipOptionalSVGSpacesOrDelimiter(ptr, end);
 
-    return true;
+  return true;
 }
 
-bool parseArcFlag(const LChar*& ptr, const LChar* end, bool& flag)
-{
-    return genericParseArcFlag(ptr, end, flag);
+bool parseArcFlag(const LChar*& ptr, const LChar* end, bool& flag) {
+  return genericParseArcFlag(ptr, end, flag);
 }
 
-bool parseArcFlag(const UChar*& ptr, const UChar* end, bool& flag)
-{
-    return genericParseArcFlag(ptr, end, flag);
+bool parseArcFlag(const UChar*& ptr, const UChar* end, bool& flag) {
+  return genericParseArcFlag(ptr, end, flag);
 }
 
-template<typename CharType>
-static bool genericParseNumberOptionalNumber(const CharType*& ptr, const CharType* end, float& x, float& y)
-{
-    if (!parseNumber(ptr, end, x))
-        return false;
+template <typename CharType>
+static bool genericParseNumberOptionalNumber(const CharType*& ptr,
+                                             const CharType* end,
+                                             float& x,
+                                             float& y) {
+  if (!parseNumber(ptr, end, x))
+    return false;
 
-    if (ptr == end)
-        y = x;
-    else if (!parseNumber(ptr, end, y, AllowLeadingAndTrailingWhitespace))
-        return false;
+  if (ptr == end)
+    y = x;
+  else if (!parseNumber(ptr, end, y, AllowLeadingAndTrailingWhitespace))
+    return false;
 
-    return ptr == end;
+  return ptr == end;
 }
 
-bool parseNumberOptionalNumber(const String& string, float& x, float& y)
-{
-    if (string.isEmpty())
-        return false;
+bool parseNumberOptionalNumber(const String& string, float& x, float& y) {
+  if (string.isEmpty())
+    return false;
 
-    if (string.is8Bit()) {
-        const LChar* ptr = string.characters8();
-        const LChar* end = ptr + string.length();
-        return genericParseNumberOptionalNumber(ptr, end, x, y);
-    }
-    const UChar* ptr = string.characters16();
-    const UChar* end = ptr + string.length();
+  if (string.is8Bit()) {
+    const LChar* ptr = string.characters8();
+    const LChar* end = ptr + string.length();
     return genericParseNumberOptionalNumber(ptr, end, x, y);
+  }
+  const UChar* ptr = string.characters16();
+  const UChar* end = ptr + string.length();
+  return genericParseNumberOptionalNumber(ptr, end, x, y);
 }
 
-} // namespace blink
+}  // namespace blink

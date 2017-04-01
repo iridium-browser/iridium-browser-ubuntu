@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import traceback
 
@@ -22,18 +23,21 @@ try:
 except ImportError:
   mox = None
 
+from chromite.cbuildbot import buildbucket_lib
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import results_lib
-from chromite.cbuildbot import constants
+from chromite.cbuildbot import topology
 from chromite.cbuildbot import repository
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import failures_lib
 from chromite.lib import gs
 from chromite.lib import metrics
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import portage_util
+from chromite.lib import results_lib
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
@@ -206,7 +210,8 @@ class BuilderStage(object):
 
     fields = {'status': status,
               'name': self.name,
-              'build_config': self._run.config.name}
+              'build_config': self._run.config.name,
+              'important': self._run.config.important}
 
     metrics.SecondsDistribution(constants.MON_STAGE_DURATION).add(
         elapsed_time_seconds, fields=fields)
@@ -270,6 +275,7 @@ class BuilderStage(object):
     kwargs.setdefault('referenced_repo', self._run.options.reference_repo)
     kwargs.setdefault('branch', manifest_branch)
     kwargs.setdefault('manifest', self._run.config.manifest)
+    kwargs.setdefault('git_cache_dir', self._run.options.git_cache_dir)
 
     # pass in preserve_paths so that repository.RepoRepository
     # knows what paths to preserve when executing clean_up_repo
@@ -277,6 +283,48 @@ class BuilderStage(object):
       kwargs.setdefault('preserve_paths', self._run.options.preserve_paths)
 
     return repository.RepoRepository(manifest_url, self._build_root, **kwargs)
+
+  def GetBuildbucketClient(self):
+    """Build a buildbucket_client instance for Buildbucket related operations.
+
+    Returns:
+      An instance of buildbucket_lib.BuildbucketClient if the build is using
+      Buildbucket as the scheduler; else, None.
+    """
+    buildbucket_client = None
+
+    if config_lib.UseBuildbucketScheduler(self._run.config):
+      if buildbucket_lib.GetServiceAccount(constants.CHROMEOS_SERVICE_ACCOUNT):
+        buildbucket_client = buildbucket_lib.BuildbucketClient(
+            service_account=constants.CHROMEOS_SERVICE_ACCOUNT)
+
+      if buildbucket_client is None and self._run.InProduction():
+        # If the build using Buildbucket is running on buildbot and
+        # is in production mode, buildbucket_client cannot be None.
+        raise buildbucket_lib.NoBuildbucketClientException(
+            'Buildbucket_client is None. '
+            'Please check if the buildbot has a valid service account file. '
+            'Please find the service account json file at %s.' %
+            constants.CHROMEOS_SERVICE_ACCOUNT)
+
+    return buildbucket_client
+
+  def GetScheduledSlaveBuildbucketIds(self):
+    """Get buildbucket_ids list of the scheduled slave builds.
+
+    Returns:
+      If slaves were scheduled by Buildbucket, return a list of
+      buildbucket_ids (strings) of the slave builds. The list doesn't
+      contain the old builds which were retried in Buildbucket.
+      If slaves were scheduled by git commits, return None.
+    """
+    buildbucket_ids = None
+    if (config_lib.UseBuildbucketScheduler(self._run.config) and
+        config_lib.IsMasterBuild(self._run.config)):
+      buildbucket_ids = buildbucket_lib.GetBuildbucketIds(
+          self._run.attrs.metadata)
+
+    return buildbucket_ids
 
   def _Print(self, msg):
     """Prints a msg to stderr."""
@@ -341,17 +389,42 @@ class BuilderStage(object):
     return self._run.site_config.GetSlavesForMaster(
         self._run.config, self._run.options)
 
-  def _Begin(self):
-    """Can be overridden.  Called before a stage is performed."""
+  def _GetSlaveConfigMap(self, important_only=True, active_only=True):
+    """Get slave config map for the current build config.
 
-    # Tell the buildbot we are starting a new step for the waterfall
-    logging.PrintBuildbotStepName(self.name)
+    This assumes self._run.config is a master config.
+
+    Args:
+      important_only: If True, only get important slaves.
+      active_only: If True, only get slaves having active_waterfall.
+
+    Returns:
+      A map of slave_name to slave_config for the current master.
+
+    Raises:
+      See config_lib.Config.GetSlaveConfigMapForMaster for details.
+    """
+    return self._run.site_config.GetSlaveConfigMapForMaster(
+        self._run.config, self._run.options,
+        important_only=important_only, active_only=active_only)
+
+  def _BeginStepForBuildbot(self, tag=None):
+    """Called before a stage is performed.
+
+    Args:
+      tag: Extra tag to add to the stage name on the waterfall.
+    """
+    waterfall_name = self.name
+    if tag is not None:
+      waterfall_name += tag
+    logging.PrintBuildbotStepName(waterfall_name)
 
     self._PrintLoudly('Start Stage %s - %s\n\n%s' % (
         self.name, cros_build_lib.UserDateTimeFormat(), self.__doc__))
 
   def _Finish(self):
-    """Can be overridden.  Called after a stage has been performed."""
+    """Called after a stage has been performed. May be overriden."""
+
     self._PrintLoudly('Finished Stage %s - %s' %
                       (self.name, cros_build_lib.UserDateTimeFormat()))
 
@@ -464,68 +537,77 @@ class BuilderStage(object):
     """Record a successful or failed result."""
     results_lib.Results.Record(*args, **kwargs)
 
+  def _ShouldSkipStage(self):
+    """Decide if we were requested to skip this stage."""
+    return (
+        self.option_name and not getattr(self._run.options, self.option_name) or
+        self.config_name and not getattr(self._run.config, self.config_name))
+
   def Run(self):
     """Have the builder execute the stage."""
+    skip_stage = self._ShouldSkipStage()
+    previous_record = results_lib.Results.PreviouslyCompletedRecord(self.name)
+    if skip_stage:
+      self._BeginStepForBuildbot(' : [SKIPPED]')
+    elif previous_record is not None:
+      self._BeginStepForBuildbot(' : [PREVIOUSLY PROCESSED]')
+    else:
+      self._BeginStepForBuildbot()
 
-    # See if this stage should be skipped.
-    if (self.option_name and not getattr(self._run.options, self.option_name) or
-        self.config_name and not getattr(self._run.config, self.config_name)):
-      self._StartBuildStageInCIDB()
-      self._PrintLoudly('Not running Stage %s' % self.name)
-      self.HandleSkip()
-      self._RecordResult(self.name, results_lib.Results.SKIPPED,
-                         prefix=self._prefix)
-      self._FinishBuildStageInCIDBAndMonarch(constants.BUILDER_STATUS_SKIPPED)
-      return
-
-    record = results_lib.Results.PreviouslyCompletedRecord(self.name)
-    if record:
-      self._StartBuildStageInCIDB()
-      # Success is stored in the results log for a stage that completed
-      # successfully in a previous run.
-      self._PrintLoudly('Stage %s processed previously' % self.name)
-      self.HandleSkip()
-      self._RecordResult(self.name, results_lib.Results.SUCCESS,
-                         prefix=self._prefix, board=record.board,
-                         time=float(record.time))
-      self._FinishBuildStageInCIDBAndMonarch(constants.BUILDER_STATUS_SKIPPED)
-      return
-
-    self._WaitBuildStageInCIDB()
-    ready = self.WaitUntilReady()
-
-    if not ready:
-      self._PrintLoudly('Stage %s precondition failed while waiting to start.'
-                        % self.name)
-      # TODO(nxia):The catch block for PerformStage can use a refactor actually
-      # (see crbug.com/425249, which would be a similar concern)
-
-      # If WaitUntilReady is false, mark stage as skipped in Results and CIDB
-      self._RecordResult(self.name,
-                         results_lib.Results.SKIPPED,
-                         prefix=self._prefix)
-      self._FinishBuildStageInCIDBAndMonarch(constants.BUILDER_STATUS_SKIPPED)
-      return
-
-    #  Ready to start, mark buildStage as inflight in CIDB
-    self._StartBuildStageInCIDB()
-
-    start_time = time.time()
-
-    # Set default values
-    result = results_lib.Results.SUCCESS
-    description = None
-
-    sys.stdout.flush()
-    sys.stderr.flush()
-    self._Begin()
     try:
+      # Set default values
+      result = None
+      cidb_result = None
+      description = None
+      board = ''
+      elapsed_time = None
+      start_time = time.time()
+
+      if skip_stage:
+        self._StartBuildStageInCIDB()
+        self._PrintLoudly('Not running Stage %s' % self.name)
+        self.HandleSkip()
+        result = results_lib.Results.SKIPPED
+        return
+
+      if previous_record:
+        self._StartBuildStageInCIDB()
+        self._PrintLoudly('Stage %s processed previously' % self.name)
+        self.HandleSkip()
+        # Success is stored in the results log for a stage that completed
+        # successfully in a previous run. But, we report the truth to CIDB.
+        result = results_lib.Results.SUCCESS
+        cidb_result = constants.BUILDER_STATUS_SKIPPED
+        # Copy over metadata from the previous record. instead of returning
+        # metadata about the current run.
+        board = previous_record.board
+        elapsed_time = float(previous_record.time)
+        return
+
+      self._WaitBuildStageInCIDB()
+      ready = self.WaitUntilReady()
+      if not ready:
+        self._PrintLoudly('Stage %s precondition failed while waiting to start.'
+                          % self.name)
+        # If WaitUntilReady is false, mark stage as skipped in Results and CIDB
+        result = results_lib.Results.SKIPPED
+        return
+
+      #  Ready to start, mark buildStage as inflight in CIDB
+      self._Print('Preconditions for the stage successfully met. '
+                  'Beginning to execute stage...')
+      self._StartBuildStageInCIDB()
+
+      start_time = time.time()
+      sys.stdout.flush()
+      sys.stderr.flush()
       # TODO(davidjames): Verify that PerformStage always returns None. See
       # crbug.com/264781
       self.PerformStage()
+      result = results_lib.Results.SUCCESS
     except SystemExit as e:
       if e.code != 0:
-        result, description, retrying = self._TopHandleStageException()
+        result, description, _ = self._TopHandleStageException()
 
       raise
     except Exception as e:
@@ -544,20 +626,25 @@ class BuilderStage(object):
       elif retrying:
         raise failures_lib.RetriableStepFailure()
     except BaseException:
-      result, description, retrying = self._TopHandleStageException()
+      result, description, _ = self._TopHandleStageException()
       raise
     finally:
-      elapsed_time = time.time() - start_time
+      # Some cases explicitly set a cidb status. For others, infer.
+      if cidb_result is None:
+        cidb_result = self._TranslateResultToCIDBStatus(result)
+      if elapsed_time is None:
+        elapsed_time = time.time() - start_time
+
       self._RecordResult(self.name, result, description, prefix=self._prefix,
-                         time=elapsed_time)
-      self._FinishBuildStageInCIDBAndMonarch(
-          self._TranslateResultToCIDBStatus(result), elapsed_time)
+                         board=board, time=elapsed_time)
+      self._FinishBuildStageInCIDBAndMonarch(cidb_result, elapsed_time)
       if isinstance(result, BaseException) and self._build_stage_id is not None:
         _, db = self._run.GetCIDBHandle()
         if db:
           failures_lib.ReportStageFailureToCIDB(db,
                                                 self._build_stage_id,
                                                 result)
+
       self._Finish()
       sys.stdout.flush()
       sys.stderr.flush()
@@ -915,7 +1002,28 @@ class ArchivingStageMixin(object):
         self._HandleExceptionAsWarning(sys.exc_info())
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
-  def UploadMetadata(self, upload_queue=None, filename=None):
+  def RunExportMetadata(self, filename):
+    """Export JSON file of the builder run's metadata to Cloud Datastore.
+
+    Args:
+      filename: Name of file to export.
+    """
+    creds_file = topology.topology.get(topology.DATASTORE_WRITER_CREDS_KEY)
+    if creds_file is None:
+      logging.warn('No known path to datastore credentials file.')
+      return
+
+    export_cmd = os.path.join(self._build_root, 'chromite', 'bin',
+                              'export_to_gcloud')
+    try:
+      cros_build_lib.RunCommand([export_cmd, creds_file, filename])
+    except cros_build_lib.RunCommandError as e:
+      logging.warn('Unable to export to datastore: %s', e)
+
+
+  @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
+  def UploadMetadata(self, upload_queue=None, filename=constants.METADATA_JSON,
+                     export=False):
     """Create and upload JSON file of the builder run's metadata, and to cidb.
 
     This uses the existing metadata stored in the builder run. The default
@@ -931,9 +1039,8 @@ class ArchivingStageMixin(object):
         this queue.  If None then upload it directly now.
       filename: Name of file to dump metadata to.
                 Defaults to constants.METADATA_JSON
+      export: If true, constants.METADATA_TAGS will be exported to gcloud.
     """
-    filename = filename or constants.METADATA_JSON
-
     metadata_json = os.path.join(self.archive_path, filename)
 
     # Stages may run in parallel, so we have to do atomic updates on this.
@@ -953,5 +1060,14 @@ class ArchivingStageMixin(object):
       logging.info('Writing updated metadata to database for build_id %s.',
                    build_id)
       db.UpdateMetadata(build_id, self._run.attrs.metadata)
+      if export:
+        d = self._run.attrs.metadata.GetDict()
+        if constants.METADATA_TAGS in d:
+          with tempfile.NamedTemporaryFile() as f:
+            logging.info('Export tags to gcloud via %s.', f.name)
+            logging.debug('Exporting: %s' % d[constants.METADATA_TAGS])
+            osutils.WriteFile(f.name, json.dumps(d[constants.METADATA_TAGS]),
+                              atomic=True, makedirs=True)
+            self.RunExportMetadata(f.name)
     else:
       logging.info('Skipping database update, no database or build_id.')

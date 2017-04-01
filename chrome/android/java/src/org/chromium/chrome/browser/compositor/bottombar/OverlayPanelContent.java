@@ -6,11 +6,13 @@ package org.chromium.chrome.browser.compositor.bottombar;
 
 import android.text.TextUtils;
 import android.view.View;
+import android.view.View.MeasureSpec;
 import android.view.ViewGroup;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.WebContentsFactory;
 import org.chromium.chrome.browser.contextualsearch.ContextualSearchManager;
 import org.chromium.chrome.browser.externalnav.ExternalNavigationHandler;
@@ -18,8 +20,8 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
 import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
+import org.chromium.content.browser.ContentVideoViewEmbedder;
 import org.chromium.content.browser.ContentView;
-import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -70,9 +72,6 @@ public class OverlayPanelContent {
     /** Whether the content view is currently being displayed. */
     private boolean mIsContentViewShowing;
 
-    /** The ContentViewCore responsible for displaying content. */
-    private ContentViewClient mContentViewClient;
-
     /** The observer used by this object to inform implementers of different events. */
     private OverlayContentDelegate mContentDelegate;
 
@@ -85,6 +84,10 @@ public class OverlayPanelContent {
     // http://crbug.com/522266 : An instance of InterceptNavigationDelegateImpl should be kept in
     // java layer. Otherwise, the instance could be garbage-collected unexpectedly.
     private InterceptNavigationDelegate mInterceptNavigationDelegate;
+
+    /** The desired size of the {@link ContentView} associated with this panel content. */
+    private int mContentViewWidth;
+    private int mContentViewHeight;
 
     // ============================================================================================
     // InterceptNavigationDelegateImpl
@@ -160,6 +163,11 @@ public class OverlayPanelContent {
             public boolean isFullscreenForTabOrPending() {
                 return mIsFullscreen;
             }
+
+            @Override
+            public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
+                return null;  // Have a no-op embedder be used.
+            }
         };
     }
 
@@ -192,6 +200,17 @@ public class OverlayPanelContent {
     }
 
     /**
+     * Set the desired size of the underlying {@link ContentView}. This is determined
+     * by the {@link OverlayPanel} before the creation of the content view.
+     * @param width The width of the content view.
+     * @param height The height of the content view.
+     */
+    void setContentViewSize(int width, int height) {
+        mContentViewWidth = width;
+        mContentViewHeight = height;
+    }
+
+    /**
      * Makes the content visible, causing it to be rendered.
      */
     public void showContent() {
@@ -204,7 +223,7 @@ public class OverlayPanelContent {
      * @return The newly created ContentViewCore.
      */
     protected ContentViewCore createContentViewCore(ChromeActivity activity) {
-        return new ContentViewCore(activity);
+        return new ContentViewCore(activity, ChromeVersionInfo.getProductVersion());
     }
 
     /**
@@ -221,13 +240,15 @@ public class OverlayPanelContent {
 
         mContentViewCore = createContentViewCore(mActivity);
 
-        if (mContentViewClient == null) {
-            mContentViewClient = new ContentViewClient();
-        }
-
-        mContentViewCore.setContentViewClient(mContentViewClient);
-
         ContentView cv = ContentView.createContentView(mActivity, mContentViewCore);
+        if (mContentViewWidth != 0 || mContentViewHeight != 0) {
+            int width = mContentViewWidth == 0 ? ContentView.DEFAULT_MEASURE_SPEC
+                    : MeasureSpec.makeMeasureSpec(mContentViewWidth, MeasureSpec.EXACTLY);
+            int height = mContentViewHeight == 0 ? ContentView.DEFAULT_MEASURE_SPEC
+                    : MeasureSpec.makeMeasureSpec(mContentViewHeight, MeasureSpec.EXACTLY);
+            cv.setDesiredMeasureSpec(width, height);
+            mActivity.getCompositorViewHolder().setOverlayContentInfo(cv, width, height);
+        }
 
         // Creates an initially hidden WebContents which gets shown when the panel is opened.
         WebContents panelWebContents = WebContentsFactory.createWebContents(false, true);
@@ -245,7 +266,6 @@ public class OverlayPanelContent {
 
                     @Override
                     public View acquireView() {
-                        assert false : "Shold not reach here";
                         return null;
                     }
 
@@ -280,8 +300,7 @@ public class OverlayPanelContent {
 
                     @Override
                     public void didStartProvisionalLoadForFrame(long frameId, long parentFrameId,
-                            boolean isMainFrame, String validatedUrl, boolean isErrorPage,
-                            boolean isIframeSrcdoc) {
+                            boolean isMainFrame, String validatedUrl, boolean isErrorPage) {
                         if (isMainFrame) {
                             mContentDelegate.onMainFrameLoadStarted(validatedUrl,
                                     !TextUtils.equals(validatedUrl, mLoadedUrl));
@@ -341,16 +360,16 @@ public class OverlayPanelContent {
     // ============================================================================================
 
     /**
-     * Calls updateTopControlsState on the ContentViewCore.
+     * Calls updateBrowserControlsState on the ContentViewCore.
      * @param enableHiding Enable the toolbar's ability to hide.
      * @param enableShowing If the toolbar is allowed to show.
      * @param animate If the toolbar should animate when showing/hiding.
      */
-    public void updateTopControlsState(boolean enableHiding, boolean enableShowing,
-            boolean animate) {
+    public void updateBrowserControlsState(
+            boolean enableHiding, boolean enableShowing, boolean animate) {
         if (mContentViewCore != null && mContentViewCore.getWebContents() != null) {
-            mContentViewCore.getWebContents().updateTopControlsState(enableHiding, enableShowing,
-                    animate);
+            mContentViewCore.getWebContents().updateBrowserControlsState(
+                    enableHiding, enableShowing, animate);
         }
     }
 
@@ -418,17 +437,6 @@ public class OverlayPanelContent {
      */
     private boolean isHttpFailureCode(int httpResultCode) {
         return httpResultCode <= 0 || httpResultCode >= 400;
-    }
-
-    /**
-     * Set a ContentViewClient for this panel to use (will be reused for each new ContentViewCore).
-     * @param viewClient The ContentViewClient to use.
-     */
-    public void setContentViewClient(ContentViewClient viewClient) {
-        mContentViewClient = viewClient;
-        if (mContentViewCore != null) {
-            mContentViewCore.setContentViewClient(mContentViewClient);
-        }
     }
 
     /**

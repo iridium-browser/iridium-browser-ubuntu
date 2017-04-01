@@ -28,11 +28,11 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
-#include "grit/browser_resources.h"
-#include "grit/theme_resources.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -61,10 +61,6 @@ const struct Resource{
     {kConfigDataFilename, kLocalResource, "application/javascript"},
     {kThemeCSSFilename, kLocalResource, "text/css"},
     {"local-ntp.css", IDR_LOCAL_NTP_CSS, "text/css"},
-    {"images/close_2.png", IDR_CLOSE_2, "image/png"},
-    {"images/close_2_hover.png", IDR_CLOSE_2_H, "image/png"},
-    {"images/close_2_active.png", IDR_CLOSE_2_P, "image/png"},
-    {"images/close_2_white.png", IDR_CLOSE_2_MASK, "image/png"},
     {"images/close_3_mask.png", IDR_CLOSE_3_MASK, "image/png"},
     {"images/close_4_button.png", IDR_CLOSE_4_BUTTON, "image/png"},
     {"images/ntp_default_favicon.png", IDR_NTP_DEFAULT_FAVICON, "image/png"},
@@ -196,8 +192,7 @@ std::string LocalNtpSource::GetSource() const {
 
 void LocalNtpSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   std::string stripped_path = StripParameters(path);
   if (stripped_path == kConfigDataFilename) {
@@ -251,9 +246,17 @@ std::string LocalNtpSource::GetMimeType(
   return std::string();
 }
 
+bool LocalNtpSource::AllowCaching() const {
+  // Some resources served by LocalNtpSource, i.e. config.js, are dynamically
+  // generated and could differ on each access. To avoid using old cached
+  // content on reload, disallow caching here. Otherwise, it fails to reflect
+  // newly revised user configurations in the page.
+  return false;
+}
+
 bool LocalNtpSource::ShouldServiceRequest(
     const net::URLRequest* request) const {
-  DCHECK(request->url().host() == chrome::kChromeSearchLocalNtpHost);
+  DCHECK(request->url().host_piece() == chrome::kChromeSearchLocalNtpHost);
   if (!InstantIOContext::ShouldServiceRequest(request))
     return false;
 

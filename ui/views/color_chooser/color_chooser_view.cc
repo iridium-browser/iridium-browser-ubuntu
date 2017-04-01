@@ -249,7 +249,7 @@ ColorChooserView::SaturationValueView::SaturationValueView(
     ColorChooserView* chooser_view)
     : chooser_view_(chooser_view),
       hue_(0) {
-  SetBorder(Border::CreateSolidBorder(kBorderWidth, SK_ColorGRAY));
+  SetBorder(CreateSolidBorder(kBorderWidth, SK_ColorGRAY));
 }
 
 void ColorChooserView::SaturationValueView::OnHueChanged(SkScalar hue) {
@@ -342,7 +342,7 @@ class ColorChooserView::SelectedColorPatchView : public views::View {
 
 ColorChooserView::SelectedColorPatchView::SelectedColorPatchView() {
   SetVisible(true);
-  SetBorder(Border::CreateSolidBorder(kBorderWidth, SK_ColorGRAY));
+  SetBorder(CreateSolidBorder(kBorderWidth, SK_ColorGRAY));
 }
 
 void ColorChooserView::SelectedColorPatchView::SetColor(SkColor color) {
@@ -444,10 +444,6 @@ ui::ModalType ColorChooserView::GetModalType() const {
 void ColorChooserView::WindowClosing() {
   if (listener_)
     listener_->OnColorChooserDialogClosed();
-}
-
-View* ColorChooserView::GetContentsView() {
-  return this;
 }
 
 void ColorChooserView::ContentsChanged(Textfield* sender,

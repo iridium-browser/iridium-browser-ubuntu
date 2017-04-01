@@ -34,34 +34,34 @@
 
 namespace blink {
 
-SVGAnimatedPropertyBase::SVGAnimatedPropertyBase(AnimatedPropertyType type, SVGElement* contextElement, const QualifiedName& attributeName)
-    : m_type(type)
-    , m_isReadOnly(false)
-    , m_contextElement(contextElement)
-    , m_attributeName(attributeName)
-{
-    ASSERT(m_contextElement);
-    ASSERT(m_attributeName != QualifiedName::null());
+SVGAnimatedPropertyBase::SVGAnimatedPropertyBase(
+    AnimatedPropertyType type,
+    SVGElement* contextElement,
+    const QualifiedName& attributeName,
+    CSSPropertyID cssPropertyId)
+    : m_type(type),
+      m_cssPropertyId(cssPropertyId),
+      m_contextElement(contextElement),
+      m_attributeName(attributeName) {
+  DCHECK(m_contextElement);
+  DCHECK(m_attributeName != QualifiedName::null());
+  DCHECK_EQ(this->type(), type);
+  DCHECK_EQ(this->cssPropertyId(), cssPropertyId);
 }
 
-SVGAnimatedPropertyBase::~SVGAnimatedPropertyBase()
-{
+SVGAnimatedPropertyBase::~SVGAnimatedPropertyBase() {}
+
+void SVGAnimatedPropertyBase::animationEnded() {
+  synchronizeAttribute();
 }
 
-void SVGAnimatedPropertyBase::animationEnded()
-{
-    synchronizeAttribute();
+void SVGAnimatedPropertyBase::synchronizeAttribute() {
+  AtomicString value(currentValueBase()->valueAsString());
+  m_contextElement->setSynchronizedLazyAttribute(m_attributeName, value);
 }
 
-void SVGAnimatedPropertyBase::synchronizeAttribute()
-{
-    AtomicString value(currentValueBase()->valueAsString());
-    m_contextElement->setSynchronizedLazyAttribute(m_attributeName, value);
+bool SVGAnimatedPropertyBase::isSpecified() const {
+  return isAnimating() || contextElement()->hasAttribute(attributeName());
 }
 
-bool SVGAnimatedPropertyBase::isSpecified() const
-{
-    return isAnimating() || contextElement()->hasAttribute(attributeName());
-}
-
-} // namespace blink
+}  // namespace blink

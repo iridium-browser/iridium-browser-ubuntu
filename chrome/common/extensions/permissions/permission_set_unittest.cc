@@ -33,7 +33,6 @@
 #include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/permissions/socket_permission.h"
 #include "extensions/common/value_builder.h"
-#include "extensions/strings/grit/extensions_strings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -783,7 +782,6 @@ TEST(PermissionsTest, PermissionMessages) {
   // TODO(erikkay) add a string for this permission.
   skip.insert(APIPermission::kBackground);
 
-  skip.insert(APIPermission::kClipboardWrite);
   skip.insert(APIPermission::kClipboard);
 
   // The cookie permission does nothing unless you have associated host

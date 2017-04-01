@@ -122,6 +122,7 @@
 #include <openssl/err.h>
 #include <openssl/rand.h>
 
+#include "../crypto/internal.h"
 #include "internal.h"
 
 
@@ -265,7 +266,7 @@ again:
     len = rr->length;
   }
 
-  memcpy(buf, rr->data, len);
+  OPENSSL_memcpy(buf, rr->data, len);
   if (!peek) {
     /* TODO(davidben): Should the record be truncated instead? This is a
      * datagram transport. See https://crbug.com/boringssl/65. */
@@ -312,8 +313,8 @@ again:
     return -1;
   }
 
-  ssl_do_msg_callback(ssl, 0 /* read */, ssl->version,
-                      SSL3_RT_CHANGE_CIPHER_SPEC, rr->data, rr->length);
+  ssl_do_msg_callback(ssl, 0 /* read */, SSL3_RT_CHANGE_CIPHER_SPEC, rr->data,
+                      rr->length);
 
   rr->length = 0;
   ssl_read_buffer_discard(ssl);
@@ -377,7 +378,7 @@ int dtls1_write_record(SSL *ssl, int type, const uint8_t *buf, size_t len,
     return -1;
   }
 
-  size_t max_out = len + ssl_max_seal_overhead(ssl);
+  size_t max_out = len + SSL_max_seal_overhead(ssl);
   uint8_t *out;
   size_t ciphertext_len;
   if (!ssl_write_buffer_init(ssl, &out, max_out) ||
@@ -409,8 +410,8 @@ int dtls1_dispatch_alert(SSL *ssl) {
     BIO_flush(ssl->wbio);
   }
 
-  ssl_do_msg_callback(ssl, 1 /* write */, ssl->version, SSL3_RT_ALERT,
-                      ssl->s3->send_alert, 2);
+  ssl_do_msg_callback(ssl, 1 /* write */, SSL3_RT_ALERT, ssl->s3->send_alert,
+                      2);
 
   int alert = (ssl->s3->send_alert[0] << 8) | ssl->s3->send_alert[1];
   ssl_do_info_callback(ssl, SSL_CB_WRITE_ALERT, alert);

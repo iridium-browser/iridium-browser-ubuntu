@@ -10,9 +10,9 @@
 #include "content/public/browser/utility_process_host_client.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
-#include "content/public/test/test_mojo_service.mojom.h"
-#include "services/shell/public/cpp/interface_provider.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "content/public/test/test_service.mojom.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 
 namespace content {
 
@@ -50,7 +50,7 @@ class UtilityProcessHostImplBrowserTest : public ContentBrowserTest {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, done_closure_);
   }
 
-  mojom::TestMojoServicePtr service_;
+  mojom::TestServicePtr service_;
   base::Closure done_closure_;
 };
 

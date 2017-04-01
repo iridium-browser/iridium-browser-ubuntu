@@ -202,7 +202,7 @@ class ScopedExtensionPrefUpdate : public DictionaryPrefUpdate {
     if (!dict->GetDictionary(extension_id_, &extension)) {
       // Extension pref does not exist, create it.
       extension = new base::DictionaryValue();
-      dict->SetWithoutPathExpansion(extension_id_, extension);
+      dict->SetWithoutPathExpansion(extension_id_, base::WrapUnique(extension));
     }
     return extension;
   }
@@ -298,16 +298,16 @@ T* ExtensionPrefs::ScopedUpdate<T, type_enum_value>::Get() {
 template <typename T, base::Value::Type type_enum_value>
 T* ExtensionPrefs::ScopedUpdate<T, type_enum_value>::Create() {
   base::DictionaryValue* dict = update_.Get();
-  base::DictionaryValue* extension = NULL;
-  base::Value* key_value = NULL;
-  T* value_as_t = NULL;
+  base::DictionaryValue* extension = nullptr;
+  base::Value* key_value = nullptr;
+  T* value_as_t = nullptr;
   if (!dict->GetDictionary(extension_id_, &extension)) {
     extension = new base::DictionaryValue;
-    dict->SetWithoutPathExpansion(extension_id_, extension);
+    dict->SetWithoutPathExpansion(extension_id_, base::WrapUnique(extension));
   }
   if (!extension->Get(key_, &key_value)) {
     value_as_t = new T;
-    extension->SetWithoutPathExpansion(key_, value_as_t);
+    extension->SetWithoutPathExpansion(key_, base::WrapUnique(value_as_t));
   } else {
     // It would be nice to CHECK that this doesn't happen, but since prefs can
     // get into a mangled state, we can't really do that. Instead, handle it
@@ -322,7 +322,7 @@ T* ExtensionPrefs::ScopedUpdate<T, type_enum_value>::Create() {
           base::IntToString(static_cast<int>(key_value->GetType())));
       base::debug::DumpWithoutCrashing();
       value_as_t = new T();
-      extension->SetWithoutPathExpansion(key_, value_as_t);
+      extension->SetWithoutPathExpansion(key_, base::WrapUnique(value_as_t));
     } else {
       value_as_t = static_cast<T*>(key_value);
     }
@@ -332,9 +332,9 @@ T* ExtensionPrefs::ScopedUpdate<T, type_enum_value>::Create() {
 
 // Explicit instantiations for Dictionary and List value types.
 template class ExtensionPrefs::ScopedUpdate<base::DictionaryValue,
-                                            base::Value::TYPE_DICTIONARY>;
+                                            base::Value::Type::DICTIONARY>;
 template class ExtensionPrefs::ScopedUpdate<base::ListValue,
-                                            base::Value::TYPE_LIST>;
+                                            base::Value::Type::LIST>;
 
 //
 // ExtensionPrefs
@@ -463,9 +463,8 @@ void ExtensionPrefs::UpdateExtensionPref(const std::string& extension_id,
 
 void ExtensionPrefs::DeleteExtensionPrefs(const std::string& extension_id) {
   extension_pref_value_map_->UnregisterExtension(extension_id);
-  FOR_EACH_OBSERVER(ExtensionPrefsObserver,
-                    observer_list_,
-                    OnExtensionPrefsDeleted(extension_id));
+  for (auto& observer : observer_list_)
+    observer.OnExtensionPrefsDeleted(extension_id);
   DictionaryPrefUpdate update(prefs_, pref_names::kExtensions);
   base::DictionaryValue* dict = update.Get();
   dict->Remove(extension_id, NULL);
@@ -805,9 +804,8 @@ void ExtensionPrefs::ModifyDisableReasons(const std::string& extension_id,
                         new base::FundamentalValue(new_value));
   }
 
-  FOR_EACH_OBSERVER(ExtensionPrefsObserver,
-                    observer_list_,
-                    OnExtensionDisableReasonsChanged(extension_id, new_value));
+  for (auto& observer : observer_list_)
+    observer.OnExtensionDisableReasonsChanged(extension_id, new_value);
 }
 
 std::set<std::string> ExtensionPrefs::GetBlacklistedExtensions() const {
@@ -820,7 +818,7 @@ std::set<std::string> ExtensionPrefs::GetBlacklistedExtensions() const {
 
   for (base::DictionaryValue::Iterator it(*extensions);
        !it.IsAtEnd(); it.Advance()) {
-    if (!it.value().IsType(base::Value::TYPE_DICTIONARY)) {
+    if (!it.value().IsType(base::Value::Type::DICTIONARY)) {
       NOTREACHED() << "Invalid pref for extension " << it.key();
       continue;
     }
@@ -1126,9 +1124,8 @@ void ExtensionPrefs::OnExtensionUninstalled(const std::string& extension_id,
                         new base::FundamentalValue(
                             Extension::EXTERNAL_EXTENSION_UNINSTALLED));
     extension_pref_value_map_->SetExtensionState(extension_id, false);
-    FOR_EACH_OBSERVER(ExtensionPrefsObserver,
-                      observer_list_,
-                      OnExtensionStateChanged(extension_id, false));
+    for (auto& observer : observer_list_)
+      observer.OnExtensionStateChanged(extension_id, false);
   } else {
     DeleteExtensionPrefs(extension_id);
   }
@@ -1139,8 +1136,8 @@ void ExtensionPrefs::SetExtensionEnabled(const std::string& extension_id) {
                       new base::FundamentalValue(Extension::ENABLED));
   extension_pref_value_map_->SetExtensionState(extension_id, true);
   UpdateExtensionPref(extension_id, kPrefDisableReasons, nullptr);
-  FOR_EACH_OBSERVER(ExtensionPrefsObserver, observer_list_,
-                    OnExtensionStateChanged(extension_id, true));
+  for (auto& observer : observer_list_)
+    observer.OnExtensionStateChanged(extension_id, true);
 }
 
 void ExtensionPrefs::SetExtensionDisabled(const std::string& extension_id,
@@ -1152,8 +1149,8 @@ void ExtensionPrefs::SetExtensionDisabled(const std::string& extension_id,
   }
   UpdateExtensionPref(extension_id, kPrefDisableReasons,
                       new base::FundamentalValue(disable_reasons));
-  FOR_EACH_OBSERVER(ExtensionPrefsObserver, observer_list_,
-                    OnExtensionStateChanged(extension_id, false));
+  for (auto& observer : observer_list_)
+    observer.OnExtensionStateChanged(extension_id, false);
 }
 
 void ExtensionPrefs::SetExtensionBlacklistState(const std::string& extension_id,
@@ -1259,8 +1256,6 @@ std::unique_ptr<ExtensionInfo> ExtensionPrefs::GetInstalledExtensionInfo(
   int state_value;
   if (ext->GetInteger(kPrefState, &state_value) &&
       state_value == Extension::EXTERNAL_EXTENSION_UNINSTALLED) {
-    LOG(WARNING) << "External extension with id " << extension_id
-                 << " has been uninstalled by the user";
     return std::unique_ptr<ExtensionInfo>();
   }
 
@@ -1281,7 +1276,7 @@ ExtensionPrefs::GetInstalledExtensionsInfo() const {
     std::unique_ptr<ExtensionInfo> info =
         GetInstalledExtensionInfo(extension_id.key());
     if (info)
-      extensions_info->push_back(linked_ptr<ExtensionInfo>(info.release()));
+      extensions_info->push_back(std::move(info));
   }
 
   return extensions_info;
@@ -1304,7 +1299,7 @@ ExtensionPrefs::GetUninstalledExtensionsInfo() const {
     std::unique_ptr<ExtensionInfo> info =
         GetInstalledInfoHelper(extension_id.key(), ext);
     if (info)
-      extensions_info->push_back(linked_ptr<ExtensionInfo>(info.release()));
+      extensions_info->push_back(std::move(info));
   }
 
   return extensions_info;
@@ -1435,7 +1430,7 @@ ExtensionPrefs::GetAllDelayedInstallInfo() const {
     std::unique_ptr<ExtensionInfo> info =
         GetDelayedInstallInfo(extension_id.key());
     if (info)
-      extensions_info->push_back(linked_ptr<ExtensionInfo>(info.release()));
+      extensions_info->push_back(std::move(info));
   }
 
   return extensions_info;
@@ -1908,10 +1903,8 @@ void ExtensionPrefs::InitExtensionControlledPrefs(
     value_map->RegisterExtension(
         *extension_id, install_time, is_enabled, is_incognito_enabled);
 
-    FOR_EACH_OBSERVER(
-        ExtensionPrefsObserver,
-        observer_list_,
-        OnExtensionRegistered(*extension_id, install_time, is_enabled));
+    for (auto& observer : observer_list_)
+      observer.OnExtensionRegistered(*extension_id, install_time, is_enabled);
 
     // Set regular extension controlled prefs.
     LoadExtensionControlledPrefs(
@@ -1925,9 +1918,8 @@ void ExtensionPrefs::InitExtensionControlledPrefs(
     LoadExtensionControlledPrefs(
         this, value_map, *extension_id, kExtensionPrefsScopeRegularOnly);
 
-    FOR_EACH_OBSERVER(ExtensionPrefsObserver,
-                      observer_list_,
-                      OnExtensionPrefsLoaded(*extension_id, this));
+    for (auto& observer : observer_list_)
+      observer.OnExtensionPrefsLoaded(*extension_id, this);
   }
 }
 
@@ -1985,10 +1977,8 @@ void ExtensionPrefs::FinishExtensionInfoPrefs(
   extension_pref_value_map_->RegisterExtension(
       extension_id, install_time, is_enabled, is_incognito_enabled);
 
-  FOR_EACH_OBSERVER(
-      ExtensionPrefsObserver,
-      observer_list_,
-      OnExtensionRegistered(extension_id, install_time, is_enabled));
+  for (auto& observer : observer_list_)
+    observer.OnExtensionRegistered(extension_id, install_time, is_enabled);
 }
 
 }  // namespace extensions

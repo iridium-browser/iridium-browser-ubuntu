@@ -96,6 +96,11 @@ struct StructTraits<gpu::mojom::VideoDecodeAcceleratorCapabilitiesDataView,
   static uint32_t flags(const gpu::VideoDecodeAcceleratorCapabilities& input) {
     return input.flags;
   }
+
+  static std::vector<gpu::VideoDecodeAcceleratorSupportedProfile>
+      supported_profiles(const gpu::VideoDecodeAcceleratorCapabilities& input) {
+    return input.supported_profiles;
+  }
 };
 
 template <>
@@ -243,6 +248,10 @@ struct StructTraits<gpu::mojom::GpuInfoDataView, gpu::GPUInfo> {
     return input.in_process_gpu;
   }
 
+  static bool passthrough_cmd_decoder(const gpu::GPUInfo& input) {
+    return input.passthrough_cmd_decoder;
+  }
+
   static gpu::CollectInfoResult basic_info_state(const gpu::GPUInfo& input) {
     return input.basic_info_state;
   }
@@ -283,6 +292,20 @@ struct StructTraits<gpu::mojom::GpuInfoDataView, gpu::GPUInfo> {
 
   static bool jpeg_decode_accelerator_supported(const gpu::GPUInfo& input) {
     return input.jpeg_decode_accelerator_supported;
+  }
+
+  static uint64_t system_visual(const gpu::GPUInfo& input) {
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+    return input.system_visual;
+#endif
+    return 0;
+  }
+
+  static uint64_t rgba_visual(const gpu::GPUInfo& input) {
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+    return input.rgba_visual;
+#endif
+    return 0;
   }
 };
 

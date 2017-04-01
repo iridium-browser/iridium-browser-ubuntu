@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "cc/resources/transferable_resource.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -18,20 +19,13 @@ class TracedValue;
 }
 }
 
-namespace cc {
-class SingleReleaseCallback;
-class TextureMailbox;
-}
-
 namespace gfx {
 class GpuMemoryBuffer;
 }
 
-namespace gpu {
-struct SyncToken;
-}
-
 namespace exo {
+
+class CompositorFrameSinkHolder;
 
 // This class provides the content for a Surface. The mechanism by which a
 // client provides and updates the contents is the responsibility of the client
@@ -57,10 +51,12 @@ class Buffer : public base::SupportsWeakPtr<Buffer> {
   // buffer. Returns a release callback on success. The release callback should
   // be called before a new texture mailbox can be acquired unless
   // |non_client_usage| is true.
-  std::unique_ptr<cc::SingleReleaseCallback> ProduceTextureMailbox(
-      cc::TextureMailbox* mailbox,
+  bool ProduceTransferableResource(
+      CompositorFrameSinkHolder* compositor_frame_sink_holder,
+      cc::ResourceId resource_id,
       bool secure_output_only,
-      bool client_usage);
+      bool client_usage,
+      cc::TransferableResource* resource);
 
   // This should be called when the buffer is attached to a Surface.
   void OnAttach();
@@ -108,24 +104,29 @@ class Buffer : public base::SupportsWeakPtr<Buffer> {
   // True if this buffer is an overlay candidate.
   const bool is_overlay_candidate_;
 
-  // This is incremented when a texture mailbox is produced and decremented
-  // when a texture mailbox is released. It is used to determine when we should
-  // notify the client that buffer has been released.
+  // This is incremented when a transferable resource is produced and
+  // decremented when a transferable resource is released. It is used to
+  // determine when we should notify the client that buffer has been released.
   unsigned use_count_ = 0;
 
   // This keeps track of how many Surfaces the buffer is attached to.
   unsigned attach_count_ = 0;
 
-  // The last used texture. ProduceTextureMailbox() will use this
+  // The last used texture. ProduceTransferableResource() will use this
   // instead of creating a new texture when possible.
   std::unique_ptr<Texture> texture_;
 
-  // The last used contents texture. ProduceTextureMailbox() will use this
+  // The last used contents texture. ProduceTransferableResource() will use this
   // instead of creating a new texture when possible.
   std::unique_ptr<Texture> contents_texture_;
 
   // The client release callback.
   base::Closure release_callback_;
+
+  // CompositorFrameSinkHolder instance that needs to be kept alive to receive
+  // a release callback when the last produced transferable resource is no
+  // longer in use.
+  scoped_refptr<CompositorFrameSinkHolder> compositor_frame_sink_holder_;
 
   DISALLOW_COPY_AND_ASSIGN(Buffer);
 };

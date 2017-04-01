@@ -17,7 +17,7 @@ class ExternalProtocolDialogDelegate : public ProtocolDialogDelegate {
  public:
   explicit ExternalProtocolDialogDelegate(const GURL& url,
                                           int render_process_host_id,
-                                          int tab_contents_id);
+                                          int render_view_routing_id);
   ~ExternalProtocolDialogDelegate() override;
 
   const base::string16& program_name() const { return program_name_; }
@@ -25,13 +25,14 @@ class ExternalProtocolDialogDelegate : public ProtocolDialogDelegate {
   void DoAccept(const GURL& url, bool dont_block) const override;
   void DoCancel(const GURL& url, bool dont_block) const override;
 
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   base::string16 GetMessageText() const override;
   base::string16 GetCheckboxText() const override;
   base::string16 GetTitleText() const override;
 
  private:
   int render_process_host_id_;
-  int tab_contents_id_;
+  int render_view_routing_id_;
   const base::string16 program_name_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalProtocolDialogDelegate);

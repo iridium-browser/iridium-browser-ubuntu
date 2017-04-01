@@ -23,9 +23,8 @@ namespace test {
 // Used to perform an audio processing simulation from wav files.
 class WavBasedSimulator final : public AudioProcessingSimulator {
  public:
-  explicit WavBasedSimulator(const SimulationSettings& settings)
-      : AudioProcessingSimulator(settings) {}
-  virtual ~WavBasedSimulator() {}
+  explicit WavBasedSimulator(const SimulationSettings& settings);
+  ~WavBasedSimulator() override;
 
   // Processes the WAV input.
   void Process() override;
@@ -41,7 +40,9 @@ class WavBasedSimulator final : public AudioProcessingSimulator {
   bool HandleProcessReverseStreamCall();
   void PrepareProcessStreamCall();
   void PrepareReverseProcessStreamCall();
-  std::vector<SimulationEventType> GetDefaultEventChain() const;
+  static std::vector<SimulationEventType> GetDefaultEventChain();
+  static std::vector<SimulationEventType> GetCustomEventChain(
+      const std::string& filename);
 
   std::vector<SimulationEventType> call_chain_;
   int last_specified_microphone_level_ = 100;

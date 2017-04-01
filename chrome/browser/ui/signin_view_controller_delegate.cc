@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/browser/ui/signin_view_controller.h"
-#include "chrome/browser/ui/webui/signin/get_auth_frame.h"
+#include "chrome/browser/ui/webui/signin/signin_utils.h"
 #include "content/public/browser/web_contents.h"
 
 namespace {
@@ -24,6 +24,7 @@ SigninViewControllerDelegate::SigninViewControllerDelegate(
     content::WebContents* web_contents)
     : signin_view_controller_(signin_view_controller),
       web_contents_(web_contents) {
+  DCHECK(web_contents_);
   web_contents_->SetDelegate(this);
 }
 

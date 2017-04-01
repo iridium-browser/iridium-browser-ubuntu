@@ -20,7 +20,17 @@
 #include "ui/message_center/notifier_settings.h"
 #include "url/gurl.h"
 
+#if !defined(OS_IOS)
+#include "mojo/public/cpp/bindings/struct_traits.h"  // nogncheck
+#endif
+
 namespace message_center {
+
+#if !defined(OS_IOS)
+namespace mojom {
+class NotificationDataView;
+}
+#endif
 
 struct MESSAGE_CENTER_EXPORT NotificationItem {
   base::string16 title;
@@ -29,11 +39,18 @@ struct MESSAGE_CENTER_EXPORT NotificationItem {
   NotificationItem(const base::string16& title, const base::string16& message);
 };
 
+enum class ButtonType { BUTTON, TEXT };
+
 struct MESSAGE_CENTER_EXPORT ButtonInfo {
   base::string16 title;
   gfx::Image icon;
+  ButtonType type = ButtonType::BUTTON;
+  base::string16 placeholder;
 
-  ButtonInfo(const base::string16& title);
+  explicit ButtonInfo(const base::string16& title);
+  ButtonInfo(const ButtonInfo& other);
+  ~ButtonInfo();
+  ButtonInfo& operator=(const ButtonInfo& other);
 };
 
 class MESSAGE_CENTER_EXPORT RichNotificationData {
@@ -66,6 +83,9 @@ class MESSAGE_CENTER_EXPORT RichNotificationData {
 
 class MESSAGE_CENTER_EXPORT Notification {
  public:
+  // Default constructor needed for generated mojom files
+  Notification();
+
   Notification(NotificationType type,
                const std::string& id,
                const base::string16& title,
@@ -80,6 +100,8 @@ class MESSAGE_CENTER_EXPORT Notification {
   Notification(const std::string& id, const Notification& other);
 
   Notification(const Notification& other);
+
+  Notification& operator=(const Notification& other);
 
   virtual ~Notification();
 
@@ -257,8 +279,6 @@ class MESSAGE_CENTER_EXPORT Notification {
       const base::Closure& click_callback);
 
  protected:
-  Notification& operator=(const Notification& other);
-
   // The type of notification we'd like displayed.
   NotificationType type_;
 
@@ -287,6 +307,10 @@ class MESSAGE_CENTER_EXPORT Notification {
   // A proxy object that allows access back to the JavaScript object that
   // represents the notification, for firing events.
   scoped_refptr<NotificationDelegate> delegate_;
+
+#if !defined(OS_IOS)
+  friend struct mojo::StructTraits<mojom::NotificationDataView, Notification>;
+#endif
 };
 
 }  // namespace message_center

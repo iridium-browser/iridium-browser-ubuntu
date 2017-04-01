@@ -36,59 +36,71 @@
 
 namespace blink {
 
-// Following the HTML 5 spec, the box object model for a <ruby> element allows several runs of ruby
+// Following the HTML 5 spec, the box object model for a <ruby> element allows
+// several runs of ruby
 // bases with their respective ruby texts looks as follows:
 //
 // 1 LayoutRuby object, corresponding to the whole <ruby> HTML element
 //      1+ LayoutRubyRun (anonymous)
-//          0 or 1 LayoutRubyText - shuffled to the front in order to re-use existing block layouting
+//          0 or 1 LayoutRubyText - shuffled to the front in order to re-use
+//                                  existing block layouting
 //              0-n inline object(s)
-//          0 or 1 LayoutRubyBase - contains the inline objects that make up the ruby base
+//          0 or 1 LayoutRubyBase - contains the inline objects that make up the
+//                                  ruby base
 //              1-n inline object(s)
 //
-// Note: <rp> elements are defined as having 'display:none' and thus normally are not assigned a layoutObject.
+// Note: <rp> elements are defined as having 'display:none' and thus normally
+// are not assigned a layoutObject.
 //
 // Generated :before/:after content is shunted into anonymous inline blocks
 
 // <ruby> when used as 'display:inline'
 class LayoutRubyAsInline final : public LayoutInline {
-public:
-    LayoutRubyAsInline(Element*);
-    ~LayoutRubyAsInline() override;
+ public:
+  LayoutRubyAsInline(Element*);
+  ~LayoutRubyAsInline() override;
 
-    void addChild(LayoutObject* child, LayoutObject* beforeChild = nullptr) override;
-    void removeChild(LayoutObject* child) override;
+  void addChild(LayoutObject* child,
+                LayoutObject* beforeChild = nullptr) override;
+  void removeChild(LayoutObject* child) override;
 
-    const char* name() const override { return "LayoutRuby (inline)"; }
+  const char* name() const override { return "LayoutRuby (inline)"; }
 
-protected:
-    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+ protected:
+  void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
-private:
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectRuby || LayoutInline::isOfType(type); }
-    bool createsAnonymousWrapper() const override { return true; }
+ private:
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectRuby || LayoutInline::isOfType(type);
+  }
+  bool createsAnonymousWrapper() const override { return true; }
 };
 
 // <ruby> when used as 'display:block' or 'display:inline-block'
 class LayoutRubyAsBlock final : public LayoutBlockFlow {
-public:
-    LayoutRubyAsBlock(Element*);
-    ~LayoutRubyAsBlock() override;
+ public:
+  LayoutRubyAsBlock(Element*);
+  ~LayoutRubyAsBlock() override;
 
-    void addChild(LayoutObject* child, LayoutObject* beforeChild = nullptr) override;
-    void removeChild(LayoutObject* child) override;
+  void addChild(LayoutObject* child,
+                LayoutObject* beforeChild = nullptr) override;
+  void removeChild(LayoutObject* child) override;
 
-    const char* name() const override { return "LayoutRuby (block)"; }
+  const char* name() const override { return "LayoutRuby (block)"; }
 
-protected:
-    void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
+ protected:
+  void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
 
-private:
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectRuby || LayoutBlockFlow::isOfType(type); }
-    bool createsAnonymousWrapper() const override { return true; }
-    void removeLeftoverAnonymousBlock(LayoutBlock*) override { ASSERT_NOT_REACHED(); }
+ private:
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectRuby || LayoutBlockFlow::isOfType(type);
+  }
+  bool createsAnonymousWrapper() const override { return true; }
+  void removeLeftoverAnonymousBlock(LayoutBlock*) override {
+    ASSERT_NOT_REACHED();
+  }
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutRuby_h
+#endif  // LayoutRuby_h

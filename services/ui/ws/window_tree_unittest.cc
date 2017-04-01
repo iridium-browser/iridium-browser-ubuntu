@@ -12,19 +12,18 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
-#include "services/shell/public/interfaces/connector.mojom.h"
+#include "services/service_manager/public/interfaces/connector.mojom.h"
 #include "services/ui/common/types.h"
 #include "services/ui/common/util.h"
 #include "services/ui/public/interfaces/window_tree.mojom.h"
-#include "services/ui/surfaces/surfaces_state.h"
 #include "services/ui/ws/default_access_policy.h"
-#include "services/ui/ws/display_binding.h"
+#include "services/ui/ws/display_manager.h"
 #include "services/ui/ws/ids.h"
 #include "services/ui/ws/platform_display.h"
 #include "services/ui/ws/platform_display_factory.h"
 #include "services/ui/ws/platform_display_init_params.h"
 #include "services/ui/ws/server_window.h"
-#include "services/ui/ws/server_window_surface_manager_test_api.h"
+#include "services/ui/ws/server_window_compositor_frame_sink_manager_test_api.h"
 #include "services/ui/ws/test_change_tracker.h"
 #include "services/ui/ws/test_server_window_delegate.h"
 #include "services/ui/ws/test_utils.h"
@@ -42,6 +41,8 @@ namespace ui {
 namespace ws {
 namespace test {
 namespace {
+
+const UserId kTestUserId1 = "2";
 
 std::string WindowIdToString(const WindowId& id) {
   return base::StringPrintf("%d,%d", id.client_id, id.window_id);
@@ -66,6 +67,12 @@ ui::PointerEvent CreatePointerDownEvent(int x, int y) {
 ui::PointerEvent CreatePointerUpEvent(int x, int y) {
   return ui::PointerEvent(ui::TouchEvent(
       ui::ET_TOUCH_RELEASED, gfx::Point(x, y), 1, ui::EventTimeForNow()));
+}
+
+ui::PointerEvent CreatePointerWheelEvent(int x, int y) {
+  return ui::PointerEvent(
+      ui::MouseWheelEvent(gfx::Vector2d(), gfx::Point(x, y), gfx::Point(x, y),
+                          ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE));
 }
 
 ui::PointerEvent CreateMouseMoveEvent(int x, int y) {
@@ -123,8 +130,7 @@ class WindowTreeTest : public testing::Test {
   ~WindowTreeTest() override {}
 
   ui::mojom::Cursor cursor_id() {
-    return static_cast<ui::mojom::Cursor>(
-        window_event_targeting_helper_.cursor_id());
+    return window_event_targeting_helper_.cursor();
   }
   Display* display() { return window_event_targeting_helper_.display(); }
   TestWindowTreeBinding* last_binding() {
@@ -156,8 +162,8 @@ class WindowTreeTest : public testing::Test {
     WindowManagerStateTestApi test_api(
         display()->GetActiveWindowManagerDisplayRoot()->window_manager_state());
     while (test_api.tree_awaiting_input_ack()) {
-      test_api.tree_awaiting_input_ack()->OnWindowInputEventAck(
-          0, mojom::EventResult::HANDLED);
+      WindowTreeTestApi(test_api.tree_awaiting_input_ack())
+          .AckOldestEvent(mojom::EventResult::HANDLED);
     }
   }
 
@@ -214,9 +220,13 @@ TEST_F(WindowTreeTest, FocusOnPointer) {
   ASSERT_TRUE(FirstRoot(wm_tree()));
   const ClientWindowId wm_root_id = FirstRootId(wm_tree());
   EXPECT_TRUE(wm_tree()->AddWindow(wm_root_id, embed_window_id));
+  ServerWindow* wm_root = FirstRoot(wm_tree());
+  ASSERT_TRUE(wm_root);
+  wm_root->SetBounds(gfx::Rect(0, 0, 100, 100));
+  EnableHitTest(wm_root);
   display()->root_window()->SetBounds(gfx::Rect(0, 0, 100, 100));
   mojom::WindowTreeClientPtr client;
-  mojom::WindowTreeClientRequest client_request = GetProxy(&client);
+  mojom::WindowTreeClientRequest client_request(&client);
   wm_client()->Bind(std::move(client_request));
   const uint32_t embed_flags = 0;
   wm_tree()->Embed(embed_window_id, std::move(client), embed_flags);
@@ -279,7 +289,7 @@ TEST_F(WindowTreeTest, FocusOnPointer) {
   // event).
   DispatchEventAndAckImmediately(CreatePointerDownEvent(61, 22));
   EXPECT_EQ(child1, display()->GetFocusedWindow());
-  ASSERT_EQ(wm_client()->tracker()->changes()->size(), 1u)
+  ASSERT_EQ(1u, wm_client()->tracker()->changes()->size())
       << SingleChangeToDescription(*wm_client()->tracker()->changes());
   EXPECT_EQ("InputEvent window=0,3 event_action=16",
             ChangesToDescription1(*wm_client()->tracker()->changes())[0]);
@@ -331,10 +341,31 @@ TEST_F(WindowTreeTest, StartPointerWatcher) {
             ChangesToDescription1(*client->tracker()->changes())[0]);
   client->tracker()->changes()->clear();
 
+  // Create a pointer wheel event outside the bounds of the client.
+  ui::PointerEvent pointer_wheel = CreatePointerWheelEvent(5, 5);
+
+  // Pointer-wheel events are sent to the client.
+  DispatchEventAndAckImmediately(pointer_wheel);
+  ASSERT_EQ(1u, client->tracker()->changes()->size());
+  EXPECT_EQ("PointerWatcherEvent event_action=22 window=null",
+            ChangesToDescription1(*client->tracker()->changes())[0]);
+  client->tracker()->changes()->clear();
+
   // Stopping the watcher stops sending events to the client.
   WindowTreeTestApi(tree).StopPointerWatcher();
   DispatchEventAndAckImmediately(pointer_down);
   ASSERT_EQ(0u, client->tracker()->changes()->size());
+  DispatchEventAndAckImmediately(pointer_wheel);
+  ASSERT_EQ(0u, client->tracker()->changes()->size());
+
+  // Create a watcher for all events including move events.
+  WindowTreeTestApi(tree).StartPointerWatcher(true);
+
+  // Pointer-wheel events are sent to the client.
+  DispatchEventAndAckImmediately(pointer_wheel);
+  ASSERT_EQ(1u, client->tracker()->changes()->size());
+  EXPECT_EQ("PointerWatcherEvent event_action=22 window=null",
+            ChangesToDescription1(*client->tracker()->changes())[0]);
 }
 
 // Verifies PointerWatcher sees windows known to it.
@@ -416,7 +447,7 @@ TEST_F(WindowTreeTest, StartPointerWatcherWrongUser) {
   // An event is watched by the wm tree, but not by the other user's tree.
   DispatchEventAndAckImmediately(CreatePointerUpEvent(5, 5));
   ASSERT_EQ(1u, wm_client()->tracker()->changes()->size());
-  EXPECT_EQ("InputEvent window=0,3 event_action=18 matches_pointer_watcher",
+  EXPECT_EQ("PointerWatcherEvent event_action=18 window=null",
             SingleChangeToDescription(*wm_client()->tracker()->changes()));
   ASSERT_EQ(0u, other_binding->client()->tracker()->changes()->size());
 }
@@ -572,7 +603,11 @@ TEST_F(WindowTreeTest, EventAck) {
   EXPECT_TRUE(wm_tree()->SetWindowVisibility(embed_window_id, true));
   ASSERT_TRUE(FirstRoot(wm_tree()));
   EXPECT_TRUE(wm_tree()->AddWindow(FirstRootId(wm_tree()), embed_window_id));
-  display()->root_window()->SetBounds(gfx::Rect(0, 0, 100, 100));
+  ASSERT_EQ(1u, display()->root_window()->children().size());
+  ServerWindow* wm_root = FirstRoot(wm_tree());
+  ASSERT_TRUE(wm_root);
+  wm_root->SetBounds(gfx::Rect(0, 0, 100, 100));
+  EnableHitTest(wm_root);
 
   wm_client()->tracker()->changes()->clear();
   DispatchEventWithoutAck(CreateMouseMoveEvent(21, 22));
@@ -604,13 +639,13 @@ TEST_F(WindowTreeTest, NewTopLevelWindow) {
   child_binding->client()->set_record_on_change_completed(true);
 
   // Create a new top level window.
-  mojo::Map<mojo::String, mojo::Array<uint8_t>> properties;
+  std::unordered_map<std::string, std::vector<uint8_t>> properties;
   const uint32_t initial_change_id = 17;
   // Explicitly use an id that does not contain the client id.
   const ClientWindowId embed_window_id2_in_child(45 << 16 | 27);
   static_cast<mojom::WindowTree*>(child_tree)
       ->NewTopLevelWindow(initial_change_id, embed_window_id2_in_child.id,
-                          std::move(properties));
+                          properties);
 
   // The binding should be paused until the wm acks the change.
   uint32_t wm_change_id = 0u;
@@ -1053,13 +1088,13 @@ TEST_F(WindowTreeTest, ValidMoveLoopWithWM) {
   child_binding->client()->set_record_on_change_completed(true);
 
   // Create a new top level window.
-  mojo::Map<mojo::String, mojo::Array<uint8_t>> properties;
+  std::unordered_map<std::string, std::vector<uint8_t>> properties;
   const uint32_t initial_change_id = 17;
   // Explicitly use an id that does not contain the client id.
   const ClientWindowId embed_window_id2_in_child(45 << 16 | 27);
   static_cast<mojom::WindowTree*>(child_tree)
       ->NewTopLevelWindow(initial_change_id, embed_window_id2_in_child.id,
-                          std::move(properties));
+                          properties);
 
   // The binding should be paused until the wm acks the change.
   uint32_t wm_change_id = 0u;
@@ -1098,13 +1133,13 @@ TEST_F(WindowTreeTest, MoveLoopAckOKByWM) {
   child_binding->client()->set_record_on_change_completed(true);
 
   // Create a new top level window.
-  mojo::Map<mojo::String, mojo::Array<uint8_t>> properties;
+  std::unordered_map<std::string, std::vector<uint8_t>> properties;
   const uint32_t initial_change_id = 17;
   // Explicitly use an id that does not contain the client id.
   const ClientWindowId embed_window_id2_in_child(45 << 16 | 27);
   static_cast<mojom::WindowTree*>(child_tree)
       ->NewTopLevelWindow(initial_change_id, embed_window_id2_in_child.id,
-                          std::move(properties));
+                          properties);
 
   // The binding should be paused until the wm acks the change.
   uint32_t wm_change_id = 0u;
@@ -1153,13 +1188,13 @@ TEST_F(WindowTreeTest, WindowManagerCantMoveLoop) {
   child_binding->client()->set_record_on_change_completed(true);
 
   // Create a new top level window.
-  mojo::Map<mojo::String, mojo::Array<uint8_t>> properties;
+  std::unordered_map<std::string, std::vector<uint8_t>> properties;
   const uint32_t initial_change_id = 17;
   // Explicitly use an id that does not contain the client id.
   const ClientWindowId embed_window_id2_in_child(45 << 16 | 27);
   static_cast<mojom::WindowTree*>(child_tree)
       ->NewTopLevelWindow(initial_change_id, embed_window_id2_in_child.id,
-                          std::move(properties));
+                          properties);
 
   // The binding should be paused until the wm acks the change.
   uint32_t wm_change_id = 0u;
@@ -1198,13 +1233,13 @@ TEST_F(WindowTreeTest, RevertWindowBoundsOnMoveLoopFailure) {
   child_binding->client()->set_record_on_change_completed(true);
 
   // Create a new top level window.
-  mojo::Map<mojo::String, mojo::Array<uint8_t>> properties;
+  std::unordered_map<std::string, std::vector<uint8_t>> properties;
   const uint32_t initial_change_id = 17;
   // Explicitly use an id that does not contain the client id.
   const ClientWindowId embed_window_id2_in_child(45 << 16 | 27);
   static_cast<mojom::WindowTree*>(child_tree)
       ->NewTopLevelWindow(initial_change_id, embed_window_id2_in_child.id,
-                          std::move(properties));
+                          properties);
 
   // The binding should be paused until the wm acks the change.
   uint32_t wm_change_id = 0u;
@@ -1317,6 +1352,38 @@ TEST_F(WindowTreeTest, CaptureNotifiesWm) {
   ASSERT_TRUE(!embed_client->tracker()->changes()->empty());
   EXPECT_EQ("OnCaptureChanged new_window=null old_window=1,1",
             ChangesToDescription1(*embed_client->tracker()->changes())[0]);
+}
+
+using WindowTreeShutdownTest = testing::Test;
+
+// Makes sure WindowTreeClient doesn't get any messages during shutdown.
+TEST_F(WindowTreeShutdownTest, DontSendMessagesDuringShutdown) {
+  std::unique_ptr<TestWindowTreeClient> client;
+  {
+    // Create a tree with one window.
+    WindowServerTestHelper ws_test_helper;
+    WindowServer* window_server = ws_test_helper.window_server();
+    TestScreenManager screen_manager;
+    screen_manager.Init(window_server->display_manager());
+    window_server->user_id_tracker()->AddUserId(kTestUserId1);
+    screen_manager.AddDisplay();
+
+    AddWindowManager(window_server, kTestUserId1);
+    window_server->user_id_tracker()->SetActiveUserId(kTestUserId1);
+    TestWindowTreeBinding* test_binding =
+        ws_test_helper.window_server_delegate()->last_binding();
+    ASSERT_TRUE(test_binding);
+    WindowTree* tree = test_binding->tree();
+    const ClientWindowId window_id = BuildClientWindowId(tree, 2);
+    ASSERT_TRUE(tree->NewWindow(window_id, ServerWindow::Properties()));
+
+    // Release the client so that it survices shutdown.
+    client = test_binding->ReleaseClient();
+    client->tracker()->changes()->clear();
+  }
+
+  // Client should not have got any messages after shutdown.
+  EXPECT_TRUE(client->tracker()->changes()->empty());
 }
 
 }  // namespace test

@@ -9,7 +9,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -40,7 +40,8 @@ class UnownedStringWriter : public net::URLFetcherResponseWriter {
     return num_bytes;
   }
 
-  virtual int Finish(const net::CompletionCallback& callback) override {
+  virtual int Finish(int net_error,
+                     const net::CompletionCallback& callback) override {
     return net::OK;
   }
 
@@ -58,9 +59,7 @@ ChromeMetadataSource::ChromeMetadataSource(
     : validation_data_url_(validation_data_url),
       getter_(getter) {}
 
-ChromeMetadataSource::~ChromeMetadataSource() {
-  base::STLDeleteValues(&requests_);
-}
+ChromeMetadataSource::~ChromeMetadataSource() {}
 
 void ChromeMetadataSource::Get(const std::string& key,
                                const Callback& downloaded) const {
@@ -68,8 +67,7 @@ void ChromeMetadataSource::Get(const std::string& key,
 }
 
 void ChromeMetadataSource::OnURLFetchComplete(const net::URLFetcher* source) {
-  std::map<const net::URLFetcher*, Request*>::iterator request =
-      requests_.find(source);
+  auto request = requests_.find(source);
   DCHECK(request != requests_.end());
 
   bool ok = source->GetResponseCode() == net::HTTP_OK;
@@ -78,7 +76,6 @@ void ChromeMetadataSource::OnURLFetchComplete(const net::URLFetcher* source) {
     data->swap(request->second->data);
   request->second->callback(ok, request->second->key, data.release());
 
-  delete request->second;
   requests_.erase(request);
 }
 
@@ -105,7 +102,7 @@ void ChromeMetadataSource::Download(const std::string& key,
   request->fetcher->SaveResponseWithWriter(
       std::unique_ptr<net::URLFetcherResponseWriter>(
           new UnownedStringWriter(&request->data)));
-  requests_[request->fetcher.get()] = request;
+  requests_[request->fetcher.get()] = base::WrapUnique(request);
   request->fetcher->Start();
 }
 

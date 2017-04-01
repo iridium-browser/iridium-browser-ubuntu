@@ -6,6 +6,24 @@
 
 namespace page_load_metrics {
 
+StyleSheetTiming::StyleSheetTiming() {}
+
+StyleSheetTiming::StyleSheetTiming(const StyleSheetTiming& other) = default;
+
+StyleSheetTiming::~StyleSheetTiming() {}
+
+bool StyleSheetTiming::operator==(const StyleSheetTiming& other) const {
+  return author_style_sheet_parse_duration_before_fcp ==
+             other.author_style_sheet_parse_duration_before_fcp &&
+         update_style_duration_before_fcp ==
+             other.update_style_duration_before_fcp;
+}
+
+bool StyleSheetTiming::IsEmpty() const {
+  return !author_style_sheet_parse_duration_before_fcp &&
+         !update_style_duration_before_fcp;
+}
+
 PageLoadTiming::PageLoadTiming() {}
 
 PageLoadTiming::PageLoadTiming(const PageLoadTiming& other) = default;
@@ -28,7 +46,13 @@ bool PageLoadTiming::operator==(const PageLoadTiming& other) const {
          parse_blocked_on_script_load_duration ==
              other.parse_blocked_on_script_load_duration &&
          parse_blocked_on_script_load_from_document_write_duration ==
-             other.parse_blocked_on_script_load_from_document_write_duration;
+             other.parse_blocked_on_script_load_from_document_write_duration &&
+         parse_blocked_on_script_execution_duration ==
+             other.parse_blocked_on_script_execution_duration &&
+         parse_blocked_on_script_execution_from_document_write_duration ==
+             other
+                 .parse_blocked_on_script_execution_from_document_write_duration &&
+         style_sheet_timing == other.style_sheet_timing;
 }
 
 bool PageLoadTiming::IsEmpty() const {
@@ -38,7 +62,10 @@ bool PageLoadTiming::IsEmpty() const {
          !first_image_paint && !first_contentful_paint &&
          !first_meaningful_paint && !parse_start && !parse_stop &&
          !parse_blocked_on_script_load_duration &&
-         !parse_blocked_on_script_load_from_document_write_duration;
+         !parse_blocked_on_script_load_from_document_write_duration &&
+         !parse_blocked_on_script_execution_duration &&
+         !parse_blocked_on_script_execution_from_document_write_duration &&
+         style_sheet_timing.IsEmpty();
 }
 
 PageLoadMetadata::PageLoadMetadata() {}

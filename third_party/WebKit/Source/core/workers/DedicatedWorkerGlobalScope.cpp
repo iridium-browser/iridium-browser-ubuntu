@@ -33,8 +33,6 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "core/dom/ExecutionContextTask.h"
-#include "core/frame/Deprecation.h"
-#include "core/frame/UseCounter.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/origin_trials/OriginTrialContext.h"
 #include "core/workers/DedicatedWorkerThread.h"
@@ -45,73 +43,68 @@
 
 namespace blink {
 
-DedicatedWorkerGlobalScope* DedicatedWorkerGlobalScope::create(DedicatedWorkerThread* thread, std::unique_ptr<WorkerThreadStartupData> startupData, double timeOrigin)
-{
-    // Note: startupData is finalized on return. After the relevant parts has been
-    // passed along to the created 'context'.
-    DedicatedWorkerGlobalScope* context = new DedicatedWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin, std::move(startupData->m_starterOriginPrivilegeData), startupData->m_workerClients.release());
-    context->applyContentSecurityPolicyFromVector(*startupData->m_contentSecurityPolicyHeaders);
-    context->setWorkerSettings(std::move(startupData->m_workerSettings));
-    if (!startupData->m_referrerPolicy.isNull())
-        context->parseAndSetReferrerPolicy(startupData->m_referrerPolicy);
-    context->setAddressSpace(startupData->m_addressSpace);
-    OriginTrialContext::addTokens(context, startupData->m_originTrialTokens.get());
-    return context;
+DedicatedWorkerGlobalScope* DedicatedWorkerGlobalScope::create(
+    DedicatedWorkerThread* thread,
+    std::unique_ptr<WorkerThreadStartupData> startupData,
+    double timeOrigin) {
+  // Note: startupData is finalized on return. After the relevant parts has been
+  // passed along to the created 'context'.
+  DedicatedWorkerGlobalScope* context = new DedicatedWorkerGlobalScope(
+      startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin,
+      std::move(startupData->m_starterOriginPrivilegeData),
+      startupData->m_workerClients);
+  context->applyContentSecurityPolicyFromVector(
+      *startupData->m_contentSecurityPolicyHeaders);
+  context->setWorkerSettings(std::move(startupData->m_workerSettings));
+  if (!startupData->m_referrerPolicy.isNull())
+    context->parseAndSetReferrerPolicy(startupData->m_referrerPolicy);
+  context->setAddressSpace(startupData->m_addressSpace);
+  OriginTrialContext::addTokens(context,
+                                startupData->m_originTrialTokens.get());
+  return context;
 }
 
-DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(const KURL& url, const String& userAgent, DedicatedWorkerThread* thread, double timeOrigin, std::unique_ptr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData, WorkerClients* workerClients)
-    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, std::move(starterOriginPrivilegeData), workerClients)
-{
+DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(
+    const KURL& url,
+    const String& userAgent,
+    DedicatedWorkerThread* thread,
+    double timeOrigin,
+    std::unique_ptr<SecurityOrigin::PrivilegeData> starterOriginPrivilegeData,
+    WorkerClients* workerClients)
+    : WorkerGlobalScope(url,
+                        userAgent,
+                        thread,
+                        timeOrigin,
+                        std::move(starterOriginPrivilegeData),
+                        workerClients) {}
+
+DedicatedWorkerGlobalScope::~DedicatedWorkerGlobalScope() {}
+
+const AtomicString& DedicatedWorkerGlobalScope::interfaceName() const {
+  return EventTargetNames::DedicatedWorkerGlobalScope;
 }
 
-DedicatedWorkerGlobalScope::~DedicatedWorkerGlobalScope()
-{
+void DedicatedWorkerGlobalScope::postMessage(
+    ExecutionContext* context,
+    PassRefPtr<SerializedScriptValue> message,
+    const MessagePortArray& ports,
+    ExceptionState& exceptionState) {
+  // Disentangle the port in preparation for sending it to the remote context.
+  std::unique_ptr<MessagePortChannelArray> channels =
+      MessagePort::disentanglePorts(context, ports, exceptionState);
+  if (exceptionState.hadException())
+    return;
+  workerObjectProxy().postMessageToWorkerObject(std::move(message),
+                                                std::move(channels));
 }
 
-const AtomicString& DedicatedWorkerGlobalScope::interfaceName() const
-{
-    return EventTargetNames::DedicatedWorkerGlobalScope;
+InProcessWorkerObjectProxy& DedicatedWorkerGlobalScope::workerObjectProxy()
+    const {
+  return static_cast<DedicatedWorkerThread*>(thread())->workerObjectProxy();
 }
 
-void DedicatedWorkerGlobalScope::postMessage(ExecutionContext* context, PassRefPtr<SerializedScriptValue> message, const MessagePortArray& ports, ExceptionState& exceptionState)
-{
-    // Disentangle the port in preparation for sending it to the remote context.
-    std::unique_ptr<MessagePortChannelArray> channels = MessagePort::disentanglePorts(context, ports, exceptionState);
-    if (exceptionState.hadException())
-        return;
-    thread()->workerObjectProxy().postMessageToWorkerObject(message, std::move(channels));
+DEFINE_TRACE(DedicatedWorkerGlobalScope) {
+  WorkerGlobalScope::trace(visitor);
 }
 
-DedicatedWorkerThread* DedicatedWorkerGlobalScope::thread() const
-{
-    return static_cast<DedicatedWorkerThread*>(WorkerGlobalScope::thread());
-}
-
-static void countOnDocument(UseCounter::Feature feature, ExecutionContext* context)
-{
-    DCHECK(context->isDocument());
-    UseCounter::count(context, feature);
-}
-
-static void countDeprecationOnDocument(UseCounter::Feature feature, ExecutionContext* context)
-{
-    DCHECK(context->isDocument());
-    Deprecation::countDeprecation(context, feature);
-}
-
-void DedicatedWorkerGlobalScope::countFeature(UseCounter::Feature feature) const
-{
-    thread()->workerObjectProxy().postTaskToMainExecutionContext(createCrossThreadTask(&countOnDocument, feature));
-}
-
-void DedicatedWorkerGlobalScope::countDeprecation(UseCounter::Feature feature) const
-{
-    thread()->workerObjectProxy().postTaskToMainExecutionContext(createCrossThreadTask(&countDeprecationOnDocument, feature));
-}
-
-DEFINE_TRACE(DedicatedWorkerGlobalScope)
-{
-    WorkerGlobalScope::trace(visitor);
-}
-
-} // namespace blink
+}  // namespace blink

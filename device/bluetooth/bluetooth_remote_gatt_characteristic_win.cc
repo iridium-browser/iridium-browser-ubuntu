@@ -56,6 +56,18 @@ BluetoothRemoteGattCharacteristicWin::~BluetoothRemoteGattCharacteristicWin() {
   }
   parent_service_->GetWinAdapter()->NotifyGattCharacteristicRemoved(this);
 
+  if (!read_characteristic_value_callbacks_.first.is_null()) {
+    DCHECK(!read_characteristic_value_callbacks_.second.is_null());
+    read_characteristic_value_callbacks_.second.Run(
+        BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  }
+
+  if (!write_characteristic_value_callbacks_.first.is_null()) {
+    DCHECK(!write_characteristic_value_callbacks_.second.is_null());
+    write_characteristic_value_callbacks_.second.Run(
+        BluetoothRemoteGattService::GATT_ERROR_FAILED);
+  }
+
   // Clear pending StartNotifySession callbacks.
   for (const auto& callback : start_notify_session_callbacks_)
     callback.second.Run(BluetoothRemoteGattService::GATT_ERROR_FAILED);
@@ -233,7 +245,7 @@ void BluetoothRemoteGattCharacteristicWin::ReadRemoteCharacteristic(
 }
 
 void BluetoothRemoteGattCharacteristicWin::WriteRemoteCharacteristic(
-    const std::vector<uint8_t>& new_value,
+    const std::vector<uint8_t>& value,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
   DCHECK(ui_task_runner_->RunsTasksOnCurrentThread());
@@ -252,7 +264,7 @@ void BluetoothRemoteGattCharacteristicWin::WriteRemoteCharacteristic(
   write_characteristic_value_callbacks_ =
       std::make_pair(callback, error_callback);
   task_manager_->PostWriteGattCharacteristicValue(
-      parent_service_->GetServicePath(), characteristic_info_.get(), new_value,
+      parent_service_->GetServicePath(), characteristic_info_.get(), value,
       base::Bind(&BluetoothRemoteGattCharacteristicWin::
                      OnWriteRemoteCharacteristicValueCallback,
                  weak_ptr_factory_.GetWeakPtr()));

@@ -10,47 +10,29 @@
 #include "cc/test/begin_frame_args_test.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/layer_tree_settings_for_testing.h"
-#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/trees/layer_tree_impl.h"
 
 namespace cc {
 
 FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
     TaskRunnerProvider* task_runner_provider,
-    SharedBitmapManager* manager,
     TaskGraphRunner* task_graph_runner)
     : FakeLayerTreeHostImpl(LayerTreeSettingsForTesting(),
                             task_runner_provider,
-                            manager,
-                            task_graph_runner,
-                            nullptr) {}
+                            task_graph_runner) {}
 
 FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
     const LayerTreeSettings& settings,
     TaskRunnerProvider* task_runner_provider,
-    SharedBitmapManager* manager,
     TaskGraphRunner* task_graph_runner)
-    : FakeLayerTreeHostImpl(settings,
-                            task_runner_provider,
-                            manager,
-                            task_graph_runner,
-                            nullptr) {}
-
-FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
-    const LayerTreeSettings& settings,
-    TaskRunnerProvider* task_runner_provider,
-    SharedBitmapManager* manager,
-    TaskGraphRunner* task_graph_runner,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager)
     : LayerTreeHostImpl(settings,
                         &client_,
                         task_runner_provider,
                         &stats_instrumentation_,
-                        manager,
-                        gpu_memory_buffer_manager,
                         task_graph_runner,
                         AnimationHost::CreateForTesting(ThreadInstance::IMPL),
-                        0),
+                        0,
+                        nullptr),
       notify_tile_state_changed_called_(false) {
   // Explicitly clear all debug settings.
   SetDebugState(LayerTreeDebugState());
@@ -59,11 +41,11 @@ FakeLayerTreeHostImpl::FakeLayerTreeHostImpl(
   // Start an impl frame so tests have a valid frame_time to work with.
   base::TimeTicks time_ticks = base::TimeTicks::FromInternalValue(1);
   WillBeginImplFrame(
-      CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE, time_ticks));
+      CreateBeginFrameArgsForTesting(BEGINFRAME_FROM_HERE, 0, 1, time_ticks));
 }
 
 FakeLayerTreeHostImpl::~FakeLayerTreeHostImpl() {
-  ReleaseOutputSurface();
+  ReleaseCompositorFrameSink();
 }
 
 void FakeLayerTreeHostImpl::CreatePendingTree() {
@@ -100,16 +82,24 @@ int FakeLayerTreeHostImpl::RecursiveUpdateNumChildren(LayerImpl* layer) {
   return num_children_that_draw_content + (layer->DrawsContent() ? 1 : 0);
 }
 
-void FakeLayerTreeHostImpl::UpdateNumChildrenAndDrawPropertiesForActiveTree() {
-  UpdateNumChildrenAndDrawProperties(active_tree());
+void FakeLayerTreeHostImpl::UpdateNumChildrenAndDrawPropertiesForActiveTree(
+    bool force_skip_verify_visible_rect_calculations) {
+  UpdateNumChildrenAndDrawProperties(
+      active_tree(), force_skip_verify_visible_rect_calculations);
 }
 
 void FakeLayerTreeHostImpl::UpdateNumChildrenAndDrawProperties(
-    LayerTreeImpl* layerTree) {
+    LayerTreeImpl* layerTree,
+    bool force_skip_verify_visible_rect_calculations) {
   RecursiveUpdateNumChildren(layerTree->root_layer_for_testing());
   bool update_lcd_text = false;
   layerTree->BuildLayerListAndPropertyTreesForTesting();
-  layerTree->UpdateDrawProperties(update_lcd_text);
+  layerTree->UpdateDrawProperties(update_lcd_text,
+                                  force_skip_verify_visible_rect_calculations);
+}
+
+AnimationHost* FakeLayerTreeHostImpl::animation_host() const {
+  return static_cast<AnimationHost*>(mutator_host());
 }
 
 }  // namespace cc

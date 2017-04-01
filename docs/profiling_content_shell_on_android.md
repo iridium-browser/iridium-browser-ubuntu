@@ -17,7 +17,7 @@ don’t mind erasing all data, rooting, and installing a userdebug build on.
 [Android Build Instructions](android_build_instructions.md).)
 
 1.  Get the code! You’ll want a second checkout as this will be
-    android-specific. You know the drill:
+    Android-specific. You know the drill:
     https://www.chromium.org/developers/how-tos/get-the-code
 1.  Append this to your `.gclient` file: `target_os = ['android']`
 1.  Create `chromium.gyp_env` next to your `.gclient` file:
@@ -77,12 +77,6 @@ http://androidmuscle.com/how-to-enable-usb-debugging-developer-options-on-nexus-
 
 Rebuild `content_shell_apk` with profiling enabled.
 
-With GYP (deprecated):
-
-    export GYP_DEFINES="$GYP_DEFINES profiling=1"
-    build/gyp_chromium
-    ninja -C out/Release content_shell_apk
-
 With GN:
 
     gn args out/Profiling
@@ -100,7 +94,7 @@ You can run any Telemetry benchmark with `--profiler=perf`, and it will:
 4.  Setup symlinks to work with the `--symfs` parameter
 
 You can also run "manual" tests with Telemetry, more information here:
-http://www.chromium.org/developers/telemetry/profiling#TOC-Manual-Profiling---Android
+https://www.chromium.org/developers/telemetry/profiling#TOC-Manual-Profiling---Android
 
 The following steps describe building `perf`, which is no longer necessary if
 you use Telemetry.
@@ -118,7 +112,7 @@ Telemetry" steps below).
 
 ## Install `/system/bin/perf` on your device (not needed for Telemetry)
 
-    # From inside the android source tree (not inside Chromium)
+    # From inside the Android source tree (not inside Chromium)
     mmm external/linux-tools-perf/
     adb remount # (allows you to write to the system image)
     adb sync
@@ -197,8 +191,6 @@ Run the following:
 
 1.  If you don’t see chromium/webkit symbols, make sure that you built/pushed
     Release, and that the symlink you created to the .so is valid!
-1.  If you have symbols, but your callstacks are nonsense, make sure you ran
-    `build/gyp_chromium` after setting `profiling=1`, and rebuilt.
 
 ## Add symbols for the kernel
 

@@ -12,7 +12,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
-#include "base/stl_util.h"
 #include "chrome/browser/extensions/api/image_writer_private/image_writer_private_api.h"
 #include "chrome/browser/extensions/api/image_writer_private/operation.h"
 #include "chrome/common/extensions/api/image_writer_private.h"
@@ -20,11 +19,10 @@
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/common/extension_id.h"
 #include "url/gurl.h"
 
 namespace image_writer_api = extensions::api::image_writer_private;
-
-class Profile;
 
 namespace content {
 class BrowserContext;
@@ -44,8 +42,6 @@ class OperationManager : public BrowserContextKeyedAPI,
                          public extensions::ExtensionRegistryObserver,
                          public base::SupportsWeakPtr<OperationManager> {
  public:
-  typedef std::string ExtensionId;
-
   explicit OperationManager(content::BrowserContext* context);
   ~OperationManager() override;
 
@@ -91,7 +87,6 @@ class OperationManager : public BrowserContextKeyedAPI,
   static OperationManager* Get(content::BrowserContext* context);
 
  private:
-
   static const char* service_name() {
     return "OperationManager";
   }

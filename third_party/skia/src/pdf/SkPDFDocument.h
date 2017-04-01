@@ -53,14 +53,9 @@ public:
     virtual ~SkPDFDocument();
     SkCanvas* onBeginPage(SkScalar, SkScalar, const SkRect&) override;
     void onEndPage() override;
-    bool onClose(SkWStream*) override;
+    void onClose(SkWStream*) override;
     void onAbort() override;
-#ifdef SK_SUPPORT_LEGACY_DOCUMENT_API
-    void setMetadata(const SkDocument::Attribute[],
-                     int,
-                     const SkTime::DateTime*,
-                     const SkTime::DateTime*) override;
-#endif  // SK_SUPPORT_LEGACY_DOCUMENT_API
+
     /**
        Serialize the object, as well as any other objects it
        indirectly refers to.  If any any other objects have been added
@@ -81,7 +76,7 @@ private:
     SkTHashSet<SkPDFFont*> fFonts;
     sk_sp<SkPDFDict> fDests;
     sk_sp<SkPDFDevice> fPageDevice;
-    sk_sp<SkCanvas> fCanvas;
+    std::unique_ptr<SkCanvas> fCanvas;
     sk_sp<SkPDFObject> fID;
     sk_sp<SkPDFObject> fXMP;
     SkScalar fRasterDpi;

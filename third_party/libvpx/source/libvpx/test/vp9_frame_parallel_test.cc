@@ -46,7 +46,7 @@ string DecodeFileWithPause(const string &filename, int num_threads,
   int in_frames = 0;
   int out_frames = 0;
 
-  vpx_codec_dec_cfg_t cfg = { 0 };
+  vpx_codec_dec_cfg_t cfg = vpx_codec_dec_cfg_t();
   cfg.threads = num_threads;
   vpx_codec_flags_t flags = 0;
   flags |= VPX_CODEC_USE_FRAME_THREADING;

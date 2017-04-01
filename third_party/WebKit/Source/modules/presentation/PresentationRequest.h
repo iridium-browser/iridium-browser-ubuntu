@@ -7,54 +7,65 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
+#include "modules/ModulesExport.h"
+#include "modules/presentation/PresentationPromiseProperty.h"
 #include "platform/heap/Handle.h"
 #include "platform/heap/Heap.h"
 #include "platform/weborigin/KURL.h"
+#include "wtf/Vector.h"
 
 namespace blink {
 
 // Implements the PresentationRequest interface from the Presentation API from
 // which websites can start or join presentation connections.
-class PresentationRequest final
-    : public EventTargetWithInlineData
-    , public ActiveScriptWrappable
-    , public ActiveDOMObject {
-    USING_GARBAGE_COLLECTED_MIXIN(PresentationRequest);
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    ~PresentationRequest() = default;
+class MODULES_EXPORT PresentationRequest final
+    : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<PresentationRequest>,
+      public ContextLifecycleObserver {
+  USING_GARBAGE_COLLECTED_MIXIN(PresentationRequest);
+  DEFINE_WRAPPERTYPEINFO();
 
-    static PresentationRequest* create(ExecutionContext*, const String& url, ExceptionState&);
+ public:
+  ~PresentationRequest() = default;
 
-    // EventTarget implementation.
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override;
+  static PresentationRequest* create(ExecutionContext*,
+                                     const String& url,
+                                     ExceptionState&);
+  static PresentationRequest* create(ExecutionContext*,
+                                     const Vector<String>& urls,
+                                     ExceptionState&);
 
-    // ScriptWrappable implementation.
-    bool hasPendingActivity() const final;
+  // EventTarget implementation.
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override;
 
-    ScriptPromise start(ScriptState*);
-    ScriptPromise reconnect(ScriptState*, const String& id);
-    ScriptPromise getAvailability(ScriptState*);
+  // ScriptWrappable implementation.
+  bool hasPendingActivity() const final;
 
-    const KURL& url() const;
+  ScriptPromise start(ScriptState*);
+  ScriptPromise reconnect(ScriptState*, const String& id);
+  ScriptPromise getAvailability(ScriptState*);
 
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(connectionavailable);
+  const Vector<KURL>& urls() const;
 
-    DECLARE_VIRTUAL_TRACE();
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(connectionavailable);
 
-protected:
-    // EventTarget implementation.
-    void addedEventListener(const AtomicString& eventType, RegisteredEventListener&) override;
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    PresentationRequest(ExecutionContext*, const KURL&);
+ protected:
+  // EventTarget implementation.
+  void addedEventListener(const AtomicString& eventType,
+                          RegisteredEventListener&) override;
 
-    KURL m_url;
+ private:
+  PresentationRequest(ExecutionContext*, const Vector<KURL>&);
+
+  Member<PresentationAvailabilityProperty> m_availabilityProperty;
+  Vector<KURL> m_urls;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PresentationRequest_h
+#endif  // PresentationRequest_h

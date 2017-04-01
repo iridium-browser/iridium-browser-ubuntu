@@ -10,14 +10,17 @@
 
 #include "SkGradientBitmapCache.h"
 #include "SkGradientShader.h"
+
+#include "SkAutoMalloc.h"
 #include "SkClampRange.h"
 #include "SkColorPriv.h"
-#include "SkReadBuffer.h"
-#include "SkWriteBuffer.h"
+#include "SkColorSpace.h"
 #include "SkMallocPixelRef.h"
-#include "SkUtils.h"
-#include "SkShader.h"
 #include "SkOnce.h"
+#include "SkReadBuffer.h"
+#include "SkShader.h"
+#include "SkUtils.h"
+#include "SkWriteBuffer.h"
 
 #if SK_SUPPORT_GPU
     #define GR_GL_USE_ACCURATE_HARD_STOP_GRADIENTS 1
@@ -83,7 +86,8 @@ public:
         }
 
         const SkMatrix*     fLocalMatrix;
-        const SkColor*      fColors;
+        const SkColor4f*    fColors;
+        sk_sp<SkColorSpace> fColorSpace;
         const SkScalar*     fPos;
         int                 fCount;
         SkShader::TileMode  fTileMode;
@@ -100,30 +104,28 @@ public:
 
         // fColors and fPos always point into local memory, so they can be safely mutated
         //
-        SkColor* mutableColors() { return const_cast<SkColor*>(fColors); }
+        SkColor4f* mutableColors() { return const_cast<SkColor4f*>(fColors); }
         SkScalar* mutablePos() { return const_cast<SkScalar*>(fPos); }
 
     private:
         enum {
             kStorageCount = 16
         };
-        SkColor fColorStorage[kStorageCount];
+        SkColor4f fColorStorage[kStorageCount];
         SkScalar fPosStorage[kStorageCount];
         SkMatrix fLocalMatrixStorage;
         SkAutoMalloc fDynamicStorage;
     };
 
-public:
     SkGradientShaderBase(const Descriptor& desc, const SkMatrix& ptsToUnit);
     virtual ~SkGradientShaderBase();
 
-    // The cache is initialized on-demand when getCache16/32 is called.
+    // The cache is initialized on-demand when getCache32 is called.
     class GradientShaderCache : public SkRefCnt {
     public:
         GradientShaderCache(U8CPU alpha, bool dither, const SkGradientShaderBase& shader);
         ~GradientShaderCache();
 
-        const uint16_t*     getCache16();
         const SkPMColor*    getCache32();
 
         SkMallocPixelRef* getCache32PixelRef() const { return fCache32PixelRef; }
@@ -132,12 +134,9 @@ public:
         bool getDither() const { return fCacheDither; }
 
     private:
-        // Working pointers. If either is nullptr, we need to recompute the corresponding
-        // cache values.
-        uint16_t*   fCache16;
+        // Working pointer. If it's nullptr, we need to recompute the cache values.
         SkPMColor*  fCache32;
 
-        uint16_t*         fCache16Storage;    // Storage for fCache16, allocated on demand.
         SkMallocPixelRef* fCache32PixelRef;
         const unsigned    fCacheAlpha;        // The alpha value we used when we computed the cache.
                                               // Larger than 8bits so we can store uninitialized
@@ -146,14 +145,11 @@ public:
 
         const SkGradientShaderBase& fShader;
 
-        // Make sure we only initialize the caches once.
-        SkOnce fCache16InitOnce,
-               fCache32InitOnce;
+        // Make sure we only initialize the cache once.
+        SkOnce fCache32InitOnce;
 
-        static void initCache16(GradientShaderCache* cache);
         static void initCache32(GradientShaderCache* cache);
 
-        static void Build16bitCache(uint16_t[], SkColor c0, SkColor c1, int count, bool dither);
         static void Build32bitCache(SkPMColor[], SkColor c0, SkColor c1, int count,
                                     U8CPU alpha, uint32_t gradFlags, bool dither);
     };
@@ -164,6 +160,8 @@ public:
 
         uint32_t getFlags() const override { return fFlags; }
 
+        bool isValid() const;
+
     protected:
         SkMatrix    fDstToIndex;
         SkMatrix::MapXYProc fDstToIndexProc;
@@ -171,7 +169,7 @@ public:
         uint8_t     fFlags;
         bool        fDither;
 
-        SkAutoTUnref<GradientShaderCache> fCache;
+        sk_sp<GradientShaderCache> fCache;
 
     private:
         typedef SkShader::Context INHERITED;
@@ -179,16 +177,15 @@ public:
 
     bool isOpaque() const override;
 
-    void getGradientTableBitmap(SkBitmap*) const;
+    enum class GradientBitmapType : uint8_t {
+        kLegacy,
+        kSRGB,
+        kHalfFloat,
+    };
+
+    void getGradientTableBitmap(SkBitmap*, GradientBitmapType bitmapType) const;
 
     enum {
-        /// Seems like enough for visual accuracy. TODO: if pos[] deserves
-        /// it, use a larger cache.
-        kCache16Bits    = 8,
-        kCache16Count = (1 << kCache16Bits),
-        kCache16Shift   = 16 - kCache16Bits,
-        kSqrt16Shift    = 8 - kCache16Bits,
-
         /// Seems like enough for visual accuracy. TODO: if pos[] deserves
         /// it, use a larger cache.
         kCache32Bits    = 8,
@@ -199,7 +196,6 @@ public:
         /// This value is used to *read* the dither cache; it may be 0
         /// if dithering is disabled.
         kDitherStride32 = kCache32Count,
-        kDitherStride16 = kCache16Count,
     };
 
     uint32_t getGradFlags() const { return fGradFlags; }
@@ -226,6 +222,9 @@ protected:
 
     bool onAsLuminanceColor(SkColor*) const override;
 
+
+    void initLinearBitmap(SkBitmap* bitmap) const;
+
     /*
      * Takes in pointers to gradient color and Rec info as colorSrc and recSrc respectively.
      * Count is the number of colors in the gradient
@@ -237,17 +236,30 @@ protected:
                                    SkColor* colorSrc, Rec* recSrc,
                                    int count);
 
+    template <typename T, typename... Args>
+    static Context* CheckedCreateContext(void* storage, Args&&... args) {
+        auto* ctx = new (storage) T(std::forward<Args>(args)...);
+        if (!ctx->isValid()) {
+            ctx->~T();
+            return nullptr;
+        }
+        return ctx;
+    }
+
 private:
     enum {
         kColorStorageCount = 4, // more than this many colors, and we'll use sk_malloc for the space
 
-        kStorageSize = kColorStorageCount * (sizeof(SkColor) + sizeof(SkScalar) + sizeof(Rec))
+        kStorageSize = kColorStorageCount *
+                       (sizeof(SkColor) + sizeof(SkScalar) + sizeof(Rec) + sizeof(SkColor4f))
     };
-    SkColor     fStorage[(kStorageSize + 3) >> 2];
+    SkColor             fStorage[(kStorageSize + 3) >> 2];
 public:
-    SkColor*    fOrigColors; // original colors, before modulation by paint in context.
-    SkScalar*   fOrigPos;   // original positions
-    int         fColorCount;
+    SkColor*            fOrigColors;   // original colors, before modulation by paint in context.
+    SkColor4f*          fOrigColors4f; // original colors, as linear floats
+    SkScalar*           fOrigPos;      // original positions
+    int                 fColorCount;
+    sk_sp<SkColorSpace> fColorSpace; // color space of gradient stops
 
     bool colorsAreOpaque() const { return fColorsAreOpaque; }
 
@@ -255,11 +267,11 @@ public:
     Rec* getRecs() const { return fRecs; }
 
 private:
-    bool        fColorsAreOpaque;
+    bool                fColorsAreOpaque;
 
-    GradientShaderCache* refCache(U8CPU alpha, bool dither) const;
-    mutable SkMutex                           fCacheMutex;
-    mutable SkAutoTUnref<GradientShaderCache> fCache;
+    sk_sp<GradientShaderCache> refCache(U8CPU alpha, bool dither) const;
+    mutable SkMutex                    fCacheMutex;
+    mutable sk_sp<GradientShaderCache> fCache;
 
     void initCommon();
 
@@ -276,18 +288,11 @@ static inline int next_dither_toggle(int toggle) {
     return toggle ^ SkGradientShaderBase::kDitherStride32;
 }
 
-static inline int init_dither_toggle16(int x, int y) {
-    return ((x ^ y) & 1) * SkGradientShaderBase::kDitherStride16;
-}
-
-static inline int next_dither_toggle16(int toggle) {
-    return toggle ^ SkGradientShaderBase::kDitherStride16;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 
 #if SK_SUPPORT_GPU
 
+#include "GrColorSpaceXform.h"
 #include "GrCoordTransform.h"
 #include "GrFragmentProcessor.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
@@ -323,12 +328,31 @@ class GrInvariantOutput;
 // Base class for Gr gradient effects
 class GrGradientEffect : public GrFragmentProcessor {
 public:
+    struct CreateArgs {
+        CreateArgs(GrContext* context,
+                   const SkGradientShaderBase* shader,
+                   const SkMatrix* matrix,
+                   SkShader::TileMode tileMode,
+                   sk_sp<GrColorSpaceXform> colorSpaceXform,
+                   bool gammaCorrect)
+            : fContext(context)
+            , fShader(shader)
+            , fMatrix(matrix)
+            , fTileMode(tileMode)
+            , fColorSpaceXform(std::move(colorSpaceXform))
+            , fGammaCorrect(gammaCorrect) {}
+
+        GrContext*                  fContext;
+        const SkGradientShaderBase* fShader;
+        const SkMatrix*             fMatrix;
+        SkShader::TileMode          fTileMode;
+        sk_sp<GrColorSpaceXform>    fColorSpaceXform;
+        bool                        fGammaCorrect;
+    };
+
     class GLSLProcessor;
 
-    GrGradientEffect(GrContext* ctx,
-                     const SkGradientShaderBase& shader,
-                     const SkMatrix& matrix,
-                     SkShader::TileMode tileMode);
+    GrGradientEffect(const CreateArgs&);
 
     virtual ~GrGradientEffect();
 
@@ -341,7 +365,7 @@ public:
         kTexture_ColorType,
 
 #if GR_GL_USE_ACCURATE_HARD_STOP_GRADIENTS
-        kHardStopCentered_ColorType,   // 0, 0.5, 0.5, 1
+        kSingleHardStop_ColorType,     // 0, t, t, 1
         kHardStopLeftEdged_ColorType,  // 0, 0, 1
         kHardStopRightEdged_ColorType, // 0, 1, 1
 #endif
@@ -371,19 +395,33 @@ public:
         return &fColors[pos];
     }
 
+    const SkColor4f* getColors4f(int pos) const {
+        SkASSERT(fColorType != kTexture_ColorType);
+        SkASSERT(pos < fColors4f.count());
+        return &fColors4f[pos];
+    }
+
 protected:
-    /** Populates a pair of arrays with colors and stop info to construct a random gradient.
-        The function decides whether stop values should be used or not. The return value indicates
-        the number of colors, which will be capped by kMaxRandomGradientColors. colors should be
-        sized to be at least kMaxRandomGradientColors. stops is a pointer to an array of at least
-        size kMaxRandomGradientColors. It may be updated to nullptr, indicating that nullptr should
-        be passed to the gradient factory rather than the array.
-    */
-    static const int kMaxRandomGradientColors = 4;
-    static int RandomGradientParams(SkRandom* r,
-                                    SkColor colors[kMaxRandomGradientColors],
-                                    SkScalar** stops,
-                                    SkShader::TileMode* tm);
+    /** Helper struct that stores (and populates) parameters to construct a random gradient.
+        If fUseColors4f is true, then the SkColor4f factory should be called, with fColors4f and
+        fColorSpace. Otherwise, the SkColor factory should be called, with fColors. fColorCount
+        will be the number of color stops in either case, and fColors and fStops can be passed to
+        the gradient factory. (The constructor may decide not to use stops, in which case fStops
+        will be nullptr). */
+    struct RandomGradientParams {
+        static const int kMaxRandomGradientColors = 4;
+
+        RandomGradientParams(SkRandom* r);
+
+        bool fUseColors4f;
+        SkColor fColors[kMaxRandomGradientColors];
+        SkColor4f fColors4f[kMaxRandomGradientColors];
+        sk_sp<SkColorSpace> fColorSpace;
+        SkScalar fStopStorage[kMaxRandomGradientColors];
+        SkShader::TileMode fTileMode;
+        int fColorCount;
+        SkScalar* fStops;
+    };
 
     bool onIsEqual(const GrFragmentProcessor&) const override;
 
@@ -392,14 +430,18 @@ protected:
     const GrCoordTransform& getCoordTransform() const { return fCoordTransform; }
 
 private:
-    static const GrCoordSet kCoordSet = kLocal_GrCoordSet;
+    // If we're in legacy mode, then fColors will be populated. If we're gamma-correct, then
+    // fColors4f and fColorSpaceXform will be populated.
+    SkTDArray<SkColor>       fColors;
 
-    SkTDArray<SkColor>  fColors;
-    SkTDArray<SkScalar> fPositions;
-    SkShader::TileMode  fTileMode;
+    SkTDArray<SkColor4f>     fColors4f;
+    sk_sp<GrColorSpaceXform> fColorSpaceXform;
+
+    SkTDArray<SkScalar>      fPositions;
+    SkShader::TileMode       fTileMode;
 
     GrCoordTransform fCoordTransform;
-    GrTextureAccess fTextureAccess;
+    TextureSampler fTextureSampler;
     SkScalar fYCoord;
     GrTextureStripAtlas* fAtlas;
     int fRow;
@@ -441,12 +483,12 @@ protected:
     // of hard stop gradients
     void emitColor(GrGLSLFPFragmentBuilder* fragBuilder,
                    GrGLSLUniformHandler* uniformHandler,
-                   const GrGLSLCaps* caps,
+                   const GrShaderCaps* shaderCaps,
                    const GrGradientEffect&,
                    const char* gradientTValue,
                    const char* outputColor,
                    const char* inputColor,
-                   const SamplerHandle* texSamplers);
+                   const TextureSamplers&);
 
 private:
     enum {
@@ -474,7 +516,9 @@ private:
 
     SkScalar fCachedYCoord;
     GrGLSLProgramDataManager::UniformHandle fColorsUni;
+    GrGLSLProgramDataManager::UniformHandle fHardStopT;
     GrGLSLProgramDataManager::UniformHandle fFSYUni;
+    GrGLSLProgramDataManager::UniformHandle fColorSpaceXformUni;
 
     typedef GrGLSLFragmentProcessor INHERITED;
 };

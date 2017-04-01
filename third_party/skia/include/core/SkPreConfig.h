@@ -26,7 +26,7 @@
 
     #if defined(_WIN32) || defined(__SYMBIAN32__)
         #define SK_BUILD_FOR_WIN32
-    #elif defined(ANDROID)
+    #elif defined(ANDROID) || defined(__ANDROID__)
         #define SK_BUILD_FOR_ANDROID
     #elif defined(linux) || defined(__linux) || defined(__FreeBSD__) || \
           defined(__OpenBSD__) || defined(__sun) || defined(__NetBSD__) || \
@@ -72,7 +72,11 @@
 //////////////////////////////////////////////////////////////////////
 
 #if !defined(SK_CPU_BENDIAN) && !defined(SK_CPU_LENDIAN)
-    #if defined(__sparc) || defined(__sparc__) || \
+    #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
+        #define SK_CPU_BENDIAN
+    #elif defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+        #define SK_CPU_LENDIAN
+    #elif defined(__sparc) || defined(__sparc__) || \
       defined(_POWER) || defined(__powerpc__) || \
       defined(__ppc__) || defined(__hppa) || \
       defined(__PPC__) || defined(__PPC64__) || \
@@ -191,6 +195,12 @@
 // All 64-bit ARM chips have NEON.  Many 32-bit ARM chips do too.
 #if !defined(SK_ARM_HAS_NEON) && !defined(SK_BUILD_NO_OPTS) && (defined(__ARM_NEON__) || defined(__ARM_NEON))
     #define SK_ARM_HAS_NEON
+#endif
+
+// Really this __APPLE__ check shouldn't be necessary, but it seems that Apple's Clang defines
+// __ARM_FEATURE_CRC32 for -arch arm64, even though their chips don't support those instructions!
+#if defined(__ARM_FEATURE_CRC32) && !defined(__APPLE__)
+    #define SK_ARM_HAS_CRC32
 #endif
 
 //////////////////////////////////////////////////////////////////////

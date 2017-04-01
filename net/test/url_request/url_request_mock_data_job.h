@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_URL_REQUEST_URL_REQUEST_MOCK_DATA_JOB_H_
-#define NET_URL_REQUEST_URL_REQUEST_MOCK_DATA_JOB_H_
+#ifndef NET_TEST_URL_REQUEST_URL_REQUEST_MOCK_DATA_JOB_H_
+#define NET_TEST_URL_REQUEST_URL_REQUEST_MOCK_DATA_JOB_H_
 
 #include <stddef.h>
 
 #include <string>
 
 #include "base/memory/weak_ptr.h"
-#include "net/base/net_export.h"
 #include "net/url_request/url_request_job.h"
 
 namespace net {
@@ -72,4 +71,4 @@ class URLRequestMockDataJob : public URLRequestJob {
 
 }  // namespace net
 
-#endif  // NET_URL_REQUEST_URL_REQUEST_SIMPLE_JOB_H_
+#endif  // NET_TEST_URL_REQUEST_URL_REQUEST_MOCK_DATA_JOB_H_

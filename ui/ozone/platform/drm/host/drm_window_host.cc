@@ -145,14 +145,14 @@ bool DrmWindowHost::CanDispatchEvent(const PlatformEvent& ne) {
         DeviceDataManager::GetInstance()->GetTargetDisplayForTouchDevice(
             event->source_device_id());
 
-    if (display_id == display::Display::kInvalidDisplayID)
+    if (display_id == display::kInvalidDisplayId)
       return false;
 
     DrmDisplayHost* display = display_manager_->GetDisplay(display_id);
     if (!display)
       return false;
 
-    DisplaySnapshot* snapshot = display->snapshot();
+    display::DisplaySnapshot* snapshot = display->snapshot();
     if (!snapshot->current_mode())
       return false;
 
@@ -160,7 +160,7 @@ bool DrmWindowHost::CanDispatchEvent(const PlatformEvent& ne) {
                              snapshot->current_mode()->size());
     return display_bounds == bounds_;
   } else if (event->IsLocatedEvent()) {
-    LocatedEvent* located_event = static_cast<LocatedEvent*>(event);
+    LocatedEvent* located_event = event->AsLocatedEvent();
     return bounds_.Contains(located_event->location());
   }
 
@@ -174,7 +174,7 @@ uint32_t DrmWindowHost::DispatchEvent(const PlatformEvent& native_event) {
   Event* event = static_cast<Event*>(native_event);
   if (event->IsLocatedEvent()) {
     // Make the event location relative to this window's origin.
-    LocatedEvent* located_event = static_cast<LocatedEvent*>(event);
+    LocatedEvent* located_event = event->AsLocatedEvent();
     gfx::PointF location = located_event->location_f();
     location -= gfx::Vector2dF(bounds_.OffsetFromOrigin());
     located_event->set_location_f(location);
@@ -185,6 +185,8 @@ uint32_t DrmWindowHost::DispatchEvent(const PlatformEvent& native_event) {
                                base::Unretained(delegate_)));
   return POST_DISPATCH_STOP_PROPAGATION;
 }
+
+void DrmWindowHost::OnGpuProcessLaunched() {}
 
 void DrmWindowHost::OnGpuThreadReady() {
   sender_->GpuCreateWindow(widget_);

@@ -20,6 +20,8 @@
 #include "content/public/browser/session_storage_usage_info.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using base::ASCIIToUTF16;
 
@@ -28,14 +30,15 @@ namespace content {
 class DOMStorageContextImplTest : public testing::Test {
  public:
   DOMStorageContextImplTest()
-    : kOrigin(GURL("http://dom_storage/")),
-      kKey(ASCIIToUTF16("key")),
-      kValue(ASCIIToUTF16("value")),
-      kDontIncludeFileInfo(false),
-      kDoIncludeFileInfo(true) {
-  }
+      : kOrigin(GURL("http://dom_storage/")),
+        kSuborigin(GURL("http-so://foobar.dom_storage/")),
+        kKey(ASCIIToUTF16("key")),
+        kValue(ASCIIToUTF16("value")),
+        kDontIncludeFileInfo(false),
+        kDoIncludeFileInfo(true) {}
 
   const GURL kOrigin;
+  const GURL kSuborigin;
   const base::string16 kKey;
   const base::string16 kValue;
   const bool kDontIncludeFileInfo;
@@ -46,10 +49,9 @@ class DOMStorageContextImplTest : public testing::Test {
     storage_policy_ = new MockSpecialStoragePolicy;
     task_runner_ =
         new MockDOMStorageTaskRunner(base::ThreadTaskRunnerHandle::Get().get());
-    context_ = new DOMStorageContextImpl(temp_dir_.path(),
-                                         base::FilePath(),
-                                         storage_policy_.get(),
-                                         task_runner_.get());
+    context_ =
+        new DOMStorageContextImpl(temp_dir_.GetPath(), base::FilePath(),
+                                  storage_policy_.get(), task_runner_.get());
   }
 
   void TearDown() override {
@@ -60,9 +62,8 @@ class DOMStorageContextImplTest : public testing::Test {
 
   void VerifySingleOriginRemains(const GURL& origin) {
     // Use a new instance to examine the contexts of temp_dir_.
-    scoped_refptr<DOMStorageContextImpl> context =
-        new DOMStorageContextImpl(temp_dir_.path(), base::FilePath(),
-                                  NULL, NULL);
+    scoped_refptr<DOMStorageContextImpl> context = new DOMStorageContextImpl(
+        temp_dir_.GetPath(), base::FilePath(), NULL, NULL);
     std::vector<LocalStorageUsageInfo> infos;
     context->GetLocalStorageUsage(&infos, kDontIncludeFileInfo);
     ASSERT_EQ(1u, infos.size());
@@ -85,7 +86,7 @@ TEST_F(DOMStorageContextImplTest, Basics) {
   // This test doesn't do much, checks that the constructor
   // initializes members properly and that invoking methods
   // on a newly created object w/o any data on disk do no harm.
-  EXPECT_EQ(temp_dir_.path(), context_->localstorage_directory());
+  EXPECT_EQ(temp_dir_.GetPath(), context_->localstorage_directory());
   EXPECT_EQ(base::FilePath(), context_->sessionstorage_directory());
   EXPECT_EQ(storage_policy_.get(), context_->special_storage_policy_.get());
   context_->DeleteLocalStorage(GURL("http://chromium.org/"));
@@ -118,7 +119,7 @@ TEST_F(DOMStorageContextImplTest, UsageInfo) {
 
   // Create a new context that points to the same directory, see that
   // it knows about the origin that we stored data for.
-  context_ = new DOMStorageContextImpl(temp_dir_.path(), base::FilePath(),
+  context_ = new DOMStorageContextImpl(temp_dir_.GetPath(), base::FilePath(),
                                        NULL, NULL);
   context_->GetLocalStorageUsage(&infos, kDontIncludeFileInfo);
   EXPECT_EQ(1u, infos.size());
@@ -202,12 +203,11 @@ TEST_F(DOMStorageContextImplTest, PersistentIds) {
 TEST_F(DOMStorageContextImplTest, DeleteSessionStorage) {
   // Create a DOMStorageContextImpl which will save sessionStorage on disk.
   context_->Shutdown();
-  context_ = new DOMStorageContextImpl(temp_dir_.path(),
-                                       temp_dir_.path(),
-                                       storage_policy_.get(),
-                                       task_runner_.get());
+  context_ =
+      new DOMStorageContextImpl(temp_dir_.GetPath(), temp_dir_.GetPath(),
+                                storage_policy_.get(), task_runner_.get());
   context_->SetSaveSessionStorageOnDisk();
-  ASSERT_EQ(temp_dir_.path(), context_->sessionstorage_directory());
+  ASSERT_EQ(temp_dir_.GetPath(), context_->sessionstorage_directory());
 
   // Write data.
   const int kSessionStorageNamespaceId = 1 + session_id_offset();
@@ -227,9 +227,9 @@ TEST_F(DOMStorageContextImplTest, DeleteSessionStorage) {
   context_->Shutdown();
   context_ = NULL;
   base::RunLoop().RunUntilIdle();
-  context_ = new DOMStorageContextImpl(
-      temp_dir_.path(), temp_dir_.path(),
-      storage_policy_.get(), task_runner_.get());
+  context_ =
+      new DOMStorageContextImpl(temp_dir_.GetPath(), temp_dir_.GetPath(),
+                                storage_policy_.get(), task_runner_.get());
   context_->SetSaveSessionStorageOnDisk();
 
   // Read the data back.
@@ -251,9 +251,9 @@ TEST_F(DOMStorageContextImplTest, DeleteSessionStorage) {
   context_->Shutdown();
   context_ = NULL;
   base::RunLoop().RunUntilIdle();
-  context_ = new DOMStorageContextImpl(
-      temp_dir_.path(), temp_dir_.path(),
-      storage_policy_.get(), task_runner_.get());
+  context_ =
+      new DOMStorageContextImpl(temp_dir_.GetPath(), temp_dir_.GetPath(),
+                                storage_policy_.get(), task_runner_.get());
   context_->SetSaveSessionStorageOnDisk();
 
   // Now there should be no data.
@@ -298,6 +298,97 @@ TEST_F(DOMStorageContextImplTest, PurgeMemory) {
   EXPECT_NE(0u, dom_namespace->GetUsageStatistics().total_cache_size);
   context_->PurgeMemory(DOMStorageContextImpl::PURGE_AGGRESSIVE);
   EXPECT_EQ(0u, dom_namespace->GetUsageStatistics().total_cache_size);
+}
+
+// Verifies that deleting the local storage for an origin will delete any
+// suborigins also present, and similarly, deleting a suborigin will delete the
+// physical origin as well.
+TEST_F(DOMStorageContextImplTest, DeleteSuboriginLocalStorage) {
+  context_->Shutdown();
+  context_ =
+      new DOMStorageContextImpl(temp_dir_.GetPath(), temp_dir_.GetPath(),
+                                storage_policy_.get(), task_runner_.get());
+
+  DOMStorageNamespace* dom_namespace =
+      context_->GetStorageNamespace(kLocalStorageNamespaceId);
+  DOMStorageArea* origin_area = dom_namespace->OpenStorageArea(kOrigin);
+  DOMStorageArea* suborigin_area = dom_namespace->OpenStorageArea(kSuborigin);
+
+  const base::string16 kOriginKey(ASCIIToUTF16("foo"));
+  const base::string16 kOriginValue(ASCIIToUTF16("bar"));
+  const base::string16 kSuboriginKey(ASCIIToUTF16("foz"));
+  const base::string16 kSuboriginValue(ASCIIToUTF16("baz"));
+  base::NullableString16 old_nullable_value;
+
+  // Setup data for the first deletion (of the origin rather than the suborigin)
+  origin_area->SetItem(kOriginKey, kOriginValue, &old_nullable_value);
+  suborigin_area->SetItem(kSuboriginKey, kSuboriginValue, &old_nullable_value);
+
+  base::NullableString16 read_value;
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_EQ(kOriginValue, read_value.string());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_EQ(kSuboriginValue, read_value.string());
+
+  // Deleting the data for the physical origin should delete the data in the
+  // suborigin as  well.
+  context_->DeleteLocalStorageForPhysicalOrigin(kOrigin);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_TRUE(read_value.is_null());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_TRUE(read_value.is_null());
+
+  // Setup data again for the second deletion (of the suborigin rather than the
+  // origin)
+  origin_area->SetItem(kOriginKey, kOriginValue, &old_nullable_value);
+  suborigin_area->SetItem(kSuboriginKey, kSuboriginValue, &old_nullable_value);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_EQ(kOriginValue, read_value.string());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_EQ(kSuboriginValue, read_value.string());
+
+  // Delete the suborigin by physical origin this time. This should delete both
+  // the suborigin and physical origin.
+  context_->DeleteLocalStorageForPhysicalOrigin(kSuborigin);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_TRUE(read_value.is_null());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_TRUE(read_value.is_null());
+
+  // Setup data again for the third deletion, to test deleting the storage one
+  // at a time.
+  origin_area->SetItem(kOriginKey, kOriginValue, &old_nullable_value);
+  suborigin_area->SetItem(kSuboriginKey, kSuboriginValue, &old_nullable_value);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_EQ(kOriginValue, read_value.string());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_EQ(kSuboriginValue, read_value.string());
+
+  // Delete the origin only. This should leave the suborigin.
+  context_->DeleteLocalStorage(kOrigin);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_TRUE(read_value.is_null());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_EQ(kSuboriginValue, read_value.string());
+
+  // Put the origin value back so suborigin deletion can be tested.
+  origin_area->SetItem(kOriginKey, kOriginValue, &old_nullable_value);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_EQ(kOriginValue, read_value.string());
+
+  // Delete the suborigin only. This should leave the origin.
+  context_->DeleteLocalStorage(kSuborigin);
+
+  read_value = origin_area->GetItem(kOriginKey);
+  EXPECT_EQ(kOriginValue, read_value.string());
+  read_value = suborigin_area->GetItem(kSuboriginKey);
+  EXPECT_TRUE(read_value.is_null());
 }
 
 }  // namespace content

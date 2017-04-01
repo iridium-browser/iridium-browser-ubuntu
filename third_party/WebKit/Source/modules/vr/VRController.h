@@ -20,45 +20,45 @@ namespace blink {
 class NavigatorVR;
 class VRGetDevicesCallback;
 
-class VRController final
-    : public GarbageCollectedFinalized<VRController>
-    , public device::blink::VRServiceClient
-    , public ContextLifecycleObserver {
-    USING_GARBAGE_COLLECTED_MIXIN(VRController);
-    WTF_MAKE_NONCOPYABLE(VRController);
-public:
-    VRController(NavigatorVR*);
-    virtual ~VRController();
+class VRController final : public GarbageCollectedFinalized<VRController>,
+                           public device::mojom::blink::VRServiceClient,
+                           public ContextLifecycleObserver {
+  USING_GARBAGE_COLLECTED_MIXIN(VRController);
+  WTF_MAKE_NONCOPYABLE(VRController);
+  USING_PRE_FINALIZER(VRController, dispose);
 
-    // VRService.
-    void getDisplays(ScriptPromiseResolver*);
-    device::blink::VRPosePtr getPose(unsigned index);
-    void resetPose(unsigned index);
+ public:
+  VRController(NavigatorVR*);
+  virtual ~VRController();
 
-    VRDisplay* createOrUpdateDisplay(const device::blink::VRDisplayPtr&);
-    VRDisplayVector updateDisplays(mojo::WTFArray<device::blink::VRDisplayPtr>);
-    VRDisplay* getDisplayForIndex(unsigned index);
+  void getDisplays(ScriptPromiseResolver*);
+  void setListeningForActivate(bool);
 
-    DECLARE_VIRTUAL_TRACE();
+  void OnDisplayConnected(device::mojom::blink::VRDisplayPtr,
+                          device::mojom::blink::VRDisplayClientRequest,
+                          device::mojom::blink::VRDisplayInfoPtr) override;
 
-private:
-    // Binding callbacks.
-    void onGetDisplays(mojo::WTFArray<device::blink::VRDisplayPtr>);
+  DECLARE_VIRTUAL_TRACE();
 
-    // VRServiceClient.
-    void OnDisplayChanged(device::blink::VRDisplayPtr) override;
+ private:
+  void onDisplaysSynced(unsigned);
+  void onGetDisplays();
 
-    // ContextLifecycleObserver.
-    void contextDestroyed() override;
+  // ContextLifecycleObserver.
+  void contextDestroyed(ExecutionContext*) override;
+  void dispose();
 
-    Member<NavigatorVR> m_navigatorVR;
-    VRDisplayVector m_displays;
+  Member<NavigatorVR> m_navigatorVR;
+  VRDisplayVector m_displays;
 
-    Deque<std::unique_ptr<VRGetDevicesCallback>> m_pendingGetDevicesCallbacks;
-    device::blink::VRServicePtr m_service;
-    mojo::Binding<device::blink::VRServiceClient> m_binding;
+  bool m_displaySynced;
+  unsigned m_numberOfSyncedDisplays;
+
+  Deque<std::unique_ptr<VRGetDevicesCallback>> m_pendingGetDevicesCallbacks;
+  device::mojom::blink::VRServicePtr m_service;
+  mojo::Binding<device::mojom::blink::VRServiceClient> m_binding;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // VRController_h
+#endif  // VRController_h

@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_summary_panel.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/features.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
@@ -34,7 +34,7 @@
 #include "ui/views/window/dialog_delegate.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/arc/arc_auth_service.h"
+#include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/arc_app_info_links_panel.h"
 #endif
 
@@ -71,19 +71,12 @@ gfx::Size GetAppInfoNativeDialogSize() {
   return gfx::Size(380, 490);
 }
 
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
 void ShowAppInfoInAppList(gfx::NativeWindow parent,
                           const gfx::Rect& app_list_bounds,
                           Profile* profile,
                           const extensions::Extension* app,
                           const base::Closure& close_callback) {
-  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialogOpenedForType",
-                            app->GetType(),
-                            extensions::Manifest::NUM_LOAD_TYPES);
-  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialogOpenedForLocation",
-                            app->location(),
-                            extensions::Manifest::NUM_LOCATIONS);
-
   views::View* app_info_view = new AppInfoDialog(parent, profile, app);
   views::DialogDelegate* dialog =
       CreateAppListContainerForView(app_info_view, close_callback);
@@ -123,24 +116,17 @@ AppInfoDialog::AppInfoDialog(gfx::NativeWindow parent_window,
       profile_(profile),
       app_id_(app->id()),
       extension_registry_(NULL) {
-  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialogOpenedForType",
-                            app->GetType(),
-                            extensions::Manifest::NUM_LOAD_TYPES);
-  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialogOpenedForLocation",
-                            app->location(),
-                            extensions::Manifest::NUM_LOCATIONS);
-
   views::BoxLayout* layout =
       new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0);
   SetLayoutManager(layout);
 
   const int kHorizontalSeparatorHeight = 1;
   dialog_header_ = new AppInfoHeaderPanel(profile, app);
-  dialog_header_->SetBorder(views::Border::CreateSolidSidedBorder(
+  dialog_header_->SetBorder(views::CreateSolidSidedBorder(
       0, 0, kHorizontalSeparatorHeight, 0, kDialogSeparatorColor));
 
   dialog_footer_ = new AppInfoFooterPanel(parent_window, profile, app);
-  dialog_footer_->SetBorder(views::Border::CreateSolidSidedBorder(
+  dialog_footer_->SetBorder(views::CreateSolidSidedBorder(
       kHorizontalSeparatorHeight, 0, 0, 0, kDialogSeparatorColor));
   if (!dialog_footer_->has_children()) {
     // If there are no controls in the footer, don't add it to the dialog.
@@ -161,7 +147,7 @@ AppInfoDialog::AppInfoDialog(gfx::NativeWindow parent_window,
 
 #if defined(OS_CHROMEOS)
   // When ARC is enabled, show the "Manage supported links" link for Chrome.
-  if (arc::ArcAuthService::Get()->IsArcEnabled() &&
+  if (arc::ArcSessionManager::Get()->IsArcEnabled() &&
       app->id() == extension_misc::kChromeAppId)
     dialog_body_contents->AddChildView(new ArcAppInfoLinksPanel(profile, app));
 #endif

@@ -4,63 +4,82 @@
 
 #include "platform/MemoryCoordinator.h"
 
-#include "platform/TraceEvent.h"
+#include "base/sys_info.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/graphics/ImageDecodingStore.h"
+#include "platform/instrumentation/tracing/TraceEvent.h"
 #include "wtf/allocator/Partitions.h"
 
 namespace blink {
 
-MemoryCoordinator& MemoryCoordinator::instance()
-{
-    DEFINE_STATIC_LOCAL(Persistent<MemoryCoordinator>, external, (new MemoryCoordinator));
-    DCHECK(isMainThread());
-    return *external.get();
+// static
+bool MemoryCoordinator::s_isLowEndDevice = false;
+
+// static
+bool MemoryCoordinator::isLowEndDevice() {
+  return s_isLowEndDevice;
 }
 
-MemoryCoordinator::MemoryCoordinator()
-{
+// static
+void MemoryCoordinator::initialize() {
+  s_isLowEndDevice = ::base::SysInfo::IsLowEndDevice();
 }
 
-void MemoryCoordinator::registerClient(MemoryCoordinatorClient* client)
-{
-    DCHECK(isMainThread());
-    DCHECK(client);
-    DCHECK(!m_clients.contains(client));
-    m_clients.add(client);
+// static
+void MemoryCoordinator::setIsLowEndDeviceForTesting(bool isLowEndDevice) {
+  s_isLowEndDevice = isLowEndDevice;
 }
 
-void MemoryCoordinator::unregisterClient(MemoryCoordinatorClient* client)
-{
-    DCHECK(isMainThread());
-    m_clients.remove(client);
+// static
+MemoryCoordinator& MemoryCoordinator::instance() {
+  DEFINE_STATIC_LOCAL(Persistent<MemoryCoordinator>, external,
+                      (new MemoryCoordinator));
+  DCHECK(isMainThread());
+  return *external.get();
 }
 
-void MemoryCoordinator::prepareToSuspend()
-{
-    for (auto& client : m_clients)
-        client->prepareToSuspend();
-    WTF::Partitions::decommitFreeableMemory();
+
+MemoryCoordinator::MemoryCoordinator() {}
+
+void MemoryCoordinator::registerClient(MemoryCoordinatorClient* client) {
+  DCHECK(isMainThread());
+  DCHECK(client);
+  DCHECK(!m_clients.contains(client));
+  m_clients.add(client);
 }
 
-void MemoryCoordinator::onMemoryPressure(WebMemoryPressureLevel level)
-{
-    TRACE_EVENT0("blink", "MemoryCoordinator::onMemoryPressure");
-    for (auto& client : m_clients)
-        client->onMemoryPressure(level);
-    if (level == WebMemoryPressureLevelCritical) {
-        // Clear the image cache.
-        // TODO(tasak|bashi): Make ImageDecodingStore and FontCache be
-        // MemoryCoordinatorClients rather than clearing caches here.
-        ImageDecodingStore::instance().clear();
-        FontCache::fontCache()->invalidate();
-    }
-    WTF::Partitions::decommitFreeableMemory();
+void MemoryCoordinator::unregisterClient(MemoryCoordinatorClient* client) {
+  DCHECK(isMainThread());
+  m_clients.remove(client);
 }
 
-DEFINE_TRACE(MemoryCoordinator)
-{
-    visitor->trace(m_clients);
+void MemoryCoordinator::onMemoryPressure(WebMemoryPressureLevel level) {
+  TRACE_EVENT0("blink", "MemoryCoordinator::onMemoryPressure");
+  for (auto& client : m_clients)
+    client->onMemoryPressure(level);
+  if (level == WebMemoryPressureLevelCritical)
+    clearMemory();
+  WTF::Partitions::decommitFreeableMemory();
 }
 
-} // namespace blink
+void MemoryCoordinator::onMemoryStateChange(MemoryState state) {
+  for (auto& client : m_clients)
+    client->onMemoryStateChange(state);
+  if (state == MemoryState::SUSPENDED)
+    clearMemory();
+  WTF::Partitions::decommitFreeableMemory();
+}
+
+void MemoryCoordinator::clearMemory() {
+  // Clear the image cache.
+  // TODO(tasak|bashi): Make ImageDecodingStore and FontCache be
+  // MemoryCoordinatorClients rather than clearing caches here.
+  ImageDecodingStore::instance().clear();
+  FontCache::fontCache()->invalidate();
+}
+
+DEFINE_TRACE(MemoryCoordinator) {
+  visitor->trace(m_clients);
+}
+
+}  // namespace blink

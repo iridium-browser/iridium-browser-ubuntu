@@ -13,6 +13,7 @@ from __future__ import print_function
 
 import collections
 import optparse
+import os
 import sys
 
 import matplotlib.pyplot as plt
@@ -48,10 +49,10 @@ class RTPStatistics(object):
     self.smooth_bw_kbps = None
 
   def print_header_statistics(self):
-    print("{:>6}{:>11}{:>11}{:>6}{:>6}{:>3}{:>11}".format(
+    print("{:>6}{:>14}{:>14}{:>6}{:>6}{:>3}{:>11}".format(
         "SeqNo", "TimeStamp", "SendTime", "Size", "PT", "M", "SSRC"))
     for point in self.data_points:
-      print("{:>6}{:>11}{:>11}{:>6}{:>6}{:>3}{:>11}".format(
+      print("{:>6}{:>14}{:>14}{:>6}{:>6}{:>3}{:>11}".format(
           point.sequence_number, point.timestamp,
           int(point.arrival_timestamp_ms), point.size, point.payload_type,
           point.marker_bit, "0x{:x}".format(point.ssrc)))
@@ -93,13 +94,22 @@ class RTPStatistics(object):
       self.print_ssrc_info("", chosen_ssrc)
       return chosen_ssrc
 
-    for (i, ssrc) in enumerate(self.ssrc_frequencies):
+    ssrc_is_incoming = misc.ssrc_directions(self.data_points)
+    incoming = [ssrc for ssrc in ssrc_is_incoming if ssrc_is_incoming[ssrc]]
+    outgoing = [ssrc for ssrc in ssrc_is_incoming if not ssrc_is_incoming[ssrc]]
+
+    print("\nIncoming:\n")
+    for (i, ssrc) in enumerate(incoming):
       self.print_ssrc_info(i, ssrc)
+
+    print("\nOutgoing:\n")
+    for (i, ssrc) in enumerate(outgoing):
+      self.print_ssrc_info(i + len(incoming), ssrc)
 
     while True:
       chosen_index = int(misc.get_input("choose one> "))
       if 0 <= chosen_index < len(self.ssrc_frequencies):
-        return list(self.ssrc_frequencies)[chosen_index]
+        return (incoming + outgoing)[chosen_index]
       else:
         print("Invalid index!")
 
@@ -249,7 +259,7 @@ class RTPStatistics(object):
                             self.data_points)
 
     plt.figure(1)
-    plt.plot(time_axis, delay)
+    plt.plot(time_axis, delay[:len(time_axis)])
     plt.xlabel("Send time [s]")
     plt.ylabel("Relative transport delay [ms]")
 
@@ -270,14 +280,14 @@ def calculate_delay(start, stop, step, points):
   masked array, in which time points with no value are masked.
 
   """
-  grouped_delays = [[] for _ in numpy.arange(start, stop, step)]
+  grouped_delays = [[] for _ in numpy.arange(start, stop + step, step)]
   rounded_value_index = lambda x: int((x - start) / step)
   for point in points:
     grouped_delays[rounded_value_index(point.real_send_time_ms)
                   ].append(point.absdelay)
-  regularized_delays = [numpy.average(arr) if arr else None for arr in
+  regularized_delays = [numpy.average(arr) if arr else -1 for arr in
                         grouped_delays]
-  return numpy.ma.masked_values(regularized_delays, None)
+  return numpy.ma.masked_values(regularized_delays, -1)
 
 
 def main():
@@ -290,13 +300,22 @@ def main():
                     default=False, action="store_true",
                     help="always query user for real sample rate")
 
+  parser.add_option("--working_directory",
+                    default=None, action="store",
+                    help="directory in which to search for relative paths")
+
   (options, args) = parser.parse_args()
 
   if len(args) < 1:
     parser.print_help()
     sys.exit(0)
 
-  data_points = pb_parse.parse_protobuf(args[0])
+  input_file = args[0]
+
+  if options.working_directory and not os.path.isabs(input_file):
+    input_file = os.path.join(options.working_directory, input_file)
+
+  data_points = pb_parse.parse_protobuf(input_file)
   rtp_stats = RTPStatistics(data_points)
 
   if options.dump_header_to_stdout:

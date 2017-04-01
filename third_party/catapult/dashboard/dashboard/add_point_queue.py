@@ -4,6 +4,7 @@
 
 """URL endpoint to add new graph data to the datastore."""
 
+import datetime
 import json
 import logging
 
@@ -11,13 +12,13 @@ from google.appengine.api import datastore_errors
 from google.appengine.ext import ndb
 
 from dashboard import add_point
-from dashboard import datastore_hooks
 from dashboard import find_anomalies
 from dashboard import graph_revisions
-from dashboard import request_handler
-from dashboard import stored_object
 from dashboard import units_to_direction
-from dashboard import utils
+from dashboard.common import datastore_hooks
+from dashboard.common import request_handler
+from dashboard.common import stored_object
+from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
 
@@ -77,8 +78,6 @@ class AddPointQueueHandler(request_handler.RequestHandler):
     for test_key in monitored_test_keys:
       if not _IsRefBuild(test_key):
         find_anomalies.ProcessTest(test_key)
-      else:
-        logging.warn('Ref data marked as monitored: %s', str(test_key))
 
 
 def _PrewarmGets(data):
@@ -318,6 +317,7 @@ def _GetOrCreateTest(name, parent_test_path, properties):
     alert = existing.stoppage_alert.get()
     if alert:
       alert.recovered = True
+      alert.last_row_timestamp = datetime.datetime.now()
       alert.put()
     else:
       logging.warning('Stoppage alert %s not found.', existing.stoppage_alert)

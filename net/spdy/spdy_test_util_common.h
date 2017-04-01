@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -40,10 +41,10 @@ class GURL;
 
 namespace net {
 
-class BoundNetLog;
 class CTVerifier;
 class CTPolicyEnforcer;
 class HostPortPair;
+class NetLogWithSource;
 class SpdySession;
 class SpdySessionKey;
 class SpdySessionPool;
@@ -105,7 +106,7 @@ base::WeakPtr<SpdyStream> CreateStreamSynchronously(
     const base::WeakPtr<SpdySession>& session,
     const GURL& url,
     RequestPriority priority,
-    const BoundNetLog& net_log);
+    const NetLogWithSource& net_log);
 
 // Helper class used by some tests to release a stream as soon as it's
 // created.
@@ -201,11 +202,12 @@ struct SpdySessionDependencies {
   bool enable_user_alternate_protocol_ports;
   bool enable_quic;
   size_t session_max_recv_window_size;
-  size_t stream_max_recv_window_size;
+  SettingsMap http2_settings;
   SpdySession::TimeFunc time_func;
   std::unique_ptr<ProxyDelegate> proxy_delegate;
   bool enable_http2_alternative_service_with_different_host;
   NetLog* net_log;
+  bool http_09_on_non_default_ports_enabled;
 };
 
 class SpdyURLRequestContext : public URLRequestContext {
@@ -220,7 +222,8 @@ class SpdyURLRequestContext : public URLRequestContext {
   URLRequestContextStorage storage_;
 };
 
-// Equivalent to pool->GetIfExists(spdy_session_key, BoundNetLog()) != NULL.
+// Equivalent to pool->GetIfExists(spdy_session_key, NetLogWithSource()) !=
+// NULL.
 bool HasSpdySession(SpdySessionPool* pool, const SpdySessionKey& key);
 
 // Creates a SPDY session for the given key and puts it in the SPDY
@@ -229,23 +232,23 @@ bool HasSpdySession(SpdySessionPool* pool, const SpdySessionKey& key);
 base::WeakPtr<SpdySession> CreateInsecureSpdySession(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
-    const BoundNetLog& net_log);
+    const NetLogWithSource& net_log);
 
 // Tries to create a SPDY session for the given key but expects the
 // attempt to fail with the given error. A SPDY session for |key| must
 // not already exist. The session will be created but close in the
 // next event loop iteration.
-base::WeakPtr<SpdySession> TryCreateInsecureSpdySessionExpectingFailure(
+base::WeakPtr<SpdySession> TryCreateSpdySessionExpectingFailure(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
     Error expected_error,
-    const BoundNetLog& net_log);
+    const NetLogWithSource& net_log);
 
 // Like CreateInsecureSpdySession(), but uses TLS.
 base::WeakPtr<SpdySession> CreateSecureSpdySession(
     HttpNetworkSession* http_session,
     const SpdySessionKey& key,
-    const BoundNetLog& net_log);
+    const NetLogWithSource& net_log);
 
 // Creates an insecure SPDY session for the given key and puts it in
 // |pool|. The returned session will neither receive nor send any
@@ -268,10 +271,7 @@ class SpdySessionPoolPeer {
   explicit SpdySessionPoolPeer(SpdySessionPool* pool);
 
   void RemoveAliases(const SpdySessionKey& key);
-  void DisableDomainAuthenticationVerification();
   void SetEnableSendingInitialData(bool enabled);
-  void SetSessionMaxRecvWindowSize(size_t window);
-  void SetStreamInitialRecvWindowSize(size_t window);
 
  private:
   SpdySessionPool* const pool_;
@@ -336,6 +336,13 @@ class SpdyTestUtil {
   // Returns the constructed frame.  The caller takes ownership of the frame.
   SpdySerializedFrame ConstructSpdyRstStream(SpdyStreamId stream_id,
                                              SpdyRstStreamStatus status);
+
+  // Construct a PRIORITY frame. The weight is derived from |request_priority|.
+  // Returns the constructed frame.  The caller takes ownership of the frame.
+  SpdySerializedFrame ConstructSpdyPriority(SpdyStreamId stream_id,
+                                            SpdyStreamId parent_stream_id,
+                                            RequestPriority request_priority,
+                                            bool exclusive);
 
   // Constructs a standard SPDY GET HEADERS frame for |url| with header
   // compression.

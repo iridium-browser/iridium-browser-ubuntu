@@ -5,11 +5,11 @@
 #include "components/sync/syncable/directory_unittest.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include <cstdlib>
 
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
@@ -18,7 +18,6 @@
 #include "components/sync/base/mock_unrecoverable_error_handler.h"
 #include "components/sync/syncable/syncable_proto_util.h"
 #include "components/sync/syncable/syncable_util.h"
-#include "components/sync/syncable/syncable_write_transaction.h"
 #include "components/sync/test/engine/test_syncable_utils.h"
 #include "components/sync/test/test_directory_backing_store.h"
 
@@ -79,9 +78,9 @@ DirOpenResult SyncableDirectoryTest::ReopenDirectory() {
   // Use a TestDirectoryBackingStore and sql::Connection so we can have test
   // data persist across Directory object lifetimes while getting the
   // performance benefits of not writing to disk.
-  dir_.reset(new Directory(
+  dir_ = base::MakeUnique<Directory>(
       new TestDirectoryBackingStore(kDirectoryName, &connection_),
-      MakeWeakHandle(handler_.GetWeakPtr()), base::Closure(), NULL, NULL));
+      MakeWeakHandle(handler_.GetWeakPtr()), base::Closure(), nullptr, nullptr);
 
   DirOpenResult open_result =
       dir_->Open(kDirectoryName, &delegate_, NullTransactionObserver());
@@ -225,10 +224,10 @@ void SyncableDirectoryTest::ValidateEntry(BaseTransaction* trans,
   Entry e(trans, GET_BY_ID, TestIdFactory::FromNumber(id));
   ASSERT_TRUE(e.good());
   if (check_name)
-    ASSERT_TRUE(name == e.GetNonUniqueName());
-  ASSERT_TRUE(base_version == e.GetBaseVersion());
-  ASSERT_TRUE(server_version == e.GetServerVersion());
-  ASSERT_TRUE(is_del == e.GetIsDel());
+    ASSERT_EQ(name, e.GetNonUniqueName());
+  ASSERT_EQ(base_version, e.GetBaseVersion());
+  ASSERT_EQ(server_version, e.GetServerVersion());
+  ASSERT_EQ(is_del, e.GetIsDel());
 }
 
 TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
@@ -262,7 +261,7 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
   Directory::SaveChangesSnapshot snapshot1;
   base::AutoLock scoped_lock(dir()->kernel()->save_changes_mutex);
   dir()->TakeSnapshotForSaveChanges(&snapshot1);
-  EXPECT_TRUE(expected_purges == snapshot1.metahandles_to_purge);
+  EXPECT_EQ(expected_purges, snapshot1.metahandles_to_purge);
 
   to_purge.Clear();
   to_purge.Put(PREFERENCES);
@@ -272,7 +271,7 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsMetahandlesToPurge) {
 
   Directory::SaveChangesSnapshot snapshot2;
   dir()->TakeSnapshotForSaveChanges(&snapshot2);
-  EXPECT_TRUE(all_handles == snapshot2.metahandles_to_purge);
+  EXPECT_EQ(all_handles, snapshot2.metahandles_to_purge);
 }
 
 TEST_F(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest) {
@@ -294,8 +293,8 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest) {
     // Make sure there's an entry for each new metahandle.  Make sure all
     // entries are marked dirty.
     ASSERT_EQ(expected_dirty_metahandles.size(), snapshot.dirty_metas.size());
-    for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
-         i != snapshot.dirty_metas.end(); ++i) {
+    for (auto i = snapshot.dirty_metas.begin(); i != snapshot.dirty_metas.end();
+         ++i) {
       ASSERT_TRUE((*i)->is_dirty());
     }
     dir()->VacuumAfterSaveChanges(snapshot);
@@ -328,8 +327,8 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsAllDirtyHandlesTest) {
     // Make sure there's an entry for each new metahandle.  Make sure all
     // entries are marked dirty.
     EXPECT_EQ(expected_dirty_metahandles.size(), snapshot.dirty_metas.size());
-    for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
-         i != snapshot.dirty_metas.end(); ++i) {
+    for (auto i = snapshot.dirty_metas.begin(); i != snapshot.dirty_metas.end();
+         ++i) {
       EXPECT_TRUE((*i)->is_dirty());
     }
     dir()->VacuumAfterSaveChanges(snapshot);
@@ -418,8 +417,8 @@ TEST_F(SyncableDirectoryTest, TakeSnapshotGetsOnlyDirtyHandlesTest) {
     // Make sure there's an entry for each changed metahandle.  Make sure all
     // entries are marked dirty.
     EXPECT_EQ(number_changed, snapshot.dirty_metas.size());
-    for (EntryKernelSet::const_iterator i = snapshot.dirty_metas.begin();
-         i != snapshot.dirty_metas.end(); ++i) {
+    for (auto i = snapshot.dirty_metas.begin(); i != snapshot.dirty_metas.end();
+         ++i) {
       EXPECT_TRUE((*i)->is_dirty());
     }
     dir()->VacuumAfterSaveChanges(snapshot);
@@ -728,7 +727,7 @@ TEST_F(SyncableDirectoryTest, TestGetUnsynced) {
     WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
     dir()->GetUnsyncedMetaHandles(&trans, &handles);
     ASSERT_EQ(1u, handles.size());
-    ASSERT_TRUE(handle1 == handles[0]);
+    ASSERT_EQ(handle1, handles[0]);
 
     MutableEntry e4(&trans, GET_BY_HANDLE, handle2);
     ASSERT_TRUE(e4.good());
@@ -740,10 +739,10 @@ TEST_F(SyncableDirectoryTest, TestGetUnsynced) {
     dir()->GetUnsyncedMetaHandles(&trans, &handles);
     ASSERT_EQ(2u, handles.size());
     if (handle1 == handles[0]) {
-      ASSERT_TRUE(handle2 == handles[1]);
+      ASSERT_EQ(handle2, handles[1]);
     } else {
-      ASSERT_TRUE(handle2 == handles[0]);
-      ASSERT_TRUE(handle1 == handles[1]);
+      ASSERT_EQ(handle2, handles[0]);
+      ASSERT_EQ(handle1, handles[1]);
     }
 
     MutableEntry e5(&trans, GET_BY_HANDLE, handle1);
@@ -757,7 +756,7 @@ TEST_F(SyncableDirectoryTest, TestGetUnsynced) {
     WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
     dir()->GetUnsyncedMetaHandles(&trans, &handles);
     ASSERT_EQ(1u, handles.size());
-    ASSERT_TRUE(handle2 == handles[0]);
+    ASSERT_EQ(handle2, handles[0]);
   }
 }
 
@@ -802,7 +801,7 @@ TEST_F(SyncableDirectoryTest, TestGetUnappliedUpdates) {
     WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
     dir()->GetUnappliedUpdateMetaHandles(&trans, all_types, &handles);
     ASSERT_EQ(1u, handles.size());
-    ASSERT_TRUE(handle1 == handles[0]);
+    ASSERT_EQ(handle1, handles[0]);
 
     MutableEntry e4(&trans, GET_BY_HANDLE, handle2);
     ASSERT_TRUE(e4.good());
@@ -814,10 +813,10 @@ TEST_F(SyncableDirectoryTest, TestGetUnappliedUpdates) {
     dir()->GetUnappliedUpdateMetaHandles(&trans, all_types, &handles);
     ASSERT_EQ(2u, handles.size());
     if (handle1 == handles[0]) {
-      ASSERT_TRUE(handle2 == handles[1]);
+      ASSERT_EQ(handle2, handles[1]);
     } else {
-      ASSERT_TRUE(handle2 == handles[0]);
-      ASSERT_TRUE(handle1 == handles[1]);
+      ASSERT_EQ(handle2, handles[0]);
+      ASSERT_EQ(handle1, handles[1]);
     }
 
     MutableEntry e5(&trans, GET_BY_HANDLE, handle1);
@@ -829,7 +828,7 @@ TEST_F(SyncableDirectoryTest, TestGetUnappliedUpdates) {
     WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
     dir()->GetUnappliedUpdateMetaHandles(&trans, all_types, &handles);
     ASSERT_EQ(1u, handles.size());
-    ASSERT_TRUE(handle2 == handles[0]);
+    ASSERT_EQ(handle2, handles[0]);
   }
 }
 
@@ -953,8 +952,8 @@ TEST_F(SyncableDirectoryTest, TestEntryIsInFolder) {
     Entry entry(&trans, GET_BY_ID, entry_id);
     ASSERT_TRUE(entry.good());
     EXPECT_EQ(entry_handle, entry.GetMetahandle());
-    EXPECT_TRUE(entry.GetNonUniqueName() == entry_name);
-    EXPECT_TRUE(entry.GetParentId() == folder_id);
+    EXPECT_EQ(entry_name, entry.GetNonUniqueName());
+    EXPECT_EQ(folder_id, entry.GetParentId());
   }
 }
 
@@ -1347,8 +1346,8 @@ TEST_F(SyncableDirectoryTest, PositionWithNullSurvivesSaveAndReload) {
   const char null_cstr[] = "\0null\0test";
   std::string null_str(null_cstr, arraysize(null_cstr) - 1);
   // Pad up to the minimum length with 0x7f characters, then add a string that
-  // contains a few NULLs to the end.  This is slightly wrong, since the suffix
-  // part of a UniquePosition shouldn't contain NULLs, but it's good enough for
+  // contains a few nulls to the end.  This is slightly wrong, since the suffix
+  // part of a UniquePosition shouldn't contain nulls, but it's good enough for
   // this test.
   std::string suffix =
       std::string(UniquePosition::kSuffixLength - null_str.length(), '\x7f') +
@@ -1622,7 +1621,7 @@ TEST_F(SyncableDirectoryTest, ToValue) {
     Entry e(&rtrans, GET_BY_ID, id);
     EXPECT_FALSE(e.good());  // Hasn't been written yet.
 
-    std::unique_ptr<base::DictionaryValue> value(e.ToValue(NULL));
+    std::unique_ptr<base::DictionaryValue> value(e.ToValue(nullptr));
     ExpectDictBooleanValue(false, *value, "good");
     EXPECT_EQ(1u, value->size());
   }
@@ -1635,7 +1634,7 @@ TEST_F(SyncableDirectoryTest, ToValue) {
     me.PutId(id);
     me.PutBaseVersion(1);
 
-    std::unique_ptr<base::DictionaryValue> value(me.ToValue(NULL));
+    std::unique_ptr<base::DictionaryValue> value(me.ToValue(nullptr));
     ExpectDictBooleanValue(true, *value, "good");
     EXPECT_TRUE(value->HasKey("kernel"));
     ExpectDictStringValue("Bookmarks", *value, "modelType");
@@ -1696,7 +1695,8 @@ TEST_F(SyncableDirectoryTest, StressTransactions) {
   std::unique_ptr<StressTransactionsDelegate> thread_delegates[kThreadCount];
 
   for (int i = 0; i < kThreadCount; ++i) {
-    thread_delegates[i].reset(new StressTransactionsDelegate(dir().get(), i));
+    thread_delegates[i] =
+        base::MakeUnique<StressTransactionsDelegate>(dir().get(), i);
     ASSERT_TRUE(base::PlatformThread::Create(0, thread_delegates[i].get(),
                                              &threads[i]));
   }
@@ -1712,7 +1712,7 @@ TEST_F(SyncableDirectoryTest, MutableEntry_PutAttachmentMetadata) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   sync_pb::AttachmentIdProto attachment_id_proto =
-      syncer::CreateAttachmentIdProto(0, 0);
+      CreateAttachmentIdProto(0, 0);
   *record->mutable_id() = attachment_id_proto;
   ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id_proto));
   {
@@ -1756,8 +1756,8 @@ TEST_F(SyncableDirectoryTest, MutableEntry_UpdateAttachmentId) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* r1 = attachment_metadata.add_record();
   sync_pb::AttachmentMetadataRecord* r2 = attachment_metadata.add_record();
-  *r1->mutable_id() = syncer::CreateAttachmentIdProto(0, 0);
-  *r2->mutable_id() = syncer::CreateAttachmentIdProto(0, 0);
+  *r1->mutable_id() = CreateAttachmentIdProto(0, 0);
+  *r2->mutable_id() = CreateAttachmentIdProto(0, 0);
   sync_pb::AttachmentIdProto attachment_id_proto = r1->id();
 
   WriteTransaction trans(FROM_HERE, UNITTEST, dir().get());
@@ -1795,7 +1795,7 @@ TEST_F(SyncableDirectoryTest, Directory_DeleteDoesNotUnlinkAttachments) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   sync_pb::AttachmentIdProto attachment_id_proto =
-      syncer::CreateAttachmentIdProto(0, 0);
+      CreateAttachmentIdProto(0, 0);
   *record->mutable_id() = attachment_id_proto;
   ASSERT_FALSE(dir()->IsAttachmentLinked(attachment_id_proto));
   const Id id = TestIdFactory::FromNumber(-1);
@@ -1824,7 +1824,7 @@ TEST_F(SyncableDirectoryTest, Directory_LastReferenceUnlinksAttachments) {
   sync_pb::AttachmentMetadata attachment_metadata;
   sync_pb::AttachmentMetadataRecord* record = attachment_metadata.add_record();
   sync_pb::AttachmentIdProto attachment_id_proto =
-      syncer::CreateAttachmentIdProto(0, 0);
+      CreateAttachmentIdProto(0, 0);
   *record->mutable_id() = attachment_id_proto;
 
   // Create two entries, each referencing the attachment.
@@ -2008,10 +2008,9 @@ TEST_F(SyncableDirectoryTest, MutableEntry_ImplicitParentId_Siblings) {
 }
 
 TEST_F(SyncableDirectoryTest, SaveChangesSnapshot_HasUnsavedMetahandleChanges) {
-  EntryKernel kernel;
   Directory::SaveChangesSnapshot snapshot;
   EXPECT_FALSE(snapshot.HasUnsavedMetahandleChanges());
-  snapshot.dirty_metas.insert(&kernel);
+  snapshot.dirty_metas.insert(base::MakeUnique<EntryKernel>());
   EXPECT_TRUE(snapshot.HasUnsavedMetahandleChanges());
   snapshot.dirty_metas.clear();
 
@@ -2021,7 +2020,7 @@ TEST_F(SyncableDirectoryTest, SaveChangesSnapshot_HasUnsavedMetahandleChanges) {
   snapshot.metahandles_to_purge.clear();
 
   EXPECT_FALSE(snapshot.HasUnsavedMetahandleChanges());
-  snapshot.delete_journals.insert(&kernel);
+  snapshot.delete_journals.insert(base::MakeUnique<EntryKernel>());
   EXPECT_TRUE(snapshot.HasUnsavedMetahandleChanges());
   snapshot.delete_journals.clear();
 
@@ -2127,6 +2126,20 @@ TEST_F(SyncableDirectoryTest, InitialSyncEndedForType) {
   // Mark as complete and verify.
   dir()->MarkInitialSyncEndedForType(&trans, PREFERENCES);
   EXPECT_TRUE(dir()->InitialSyncEndedForType(&trans, PREFERENCES));
+}
+
+TEST_F(SyncableDirectoryTest, TestGetNodeDetailsForType) {
+  CreateEntry(BOOKMARKS, "rtc");
+
+  ReadTransaction trans(FROM_HERE, dir().get());
+  std::unique_ptr<base::ListValue> nodes(
+      dir()->GetNodeDetailsForType(&trans, BOOKMARKS));
+  ASSERT_EQ(1U, nodes->GetSize());
+
+  const base::DictionaryValue* first_result;
+  ASSERT_TRUE(nodes->GetDictionary(0, &first_result));
+  EXPECT_TRUE(first_result->HasKey("ID"));
+  EXPECT_TRUE(first_result->HasKey("NON_UNIQUE_NAME"));
 }
 
 }  // namespace syncable

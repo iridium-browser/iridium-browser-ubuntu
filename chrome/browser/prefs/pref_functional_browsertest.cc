@@ -22,7 +22,7 @@
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/content_settings/core/common/pref_names.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/download_test_observer.h"
@@ -56,11 +56,11 @@ IN_PROC_BROWSER_TEST_F(PrefsFunctionalTest, TestDownloadDirPref) {
   ASSERT_TRUE(new_download_dir.CreateUniqueTempDir());
 
   base::FilePath downloaded_pkg =
-      new_download_dir.path().AppendASCII("a_zip_file.zip");
+      new_download_dir.GetPath().AppendASCII("a_zip_file.zip");
 
   // Set pref to download in new_download_dir.
   browser()->profile()->GetPrefs()->SetFilePath(
-      prefs::kDownloadDefaultDirectory, new_download_dir.path());
+      prefs::kDownloadDefaultDirectory, new_download_dir.GetPath());
 
   // Create a downloads observer.
   std::unique_ptr<content::DownloadTestObserver> downloads_observer(

@@ -5,6 +5,7 @@
 #include "extensions/browser/lazy_background_task_queue.h"
 
 #include "base/callback.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -78,7 +79,7 @@ void LazyBackgroundTaskQueue::AddPendingTask(
   PendingTasksMap::iterator it = pending_tasks_.find(key);
   if (it == pending_tasks_.end()) {
     tasks_list = new PendingTasksList();
-    pending_tasks_[key] = linked_ptr<PendingTasksList>(tasks_list);
+    pending_tasks_[key] = base::WrapUnique(tasks_list);
 
     const Extension* extension =
         ExtensionRegistry::Get(browser_context)->enabled_extensions().GetByID(

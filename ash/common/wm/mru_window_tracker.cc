@@ -6,12 +6,12 @@
 
 #include <algorithm>
 
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/wm/focus_rules.h"
 #include "ash/common/wm/switchable_windows.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/bind.h"
 
 namespace ash {
@@ -32,14 +32,6 @@ void AddTrackedWindows(WmWindow* root,
   WmWindow* container = root->GetChildByShellWindowId(container_id);
   const MruWindowTracker::WindowList children(container->GetChildren());
   windows->insert(windows->end(), children.begin(), children.end());
-}
-
-// Returns whether |w1| should be considered less recently used than |w2|. This
-// is used for a stable sort to move minimized windows to the LRU end of the
-// list.
-bool CompareWindowState(WmWindow* w1, WmWindow* w2) {
-  return w1->GetWindowState()->IsMinimized() &&
-         !w2->GetWindowState()->IsMinimized();
 }
 
 // Returns a list of windows ordered by their stacking order.
@@ -67,8 +59,7 @@ MruWindowTracker::WindowList BuildWindowListInternal(
   // Removes unfocusable windows.
   std::vector<WmWindow*>::iterator itr = windows.begin();
   while (itr != windows.end()) {
-    if (!should_include_window_predicate.Run(*itr) ||
-        (*itr)->GetWindowState()->ShouldBeExcludedFromMru())
+    if (!should_include_window_predicate.Run(*itr))
       itr = windows.erase(itr);
     else
       ++itr;
@@ -94,9 +85,6 @@ MruWindowTracker::WindowList BuildWindowListInternal(
       }
     }
   }
-
-  // Move minimized windows to the beginning (LRU end) of the list.
-  std::stable_sort(windows.begin(), windows.end(), CompareWindowState);
 
   // Window cycling expects the topmost window at the front of the list.
   std::reverse(windows.begin(), windows.end());

@@ -5,12 +5,24 @@
 #ifndef COMPONENTS_ARC_INSTANCE_HOLDER_H_
 #define COMPONENTS_ARC_INSTANCE_HOLDER_H_
 
+#include <string>
+#include <type_traits>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
+
+// A macro to call InstanceHolder<T>::GetInstanceForVersionDoNotCallDirectly().
+// In order to avoid exposing method names from within the Mojo bindings, we
+// will rely on stringification and the fact that the method min versions have a
+// consistent naming scheme.
+#define ARC_GET_INSTANCE_FOR_METHOD(holder, method_name)        \
+  (holder)->GetInstanceForVersionDoNotCallDirectly(             \
+      std::remove_pointer<decltype(                             \
+          holder)>::type::Instance::k##method_name##MinVersion, \
+      #method_name)
 
 namespace arc {
 
@@ -33,14 +45,38 @@ class InstanceHolder {
     virtual ~Observer() = default;
   };
 
+  using Instance = T;
+
   InstanceHolder() = default;
 
-  // Gets the Mojo interface for all the instance services. This will return
-  // nullptr if that particular service is not ready yet. Use an Observer if you
-  // want to be notified when this is ready. This can only be called on the
-  // thread that this class was created on.
-  T* instance() const { return instance_; }
-  uint32_t version() const { return version_; }
+  // Returns true if the Mojo interface is ready at least for its version 0
+  // interface. Use an Observer if you want to be notified when this is ready.
+  // This can only be called on the thread that this class was created on.
+  bool has_instance() const { return instance_; }
+
+  // Gets the Mojo interface that's intended to call for
+  // |method_name_for_logging|, but only if its reported version is at least
+  // |min_version|. Returns nullptr if the instance is either not ready or does
+  // not have the requested version, and logs appropriately.
+  // This function should not be called directly. Instead, use the
+  // ARC_GET_INSTANCE_FOR_METHOD() macro.
+  T* GetInstanceForVersionDoNotCallDirectly(
+      uint32_t min_version,
+      const char method_name_for_logging[]) {
+    if (!instance_) {
+      VLOG(1) << "Instance for " << T::Name_ << "::" << method_name_for_logging
+              << " not available.";
+      return nullptr;
+    }
+    if (version_ < min_version) {
+      LOG(ERROR) << "Instance for " << T::Name_
+                 << "::" << method_name_for_logging
+                 << " version mismatch. Expected " << min_version << " got "
+                 << version_;
+      return nullptr;
+    }
+    return instance_;
+  }
 
   // Adds or removes observers. This can only be called on the thread that this
   // class was created on. RemoveObserver does nothing if |observer| is not in
@@ -49,7 +85,7 @@ class InstanceHolder {
     DCHECK(thread_checker_.CalledOnValidThread());
     observer_list_.AddObserver(observer);
 
-    if (instance())
+    if (instance_)
       observer->OnInstanceReady();
   }
 
@@ -73,9 +109,11 @@ class InstanceHolder {
     instance_ = instance;
     version_ = version;
     if (instance_) {
-      FOR_EACH_OBSERVER(Observer, observer_list_, OnInstanceReady());
+      for (auto& observer : observer_list_)
+        observer.OnInstanceReady();
     } else {
-      FOR_EACH_OBSERVER(Observer, observer_list_, OnInstanceClosed());
+      for (auto& observer : observer_list_)
+        observer.OnInstanceClosed();
     }
   }
 

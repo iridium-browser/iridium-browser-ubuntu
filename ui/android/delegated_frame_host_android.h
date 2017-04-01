@@ -17,9 +17,7 @@
 namespace cc {
 
 class CompositorFrame;
-class CopyOutputResult;
 class Layer;
-class SurfaceId;
 class SurfaceManager;
 class SurfaceLayer;
 class SurfaceIdAllocator;
@@ -34,12 +32,16 @@ class WindowAndroidCompositor;
 class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
     : public cc::SurfaceFactoryClient {
  public:
-  using ReturnResourcesCallback =
-      base::Callback<void(const cc::ReturnedResourceArray&)>;
+  class Client {
+   public:
+    virtual void SetBeginFrameSource(
+        cc::BeginFrameSource* begin_frame_source) = 0;
+    virtual void ReturnResources(const cc::ReturnedResourceArray&) = 0;
+  };
 
   DelegatedFrameHostAndroid(ViewAndroid* view,
                             SkColor background_color,
-                            ReturnResourcesCallback return_resources_callback);
+                            Client* client);
 
   ~DelegatedFrameHostAndroid() override;
 
@@ -50,7 +52,7 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
 
   bool HasDelegatedContent() const;
 
-  uint32_t GetSurfaceClientId() const;
+  cc::FrameSinkId GetFrameSinkId() const;
 
   // Should only be called when the host has a content layer.
   void RequestCopyOfSurface(
@@ -58,13 +60,16 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
       const gfx::Rect& src_subrect_in_pixel,
       cc::CopyOutputRequest::CopyOutputRequestCallback result_callback);
 
-  void OutputSurfaceChanged();
+  void CompositorFrameSinkChanged();
 
   void UpdateBackgroundColor(SkColor color);
 
-  void SetContentsOpaque(bool opaque);
-
   void UpdateContainerSizeinDIP(const gfx::Size& size_in_dip);
+
+  // Called when this DFH is attached/detached from a parent browser compositor
+  // and needs to be attached to the surface hierarchy.
+  void RegisterFrameSinkHierarchy(const cc::FrameSinkId& parent_id);
+  void UnregisterFrameSinkHierarchy();
 
  private:
   // cc::SurfaceFactoryClient implementation.
@@ -73,11 +78,14 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
 
   void UpdateBackgroundLayer();
 
+  const cc::FrameSinkId frame_sink_id_;
+
   ViewAndroid* view_;
 
   cc::SurfaceManager* surface_manager_;
   std::unique_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
-  ReturnResourcesCallback return_resources_callback_;
+  cc::FrameSinkId registered_parent_frame_sink_id_;
+  Client* client_;
 
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
 
@@ -85,13 +93,14 @@ class UI_ANDROID_EXPORT DelegatedFrameHostAndroid
     FrameData();
     ~FrameData();
 
-    cc::SurfaceId surface_id;
+    cc::LocalFrameId local_frame_id;
     gfx::Size surface_size;
     float top_controls_height;
     float top_controls_shown_ratio;
     float bottom_controls_height;
     float bottom_controls_shown_ratio;
     cc::Selection<gfx::SelectionBound> viewport_selection;
+    bool has_transparent_background;
   };
   std::unique_ptr<FrameData> current_frame_;
 

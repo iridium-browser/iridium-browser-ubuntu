@@ -902,8 +902,6 @@ TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarSizeAfterPrefChange) {
 // Test that, in the absence of the extension-action-redesign switch, the
 // model only contains extensions with browser actions and component actions.
 TEST_F(ToolbarActionsModelUnitTest, TestToolbarExtensionTypesDisabledSwitch) {
-  extensions::FeatureSwitch::ScopedOverride enable_media_router(
-      extensions::FeatureSwitch::media_router(), false);
   extensions::FeatureSwitch::ScopedOverride enable_redesign(
       extensions::FeatureSwitch::extension_action_redesign(), false);
   Init();
@@ -972,8 +970,6 @@ TEST_F(ToolbarActionsModelUnitTest, TestToolbarExtensionTypesEnabledSwitch) {
 // Test that hiding actions on the toolbar results in their removal from the
 // model when the redesign switch is not enabled.
 TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarActionsVisibilityNoSwitch) {
-  extensions::FeatureSwitch::ScopedOverride enable_media_router(
-      extensions::FeatureSwitch::media_router(), false);
   extensions::FeatureSwitch::ScopedOverride enable_redesign(
       extensions::FeatureSwitch::extension_action_redesign(), false);
   Init();
@@ -1121,11 +1117,11 @@ TEST_F(ToolbarActionsModelUnitTest, ActionsToolbarIncognitoEnableExtension) {
     // The extension id will be calculated from the file path; we need this to
     // wait for the extension to load.
     base::FilePath path_for_id =
-        base::MakeAbsoluteFilePath(dirs[i]->unpacked_path());
+        base::MakeAbsoluteFilePath(dirs[i]->UnpackedPath());
     std::string id = crx_file::id_util::GenerateIdForPath(path_for_id);
     extensions::TestExtensionRegistryObserver observer(registry(), id);
-    extensions::UnpackedInstaller::Create(service())
-        ->Load(dirs[i]->unpacked_path());
+    extensions::UnpackedInstaller::Create(service())->Load(
+        dirs[i]->UnpackedPath());
     observer.WaitForExtensionLoaded();
     extensions[i] = registry()->enabled_extensions().GetByID(id);
     ASSERT_TRUE(extensions[i]);
@@ -1312,36 +1308,6 @@ TEST_F(ToolbarActionsModelUnitTest, ToolbarModelPrefChange) {
             observer()->inserted_count() - observer()->removed_count());
 }
 
-TEST_F(ToolbarActionsModelUnitTest, ComponentExtensionsAddedToEnd) {
-  Init();
-
-  ASSERT_TRUE(AddBrowserActionExtensions());
-
-  EXPECT_EQ(browser_action_a()->id(), GetActionIdAtIndex(0));
-  EXPECT_EQ(browser_action_b()->id(), GetActionIdAtIndex(1));
-  EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(2));
-
-  const char kName[] = "component";
-  extensions::DictionaryBuilder manifest;
-  manifest.Set("name", kName)
-      .Set("description", "An extension")
-      .Set("manifest_version", 2)
-      .Set("version", "1.0.0")
-      .Set("browser_action", extensions::DictionaryBuilder().Build());
-  scoped_refptr<const extensions::Extension> component_extension =
-      extensions::ExtensionBuilder()
-          .SetManifest(manifest.Build())
-          .SetID(crx_file::id_util::GenerateId(kName))
-          .SetLocation(extensions::Manifest::COMPONENT)
-          .Build();
-  service()->AddExtension(component_extension.get());
-
-  EXPECT_EQ(component_extension.get()->id(), GetActionIdAtIndex(0));
-  EXPECT_EQ(browser_action_a()->id(), GetActionIdAtIndex(1));
-  EXPECT_EQ(browser_action_b()->id(), GetActionIdAtIndex(2));
-  EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(3));
-}
-
 // Test various different reorderings, removals, and reinsertions of the
 // toolbar with component actions.
 TEST_F(ToolbarActionsModelUnitTest,
@@ -1464,6 +1430,76 @@ TEST_F(ToolbarActionsModelUnitTest,
   EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(1u));
 }
 
+TEST_F(ToolbarActionsModelUnitTest, AddAndRemoveComponentActionWithOVerflow) {
+  Init();
+  // Add three extension actions: A, B, C.
+  ASSERT_TRUE(AddBrowserActionExtensions());
+  EXPECT_EQ(3u, num_toolbar_items());
+
+  // Hide the last icon: A, B, [C].
+  toolbar_model()->SetVisibleIconCount(2);
+  EXPECT_EQ(2u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(2u));
+
+  // Add a component action, CA. Now the icons should be: A, B, CA, [C].
+  toolbar_model()->AddComponentAction(component_action_id());
+  EXPECT_EQ(4u, num_toolbar_items());
+  EXPECT_EQ(3u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(component_action_id(), GetActionIdAtIndex(2u));
+  EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(3u));
+
+  // Remove the component action. Extension C should stay in the overflow.
+  // The icons should be: A, B, [C].
+  toolbar_model()->RemoveComponentAction(component_action_id());
+  EXPECT_EQ(3u, num_toolbar_items());
+  EXPECT_EQ(2u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(2u));
+}
+
+TEST_F(ToolbarActionsModelUnitTest, AddComponentActionInIncognito) {
+  Init();
+  // Add three extension actions: A, B, C.
+  ASSERT_TRUE(AddBrowserActionExtensions());
+  EXPECT_EQ(3u, num_toolbar_items());
+
+  // Enable extension C in incognito.
+  extensions::ExtensionPrefs* extension_prefs =
+      extensions::ExtensionPrefs::Get(profile());
+  extension_prefs->SetIsIncognitoEnabled(browser_action_c()->id(), true);
+  extensions::util::SetIsIncognitoEnabled(browser_action_c()->id(), profile(),
+                                          true);
+
+  // Get an incognito toolbar.
+  ToolbarActionsModel* incognito_model =
+      extensions::extension_action_test_util::CreateToolbarModelForProfile(
+          profile()->GetOffTheRecordProfile());
+
+  // The incognito toolbar should only have extension C.
+  EXPECT_EQ(1u, incognito_model->toolbar_items().size());
+
+  // Add a component action to the incognito toolbar. It shouldn't appear on the
+  // non-incognito toolbar.
+  incognito_model->AddComponentAction(component_action_id());
+  EXPECT_EQ(2u, incognito_model->toolbar_items().size());
+  EXPECT_EQ(2u, incognito_model->visible_icon_count());
+  EXPECT_EQ(component_action_id(), GetActionIdAtIndex(1u, incognito_model));
+  EXPECT_EQ(3u, num_toolbar_items());
+  incognito_model->RemoveComponentAction(component_action_id());
+
+  // Set visible count to 2 so that C is overflowed on the non-incognito
+  // toolbar. Its state is A, B, [C]. C stays visible on the incognito toolbar.
+  toolbar_model()->SetVisibleIconCount(2);
+  EXPECT_EQ(1u, incognito_model->toolbar_items().size());
+  EXPECT_EQ(1u, incognito_model->visible_icon_count());
+
+  // Add a component action to the incognito toolbar. It shouldn't appear in the
+  // overflow menu.
+  incognito_model->AddComponentAction(component_action_id());
+  EXPECT_EQ(2u, incognito_model->toolbar_items().size());
+  EXPECT_EQ(2u, incognito_model->visible_icon_count());
+  EXPECT_EQ(component_action_id(), GetActionIdAtIndex(1u, incognito_model));
+}
+
 TEST_F(ToolbarActionsModelUnitTest,
        TestUninstallVisibleExtensionDoesntBringOutOther) {
   Init();
@@ -1486,6 +1522,18 @@ TEST_F(ToolbarActionsModelUnitTest,
   EXPECT_EQ(1u, toolbar_model()->visible_icon_count());
   EXPECT_EQ(browser_action_a()->id(), GetActionIdAtIndex(0u));
   EXPECT_EQ(browser_action_c()->id(), GetActionIdAtIndex(1u));
+}
+
+TEST_F(ToolbarActionsModelUnitTest, AddComponentActionBeforeInitialization) {
+  InitializeEmptyExtensionService();
+  ToolbarActionsModel* toolbar_model = extensions::extension_action_test_util::
+      CreateToolbarModelForProfileWithoutWaitingForReady(profile());
+  ASSERT_FALSE(toolbar_model->actions_initialized());
+
+  // AddComponentAction() should be a no-op if actions_initialized() is false.
+  toolbar_model->AddComponentAction(component_action_id());
+  EXPECT_EQ(0u, toolbar_model->toolbar_items().size());
+  EXPECT_FALSE(toolbar_model->HasComponentAction(component_action_id()));
 }
 
 TEST_F(ToolbarActionsModelUnitTest,

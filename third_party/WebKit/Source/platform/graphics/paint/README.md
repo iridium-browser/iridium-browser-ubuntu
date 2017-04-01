@@ -93,6 +93,22 @@ The raster region defined by a node is the rounded rect transformed to the
 root space, intersects with the raster region defined by its parent clip node
 (if not root).
 
+### Scrolling
+
+Each paint chunk is associated with a [scroll node](ScrollPaintPropertyNode.h)
+which defines information about how a subtree scrolls so threads other than the
+main thread can perform scrolling. Scroll information includes:
+
+* Which directions, if any, are scrollable by the user.
+* A reference to a [transform node](TransformPaintPropertyNode.h) which contains
+a 2d scroll offset.
+* The extent that can be scrolled. For example, an overflow clip of size 7x9
+with scrolling contents of size 7x13 can scroll 4px vertically and none
+horizontally.
+
+To ensure geometry operations are simple and only deal with transforms, the
+scroll offset is stored as a 2d transform in the transform tree.
+
 ### Effects
 
 Each paint chunk is associated with an [effect node](EffectPaintPropertyNode.h),
@@ -243,16 +259,20 @@ to combine paint chunks into a smaller number of layers.
 The owner of the `PaintArtifactCompositor` (e.g. `WebView`) can then attach its
 root layer to the overall layer hierarchy to be displayed to the user.
 
+In the future we would like to explore moving to a single shared property tree
+representation across both cc and
+Blink. See [Web Page Geometries](https://goo.gl/MwVIto) for more.
+
 ## Geometry routines
 
 The [`GeometryMapper`](GeometryMapper.h) is responsible for efficiently computing
 visual and transformed rects of display items in the coordinate space of ancestor
 [`PropertyTreeState`](PropertyTreeState.h)s.
 
-The transformed rect of a display item in an ancestor `PropertyTreeState` is that
-rect, multiplied by the transforms between the display item's `PropertyTreeState`
-and the ancestors, then flattened into 2D.
+The transformed rect of a display item in an ancestor `PropertyTreeState` is
+that rect, multiplied by the transforms between the display item's
+`PropertyTreeState` and the ancestors, then flattened into 2D.
 
-The visual rect of a display item in an ancestor `PropertyTreeState` is the intersection
-of all of the intermediate clips (transformed in to the ancestor state), with
-the display item's transformed rect.
+The visual rect of a display item in an ancestor `PropertyTreeState` is the
+intersection of all of the intermediate clips (transformed in to the ancestor
+state), with the display item's transformed rect.

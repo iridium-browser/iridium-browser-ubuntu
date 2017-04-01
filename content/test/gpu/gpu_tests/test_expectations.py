@@ -9,11 +9,14 @@ import urlparse
 #
 # Operating systems:
 #     win, xp, vista, win7, win8, win10, mac, leopard, snowleopard,
-#     lion, mountainlion, mavericks, yosemite, linux, chromeos,
+#     lion, mountainlion, mavericks, yosemite, sierra, linux, chromeos,
 #     android
 #
 # Browser types:
 #     android-webview-shell, android-content-shell, debug, release
+#
+# ASAN conditions:
+#     asan, no_asan
 #
 # Sample usage in SetExpectations in subclasses:
 #   self.Fail('gl-enable-vertex-attrib.html',
@@ -21,7 +24,7 @@ import urlparse
 
 WIN_CONDITIONS = ['xp', 'vista', 'win7', 'win8', 'win10']
 MAC_CONDITIONS = ['leopard', 'snowleopard', 'lion', 'mountainlion',
-                 'mavericks', 'yosemite']
+                  'mavericks', 'yosemite', 'sierra']
 
 OS_CONDITIONS = ['win', 'mac', 'linux', 'chromeos', 'android'] + \
                 WIN_CONDITIONS + MAC_CONDITIONS
@@ -30,25 +33,41 @@ BROWSER_TYPE_CONDITIONS = [
     'android-webview-shell', 'android-content-shell', 'android-chromium',
     'debug', 'release']
 
+ASAN_CONDITIONS = ['asan', 'no_asan']
+
+def _SafeLower(opt_str):
+  if not opt_str:
+    return opt_str
+  return opt_str.lower()
+
+
 class Expectation(object):
-  """Represents a single test expectation for a page.
+  """Represents a single expectation for a test.
 
   Supports conditions based on operating system (e.g., win, mac) and
   browser type (e.g. 'debug', 'release').
+
+  The pattern, if a URL, *must* be a relative URL. Absolute URLs
+  (e.g. starting with a scheme like http://, https://, file://) are
+  not allowed. A ValueError is raised if one is passed to __init__.
 
   Subclass this class and call super.__init__ last in your constructor
   in order to add new user-defined conditions. The conditions are
   parsed at the end of this class's constructor, so be careful not to
   overwrite the results of the constructor call!
+
   """
 
   def __init__(self, expectation, pattern, conditions=None, bug=None):
     self.expectation = expectation.lower()
+    if pattern.find('://') > 0:
+      raise ValueError('Absolute URLs are not allowed in patterns')
     self.pattern = pattern
     self.bug = bug
 
     self.os_conditions = []
     self.browser_conditions = []
+    self.asan_conditions = []
 
     if conditions:
       for c in conditions:
@@ -67,7 +86,8 @@ class Expectation(object):
 
     Operating systems:
       win, xp, vista, win7, mac, leopard, snowleopard, lion,
-      mountainlion, mavericks, yosemite, linux, chromeos, android
+      mountainlion, mavericks, yosemite, sierra, linux, chromeos,
+      android
 
     Browser types:
       android-webview-shell, android-content-shell, android-chromium,
@@ -76,25 +96,37 @@ class Expectation(object):
     Sample usage in SetExpectations in subclasses:
       self.Fail('gl-enable-vertex-attrib.html',
          ['mac', 'release'], bug=123)
+
     """
     cl = condition.lower()
     if cl in OS_CONDITIONS:
       self.os_conditions.append(cl)
     elif cl in BROWSER_TYPE_CONDITIONS:
-      self.browser_conditions.append(condition)
+      self.browser_conditions.append(cl)
+    elif cl in ASAN_CONDITIONS:
+      self.asan_conditions.append(cl)
     else:
       raise ValueError('Unknown expectation condition: "%s"' % cl)
 
 
 class TestExpectations(object):
-  """A class which defines the expectations for a page set test execution"""
+  """A class which defines the expectations for a test execution."""
 
-  def __init__(self):
+  def __init__(self, url_prefixes=None, is_asan=False):
     self._expectations = []
+    self._url_prefixes = []
+    # The browser doesn't know whether it was built with ASAN or not;
+    # only the surrounding environment knows that. Tests which care to
+    # support ASAN-specific expectations have to tell the
+    # TestExpectations object about this during its construction.
+    self._is_asan = is_asan
     self._skip_matching_names = False
     self._built_expectation_cache = True
     self._ClearExpectationsCache()
     self.SetExpectations()
+    if url_prefixes:
+      for p in url_prefixes:
+        self._url_prefixes.append(p)
 
   def SetExpectations(self):
     """Called on creation. Override to set up custom expectations."""
@@ -139,11 +171,11 @@ class TestExpectations(object):
     # Could make this more precise.
     return '*' in input_string or '+' in input_string
 
-  def _BuildExpectationsCache(self, browser, page):
+  def _BuildExpectationsCache(self, browser):
     # Turn off name matching while building the cache.
     self._skip_matching_names = True
     for e in self._expectations:
-      if self.ExpectationAppliesToPage(e, browser, page):
+      if self._ExpectationAppliesToTest(e, browser, None, None):
         if self._HasWildcardCharacters(e.pattern):
           self._expectations_with_wildcards.append(e)
         else:
@@ -160,8 +192,9 @@ class TestExpectations(object):
       return url
     return url.replace('\\', '/')
 
-  def _GetURLPath(self, url):
-    components = urlparse.urlsplit(url)
+  def _GetURLPath(self, url, browser):
+    normalized_url = self._GetNormalizedURL(url, browser)
+    components = urlparse.urlsplit(normalized_url)
     # For compatibility, the file:// scheme must be treated specially.
     # The top-level directory shows up in the netloc portion of the URL.
     if components[0] == 'file':
@@ -177,31 +210,34 @@ class TestExpectations(object):
     query_index = url_path.find('?')
     if query_index > 0:
       url_path = url_path[0:query_index]
+    # Look for the URL prefixes specified at construction time, and
+    # trim the first one found, if any.
+    if self._url_prefixes:
+      for p in self._url_prefixes:
+        if url_path.startswith(p):
+          url_path = url_path[len(p):]
+          break
     return url_path
 
-  def _GetExpectationObjectForPage(self, browser, page):
+  def _GetExpectationObjectForTest(self, browser, test_url, test_name):
     if not self._built_expectation_cache:
-      self._BuildExpectationsCache(browser, page)
-    # First attempt to look up by the page's URL or name.
+      self._BuildExpectationsCache(browser)
+    # First attempt to look up by the test's URL or name.
     e = None
     # Relative URL (common case).
-    url = self._GetNormalizedURL(page.url, browser)
-    url_path = self._GetURLPath(url)
+    url_path = self._GetURLPath(test_url, browser)
     if url_path:
       e = self._expectations_by_pattern.get(url_path)
     if e:
       return e
-    e = self._expectations_by_pattern.get(url)
-    if e:
-      return e
-    if page.name:
-      e = self._expectations_by_pattern.get(page.name)
+    if test_name:
+      e = self._expectations_by_pattern.get(test_name)
     if e:
       return e
     # Fall back to scanning through the expectations containing
     # wildcards.
     for e in self._expectations_with_wildcards:
-      if self.ExpectationAppliesToPage(e, browser, page):
+      if self._ExpectationAppliesToTest(e, browser, test_url, test_name):
         return e
     return None
 
@@ -210,8 +246,8 @@ class TestExpectations(object):
               if not self._HasWildcardCharacters(e.pattern)]
 
 
-  def GetExpectationForPage(self, browser, page):
-    '''Fetches the expectation that applies to the given page.
+  def GetExpectationForTest(self, browser, test_url, test_name):
+    '''Fetches the expectation that applies to the given test.
 
     The implementation of this function performs significant caching
     based on the browser's parameters, which are expected to remain
@@ -219,46 +255,56 @@ class TestExpectations(object):
     ClearExpectationsCacheForTesting is available to clear the cache;
     but file a bug if this is needed for any reason but testing.
     '''
-    e = self._GetExpectationObjectForPage(browser, page)
+    e = self._GetExpectationObjectForTest(browser, test_url, test_name)
     if e:
       return e.expectation
     return 'pass'
 
-  def ExpectationAppliesToPage(self, expectation, browser, page):
-    """Defines whether the given expectation applies to the given page.
+  def _ExpectationAppliesToTest(
+      self, expectation, browser, test_url, test_name):
+    """Defines whether the given expectation applies to the given test.
 
     Override this in subclasses to add more conditions. Call the
     superclass's implementation first, and return false if it returns
-    false. Subclasses must not consult the page's name or URL; that is
+    false. Subclasses must not consult the test's URL or name; that is
     the responsibility of the base class.
 
     Args:
       expectation: an instance of a subclass of Expectation, created
           by a call to CreateExpectation.
       browser: the currently running browser.
-      page: the page to be run.
+      test_url: a string containing the current test's URL. May be
+          None if _skip_matching_names is True.
+      test_name: a string containing the current test's name,
+          including the empty string. May be None if
+          _skip_matching_names is True.
     """
     # While building the expectations cache we need to match
-    # everything except the page's name or URL.
+    # everything except the test's name or URL.
     if not self._skip_matching_names:
+      if test_url is None or test_name is None:
+        raise ValueError('Neither test_url nor test_name may be None')
+
       # Relative URL.
-      if not fnmatch.fnmatch(self._GetURLPath(page.url),
+      if not fnmatch.fnmatch(self._GetURLPath(test_url, browser),
                              expectation.pattern):
-        # Absolute URL.
-        if not fnmatch.fnmatch(page.url,
-                               expectation.pattern):
-          # Name.
-          if not (page.name and fnmatch.fnmatch(page.name,
-                                                expectation.pattern)):
-            return False
+        # Name.
+        if not (test_name and fnmatch.fnmatch(test_name, expectation.pattern)):
+          return False
 
     platform = browser.platform
-    os_matches = (not expectation.os_conditions or
-        platform.GetOSName() in expectation.os_conditions or
-        platform.GetOSVersionName() in expectation.os_conditions)
+    os_matches = (
+      not expectation.os_conditions or
+      _SafeLower(platform.GetOSName()) in expectation.os_conditions or
+      _SafeLower(platform.GetOSVersionName()) in expectation.os_conditions)
 
     browser_matches = (
       (not expectation.browser_conditions) or
-      browser.browser_type in expectation.browser_conditions)
+      _SafeLower(browser.browser_type) in expectation.browser_conditions)
 
-    return os_matches and browser_matches
+    asan_matches = (
+      (not expectation.asan_conditions) or
+      ('asan' in expectation.asan_conditions and self._is_asan) or
+      ('no_asan' in expectation.asan_conditions and not self._is_asan))
+
+    return os_matches and browser_matches and asan_matches

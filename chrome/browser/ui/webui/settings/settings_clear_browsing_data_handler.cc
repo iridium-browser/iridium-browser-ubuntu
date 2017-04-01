@@ -18,8 +18,8 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/browsing_data/core/history_notice_utils.h"
 #include "components/browsing_data/core/pref_names.h"
-#include "components/browsing_data_ui/history_notice_utils.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/web_ui.h"
 
@@ -100,21 +100,20 @@ void ClearBrowsingDataHandler::RegisterMessages() {
 }
 
 void ClearBrowsingDataHandler::OnJavascriptAllowed() {
-  PrefService* prefs = profile_->GetPrefs();
-  profile_pref_registrar_.Init(prefs);
-  profile_pref_registrar_.Add(
-      prefs::kAllowDeletingBrowserHistory,
-      base::Bind(&ClearBrowsingDataHandler::OnBrowsingHistoryPrefChanged,
-                 base::Unretained(this)));
-
   if (sync_service_)
     sync_service_observer_.Add(sync_service_);
+
+  DCHECK(counters_.empty());
+  for (const std::string& pref : kCounterPrefs) {
+    AddCounter(
+        BrowsingDataCounterFactory::GetForProfileAndPref(profile_, pref));
+  }
 }
 
 void ClearBrowsingDataHandler::OnJavascriptDisallowed() {
-  profile_pref_registrar_.RemoveAll();
   sync_service_observer_.RemoveAll();
   task_observer_.reset();
+  counters_.clear();
 }
 
 void ClearBrowsingDataHandler::HandleClearBrowsingData(
@@ -207,17 +206,20 @@ void ClearBrowsingDataHandler::HandleClearBrowsingData(
       remover,
       base::Bind(&ClearBrowsingDataHandler::OnClearingTaskFinished,
                  base::Unretained(this), webui_callback_id));
+  browsing_data::TimePeriod time_period =
+      static_cast<browsing_data::TimePeriod>(period_selected);
+  browsing_data::RecordDeletionForPeriod(time_period);
   remover->RemoveAndReply(
-      BrowsingDataRemover::Period(
-          static_cast<browsing_data::TimePeriod>(period_selected)),
+      browsing_data::CalculateBeginDeleteTime(time_period),
+      browsing_data::CalculateEndDeleteTime(time_period),
       remove_mask, origin_mask, task_observer_.get());
 }
 
 void ClearBrowsingDataHandler::OnClearingTaskFinished(
     const std::string& webui_callback_id) {
   PrefService* prefs = profile_->GetPrefs();
-  int notice_shown_times =
-      prefs->GetInteger(prefs::kClearBrowsingDataHistoryNoticeShownTimes);
+  int notice_shown_times = prefs->GetInteger(
+      browsing_data::prefs::kClearBrowsingDataHistoryNoticeShownTimes);
 
   // When the deletion is complete, we might show an additional dialog with
   // a notice about other forms of browsing history. This is the case if
@@ -231,8 +233,9 @@ void ClearBrowsingDataHandler::OnClearingTaskFinished(
 
   if (show_notice) {
     // Increment the preference.
-    prefs->SetInteger(prefs::kClearBrowsingDataHistoryNoticeShownTimes,
-                      notice_shown_times + 1);
+    prefs->SetInteger(
+        browsing_data::prefs::kClearBrowsingDataHistoryNoticeShownTimes,
+        notice_shown_times + 1);
   }
 
   UMA_HISTOGRAM_BOOLEAN(
@@ -244,30 +247,20 @@ void ClearBrowsingDataHandler::OnClearingTaskFinished(
   task_observer_.reset();
 }
 
-void ClearBrowsingDataHandler::OnBrowsingHistoryPrefChanged() {
-  CallJavascriptFunction(
-      "cr.webUIListenerCallback",
-      base::StringValue("browsing-history-pref-changed"),
-      base::FundamentalValue(
-          profile_->GetPrefs()->GetBoolean(
-              prefs::kAllowDeletingBrowserHistory)));
-}
-
 void ClearBrowsingDataHandler::HandleInitialize(const base::ListValue* args) {
   AllowJavascript();
   const base::Value* callback_id;
   CHECK(args->Get(0, &callback_id));
 
+  // Needed because WebUI doesn't handle renderer crashes. See crbug.com/610450.
   task_observer_.reset();
-  counters_.clear();
-
-  for (const std::string& pref : kCounterPrefs) {
-    AddCounter(
-        BrowsingDataCounterFactory::GetForProfileAndPref(profile_, pref));
-  }
 
   OnStateChanged();
   RefreshHistoryNotice();
+
+  // Restart the counters each time the dialog is reopened.
+  for (const auto& counter : counters_)
+    counter->Restart();
 
   ResolveJavascriptCallback(
       *callback_id,
@@ -283,7 +276,7 @@ void ClearBrowsingDataHandler::OnStateChanged() {
 }
 
 void ClearBrowsingDataHandler::RefreshHistoryNotice() {
-  browsing_data_ui::ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
+  browsing_data::ShouldShowNoticeAboutOtherFormsOfBrowsingHistory(
       sync_service_,
       WebHistoryServiceFactory::GetForProfile(profile_),
       base::Bind(&ClearBrowsingDataHandler::UpdateHistoryNotice,
@@ -292,11 +285,11 @@ void ClearBrowsingDataHandler::RefreshHistoryNotice() {
   // If the dialog with history notice has been shown less than
   // |kMaxTimesHistoryNoticeShown| times, we might have to show it when the
   // user deletes history. Find out if the conditions are met.
-  int notice_shown_times = profile_->GetPrefs()->
-      GetInteger(prefs::kClearBrowsingDataHistoryNoticeShownTimes);
+  int notice_shown_times = profile_->GetPrefs()->GetInteger(
+      browsing_data::prefs::kClearBrowsingDataHistoryNoticeShownTimes);
 
   if (notice_shown_times < kMaxTimesHistoryNoticeShown) {
-    browsing_data_ui::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
+    browsing_data::ShouldPopupDialogAboutOtherFormsOfBrowsingHistory(
         sync_service_,
         WebHistoryServiceFactory::GetForProfile(profile_),
         chrome::GetChannel(),
@@ -324,7 +317,6 @@ void ClearBrowsingDataHandler::AddCounter(
   counter->Init(profile_->GetPrefs(),
                 base::Bind(&ClearBrowsingDataHandler::UpdateCounterText,
                            base::Unretained(this)));
-  counter->Restart();
   counters_.push_back(std::move(counter));
 }
 

@@ -5,10 +5,11 @@
 package org.chromium.chrome.browser.download;
 
 import android.content.Context;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -48,6 +49,7 @@ public class ChromeDownloadDelegateTest extends ChromeActivityTestCaseBase<Chrom
      */
     @SmallTest
     @Feature({"Download"})
+    @RetryOnFailure
     public void testShouldInterceptContextMenuDownload() throws InterruptedException {
         final Tab tab = getActivity().getActivityTab();
         loadUrl("about:blank");

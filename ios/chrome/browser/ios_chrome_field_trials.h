@@ -5,13 +5,7 @@
 #ifndef IOS_CHROME_BROWSER_IOS_CHROME_FIELD_TRIALS_H_
 #define IOS_CHROME_BROWSER_IOS_CHROME_FIELD_TRIALS_H_
 
-namespace base {
-class CommandLine;
-class Time;
-}
-
 // Sets up iOS-specific field trials.
-void SetupFieldTrials(const base::CommandLine& command_line,
-                      const base::Time& install_time);
+void SetupIOSFieldTrials();
 
 #endif  // IOS_CHROME_BROWSER_IOS_CHROME_FIELD_TRIALS_H_

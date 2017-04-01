@@ -5,7 +5,7 @@
 #include "cc/trees/layer_tree_impl.h"
 
 #include "base/macros.h"
-#include "cc/animation/mutable_properties.h"
+#include "base/memory/ptr_util.h"
 #include "cc/layers/heads_up_display_layer_impl.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/geometry_test_utils.h"
@@ -15,6 +15,7 @@
 #include "cc/trees/draw_property_utils.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
+#include "cc/trees/mutable_properties.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -40,7 +41,9 @@ class LayerTreeImplTest : public testing::Test {
     return host_impl().active_tree()->RenderSurfaceLayerList();
   }
 
-  void ExecuteCalculateDrawProperties(LayerImpl* root_layer) {
+  void ExecuteCalculateDrawProperties(
+      LayerImpl* root_layer,
+      bool skip_verify_visible_rect_calculations = false) {
     // We are probably not testing what is intended if the root_layer bounds are
     // empty.
     DCHECK(!root_layer->bounds().IsEmpty());
@@ -49,6 +52,8 @@ class LayerTreeImplTest : public testing::Test {
     LayerTreeHostCommon::CalcDrawPropsImplInputsForTesting inputs(
         root_layer, root_layer->bounds(), &render_surface_layer_list_impl_);
     inputs.can_adjust_raster_scales = true;
+    if (skip_verify_visible_rect_calculations)
+      inputs.verify_visible_rect_calculations = false;
     LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
   }
 
@@ -75,26 +80,28 @@ class LayerTreeImplTest : public testing::Test {
       gfx::Transform translate_z;
       translate_z.Translate3d(0, 0, root_depth);
       root->test_properties()->transform = translate_z;
+      root->test_properties()->sorting_context_id = root_sorting_context;
       root->SetBounds(bounds);
       root->SetDrawsContent(true);
-      root->Set3dSortingContextId(root_sorting_context);
     }
     {
       gfx::Transform translate_z;
       translate_z.Translate3d(0, 0, left_child_depth);
       left_child->test_properties()->transform = translate_z;
+      left_child->test_properties()->sorting_context_id =
+          left_child_sorting_context;
       left_child->SetBounds(bounds);
       left_child->SetDrawsContent(true);
-      left_child->Set3dSortingContextId(left_child_sorting_context);
       left_child->test_properties()->should_flatten_transform = false;
     }
     {
       gfx::Transform translate_z;
       translate_z.Translate3d(0, 0, right_child_depth);
       right_child->test_properties()->transform = translate_z;
+      right_child->test_properties()->sorting_context_id =
+          right_child_sorting_context;
       right_child->SetBounds(bounds);
       right_child->SetDrawsContent(true);
-      right_child->Set3dSortingContextId(right_child_sorting_context);
     }
 
     root->test_properties()->AddChild(std::move(left_child));
@@ -240,7 +247,14 @@ TEST_F(LayerTreeImplTest, HitTestingForUninvertibleTransform) {
   root->SetDrawsContent(true);
 
   host_impl().SetViewportSize(root->bounds());
-  host_impl().UpdateNumChildrenAndDrawPropertiesForActiveTree();
+  // While computing visible rects by combining clips in screen space, we set
+  // the entire layer as visible if the screen space transform is singular. This
+  // is not always true when we combine clips in target space because if the
+  // intersection of combined_clip in taret space with layer_rect projected to
+  // target space is empty, we set it to an empty rect.
+  bool skip_verify_visible_rect_calculations = true;
+  host_impl().UpdateNumChildrenAndDrawPropertiesForActiveTree(
+      skip_verify_visible_rect_calculations);
   // Sanity check the scenario we just created.
   ASSERT_EQ(1u, RenderSurfaceLayerList().size());
   ASSERT_EQ(1u, root_layer()->render_surface()->layer_list().size());
@@ -620,6 +634,10 @@ TEST_F(LayerTreeImplTest, HitTestingForMultiClippedRotatedLayer) {
 
   root->SetBounds(gfx::Size(100, 100));
   root->SetMasksToBounds(true);
+  // Visible rects computed by combinig clips in target space and root space
+  // don't match because of rotation transforms. So, we skip
+  // verify_visible_rect_calculations.
+  bool skip_verify_visible_rect_calculations = true;
   {
     std::unique_ptr<LayerImpl> child =
         LayerImpl::Create(host_impl().active_tree(), 456);
@@ -659,11 +677,12 @@ TEST_F(LayerTreeImplTest, HitTestingForMultiClippedRotatedLayer) {
     child->test_properties()->AddChild(std::move(grand_child));
     root->test_properties()->AddChild(std::move(child));
 
-    ExecuteCalculateDrawProperties(root);
+    ExecuteCalculateDrawProperties(root, skip_verify_visible_rect_calculations);
   }
 
   host_impl().SetViewportSize(root->bounds());
-  host_impl().UpdateNumChildrenAndDrawPropertiesForActiveTree();
+  host_impl().UpdateNumChildrenAndDrawPropertiesForActiveTree(
+      skip_verify_visible_rect_calculations);
   // (11, 89) is close to the the bottom left corner within the clip, but it is
   // not inside the layer.
   gfx::PointF test_point(11.f, 89.f);
@@ -924,7 +943,7 @@ TEST_F(LayerTreeImplTest, HitTestingForMultipleLayersAtVaryingDepths) {
   root->SetBounds(gfx::Size(100, 100));
   root->SetDrawsContent(true);
   root->test_properties()->should_flatten_transform = false;
-  root->Set3dSortingContextId(1);
+  root->test_properties()->sorting_context_id = 1;
   {
     // child 1 and child2 are initialized to overlap between x=50 and x=60.
     // grand_child is set to overlap both child1 and child2 between y=50 and
@@ -943,7 +962,7 @@ TEST_F(LayerTreeImplTest, HitTestingForMultipleLayersAtVaryingDepths) {
     child1->SetBounds(gfx::Size(50, 50));
     child1->SetDrawsContent(true);
     child1->test_properties()->should_flatten_transform = false;
-    child1->Set3dSortingContextId(1);
+    child1->test_properties()->sorting_context_id = 1;
 
     child2->SetPosition(gfx::PointF(50.f, 10.f));
     child2->SetBounds(gfx::Size(50, 50));
@@ -952,7 +971,7 @@ TEST_F(LayerTreeImplTest, HitTestingForMultipleLayersAtVaryingDepths) {
     child2->test_properties()->transform = translate_z;
     child2->SetDrawsContent(true);
     child2->test_properties()->should_flatten_transform = false;
-    child2->Set3dSortingContextId(1);
+    child2->test_properties()->sorting_context_id = 1;
 
     // Remember that grand_child is positioned with respect to its parent (i.e.
     // child1).  In screen space, the intended position is (10, 50), with size
@@ -1324,7 +1343,14 @@ TEST_F(LayerTreeImplTest,
   root->SetTouchEventHandlerRegion(touch_handler_region);
 
   host_impl().SetViewportSize(root->bounds());
-  host_impl().UpdateNumChildrenAndDrawPropertiesForActiveTree();
+  // While computing visible rects by combining clips in screen space, we set
+  // the entire layer as visible if the screen space transform is singular. This
+  // is not always true when we combine clips in target space because if the
+  // intersection of combined_clip in taret space with layer_rect projected to
+  // target space is empty, we set it to an empty rect.
+  bool skip_verify_visible_rect_calculations = true;
+  host_impl().UpdateNumChildrenAndDrawPropertiesForActiveTree(
+      skip_verify_visible_rect_calculations);
 
   // Sanity check the scenario we just created.
   ASSERT_EQ(1u, RenderSurfaceLayerList().size());
@@ -2224,6 +2250,16 @@ TEST_F(LayerTreeImplTest, DeviceScaleFactorNeedsDrawPropertiesUpdate) {
   EXPECT_TRUE(host_impl().active_tree()->needs_update_draw_properties());
 }
 
+TEST_F(LayerTreeImplTest, DeviceColorSpaceDoesNotNeedDrawPropertiesUpdate) {
+  host_impl().active_tree()->BuildPropertyTreesForTesting();
+  host_impl().active_tree()->SetDeviceColorSpace(
+      gfx::ColorSpace::CreateXYZD50());
+  host_impl().active_tree()->UpdateDrawProperties(false);
+  EXPECT_FALSE(host_impl().active_tree()->needs_update_draw_properties());
+  host_impl().active_tree()->SetDeviceColorSpace(gfx::ColorSpace::CreateSRGB());
+  EXPECT_FALSE(host_impl().active_tree()->needs_update_draw_properties());
+}
+
 TEST_F(LayerTreeImplTest, HitTestingCorrectLayerWheelListener) {
   host_impl().active_tree()->set_event_listener_properties(
       EventListenerClass::kMouseWheel, EventListenerProperties::kBlocking);
@@ -2280,7 +2316,8 @@ class PersistentSwapPromise
   ~PersistentSwapPromise() override = default;
 
   void DidActivate() override {}
-  MOCK_METHOD1(DidSwap, void(CompositorFrameMetadata* metadata));
+  MOCK_METHOD1(WillSwap, void(CompositorFrameMetadata* metadata));
+  MOCK_METHOD0(DidSwap, void());
 
   DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override {
     return DidNotSwapAction::KEEP_ACTIVE;
@@ -2298,7 +2335,8 @@ class NotPersistentSwapPromise
   ~NotPersistentSwapPromise() override = default;
 
   void DidActivate() override {}
-  void DidSwap(CompositorFrameMetadata* metadata) override {}
+  void WillSwap(CompositorFrameMetadata* metadata) override {}
+  void DidSwap() override {}
 
   DidNotSwapAction DidNotSwap(DidNotSwapReason reason) override {
     return DidNotSwapAction::BREAK_PROMISE;
@@ -2335,7 +2373,7 @@ TEST_F(LayerTreeImplTest, PersistentSwapPromisesAreKeptAlive) {
   for (size_t i = 0; i < persistent_promises.size(); ++i) {
     SCOPED_TRACE(testing::Message() << "While checking case #" << i);
     ASSERT_TRUE(persistent_promises[i]);
-    EXPECT_CALL(*persistent_promises[i], DidSwap(testing::_));
+    EXPECT_CALL(*persistent_promises[i], WillSwap(testing::_));
   }
   host_impl().active_tree()->FinishSwapPromises(nullptr);
 }

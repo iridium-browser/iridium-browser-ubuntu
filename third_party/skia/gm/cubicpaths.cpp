@@ -158,7 +158,7 @@ protected:
             SkPath::FillType fFill;
             const char*      fName;
         };
-        static const FillAndName gFills[] = {
+        constexpr FillAndName gFills[] = {
             {SkPath::kWinding_FillType, "Winding"},
             {SkPath::kEvenOdd_FillType, "Even / Odd"},
             {SkPath::kInverseWinding_FillType, "Inverse Winding"},
@@ -168,7 +168,7 @@ protected:
             SkPaint::Style fStyle;
             const char*    fName;
         };
-        static const StyleAndName gStyles[] = {
+        constexpr StyleAndName gStyles[] = {
             {SkPaint::kFill_Style, "Fill"},
             {SkPaint::kStroke_Style, "Stroke"},
             {SkPaint::kStrokeAndFill_Style, "Stroke And Fill"},
@@ -178,7 +178,7 @@ protected:
             SkPaint::Join fJoin;
             const char*   fName;
         };
-        static const CapAndName gCaps[] = {
+        constexpr CapAndName gCaps[] = {
             {SkPaint::kButt_Cap, SkPaint::kBevel_Join, "Butt"},
             {SkPaint::kRound_Cap, SkPaint::kRound_Join, "Round"},
             {SkPaint::kSquare_Cap, SkPaint::kBevel_Join, "Square"}
@@ -302,7 +302,7 @@ protected:
             SkPath::FillType fFill;
             const char*      fName;
         };
-        static const FillAndName gFills[] = {
+        constexpr FillAndName gFills[] = {
             {SkPath::kWinding_FillType, "Winding"},
             {SkPath::kEvenOdd_FillType, "Even / Odd"},
             {SkPath::kInverseWinding_FillType, "Inverse Winding"},
@@ -312,7 +312,7 @@ protected:
             SkPaint::Style fStyle;
             const char*    fName;
         };
-        static const StyleAndName gStyles[] = {
+        constexpr StyleAndName gStyles[] = {
             {SkPaint::kFill_Style, "Fill"},
             {SkPaint::kStroke_Style, "Stroke"},
             {SkPaint::kStrokeAndFill_Style, "Stroke And Fill"},
@@ -322,7 +322,7 @@ protected:
             SkPaint::Join fJoin;
             const char*   fName;
         };
-        static const CapAndName gCaps[] = {
+        constexpr CapAndName gCaps[] = {
             {SkPaint::kButt_Cap, SkPaint::kBevel_Join, "Butt"},
             {SkPaint::kRound_Cap, SkPaint::kRound_Join, "Round"},
             {SkPaint::kSquare_Cap, SkPaint::kBevel_Join, "Square"}
@@ -423,6 +423,30 @@ DEF_SIMPLE_GM(bug5099, canvas, 50, 50) {
     SkPath path;
     path.moveTo(6, 27);
     path.cubicTo(31.5f, 1.5f, 3.5f, 4.5f, 29, 29);
+    canvas->drawPath(path, p);
+}
+
+DEF_SIMPLE_GM(bug6083, canvas, 100, 50) {
+    SkPaint p;
+    p.setColor(SK_ColorRED);
+    p.setAntiAlias(true);
+    p.setStyle(SkPaint::kStroke_Style);
+    p.setStrokeWidth(15);
+    canvas->translate(-500, -130);
+    SkPath path;
+    path.moveTo(500.988f, 155.200f);
+    path.lineTo(526.109f, 155.200f);
+    SkPoint p1 = { 526.109f, 155.200f };
+    SkPoint p2 = { 525.968f, 212.968f };
+    SkPoint p3 = { 526.109f, 241.840f };
+    path.cubicTo(p1, p2, p3);
+    canvas->drawPath(path, p);
+    canvas->translate(50, 0);
+    path.reset();
+    p2.set(525.968f, 213.172f);
+    path.moveTo(500.988f, 155.200f);
+    path.lineTo(526.109f, 155.200f);
+    path.cubicTo(p1, p2, p3);
     canvas->drawPath(path, p);
 }
 

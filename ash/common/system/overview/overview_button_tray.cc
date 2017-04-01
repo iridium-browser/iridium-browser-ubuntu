@@ -7,7 +7,6 @@
 #include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/shelf_constants.h"
-#include "ash/common/shelf/shelf_types.h"
 #include "ash/common/shelf/wm_shelf_util.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/system/tray/tray_constants.h"
@@ -15,12 +14,13 @@
 #include "ash/common/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/common/wm/overview/window_selector_controller.h"
 #include "ash/common/wm_shell.h"
+#include "ash/public/cpp/shelf_types.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
 
@@ -39,14 +39,15 @@ namespace ash {
 
 OverviewButtonTray::OverviewButtonTray(WmShelf* wm_shelf)
     : TrayBackgroundView(wm_shelf), icon_(nullptr) {
-  SetContentsBackground();
-
   icon_ = new views::ImageView();
   if (MaterialDesignController::IsShelfMaterial()) {
+    SetInkDropMode(InkDropMode::ON);
+    SetContentsBackground(false);
     gfx::ImageSkia image_md =
-        CreateVectorIcon(gfx::VectorIconId::SHELF_OVERVIEW, kShelfIconColor);
+        CreateVectorIcon(kShelfOverviewIcon, kShelfIconColor);
     icon_->SetImage(image_md);
   } else {
+    SetContentsBackground(true);
     gfx::ImageSkia* image_non_md =
         ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
             IDR_AURA_UBER_TRAY_OVERVIEW_MODE);
@@ -71,14 +72,14 @@ void OverviewButtonTray::UpdateAfterLoginStatusChange(LoginStatus status) {
 bool OverviewButtonTray::PerformAction(const ui::Event& event) {
   WindowSelectorController* controller =
       WmShell::Get()->window_selector_controller();
-  controller->ToggleOverview();
-  SetDrawBackgroundAsActive(controller->IsSelecting());
+  // Toggling overview mode will fail if there is no window to show.
+  bool performed = controller->ToggleOverview();
   WmShell::Get()->RecordUserMetricsAction(UMA_TRAY_OVERVIEW);
-  return true;
+  return performed;
 }
 
 void OverviewButtonTray::SessionStateChanged(
-    SessionStateDelegate::SessionState state) {
+    session_manager::SessionState state) {
   UpdateIconVisibility();
 }
 
@@ -90,8 +91,12 @@ void OverviewButtonTray::OnMaximizeModeEnded() {
   UpdateIconVisibility();
 }
 
+void OverviewButtonTray::OnOverviewModeStarting() {
+  SetIsActive(true);
+}
+
 void OverviewButtonTray::OnOverviewModeEnded() {
-  SetDrawBackgroundAsActive(false);
+  SetIsActive(false);
 }
 
 void OverviewButtonTray::ClickedOutsideBubble() {}
@@ -128,7 +133,7 @@ void OverviewButtonTray::SetIconBorderForShelfAlignment() {
                  : gfx::Insets(kVerticalShelfVerticalPadding,
                                kVerticalShelfHorizontalPadding);
   }
-  icon_->SetBorder(views::Border::CreateEmptyBorder(insets));
+  icon_->SetBorder(views::CreateEmptyBorder(insets));
 }
 
 void OverviewButtonTray::UpdateIconVisibility() {
@@ -145,9 +150,11 @@ void OverviewButtonTray::UpdateIconVisibility() {
       session_state_delegate->IsActiveUserSessionStarted() &&
       !session_state_delegate->IsScreenLocked() &&
       session_state_delegate->GetSessionState() ==
-          SessionStateDelegate::SESSION_STATE_ACTIVE &&
+          session_manager::SessionState::ACTIVE &&
       shell->system_tray_delegate()->GetUserLoginStatus() !=
-          LoginStatus::KIOSK_APP);
+          LoginStatus::KIOSK_APP &&
+      shell->system_tray_delegate()->GetUserLoginStatus() !=
+          LoginStatus::ARC_KIOSK_APP);
 }
 
 }  // namespace ash

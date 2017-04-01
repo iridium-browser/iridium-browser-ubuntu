@@ -20,6 +20,7 @@
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
 #include "components/renderer_context_menu/render_view_context_menu_proxy.h"
 #include "content/public/common/context_menu_params.h"
+#include "ppapi/features/features.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -27,15 +28,6 @@
 namespace content {
 class RenderFrameHost;
 class WebContents;
-}
-
-namespace gfx {
-class Point;
-}
-
-namespace blink {
-struct WebMediaPlayerAction;
-struct WebPluginAction;
 }
 
 class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
@@ -144,7 +136,7 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   // Increments histogram value for visible context menu item specified by |id|.
   virtual void RecordShownItem(int id) = 0;
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   virtual void HandleAuthorizeAllPlugins() = 0;
 #endif
 
@@ -163,7 +155,8 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   bool IsCustomItemEnabled(int id) const;
 
   // Opens the specified URL string in a new tab.
-  void OpenURL(const GURL& url, const GURL& referrer,
+  void OpenURL(const GURL& url,
+               const GURL& referrer,
                WindowOpenDisposition disposition,
                ui::PageTransition transition);
 
@@ -184,6 +177,9 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   // Renderer's frame id.
   const int render_frame_id_;
 
+  // The RenderFrameHost's IDs.
+  const int render_process_id_;
+
   // Our observers.
   mutable base::ObserverList<RenderViewContextMenuObserver> observers_;
 
@@ -195,9 +191,6 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
 
  private:
   bool AppendCustomItems();
-
-  // The RenderFrameHost's IDs.
-  const int render_process_id_;
 
   std::unique_ptr<ToolkitDelegate> toolkit_delegate_;
 

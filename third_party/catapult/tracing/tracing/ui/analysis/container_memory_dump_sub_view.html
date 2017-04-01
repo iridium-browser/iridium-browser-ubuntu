@@ -6,6 +6,7 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/iteration_helpers.html">
+<link rel="import" href="/tracing/base/unit.html">
 <link rel="import" href="/tracing/model/model.html">
 <link rel="import" href="/tracing/ui/analysis/analysis_link.html">
 <link rel="import" href="/tracing/ui/analysis/analysis_sub_view.html">
@@ -13,10 +14,14 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/ui/analysis/stacked_pane_view.html">
 <link rel="import" href="/tracing/ui/base/dom_helpers.html">
 <link rel="import" href="/tracing/value/ui/scalar_span.html">
-<link rel="import" href="/tracing/value/unit.html">
 
 <dom-module id='tr-ui-a-container-memory-dump-sub-view'>
   <template>
+    <style>
+    tr-ui-b-table {
+      font-size: 12px;
+    }
+    </style>
     <div id="content"></div>
   </template>
 </dom-module>
@@ -48,14 +53,11 @@ tr.exportTo('tr.ui.analysis', function() {
 
       // Group the selected memory dumps by container name and sort them
       // chronologically.
-      this.dumpsByContainerName_ = tr.b.group(this.currentSelection_.toArray(),
-          function(dump) {
-            return dump.containerName;
-          });
-      tr.b.iterItems(this.dumpsByContainerName_,
-          function(containerName, dumps) {
-            dumps.sort(function(a, b) { return a.start - b.start; });
-          });
+      this.dumpsByContainerName_ = tr.b.group(
+          this.currentSelection_.toArray(), dump => dump.containerName);
+      for (var dumps of Object.values(this.dumpsByContainerName_)) {
+        dumps.sort((a, b) => a.start - b.start);
+      }
 
       this.updateContents_();
     },
@@ -130,7 +132,7 @@ tr.exportTo('tr.ui.analysis', function() {
             linkEl.setSelectionAndContent(new tr.model.EventSet([row]));
             Polymer.dom(linkEl).appendChild(tr.v.ui.createScalarSpan(
                 row.start, {
-                  unit: tr.v.Unit.byName.timeStampInMs,
+                  unit: tr.b.Unit.byName.timeStampInMs,
                   ownerDocument: ownerDocument
                 }));
             return linkEl;

@@ -11,55 +11,94 @@
 
 namespace blink {
 
-struct CompositionUnderline;
 struct PaintInfo;
 
+class AppliedTextDecoration;
 class Color;
+class CompositionUnderline;
 class ComputedStyle;
 class DocumentMarker;
-class FloatPoint;
-class FloatRect;
 class Font;
 class GraphicsContext;
 class InlineTextBox;
 class LayoutObject;
 class LayoutPoint;
 class LayoutTextCombine;
+class TextPainter;
 
 enum class DocumentMarkerPaintPhase { Foreground, Background };
 
 class InlineTextBoxPainter {
-    STACK_ALLOCATED();
-public:
-    InlineTextBoxPainter(const InlineTextBox& inlineTextBox) : m_inlineTextBox(inlineTextBox) { }
+  STACK_ALLOCATED();
 
-    void paint(const PaintInfo&, const LayoutPoint&);
-    void paintDocumentMarkers(const PaintInfo&, const LayoutPoint& boxOrigin, const ComputedStyle&, const Font&, DocumentMarkerPaintPhase);
-    void paintDocumentMarker(GraphicsContext&, const LayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&, bool grammar);
-    void paintTextMatchMarkerForeground(const PaintInfo&, const LayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&);
-    void paintTextMatchMarkerBackground(const PaintInfo&, const LayoutPoint& boxOrigin, DocumentMarker*, const ComputedStyle&, const Font&);
+ public:
+  InlineTextBoxPainter(const InlineTextBox& inlineTextBox)
+      : m_inlineTextBox(inlineTextBox) {}
 
-    static void removeFromTextBlobCache(const InlineTextBox&);
-    static bool paintsMarkerHighlights(const LayoutObject&);
+  void paint(const PaintInfo&, const LayoutPoint&);
+  void paintDocumentMarkers(const PaintInfo&,
+                            const LayoutPoint& boxOrigin,
+                            const ComputedStyle&,
+                            const Font&,
+                            DocumentMarkerPaintPhase);
+  void paintDocumentMarker(GraphicsContext&,
+                           const LayoutPoint& boxOrigin,
+                           const DocumentMarker&,
+                           const ComputedStyle&,
+                           const Font&,
+                           bool grammar);
+  void paintTextMatchMarkerForeground(const PaintInfo&,
+                                      const LayoutPoint& boxOrigin,
+                                      const DocumentMarker&,
+                                      const ComputedStyle&,
+                                      const Font&);
+  void paintTextMatchMarkerBackground(const PaintInfo&,
+                                      const LayoutPoint& boxOrigin,
+                                      const DocumentMarker&,
+                                      const ComputedStyle&,
+                                      const Font&);
 
-private:
-    enum class PaintOptions { Normal, CombinedText };
+  static void removeFromTextBlobCache(const InlineTextBox&);
+  static bool paintsMarkerHighlights(const LayoutObject&);
 
-    void paintCompositionBackgrounds(GraphicsContext&, const LayoutPoint& boxOrigin, const ComputedStyle&, const Font&, bool useCustomUnderlines);
-    void paintSingleCompositionBackgroundRun(GraphicsContext&, const LayoutPoint& boxOrigin, const ComputedStyle&, const Font&, Color backgroundColor, int startPos, int endPos);
-    template <PaintOptions>
-    void paintSelection(GraphicsContext&, const LayoutRect& boxRect, const ComputedStyle&, const Font&, Color textColor, LayoutTextCombine* = nullptr);
-    void paintDecoration(const PaintInfo&, const LayoutPoint& boxOrigin, TextDecoration);
-    void paintCompositionUnderline(GraphicsContext&, const LayoutPoint& boxOrigin, const CompositionUnderline&);
-    unsigned underlinePaintStart(const CompositionUnderline&);
-    unsigned underlinePaintEnd(const CompositionUnderline&);
-    bool shouldPaintTextBox(const PaintInfo&);
-    void expandToIncludeNewlineForSelection(LayoutRect&);
-    LayoutObject& inlineLayoutObject() const;
+ private:
+  enum class PaintOptions { Normal, CombinedText };
 
-    const InlineTextBox& m_inlineTextBox;
+  void paintCompositionBackgrounds(GraphicsContext&,
+                                   const LayoutPoint& boxOrigin,
+                                   const ComputedStyle&,
+                                   const Font&,
+                                   bool useCustomUnderlines);
+  void paintSingleCompositionBackgroundRun(GraphicsContext&,
+                                           const LayoutPoint& boxOrigin,
+                                           const ComputedStyle&,
+                                           const Font&,
+                                           Color backgroundColor,
+                                           int startPos,
+                                           int endPos);
+  template <PaintOptions>
+  void paintSelection(GraphicsContext&,
+                      const LayoutRect& boxRect,
+                      const ComputedStyle&,
+                      const Font&,
+                      Color textColor,
+                      LayoutTextCombine* = nullptr);
+  void paintDecorations(TextPainter&,
+                        const PaintInfo&,
+                        const LayoutPoint& boxOrigin,
+                        const Vector<AppliedTextDecoration>&);
+  void paintCompositionUnderline(GraphicsContext&,
+                                 const LayoutPoint& boxOrigin,
+                                 const CompositionUnderline&);
+  unsigned underlinePaintStart(const CompositionUnderline&);
+  unsigned underlinePaintEnd(const CompositionUnderline&);
+  bool shouldPaintTextBox(const PaintInfo&);
+  void expandToIncludeNewlineForSelection(LayoutRect&);
+  LayoutObject& inlineLayoutObject() const;
+
+  const InlineTextBox& m_inlineTextBox;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // InlineTextBoxPainter_h
+#endif  // InlineTextBoxPainter_h

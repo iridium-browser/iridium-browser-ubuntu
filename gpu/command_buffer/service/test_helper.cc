@@ -34,6 +34,7 @@ using ::testing::NotNull;
 using ::testing::Return;
 using ::testing::SetArrayArgument;
 using ::testing::SetArgumentPointee;
+using ::testing::SetArgPointee;
 using ::testing::StrEq;
 using ::testing::StrictMock;
 
@@ -204,10 +205,17 @@ void TestHelper::SetupTextureInitializationExpectations(
 void TestHelper::SetupTextureManagerInitExpectations(
     ::gl::MockGLInterface* gl,
     bool is_es3_enabled,
+    bool is_es3_capable,
     bool is_desktop_core_profile,
     const char* extensions,
     bool use_default_textures) {
   InSequence sequence;
+
+  if (is_es3_capable) {
+    EXPECT_CALL(*gl, BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0))
+        .Times(1)
+        .RetiresOnSaturation();
+  }
 
   SetupTextureInitializationExpectations(
       gl, GL_TEXTURE_2D, use_default_textures);
@@ -331,13 +339,17 @@ void TestHelper::SetupContextGroupInitExpectations(
     const DisallowedFeatures& disallowed_features,
     const char* extensions,
     const char* gl_version,
+    ContextType context_type,
     bool bind_generates_resource) {
   InSequence sequence;
 
-  SetupFeatureInfoInitExpectationsWithGLVersion(gl, extensions, "", gl_version);
+  bool enable_es3 = !(context_type == CONTEXT_TYPE_OPENGLES2 ||
+                      context_type == CONTEXT_TYPE_WEBGL1);
 
   gl::GLVersionInfo gl_info(gl_version, "", extensions);
 
+  SetupFeatureInfoInitExpectationsWithGLVersion(gl, extensions, "", gl_version,
+      context_type);
   EXPECT_CALL(*gl, GetIntegerv(GL_MAX_RENDERBUFFER_SIZE, _))
       .WillOnce(SetArgumentPointee<1>(kMaxRenderbufferSize))
       .RetiresOnSaturation();
@@ -462,13 +474,14 @@ void TestHelper::SetupContextGroupInitExpectations(
 
   bool use_default_textures = bind_generates_resource;
   SetupTextureManagerInitExpectations(
-      gl, false, gl_info.is_desktop_core_profile, extensions,
-      use_default_textures);
+      gl, enable_es3, gl_info.is_es3_capable, gl_info.is_desktop_core_profile,
+      extensions, use_default_textures);
 }
 
 void TestHelper::SetupFeatureInfoInitExpectations(::gl::MockGLInterface* gl,
                                                   const char* extensions) {
-  SetupFeatureInfoInitExpectationsWithGLVersion(gl, extensions, "", "");
+  SetupFeatureInfoInitExpectationsWithGLVersion(gl, extensions, "", "",
+      CONTEXT_TYPE_OPENGLES2);
 }
 
 void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
@@ -476,8 +489,11 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
     const char* extensions,
     const char* gl_renderer,
     const char* gl_version,
-    bool enable_es3) {
+    ContextType context_type) {
   InSequence sequence;
+
+  bool enable_es3 = context_type == CONTEXT_TYPE_WEBGL2 ||
+      context_type == CONTEXT_TYPE_OPENGLES3;
 
   EXPECT_CALL(*gl, GetString(GL_VERSION))
       .WillOnce(Return(reinterpret_cast<const uint8_t*>(gl_version)))
@@ -514,9 +530,16 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
       .WillOnce(Return(reinterpret_cast<const uint8_t*>(gl_renderer)))
       .RetiresOnSaturation();
 
+  if (enable_es3) {
+    EXPECT_CALL(*gl, GetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, _))
+      .WillOnce(SetArgPointee<1>(0))
+      .RetiresOnSaturation();
+  }
+
   if ((strstr(extensions, "GL_ARB_texture_float") ||
        gl_info.is_desktop_core_profile) ||
-      (gl_info.is_es3 && strstr(extensions, "GL_EXT_color_buffer_float"))) {
+      (gl_info.is_es3 && strstr(extensions, "GL_OES_texture_float") &&
+       strstr(extensions, "GL_EXT_color_buffer_float"))) {
     static const GLuint tx_ids[] = {101, 102};
     static const GLuint fb_ids[] = {103, 104};
     const GLsizei width = 16;
@@ -553,6 +576,7 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
     EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
         .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
         .RetiresOnSaturation();
+    GLenum status_rgba = GL_FRAMEBUFFER_COMPLETE;
     EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, width, width, 0,
         GL_RGB, GL_FLOAT, _))
         .Times(1)
@@ -565,51 +589,51 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
       EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
           .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
           .RetiresOnSaturation();
+    }
 
-      if (enable_es3 && gl_info.is_es3_capable) {
-        EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_R16F, width, width,
-            0, GL_RED, GL_FLOAT, _))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, width, width,
-            0, GL_RG, GL_FLOAT, _))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, width,
-            0, GL_RGBA, GL_FLOAT, _))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_R32F, width, width,
-            0, GL_RED, GL_FLOAT, _))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, width, width,
-            0, GL_RG, GL_FLOAT, _))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_R11F_G11F_B10F,
-            width, width, 0, GL_RGB, GL_FLOAT, _))
-            .Times(1)
-            .RetiresOnSaturation();
-        EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
-            .Times(1)
-            .RetiresOnSaturation();
-      }
+    if (status_rgba == GL_FRAMEBUFFER_COMPLETE && enable_es3) {
+      EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_R16F, width, width,
+          0, GL_RED, GL_FLOAT, _))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, width, width,
+          0, GL_RG, GL_FLOAT, _))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, width,
+          0, GL_RGBA, GL_FLOAT, _))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_R32F, width, width,
+          0, GL_RED, GL_FLOAT, _))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, width, width,
+          0, GL_RG, GL_FLOAT, _))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, GL_R11F_G11F_B10F,
+          width, width, 0, GL_RGB, GL_FLOAT, _))
+          .Times(1)
+          .RetiresOnSaturation();
+      EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+          .Times(1)
+          .RetiresOnSaturation();
     }
 
 

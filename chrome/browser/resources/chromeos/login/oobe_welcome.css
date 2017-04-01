@@ -2,41 +2,66 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
-#oobe-welcome-md .buttonbox {
-  font-size: 32px;
-  padding: 15px 24px 24px;
-  width: 100px;
+/************* Language Screen **************/
+#languageScreen .language-selection-entry {
+  border-top: 1px solid lightgrey;
+  height: 44px;
+  padding: 0 10px;
 }
 
-#oobe-welcome-md .welcome-next {
-  padding: 15px 24px 24px;
+#languageScreen .language-selection-entry:last-of-type {
+  border-bottom: 1px solid lightgrey;
 }
 
-#oobe-welcome-md .bottom-button {
-  --iron-icon-height: 32px;
-  --iron-icon-width: 32px;
+#languageScreen .language-selection-title {
+  color: rgba(0, 0, 0, 0.87);
+  font: 13px Roboto, sans-serif;
 }
 
-.language-selection-entry {
+#languageScreen .bottom-buttons {
+  padding: 0 24px;
+}
+
+/************* Accessibility Screen **************/
+#accessibilityScreen oobe-a11y-option {
+  border-top: 1px solid lightgrey;
+  min-height: 56px;
+}
+
+#accessibilityScreen oobe-a11y-option:last-of-type {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.14);
+}
+
+#accessibilityScreen .bottom-buttons {
+  padding: 0 24px;
+}
+
+/************* Network Selection Screen **************/
+#networkSelectionScreen .footer {
+  margin-bottom: 10px;
+  max-height: 297px;
+}
+
+#networkSelectionScreen .bottom-buttons {
+  padding: 0 6px; /* = 8px - 2px back button border */
+}
+
+/************* Timezone Screen **************/
+#timezoneScreen .timezone-selection-entry {
   border-top: 1px solid lightgrey;
   height: 44px;
   padding: 0 20px;
 }
 
-.language-selection-entry:last-of-type {
+#timezoneScreen .timezone-selection-entry:last-of-type {
   border-bottom: 1px solid lightgrey;
 }
 
-.language-selection-title {
+#timezoneScreen .timezone-selection-title {
   color: rgba(0, 0, 0, 0.87);
   font: 13px Roboto, sans-serif;
 }
 
-oobe-a11y-option {
-  border-top: 1px solid lightgrey;
-  min-height: 56px;
-}
-
-oobe-a11y-option:last-of-type {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.14);
+#timezoneScreen .bottom-buttons {
+  padding: 0 24px;
 }

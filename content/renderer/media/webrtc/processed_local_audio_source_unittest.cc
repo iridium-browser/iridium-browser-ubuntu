@@ -2,7 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+#include <string>
+
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
 #include "content/public/renderer/media_stream_audio_sink.h"
 #include "content/renderer/media/media_stream_audio_track.h"
@@ -93,15 +97,16 @@ class ProcessedLocalAudioSourceTest : public testing::Test {
 
   void CreateProcessedLocalAudioSource(
       const blink::WebMediaConstraints& constraints) {
-    ProcessedLocalAudioSource* const source =
-      new ProcessedLocalAudioSource(
-            -1 /* consumer_render_frame_id is N/A for non-browser tests */,
-            StreamDeviceInfo(MEDIA_DEVICE_AUDIO_CAPTURE, "Mock audio device",
-                             "mock_audio_device_id", kSampleRate,
-                             kChannelLayout, kRequestedBufferSize),
-            &mock_dependency_factory_);
+    ProcessedLocalAudioSource* const source = new ProcessedLocalAudioSource(
+        -1 /* consumer_render_frame_id is N/A for non-browser tests */,
+        StreamDeviceInfo(MEDIA_DEVICE_AUDIO_CAPTURE, "Mock audio device",
+                         "mock_audio_device_id", kSampleRate, kChannelLayout,
+                         kRequestedBufferSize),
+        constraints,
+        base::Bind(&ProcessedLocalAudioSourceTest::OnAudioSourceStarted,
+                   base::Unretained(this)),
+        &mock_dependency_factory_);
     source->SetAllowInvalidRenderFrameIdForTesting(true);
-    source->SetSourceConstraints(constraints);
     blink_audio_source_.setExtraData(source);  // Takes ownership.
   }
 
@@ -134,7 +139,12 @@ class ProcessedLocalAudioSourceTest : public testing::Test {
     return blink_audio_track_;
   }
 
+  void OnAudioSourceStarted(MediaStreamSource* source,
+                            MediaStreamRequestResult result,
+                            const blink::WebString& result_name) {}
+
  private:
+  base::MessageLoop main_thread_message_loop_;  // Needed for MSAudioProcessor.
   MockAudioDeviceFactory mock_audio_device_factory_;
   MockPeerConnectionDependencyFactory mock_dependency_factory_;
   blink::WebMediaStreamSource blink_audio_source_;
@@ -164,7 +174,10 @@ TEST_F(ProcessedLocalAudioSourceTest, VerifyAudioFlowWithoutAudioProcessing) {
       .WillOnce(WithArg<0>(Invoke(this, &ThisTest::CheckSourceFormatMatches)));
   EXPECT_CALL(*mock_audio_device_factory()->mock_capturer_source(),
               SetAutomaticGainControl(true));
-  EXPECT_CALL(*mock_audio_device_factory()->mock_capturer_source(), Start());
+  EXPECT_CALL(*mock_audio_device_factory()->mock_capturer_source(), Start())
+      .WillOnce(Invoke(
+          capture_source_callback(),
+          &media::AudioCapturerSource::CaptureCallback::OnCaptureStarted));
   ASSERT_TRUE(audio_source()->ConnectToTrack(blink_audio_track()));
   CheckOutputFormatMatches(audio_source()->GetAudioParameters());
 

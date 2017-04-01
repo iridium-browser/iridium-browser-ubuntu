@@ -7,7 +7,7 @@
 #include "content/common/input/input_event_ack_state.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 
 using blink::WebGestureEvent;
 using blink::WebInputEvent;
@@ -423,6 +423,9 @@ TEST(TouchActionFilterTest, Pinch) {
   EXPECT_TRUE(filter.FilterGestureEvent(&pinch_begin));
   EXPECT_TRUE(filter.FilterGestureEvent(&pinch_update));
   EXPECT_TRUE(filter.FilterGestureEvent(&pinch_end));
+  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_begin));
+  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_update));
+  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_end));
   EXPECT_TRUE(filter.FilterGestureEvent(&scroll_end));
 
   // Pinch is not allowed with touch-action: pan-x pan-y.
@@ -451,13 +454,7 @@ TEST(TouchActionFilterTest, Pinch) {
   EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
   EXPECT_FALSE(filter.FilterGestureEvent(&scroll_end));
 
-  // Pinching can become disallowed during a single scroll gesture, but
-  // can't become allowed again until the scroll terminates.
-  // Note that the current TouchEventQueue design makes this scenario
-  // impossible in practice (no touch events are sent to the renderer
-  // while scrolling) and so no SetTouchAction can occur.  But this
-  // could change in the future, so it's still worth verifying in this
-  // unit test.
+  // Pinching is only computed at GestureScrollBegin time.
   filter.ResetTouchAction();
   filter.OnSetTouchAction(TOUCH_ACTION_AUTO);
   EXPECT_FALSE(filter.FilterGestureEvent(&scroll_begin));
@@ -465,17 +462,17 @@ TEST(TouchActionFilterTest, Pinch) {
   EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
   EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
   filter.OnSetTouchAction(TOUCH_ACTION_NONE);
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_begin));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_update));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_end));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
   filter.OnSetTouchAction(TOUCH_ACTION_AUTO);
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_begin));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_update));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_end));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
   EXPECT_FALSE(filter.FilterGestureEvent(&scroll_end));
 
-  // Once a pinch has started, any change in state won't affect the current
-  // pinch gesture, but can affect a future one within the same scroll.
+  // Once a pinch has started, any change in state won't affect the pinch
+  // gestures since it is computed in GestureScrollBegin.
   filter.ResetTouchAction();
   filter.OnSetTouchAction(TOUCH_ACTION_AUTO);
   EXPECT_FALSE(filter.FilterGestureEvent(&scroll_begin));
@@ -483,11 +480,32 @@ TEST(TouchActionFilterTest, Pinch) {
   filter.OnSetTouchAction(TOUCH_ACTION_NONE);
   EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
   EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_begin));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_update));
-  EXPECT_TRUE(filter.FilterGestureEvent(&pinch_end));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
   EXPECT_FALSE(filter.FilterGestureEvent(&scroll_end));
   filter.ResetTouchAction();
+
+  scroll_begin.data.scrollBegin.pointerCount = 1;
+  // Scrolling should be disallowed for pinch zoom with only
+  // one pointer down.
+  filter.OnSetTouchAction(TOUCH_ACTION_PINCH_ZOOM);
+  EXPECT_TRUE(filter.FilterGestureEvent(&scroll_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
+  EXPECT_TRUE(filter.FilterGestureEvent(&scroll_end));
+
+  scroll_begin.data.scrollBegin.pointerCount = 2;
+
+  // Scrolling is allowed when two fingers are down.
+  filter.ResetTouchAction();
+  filter.OnSetTouchAction(TOUCH_ACTION_PINCH_ZOOM);
+  EXPECT_FALSE(filter.FilterGestureEvent(&scroll_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_begin));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_update));
+  EXPECT_FALSE(filter.FilterGestureEvent(&pinch_end));
+  EXPECT_FALSE(filter.FilterGestureEvent(&scroll_end));
 }
 
 TEST(TouchActionFilterTest, DoubleTapWithTouchActionAuto) {
@@ -506,7 +524,7 @@ TEST(TouchActionFilterTest, DoubleTapWithTouchActionAuto) {
   filter.ResetTouchAction();
   EXPECT_FALSE(filter.FilterGestureEvent(&tap_down));
   EXPECT_FALSE(filter.FilterGestureEvent(&unconfirmed_tap));
-  EXPECT_EQ(unconfirmed_tap.type, WebInputEvent::GestureTapUnconfirmed);
+  EXPECT_EQ(unconfirmed_tap.type(), WebInputEvent::GestureTapUnconfirmed);
   // The tap cancel will come as part of the next touch sequence.
   filter.ResetTouchAction();
   // Changing the touch action for the second tap doesn't effect the behaviour
@@ -535,7 +553,7 @@ TEST(TouchActionFilterTest, DoubleTap) {
   filter.OnSetTouchAction(TOUCH_ACTION_MANIPULATION);
   EXPECT_FALSE(filter.FilterGestureEvent(&tap_down));
   EXPECT_FALSE(filter.FilterGestureEvent(&unconfirmed_tap));
-  EXPECT_EQ(WebInputEvent::GestureTap, unconfirmed_tap.type);
+  EXPECT_EQ(WebInputEvent::GestureTap, unconfirmed_tap.type());
   // Changing the touch action for the second tap doesn't effect the behaviour
   // of the event. The tap cancel will come as part of the next touch sequence.
   filter.ResetTouchAction();
@@ -543,7 +561,7 @@ TEST(TouchActionFilterTest, DoubleTap) {
   EXPECT_TRUE(filter.FilterGestureEvent(&tap_cancel));
   EXPECT_FALSE(filter.FilterGestureEvent(&tap_down));
   EXPECT_FALSE(filter.FilterGestureEvent(&double_tap));
-  EXPECT_EQ(WebInputEvent::GestureTap, double_tap.type);
+  EXPECT_EQ(WebInputEvent::GestureTap, double_tap.type());
   filter.ResetTouchAction();
 }
 
@@ -561,7 +579,7 @@ TEST(TouchActionFilterTest, SingleTapWithTouchActionAuto) {
   filter.ResetTouchAction();
   EXPECT_FALSE(filter.FilterGestureEvent(&tap_down));
   EXPECT_FALSE(filter.FilterGestureEvent(&unconfirmed_tap1));
-  EXPECT_EQ(WebInputEvent::GestureTapUnconfirmed, unconfirmed_tap1.type);
+  EXPECT_EQ(WebInputEvent::GestureTapUnconfirmed, unconfirmed_tap1.type());
   EXPECT_FALSE(filter.FilterGestureEvent(&tap));
   filter.ResetTouchAction();
 }
@@ -581,7 +599,7 @@ TEST(TouchActionFilterTest, SingleTap) {
   filter.OnSetTouchAction(TOUCH_ACTION_NONE);
   EXPECT_FALSE(filter.FilterGestureEvent(&tap_down));
   EXPECT_FALSE(filter.FilterGestureEvent(&unconfirmed_tap1));
-  EXPECT_EQ(WebInputEvent::GestureTap, unconfirmed_tap1.type);
+  EXPECT_EQ(WebInputEvent::GestureTap, unconfirmed_tap1.type());
   EXPECT_TRUE(filter.FilterGestureEvent(&tap));
   filter.ResetTouchAction();
 }
@@ -665,7 +683,7 @@ TEST(TouchActionFilterTest, ZeroVelocityFlingsConvertedToScrollEnd) {
     WebGestureEvent fling_start = SyntheticWebGestureEventBuilder::BuildFling(
         kFlingX, 0, kSourceDevice);
     EXPECT_FALSE(filter.FilterGestureEvent(&fling_start));
-    EXPECT_EQ(WebInputEvent::GestureScrollEnd, fling_start.type);
+    EXPECT_EQ(WebInputEvent::GestureScrollEnd, fling_start.type());
   }
 
   filter.ResetTouchAction();
@@ -682,7 +700,7 @@ TEST(TouchActionFilterTest, ZeroVelocityFlingsConvertedToScrollEnd) {
     WebGestureEvent fling_start = SyntheticWebGestureEventBuilder::BuildFling(
         0, kFlingY, kSourceDevice);
     EXPECT_FALSE(filter.FilterGestureEvent(&fling_start));
-    EXPECT_EQ(WebInputEvent::GestureScrollEnd, fling_start.type);
+    EXPECT_EQ(WebInputEvent::GestureScrollEnd, fling_start.type());
   }
 }
 

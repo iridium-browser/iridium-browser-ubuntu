@@ -5,7 +5,6 @@
 #include <memory>
 #include <string>
 
-#include "ash/common/ash_switches.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
@@ -23,7 +22,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
-#include "components/syncable_prefs/pref_service_syncable.h"
+#include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 

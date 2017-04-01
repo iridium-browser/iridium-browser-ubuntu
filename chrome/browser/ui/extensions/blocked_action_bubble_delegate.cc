@@ -6,7 +6,7 @@
 
 #include "base/callback_helpers.h"
 #include "base/strings/string16.h"
-#include "grit/generated_resources.h"
+#include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 BlockedActionBubbleDelegate::BlockedActionBubbleDelegate(
@@ -61,4 +61,9 @@ void BlockedActionBubbleDelegate::OnBubbleShown() {}
 
 void BlockedActionBubbleDelegate::OnBubbleClosed(CloseAction action) {
   base::ResetAndReturn(&callback_).Run(action);
+}
+
+std::unique_ptr<ToolbarActionsBarBubbleDelegate::ExtraViewInfo>
+BlockedActionBubbleDelegate::GetExtraViewInfo() {
+  return nullptr;
 }

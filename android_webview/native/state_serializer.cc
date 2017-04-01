@@ -12,6 +12,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/restore_type.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/page_state.h"
 
@@ -102,16 +103,13 @@ bool RestoreFromPickle(base::PickleIterator* iterator,
     if (!internal::RestoreNavigationEntryFromPickle(state_version, iterator,
                                                     entries[i].get()))
       return false;
-
-    entries[i]->SetPageID(i);
   }
 
   // |web_contents| takes ownership of these entries after this call.
   content::NavigationController& controller = web_contents->GetController();
-  controller.Restore(
-      selected_entry,
-      content::NavigationController::RESTORE_LAST_SESSION_EXITED_CLEANLY,
-      &entries);
+  controller.Restore(selected_entry,
+                     content::RestoreType::LAST_SESSION_EXITED_CLEANLY,
+                     &entries);
   DCHECK_EQ(0u, entries.size());
 
   if (controller.GetLastCommittedEntry()) {

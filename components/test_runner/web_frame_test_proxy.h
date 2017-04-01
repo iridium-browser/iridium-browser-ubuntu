@@ -12,6 +12,7 @@
 #include "base/macros.h"
 #include "components/test_runner/test_runner_export.h"
 #include "components/test_runner/web_frame_test_client.h"
+#include "third_party/WebKit/public/platform/WebEffectiveConnectionType.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebFrameClient.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -95,11 +96,9 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
                             replaces_current_history_item);
   }
 
-  void didStartProvisionalLoad(blink::WebLocalFrame* frame,
-                               double triggeringEventTime) override {
-    test_client()->didStartProvisionalLoad(frame, triggeringEventTime);
-    Base::didStartProvisionalLoad(
-        frame, triggeringEventTime);
+  void didStartProvisionalLoad(blink::WebLocalFrame* frame) override {
+    test_client()->didStartProvisionalLoad(frame);
+    Base::didStartProvisionalLoad(frame);
   }
 
   void didReceiveServerRedirectForProvisionalLoad(
@@ -189,6 +188,14 @@ class WebFrameTestProxy : public Base, public WebFrameTestProxyBase {
       const blink::WebVector<blink::WebColorSuggestion>& suggestions) override {
     return test_client()->createColorChooser(client, initial_color,
                                              suggestions);
+  }
+
+  blink::WebEffectiveConnectionType getEffectiveConnectionType() override {
+    if (test_client()->getEffectiveConnectionType() !=
+        blink::WebEffectiveConnectionType::TypeUnknown) {
+      return test_client()->getEffectiveConnectionType();
+    }
+    return Base::getEffectiveConnectionType();
   }
 
   void runModalAlertDialog(const blink::WebString& message) override {

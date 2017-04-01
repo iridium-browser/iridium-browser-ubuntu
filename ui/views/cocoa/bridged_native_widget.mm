@@ -12,6 +12,7 @@
 #import "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #import "base/mac/sdk_forward_declarations.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "ui/accelerated_widget_mac/window_resize_helper_mac.h"
 #import "ui/base/cocoa/constrained_window/constrained_window_animation.h"
@@ -168,16 +169,20 @@ bool IsPointInResizeArea(NSPoint point, NSWindow* window) {
   return false;
 }
 
+// Routes the |ns_event| to the corresponding BridgedNativeWidget and queries
+// whether the event should be reposted.
 BOOL WindowWantsMouseDownReposted(NSEvent* ns_event) {
-  id delegate = [[ns_event window] delegate];
-  return
-      [delegate
-          respondsToSelector:@selector(shouldRepostPendingLeftMouseDown:)] &&
-      [delegate shouldRepostPendingLeftMouseDown:[ns_event locationInWindow]];
+  DCHECK(views::BridgedNativeWidget::ShouldUseDragEventMonitor());
+
+  views::BridgedNativeWidget* bridge =
+      views::NativeWidgetMac::GetBridgeForNativeWindow([ns_event window]);
+  return bridge && bridge->ShouldRepostPendingLeftMouseDown(ns_event);
 }
 
 // Check if a mouse-down event should drag the window. If so, repost the event.
 NSEvent* RepostEventIfHandledByWindow(NSEvent* ns_event) {
+  DCHECK(views::BridgedNativeWidget::ShouldUseDragEventMonitor());
+
   enum RepostState {
     // Nothing reposted: hit-test new mouse-downs to see if they need to be
     // ignored and reposted after changing draggability.
@@ -252,9 +257,12 @@ NSEvent* RepostEventIfHandledByWindow(NSEvent* ns_event) {
 // To bridge the two models, we monitor mouse-downs with
 // +[NSEvent addLocalMonitorForEventsMatchingMask:handler:]. This receives
 // events after window dragging is handled, so for mouse-downs that land on a
-// draggable point, we cancel the event and repost it at the CGSessionEventTap
-// level so that window dragging will be handled again.
+// draggable point, we cancel the event, make the window draggable and repost it
+// at the CGSessionEventTap level so that window dragging will be handled again.
+// On Mac OS > 10.10, we don't use an event monitor. Instead, we use [NSWindow
+// performWindowDragWithEvent:]. See [NativeWidgetMacNSWindow sendEvent:].
 void SetupDragEventMonitor() {
+  DCHECK(views::BridgedNativeWidget::ShouldUseDragEventMonitor());
   static id monitor = nil;
   if (monitor)
     return;
@@ -312,6 +320,17 @@ NSComparisonResult SubviewSorter(NSViewComparatorValue lhs,
   return NSOrderedSame;
 }
 
+// Counts windows managed by a BridgedNativeWidget instance in the
+// |child_windows| array ignoring the windows added by AppKit.
+NSUInteger CountBridgedWindows(NSArray* child_windows) {
+  NSUInteger count = 0;
+  for (NSWindow* child in child_windows)
+    if ([[child delegate] isKindOfClass:[ViewsNSWindowDelegate class]])
+      ++count;
+
+  return count;
+}
+
 }  // namespace
 
 namespace views {
@@ -326,6 +345,14 @@ gfx::Size BridgedNativeWidget::GetWindowSizeForClientSize(
   return gfx::Size(NSWidth(frame_rect), NSHeight(frame_rect));
 }
 
+// static
+// TODO(karandeepb): Remove usage of drag event monitor once we stop supporting
+// Mac OS 10.10.
+bool BridgedNativeWidget::ShouldUseDragEventMonitor() {
+  return ![NSWindow
+      instancesRespondToSelector:@selector(performWindowDragWithEvent:)];
+}
+
 BridgedNativeWidget::BridgedNativeWidget(NativeWidgetMac* parent)
     : native_widget_mac_(parent),
       focus_manager_(nullptr),
@@ -335,49 +362,25 @@ BridgedNativeWidget::BridgedNativeWidget(NativeWidgetMac* parent)
       in_fullscreen_transition_(false),
       window_visible_(false),
       wants_to_be_visible_(false) {
-  SetupDragEventMonitor();
+  if (BridgedNativeWidget::ShouldUseDragEventMonitor())
+    SetupDragEventMonitor();
+
   DCHECK(parent);
   window_delegate_.reset(
       [[ViewsNSWindowDelegate alloc] initWithBridgedNativeWidget:this]);
 }
 
 BridgedNativeWidget::~BridgedNativeWidget() {
-  bool close_window = false;
-  if ([window_ delegate]) {
-    // If the delegate is still set on a modal dialog, it means it was not
-    // closed via [NSApplication endSheet:]. This is probably OK if the widget
-    // was never shown. But Cocoa ignores close() calls on open sheets. Calling
-    // endSheet: here would work, but it messes up assumptions elsewhere. E.g.
-    // DialogClientView assumes its delegate is alive when closing, which isn't
-    // true after endSheet: synchronously calls OnNativeWidgetDestroyed().
-    // So ban it. Modal dialogs should be closed via Widget::Close().
-    DCHECK(!native_widget_mac_->IsWindowModalSheet());
-
-    // If the delegate is still set, it means OnWindowWillClose() has not been
-    // called and the window is still open. Usually, -[NSWindow close] would
-    // synchronously call OnWindowWillClose() which removes the delegate and
-    // notifies NativeWidgetMac, which then calls this with a nil delegate.
-    // For other teardown flows (e.g. Widget::WIDGET_OWNS_NATIVE_WIDGET or
-    // Widget::CloseNow()) the delegate must first be cleared to avoid AppKit
-    // calling back into the bridge. This means OnWindowWillClose() needs to be
-    // invoked manually, which is done below.
-    // Note that if the window has children it can't be closed until the
-    // children are gone, but removing child windows calls into AppKit for the
-    // parent window, so the delegate must be cleared first.
-    [window_ setDelegate:nil];
-    close_window = true;
-  }
+  // The delegate should be cleared already. Note this enforces the precondition
+  // that -[NSWindow close] is invoked on the hosted window before the
+  // destructor is called.
+  DCHECK(![window_ delegate]);
 
   RemoveOrDestroyChildren();
   DCHECK(child_windows_.empty());
   SetFocusManager(nullptr);
   SetRootView(nullptr);
   DestroyCompositor();
-
-  if (close_window) {
-    OnWindowWillClose();
-    [window_ close];
-  }
 }
 
 void BridgedNativeWidget::Init(base::scoped_nsobject<NSWindow> window,
@@ -555,6 +558,13 @@ void BridgedNativeWidget::SetVisibilityState(WindowVisibilityState new_state) {
   wants_to_be_visible_ = new_state != HIDE_WINDOW;
 
   if (new_state == HIDE_WINDOW) {
+    // Calling -orderOut: on a window with an attached sheet encounters broken
+    // AppKit behavior. The sheet effectively becomes "lost".
+    // See http://crbug.com/667602. Alternatives: call -setAlphaValue:0 and
+    // -setIgnoresMouseEvents:YES on the NSWindow, or dismiss the sheet before
+    // hiding.
+    DCHECK(![window_ attachedSheet]);
+
     [window_ orderOut:nil];
     DCHECK(!window_visible_);
     return;
@@ -569,6 +579,23 @@ void BridgedNativeWidget::SetVisibilityState(WindowVisibilityState new_state) {
   if (native_widget_mac_->IsWindowModalSheet()) {
     ShowAsModalSheet();
     return;
+  }
+
+  // Non-modal windows are not animated. Hence opaque non-modal windows can
+  // appear with a "flash" if they are made visible before the frame from the
+  // compositor arrives. To get around this, set the alpha value of the window
+  // to 0, till we receive the correct frame from the compositor. Also, ignore
+  // mouse clicks till then. Also check for an active task runner on the
+  // WindowResizeHelperMac instance to ensure visibility is only suppressed when
+  // there is an active GPU process.
+  // TODO(karandeepb): Investigate whether similar technique is needed for other
+  // dialog types.
+  if (layer() && [window_ isOpaque] && !window_visible_ &&
+      !native_widget_mac_->GetWidget()->IsModal() &&
+      ui::WindowResizeHelperMac::Get()->task_runner()) {
+    initial_visibility_suppressed_ = true;
+    [window_ setAlphaValue:0.0];
+    [window_ setIgnoresMouseEvents:YES];
   }
 
   if (new_state == SHOW_AND_ACTIVATE_WINDOW) {
@@ -681,6 +708,8 @@ void BridgedNativeWidget::SetCursor(NSCursor* cursor) {
 }
 
 void BridgedNativeWidget::OnWindowWillClose() {
+  native_widget_mac_->GetWidget()->OnNativeWidgetDestroying();
+
   // Ensure BridgedNativeWidget does not have capture, otherwise
   // OnMouseCaptureLost() may reference a deleted |native_widget_mac_| when
   // called via ~CocoaMouseCapture() upon the destruction of |mouse_capture_|.
@@ -693,9 +722,10 @@ void BridgedNativeWidget::OnWindowWillClose() {
     parent_->RemoveChildWindow(this);
     parent_ = nullptr;
   }
-  [window_ setDelegate:nil];
   [[NSNotificationCenter defaultCenter] removeObserver:window_delegate_];
-  native_widget_mac_->OnWindowWillClose();
+  [window_ setDelegate:nil];
+  native_widget_mac_->OnWindowDestroyed();
+  // Note: |this| is deleted here.
 }
 
 void BridgedNativeWidget::OnFullscreenTransitionStart(
@@ -782,7 +812,7 @@ void BridgedNativeWidget::OnSizeChanged() {
   // We don't update the window mask during a live resize, instead it is done
   // after the resize is completed in viewDidEndLiveResize: in
   // BridgedContentView.
-  if (base::mac::IsOSMavericks() && ![window_ inLiveResize])
+  if (base::mac::IsOS10_9() && ![window_ inLiveResize])
     [bridged_view_ updateWindowMask];
 }
 
@@ -804,7 +834,9 @@ void BridgedNativeWidget::OnVisibilityChanged() {
   if (window_visible_) {
     wants_to_be_visible_ = true;
 
-    if (parent_)
+    // Sheets don't need a parentWindow set, and setting one causes graphical
+    // glitches (http://crbug.com/605098).
+    if (parent_ && ![window_ isSheet])
       [parent_->GetNSWindow() addChildWindow:window_ ordered:NSWindowAbove];
   } else {
     ReleaseCapture();  // Capture on hidden windows is not permitted.
@@ -826,6 +858,11 @@ void BridgedNativeWidget::OnVisibilityChanged() {
   if (layer()) {
     layer()->SetVisible(window_visible_);
     layer()->SchedulePaint(gfx::Rect(GetClientAreaSize()));
+
+    // For translucent windows which are made visible, recalculate shadow when
+    // the frame from the compositor arrives.
+    if (![window_ isOpaque])
+      invalidate_shadow_on_frame_swap_ = window_visible_;
   }
 
   NotifyVisibilityChangeDown();
@@ -841,7 +878,7 @@ void BridgedNativeWidget::OnVisibilityChanged() {
 }
 
 void BridgedNativeWidget::OnSystemControlTintChanged() {
-  ui::NativeThemeMac::instance()->NotifyObservers();
+  ui::NativeTheme::GetInstanceForNativeUi()->NotifyObservers();
 }
 
 void BridgedNativeWidget::OnBackingPropertiesChanged() {
@@ -868,8 +905,38 @@ void BridgedNativeWidget::OnWindowKeyStatusChangedTo(bool is_key) {
   }
 }
 
-bool BridgedNativeWidget::ShouldRepostPendingLeftMouseDown(
-    NSPoint location_in_window) {
+bool BridgedNativeWidget::ShouldDragWindow(NSEvent* event) {
+  if (!bridged_view_ || [event type] != NSLeftMouseDown)
+    return false;
+
+  NSPoint location_in_window = [event locationInWindow];
+  if (IsPointInResizeArea(location_in_window, window_))
+    return false;
+
+  gfx::Point point(location_in_window.x,
+                   NSHeight([window_ frame]) - location_in_window.y);
+
+  if (native_widget_mac()->GetWidget()->GetNonClientComponent(point) !=
+      HTCAPTION)
+    return false;
+
+  // Check that the point is not obscured by non-content NSViews.
+  for (NSView* subview : [[bridged_view_ superview] subviews]) {
+    if (subview == bridged_view_.get())
+      continue;
+
+    if (![subview mouseDownCanMoveWindow] &&
+        NSPointInRect(location_in_window, [subview frame]))
+      return false;
+  }
+
+  return true;
+}
+
+bool BridgedNativeWidget::ShouldRepostPendingLeftMouseDown(NSEvent* event) {
+  DCHECK(BridgedNativeWidget::ShouldUseDragEventMonitor());
+  DCHECK_EQ(NSLeftMouseDown, [event type]);
+
   if (!bridged_view_)
     return false;
 
@@ -880,28 +947,7 @@ bool BridgedNativeWidget::ShouldRepostPendingLeftMouseDown(
     return false;
   }
 
-  if (IsPointInResizeArea(location_in_window, window_))
-    return false;
-
-  gfx::Point point(location_in_window.x,
-                   NSHeight([window_ frame]) - location_in_window.y);
-  bool should_move_window =
-      native_widget_mac()->GetWidget()->GetNonClientComponent(point) ==
-      HTCAPTION;
-
-  // Check that the point is not obscured by non-content NSViews.
-  for (NSView* subview : [[bridged_view_ superview] subviews]) {
-    if (subview == bridged_view_.get())
-      continue;
-
-    if (![subview mouseDownCanMoveWindow] &&
-        NSPointInRect(location_in_window, [subview frame])) {
-      should_move_window = false;
-      break;
-    }
-  }
-
-  if (!should_move_window)
+  if (!ShouldDragWindow(event))
     return false;
 
   // Make the window draggable, then return true to repost the event.
@@ -955,7 +1001,7 @@ void BridgedNativeWidget::CreateLayer(ui::LayerType layer_type,
   CreateCompositor();
   DCHECK(compositor_);
 
-  SetLayer(new ui::Layer(layer_type));
+  SetLayer(base::MakeUnique<ui::Layer>(layer_type));
   // Note, except for controls, this will set the layer to be hidden, since it
   // is only called during Init().
   layer()->SetVisible(window_visible_);
@@ -979,7 +1025,7 @@ void BridgedNativeWidget::CreateLayer(ui::LayerType layer_type,
     // to generate a window shadow from the composited CALayer. To get around
     // this, let the window background remain opaque and clip the window
     // boundary in drawRect method of BridgedContentView. See crbug.com/543671.
-    if (base::mac::IsOSYosemiteOrLater())
+    if (base::mac::IsAtLeastOS10_10())
       [window_ setBackgroundColor:[NSColor clearColor]];
   }
 
@@ -1000,6 +1046,11 @@ void BridgedNativeWidget::ClearAssociationForView(const views::View* view) {
 }
 
 void BridgedNativeWidget::ReorderChildViews() {
+  // Ignore layer manipulation during a Close(). This can be reached during the
+  // orderOut: in Close(), which notifies visibility changes to Views.
+  if (!bridged_view_)
+    return;
+
   RankMap rank;
   Widget* widget = native_widget_mac_->GetWidget();
   RankNSViews(widget->GetRootView(), associated_views_, &rank);
@@ -1076,10 +1127,6 @@ void BridgedNativeWidget::OnDeviceScaleFactorChanged(
       device_scale_factor);
 }
 
-base::Closure BridgedNativeWidget::PrepareForLayerBoundsChange() {
-  return base::Closure();
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // BridgedNativeWidget, AcceleratedWidgetMac:
 
@@ -1099,6 +1146,12 @@ void BridgedNativeWidget::AcceleratedWidgetSwapCompleted() {
   // should arrive soon.
   if (!compositor_widget_->HasFrameOfSize(GetClientAreaSize()))
     return;
+
+  if (initial_visibility_suppressed_) {
+    initial_visibility_suppressed_ = false;
+    [window_ setAlphaValue:1.0];
+    [window_ setIgnoresMouseEvents:NO];
+  }
 
   if (invalidate_shadow_on_frame_swap_) {
     invalidate_shadow_on_frame_swap_ = false;
@@ -1165,19 +1218,21 @@ void BridgedNativeWidget::NotifyVisibilityChangeDown() {
     // The orderOut calls above should result in a call to OnVisibilityChanged()
     // in each child. There, children will remove themselves from the NSWindow
     // childWindow list as well as propagate NotifyVisibilityChangeDown() calls
-    // to any children of their own.
-    DCHECK_EQ(0u, [[window_ childWindows] count]);
+    // to any children of their own. However this is only true for windows
+    // managed by the BridgedNativeWidget i.e. windows which have
+    // ViewsNSWindowDelegate as the delegate.
+    DCHECK_EQ(0u, CountBridgedWindows([window_ childWindows]));
     return;
   }
 
-  NSUInteger visible_children = 0;  // For a DCHECK below.
+  NSUInteger visible_bridged_children = 0;  // For a DCHECK below.
   NSInteger parent_window_number = [window_ windowNumber];
   for (BridgedNativeWidget* child: child_windows_) {
     // Note: order the child windows on top, regardless of whether or not they
     // are currently visible. They probably aren't, since the parent was hidden
     // prior to this, but they could have been made visible in other ways.
     if (child->wants_to_be_visible_) {
-      ++visible_children;
+      ++visible_bridged_children;
       // Here -[NSWindow orderWindow:relativeTo:] is used to put the window on
       // screen. However, that by itself is insufficient to guarantee a correct
       // z-order relationship. If this function is being called from a z-order
@@ -1192,7 +1247,8 @@ void BridgedNativeWidget::NotifyVisibilityChangeDown() {
     }
     CHECK_EQ(child_count, child_windows_.size());
   }
-  DCHECK_EQ(visible_children, [[window_ childWindows] count]);
+  DCHECK_EQ(visible_bridged_children,
+            CountBridgedWindows([window_ childWindows]));
 }
 
 gfx::Size BridgedNativeWidget::GetClientAreaSize() const {
@@ -1208,12 +1264,15 @@ void BridgedNativeWidget::CreateCompositor() {
   ui::ContextFactory* context_factory =
       ViewsDelegate::GetInstance()->GetContextFactory();
   DCHECK(context_factory);
+  ui::ContextFactoryPrivate* context_factory_private =
+      ViewsDelegate::GetInstance()->GetContextFactoryPrivate();
 
   AddCompositorSuperview();
 
   compositor_widget_.reset(new ui::AcceleratedWidgetMac());
-  compositor_.reset(
-      new ui::Compositor(context_factory, GetCompositorTaskRunner()));
+  compositor_.reset(new ui::Compositor(
+      context_factory_private->AllocateFrameSinkId(), context_factory,
+      context_factory_private, GetCompositorTaskRunner()));
   compositor_->SetAcceleratedWidget(compositor_widget_->accelerated_widget());
   compositor_widget_->SetNSView(this);
 }
@@ -1270,7 +1329,7 @@ void BridgedNativeWidget::AddCompositorSuperview() {
   if (widget_type_ == Widget::InitParams::TYPE_MENU) {
     // Giving the canvas opacity messes up subpixel font rendering, so use a
     // solid background, but make the CALayer transparent.
-    if (base::mac::IsOSYosemiteOrLater()) {
+    if (base::mac::IsAtLeastOS10_10()) {
       [background_layer setOpacity:kYosemiteMenuOpacity];
       CGSSetWindowBackgroundBlurRadius(
           _CGSDefaultConnection(), [window_ windowNumber], kYosemiteMenuBlur);
@@ -1362,6 +1421,8 @@ NSMutableDictionary* BridgedNativeWidget::GetWindowProperties() const {
 }
 
 void BridgedNativeWidget::SetDraggable(bool draggable) {
+  DCHECK(BridgedNativeWidget::ShouldUseDragEventMonitor());
+
   [bridged_view_ setMouseDownCanMoveWindow:draggable];
   // AppKit will not update its cache of mouseDownCanMoveWindow unless something
   // changes. Previously we tried adding an NSView and removing it, but for some

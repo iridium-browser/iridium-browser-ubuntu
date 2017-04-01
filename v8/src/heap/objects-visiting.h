@@ -6,6 +6,7 @@
 #define V8_OBJECTS_VISITING_H_
 
 #include "src/allocation.h"
+#include "src/heap/embedder-tracing.h"
 #include "src/heap/heap.h"
 #include "src/heap/spaces.h"
 #include "src/layout-descriptor.h"
@@ -132,7 +133,7 @@ class StaticVisitorBase : public AllStatic {
            (base == kVisitJSObject) || (base == kVisitJSApiObject));
     DCHECK(IsAligned(object_size, kPointerSize));
     DCHECK(Heap::kMinObjectSizeInWords * kPointerSize <= object_size);
-    DCHECK(object_size <= Page::kMaxRegularHeapObjectSize);
+    DCHECK(object_size <= kMaxRegularHeapObjectSize);
     DCHECK(!has_unboxed_fields || (base == kVisitJSObject) ||
            (base == kVisitJSApiObject));
 
@@ -267,12 +268,17 @@ class StaticNewSpaceVisitor : public StaticVisitorBase {
   // Although we are using the JSFunction body descriptor which does not
   // visit the code entry, compiler wants it to be accessible.
   // See JSFunction::BodyDescriptorImpl.
-  INLINE(static void VisitCodeEntry(Heap* heap, HeapObject* object,
-                                    Address entry_address)) {
+  inline static void VisitCodeEntry(Heap* heap, HeapObject* object,
+                                    Address entry_address) {
     UNREACHABLE();
   }
 
  private:
+  inline static int UnreachableVisitor(Map* map, HeapObject* object) {
+    UNREACHABLE();
+    return 0;
+  }
+
   INLINE(static int VisitByteArray(Map* map, HeapObject* object)) {
     return reinterpret_cast<ByteArray*>(object)->ByteArraySize();
   }
@@ -299,8 +305,6 @@ class StaticNewSpaceVisitor : public StaticVisitorBase {
   INLINE(static int VisitFreeSpace(Map* map, HeapObject* object)) {
     return FreeSpace::cast(object)->size();
   }
-
-  INLINE(static int VisitBytecodeArray(Map* map, HeapObject* object));
 
   class DataObjectVisitor {
    public:
@@ -354,7 +358,6 @@ class StaticMarkingVisitor : public StaticVisitorBase {
     table_.GetVisitor(map)(map, obj);
   }
 
-  INLINE(static void VisitPropertyCell(Map* map, HeapObject* object));
   INLINE(static void VisitWeakCell(Map* map, HeapObject* object));
   INLINE(static void VisitTransitionArray(Map* map, HeapObject* object));
   INLINE(static void VisitCodeEntry(Heap* heap, HeapObject* object,
@@ -373,13 +376,11 @@ class StaticMarkingVisitor : public StaticVisitorBase {
  protected:
   INLINE(static void VisitMap(Map* map, HeapObject* object));
   INLINE(static void VisitCode(Map* map, HeapObject* object));
+  INLINE(static void VisitBytecodeArray(Map* map, HeapObject* object));
   INLINE(static void VisitSharedFunctionInfo(Map* map, HeapObject* object));
-  INLINE(static void VisitAllocationSite(Map* map, HeapObject* object));
   INLINE(static void VisitWeakCollection(Map* map, HeapObject* object));
   INLINE(static void VisitJSFunction(Map* map, HeapObject* object));
-  INLINE(static void VisitJSRegExp(Map* map, HeapObject* object));
   INLINE(static void VisitNativeContext(Map* map, HeapObject* object));
-  INLINE(static void VisitBytecodeArray(Map* map, HeapObject* object));
 
   // Mark pointers in a Map treating some elements of the descriptor array weak.
   static void MarkMapContents(Heap* heap, Map* map);
@@ -390,8 +391,8 @@ class StaticMarkingVisitor : public StaticVisitorBase {
 
   // Helpers used by code flushing support that visit pointer fields and treat
   // references to code objects either strongly or weakly.
-  static void VisitSharedFunctionInfoStrongCode(Heap* heap, HeapObject* object);
-  static void VisitSharedFunctionInfoWeakCode(Heap* heap, HeapObject* object);
+  static void VisitSharedFunctionInfoStrongCode(Map* map, HeapObject* object);
+  static void VisitSharedFunctionInfoWeakCode(Map* map, HeapObject* object);
   static void VisitJSFunctionStrongCode(Map* map, HeapObject* object);
   static void VisitJSFunctionWeakCode(Map* map, HeapObject* object);
 
@@ -424,7 +425,7 @@ class StaticMarkingVisitor : public StaticVisitorBase {
 
    private:
     INLINE(static void TracePossibleWrapper(HeapObject* object)) {
-      if (object->GetHeap()->UsingEmbedderHeapTracer()) {
+      if (object->GetHeap()->local_embedder_heap_tracer()->InUse()) {
         DCHECK(object->IsJSObject());
         object->GetHeap()->TracePossibleWrapper(JSObject::cast(object));
       }

@@ -16,10 +16,12 @@ class InputDeviceClient;
 
 namespace views {
 class ViewsDelegate;
-class WindowManagerConnection;
 }
 
 #if defined(USE_AURA)
+namespace views {
+class MusClient;
+}
 namespace wm {
 class WMState;
 }
@@ -30,18 +32,23 @@ class ChromeBrowserMainExtraPartsViews : public ChromeBrowserMainExtraParts {
   ChromeBrowserMainExtraPartsViews();
   ~ChromeBrowserMainExtraPartsViews() override;
 
+#if defined(USE_AURA)
+  wm::WMState* wm_state() { return wm_state_.get(); }
+#endif
+
   // Overridden from ChromeBrowserMainExtraParts:
   void ToolkitInitialized() override;
   void PreCreateThreads() override;
-  void MojoShellConnectionStarted(
-      content::MojoShellConnection* connection) override;
+  void PreProfileInit() override;
+  void ServiceManagerConnectionStarted(
+      content::ServiceManagerConnection* connection) override;
 
  private:
   std::unique_ptr<views::ViewsDelegate> views_delegate_;
 
 #if defined(USE_AURA)
   std::unique_ptr<wm::WMState> wm_state_;
-  std::unique_ptr<views::WindowManagerConnection> window_manager_connection_;
+  std::unique_ptr<views::MusClient> mus_client_;
 
   // Subscribes to updates about input-devices.
   std::unique_ptr<ui::InputDeviceClient> input_device_client_;

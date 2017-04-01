@@ -63,10 +63,13 @@ class PopupBlockerTabHelper
 
   explicit PopupBlockerTabHelper(content::WebContents* web_contents);
 
+  void AddBlockedPopup(const chrome::NavigateParams& params,
+                       const blink::WebWindowFeatures& window_features);
+
   // Called when the blocked popup notification is shown or hidden.
   void PopupNotificationVisibilityChanged(bool visible);
 
-  IDMap<BlockedRequest, IDMapOwnPointer> blocked_popups_;
+  IDMap<std::unique_ptr<BlockedRequest>> blocked_popups_;
 
   DISALLOW_COPY_AND_ASSIGN(PopupBlockerTabHelper);
 };

@@ -34,17 +34,23 @@
 namespace blink {
 
 // For file system types used in FileSystem API.
+//
+// WARNING: These enumerators can be serialized to disk (with IndexedDB).
+// If you have to update this list, also modify deserialization logic to handle
+// the previous version of this enum.
 enum FileSystemType {
-    FileSystemTypeTemporary,
-    FileSystemTypePersistent,
+  FileSystemTypeTemporary,
+  FileSystemTypePersistent,
 
-    // Transient isolated non-sandboxed filesystem.
-    FileSystemTypeIsolated,
+  // Transient isolated non-sandboxed filesystem.
+  FileSystemTypeIsolated,
 
-    // Non-sandbox filesystem.
-    FileSystemTypeExternal,
+  // Non-sandbox filesystem.
+  FileSystemTypeExternal,
+
+  FileSystemTypeLast = FileSystemTypeExternal,
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // FileSystemType_h
+#endif  // FileSystemType_h

@@ -14,20 +14,19 @@ namespace content {
 
 DownloadCreateInfo::DownloadCreateInfo(
     const base::Time& start_time,
-    const net::BoundNetLog& bound_net_log,
+    const net::NetLogWithSource& net_log,
     std::unique_ptr<DownloadSaveInfo> save_info)
     : download_id(DownloadItem::kInvalidId),
       start_time(start_time),
       total_bytes(0),
       has_user_gesture(false),
-      transition_type(ui::PAGE_TRANSITION_LINK),
       result(DOWNLOAD_INTERRUPT_REASON_NONE),
       save_info(std::move(save_info)),
-      request_bound_net_log(bound_net_log) {}
+      request_net_log(net_log) {}
 
 DownloadCreateInfo::DownloadCreateInfo()
     : DownloadCreateInfo(base::Time(),
-                         net::BoundNetLog(),
+                         net::NetLogWithSource(),
                          base::WrapUnique(new DownloadSaveInfo)) {}
 
 DownloadCreateInfo::~DownloadCreateInfo() {}

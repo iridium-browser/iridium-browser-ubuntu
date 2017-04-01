@@ -12,6 +12,7 @@
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/font_names_testing.h"
 
 namespace gfx {
 
@@ -306,8 +307,9 @@ TEST(FontListTest, MAYBE_Fonts_GetHeight_GetBaseline) {
 
   // If there are two different fonts, the font list returns the max value
   // for the baseline (ascent) and height.
-  Font font2("Symbol", 16);
-  ASSERT_EQ("symbol", base::ToLowerASCII(font2.GetActualFontNameForTesting()));
+  Font font2(kCJKFontName, 16);
+  ASSERT_EQ(base::ToLowerASCII(kCJKFontName),
+            base::ToLowerASCII(font2.GetActualFontNameForTesting()));
   EXPECT_NE(font1.GetBaseline(), font2.GetBaseline());
   // TODO(ananta): Find a size and font pair with reliably distinct descents.
   EXPECT_NE(font1.GetHeight(), font2.GetHeight());
@@ -336,7 +338,7 @@ TEST(FontListTest, MAYBE_Fonts_DeriveWithHeightUpperBound) {
 
   fonts.push_back(Font("Arial", 18));
   fonts.push_back(Font("Sans serif", 18));
-  fonts.push_back(Font("Symbol", 18));
+  fonts.push_back(Font(kSymbolFontName, 18));
   FontList font_list = FontList(fonts);
 
   // A smaller upper bound should derive a font list with a smaller height.
@@ -352,6 +354,26 @@ TEST(FontListTest, MAYBE_Fonts_DeriveWithHeightUpperBound) {
   EXPECT_LE(derived_2.GetHeight(), height_2);
   EXPECT_EQ(font_list.GetHeight(), derived_2.GetHeight());
   EXPECT_EQ(font_list.GetFontSize(), derived_2.GetFontSize());
+}
+
+TEST(FontListTest, FirstAvailableOrFirst) {
+  EXPECT_TRUE(FontList::FirstAvailableOrFirst("").empty());
+  EXPECT_TRUE(FontList::FirstAvailableOrFirst(std::string()).empty());
+
+  EXPECT_EQ("Arial", FontList::FirstAvailableOrFirst("Arial"));
+  EXPECT_EQ("not exist", FontList::FirstAvailableOrFirst("not exist"));
+
+  EXPECT_EQ("Arial", FontList::FirstAvailableOrFirst("Arial, not exist"));
+  EXPECT_EQ("Arial", FontList::FirstAvailableOrFirst("not exist, Arial"));
+  EXPECT_EQ("Arial",
+            FontList::FirstAvailableOrFirst("not exist, Arial, not exist"));
+
+  EXPECT_EQ("not exist",
+            FontList::FirstAvailableOrFirst("not exist, not exist 2"));
+
+  EXPECT_EQ("Arial", FontList::FirstAvailableOrFirst(", not exist, Arial"));
+  EXPECT_EQ("not exist",
+            FontList::FirstAvailableOrFirst(", not exist, not exist"));
 }
 
 }  // namespace gfx

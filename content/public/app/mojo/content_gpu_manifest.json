@@ -1,16 +1,21 @@
 {
-  "manifest_version":  1,
-  "name": "exe:content_gpu",
-  "display_name": "Content Gpu",
-  "capabilities": {
-    "provided": {
-      "all_interfaces": [ "*" ]
-    },
-    "required": {
-      "exe:content_browser": {
-        "classes": [
-          "all_interfaces"
+  "name": "content_gpu",
+  "display_name": "Content (GPU process)",
+  "interface_provider_specs": {
+    "service_manager:connector": {
+      "provides": {
+        "browser": [
+          "IPC::mojom::ChannelBootstrap",
+          "service_manager::mojom::ServiceFactory",
+          "ui::mojom::GpuMain"
+        ],
+        "service_manager:service_factory": [
+          "service_manager::mojom::ServiceFactory"
         ]
+      },
+      "requires": {
+        "content_browser": [ "gpu" ],
+        "device": [ "device:power_monitor" ]
       }
     }
   }

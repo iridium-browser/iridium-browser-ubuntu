@@ -4,22 +4,29 @@
 
 #include "content/browser/device_sensors/device_sensor_host.h"
 
+#include "base/memory/ptr_util.h"
+#include "base/message_loop/message_loop.h"
 #include "content/browser/device_sensors/device_sensor_service.h"
-#include "content/public/browser/browser_thread.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace content {
 
 template <typename MojoInterface, ConsumerType consumer_type>
 void DeviceSensorHost<MojoInterface, consumer_type>::Create(
     mojo::InterfaceRequest<MojoInterface> request) {
-  new DeviceSensorHost(std::move(request));
+  mojo::MakeStrongBinding(
+      base::WrapUnique(new DeviceSensorHost<MojoInterface, consumer_type>),
+      std::move(request));
 }
 
 template <typename MojoInterface, ConsumerType consumer_type>
-DeviceSensorHost<MojoInterface, consumer_type>::DeviceSensorHost(
-    mojo::InterfaceRequest<MojoInterface> request)
-    : is_started_(false), binding_(this, std::move(request)) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+DeviceSensorHost<MojoInterface, consumer_type>::DeviceSensorHost()
+    : is_started_(false) {
+#if defined(OS_ANDROID)
+  DCHECK(base::MessageLoopForUI::IsCurrent());
+#else
+  DCHECK(base::MessageLoopForIO::IsCurrent());
+#endif
 }
 
 template <typename MojoInterface, ConsumerType consumer_type>

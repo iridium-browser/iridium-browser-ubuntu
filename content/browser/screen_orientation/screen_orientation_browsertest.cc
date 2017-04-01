@@ -20,7 +20,6 @@
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/common/shell_switches.h"
-#include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "ui/compositor/compositor_switches.h"
 
 namespace content {
@@ -34,30 +33,29 @@ class ScreenOrientationBrowserTest : public ContentBrowserTest  {
   void SendFakeScreenOrientation(unsigned angle, const std::string& strType) {
     RenderWidgetHost* rwh = shell()->web_contents()->GetRenderWidgetHostView()
         ->GetRenderWidgetHost();
-    blink::WebScreenInfo screen_info;
-    rwh->GetWebScreenInfo(&screen_info);
-    screen_info.orientationAngle = angle;
+    ScreenInfo screen_info;
+    rwh->GetScreenInfo(&screen_info);
+    screen_info.orientation_angle = angle;
 
-    blink::WebScreenOrientationType type = blink::WebScreenOrientationUndefined;
+    ScreenOrientationValues type = SCREEN_ORIENTATION_VALUES_DEFAULT;
     if (strType == "portrait-primary") {
-      type = blink::WebScreenOrientationPortraitPrimary;
+      type = SCREEN_ORIENTATION_VALUES_PORTRAIT_PRIMARY;
     } else if (strType == "portrait-secondary") {
-      type = blink::WebScreenOrientationPortraitSecondary;
+      type = SCREEN_ORIENTATION_VALUES_PORTRAIT_SECONDARY;
     } else if (strType == "landscape-primary") {
-      type = blink::WebScreenOrientationLandscapePrimary;
+      type = SCREEN_ORIENTATION_VALUES_LANDSCAPE_PRIMARY;
     } else if (strType == "landscape-secondary") {
-      type = blink::WebScreenOrientationLandscapeSecondary;
+      type = SCREEN_ORIENTATION_VALUES_LANDSCAPE_SECONDARY;
     }
-    ASSERT_NE(blink::WebScreenOrientationUndefined, type);
-    screen_info.orientationType = type;
+    ASSERT_NE(SCREEN_ORIENTATION_VALUES_DEFAULT, type);
+    screen_info.orientation_type = type;
 
     ResizeParams params;
     params.screen_info = screen_info;
     params.new_size = gfx::Size(0, 0);
     params.physical_backing_size = gfx::Size(300, 300);
     params.top_controls_height = 0.f;
-    params.top_controls_shrink_blink_size = false;
-    params.resizer_rect = gfx::Rect();
+    params.browser_controls_shrink_blink_size = false;
     params.is_fullscreen_granted = false;
     rwh->Send(new ViewMsg_Resize(rwh->GetRoutingID(), params));
   }

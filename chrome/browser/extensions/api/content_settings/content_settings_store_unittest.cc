@@ -8,6 +8,10 @@
 
 #include <memory>
 
+#include "base/memory/ptr_util.h"
+#include "base/values.h"
+#include "chrome/browser/extensions/api/content_settings/content_settings_api_constants.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/test/content_settings_test_utils.h"
@@ -18,6 +22,8 @@
 using ::testing::Mock;
 
 namespace extensions {
+
+namespace keys = content_settings_api_constants;
 
 namespace {
 
@@ -60,21 +66,23 @@ ContentSetting GetContentSettingFromStore(
       store->GetRuleIterator(content_type, resource_identifier, incognito));
   std::unique_ptr<base::Value> setting(
       content_settings::TestUtils::GetContentSettingValueAndPatterns(
-          rule_iterator.get(), primary_url, secondary_url, NULL, NULL));
+          rule_iterator.get(), primary_url, secondary_url, nullptr, nullptr));
   return content_settings::ValueToContentSetting(setting.get());
 }
 
-void GetSettingsForOneTypeFromStore(
+std::vector<content_settings::Rule> GetSettingsForOneTypeFromStore(
     const ContentSettingsStore* store,
     ContentSettingsType content_type,
     const std::string& resource_identifier,
-    bool incognito,
-    std::vector<content_settings::Rule>* rules) {
-  rules->clear();
+    bool incognito) {
+  std::vector<content_settings::Rule> rules;
   std::unique_ptr<content_settings::RuleIterator> rule_iterator(
       store->GetRuleIterator(content_type, resource_identifier, incognito));
-  while (rule_iterator->HasNext())
-    rules->push_back(rule_iterator->Next());
+  if (rule_iterator) {
+    while (rule_iterator->HasNext())
+      rules.push_back(rule_iterator->Next());
+  }
+  return rules;
 }
 
 }  // namespace
@@ -194,10 +202,9 @@ TEST_F(ContentSettingsStoreTest, RegisterUnregister) {
 }
 
 TEST_F(ContentSettingsStoreTest, GetAllSettings) {
-  bool incognito = false;
-  std::vector<content_settings::Rule> rules;
-  GetSettingsForOneTypeFromStore(
-      store(), CONTENT_SETTINGS_TYPE_COOKIES, std::string(), incognito, &rules);
+  const bool incognito = false;
+  std::vector<content_settings::Rule> rules = GetSettingsForOneTypeFromStore(
+      store(), CONTENT_SETTINGS_TYPE_COOKIES, std::string(), incognito);
   ASSERT_EQ(0u, rules.size());
 
   // Register first extension.
@@ -213,8 +220,8 @@ TEST_F(ContentSettingsStoreTest, GetAllSettings) {
                                       CONTENT_SETTING_ALLOW,
                                       kExtensionPrefsScopeRegular);
 
-  GetSettingsForOneTypeFromStore(
-      store(), CONTENT_SETTINGS_TYPE_COOKIES, std::string(), incognito, &rules);
+  rules = GetSettingsForOneTypeFromStore(store(), CONTENT_SETTINGS_TYPE_COOKIES,
+                                         std::string(), incognito);
   ASSERT_EQ(1u, rules.size());
   CheckRule(rules[0], pattern, pattern, CONTENT_SETTING_ALLOW);
 
@@ -231,8 +238,8 @@ TEST_F(ContentSettingsStoreTest, GetAllSettings) {
                                       CONTENT_SETTING_BLOCK,
                                       kExtensionPrefsScopeRegular);
 
-  GetSettingsForOneTypeFromStore(
-      store(), CONTENT_SETTINGS_TYPE_COOKIES, std::string(), incognito, &rules);
+  rules = GetSettingsForOneTypeFromStore(store(), CONTENT_SETTINGS_TYPE_COOKIES,
+                                         std::string(), incognito);
   ASSERT_EQ(2u, rules.size());
   // Rules appear in the reverse installation order of the extensions.
   CheckRule(rules[0], pattern_2, pattern_2, CONTENT_SETTING_BLOCK);
@@ -241,17 +248,87 @@ TEST_F(ContentSettingsStoreTest, GetAllSettings) {
   // Disable first extension.
   store()->SetExtensionState(ext_id, false);
 
-  GetSettingsForOneTypeFromStore(
-      store(), CONTENT_SETTINGS_TYPE_COOKIES, std::string(), incognito, &rules);
+  rules = GetSettingsForOneTypeFromStore(store(), CONTENT_SETTINGS_TYPE_COOKIES,
+                                         std::string(), incognito);
   ASSERT_EQ(1u, rules.size());
   CheckRule(rules[0], pattern_2, pattern_2, CONTENT_SETTING_BLOCK);
 
   // Uninstall second extension.
   store()->UnregisterExtension(ext_id_2);
 
-  GetSettingsForOneTypeFromStore(
-      store(), CONTENT_SETTINGS_TYPE_COOKIES, std::string(), incognito, &rules);
+  rules = GetSettingsForOneTypeFromStore(store(), CONTENT_SETTINGS_TYPE_COOKIES,
+                                         std::string(), incognito);
   ASSERT_EQ(0u, rules.size());
+}
+
+TEST_F(ContentSettingsStoreTest, SetFromList) {
+  // Force creation of ContentSettingsRegistry, so that the string to content
+  // setting type lookup can succeed.
+  content_settings::ContentSettingsRegistry::GetInstance();
+
+  ::testing::StrictMock<MockContentSettingsStoreObserver> observer;
+  store()->AddObserver(&observer);
+
+  GURL url("http://www.youtube.com");
+
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
+            GetContentSettingFromStore(store(),
+                                       url,
+                                       url,
+                                       CONTENT_SETTINGS_TYPE_COOKIES,
+                                       std::string(),
+                                       false));
+
+  // Register first extension
+  std::string ext_id("my_extension");
+  RegisterExtension(ext_id);
+
+  // Set setting via a list
+  ContentSettingsPattern pattern =
+      ContentSettingsPattern::FromURL(GURL("http://www.youtube.com"));
+  EXPECT_CALL(observer, OnContentSettingChanged(ext_id, false));
+
+  // Build a preference list in JSON format.
+  base::ListValue pref_list;
+  // {"primaryPattern": pattern, "secondaryPattern": pattern, "type": "cookies",
+  //  "setting": "allow"}
+  auto dict_value = base::MakeUnique<base::DictionaryValue>();
+  dict_value->SetString(keys::kPrimaryPatternKey, pattern.ToString());
+  dict_value->SetString(keys::kSecondaryPatternKey, pattern.ToString());
+  dict_value->SetString(keys::kContentSettingsTypeKey, "cookies");
+  dict_value->SetString(keys::kContentSettingKey, "allow");
+  pref_list.Append(std::move(dict_value));
+  // Test content settings types that have been removed. Should be ignored.
+  // {"primaryPattern": pattern, "secondaryPattern": pattern,
+  //  "type": "fullscreen", "setting": "allow"}
+  dict_value = base::MakeUnique<base::DictionaryValue>();
+  dict_value->SetString(keys::kPrimaryPatternKey, pattern.ToString());
+  dict_value->SetString(keys::kSecondaryPatternKey, pattern.ToString());
+  dict_value->SetString(keys::kContentSettingsTypeKey, "fullscreen");
+  dict_value->SetString(keys::kContentSettingKey, "allow");
+  pref_list.Append(std::move(dict_value));
+  // {"primaryPattern": pattern, "secondaryPattern": pattern,
+  //  "type": "mouselock", "setting": "allow"}
+  dict_value = base::MakeUnique<base::DictionaryValue>();
+  dict_value->SetString(keys::kPrimaryPatternKey, pattern.ToString());
+  dict_value->SetString(keys::kSecondaryPatternKey, pattern.ToString());
+  dict_value->SetString(keys::kContentSettingsTypeKey, "mouselock");
+  dict_value->SetString(keys::kContentSettingKey, "allow");
+  pref_list.Append(std::move(dict_value));
+
+  store()->SetExtensionContentSettingFromList(ext_id, &pref_list,
+                                              kExtensionPrefsScopeRegular);
+  Mock::VerifyAndClear(&observer);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            GetContentSettingFromStore(store(),
+                                       url,
+                                       url,
+                                       CONTENT_SETTINGS_TYPE_COOKIES,
+                                       std::string(),
+                                       false));
+
+  store()->RemoveObserver(&observer);
 }
 
 }  // namespace extensions

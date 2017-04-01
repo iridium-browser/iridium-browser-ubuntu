@@ -38,14 +38,9 @@ namespace base {
 class DictionaryValue;
 }  // namespace base
 
-namespace net {
-class NetLog;
-}  // namespace net
-
 namespace media {
 namespace cast {
 
-struct RtpReceiverStatistics;
 struct RtcpTimeData;
 
 // Following the initialization of either audio or video an initialization
@@ -114,7 +109,7 @@ class CastTransport : public base::NonThreadSafe {
                                 std::unique_ptr<RtcpObserver> rtcp_observer) {}
 
   // Encrypt, packetize and transmit |frame|. |ssrc| must refer to a
-  // a channel already established with InitializeAudio / InitializeVideo.
+  // a channel already established with InitializeStream.
   virtual void InsertFrame(uint32_t ssrc, const EncodedFrame& frame) = 0;
 
   // Sends a RTCP sender report to the receiver.

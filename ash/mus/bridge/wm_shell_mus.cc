@@ -7,37 +7,42 @@
 #include <utility>
 
 #include "ash/common/accelerators/accelerator_controller.h"
-#include "ash/common/display/display_info.h"
 #include "ash/common/key_event_watcher.h"
-#include "ash/common/keyboard/keyboard_ui.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shell_delegate.h"
 #include "ash/common/shell_observer.h"
-#include "ash/common/shell_window_ids.h"
-#include "ash/common/system/tray/default_system_tray_delegate.h"
+#include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wallpaper/wallpaper_delegate.h"
 #include "ash/common/wm/maximize_mode/maximize_mode_event_handler.h"
 #include "ash/common/wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard.h"
 #include "ash/common/wm/mru_window_tracker.h"
 #include "ash/common/wm/window_cycle_event_filter.h"
 #include "ash/common/wm/window_resizer.h"
-#include "ash/common/wm_activation_observer.h"
+#include "ash/common/wm_window.h"
 #include "ash/mus/accelerators/accelerator_controller_delegate_mus.h"
 #include "ash/mus/accelerators/accelerator_controller_registrar.h"
-#include "ash/mus/bridge/wm_root_window_controller_mus.h"
-#include "ash/mus/bridge/wm_window_mus.h"
-#include "ash/mus/container_ids.h"
+#include "ash/mus/bridge/immersive_handler_factory_mus.h"
+#include "ash/mus/bridge/workspace_event_handler_mus.h"
 #include "ash/mus/drag_window_resizer.h"
-#include "ash/mus/root_window_controller.h"
+#include "ash/mus/keyboard_ui_mus.h"
+#include "ash/mus/screen_mus.h"
 #include "ash/mus/window_manager.h"
+#include "ash/root_window_controller.h"
+#include "ash/root_window_settings.h"
 #include "ash/shared/immersive_fullscreen_controller.h"
+#include "ash/shell.h"
+#include "ash/shell_init_params.h"
+#include "ash/wm/window_util.h"
 #include "base/memory/ptr_util.h"
 #include "components/user_manager/user_info_impl.h"
-#include "services/ui/common/util.h"
-#include "services/ui/public/cpp/window.h"
-#include "services/ui/public/cpp/window_tree_client.h"
+#include "ui/aura/mus/window_tree_client.h"
+#include "ui/aura/mus/window_tree_host_mus.h"
+#include "ui/aura/window.h"
+#include "ui/display/manager/managed_display_info.h"
 #include "ui/display/screen.h"
 #include "ui/views/mus/pointer_watcher_event_router.h"
+#include "ui/wm/core/capture_controller.h"
+#include "ui/wm/core/focus_controller.h"
 
 namespace ash {
 namespace mus {
@@ -56,14 +61,11 @@ class SessionStateDelegateStub : public SessionStateDelegate {
 
   // SessionStateDelegate:
   int GetMaximumNumberOfLoggedInUsers() const override { return 3; }
-  int NumberOfLoggedInUsers() const override {
-    // ash_shell has 2 users.
-    return 2;
-  }
+  int NumberOfLoggedInUsers() const override { return 1; }
   bool IsActiveUserSessionStarted() const override { return true; }
   bool CanLockScreen() const override { return true; }
   bool IsScreenLocked() const override { return screen_locked_; }
-  bool ShouldLockScreenBeforeSuspending() const override { return false; }
+  bool ShouldLockScreenAutomatically() const override { return false; }
   void LockScreen() override {
     screen_locked_ = true;
     NOTIMPLEMENTED();
@@ -73,7 +75,9 @@ class SessionStateDelegateStub : public SessionStateDelegate {
     screen_locked_ = false;
   }
   bool IsUserSessionBlocked() const override { return false; }
-  SessionState GetSessionState() const override { return SESSION_STATE_ACTIVE; }
+  session_manager::SessionState GetSessionState() const override {
+    return session_manager::SessionState::ACTIVE;
+  }
   const user_manager::UserInfo* GetUserInfo(UserIndex index) const override {
     return user_info_.get();
   }
@@ -106,14 +110,16 @@ class SessionStateDelegateStub : public SessionStateDelegate {
 }  // namespace
 
 WmShellMus::WmShellMus(
+    WmWindow* primary_root_window,
     std::unique_ptr<ShellDelegate> shell_delegate,
     WindowManager* window_manager,
     views::PointerWatcherEventRouter* pointer_watcher_event_router)
     : WmShell(std::move(shell_delegate)),
       window_manager_(window_manager),
+      primary_root_window_(primary_root_window),
       pointer_watcher_event_router_(pointer_watcher_event_router),
       session_state_delegate_(new SessionStateDelegateStub) {
-  window_tree_client()->AddObserver(this);
+  DCHECK(primary_root_window_);
   WmShell::Set(this);
 
   uint16_t accelerator_namespace_id = 0u;
@@ -121,40 +127,19 @@ WmShellMus::WmShellMus(
       window_manager->GetNextAcceleratorNamespaceId(&accelerator_namespace_id);
   // WmShellMus is created early on, so that this should always succeed.
   DCHECK(add_result);
-  accelerator_controller_delegate_.reset(new AcceleratorControllerDelegateMus);
+  accelerator_controller_delegate_.reset(
+      new AcceleratorControllerDelegateMus(window_manager_));
   accelerator_controller_registrar_.reset(new AcceleratorControllerRegistrar(
       window_manager_, accelerator_namespace_id));
   SetAcceleratorController(base::MakeUnique<AcceleratorController>(
       accelerator_controller_delegate_.get(),
       accelerator_controller_registrar_.get()));
+  immersive_handler_factory_.reset(new ImmersiveHandlerFactoryMus);
 
-  CreateMaximizeModeController();
-
-  CreateMruWindowTracker();
-
-  SetSystemTrayDelegate(base::WrapUnique(new DefaultSystemTrayDelegate));
-
-  // TODO(jamescook): Port ash::sysui::KeyboardUIMus and use it here.
-  SetKeyboardUI(KeyboardUI::Create());
-
-  // TODO(msw): Port WallpaperDelegateMus and support this (crbug.com/629605):
-  // wallpaper_delegate()->InitializeWallpaper();
+  SetKeyboardUI(KeyboardUIMus::Create(window_manager_->connector()));
 }
 
 WmShellMus::~WmShellMus() {
-  // This order mirrors that of Shell.
-
-  // Destroy maximize mode controller early on since it has some observers which
-  // need to be removed.
-  DeleteMaximizeModeController();
-  DeleteToastManager();
-  DeleteSystemTrayDelegate();
-  // Has to happen before ~MruWindowTracker.
-  DeleteWindowCycleController();
-  DeleteWindowSelectorController();
-  DeleteMruWindowTracker();
-  if (window_tree_client())
-    window_tree_client()->RemoveObserver(this);
   WmShell::Set(nullptr);
 }
 
@@ -163,71 +148,82 @@ WmShellMus* WmShellMus::Get() {
   return static_cast<WmShellMus*>(WmShell::Get());
 }
 
-void WmShellMus::AddRootWindowController(
-    WmRootWindowControllerMus* controller) {
-  root_window_controllers_.push_back(controller);
-  // The first root window will be the initial root for new windows.
-  if (!GetRootWindowForNewWindows())
-    set_root_window_for_new_windows(controller->GetWindow());
-}
-
-void WmShellMus::RemoveRootWindowController(
-    WmRootWindowControllerMus* controller) {
-  auto iter = std::find(root_window_controllers_.begin(),
-                        root_window_controllers_.end(), controller);
-  DCHECK(iter != root_window_controllers_.end());
-  root_window_controllers_.erase(iter);
-}
-
-// static
-WmWindowMus* WmShellMus::GetToplevelAncestor(ui::Window* window) {
-  while (window) {
-    if (IsActivationParent(window->parent()))
-      return WmWindowMus::Get(window);
-    window = window->parent();
-  }
-  return nullptr;
-}
-
-WmRootWindowControllerMus* WmShellMus::GetRootWindowControllerWithDisplayId(
+RootWindowController* WmShellMus::GetRootWindowControllerWithDisplayId(
     int64_t id) {
-  for (WmRootWindowControllerMus* root_window_controller :
-       root_window_controllers_) {
-    if (root_window_controller->GetDisplay().id() == id)
+  for (RootWindowController* root_window_controller :
+       RootWindowController::root_window_controllers()) {
+    RootWindowSettings* settings =
+        GetRootWindowSettings(root_window_controller->GetRootWindow());
+    DCHECK(settings);
+    if (settings->display_id == id)
       return root_window_controller;
   }
   NOTREACHED();
   return nullptr;
 }
 
-WmWindow* WmShellMus::NewContainerWindow() {
-  return WmWindowMus::Get(window_tree_client()->NewWindow());
+aura::WindowTreeClient* WmShellMus::window_tree_client() {
+  return window_manager_->window_tree_client();
+}
+
+void WmShellMus::Initialize(
+    const scoped_refptr<base::SequencedWorkerPool>& pool) {
+  WmShell::Initialize(pool);
+}
+
+void WmShellMus::Shutdown() {
+  WmShell::Shutdown();
+
+  window_manager_->DeleteAllRootWindowControllers();
+}
+
+bool WmShellMus::IsRunningInMash() const {
+  return true;
+}
+
+WmWindow* WmShellMus::NewWindow(ui::wm::WindowType window_type,
+                                ui::LayerType layer_type) {
+  aura::Window* window = new aura::Window(nullptr);
+  window->SetType(window_type);
+  window->Init(layer_type);
+  return WmWindow::Get(window);
 }
 
 WmWindow* WmShellMus::GetFocusedWindow() {
-  return WmWindowMus::Get(window_tree_client()->GetFocusedWindow());
+  // TODO: remove as both WmShells use same implementation.
+  return WmWindow::Get(
+      aura::client::GetFocusClient(Shell::GetPrimaryRootWindow())
+          ->GetFocusedWindow());
 }
 
 WmWindow* WmShellMus::GetActiveWindow() {
-  return GetToplevelAncestor(window_tree_client()->GetFocusedWindow());
+  // TODO: remove as both WmShells use same implementation.
+  return WmWindow::Get(wm::GetActiveWindow());
 }
 
 WmWindow* WmShellMus::GetCaptureWindow() {
-  return WmWindowMus::Get(window_tree_client()->GetCaptureWindow());
+  // TODO: remove as both WmShells use same implementation.
+  return WmWindow::Get(::wm::CaptureController::Get()->GetCaptureWindow());
 }
 
 WmWindow* WmShellMus::GetPrimaryRootWindow() {
-  return root_window_controllers_[0]->GetWindow();
+  // NOTE: This is called before the RootWindowController has been created, so
+  // it can't call through to RootWindowController to get all windows.
+  return primary_root_window_;
 }
 
 WmWindow* WmShellMus::GetRootWindowForDisplayId(int64_t display_id) {
-  return GetRootWindowControllerWithDisplayId(display_id)->GetWindow();
+  RootWindowController* root_window_controller =
+      GetRootWindowControllerWithDisplayId(display_id);
+  DCHECK(root_window_controller);
+  return WmWindow::Get(root_window_controller->GetRootWindow());
 }
 
-const DisplayInfo& WmShellMus::GetDisplayInfo(int64_t display_id) const {
+const display::ManagedDisplayInfo& WmShellMus::GetDisplayInfo(
+    int64_t display_id) const {
   // TODO(mash): implement http://crbug.com/622480.
   NOTIMPLEMENTED();
-  static DisplayInfo fake_info;
+  static display::ManagedDisplayInfo fake_info;
   return fake_info;
 }
 
@@ -245,6 +241,13 @@ display::Display WmShellMus::GetFirstDisplay() const {
 
 bool WmShellMus::IsInUnifiedMode() const {
   // TODO(mash): implement http://crbug.com/622480.
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool WmShellMus::IsInUnifiedModeIgnoreMirroring() const {
+  // TODO(mash): implement http://crbug.com/622480.
+  NOTIMPLEMENTED();
   return false;
 }
 
@@ -255,7 +258,7 @@ bool WmShellMus::IsForceMaximizeOnFirstRun() {
 
 void WmShellMus::SetDisplayWorkAreaInsets(WmWindow* window,
                                           const gfx::Insets& insets) {
-  NOTIMPLEMENTED();
+  window_manager_->screen()->SetWorkAreaInsets(window->aura_window(), insets);
 }
 
 bool WmShellMus::IsPinned() {
@@ -265,11 +268,6 @@ bool WmShellMus::IsPinned() {
 
 void WmShellMus::SetPinnedWindow(WmWindow* window) {
   NOTIMPLEMENTED();
-}
-
-bool WmShellMus::CanShowWindowForUser(WmWindow* window) {
-  NOTIMPLEMENTED();
-  return true;
 }
 
 void WmShellMus::LockCursor() {
@@ -289,10 +287,12 @@ bool WmShellMus::IsMouseEventsEnabled() {
 }
 
 std::vector<WmWindow*> WmShellMus::GetAllRootWindows() {
-  std::vector<WmWindow*> wm_windows(root_window_controllers_.size());
-  for (size_t i = 0; i < root_window_controllers_.size(); ++i)
-    wm_windows[i] = root_window_controllers_[i]->GetWindow();
-  return wm_windows;
+  std::vector<WmWindow*> root_windows;
+  for (RootWindowController* root_window_controller :
+       RootWindowController::root_window_controllers()) {
+    root_windows.push_back(root_window_controller->GetWindow());
+  }
+  return root_windows;
 }
 
 void WmShellMus::RecordGestureAction(GestureActionType action) {
@@ -307,12 +307,6 @@ void WmShellMus::RecordUserMetricsAction(UserMetricsAction action) {
 
 void WmShellMus::RecordTaskSwitchMetric(TaskSwitchSource source) {
   // TODO: http://crbug.com/616581.
-  NOTIMPLEMENTED();
-}
-
-void WmShellMus::ShowContextMenu(const gfx::Point& location_in_screen,
-                                 ui::MenuSourceType source_type) {
-  // TODO: http://crbug.com/640693.
   NOTIMPLEMENTED();
 }
 
@@ -344,10 +338,15 @@ WmShellMus::CreateScopedDisableInternalMouseAndKeyboard() {
   return nullptr;
 }
 
+std::unique_ptr<WorkspaceEventHandler> WmShellMus::CreateWorkspaceEventHandler(
+    WmWindow* workspace_window) {
+  return base::MakeUnique<WorkspaceEventHandlerMus>(
+      WmWindow::GetAuraWindow(workspace_window));
+}
+
 std::unique_ptr<ImmersiveFullscreenController>
 WmShellMus::CreateImmersiveFullscreenController() {
-  // TODO(sky): port ImmersiveFullscreenController, http://crbug.com/548435.
-  return nullptr;
+  return base::MakeUnique<ImmersiveFullscreenController>();
 }
 
 std::unique_ptr<KeyEventWatcher> WmShellMus::CreateKeyEventWatcher() {
@@ -357,24 +356,17 @@ std::unique_ptr<KeyEventWatcher> WmShellMus::CreateKeyEventWatcher() {
 }
 
 void WmShellMus::OnOverviewModeStarting() {
-  FOR_EACH_OBSERVER(ShellObserver, *shell_observers(),
-                    OnOverviewModeStarting());
+  for (auto& observer : *shell_observers())
+    observer.OnOverviewModeStarting();
 }
 
 void WmShellMus::OnOverviewModeEnded() {
-  FOR_EACH_OBSERVER(ShellObserver, *shell_observers(), OnOverviewModeEnded());
+  for (auto& observer : *shell_observers())
+    observer.OnOverviewModeEnded();
 }
 
 SessionStateDelegate* WmShellMus::GetSessionStateDelegate() {
   return session_state_delegate_.get();
-}
-
-void WmShellMus::AddActivationObserver(WmActivationObserver* observer) {
-  activation_observers_.AddObserver(observer);
-}
-
-void WmShellMus::RemoveActivationObserver(WmActivationObserver* observer) {
-  activation_observers_.RemoveObserver(observer);
 }
 
 void WmShellMus::AddDisplayObserver(WmDisplayObserver* observer) {
@@ -386,12 +378,19 @@ void WmShellMus::RemoveDisplayObserver(WmDisplayObserver* observer) {
 }
 
 void WmShellMus::AddPointerWatcher(views::PointerWatcher* watcher,
-                                   bool wants_moves) {
-  pointer_watcher_event_router_->AddPointerWatcher(watcher, wants_moves);
+                                   views::PointerWatcherEventTypes events) {
+  // TODO: implement drags for mus pointer watcher, http://crbug.com/641164.
+  // NOTIMPLEMENTED drags for mus pointer watcher.
+  pointer_watcher_event_router_->AddPointerWatcher(
+      watcher, events == views::PointerWatcherEventTypes::MOVES);
 }
 
 void WmShellMus::RemovePointerWatcher(views::PointerWatcher* watcher) {
   pointer_watcher_event_router_->RemovePointerWatcher(watcher);
+}
+
+void WmShellMus::RequestShutdown() {
+  NOTIMPLEMENTED();
 }
 
 bool WmShellMus::IsTouchDown() {
@@ -400,7 +399,6 @@ bool WmShellMus::IsTouchDown() {
   return false;
 }
 
-#if defined(OS_CHROMEOS)
 void WmShellMus::ToggleIgnoreExternalKeyboard() {
   NOTIMPLEMENTED();
 }
@@ -408,37 +406,16 @@ void WmShellMus::ToggleIgnoreExternalKeyboard() {
 void WmShellMus::SetLaserPointerEnabled(bool enabled) {
   NOTIMPLEMENTED();
 }
-#endif  // defined(OS_CHROMEOS)
 
-ui::WindowTreeClient* WmShellMus::window_tree_client() {
-  return window_manager_->window_tree_client();
+void WmShellMus::CreatePointerWatcherAdapter() {
+  // Only needed in WmShellAura, which has specific creation order.
 }
 
-// static
-bool WmShellMus::IsActivationParent(ui::Window* window) {
-  return window && IsActivatableShellWindowId(
-                       WmWindowMus::Get(window)->GetShellWindowId());
+void WmShellMus::CreatePrimaryHost() {}
+
+void WmShellMus::InitHosts(const ShellInitParams& init_params) {
+  window_manager_->CreatePrimaryRootWindowController(
+      base::WrapUnique(init_params.primary_window_tree_host));
 }
-
-// TODO: support OnAttemptToReactivateWindow, http://crbug.com/615114.
-void WmShellMus::OnWindowTreeFocusChanged(ui::Window* gained_focus,
-                                          ui::Window* lost_focus) {
-  WmWindow* gained_active = GetToplevelAncestor(gained_focus);
-  if (gained_active)
-    set_root_window_for_new_windows(gained_active->GetRootWindow());
-
-  WmWindow* lost_active = GetToplevelAncestor(gained_focus);
-  if (gained_active == lost_active)
-    return;
-
-  FOR_EACH_OBSERVER(WmActivationObserver, activation_observers_,
-                    OnWindowActivated(gained_active, lost_active));
-}
-
-void WmShellMus::OnDidDestroyClient(ui::WindowTreeClient* client) {
-  DCHECK_EQ(window_tree_client(), client);
-  client->RemoveObserver(this);
-}
-
 }  // namespace mus
 }  // namespace ash

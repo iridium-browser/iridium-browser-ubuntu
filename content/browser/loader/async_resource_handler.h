@@ -7,11 +7,11 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/timer/timer.h"
 #include "content/browser/loader/resource_handler.h"
 #include "content/browser/loader/resource_message_delegate.h"
 #include "content/common/content_export.h"
@@ -20,14 +20,13 @@
 
 namespace net {
 class URLRequest;
+class UploadProgress;
 }
 
 namespace content {
 class ResourceBuffer;
-class ResourceContext;
 class ResourceDispatcherHostImpl;
-class ResourceMessageFilter;
-class SharedIOBuffer;
+class UploadProgressTracker;
 
 // Used to complete an asynchronous resource request in response to resource
 // load events from the resource dispatcher host.
@@ -51,7 +50,6 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
                   int min_size) override;
   bool OnReadCompleted(int bytes_read, bool* defer) override;
   void OnResponseCompleted(const net::URLRequestStatus& status,
-                           const std::string& security_info,
                            bool* defer) override;
   void OnDataDownloaded(int bytes_downloaded) override;
 
@@ -63,8 +61,6 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
   void OnDataReceivedACK(int request_id);
   void OnUploadProgressACK(int request_id);
 
-  void ReportUploadProgress();
-
   bool EnsureResourceBufferIsInitialized();
   void ResumeIfDeferred();
   void OnDefer();
@@ -72,6 +68,7 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
   int CalculateEncodedDataLengthToReport();
   int CalculateEncodedBodyLengthToReport();
   void RecordHistogram();
+  void SendUploadProgress(const net::UploadProgress& progress);
 
   scoped_refptr<ResourceBuffer> buffer_;
   ResourceDispatcherHostImpl* rdh_;
@@ -82,6 +79,8 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
 
   int allocation_size_;
 
+  bool first_chunk_read_ = false;
+
   bool did_defer_;
 
   bool has_checked_for_sufficient_resources_;
@@ -91,13 +90,9 @@ class CONTENT_EXPORT AsyncResourceHandler : public ResourceHandler,
   std::unique_ptr<InliningHelper> inlining_helper_;
   base::TimeTicks response_started_ticks_;
 
-  uint64_t last_upload_position_;
-  bool waiting_for_upload_progress_ack_;
-  base::TimeTicks last_upload_ticks_;
-  base::RepeatingTimer progress_timer_;
+  std::unique_ptr<UploadProgressTracker> upload_progress_tracker_;
 
   int64_t reported_transfer_size_;
-  int64_t reported_encoded_body_length_;
 
   DISALLOW_COPY_AND_ASSIGN(AsyncResourceHandler);
 };

@@ -13,65 +13,86 @@
 
 namespace blink {
 
-ImageBitmapRenderingContext::ImageBitmapRenderingContext(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
-    : CanvasRenderingContext(canvas, nullptr, attrs)
-{ }
+ImageBitmapRenderingContext::ImageBitmapRenderingContext(
+    HTMLCanvasElement* canvas,
+    const CanvasContextCreationAttributes& attrs,
+    Document& document)
+    : CanvasRenderingContext(canvas, nullptr, attrs) {}
 
-ImageBitmapRenderingContext::~ImageBitmapRenderingContext() { }
+ImageBitmapRenderingContext::~ImageBitmapRenderingContext() {}
 
-void ImageBitmapRenderingContext::setCanvasGetContextResult(RenderingContext& result)
-{
-    result.setImageBitmapRenderingContext(this);
+void ImageBitmapRenderingContext::setCanvasGetContextResult(
+    RenderingContext& result) {
+  result.setImageBitmapRenderingContext(this);
 }
 
-void ImageBitmapRenderingContext::transferFromImageBitmap(ImageBitmap* imageBitmap)
-{
-    if (!imageBitmap) {
-        m_image.release();
-        return;
-    }
+void ImageBitmapRenderingContext::transferFromImageBitmap(
+    ImageBitmap* imageBitmap,
+    ExceptionState& exceptionState) {
+  if (!imageBitmap) {
+    m_image.release();
+    return;
+  }
 
-    m_image = imageBitmap->bitmapImage();
-    if (!m_image)
-        return;
+  if (imageBitmap->isNeutered()) {
+    exceptionState.throwDOMException(InvalidStateError,
+                                     "The input ImageBitmap has been detached");
+    return;
+  }
 
-    RefPtr<SkImage> skImage = m_image->imageForCurrentFrame();
-    if (skImage->isTextureBacked()) {
-        // TODO(junov): crbug.com/585607 Eliminate this readback and use an ExternalTextureLayer
-        sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(skImage->width(), skImage->height());
-        if (!surface) {
-            // silent failure
-            m_image.clear();
-            return;
-        }
-        surface->getCanvas()->drawImage(skImage.get(), 0, 0);
-        m_image = StaticBitmapImage::create(fromSkSp(surface->makeImageSnapshot()));
+  m_image = imageBitmap->bitmapImage();
+  if (!m_image)
+    return;
+
+  // TODO(ccameron): Determine the correct color behavior here.
+  // ImageBitmapRenderingContext.
+  // https://crbug.com/672306
+  sk_sp<SkImage> skImage =
+      m_image->imageForCurrentFrame(ColorBehavior::transformToGlobalTarget());
+  if (skImage->isTextureBacked()) {
+    // TODO(junov): crbug.com/585607 Eliminate this readback and use an
+    // ExternalTextureLayer
+    sk_sp<SkSurface> surface =
+        SkSurface::MakeRasterN32Premul(skImage->width(), skImage->height());
+    if (!surface) {
+      // silent failure
+      m_image.clear();
+      return;
     }
-    canvas()->didDraw(FloatRect(FloatPoint(), FloatSize(m_image->width(), m_image->height())));
+    surface->getCanvas()->drawImage(skImage, 0, 0);
+    m_image = StaticBitmapImage::create(surface->makeImageSnapshot());
+  }
+  canvas()->didDraw(
+      FloatRect(FloatPoint(), FloatSize(m_image->width(), m_image->height())));
+  imageBitmap->close();
 }
 
-bool ImageBitmapRenderingContext::paint(GraphicsContext& gc, const IntRect& r)
-{
-    if (!m_image)
-        return true;
-
-    // With impl-side painting, it is unsafe to use a gpu-backed SkImage
-    ASSERT(!m_image->imageForCurrentFrame()->isTextureBacked());
-    gc.drawImage(m_image.get(), r, nullptr, creationAttributes().alpha() ? SkXfermode::kSrcOver_Mode : SkXfermode::kSrc_Mode);
-
+bool ImageBitmapRenderingContext::paint(GraphicsContext& gc, const IntRect& r) {
+  if (!m_image)
     return true;
+
+  // With impl-side painting, it is unsafe to use a gpu-backed SkImage
+  DCHECK(
+      !m_image->imageForCurrentFrame(ColorBehavior::transformToGlobalTarget())
+           ->isTextureBacked());
+  gc.drawImage(m_image.get(), r, nullptr, creationAttributes().alpha()
+                                              ? SkBlendMode::kSrcOver
+                                              : SkBlendMode::kSrc);
+
+  return true;
 }
 
-CanvasRenderingContext* ImageBitmapRenderingContext::Factory::create(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
-{
-    if (!RuntimeEnabledFeatures::experimentalCanvasFeaturesEnabled())
-        return nullptr;
-    return new ImageBitmapRenderingContext(canvas, attrs, document);
+CanvasRenderingContext* ImageBitmapRenderingContext::Factory::create(
+    HTMLCanvasElement* canvas,
+    const CanvasContextCreationAttributes& attrs,
+    Document& document) {
+  if (!RuntimeEnabledFeatures::experimentalCanvasFeaturesEnabled())
+    return nullptr;
+  return new ImageBitmapRenderingContext(canvas, attrs, document);
 }
 
-void ImageBitmapRenderingContext::stop()
-{
-    m_image.clear();
+void ImageBitmapRenderingContext::stop() {
+  m_image.clear();
 }
 
-} // blink
+}  // blink

@@ -64,13 +64,13 @@ bool ChromeHistoryClient::CanAddURL(const GURL& url) {
 
 void ChromeHistoryClient::NotifyProfileError(sql::InitStatus init_status,
                                              const std::string& diagnostics) {
-  ShowProfileErrorDialog(PROFILE_ERROR_HISTORY,
+  ShowProfileErrorDialog(ProfileErrorType::HISTORY,
                          SqlInitStatusToMessageId(init_status), diagnostics);
 }
 
 std::unique_ptr<history::HistoryBackendClient>
 ChromeHistoryClient::CreateBackendClient() {
-  return base::WrapUnique(new ChromeHistoryBackendClient(bookmark_model_));
+  return base::MakeUnique<ChromeHistoryBackendClient>(bookmark_model_);
 }
 
 void ChromeHistoryClient::BookmarkModelChanged() {

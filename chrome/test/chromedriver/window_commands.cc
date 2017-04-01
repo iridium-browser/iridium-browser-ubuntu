@@ -84,8 +84,9 @@ struct Cookie {
   bool session;
 };
 
-base::DictionaryValue* CreateDictionaryFrom(const Cookie& cookie) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+std::unique_ptr<base::DictionaryValue> CreateDictionaryFrom(
+    const Cookie& cookie) {
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("name", cookie.name);
   dict->SetString("value", cookie.value);
   if (!cookie.domain.empty())
@@ -217,12 +218,24 @@ Status ExecuteWindowCommand(const WindowCommand& command,
   if (status.IsError())
     return status;
 
-  if (web_view->GetJavaScriptDialogManager()->IsDialogOpen()) {
+  JavaScriptDialogManager* dialog_manager =
+      web_view->GetJavaScriptDialogManager();
+  if (dialog_manager->IsDialogOpen()) {
     std::string alert_text;
-    status =
-        web_view->GetJavaScriptDialogManager()->GetDialogMessage(&alert_text);
+    status = dialog_manager->GetDialogMessage(&alert_text);
     if (status.IsError())
       return status;
+
+    // Close the dialog depending on the unexpectedalert behaviour set by user
+    // before returning an error, so that subsequent commands do not fail.
+    std::string alert_behaviour = session->unexpected_alert_behaviour;
+    if (alert_behaviour == kAccept)
+      status = dialog_manager->HandleDialog(true, session->prompt_text.get());
+    else if (alert_behaviour == kDismiss)
+      status = dialog_manager->HandleDialog(false, session->prompt_text.get());
+    if (status.IsError())
+      return status;
+
     return Status(kUnexpectedAlertOpen, "{Alert text : " + alert_text + "}");
   }
 
@@ -336,7 +349,7 @@ Status ExecuteSwitchToFrame(Session* session,
   if (!params.Get("id", &id))
     return Status(kUnknownError, "missing 'id'");
 
-  if (id->IsType(base::Value::TYPE_NULL)) {
+  if (id->IsType(base::Value::Type::NONE)) {
     session->SwitchToTopFrame();
     return Status(kOk);
   }
@@ -346,7 +359,7 @@ Status ExecuteSwitchToFrame(Session* session,
   const base::DictionaryValue* id_dict;
   if (id->GetAsDictionary(&id_dict)) {
     script = "function(elem) { return elem; }";
-    args.Append(id_dict->DeepCopy());
+    args.Append(id_dict->CreateDeepCopy());
   } else {
     script =
         "function(xpath) {"
@@ -387,7 +400,7 @@ Status ExecuteSwitchToFrame(Session* session,
       "  frame.setAttribute('cd_frame_id_', id);"
       "}";
   base::ListValue new_args;
-  new_args.Append(element->DeepCopy());
+  new_args.Append(element->CreateDeepCopy());
   new_args.AppendString(chrome_driver_id);
   result.reset(NULL);
   status = web_view->CallFunction(
@@ -857,7 +870,8 @@ Status ExecuteScreenshot(Session* session,
   status = session->chrome->GetAsDesktop(&desktop);
   if (status.IsOk() && !session->force_devtools_screenshot) {
     AutomationExtension* extension = NULL;
-    status = desktop->GetAutomationExtension(&extension);
+    status = desktop->GetAutomationExtension(&extension,
+                                             session->w3c_compliant);
     if (status.IsError())
       return status;
     status = extension->CaptureScreenshot(&screenshot);
@@ -902,7 +916,7 @@ Status ExecuteAddCookie(Session* session,
   if (!params.GetDictionary("cookie", &cookie))
     return Status(kUnknownError, "missing 'cookie'");
   base::ListValue args;
-  args.Append(cookie->DeepCopy());
+  args.Append(cookie->CreateDeepCopy());
   std::unique_ptr<base::Value> result;
   return web_view->CallFunction(
       session->GetCurrentFrameId(), kAddCookieScript, args, &result);

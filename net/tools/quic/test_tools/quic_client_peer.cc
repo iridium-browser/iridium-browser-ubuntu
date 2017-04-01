@@ -16,7 +16,9 @@ QuicCryptoClientConfig* QuicClientPeer::GetCryptoConfig(QuicClient* client) {
 
 // static
 bool QuicClientPeer::CreateUDPSocketAndBind(QuicClient* client) {
-  return client->CreateUDPSocketAndBind();
+  return client->CreateUDPSocketAndBind(client->server_address(),
+                                        client->bind_to_address(),
+                                        client->local_port());
 }
 
 // static
@@ -27,7 +29,7 @@ void QuicClientPeer::CleanUpUDPSocket(QuicClient* client, int fd) {
 // static
 void QuicClientPeer::SetClientPort(QuicClient* client, int port) {
   client->fd_address_map_.back().second =
-      IPEndPoint(client->GetLatestClientAddress().address(), port);
+      QuicSocketAddress(client->GetLatestClientAddress().host(), port);
 }
 
 // static

@@ -6,6 +6,8 @@
 #define MOJO_PUBLIC_CPP_BINDINGS_ASSOCIATED_INTERFACE_PTR_H_
 
 #include <stdint.h>
+
+#include <string>
 #include <utility>
 
 #include "base/callback.h"
@@ -17,7 +19,10 @@
 #include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/associated_interface_ptr_info.h"
 #include "mojo/public/cpp/bindings/associated_interface_request.h"
+#include "mojo/public/cpp/bindings/connection_error_callback.h"
 #include "mojo/public/cpp/bindings/lib/associated_interface_ptr_state.h"
+#include "mojo/public/cpp/bindings/lib/multiplex_router.h"
+#include "mojo/public/cpp/system/message_pipe.h"
 
 namespace mojo {
 
@@ -107,11 +112,24 @@ class AssociatedInterfacePtr {
     internal_state_.RequireVersion(version);
   }
 
+  // Sends a message on the underlying message pipe and runs the current
+  // message loop until its response is received. This can be used in tests to
+  // verify that no message was sent on a message pipe in response to some
+  // stimulus.
+  void FlushForTesting() { internal_state_.FlushForTesting(); }
+
   // Closes the associated interface (if any) and returns the pointer to the
   // unbound state.
   void reset() {
     State doomed;
     internal_state_.Swap(&doomed);
+  }
+
+  // Similar to the method above, but also specifies a disconnect reason.
+  void ResetWithReason(uint32_t custom_reason, const std::string& description) {
+    if (internal_state_.is_bound())
+      internal_state_.SendDisconnectReason(custom_reason, description);
+    reset();
   }
 
   // Indicates whether an error has been encountered. If true, method calls made
@@ -124,6 +142,11 @@ class AssociatedInterfacePtr {
   // bound.
   void set_connection_error_handler(const base::Closure& error_handler) {
     internal_state_.set_connection_error_handler(error_handler);
+  }
+
+  void set_connection_error_with_reason_handler(
+      const ConnectionErrorWithReasonCallback& error_handler) {
+    internal_state_.set_connection_error_with_reason_handler(error_handler);
   }
 
   // Unbinds and returns the associated interface pointer information which
@@ -181,7 +204,7 @@ class AssociatedInterfacePtr {
 
 // Creates an associated interface. The output |ptr| should be used locally
 // while the returned request should be passed through the message pipe endpoint
-// referred to by |associated_group| to setup the corresponding asssociated
+// referred to by |associated_group| to setup the corresponding associated
 // interface implementation at the remote side.
 //
 // NOTE: |ptr| should NOT be used to make calls before the request is sent.
@@ -189,7 +212,7 @@ class AssociatedInterfacePtr {
 // as soon as the request is sent, |ptr| is usable. There is no need to wait
 // until the request is bound to an implementation at the remote side.
 template <typename Interface>
-AssociatedInterfaceRequest<Interface> GetProxy(
+AssociatedInterfaceRequest<Interface> MakeRequest(
     AssociatedInterfacePtr<Interface>* ptr,
     AssociatedGroup* group,
     scoped_refptr<base::SingleThreadTaskRunner> runner =
@@ -200,6 +223,72 @@ AssociatedInterfaceRequest<Interface> GetProxy(
                                    &ptr_info, &request);
 
   ptr->Bind(std::move(ptr_info), std::move(runner));
+  return request;
+}
+
+// Creates an associated interface proxy in its own AssociatedGroup.
+template <typename Interface>
+AssociatedInterfaceRequest<Interface> MakeRequestForTesting(
+    AssociatedInterfacePtr<Interface>* ptr,
+    scoped_refptr<base::SingleThreadTaskRunner> runner =
+        base::ThreadTaskRunnerHandle::Get()) {
+  MessagePipe pipe;
+  using internal::MultiplexRouter;
+  scoped_refptr<MultiplexRouter> router0 = new MultiplexRouter(
+      std::move(pipe.handle0), MultiplexRouter::MULTI_INTERFACE, true, runner);
+  scoped_refptr<MultiplexRouter> router1 = new MultiplexRouter(
+      std::move(pipe.handle1), MultiplexRouter::MULTI_INTERFACE, false, runner);
+
+  AssociatedInterfacePtrInfo<Interface> ptr_info;
+  AssociatedInterfaceRequest<Interface> request;
+  router1->CreateAssociatedGroup()->CreateAssociatedInterface(
+      AssociatedGroup::WILL_PASS_PTR, &ptr_info, &request);
+
+  // Emulate passing |ptr_info| across a pipe.
+  ScopedInterfaceEndpointHandle handle = ptr_info.PassHandle();
+  DCHECK(!handle.is_local());
+  ptr->Bind(AssociatedInterfacePtrInfo<Interface>(
+                router0->CreateLocalEndpointHandle(handle.release()),
+                ptr_info.version()),
+            std::move(runner));
+
+  return request;
+}
+
+// Like |GetProxy|, but the interface is never associated with any other
+// interface. The returned request can be bound directly to the corresponding
+// associated interface implementation, without first passing it through a
+// message pipe endpoint.
+//
+// This function has two main uses:
+//
+//  * In testing, where the returned request is bound to e.g. a mock and there
+//    are no other interfaces involved.
+//
+//  * When discarding messages sent on an interface, which can be done by
+//    discarding the returned request.
+template <typename Interface>
+AssociatedInterfaceRequest<Interface> GetIsolatedProxy(
+    AssociatedInterfacePtr<Interface>* ptr) {
+  MessagePipe pipe;
+  scoped_refptr<internal::MultiplexRouter> router0 =
+      new internal::MultiplexRouter(std::move(pipe.handle0),
+                                    internal::MultiplexRouter::MULTI_INTERFACE,
+                                    false, base::ThreadTaskRunnerHandle::Get());
+  scoped_refptr<internal::MultiplexRouter> router1 =
+      new internal::MultiplexRouter(std::move(pipe.handle1),
+                                    internal::MultiplexRouter::MULTI_INTERFACE,
+                                    true, base::ThreadTaskRunnerHandle::Get());
+
+  ScopedInterfaceEndpointHandle endpoint0, endpoint1;
+  router0->CreateEndpointHandlePair(&endpoint0, &endpoint1);
+  endpoint1 = router1->CreateLocalEndpointHandle(endpoint1.release());
+
+  ptr->Bind(AssociatedInterfacePtrInfo<Interface>(std::move(endpoint0),
+                                                  Interface::Version_));
+
+  AssociatedInterfaceRequest<Interface> request;
+  request.Bind(std::move(endpoint1));
   return request;
 }
 

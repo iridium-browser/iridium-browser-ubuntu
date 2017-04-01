@@ -5,12 +5,12 @@
 package org.chromium.chrome.browser.offlinepages;
 
 import android.content.Context;
-import android.os.Environment;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.OfflinePageModelObserver;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge.SavePageCallback;
@@ -93,8 +93,7 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
 
         initializeBridgeForProfile(false);
 
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
         mTestPage = mTestServer.getURL(TEST_PAGE);
     }
 
@@ -110,12 +109,14 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testLoadOfflinePagesWhenEmpty() throws Exception {
         List<OfflinePageItem> offlinePages = getAllPages();
         assertEquals("Offline pages count incorrect.", 0, offlinePages.size());
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testAddOfflinePageAndLoad() throws Exception {
         loadUrl(mTestPage);
         savePage(SavePageResult.SUCCESS, mTestPage);
@@ -123,12 +124,6 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
         OfflinePageItem offlinePage = allPages.get(0);
         assertEquals("Offline pages count incorrect.", 1, allPages.size());
         assertEquals("Offline page item url incorrect.", mTestPage, offlinePage.getUrl());
-        assertTrue("Offline page item offline file url doesn't start properly.",
-                offlinePage.getOfflineUrl().startsWith("file:///"));
-        assertTrue("Offline page item offline file doesn't have the right name.",
-                offlinePage.getOfflineUrl().endsWith(".mhtml"));
-        assertTrue("Offline page item offline file doesn't have the right name.",
-                offlinePage.getOfflineUrl().contains("About"));
 
         // We don't care about the exact file size of the mhtml file:
         // - exact file size is not something that the end user sees or cares about
@@ -144,22 +139,18 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testGetPageByBookmarkId() throws Exception {
         loadUrl(mTestPage);
         savePage(SavePageResult.SUCCESS, mTestPage);
         OfflinePageItem offlinePage = getPageByClientId(BOOKMARK_ID);
         assertEquals("Offline page item url incorrect.", mTestPage, offlinePage.getUrl());
-        assertTrue("Offline page item offline file url doesn't start properly.",
-                offlinePage.getOfflineUrl().startsWith("file:///"));
-        assertTrue("Offline page item offline file doesn't have the right name.",
-                offlinePage.getOfflineUrl().endsWith(".mhtml"));
-        assertTrue("Offline page item offline file doesn't have the right name.",
-                offlinePage.getOfflineUrl().contains("About"));
         assertNull("Offline page is not supposed to exist",
                 getPageByClientId(new ClientId(OfflinePageBridge.BOOKMARK_NAMESPACE, "-42")));
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testDeleteOfflinePage() throws Exception {
         deletePage(BOOKMARK_ID, DeletePageResult.SUCCESS);
         loadUrl(mTestPage);
@@ -171,20 +162,9 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
                 getPageByClientId(BOOKMARK_ID));
     }
 
-    @CommandLineFlags.Add("disable-features=OfflinePagesBackgroundLoading")
-    @SmallTest
-    public void testBackgroundLoadSwitch() throws Exception {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
-            @Override
-            public void run() {
-                assertFalse("If background loading is off, we should see the feature disabled",
-                        OfflinePageBridge.isBackgroundLoadingEnabled());
-            }
-        });
-    }
-
     @CommandLineFlags.Add("disable-features=OfflinePagesSharing")
     @SmallTest
+    @RetryOnFailure
     public void testPageSharingSwitch() throws Exception {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -196,6 +176,7 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testCheckPagesExistOffline() throws Exception {
         // If we save a page, then it should exist in the result.
         loadUrl(mTestPage);
@@ -216,6 +197,7 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testGetRequestsInQueue() throws Exception {
         String url = "https://www.google.com/";
         String namespace = "custom_tabs";
@@ -248,12 +230,14 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testOfflinePageBridgeDisabledInIncognito() throws Exception {
         initializeBridgeForProfile(true);
         assertEquals(null, mOfflinePageBridge);
     }
 
     @SmallTest
+    @RetryOnFailure
     public void testRemoveRequestsFromQueue() throws Exception {
         String url = "https://www.google.com/";
         String namespace = "custom_tabs";
@@ -409,7 +393,7 @@ public class OfflinePageBridgeTest extends ChromeActivityTestCaseBase<ChromeActi
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mOfflinePageBridge.savePageLaterForDownload(url, namespace);
+                mOfflinePageBridge.savePageLater(url, namespace, true /* userRequested */);
             }
         });
     }

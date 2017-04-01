@@ -52,13 +52,13 @@ tr.exportTo('tr.b', function() {
     vec2.set(q.p3, x + w, y + h);
     vec2.set(q.p4, x, y + h);
     return q;
-  }
+  };
 
   Quad.fromRect = function(r) {
     return new Quad.fromXYWH(
         r.x, r.y,
         r.width, r.height);
-  }
+  };
 
   Quad.from4Vecs = function(p1, p2, p3, p4) {
     var q = new Quad();
@@ -67,10 +67,10 @@ tr.exportTo('tr.b', function() {
     vec2.set(q.p3, p3[0], p3[1]);
     vec2.set(q.p4, p4[0], p4[1]);
     return q;
-  }
+  };
 
   Quad.from8Array = function(arr) {
-    if (arr.length != 8)
+    if (arr.length !== 8)
       throw new Error('Array must be 8 long');
     var q = new Quad();
     q.p1[0] = arr[0];
@@ -126,14 +126,14 @@ tr.exportTo('tr.b', function() {
       // Simple rectangle check. Note: will not handle out-of-order components.
       var bounds = this.boundingRect();
       return (
-          bounds.x == this.p1[0] &&
-          bounds.y == this.p1[1] &&
-          bounds.width == this.p2[0] - this.p1[0] &&
-          bounds.y == this.p2[1] &&
-          bounds.width == this.p3[0] - this.p1[0] &&
-          bounds.height == this.p3[1] - this.p2[1] &&
-          bounds.x == this.p4[0] &&
-          bounds.height == this.p4[1] - this.p2[1]
+          bounds.x === this.p1[0] &&
+          bounds.y === this.p1[1] &&
+          bounds.width === this.p2[0] - this.p1[0] &&
+          bounds.y === this.p2[1] &&
+          bounds.width === this.p3[0] - this.p1[0] &&
+          bounds.height === this.p3[1] - this.p2[1] &&
+          bounds.x === this.p4[0] &&
+          bounds.height === this.p4[1] - this.p2[1]
       );
     },
 
@@ -148,7 +148,10 @@ tr.exportTo('tr.b', function() {
       var v14 = tmpVec2s[1];
       var v23 = tmpVec2s[2];
       var v43 = tmpVec2s[3];
-      var l12, l14, l23, l43;
+      var l12;
+      var l14;
+      var l23;
+      var l43;
 
       vec2.sub(v12, this.p2, this.p1);
       l12 = vec2.length(v12);
@@ -215,7 +218,7 @@ tr.exportTo('tr.b', function() {
     var b1 = sign(pt, p1, p2) < 0.0;
     var b2 = sign(pt, p2, p3) < 0.0;
     var b3 = sign(pt, p3, p1) < 0.0;
-    return ((b1 == b2) && (b2 == b3));
+    return ((b1 === b2) && (b2 === b3));
   }
 
   function pointInImplicitQuad(point, p1, p2, p3, p4) {
@@ -224,9 +227,9 @@ tr.exportTo('tr.b', function() {
   }
 
   return {
-    pointInTriangle2: pointInTriangle2,
-    pointInImplicitQuad: pointInImplicitQuad,
-    Quad: Quad
+    pointInTriangle2,
+    pointInImplicitQuad,
+    Quad,
   };
 });
 </script>

@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
-#include "ios/web/public/test/response_providers/data_response_provider.h"
-#include "ios/web/public/test/response_providers/html_response_provider_impl.h"
-#include "ios/web/public/test/response_providers/response_provider.h"
+#import "ios/web/public/test/response_providers/data_response_provider.h"
+#import "ios/web/public/test/response_providers/html_response_provider_impl.h"
+#import "ios/web/public/test/response_providers/response_provider.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -26,6 +26,11 @@ class HtmlResponseProvider : public web::DataResponseProvider {
   // Constructs an HtmlResponseProvider that generates a simple string response
   // to a URL based on the mapping present in |responses|.
   explicit HtmlResponseProvider(const std::map<GURL, std::string>& responses);
+  // Constructs an HtmlResponseProvider that generates a simple string response
+  // to a URL with a Set-Cookie entry in the headers based on the mapping
+  // present in |responses|.
+  explicit HtmlResponseProvider(
+      const std::map<GURL, std::pair<std::string, std::string>>& responses);
   // Constructs an HtmlResponseProvider that generates a response to a URL based
   // on the mapping present in |responses|.
   explicit HtmlResponseProvider(

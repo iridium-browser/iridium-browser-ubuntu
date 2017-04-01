@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,7 @@
 #include "content/renderer/media/peer_connection_tracker.h"
 #include "content/renderer/media/webrtc/mock_peer_connection_dependency_factory.h"
 #include "content/renderer/media/webrtc/processed_local_audio_source.h"
+#include "content/renderer/media/webrtc/rtc_stats.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
@@ -50,6 +52,7 @@
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebHeap.h"
 #include "third_party/webrtc/api/peerconnectioninterface.h"
+#include "third_party/webrtc/stats/test/rtcteststats.h"
 
 static const char kDummySdp[] = "dummy sdp";
 static const char kDummySdpType[] = "dummy type";
@@ -73,9 +76,9 @@ class MockRTCStatsResponse : public LocalRTCStatsResponse {
         statistic_count_(0) {
   }
 
-  void addStats(const blink::WebRTCStats& stats) override {
+  void addStats(const blink::WebRTCLegacyStats& stats) override {
     ++report_count_;
-    for (std::unique_ptr<blink::WebRTCStatsMemberIterator> member(
+    for (std::unique_ptr<blink::WebRTCLegacyStatsMemberIterator> member(
              stats.iterator());
          !member->isEnd(); member->next()) {
       ++statistic_count_;
@@ -147,7 +150,7 @@ class MockPeerConnectionTracker : public PeerConnectionTracker {
                     const std::string& sdp, const std::string& type,
                     Source source));
   MOCK_METHOD2(
-      TrackUpdateIce,
+      TrackSetConfiguration,
       void(RTCPeerConnectionHandler* pc_handler,
            const webrtc::PeerConnectionInterface::RTCConfiguration& config));
   MOCK_METHOD4(TrackAddIceCandidate,
@@ -181,12 +184,50 @@ class MockPeerConnectionTracker : public PeerConnectionTracker {
       TrackIceGatheringStateChange,
       void(RTCPeerConnectionHandler* pc_handler,
            WebRTCPeerConnectionHandlerClient::ICEGatheringState state));
+  MOCK_METHOD4(TrackSessionDescriptionCallback,
+               void(RTCPeerConnectionHandler* pc_handler,
+                    Action action,
+                    const std::string& type,
+                    const std::string& value));
   MOCK_METHOD1(TrackOnRenegotiationNeeded,
                void(RTCPeerConnectionHandler* pc_handler));
   MOCK_METHOD2(TrackCreateDTMFSender,
                void(RTCPeerConnectionHandler* pc_handler,
                      const blink::WebMediaStreamTrack& track));
 };
+
+class MockRTCStatsReportCallback : public blink::WebRTCStatsReportCallback {
+ public:
+  explicit MockRTCStatsReportCallback(
+      std::unique_ptr<blink::WebRTCStatsReport>* result)
+      : main_thread_(base::ThreadTaskRunnerHandle::Get()), result_(result) {
+    DCHECK(result_);
+  }
+
+  void OnStatsDelivered(
+      std::unique_ptr<blink::WebRTCStatsReport> report) override {
+    EXPECT_TRUE(main_thread_->BelongsToCurrentThread());
+    EXPECT_TRUE(report);
+    result_->reset(report.release());
+  }
+
+ private:
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_;
+  std::unique_ptr<blink::WebRTCStatsReport>* result_;
+};
+
+template<typename T>
+std::vector<T> ToSequence(T value) {
+  std::vector<T> vec;
+  vec.push_back(value);
+  return vec;
+}
+
+template<typename T>
+void ExpectSequenceEquals(const blink::WebVector<T>& sequence, T value) {
+  EXPECT_EQ(sequence.size(), static_cast<size_t>(1));
+  EXPECT_EQ(sequence[0], value);
+}
 
 class RTCPeerConnectionHandlerUnderTest : public RTCPeerConnectionHandler {
  public:
@@ -260,10 +301,10 @@ class RTCPeerConnectionHandlerTest : public ::testing::Test {
                              media::AudioParameters::kAudioCDSampleRate,
                              media::CHANNEL_LAYOUT_STEREO,
                              media::AudioParameters::kAudioCDSampleRate / 100),
+            MockConstraintFactory().CreateWebMediaConstraints(),
+            base::Bind(&RTCPeerConnectionHandlerTest::OnAudioSourceStarted),
             mock_dependency_factory_.get());
     audio_source->SetAllowInvalidRenderFrameIdForTesting(true);
-    audio_source->SetSourceConstraints(
-        MockConstraintFactory().CreateWebMediaConstraints());
     blink_audio_source.setExtraData(audio_source);  // Takes ownership.
 
     blink::WebMediaStreamSource video_source;
@@ -329,6 +370,10 @@ class RTCPeerConnectionHandlerTest : public ::testing::Test {
     for (const auto& track : video_tracks)
       MediaStreamVideoTrack::GetVideoTrack(track)->Stop();
   }
+
+  static void OnAudioSourceStarted(MediaStreamSource* source,
+                                   MediaStreamRequestResult result,
+                                   const blink::WebString& result_name) {}
 
   base::MessageLoop message_loop_;
   std::unique_ptr<ChildProcess> child_process_;
@@ -443,6 +488,36 @@ TEST_F(RTCPeerConnectionHandlerTest, setLocalDescription) {
   EXPECT_EQ(kDummySdpType, mock_peer_connection_->local_description()->type());
   mock_peer_connection_->local_description()->ToString(&sdp_string);
   EXPECT_EQ(kDummySdp, sdp_string);
+
+  // TODO(deadbeef): Also mock the "success" callback from the PeerConnection
+  // and ensure that the sucessful result is tracked by PeerConnectionTracker.
+}
+
+// Test that setLocalDescription with invalid SDP will result in a failure, and
+// is tracked as a failure with PeerConnectionTracker.
+TEST_F(RTCPeerConnectionHandlerTest, setLocalDescriptionParseError) {
+  blink::WebRTCVoidRequest request;
+  blink::WebRTCSessionDescription description;
+  description.initialize(kDummySdpType, kDummySdp);
+  testing::InSequence sequence;
+  // Expect two "Track" calls, one for the start of the attempt and one for the
+  // failure.
+  EXPECT_CALL(
+      *mock_tracker_.get(),
+      TrackSetSessionDescription(pc_handler_.get(), kDummySdp, kDummySdpType,
+                                 PeerConnectionTracker::SOURCE_LOCAL));
+  EXPECT_CALL(
+      *mock_tracker_.get(),
+      TrackSessionDescriptionCallback(
+          pc_handler_.get(),
+          PeerConnectionTracker::ACTION_SET_LOCAL_DESCRIPTION, "OnFailure", _));
+
+  // Used to simulate a parse failure.
+  mock_dependency_factory_->SetFailToCreateSessionDescription(true);
+  pc_handler_->setLocalDescription(request, description);
+  base::RunLoop().RunUntilIdle();
+  // A description that failed to be applied shouldn't be stored.
+  EXPECT_TRUE(pc_handler_->localDescription().sdp().isEmpty());
 }
 
 TEST_F(RTCPeerConnectionHandlerTest, setRemoteDescription) {
@@ -469,16 +544,47 @@ TEST_F(RTCPeerConnectionHandlerTest, setRemoteDescription) {
   EXPECT_EQ(kDummySdpType, mock_peer_connection_->remote_description()->type());
   mock_peer_connection_->remote_description()->ToString(&sdp_string);
   EXPECT_EQ(kDummySdp, sdp_string);
+
+  // TODO(deadbeef): Also mock the "success" callback from the PeerConnection
+  // and ensure that the sucessful result is tracked by PeerConnectionTracker.
 }
 
-TEST_F(RTCPeerConnectionHandlerTest, updateICE) {
+// Test that setRemoteDescription with invalid SDP will result in a failure, and
+// is tracked as a failure with PeerConnectionTracker.
+TEST_F(RTCPeerConnectionHandlerTest, setRemoteDescriptionParseError) {
+  blink::WebRTCVoidRequest request;
+  blink::WebRTCSessionDescription description;
+  description.initialize(kDummySdpType, kDummySdp);
+  testing::InSequence sequence;
+  // Expect two "Track" calls, one for the start of the attempt and one for the
+  // failure.
+  EXPECT_CALL(
+      *mock_tracker_.get(),
+      TrackSetSessionDescription(pc_handler_.get(), kDummySdp, kDummySdpType,
+                                 PeerConnectionTracker::SOURCE_REMOTE));
+  EXPECT_CALL(*mock_tracker_.get(),
+              TrackSessionDescriptionCallback(
+                  pc_handler_.get(),
+                  PeerConnectionTracker::ACTION_SET_REMOTE_DESCRIPTION,
+                  "OnFailure", _));
+
+  // Used to simulate a parse failure.
+  mock_dependency_factory_->SetFailToCreateSessionDescription(true);
+  pc_handler_->setRemoteDescription(request, description);
+  base::RunLoop().RunUntilIdle();
+  // A description that failed to be applied shouldn't be stored.
+  EXPECT_TRUE(pc_handler_->remoteDescription().sdp().isEmpty());
+}
+
+TEST_F(RTCPeerConnectionHandlerTest, setConfiguration) {
   blink::WebRTCConfiguration config;
 
-  EXPECT_CALL(*mock_tracker_.get(), TrackUpdateIce(pc_handler_.get(), _));
+  EXPECT_CALL(*mock_tracker_.get(),
+              TrackSetConfiguration(pc_handler_.get(), _));
   // TODO(perkj): Test that the parameters in |config| can be translated when a
   // WebRTCConfiguration can be constructed. It's WebKit class and can't be
   // initialized from a test.
-  EXPECT_TRUE(pc_handler_->updateICE(config));
+  EXPECT_TRUE(pc_handler_->setConfiguration(config));
 }
 
 TEST_F(RTCPeerConnectionHandlerTest, addICECandidate) {
@@ -634,6 +740,128 @@ TEST_F(RTCPeerConnectionHandlerTest, GetStatsWithBadSelector) {
   EXPECT_EQ(0, request->result()->report_count());
 
   StopAllTracks(local_stream);
+}
+
+TEST_F(RTCPeerConnectionHandlerTest, GetRTCStats) {
+  WhitelistStatsForTesting(webrtc::RTCTestStats::kType);
+
+  rtc::scoped_refptr<webrtc::RTCStatsReport> report =
+      webrtc::RTCStatsReport::Create();
+
+  report->AddStats(std::unique_ptr<const webrtc::RTCStats>(
+      new webrtc::RTCTestStats("RTCUndefinedStats", 1000)));
+
+  std::unique_ptr<webrtc::RTCTestStats> stats_defined_members(
+      new webrtc::RTCTestStats("RTCDefinedStats", 2000));
+  stats_defined_members->m_bool = true;
+  stats_defined_members->m_int32 = 42;
+  stats_defined_members->m_uint32 = 42;
+  stats_defined_members->m_int64 = 42;
+  stats_defined_members->m_uint64 = 42;
+  stats_defined_members->m_double = 42.0;
+  stats_defined_members->m_string = "42";
+  stats_defined_members->m_sequence_bool = ToSequence<bool>(true);
+  stats_defined_members->m_sequence_int32 = ToSequence<int32_t>(42);
+  stats_defined_members->m_sequence_uint32 = ToSequence<uint32_t>(42);
+  stats_defined_members->m_sequence_int64 = ToSequence<int64_t>(42);
+  stats_defined_members->m_sequence_uint64 = ToSequence<uint64_t>(42);
+  stats_defined_members->m_sequence_double = ToSequence<double>(42);
+  stats_defined_members->m_sequence_string = ToSequence<std::string>("42");
+  report->AddStats(std::unique_ptr<const webrtc::RTCStats>(
+      stats_defined_members.release()));
+
+  pc_handler_->native_peer_connection()->SetGetStatsReport(report);
+  std::unique_ptr<blink::WebRTCStatsReport> result;
+  pc_handler_->getStats(std::unique_ptr<blink::WebRTCStatsReportCallback>(
+      new MockRTCStatsReportCallback(&result)));
+  base::RunLoop().RunUntilIdle();
+  EXPECT_TRUE(result);
+
+  int undefined_stats_count = 0;
+  int defined_stats_count = 0;
+  for (std::unique_ptr<blink::WebRTCStats> stats = result->next(); stats;
+       stats.reset(result->next().release())) {
+    EXPECT_EQ(stats->type().utf8(), webrtc::RTCTestStats::kType);
+    if (stats->id().utf8() == "RTCUndefinedStats") {
+      ++undefined_stats_count;
+      EXPECT_EQ(stats->timestamp(), 1.0);
+      for (size_t i = 0; i < stats->membersCount(); ++i) {
+        EXPECT_FALSE(stats->getMember(i)->isDefined());
+      }
+    } else if (stats->id().utf8() == "RTCDefinedStats") {
+      ++defined_stats_count;
+      EXPECT_EQ(stats->timestamp(), 2.0);
+      std::set<blink::WebRTCStatsMemberType> members;
+      for (size_t i = 0; i < stats->membersCount(); ++i) {
+        std::unique_ptr<blink::WebRTCStatsMember> member =
+            stats->getMember(i);
+        // TODO(hbos): A WebRTC-change is adding new members, this would cause
+        // not all members to be defined. This if-statement saves Chromium from
+        // crashing. As soon as the change has been rolled in, I will update
+        // this test. crbug.com/627816
+        if (!member->isDefined())
+          continue;
+        EXPECT_TRUE(member->isDefined());
+        members.insert(member->type());
+        switch (member->type()) {
+          case blink::WebRTCStatsMemberTypeBool:
+            EXPECT_EQ(member->valueBool(), true);
+            break;
+          case blink::WebRTCStatsMemberTypeInt32:
+            EXPECT_EQ(member->valueInt32(), static_cast<int32_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeUint32:
+            EXPECT_EQ(member->valueUint32(), static_cast<uint32_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeInt64:
+            EXPECT_EQ(member->valueInt64(), static_cast<int64_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeUint64:
+            EXPECT_EQ(member->valueUint64(), static_cast<uint64_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeDouble:
+            EXPECT_EQ(member->valueDouble(), 42.0);
+            break;
+          case blink::WebRTCStatsMemberTypeString:
+            EXPECT_EQ(member->valueString(), blink::WebString::fromUTF8("42"));
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceBool:
+            ExpectSequenceEquals(member->valueSequenceBool(), 1);
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceInt32:
+            ExpectSequenceEquals(member->valueSequenceInt32(),
+                                 static_cast<int32_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceUint32:
+            ExpectSequenceEquals(member->valueSequenceUint32(),
+                                 static_cast<uint32_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceInt64:
+            ExpectSequenceEquals(member->valueSequenceInt64(),
+                                 static_cast<int64_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceUint64:
+            ExpectSequenceEquals(member->valueSequenceUint64(),
+                                 static_cast<uint64_t>(42));
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceDouble:
+            ExpectSequenceEquals(member->valueSequenceDouble(), 42.0);
+            break;
+          case blink::WebRTCStatsMemberTypeSequenceString:
+            ExpectSequenceEquals(member->valueSequenceString(),
+                                 blink::WebString::fromUTF8("42"));
+            break;
+          default:
+            NOTREACHED();
+        }
+      }
+      EXPECT_EQ(members.size(), static_cast<size_t>(14));
+    } else {
+      NOTREACHED();
+    }
+  }
+  EXPECT_EQ(undefined_stats_count, 1);
+  EXPECT_EQ(defined_stats_count, 1);
 }
 
 TEST_F(RTCPeerConnectionHandlerTest, OnSignalingChange) {

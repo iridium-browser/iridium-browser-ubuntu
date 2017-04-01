@@ -78,13 +78,13 @@ public:
         yuvMatrix[1].preScale(w[1] / w[0], h[1] / h[0]);
         yuvMatrix[2] = yuvMatrix[0];
         yuvMatrix[2].preScale(w[2] / w[0], h[2] / h[0]);
-        GrTextureParams::FilterMode uvFilterMode =
+        GrSamplerParams::FilterMode uvFilterMode =
             ((sizes[1].fWidth  != sizes[0].fWidth) ||
              (sizes[1].fHeight != sizes[0].fHeight) ||
              (sizes[2].fWidth  != sizes[0].fWidth) ||
              (sizes[2].fHeight != sizes[0].fHeight)) ?
-            GrTextureParams::kBilerp_FilterMode :
-            GrTextureParams::kNone_FilterMode;
+            GrSamplerParams::kBilerp_FilterMode :
+            GrSamplerParams::kNone_FilterMode;
         return sk_sp<GrFragmentProcessor>(new YUVtoRGBEffect(
             yTexture, uTexture, vTexture, yuvMatrix, uvFilterMode, colorSpace, nv12));
     }
@@ -108,17 +108,20 @@ public:
                                                           kMat44f_GrSLType, kDefault_GrSLPrecision,
                                                           "ColorSpaceMatrix", &colorSpaceMatrix);
             fragBuilder->codeAppendf("%s = vec4(", args.fOutputColor);
-            fragBuilder->appendTextureLookup(args.fTexSamplers[0], args.fCoords[0].c_str(),
-                                             args.fCoords[0].getType());
+            fragBuilder->appendTextureLookup(args.fTexSamplers[0],
+                                             args.fTransformedCoords[0].c_str(),
+                                             args.fTransformedCoords[0].getType());
             fragBuilder->codeAppend(".r,");
-            fragBuilder->appendTextureLookup(args.fTexSamplers[1], args.fCoords[1].c_str(),
-                                             args.fCoords[1].getType());
+            fragBuilder->appendTextureLookup(args.fTexSamplers[1],
+                                             args.fTransformedCoords[1].c_str(),
+                                             args.fTransformedCoords[1].getType());
             if (effect.fNV12) {
                 fragBuilder->codeAppendf(".rg,");
             } else {
                 fragBuilder->codeAppend(".r,");
-                fragBuilder->appendTextureLookup(args.fTexSamplers[2], args.fCoords[2].c_str(),
-                                                 args.fCoords[2].getType());
+                fragBuilder->appendTextureLookup(args.fTexSamplers[2],
+                                                 args.fTransformedCoords[2].c_str(),
+                                                 args.fTransformedCoords[2].getType());
                 fragBuilder->codeAppendf(".g,");
             }
             fragBuilder->codeAppendf("1.0) * %s;", colorSpaceMatrix);
@@ -149,24 +152,24 @@ public:
 
 private:
     YUVtoRGBEffect(GrTexture* yTexture, GrTexture* uTexture, GrTexture* vTexture,
-                   const SkMatrix yuvMatrix[3], GrTextureParams::FilterMode uvFilterMode,
+                   const SkMatrix yuvMatrix[3], GrSamplerParams::FilterMode uvFilterMode,
                    SkYUVColorSpace colorSpace, bool nv12)
-        : fYTransform(kLocal_GrCoordSet, yuvMatrix[0], yTexture, GrTextureParams::kNone_FilterMode)
-        , fYAccess(yTexture)
-        , fUTransform(kLocal_GrCoordSet, yuvMatrix[1], uTexture, uvFilterMode)
-        , fUAccess(uTexture, uvFilterMode)
-        , fVAccess(vTexture, uvFilterMode)
+        : fYTransform(yuvMatrix[0], yTexture, GrSamplerParams::kNone_FilterMode)
+        , fYSampler(yTexture)
+        , fUTransform(yuvMatrix[1], uTexture, uvFilterMode)
+        , fUSampler(uTexture, uvFilterMode)
+        , fVSampler(vTexture, uvFilterMode)
         , fColorSpace(colorSpace)
         , fNV12(nv12) {
         this->initClassID<YUVtoRGBEffect>();
         this->addCoordTransform(&fYTransform);
-        this->addTextureAccess(&fYAccess);
+        this->addTextureSampler(&fYSampler);
         this->addCoordTransform(&fUTransform);
-        this->addTextureAccess(&fUAccess);
+        this->addTextureSampler(&fUSampler);
         if (!fNV12) {
-            fVTransform = GrCoordTransform(kLocal_GrCoordSet, yuvMatrix[2], vTexture, uvFilterMode);
+            fVTransform = GrCoordTransform(yuvMatrix[2], vTexture, uvFilterMode);
             this->addCoordTransform(&fVTransform);
-            this->addTextureAccess(&fVAccess);
+            this->addTextureSampler(&fVSampler);
         }
     }
 
@@ -174,7 +177,7 @@ private:
         return new GLSLProcessor;
     }
 
-    void onGetGLSLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override {
+    void onGetGLSLProcessorKey(const GrShaderCaps& caps, GrProcessorKeyBuilder* b) const override {
         b->add32(fNV12);
     }
 
@@ -190,11 +193,11 @@ private:
     }
 
     GrCoordTransform fYTransform;
-    GrTextureAccess fYAccess;
+    TextureSampler   fYSampler;
     GrCoordTransform fUTransform;
-    GrTextureAccess fUAccess;
+    TextureSampler   fUSampler;
     GrCoordTransform fVTransform;
-    GrTextureAccess fVAccess;
+    TextureSampler   fVSampler;
     SkYUVColorSpace fColorSpace;
     bool fNV12;
 
@@ -331,7 +334,7 @@ private:
         return new GLSLProcessor;
     }
 
-    void onGetGLSLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override {
+    void onGetGLSLProcessorKey(const GrShaderCaps& caps, GrProcessorKeyBuilder* b) const override {
         // kY, kU, and kV all generate the same code, just upload different coefficients.
         if (kU_OutputChannels == fOutputChannels || kV_OutputChannels == fOutputChannels) {
             b->add32(kY_OutputChannels);
@@ -350,7 +353,7 @@ private:
     }
 
     GrCoordTransform    fTransform;
-    GrTextureAccess     fAccess;
+    TextureSampler      fTextureSampler;
     SkYUVColorSpace     fColorSpace;
     OutputChannels      fOutputChannels;
 

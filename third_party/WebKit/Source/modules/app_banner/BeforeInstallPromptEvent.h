@@ -7,63 +7,86 @@
 
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseProperty.h"
+#include "core/frame/LocalFrame.h"
 #include "modules/EventModules.h"
 #include "modules/app_banner/AppBannerPromptResult.h"
-#include "platform/heap/Handle.h"
+#include "mojo/public/cpp/bindings/binding.h"
+#include "public/platform/modules/app_banner/app_banner.mojom-blink.h"
+#include <utility>
 
 namespace blink {
 
 class BeforeInstallPromptEvent;
 class BeforeInstallPromptEventInit;
-class WebAppBannerClient;
 
-using UserChoiceProperty = ScriptPromiseProperty<Member<BeforeInstallPromptEvent>, Member<AppBannerPromptResult>, ToV8UndefinedGenerator>;
+using UserChoiceProperty =
+    ScriptPromiseProperty<Member<BeforeInstallPromptEvent>,
+                          Member<AppBannerPromptResult>,
+                          ToV8UndefinedGenerator>;
 
-class BeforeInstallPromptEvent final : public Event {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    ~BeforeInstallPromptEvent() override;
+class BeforeInstallPromptEvent final : public Event,
+                                       public mojom::blink::AppBannerEvent {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_PRE_FINALIZER(BeforeInstallPromptEvent, dispose);
 
-    // For EventModules.cpp
-    static BeforeInstallPromptEvent* create()
-    {
-        return new BeforeInstallPromptEvent();
-    }
+ public:
+  ~BeforeInstallPromptEvent() override;
 
-    static BeforeInstallPromptEvent* create(const AtomicString& name, ExecutionContext* executionContext, const Vector<String>& platforms, int requestId, WebAppBannerClient* client)
-    {
-        return new BeforeInstallPromptEvent(name, executionContext, platforms, requestId, client);
-    }
+  static BeforeInstallPromptEvent* create(
+      const AtomicString& name,
+      LocalFrame& frame,
+      mojom::blink::AppBannerServicePtr servicePtr,
+      mojom::blink::AppBannerEventRequest eventRequest,
+      const Vector<String>& platforms) {
+    return new BeforeInstallPromptEvent(name, frame, std::move(servicePtr),
+                                        std::move(eventRequest), platforms);
+  }
 
-    static BeforeInstallPromptEvent* create(const AtomicString& name, const BeforeInstallPromptEventInit& init)
-    {
-        return new BeforeInstallPromptEvent(name, init);
-    }
+  static BeforeInstallPromptEvent* create(
+      const AtomicString& name,
+      const BeforeInstallPromptEventInit& init) {
+    return new BeforeInstallPromptEvent(name, init);
+  }
 
-    Vector<String> platforms() const;
-    ScriptPromise userChoice(ScriptState*);
-    ScriptPromise prompt(ScriptState*);
+  void dispose();
 
-    const AtomicString& interfaceName() const override;
-    void preventDefault() override;
+  Vector<String> platforms() const;
+  ScriptPromise userChoice(ScriptState*);
+  ScriptPromise prompt(ScriptState*);
 
-    DECLARE_VIRTUAL_TRACE();
+  const AtomicString& interfaceName() const override;
+  void preventDefault() override;
 
-private:
-    BeforeInstallPromptEvent();
-    BeforeInstallPromptEvent(const AtomicString& name, ExecutionContext*, const Vector<String>& platforms, int requestId, WebAppBannerClient*);
-    BeforeInstallPromptEvent(const AtomicString& name, const BeforeInstallPromptEventInit&);
+  DECLARE_VIRTUAL_TRACE();
 
-    Vector<String> m_platforms;
+ private:
+  BeforeInstallPromptEvent(const AtomicString& name,
+                           LocalFrame&,
+                           mojom::blink::AppBannerServicePtr,
+                           mojom::blink::AppBannerEventRequest,
+                           const Vector<String>& platforms);
+  BeforeInstallPromptEvent(const AtomicString& name,
+                           const BeforeInstallPromptEventInit&);
 
-    int m_requestId;
-    WebAppBannerClient* m_client;
-    Member<UserChoiceProperty> m_userChoice;
-    bool m_registered;
+  // mojom::blink::AppBannerEvent methods:
+  void BannerAccepted(const String& platform) override;
+  void BannerDismissed() override;
+
+  mojom::blink::AppBannerServicePtr m_bannerService;
+  mojo::Binding<mojom::blink::AppBannerEvent> m_binding;
+  Vector<String> m_platforms;
+  Member<UserChoiceProperty> m_userChoice;
+  bool m_promptCalled;
 };
 
-DEFINE_TYPE_CASTS(BeforeInstallPromptEvent, Event, event, event->interfaceName() == EventNames::BeforeInstallPromptEvent, event.interfaceName() == EventNames::BeforeInstallPromptEvent);
+DEFINE_TYPE_CASTS(BeforeInstallPromptEvent,
+                  Event,
+                  event,
+                  event->interfaceName() ==
+                      EventNames::BeforeInstallPromptEvent,
+                  event.interfaceName() ==
+                      EventNames::BeforeInstallPromptEvent);
 
-} // namespace blink
+}  // namespace blink
 
-#endif // BeforeInstallPromptEvent_h
+#endif  // BeforeInstallPromptEvent_h

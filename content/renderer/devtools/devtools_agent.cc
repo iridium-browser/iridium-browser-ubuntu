@@ -85,7 +85,6 @@ DevToolsAgent::DevToolsAgent(RenderFrameImpl* frame)
     : RenderFrameObserver(frame),
       is_attached_(false),
       is_devtools_client_(false),
-      paused_in_mouse_move_(false),
       paused_(false),
       frame_(frame),
       cpu_throttler_(new DevToolsCPUThrottler()),
@@ -154,18 +153,10 @@ DevToolsAgent::createClientMessageLoop() {
 
 void DevToolsAgent::willEnterDebugLoop() {
   paused_ = true;
-  if (RenderWidget* widget = frame_->GetRenderWidget())
-    paused_in_mouse_move_ = widget->SendAckForMouseMoveFromDebugger();
 }
 
 void DevToolsAgent::didExitDebugLoop() {
   paused_ = false;
-  if (!paused_in_mouse_move_)
-    return;
-  if (RenderWidget* widget = frame_->GetRenderWidget()) {
-    widget->IgnoreAckForMouseMoveFromDebugger();
-    paused_in_mouse_move_ = false;
-  }
 }
 
 bool DevToolsAgent::requestDevToolsForFrame(blink::WebLocalFrame* webFrame) {
@@ -327,14 +318,15 @@ void DevToolsAgent::GotManifest(int session_id,
 
   bool failed = false;
   for (const auto& error : debug_info.errors) {
-    base::DictionaryValue* error_value = new base::DictionaryValue();
-    errors->Append(error_value);
+    std::unique_ptr<base::DictionaryValue> error_value(
+        new base::DictionaryValue());
     error_value->SetString("message", error.message);
     error_value->SetBoolean("critical", error.critical);
     error_value->SetInteger("line", error.line);
     error_value->SetInteger("column", error.column);
     if (error.critical)
       failed = true;
+    errors->Append(std::move(error_value));
   }
 
   WebString url = frame_->GetWebFrame()->document().manifestURL().string();

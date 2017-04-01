@@ -435,9 +435,8 @@ void Widget::NotifyNativeViewHierarchyChanged() {
 }
 
 void Widget::NotifyWillRemoveView(View* view) {
-  FOR_EACH_OBSERVER(WidgetRemovalsObserver,
-                    removals_observers_,
-                    OnWillRemoveView(this, view));
+  for (WidgetRemovalsObserver& observer : removals_observers_)
+    observer.OnWillRemoveView(this, view);
 }
 
 // Converted methods (see header) ----------------------------------------------
@@ -553,10 +552,6 @@ void Widget::StackAtTop() {
   native_widget_->StackAtTop();
 }
 
-void Widget::StackBelow(gfx::NativeView native_view) {
-  native_widget_->StackBelow(native_view);
-}
-
 void Widget::SetShape(std::unique_ptr<SkRegion> shape) {
   native_widget_->SetShape(std::move(shape));
 }
@@ -583,14 +578,17 @@ void Widget::Close() {
     if (is_top_level() && focus_manager_.get())
       focus_manager_->SetFocusedView(NULL);
 
-    FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetClosing(this));
+    for (WidgetObserver& observer : observers_)
+      observer.OnWidgetClosing(this);
+
     native_widget_->Close();
     widget_closed_ = true;
   }
 }
 
 void Widget::CloseNow() {
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetClosing(this));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetClosing(this);
   native_widget_->CloseNow();
 }
 
@@ -738,10 +736,6 @@ const ui::ThemeProvider* Widget::GetThemeProvider() const {
       return provider;
   }
   return default_theme_provider_.get();
-}
-
-const ui::NativeTheme* Widget::GetNativeTheme() const {
-  return native_widget_->GetNativeTheme();
 }
 
 FocusManager* Widget::GetFocusManager() {
@@ -985,10 +979,6 @@ void Widget::SynthesizeMouseMoveEvent() {
   root_view_->OnMouseMoved(mouse_event);
 }
 
-void Widget::OnRootViewLayout() {
-  native_widget_->OnRootViewLayout();
-}
-
 bool Widget::IsTranslucentWindowOpacitySupported() const {
   return native_widget_->IsTranslucentWindowOpacitySupported();
 }
@@ -1030,8 +1020,8 @@ void Widget::OnNativeWidgetActivationChanged(bool active) {
   if (!active && native_widget_initialized_)
     SaveWindowPlacement();
 
-  FOR_EACH_OBSERVER(WidgetObserver, observers_,
-                    OnWidgetActivationChanged(this, active));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetActivationChanged(this, active);
 
   if (non_client_view())
     non_client_view()->frame_view()->ActivationChanged(active);
@@ -1046,16 +1036,16 @@ void Widget::OnNativeBlur() {
 }
 
 void Widget::OnNativeWidgetVisibilityChanging(bool visible) {
-  FOR_EACH_OBSERVER(WidgetObserver, observers_,
-                    OnWidgetVisibilityChanging(this, visible));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetVisibilityChanging(this, visible);
 }
 
 void Widget::OnNativeWidgetVisibilityChanged(bool visible) {
   View* root = GetRootView();
   if (root)
     root->PropagateVisibilityNotifications(root, visible);
-  FOR_EACH_OBSERVER(WidgetObserver, observers_,
-                    OnWidgetVisibilityChanged(this, visible));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetVisibilityChanged(this, visible);
   if (GetCompositor() && root && root->layer())
     root->layer()->SetVisible(visible);
 }
@@ -1066,7 +1056,8 @@ void Widget::OnNativeWidgetCreated(bool desktop_widget) {
 
   native_widget_->InitModalType(widget_delegate_->GetModalType());
 
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetCreated(this));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetCreated(this);
 }
 
 void Widget::OnNativeWidgetDestroying() {
@@ -1074,14 +1065,16 @@ void Widget::OnNativeWidgetDestroying() {
   // in case that the focused view is under this root view.
   if (GetFocusManager() && root_view_)
     GetFocusManager()->ViewRemoved(root_view_.get());
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetDestroying(this));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetDestroying(this);
   if (non_client_view_)
     non_client_view_->WindowClosing();
   widget_delegate_->WindowClosing();
 }
 
 void Widget::OnNativeWidgetDestroyed() {
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetDestroyed(this));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetDestroyed(this);
   widget_delegate_->DeleteDelegate();
   widget_delegate_ = NULL;
   native_widget_destroyed_ = true;
@@ -1099,9 +1092,8 @@ void Widget::OnNativeWidgetMove() {
   widget_delegate_->OnWidgetMove();
   NotifyCaretBoundsChanged(GetInputMethod());
 
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetBoundsChanged(
-    this,
-    GetWindowBoundsInScreen()));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetBoundsChanged(this, GetWindowBoundsInScreen());
 }
 
 void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
@@ -1112,9 +1104,8 @@ void Widget::OnNativeWidgetSizeChanged(const gfx::Size& new_size) {
   NotifyCaretBoundsChanged(GetInputMethod());
   SaveWindowPlacementIfInitialized();
 
-  FOR_EACH_OBSERVER(WidgetObserver, observers_, OnWidgetBoundsChanged(
-    this,
-    GetWindowBoundsInScreen()));
+  for (WidgetObserver& observer : observers_)
+    observer.OnWidgetBoundsChanged(this, GetWindowBoundsInScreen());
 }
 
 void Widget::OnNativeWidgetWorkspaceChanged() {}
@@ -1210,7 +1201,14 @@ void Widget::OnMouseEvent(ui::MouseEvent* event) {
       }
       if (root_view)
         root_view->OnMouseReleased(*event);
-      if ((event->flags() & ui::EF_IS_NON_CLIENT) == 0)
+      if ((event->flags() & ui::EF_IS_NON_CLIENT) == 0 &&
+          // If none of the "normal" buttons are pressed, this event may be from
+          // one of the newer mice that have buttons bound to browser forward
+          // back actions. Don't squelch the event and let the default handler
+          // process it.
+          (event->flags() &
+           (ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON |
+            ui::EF_RIGHT_MOUSE_BUTTON)) != 0)
         event->SetHandled();
       return;
 
@@ -1305,18 +1303,24 @@ const Widget* Widget::AsWidget() const {
 }
 
 bool Widget::SetInitialFocus(ui::WindowShowState show_state) {
+  FocusManager* focus_manager = GetFocusManager();
   View* v = widget_delegate_->GetInitiallyFocusedView();
   if (!focus_on_creation_ || show_state == ui::SHOW_STATE_INACTIVE ||
       show_state == ui::SHOW_STATE_MINIMIZED) {
     // If not focusing the window now, tell the focus manager which view to
     // focus when the window is restored.
-    if (v && focus_manager_.get())
-      focus_manager_->SetStoredFocusView(v);
+    if (v && focus_manager)
+      focus_manager->SetStoredFocusView(v);
     return true;
   }
-  if (v)
+  if (v) {
     v->RequestFocus();
-  return !!v;
+    // If the request for focus was unsuccessful, fall back to using the first
+    // focusable View instead.
+    if (focus_manager && focus_manager->GetFocusedView() == nullptr)
+      focus_manager->AdvanceFocus(false);
+  }
+  return !!focus_manager->GetFocusedView();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1369,6 +1373,7 @@ internal::RootView* Widget::CreateRootView() {
 }
 
 void Widget::DestroyRootView() {
+  NotifyWillRemoveView(root_view_.get());
   non_client_view_ = NULL;
   root_view_.reset();
 }

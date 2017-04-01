@@ -85,8 +85,14 @@ class PlatformBackend(object):
       self._forwarder_factory = do_nothing_forwarder.DoNothingForwarderFactory()
     return self._forwarder_factory
 
+  def GetPortPairForForwarding(self, local_port):
+    return forwarders.PortPair(local_port=local_port, remote_port=local_port)
+
   def GetRemotePort(self, port):
     return port
+
+  def GetSystemLog(self):
+    return None
 
   def DidCreateBrowser(self, browser, browser_backend):
     browser_options = browser_backend.browser_options
@@ -102,13 +108,6 @@ class PlatformBackend(object):
       self.SetFullPerformanceModeEnabled(False)
 
     self._running_browser_backends.discard(browser_backend)
-
-  def GetWprPortPairs(self):
-    """Return suitable port pairs to be used for web page replay."""
-    return forwarders.PortPairs(
-        http=forwarders.PortPair(0, 0),
-        https=forwarders.PortPair(0, 0),
-        dns=None)
 
   def IsDisplayTracingSupported(self):
     return False
@@ -300,3 +299,10 @@ class PlatformBackend(object):
 
   def HasBattOrConnected(self):
     return battor_wrapper.IsBattOrConnected(self.GetOSName())
+
+  def WaitForTemperature(self, temp):
+    """Waits for device under test to cool down to temperature given.
+    Args:
+      temp: temperature target in degrees C.
+    """
+    pass

@@ -5,15 +5,14 @@
 #include "ui/arc/notification/arc_notification_item.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner.h"
-#include "base/task_runner_util.h"
-#include "base/threading/worker_pool.h"
-#include "components/arc/bitmap/bitmap_type_converters.h"
+#include "base/task_scheduler/post_task.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -33,7 +32,6 @@ constexpr char kNotifierId[] = "ARC_NOTIFICATION";
 constexpr char kNotificationIdPrefix[] = "ARC_NOTIFICATION_";
 
 SkBitmap DecodeImage(const std::vector<uint8_t>& data) {
-  DCHECK(base::WorkerPool::RunsTasksOnCurrentThread());
   DCHECK(!data.empty());  // empty string should be handled in caller.
 
   // We may decode an image in the browser process since it has been generated
@@ -136,81 +134,85 @@ ArcNotificationItem::ArcNotificationItem(
       weak_ptr_factory_(this) {}
 
 void ArcNotificationItem::UpdateWithArcNotificationData(
-    const mojom::ArcNotificationData& data) {
+    mojom::ArcNotificationDataPtr data) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(notification_key_ == data.key);
+  DCHECK(notification_key_ == data->key);
 
   // Check if a decode task is on-going or not. If |notification_| is non-null,
-  // a decode task is on-going asynchronously. Otherwise, there is no task.
+  // a decode task is on-going asynchronously. Otherwise, there is no task and
+  // cache the latest data to the |newer_data_| property.
   // TODO(yoshiki): Refactor and remove this check by omitting image decoding
   // from here.
-  if (CacheArcNotificationData(data))
+  if (HasPendingNotification()) {
+    CacheArcNotificationData(std::move(data));
     return;
+  }
 
   message_center::RichNotificationData rich_data;
   message_center::NotificationType type;
 
-  switch (data.type) {
+  switch (data->type) {
     case mojom::ArcNotificationType::BASIC:
       type = message_center::NOTIFICATION_TYPE_BASE_FORMAT;
       break;
     case mojom::ArcNotificationType::LIST:
       type = message_center::NOTIFICATION_TYPE_MULTIPLE;
 
-      if (data.texts.is_null())
+      if (!data->texts.has_value())
         break;
 
       for (size_t i = 0;
-           i < std::min(data.texts.size(),
+           i < std::min(data->texts->size(),
                         message_center::kNotificationMaximumItems - 1);
            i++) {
-        rich_data.items.emplace_back(
-            base::string16(), base::UTF8ToUTF16(data.texts.at(i).get()));
+        rich_data.items.emplace_back(base::string16(),
+                                     base::UTF8ToUTF16(data->texts->at(i)));
       }
 
-      if (data.texts.size() > message_center::kNotificationMaximumItems) {
+      if (data->texts->size() > message_center::kNotificationMaximumItems) {
         // Show an elipsis as the 5th item if there are more than 5 items.
         rich_data.items.emplace_back(base::string16(), gfx::kEllipsisUTF16);
-      } else if (data.texts.size() ==
+      } else if (data->texts->size() ==
                  message_center::kNotificationMaximumItems) {
         // Show the 5th item if there are exact 5 items.
         rich_data.items.emplace_back(
             base::string16(),
-            base::UTF8ToUTF16(data.texts.at(data.texts.size() - 1).get()));
+            base::UTF8ToUTF16(data->texts->at(data->texts->size() - 1)));
       }
       break;
     case mojom::ArcNotificationType::IMAGE:
       type = message_center::NOTIFICATION_TYPE_IMAGE;
 
-      if (!data.big_picture.is_null()) {
+      if (data->big_picture && !data->big_picture->isNull()) {
         rich_data.image = gfx::Image::CreateFrom1xBitmap(
-            CropImage(data.big_picture.To<SkBitmap>()));
+            CropImage(*data->big_picture));
       }
       break;
     case mojom::ArcNotificationType::PROGRESS:
       type = message_center::NOTIFICATION_TYPE_PROGRESS;
       rich_data.timestamp = base::Time::UnixEpoch() +
-                            base::TimeDelta::FromMilliseconds(data.time);
+                            base::TimeDelta::FromMilliseconds(data->time);
       rich_data.progress = std::max(
           0, std::min(100, static_cast<int>(std::round(
-                               static_cast<float>(data.progress_current) /
-                               data.progress_max * 100))));
+                               static_cast<float>(data->progress_current) /
+                               data->progress_max * 100))));
       break;
   }
-  DCHECK(IsKnownEnumValue(data.type)) << "Unsupported notification type: "
-                                      << data.type;
+  DCHECK(IsKnownEnumValue(data->type)) << "Unsupported notification type: "
+                                      << data->type;
 
-  for (size_t i = 0; i < data.buttons.size(); i++) {
+  for (size_t i = 0; i < data->buttons.size(); i++) {
     rich_data.buttons.emplace_back(
-        base::UTF8ToUTF16(data.buttons.at(i)->label.get()));
+        base::UTF8ToUTF16(data->buttons.at(i)->label));
   }
 
   // If the client is old (version < 1), both |no_clear| and |ongoing_event|
   // are false.
-  rich_data.pinned = (data.no_clear || data.ongoing_event);
+  rich_data.pinned = (data->no_clear || data->ongoing_event);
 
-  rich_data.priority = ConvertAndroidPriority(data.priority);
-  rich_data.small_image = ConvertAndroidSmallIcon(data.small_icon);
+  rich_data.priority = ConvertAndroidPriority(data->priority);
+  if (data->small_icon)
+    rich_data.small_image = gfx::Image::CreateFrom1xBitmap(*data->small_icon);
 
   // The identifier of the notifier, which is used to distinguish the notifiers
   // in the message center.
@@ -218,36 +220,34 @@ void ArcNotificationItem::UpdateWithArcNotificationData(
       message_center::NotifierId::SYSTEM_COMPONENT, kNotifierId);
   notifier_id.profile_id = profile_id_.GetUserEmail();
 
-  DCHECK(!data.title.is_null());
-  DCHECK(!data.message.is_null());
   SetNotification(base::MakeUnique<message_center::Notification>(
-      type, notification_id_, base::UTF8ToUTF16(data.title.get()),
-      base::UTF8ToUTF16(data.message.get()),
+      type, notification_id_, base::UTF8ToUTF16(data->title),
+      base::UTF8ToUTF16(data->message),
       gfx::Image(),              // icon image: Will be overriden later.
       base::UTF8ToUTF16("arc"),  // display source
       GURL(),                    // empty origin url, for system component
       notifier_id, rich_data,
       new ArcNotificationDelegate(weak_ptr_factory_.GetWeakPtr())));
 
-  DCHECK(!data.icon_data.is_null());
-  if (data.icon_data.size() == 0) {
+  if (data->icon_data.size() == 0) {
     OnImageDecoded(SkBitmap());  // Pass an empty bitmap.
     return;
   }
 
   // TODO(yoshiki): Remove decoding by passing a bitmap directly from Android.
-  base::PostTaskAndReplyWithResult(
-      base::WorkerPool::GetTaskRunner(true).get(), FROM_HERE,
-      base::Bind(&DecodeImage, data.icon_data.storage()),
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, base::TaskTraits().WithShutdownBehavior(
+                     base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      base::Bind(&DecodeImage, data->icon_data),
       base::Bind(&ArcNotificationItem::OnImageDecoded,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
 ArcNotificationItem::~ArcNotificationItem() {}
 
-void ArcNotificationItem::OnClosedFromAndroid(bool by_user) {
+void ArcNotificationItem::OnClosedFromAndroid() {
   being_removed_by_manager_ = true;  // Closing is initiated by the manager.
-  message_center_->RemoveNotification(notification_id_, by_user);
+  message_center_->RemoveNotification(notification_id_, false /* by_user */);
 }
 
 void ArcNotificationItem::Close(bool by_user) {
@@ -294,25 +294,14 @@ int ArcNotificationItem::ConvertAndroidPriority(int android_priority) {
   }
 }
 
-// static
-gfx::Image ArcNotificationItem::ConvertAndroidSmallIcon(
-    const mojom::ArcBitmapPtr& arc_bitmap) {
-  if (arc_bitmap.is_null())
-    return gfx::Image();
-
-  return gfx::Image::CreateFrom1xBitmap(arc_bitmap.To<SkBitmap>());
+bool ArcNotificationItem::HasPendingNotification() {
+  return (notification_ != nullptr);
 }
 
-bool ArcNotificationItem::CacheArcNotificationData(
-    const mojom::ArcNotificationData& data) {
-  if (!notification_)
-    return false;
-
-  // Store the latest data to the |newer_data_| property if there is a pending
-  // |notification_|.
+void ArcNotificationItem::CacheArcNotificationData(
+    mojom::ArcNotificationDataPtr data) {
   // If old |newer_data_| has been stored, discard the old one.
-  newer_data_ = data.Clone();
-  return true;
+  newer_data_ = std::move(data);
 }
 
 void ArcNotificationItem::SetNotification(
@@ -326,8 +315,7 @@ void ArcNotificationItem::AddToMessageCenter() {
 
   if (newer_data_) {
     // There is the newer data, so updates again.
-    mojom::ArcNotificationDataPtr data(std::move(newer_data_));
-    UpdateWithArcNotificationData(*data);
+    UpdateWithArcNotificationData(std::move(newer_data_));
   }
 }
 

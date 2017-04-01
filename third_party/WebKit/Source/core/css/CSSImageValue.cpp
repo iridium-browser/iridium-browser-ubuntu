@@ -24,9 +24,9 @@
 #include "core/dom/Document.h"
 #include "core/fetch/FetchInitiatorTypeNames.h"
 #include "core/fetch/FetchRequest.h"
-#include "core/fetch/ImageResource.h"
 #include "core/fetch/ResourceFetcher.h"
-#include "core/loader/MixedContentChecker.h"
+#include "core/frame/Settings.h"
+#include "core/loader/resource/ImageResourceContent.h"
 #include "core/style/StyleFetchedImage.h"
 #include "core/style/StyleInvalidImage.h"
 #include "platform/CrossOriginAttributeValue.h"
@@ -35,106 +35,98 @@
 
 namespace blink {
 
-CSSImageValue::CSSImageValue(const AtomicString& rawValue, const KURL& url, StyleImage* image)
-    : CSSValue(ImageClass)
-    , m_relativeURL(rawValue)
-    , m_absoluteURL(url.getString())
-    , m_isCachePending(!image)
-    , m_cachedImage(image)
-{
-}
+CSSImageValue::CSSImageValue(const AtomicString& rawValue,
+                             const KURL& url,
+                             StyleImage* image)
+    : CSSValue(ImageClass),
+      m_relativeURL(rawValue),
+      m_absoluteURL(url.getString()),
+      m_cachedImage(image) {}
 
 CSSImageValue::CSSImageValue(const AtomicString& absoluteURL)
-    : CSSValue(ImageClass)
-    , m_relativeURL(absoluteURL)
-    , m_absoluteURL(absoluteURL)
-    , m_isCachePending(true)
-{
+    : CSSValue(ImageClass),
+      m_relativeURL(absoluteURL),
+      m_absoluteURL(absoluteURL) {}
+
+CSSImageValue::~CSSImageValue() {}
+
+StyleImage* CSSImageValue::cacheImage(const Document& document,
+                                      CrossOriginAttributeValue crossOrigin) {
+  if (!m_cachedImage) {
+    FetchRequest request(ResourceRequest(m_absoluteURL),
+                         m_initiatorName.isEmpty()
+                             ? FetchInitiatorTypeNames::css
+                             : m_initiatorName);
+    request.mutableResourceRequest().setHTTPReferrer(
+        SecurityPolicy::generateReferrer(m_referrer.referrerPolicy,
+                                         request.url(), m_referrer.referrer));
+
+    if (crossOrigin != CrossOriginAttributeNotSet)
+      request.setCrossOriginAccessControl(document.getSecurityOrigin(),
+                                          crossOrigin);
+    if (document.settings() && document.settings()->getFetchImagePlaceholders())
+      request.setAllowImagePlaceholder();
+
+    if (ImageResourceContent* cachedImage =
+            ImageResourceContent::fetch(request, document.fetcher()))
+      m_cachedImage =
+          StyleFetchedImage::create(cachedImage, document, request.url());
+    else
+      m_cachedImage = StyleInvalidImage::create(url());
+  }
+
+  return m_cachedImage.get();
 }
 
-CSSImageValue::~CSSImageValue()
-{
+void CSSImageValue::restoreCachedResourceIfNeeded(
+    const Document& document) const {
+  if (!m_cachedImage || !document.fetcher() || m_absoluteURL.isNull())
+    return;
+
+  ImageResourceContent* resource = m_cachedImage->cachedImage();
+  if (!resource)
+    return;
+
+  resource->emulateLoadStartedForInspector(
+      document.fetcher(), KURL(ParsedURLString, m_absoluteURL),
+      m_initiatorName.isEmpty() ? FetchInitiatorTypeNames::css
+                                : m_initiatorName);
 }
 
-StyleImage* CSSImageValue::cacheImage(Document* document, CrossOriginAttributeValue crossOrigin)
-{
-    ASSERT(document);
-
-    if (m_isCachePending) {
-        m_isCachePending = false;
-
-        FetchRequest request(ResourceRequest(m_absoluteURL), m_initiatorName.isEmpty() ? FetchInitiatorTypeNames::css : m_initiatorName);
-        request.mutableResourceRequest().setHTTPReferrer(SecurityPolicy::generateReferrer(m_referrer.referrerPolicy, request.url(), m_referrer.referrer));
-
-        if (crossOrigin != CrossOriginAttributeNotSet)
-            request.setCrossOriginAccessControl(document->getSecurityOrigin(), crossOrigin);
-
-        if (ImageResource* cachedImage = ImageResource::fetch(request, document->fetcher()))
-            m_cachedImage = StyleFetchedImage::create(cachedImage, document, request.url());
-        else
-            m_cachedImage = StyleInvalidImage::create(url());
-    }
-
-    return m_cachedImage.get();
+bool CSSImageValue::hasFailedOrCanceledSubresources() const {
+  if (!m_cachedImage)
+    return false;
+  if (ImageResourceContent* cachedResource = m_cachedImage->cachedImage())
+    return cachedResource->loadFailedOrCanceled();
+  return true;
 }
 
-void CSSImageValue::restoreCachedResourceIfNeeded(Document& document) const
-{
-    if (m_isCachePending || !m_cachedImage || !document.fetcher() || m_absoluteURL.isNull())
-        return;
-    if (document.fetcher()->cachedResource(KURL(ParsedURLString, m_absoluteURL)))
-        return;
-
-    ImageResource* resource = m_cachedImage->cachedImage();
-    if (!resource)
-        return;
-
-    FetchRequest request(ResourceRequest(m_absoluteURL), m_initiatorName.isEmpty() ? FetchInitiatorTypeNames::css : m_initiatorName, resource->options());
-    request.mutableResourceRequest().setRequestContext(WebURLRequest::RequestContextImage);
-    MixedContentChecker::shouldBlockFetch(document.frame(), resource->lastResourceRequest(),
-        resource->lastResourceRequest().url(), MixedContentChecker::SendReport);
-    document.fetcher()->requestLoadStarted(resource->identifier(), resource, request, ResourceFetcher::ResourceLoadingFromCache);
+bool CSSImageValue::equals(const CSSImageValue& other) const {
+  if (m_absoluteURL.isEmpty() && other.m_absoluteURL.isEmpty())
+    return m_relativeURL == other.m_relativeURL;
+  return m_absoluteURL == other.m_absoluteURL;
 }
 
-bool CSSImageValue::hasFailedOrCanceledSubresources() const
-{
-    if (!m_cachedImage)
-        return false;
-    if (Resource* cachedResource = m_cachedImage->cachedImage())
-        return cachedResource->loadFailedOrCanceled();
-    return true;
+String CSSImageValue::customCSSText() const {
+  return serializeURI(m_relativeURL);
 }
 
-bool CSSImageValue::equals(const CSSImageValue& other) const
-{
-    return m_absoluteURL == other.m_absoluteURL;
+bool CSSImageValue::knownToBeOpaque(const LayoutObject& layoutObject) const {
+  return m_cachedImage ? m_cachedImage->knownToBeOpaque(layoutObject) : false;
 }
 
-String CSSImageValue::customCSSText() const
-{
-    return serializeURI(m_relativeURL);
+DEFINE_TRACE_AFTER_DISPATCH(CSSImageValue) {
+  visitor->trace(m_cachedImage);
+  CSSValue::traceAfterDispatch(visitor);
 }
 
-bool CSSImageValue::knownToBeOpaque(const LayoutObject& layoutObject) const
-{
-    return m_cachedImage ? m_cachedImage->knownToBeOpaque(layoutObject) : false;
+void CSSImageValue::reResolveURL(const Document& document) const {
+  KURL url = document.completeURL(m_relativeURL);
+  AtomicString urlString(url.getString());
+  if (urlString == m_absoluteURL)
+    return;
+  m_absoluteURL = urlString;
+  m_cachedImage.clear();
 }
 
-DEFINE_TRACE_AFTER_DISPATCH(CSSImageValue)
-{
-    visitor->trace(m_cachedImage);
-    CSSValue::traceAfterDispatch(visitor);
-}
-
-void CSSImageValue::reResolveURL(const Document& document) const
-{
-    KURL url = document.completeURL(m_relativeURL);
-    AtomicString urlString(url.getString());
-    if (urlString == m_absoluteURL)
-        return;
-    m_absoluteURL = urlString;
-    m_isCachePending = true;
-    m_cachedImage.clear();
-}
-
-} // namespace blink
+}  // namespace blink

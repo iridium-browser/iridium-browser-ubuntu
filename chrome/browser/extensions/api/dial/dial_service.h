@@ -15,17 +15,18 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "net/base/ip_address.h"
-#include "net/log/net_log.h"
-#include "net/udp/udp_socket.h"
+#include "net/log/net_log_source.h"
+#include "net/socket/udp_socket.h"
 
 namespace net {
-class IOBuffer;
 class IPEndPoint;
 class StringIOBuffer;
-struct NetworkInterface;
+class NetLog;
 }
 
 namespace extensions {
+namespace api {
+namespace dial {
 
 class DialDeviceData;
 
@@ -125,7 +126,7 @@ class DialServiceImpl : public DialService {
     // |bind_ip_address|.
     bool CreateAndBindSocket(const net::IPAddress& bind_ip_address,
                              net::NetLog* net_log,
-                             net::NetLog::Source net_log_source);
+                             net::NetLogSource net_log_source);
 
     // Sends a single discovery request |send_buffer| to |send_address|
     // over the socket.
@@ -244,7 +245,7 @@ class DialServiceImpl : public DialService {
   net::NetLog* const net_log_;
 
   // The NetLog source for this service.
-  net::NetLog::Source net_log_source_;
+  net::NetLogSource net_log_source_;
 
   // The multicast address:port for search requests.
   net::IPEndPoint send_address_;
@@ -291,6 +292,8 @@ class DialServiceImpl : public DialService {
   DISALLOW_COPY_AND_ASSIGN(DialServiceImpl);
 };
 
+}  // namespace dial
+}  // namespace api
 }  // namespace extensions
 
 #endif  // CHROME_BROWSER_EXTENSIONS_API_DIAL_DIAL_SERVICE_H_

@@ -18,7 +18,6 @@ class ContentSettingsPattern;
 
 namespace content_settings {
 
-struct Rule;
 class RuleIterator;
 
 class ProviderInterface {
@@ -32,6 +31,7 @@ class ProviderInterface {
   // mode. It is not allowed to call other |ProviderInterface| functions
   // (including |GetRuleIterator|) for the same provider until the
   // |RuleIterator| is destroyed.
+  // Returns nullptr to indicate the RuleIterator is empty.
   virtual std::unique_ptr<RuleIterator> GetRuleIterator(
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,

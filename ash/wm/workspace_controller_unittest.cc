@@ -2,25 +2,24 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/wm/workspace_controller.h"
+#include "ash/common/wm/workspace_controller.h"
 
 #include <map>
 
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/shelf/shelf_layout_manager.h"
 #include "ash/common/shelf/shelf_widget.h"
 #include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/status_area_widget.h"
+#include "ash/common/test/test_shelf_delegate.h"
 #include "ash/common/wm/panels/panel_layout_manager.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/workspace/workspace_window_resizer.h"
-#include "ash/root_window_controller.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_md_test_base.h"
 #include "ash/test/shell_test_api.h"
-#include "ash/test/test_shelf_delegate.h"
 #include "ash/wm/window_state_aura.h"
 #include "ash/wm/window_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -51,7 +50,7 @@ std::string GetWindowNames(const aura::Window* window) {
   for (size_t i = 0; i < window->children().size(); ++i) {
     if (i != 0)
       result += " ";
-    result += window->children()[i]->name();
+    result += window->children()[i]->GetName();
   }
   return result;
 }
@@ -65,7 +64,7 @@ std::string GetLayerNames(const aura::Window* window) {
   LayerToWindowNameMap window_names;
   for (size_t i = 0; i < window->children().size(); ++i) {
     window_names[window->children()[i]->layer()] =
-        window->children()[i]->name();
+        window->children()[i]->GetName();
   }
 
   std::string result;
@@ -122,12 +121,9 @@ class WorkspaceControllerTest : public test::AshMDTestBase {
                                 const gfx::Rect& bounds) {
     aura::Window* window = CreateTestWindowInShellWithDelegateAndType(
         delegate, ui::wm::WINDOW_TYPE_PANEL, 0, bounds);
-    test::TestShelfDelegate* shelf_delegate =
-        test::TestShelfDelegate::instance();
-    shelf_delegate->AddShelfItem(window);
-    PanelLayoutManager* manager =
-        PanelLayoutManager::Get(WmWindowAura::Get(window));
-    manager->Relayout();
+    WmWindow* wm_window = WmWindow::Get(window);
+    test::TestShelfDelegate::instance()->AddShelfItem(wm_window);
+    PanelLayoutManager::Get(wm_window)->Relayout();
     return window;
   }
 
@@ -142,12 +138,10 @@ class WorkspaceControllerTest : public test::AshMDTestBase {
         .bounds();
   }
 
-  ShelfWidget* shelf_widget() {
-    return Shell::GetPrimaryRootWindowController()->shelf_widget();
-  }
+  ShelfWidget* shelf_widget() { return GetPrimaryShelf()->shelf_widget(); }
 
   ShelfLayoutManager* shelf_layout_manager() {
-    return Shell::GetPrimaryRootWindowController()->GetShelfLayoutManager();
+    return GetPrimaryShelf()->shelf_layout_manager();
   }
 
   bool GetWindowOverlapsShelf() {
@@ -724,8 +718,6 @@ TEST_P(WorkspaceControllerTest, TransientParent) {
 
 // Test the placement of newly created windows.
 TEST_P(WorkspaceControllerTest, BasicAutoPlacingOnCreate) {
-  if (!SupportsHostWindowResize())
-    return;
   UpdateDisplay("1600x1200");
   // Creating a popup handler here to make sure it does not interfere with the
   // existing windows.
@@ -1040,9 +1032,6 @@ TEST_P(WorkspaceControllerTest, TestUserHandledWindowRestore) {
 
 // Solo window should be restored to the bounds where a user moved to.
 TEST_P(WorkspaceControllerTest, TestRestoreToUserModifiedBounds) {
-  if (!SupportsHostWindowResize())
-    return;
-
   UpdateDisplay("400x300");
   gfx::Rect default_bounds(10, 0, 100, 100);
   std::unique_ptr<aura::Window> window1(
@@ -1070,8 +1059,8 @@ TEST_P(WorkspaceControllerTest, TestRestoreToUserModifiedBounds) {
 
   // A user moved the window.
   std::unique_ptr<WindowResizer> resizer(
-      CreateWindowResizer(WmWindowAura::Get(window1.get()), gfx::Point(),
-                          HTCAPTION, aura::client::WINDOW_MOVE_SOURCE_MOUSE)
+      CreateWindowResizer(WmWindow::Get(window1.get()), gfx::Point(), HTCAPTION,
+                          aura::client::WINDOW_MOVE_SOURCE_MOUSE)
           .release());
   gfx::Point location = resizer->GetInitialLocation();
   location.Offset(-50, 0);

@@ -11,8 +11,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
+#include "net/base/escape.h"
 #include "net/http/http_log_util.h"
 #include "net/http/http_util.h"
+#include "net/log/net_log_capture_mode.h"
 
 namespace net {
 
@@ -89,9 +91,8 @@ void HttpRequestHeaders::Clear() {
 
 void HttpRequestHeaders::SetHeader(const base::StringPiece& key,
                                    const base::StringPiece& value) {
-  DCHECK(HttpUtil::IsValidHeaderName(key.as_string()));
-  // TODO(ricea): Revert this. See crbug.com/627398.
-  CHECK(HttpUtil::IsValidHeaderValue(value.as_string()));
+  DCHECK(HttpUtil::IsValidHeaderName(key));
+  DCHECK(HttpUtil::IsValidHeaderValue(value));
   HeaderVector::iterator it = FindHeader(key);
   if (it != headers_.end())
     it->value.assign(value.data(), value.size());
@@ -101,9 +102,8 @@ void HttpRequestHeaders::SetHeader(const base::StringPiece& key,
 
 void HttpRequestHeaders::SetHeaderIfMissing(const base::StringPiece& key,
                                             const base::StringPiece& value) {
-  DCHECK(HttpUtil::IsValidHeaderName(key.as_string()));
-  // TODO(ricea): Revert this. See crbug.com/627398.
-  CHECK(HttpUtil::IsValidHeaderValue(value.as_string()));
+  DCHECK(HttpUtil::IsValidHeaderName(key));
+  DCHECK(HttpUtil::IsValidHeaderValue(value));
   HeaderVector::iterator it = FindHeader(key);
   if (it == headers_.end())
     headers_.push_back(HeaderKeyValuePair(key, value));
@@ -189,14 +189,16 @@ std::unique_ptr<base::Value> HttpRequestHeaders::NetLogCallback(
     const std::string* request_line,
     NetLogCaptureMode capture_mode) const {
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->SetString("line", *request_line);
+  dict->SetString("line", EscapeNonASCII(*request_line));
   base::ListValue* headers = new base::ListValue();
-  for (HeaderVector::const_iterator it = headers_.begin();
-       it != headers_.end(); ++it) {
+  for (HeaderVector::const_iterator it = headers_.begin(); it != headers_.end();
+       ++it) {
     std::string log_value =
         ElideHeaderValueForNetLog(capture_mode, it->key, it->value);
-    headers->AppendString(
-        base::StringPrintf("%s: %s", it->key.c_str(), log_value.c_str()));
+    std::string escaped_name = EscapeNonASCII(it->key);
+    std::string escaped_value = EscapeNonASCII(log_value);
+    headers->AppendString(base::StringPrintf("%s: %s", escaped_name.c_str(),
+                                             escaped_value.c_str()));
   }
   dict->Set("headers", headers);
   return std::move(dict);

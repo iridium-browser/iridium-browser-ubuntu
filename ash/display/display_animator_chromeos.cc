@@ -4,10 +4,10 @@
 
 #include "ash/display/display_animator_chromeos.h"
 
-#include "ash/common/shell_window_ids.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "base/bind.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "ui/aura/window.h"
@@ -32,9 +32,9 @@ class CallbackRunningObserver {
       : completed_counter_(0), animation_aborted_(false), callback_(callback) {}
 
   void AddNewAnimator(ui::LayerAnimator* animator) {
-    Observer* observer = new Observer(animator, this);
-    animator->AddObserver(observer);
-    observer_list_.push_back(observer);
+    auto observer = base::MakeUnique<Observer>(animator, this);
+    animator->AddObserver(observer.get());
+    observer_list_.push_back(std::move(observer));
   }
 
  private:
@@ -84,7 +84,7 @@ class CallbackRunningObserver {
 
   size_t completed_counter_;
   bool animation_aborted_;
-  ScopedVector<Observer> observer_list_;
+  std::vector<std::unique_ptr<Observer>> observer_list_;
   base::Closure callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CallbackRunningObserver);
@@ -110,13 +110,14 @@ void DisplayAnimatorChromeOS::StartFadeOutAnimation(base::Closure callback) {
   // safety.  These layers remain to hide root windows and will be deleted
   // after the animation of OnDisplayModeChanged().
   for (aura::Window* root_window : Shell::GetInstance()->GetAllRootWindows()) {
-    ui::Layer* hiding_layer = new ui::Layer(ui::LAYER_SOLID_COLOR);
+    std::unique_ptr<ui::Layer> hiding_layer =
+        base::MakeUnique<ui::Layer>(ui::LAYER_SOLID_COLOR);
     hiding_layer->SetColor(SK_ColorBLACK);
     hiding_layer->SetBounds(root_window->bounds());
     ui::Layer* parent = ash::Shell::GetContainer(
                             root_window, ash::kShellWindowId_OverlayContainer)
                             ->layer();
-    parent->Add(hiding_layer);
+    parent->Add(hiding_layer.get());
 
     hiding_layer->SetOpacity(0.0);
 
@@ -126,7 +127,7 @@ void DisplayAnimatorChromeOS::StartFadeOutAnimation(base::Closure callback) {
     observer->AddNewAnimator(hiding_layer->GetAnimator());
     hiding_layer->SetOpacity(1.0f);
     hiding_layer->SetVisible(true);
-    hiding_layers_[root_window] = hiding_layer;
+    hiding_layers_[root_window] = std::move(hiding_layer);
   }
 
   // In case that OnDisplayModeChanged() isn't called or its animator is
@@ -148,7 +149,7 @@ void DisplayAnimatorChromeOS::StartFadeInAnimation() {
                  weak_ptr_factory_.GetWeakPtr()));
 
   // Ensure that layers are not animating.
-  for (std::map<aura::Window*, ui::Layer*>::value_type& e : hiding_layers_) {
+  for (auto& e : hiding_layers_) {
     ui::LayerAnimator* animator = e.second->GetAnimator();
     if (animator->is_animating())
       animator->StopAnimating();
@@ -172,9 +173,9 @@ void DisplayAnimatorChromeOS::StartFadeInAnimation() {
       parent->Add(hiding_layer);
       hiding_layer->SetOpacity(1.0f);
       hiding_layer->SetVisible(true);
-      hiding_layers_[root_window] = hiding_layer;
+      hiding_layers_[root_window] = base::WrapUnique(hiding_layer);
     } else {
-      hiding_layer = hiding_layers_[root_window];
+      hiding_layer = hiding_layers_[root_window].get();
       if (hiding_layer->bounds() != root_window->bounds())
         hiding_layer->SetBounds(root_window->bounds());
     }
@@ -189,14 +190,14 @@ void DisplayAnimatorChromeOS::StartFadeInAnimation() {
 }
 
 void DisplayAnimatorChromeOS::OnDisplayModeChanged(
-    const ui::DisplayConfigurator::DisplayStateList& displays) {
+    const display::DisplayConfigurator::DisplayStateList& displays) {
   if (!hiding_layers_.empty())
     StartFadeInAnimation();
 }
 
 void DisplayAnimatorChromeOS::OnDisplayModeChangeFailed(
-    const ui::DisplayConfigurator::DisplayStateList& displays,
-    ui::MultipleDisplayState failed_new_state) {
+    const display::DisplayConfigurator::DisplayStateList& displays,
+    display::MultipleDisplayState failed_new_state) {
   if (!hiding_layers_.empty())
     StartFadeInAnimation();
 }
@@ -206,8 +207,6 @@ void DisplayAnimatorChromeOS::ClearHidingLayers() {
     timer_->Stop();
     timer_.reset();
   }
-  base::STLDeleteContainerPairSecondPointers(hiding_layers_.begin(),
-                                             hiding_layers_.end());
   hiding_layers_.clear();
 }
 

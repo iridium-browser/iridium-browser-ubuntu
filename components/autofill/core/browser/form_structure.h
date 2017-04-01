@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -14,7 +15,6 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "components/autofill/core/browser/autofill_field.h"
@@ -22,8 +22,6 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "url/gurl.h"
-
-class XmlWriter;
 
 enum UploadRequired {
   UPLOAD_NOT_REQUIRED,
@@ -35,12 +33,8 @@ namespace base {
 class TimeTicks;
 }
 
-namespace buzz {
-class XmlElement;
-}
-
 namespace rappor {
-class RapporService;
+class RapporServiceImpl;
 }
 
 namespace autofill {
@@ -81,7 +75,7 @@ class FormStructure {
   // |rappor_service| may be null.
   static void ParseQueryResponse(std::string response,
                                  const std::vector<FormStructure*>& forms,
-                                 rappor::RapporService* rappor_service);
+                                 rappor::RapporServiceImpl* rappor_service);
 
   // Returns predictions using the details from the given |form_structures| and
   // their fields' predicted types.
@@ -91,9 +85,8 @@ class FormStructure {
   // Returns whether sending autofill field metadata to the server is enabled.
   static bool IsAutofillFieldMetadataEnabled();
 
-  // The unique signature for this form, composed of the target url domain,
-  // the form name, and the form field names in a 64-bit hash.
-  std::string FormSignature() const;
+  // Return the form signature as string.
+  std::string FormSignatureAsStr() const;
 
   // Runs a quick heuristic to rule out forms that are obviously not
   // auto-fillable, like google/yahoo/msn search, etc.
@@ -136,7 +129,7 @@ class FormStructure {
   void LogQualityMetrics(const base::TimeTicks& load_time,
                          const base::TimeTicks& interaction_time,
                          const base::TimeTicks& submission_time,
-                         rappor::RapporService* rappor_service,
+                         rappor::RapporServiceImpl* rappor_service,
                          bool did_show_suggestions,
                          bool observed_submission) const;
 
@@ -195,10 +188,10 @@ class FormStructure {
   size_t autofill_count() const { return autofill_count_; }
 
   // Used for iterating over the fields.
-  std::vector<AutofillField*>::const_iterator begin() const {
+  std::vector<std::unique_ptr<AutofillField>>::const_iterator begin() const {
     return fields_.begin();
   }
-  std::vector<AutofillField*>::const_iterator end() const {
+  std::vector<std::unique_ptr<AutofillField>>::const_iterator end() const {
     return fields_.end();
   }
 
@@ -221,6 +214,8 @@ class FormStructure {
 
   bool all_fields_are_passwords() const { return all_fields_are_passwords_; }
 
+  FormSignature form_signature() const { return form_signature_; }
+
   // Returns a FormData containing the data this form structure knows about.
   FormData ToFormData() const;
 
@@ -239,11 +234,6 @@ class FormStructure {
 
   // Encodes information about this form and its fields into |upload|.
   void EncodeFormForUpload(autofill::AutofillUploadContents* upload) const;
-
-  // 64-bit hash of the string - used in FormSignature and unit-tests.
-  static uint64_t Hash64Bit(const std::string& str);
-
-  uint64_t FormSignature64Bit() const;
 
   // Returns true if the form has no fields, or too many.
   bool IsMalformed() const;
@@ -284,16 +274,11 @@ class FormStructure {
   size_t autofill_count_;
 
   // A vector of all the input fields in the form.
-  ScopedVector<AutofillField> fields_;
+  std::vector<std::unique_ptr<AutofillField>> fields_;
 
   // The number of fields that are part of the form signature and that are
   // included in queries to the Autofill server.
   size_t active_field_count_;
-
-  // The names of the form input elements, that are part of the form signature.
-  // The string starts with "&" and the names are also separated by the "&"
-  // character. E.g.: "&form_input1_name&form_input2_name&...&form_inputN_name"
-  std::string form_signature_field_names_;
 
   // Whether the server expects us to always upload, never upload, or default
   // to the stored upload rates.
@@ -323,6 +308,10 @@ class FormStructure {
 
   // True if all form fields are password fields.
   bool all_fields_are_passwords_;
+
+  // The unique signature for this form, composed of the target url domain,
+  // the form name, and the form field names in a 64-bit hash.
+  FormSignature form_signature_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

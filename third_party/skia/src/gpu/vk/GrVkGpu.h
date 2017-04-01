@@ -8,26 +8,16 @@
 #ifndef GrVkGpu_DEFINED
 #define GrVkGpu_DEFINED
 
-#define USE_SKSL 1
-
 #include "GrGpu.h"
 #include "GrGpuFactory.h"
 #include "vk/GrVkBackendContext.h"
 #include "GrVkCaps.h"
+#include "GrVkCopyManager.h"
 #include "GrVkIndexBuffer.h"
 #include "GrVkMemory.h"
 #include "GrVkResourceProvider.h"
 #include "GrVkVertexBuffer.h"
 #include "GrVkUtil.h"
-
-#if USE_SKSL
-namespace SkSL {
-    class Compiler;
-}
-#else
-#include "shaderc/shaderc.h"
-#endif
-
 #include "vk/GrVkDefines.h"
 
 class GrPipeline;
@@ -42,6 +32,10 @@ class GrVkSecondaryCommandBuffer;
 class GrVkTexture;
 struct GrVkInterface;
 
+namespace SkSL {
+    class Compiler;
+}
+
 class GrVkGpu : public GrGpu {
 public:
     static GrGpu* Create(GrBackendContext backendContext, const GrContextOptions& options,
@@ -49,7 +43,7 @@ public:
 
     ~GrVkGpu() override;
 
-    const GrVkInterface* vkInterface() const { return fBackendContext->fInterface; }
+    const GrVkInterface* vkInterface() const { return fBackendContext->fInterface.get(); }
     const GrVkCaps& vkCaps() const { return *fVkCaps; }
 
     VkDevice device() const { return fDevice; }
@@ -59,7 +53,9 @@ public:
         return fPhysDevMemProps;
     }
 
-    GrVkResourceProvider& resourceProvider() { return fResourceProvider;  }
+    GrVkResourceProvider& resourceProvider() { return fResourceProvider; }
+
+    GrVkPrimaryCommandBuffer* currentCommandBuffer() { return fCurrentCmdBuffer; }
 
     enum SyncQueue {
         kForce_SyncQueue,
@@ -79,10 +75,10 @@ public:
                        const SkIRect& srcRect,
                        const SkIPoint& dstPoint) override;
 
-    void onGetMultisampleSpecs(GrRenderTarget* rt, const GrStencilSettings&,
-                               int* effectiveSampleCnt, SamplePattern*) override;
+    void onQueryMultisampleSpecs(GrRenderTarget* rt, const GrStencilSettings&,
+                                 int* effectiveSampleCnt, SamplePattern*) override;
 
-    bool initCopySurfaceDstDesc(const GrSurface* src, GrSurfaceDesc* desc) const override;
+    bool initDescForDstCopy(const GrRenderTarget* src, GrSurfaceDesc* desc) const override;
 
     void xferBarrier(GrRenderTarget*, GrXferBarrierType) override {}
 
@@ -99,7 +95,6 @@ public:
     void clearStencil(GrRenderTarget* target) override;
 
     GrGpuCommandBuffer* createCommandBuffer(
-            GrRenderTarget* target,
             const GrGpuCommandBuffer::LoadAndStoreInfo& colorInfo,
             const GrGpuCommandBuffer::LoadAndStoreInfo& stencilInfo) override;
 
@@ -118,15 +113,9 @@ public:
                                bool byRegion,
                                VkImageMemoryBarrier* barrier) const;
 
-#if USE_SKSL
     SkSL::Compiler* shaderCompiler() const {
         return fCompiler;
     }
-#else
-    shaderc_compiler_t shadercCompiler() const {
-        return fCompiler;
-    }
-#endif
 
     void onResolveRenderTarget(GrRenderTarget* target) override;
 
@@ -136,7 +125,11 @@ public:
                                       GrVkRenderTarget*,
                                       const SkIRect& bounds);
 
-    void finishDrawTarget() override;
+    void finishOpList() override;
+
+    GrFence SK_WARN_UNUSED_RESULT insertFence() const override;
+    bool waitFence(GrFence, uint64_t timeout) const override;
+    void deleteFence(GrFence) const override;
 
     void generateMipmap(GrVkTexture* tex);
 
@@ -161,7 +154,7 @@ public:
     };
     static const int kHeapCount = kLastHeap + 1;
 
-    GrVkHeap* getHeap(Heap heap) const { return fHeaps[heap]; }
+    GrVkHeap* getHeap(Heap heap) const { return fHeaps[heap].get(); }
 
 private:
     GrVkGpu(GrContext* context, const GrContextOptions& options,
@@ -175,11 +168,13 @@ private:
     GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc, SkBudgeted,
                                          const SkTArray<GrMipLevel>&) override { return NULL; }
 
-    GrTexture* onWrapBackendTexture(const GrBackendTextureDesc&, GrWrapOwnership) override;
+    sk_sp<GrTexture> onWrapBackendTexture(const GrBackendTextureDesc&, GrWrapOwnership) override;
 
-    GrRenderTarget* onWrapBackendRenderTarget(const GrBackendRenderTargetDesc&,
-                                              GrWrapOwnership) override;
-    GrRenderTarget* onWrapBackendTextureAsRenderTarget(const GrBackendTextureDesc&) override { return NULL; }
+    sk_sp<GrRenderTarget> onWrapBackendRenderTarget(const GrBackendRenderTargetDesc&,
+                                                    GrWrapOwnership) override;
+    sk_sp<GrRenderTarget> onWrapBackendTextureAsRenderTarget(const GrBackendTextureDesc&) override {
+        return nullptr;
+    }
 
     GrBuffer* onCreateBuffer(size_t size, GrBufferType type, GrAccessPattern,
                              const void* data) override;
@@ -220,10 +215,10 @@ private:
                            const SkIRect& srcRect,
                            const SkIPoint& dstPoint);
 
-    void copySurfaceAsDraw(GrSurface* dst,
-                           GrSurface* src,
-                           const SkIRect& srcRect,
-                           const SkIPoint& dstPoint);
+    void copySurfaceAsResolve(GrSurface* dst,
+                              GrSurface* src,
+                              const SkIRect& srcRect,
+                              const SkIPoint& dstPoint);
 
     // helpers for onCreateTexture and writeTexturePixels
     bool uploadTexDataLinear(GrVkTexture* tex,
@@ -236,8 +231,13 @@ private:
                               GrPixelConfig dataConfig,
                               const SkTArray<GrMipLevel>&);
 
-    SkAutoTUnref<const GrVkBackendContext> fBackendContext;
-    SkAutoTUnref<GrVkCaps>                 fVkCaps;
+    void resolveImage(GrVkRenderTarget* dst,
+                      GrVkRenderTarget* src,
+                      const SkIRect& srcRect,
+                      const SkIPoint& dstPoint);
+
+    sk_sp<const GrVkBackendContext> fBackendContext;
+    sk_sp<GrVkCaps>                 fVkCaps;
 
     // These Vulkan objects are provided by the client, and also stored in fBackendContext.
     // They're copied here for convenient access.
@@ -250,20 +250,18 @@ private:
     GrVkPrimaryCommandBuffer*              fCurrentCmdBuffer;
     VkPhysicalDeviceMemoryProperties       fPhysDevMemProps;
 
-    SkAutoTDelete<GrVkHeap>                fHeaps[kHeapCount];
+    std::unique_ptr<GrVkHeap>              fHeaps[kHeapCount];
+
+    GrVkCopyManager                        fCopyManager;
 
 #ifdef SK_ENABLE_VK_LAYERS
     // For reporting validation layer errors
     VkDebugReportCallbackEXT               fCallback;
 #endif
 
-#if USE_SKSL
+    // compiler used for compiling sksl into spirv. We only want to create the compiler once since
+    // there is significant overhead to the first compile of any compiler.
     SkSL::Compiler* fCompiler;
-#else
-    // Shaderc compiler used for compiling glsl in spirv. We only want to create the compiler once
-    // since there is significant overhead to the first compile of any compiler.
-    shaderc_compiler_t fCompiler;
-#endif
 
     typedef GrGpu INHERITED;
 };

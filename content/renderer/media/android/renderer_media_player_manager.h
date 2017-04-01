@@ -16,14 +16,8 @@
 #include "url/gurl.h"
 
 namespace blink {
-class WebFrame;
+enum class WebRemotePlaybackAvailability;
 }
-
-namespace gfx {
-class RectF;
-}
-
-struct MediaPlayerHostMsg_Initialize_Params;
 
 namespace content {
 class WebMediaPlayerAndroid;
@@ -46,11 +40,9 @@ class RendererMediaPlayerManager :
                   int player_id,
                   const GURL& url,
                   const GURL& first_party_for_cookies,
-                  int demuxer_client_id,
                   const GURL& frame_url,
                   bool allow_credentials,
-                  int delegate_id,
-                  int media_session_id) override;
+                  int delegate_id) override;
 
   // Starts the player.
   void Start(int player_id) override;
@@ -83,25 +75,11 @@ class RendererMediaPlayerManager :
   // Requests control of remote playback
   void RequestRemotePlaybackControl(int player_id) override;
 
+  // Requests stopping remote playback
+  void RequestRemotePlaybackStop(int player_id) override;
+
   // Requests the player to enter fullscreen.
   void EnterFullscreen(int player_id);
-
-  // Requests the player with |player_id| to use the CDM with |cdm_id|.
-  // Does nothing if |cdm_id| is kInvalidCdmId.
-  // TODO(xhwang): Update this when we implement setCdm(0).
-  void SetCdm(int player_id, int cdm_id);
-
-#if defined(VIDEO_HOLE)
-  // Requests an external surface for out-of-band compositing.
-  void RequestExternalSurface(int player_id, const gfx::RectF& geometry);
-
-  // RenderFrameObserver overrides.
-  void DidCommitCompositorFrame() override;
-
-  // Returns true if a media player should use video-overlay for the embedded
-  // encrypted video.
-  bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo();
-#endif  // defined(VIDEO_HOLE)
 
   // Registers and unregisters a WebMediaPlayerAndroid object.
   int RegisterMediaPlayer(media::RendererMediaPlayerInterface* player) override;
@@ -109,11 +87,6 @@ class RendererMediaPlayerManager :
 
   // Gets the pointer to WebMediaPlayerAndroid given the |player_id|.
   media::RendererMediaPlayerInterface* GetMediaPlayer(int player_id);
-
-#if defined(VIDEO_HOLE)
-  // Gets the list of media players with video geometry changes.
-  void RetrieveGeometryChanges(std::map<int, gfx::RectF>* changes);
-#endif  // defined(VIDEO_HOLE)
 
  private:
   // RenderFrameObserver implementation.
@@ -135,17 +108,18 @@ class RendererMediaPlayerManager :
   void OnTimeUpdate(int player_id,
                     base::TimeDelta current_timestamp,
                     base::TimeTicks current_time_ticks);
-  void OnWaitingForDecryptionKey(int player_id);
   void OnMediaPlayerReleased(int player_id);
   void OnConnectedToRemoteDevice(int player_id,
       const std::string& remote_playback_message);
   void OnDisconnectedFromRemoteDevice(int player_id);
   void OnCancelledRemotePlaybackRequest(int player_id);
+  void OnRemotePlaybackStarted(int player_id);
   void OnDidExitFullscreen(int player_id);
   void OnDidEnterFullscreen(int player_id);
   void OnPlayerPlay(int player_id);
   void OnPlayerPause(int player_id);
-  void OnRemoteRouteAvailabilityChanged(int player_id, bool routes_available);
+  void OnRemoteRouteAvailabilityChanged(
+      int player_id, blink::WebRemotePlaybackAvailability availability);
 
   // Info for all available WebMediaPlayerAndroid on a page; kept so that
   // we can enumerate them to send updates about tab focus and visibility.

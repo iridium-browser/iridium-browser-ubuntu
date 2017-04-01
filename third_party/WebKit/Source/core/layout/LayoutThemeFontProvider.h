@@ -30,21 +30,27 @@
 #include "core/CoreExport.h"
 #include "platform/fonts/FontTraits.h"
 #include "wtf/Allocator.h"
+#include "wtf/text/AtomicString.h"
 
 namespace blink {
 
 class CORE_EXPORT LayoutThemeFontProvider {
-    STATIC_ONLY(LayoutThemeFontProvider);
-public:
-    static void systemFont(CSSValueID systemFontID, FontStyle&, FontWeight&, float& fontSize, AtomicString& fontFamily);
-    static void setDefaultFontSize(int);
+  STATIC_ONLY(LayoutThemeFontProvider);
 
-protected:
-    static const WTF::AtomicString& defaultGUIFont();
+ public:
+  static void systemFont(CSSValueID systemFontID,
+                         FontStyle&,
+                         FontWeight&,
+                         float& fontSize,
+                         AtomicString& fontFamily);
+  static void setDefaultFontSize(int);
 
-    static float s_defaultFontSize;
+ protected:
+  static const WTF::AtomicString& defaultGUIFont();
+
+  static float s_defaultFontSize;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutThemeFontProvider_h
+#endif  // LayoutThemeFontProvider_h

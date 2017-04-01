@@ -5,11 +5,12 @@
 package org.chromium.chrome.browser;
 
 import android.graphics.Bitmap;
-import android.test.suitebuilder.annotation.MediumTest;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.MediumTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -23,6 +24,7 @@ import org.chromium.content_public.browser.NavigationHistory;
 /**
  * Tests for the navigation popup.
  */
+@RetryOnFailure
 public class NavigationPopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private static final int INVALID_NAVIGATION_INDEX = -1;
@@ -122,15 +124,7 @@ public class NavigationPopupTest extends ChromeActivityTestCaseBase<ChromeActivi
         }
 
         @Override
-        public void reloadToRefreshContent(boolean checkForRepost) {
-        }
-
-        @Override
         public void reloadBypassingCache(boolean checkForRepost) {
-        }
-
-        @Override
-        public void reloadDisableLoFi(boolean checkForRepost) {
         }
 
         @Override
@@ -219,11 +213,19 @@ public class NavigationPopupTest extends ChromeActivityTestCaseBase<ChromeActivi
         @Override
         public void copyStateFromAndPrune(NavigationController source, boolean replaceEntry) {
         }
+
+        @Override
+        public String getEntryExtraData(int index, String key) {
+            return null;
+        }
+
+        @Override
+        public void setEntryExtraData(int index, String key, String value) {}
     }
 
     @MediumTest
     @Feature({"Navigation"})
-    public void testFaviconFetching() throws InterruptedException {
+    public void testFaviconFetching() {
         final TestNavigationController controller = new TestNavigationController();
         final NavigationPopup popup = new NavigationPopup(
                 mProfile, getActivity(), controller, true);

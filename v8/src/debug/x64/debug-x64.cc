@@ -4,10 +4,11 @@
 
 #if V8_TARGET_ARCH_X64
 
-#include "src/assembler.h"
-#include "src/codegen.h"
 #include "src/debug/debug.h"
 
+#include "src/assembler.h"
+#include "src/codegen.h"
+#include "src/debug/liveedit.h"
 
 namespace v8 {
 namespace internal {
@@ -128,7 +129,7 @@ void DebugCodegen::GenerateFrameDropperLiveEdit(MacroAssembler* masm) {
   __ popq(rbp);
 
   ParameterCount dummy(0);
-  __ FloodFunctionIfStepping(rdi, no_reg, dummy, dummy);
+  __ CheckDebugHook(rdi, no_reg, dummy, dummy);
 
   // Load context from the function.
   __ movp(rsi, FieldOperand(rdi, JSFunction::kContextOffset));

@@ -7,13 +7,14 @@ found in the LICENSE file.
 
 <link rel="import" href="/tracing/base/base.html">
 <link rel="import" href="/tracing/base/iteration_helpers.html">
+<link rel="import" href="/tracing/base/range.html">
 <link rel="import" href="/tracing/base/statistics.html">
+<link rel="import" href="/tracing/base/unit.html">
 <link rel="import" href="/tracing/model/event_set.html">
 <link rel="import" href="/tracing/ui/analysis/analysis_link.html">
 <link rel="import" href="/tracing/ui/analysis/multi_event_summary.html">
 <link rel="import" href="/tracing/ui/base/table.html">
 <link rel="import" href="/tracing/value/ui/scalar_span.html">
-<link rel="import" href="/tracing/value/unit.html">
 
 <dom-module id='tr-ui-a-multi-event-summary-table'>
   <template>
@@ -24,6 +25,7 @@ found in the LICENSE file.
     #table {
       flex: 1 1 auto;
       align-self: stretch;
+      font-size: 12px;
     }
     </style>
     <tr-ui-b-table id="table">
@@ -82,10 +84,10 @@ Polymer({
         title: 'Wall Duration',
         value: function(row) {
           return tr.v.ui.createScalarSpan(row.duration, {
-            unit: tr.v.Unit.byName.timeDurationInMs,
-            total: row.totalsRow ? undefined : maxValues.duration,
+            unit: tr.b.Unit.byName.timeDurationInMs,
+            customContextRange: row.totalsRow ? undefined :
+                tr.b.Range.fromExplicitRange(0, maxValues.duration),
             ownerDocument: ownerDocument,
-            rightAlign: true
           });
         },
         width: '<upated further down>',
@@ -100,10 +102,10 @@ Polymer({
         title: 'CPU Duration',
         value: function(row) {
           return tr.v.ui.createScalarSpan(row.cpuDuration, {
-            unit: tr.v.Unit.byName.timeDurationInMs,
-            total: row.totalsRow ? undefined : maxValues.cpuDuration,
+            unit: tr.b.Unit.byName.timeDurationInMs,
+            customContextRange: row.totalsRow ? undefined :
+                tr.b.Range.fromExplicitRange(0, maxValues.cpuDuration),
             ownerDocument: ownerDocument,
-            rightAlign: true
           });
         },
         width: '<upated further down>',
@@ -118,10 +120,10 @@ Polymer({
         title: 'Self time',
         value: function(row) {
           return tr.v.ui.createScalarSpan(row.selfTime, {
-            unit: tr.v.Unit.byName.timeDurationInMs,
-            total: row.totalsRow ? undefined : maxValues.selfTime,
+            unit: tr.b.Unit.byName.timeDurationInMs,
+            customContextRange: row.totalsRow ? undefined :
+                tr.b.Range.fromExplicitRange(0, maxValues.selfTime),
             ownerDocument: ownerDocument,
-            rightAlign: true
           });
         },
         width: '<upated further down>',
@@ -136,10 +138,10 @@ Polymer({
         title: 'CPU Self Time',
         value: function(row) {
           return tr.v.ui.createScalarSpan(row.cpuSelfTime, {
-            unit: tr.v.Unit.byName.timeDurationInMs,
-            total: row.totalsRow ? undefined : maxValues.cpuSelfTime,
+            unit: tr.b.Unit.byName.timeDurationInMs,
+            customContextRange: row.totalsRow ? undefined :
+                tr.b.Range.fromExplicitRange(0, maxValues.cpuSelfTime),
             ownerDocument: ownerDocument,
-            rightAlign: true
           });
         },
         width: '<upated further down>',
@@ -155,10 +157,10 @@ Polymer({
         value: function(row) {
           var totalDuration = hasCpuData ? row.cpuDuration : row.duration;
           return tr.v.ui.createScalarSpan(totalDuration / row.numEvents, {
-            unit: tr.v.Unit.byName.timeDurationInMs,
-            total: row.totalsRow ? undefined : maxValues.duration,
+            unit: tr.b.Unit.byName.timeDurationInMs,
+            customContextRange: row.totalsRow ? undefined :
+                tr.b.Range.fromExplicitRange(0, maxValues.duration),
             ownerDocument: ownerDocument,
-            rightAlign: true
           });
         },
         width: '<upated further down>',
@@ -200,7 +202,7 @@ Polymer({
       alertsColumnIndex = columns.length - 1;
     }
     var colWidthPercentage;
-    if (columns.length == 1)
+    if (columns.length === 1)
       colWidthPercentage = '100%';
     else
       colWidthPercentage = (100 / (columns.length - 1)).toFixed(3) + '%';
@@ -293,15 +295,12 @@ Polymer({
 
     var allEvents = new tr.model.EventSet();
     var rows = [];
-    tr.b.iterItems(
-        eventsByTitle,
-        function(title, eventsOfSingleTitle) {
-          for (var event of allEvents)
-            allEvents.push(event);
-          var row = new tr.ui.analysis.MultiEventSummary(
-            title, eventsOfSingleTitle);
-          rows.push(row);
-        });
+    for (var [title, eventsOfSingleTitle] of Object.entries(eventsByTitle)) {
+      for (var event of allEvents) allEvents.push(event);
+      var row = new tr.ui.analysis.MultiEventSummary(
+          title, eventsOfSingleTitle);
+      rows.push(row);
+    }
 
     this.updateTableColumns_(rows);
     this.$.table.tableRows = rows;

@@ -66,11 +66,6 @@ class ComponentLoader {
   // extension with the same ID.
   std::string AddOrReplace(const base::FilePath& path);
 
-  // Returns the extension ID of a component extension specified by resource
-  // id of its manifest file.
-  std::string GetExtensionID(int manifest_resource_id,
-                             const base::FilePath& root_directory);
-
   // Returns true if an extension with the specified id has been added.
   bool Exists(const std::string& id) const;
 
@@ -92,17 +87,19 @@ class ComponentLoader {
   // Similar to above but adds the default component extensions for kiosk mode.
   void AddDefaultComponentExtensionsForKioskMode(bool skip_session_components);
 
-  // Clear the list of registered extensions.
-  void ClearAllRegistered();
-
   // Reloads a registered component extension.
   void Reload(const std::string& extension_id);
 
 #if defined(OS_CHROMEOS)
-  // Calls |done_cb|, if not a null callback, on success.
-  // NOTE: |done_cb| is not called if the component loader is shut down
-  // during loading.
-  void AddChromeVoxExtension(const base::Closure& done_cb);
+  // Add a component extension from a specific directory. Assumes that the
+  // extension uses a different manifest file when this is a guest session
+  // and that the manifest file lives in |root_directory|. Calls |done_cb|
+  // on success, unless the component loader is shut down during loading.
+  void AddComponentFromDir(
+      const base::FilePath& root_directory,
+      const char* extension_id,
+      const base::Closure& done_cb);
+
   void AddChromeOsSpeechSynthesisExtension();
 #endif
 
@@ -115,28 +112,36 @@ class ComponentLoader {
 
   // Information about a registered component extension.
   struct ComponentExtensionInfo {
-    ComponentExtensionInfo(const base::DictionaryValue* manifest,
-                           const base::FilePath& root_directory);
+    ComponentExtensionInfo(
+        std::unique_ptr<base::DictionaryValue> manifest_param,
+        const base::FilePath& root_directory);
+    ~ComponentExtensionInfo();
+
+    ComponentExtensionInfo(ComponentExtensionInfo&& other);
+    ComponentExtensionInfo& operator=(ComponentExtensionInfo&& other);
 
     // The parsed contents of the extensions's manifest file.
-    const base::DictionaryValue* manifest;
+    std::unique_ptr<base::DictionaryValue> manifest;
 
     // Directory where the extension is stored.
     base::FilePath root_directory;
 
     // The component extension's ID.
     std::string extension_id;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(ComponentExtensionInfo);
   };
 
   // Parses the given JSON manifest. Returns nullptr if it cannot be parsed or
   // if the result is not a DictionaryValue.
-  base::DictionaryValue* ParseManifest(
+  std::unique_ptr<base::DictionaryValue> ParseManifest(
       base::StringPiece manifest_contents) const;
 
   std::string Add(const base::StringPiece& manifest_contents,
                   const base::FilePath& root_directory,
                   bool skip_whitelist);
-  std::string Add(const base::DictionaryValue* parsed_manifest,
+  std::string Add(std::unique_ptr<base::DictionaryValue> parsed_manifest,
                   const base::FilePath& root_directory,
                   bool skip_whitelist);
 
@@ -175,18 +180,10 @@ class ComponentLoader {
   void EnableFileSystemInGuestMode(const std::string& id);
 
 #if defined(OS_CHROMEOS)
-  // Adds an extension where the manifest file is stored on the file system.
-  // |manifest_filename| can be relative to the |root_directory|.
-  void AddWithManifestFile(
-      const base::FilePath::CharType* manifest_filename,
-      const base::FilePath& root_directory,
-      const char* extension_id,
-      const base::Closure& done_cb);
-
-  // Used as a reply callback by |AddWithManifestFile|.
+  // Used as a reply callback by |AddComponentFromDir|.
   // Called with a |root_directory| and parsed |manifest| and invokes
   // |done_cb| after adding the extension.
-  void FinishAddWithManifestFile(
+  void FinishAddComponentFromDir(
       const base::FilePath& root_directory,
       const char* extension_id,
       const base::Closure& done_cb,

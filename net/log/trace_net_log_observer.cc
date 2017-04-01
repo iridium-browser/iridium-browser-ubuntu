@@ -14,7 +14,8 @@
 #include "base/logging.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_entry.h"
+#include "net/log/net_log_event_type.h"
 
 namespace net {
 
@@ -55,10 +56,10 @@ TraceNetLogObserver::~TraceNetLogObserver() {
   DCHECK(!net_log());
 }
 
-void TraceNetLogObserver::OnAddEntry(const NetLog::Entry& entry) {
+void TraceNetLogObserver::OnAddEntry(const NetLogEntry& entry) {
   std::unique_ptr<base::Value> params(entry.ParametersToValue());
   switch (entry.phase()) {
-    case NetLog::PHASE_BEGIN:
+    case NetLogEventPhase::BEGIN:
       TRACE_EVENT_NESTABLE_ASYNC_BEGIN2(
           kNetLogTracingCategory, NetLog::EventTypeToString(entry.type()),
           entry.source().id, "source_type",
@@ -66,7 +67,7 @@ void TraceNetLogObserver::OnAddEntry(const NetLog::Entry& entry) {
           std::unique_ptr<base::trace_event::ConvertableToTraceFormat>(
               new TracedValue(std::move(params))));
       break;
-    case NetLog::PHASE_END:
+    case NetLogEventPhase::END:
       TRACE_EVENT_NESTABLE_ASYNC_END2(
           kNetLogTracingCategory, NetLog::EventTypeToString(entry.type()),
           entry.source().id, "source_type",
@@ -74,7 +75,7 @@ void TraceNetLogObserver::OnAddEntry(const NetLog::Entry& entry) {
           std::unique_ptr<base::trace_event::ConvertableToTraceFormat>(
               new TracedValue(std::move(params))));
       break;
-    case NetLog::PHASE_NONE:
+    case NetLogEventPhase::NONE:
       TRACE_EVENT_NESTABLE_ASYNC_INSTANT2(
           kNetLogTracingCategory, NetLog::EventTypeToString(entry.type()),
           entry.source().id, "source_type",
@@ -89,6 +90,10 @@ void TraceNetLogObserver::WatchForTraceStart(NetLog* netlog) {
   DCHECK(!net_log_to_watch_);
   DCHECK(!net_log());
   net_log_to_watch_ = netlog;
+  // Tracing can start before the observer is even created, for instance for
+  // startup tracing.
+  if (base::trace_event::TraceLog::GetInstance()->IsEnabled())
+    OnTraceLogEnabled();
   base::trace_event::TraceLog::GetInstance()->AddEnabledStateObserver(this);
 }
 
@@ -96,12 +101,21 @@ void TraceNetLogObserver::StopWatchForTraceStart() {
   // Should only stop if is currently watching.
   DCHECK(net_log_to_watch_);
   base::trace_event::TraceLog::GetInstance()->RemoveEnabledStateObserver(this);
+  // net_log() != nullptr iff NetLog::DeprecatedAddObserver() has been called.
+  // This implies that if the netlog category wasn't enabled, then
+  // NetLog::DeprecatedRemoveObserver() will not get called, and there won't be
+  // a crash in NetLog::DeprecatedRemoveObserver().
   if (net_log())
     net_log()->DeprecatedRemoveObserver(this);
-  net_log_to_watch_ = NULL;
+  net_log_to_watch_ = nullptr;
 }
 
 void TraceNetLogObserver::OnTraceLogEnabled() {
+  bool enabled;
+  TRACE_EVENT_CATEGORY_GROUP_ENABLED(kNetLogTracingCategory, &enabled);
+  if (!enabled)
+    return;
+
   net_log_to_watch_->DeprecatedAddObserver(this, NetLogCaptureMode::Default());
 }
 

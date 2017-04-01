@@ -519,7 +519,7 @@ TEST(ParseInspectorMessage, EventNoParams) {
       "{\"method\":\"method\"}", 0, &type, &event, &response));
   ASSERT_EQ(internal::kEventMessageType, type);
   ASSERT_STREQ("method", event.method.c_str());
-  ASSERT_TRUE(event.params->IsType(base::Value::TYPE_DICTIONARY));
+  ASSERT_TRUE(event.params->IsType(base::Value::Type::DICTIONARY));
 }
 
 TEST(ParseInspectorMessage, EventWithParams) {
@@ -998,7 +998,7 @@ class MockDevToolsEventListener : public DevToolsEventListener {
 
 std::unique_ptr<SyncWebSocket> CreateMockSyncWebSocket6(
     std::list<std::string>* messages) {
-  return base::WrapUnique(new MockSyncWebSocket6(messages));
+  return base::MakeUnique<MockSyncWebSocket6>(messages);
 }
 
 }  // namespace

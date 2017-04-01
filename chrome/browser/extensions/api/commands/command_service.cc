@@ -111,7 +111,7 @@ void MergeSuggestedKeyPrefs(
                                             &current_prefs)) {
     std::unique_ptr<base::DictionaryValue> new_prefs(current_prefs->DeepCopy());
     new_prefs->MergeDictionary(suggested_key_prefs.get());
-    suggested_key_prefs.reset(new_prefs.release());
+    suggested_key_prefs = std::move(new_prefs);
   }
 
   extension_prefs->UpdateExtensionPref(extension_id,
@@ -294,11 +294,10 @@ bool CommandService::AddKeybindingPref(
                          std::move(suggested_key_prefs));
 
   // Fetch the newly-updated command, and notify the observers.
-  FOR_EACH_OBSERVER(
-      Observer,
-      observers_,
-      OnExtensionCommandAdded(extension_id,
-                              FindCommandByName(extension_id, command_name)));
+  for (auto& observer : observers_) {
+    observer.OnExtensionCommandAdded(
+        extension_id, FindCommandByName(extension_id, command_name));
+  }
 
   // TODO(devlin): Deprecate this notification in favor of the observers.
   std::pair<const std::string, const std::string> details =
@@ -849,10 +848,8 @@ void CommandService::RemoveKeybindingPrefs(const std::string& extension_id,
   }
 
   for (const Command& removed_command : removed_commands) {
-    FOR_EACH_OBSERVER(
-        Observer,
-        observers_,
-        OnExtensionCommandRemoved(extension_id, removed_command));
+    for (auto& observer : observers_)
+      observer.OnExtensionCommandRemoved(extension_id, removed_command);
   }
 }
 

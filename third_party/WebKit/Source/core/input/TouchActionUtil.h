@@ -10,13 +10,12 @@
 
 namespace blink {
 
-class LayoutObject;
 class Node;
 
 namespace TouchActionUtil {
 CORE_EXPORT TouchAction computeEffectiveTouchAction(const Node&);
-} // namespace TouchActionUtil
+}  // namespace TouchActionUtil
 
-} // namespace blink
+}  // namespace blink
 
-#endif // TouchActionUtil_h
+#endif  // TouchActionUtil_h

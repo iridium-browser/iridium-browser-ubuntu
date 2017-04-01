@@ -13,6 +13,7 @@
 #include "ipc/ipc_param_traits.h"
 #include "ipc/param_traits_macros.h"
 #include "third_party/WebKit/public/web/WebAXEnums.h"
+#include "ui/accessibility/ax_action_data.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_relative_bounds.h"
 #include "ui/accessibility/ax_tree_update.h"
@@ -25,6 +26,20 @@
 
 IPC_ENUM_TRAITS_MAX_VALUE(content::AXContentIntAttribute,
                           content::AX_CONTENT_INT_ATTRIBUTE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(ui::AXAction, ui::AX_ACTION_LAST)
+
+IPC_STRUCT_TRAITS_BEGIN(ui::AXActionData)
+  IPC_STRUCT_TRAITS_MEMBER(action)
+  IPC_STRUCT_TRAITS_MEMBER(target_node_id)
+  IPC_STRUCT_TRAITS_MEMBER(flags)
+  IPC_STRUCT_TRAITS_MEMBER(anchor_node_id)
+  IPC_STRUCT_TRAITS_MEMBER(anchor_offset)
+  IPC_STRUCT_TRAITS_MEMBER(focus_node_id)
+  IPC_STRUCT_TRAITS_MEMBER(focus_offset)
+  IPC_STRUCT_TRAITS_MEMBER(target_rect)
+  IPC_STRUCT_TRAITS_MEMBER(target_point)
+  IPC_STRUCT_TRAITS_MEMBER(value)
+IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::AXContentNodeData)
   IPC_STRUCT_TRAITS_MEMBER(id)
@@ -81,6 +96,9 @@ IPC_STRUCT_BEGIN(AccessibilityHostMsg_EventParams)
 
   // ID of the node that the event applies to.
   IPC_STRUCT_MEMBER(int, id)
+
+  // The source of this event.
+  IPC_STRUCT_MEMBER(ui::AXEventFrom, event_from)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(AccessibilityHostMsg_LocationChangeParams)
@@ -113,55 +131,10 @@ IPC_STRUCT_END()
 
 // Messages sent from the browser to the renderer.
 
-// Relay a request from assistive technology to set focus to a given node.
-IPC_MESSAGE_ROUTED1(AccessibilityMsg_SetFocus,
-                    int /* object id */)
-
-// Relay a request from assistive technology to perform the default action
-// on a given node.
-IPC_MESSAGE_ROUTED1(AccessibilityMsg_DoDefaultAction,
-                    int /* object id */)
-
-// Relay a request from assistive technology to make a given object
-// visible by scrolling as many scrollable containers as possible.
-// In addition, if it's not possible to make the entire object visible,
-// scroll so that the |subfocus| rect is visible at least. The subfocus
-// rect is in local coordinates of the object itself.
-IPC_MESSAGE_ROUTED2(AccessibilityMsg_ScrollToMakeVisible,
-                    int /* object id */,
-                    gfx::Rect /* subfocus */)
-
-// Relay a request from assistive technology to show the context menu for a
-// given object.
-IPC_MESSAGE_ROUTED1(AccessibilityMsg_ShowContextMenu, int /* object id */)
-
-// Relay a request from assistive technology to move a given object
-// to a specific location, in the WebContents area coordinate space, i.e.
-// (0, 0) is the top-left corner of the WebContents.
-IPC_MESSAGE_ROUTED2(AccessibilityMsg_ScrollToPoint,
-                    int /* object id */,
-                    gfx::Point /* new location */)
-
-// Relay a request from assistive technology to set the scroll offset
-// of an accessibility object that's a scroll container, to a specific
-// offset.
-IPC_MESSAGE_ROUTED2(AccessibilityMsg_SetScrollOffset,
-                    int /* object id */,
-                    gfx::Point /* new offset */)
-
-// Relay a request from assistive technology to set the cursor or
-// selection within a document.
-IPC_MESSAGE_ROUTED4(AccessibilityMsg_SetSelection,
-                    int /* New anchor object id */,
-                    int /* New anchor offset */,
-                    int /* New focus object id */,
-                    int /* New focus offset */)
-
-// Relay a request from assistive technology to set the value of an
-// editable text element.
-IPC_MESSAGE_ROUTED2(AccessibilityMsg_SetValue,
-                    int /* object id */,
-                    base::string16 /* Value */)
+// Relay a request from assistive technology to perform an action,
+// such as focusing or clicking on a node.
+IPC_MESSAGE_ROUTED1(AccessibilityMsg_PerformAction,
+                    ui::AXActionData  /* action parameters */)
 
 // Determine the accessibility object under a given point.
 //
@@ -181,8 +154,10 @@ IPC_MESSAGE_ROUTED1(AccessibilityMsg_SetAccessibilityFocus,
                     int /* object id */)
 
 // Tells the render view that a AccessibilityHostMsg_Events
-// message was processed and it can send addition events.
-IPC_MESSAGE_ROUTED0(AccessibilityMsg_Events_ACK)
+// message was processed and it can send additional events. The argument
+// must be the same as the ack_token passed to AccessibilityHostMsg_Events.
+IPC_MESSAGE_ROUTED1(AccessibilityMsg_Events_ACK,
+                    int /* ack_token */)
 
 // Tell the renderer to reset and send a new accessibility tree from
 // scratch because the browser is out of sync. It passes a sequential
@@ -207,15 +182,17 @@ IPC_MESSAGE_ROUTED1(AccessibilityMsg_SnapshotTree,
 // Messages sent from the renderer to the browser.
 
 // Sent to notify the browser about renderer accessibility events.
-// The browser responds with a AccessibilityMsg_Events_ACK.
+// The browser responds with a AccessibilityMsg_Events_ACK with the same
+// ack_token.
 // The second parameter, reset_token, is set if this IPC was sent in response
 // to a reset request from the browser. When the browser requests a reset,
 // it ignores incoming IPCs until it sees one with the correct reset token.
 // Any other time, it ignores IPCs with a reset token.
-IPC_MESSAGE_ROUTED2(
+IPC_MESSAGE_ROUTED3(
     AccessibilityHostMsg_Events,
     std::vector<AccessibilityHostMsg_EventParams> /* events */,
-    int /* reset_token */)
+    int /* reset_token */,
+    int /* ack_token */)
 
 // Sent to update the browser of the location of accessibility objects.
 IPC_MESSAGE_ROUTED1(

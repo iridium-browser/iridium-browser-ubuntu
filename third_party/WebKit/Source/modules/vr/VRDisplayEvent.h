@@ -12,39 +12,50 @@
 namespace blink {
 
 class VRDisplayEvent final : public Event {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static VRDisplayEvent* create()
-    {
-        return new VRDisplayEvent;
-    }
-    static VRDisplayEvent* create(const AtomicString& type, bool canBubble, bool cancelable, VRDisplay* display, String reason)
-    {
-        return new VRDisplayEvent(type, canBubble, cancelable, display, reason);
-    }
-    static VRDisplayEvent* create(const AtomicString& type, const VRDisplayEventInit& initializer)
-    {
-        return new VRDisplayEvent(type, initializer);
-    }
+  DEFINE_WRAPPERTYPEINFO();
 
-    ~VRDisplayEvent() override;
+ public:
+  static VRDisplayEvent* create() { return new VRDisplayEvent; }
+  static VRDisplayEvent* create(const AtomicString& type,
+                                bool canBubble,
+                                bool cancelable,
+                                VRDisplay* display,
+                                String reason) {
+    return new VRDisplayEvent(type, canBubble, cancelable, display, reason);
+  }
+  static VRDisplayEvent* create(const AtomicString& type,
+                                bool canBubble,
+                                bool cancelable,
+                                VRDisplay*,
+                                device::mojom::blink::VRDisplayEventReason);
 
-    VRDisplay* display() const { return m_display.get(); }
-    const String& reason() const { return m_reason; }
+  static VRDisplayEvent* create(const AtomicString& type,
+                                const VRDisplayEventInit& initializer) {
+    return new VRDisplayEvent(type, initializer);
+  }
 
-    const AtomicString& interfaceName() const override;
+  ~VRDisplayEvent() override;
 
-    DECLARE_VIRTUAL_TRACE();
+  VRDisplay* display() const { return m_display.get(); }
+  const String& reason() const { return m_reason; }
 
-private:
-    VRDisplayEvent();
-    VRDisplayEvent(const AtomicString& type, bool canBubble, bool cancelable, VRDisplay*, String);
-    VRDisplayEvent(const AtomicString&, const VRDisplayEventInit&);
+  const AtomicString& interfaceName() const override;
 
-    Member<VRDisplay> m_display;
-    String m_reason;
+  DECLARE_VIRTUAL_TRACE();
+
+ private:
+  VRDisplayEvent();
+  VRDisplayEvent(const AtomicString& type,
+                 bool canBubble,
+                 bool cancelable,
+                 VRDisplay*,
+                 String);
+  VRDisplayEvent(const AtomicString&, const VRDisplayEventInit&);
+
+  Member<VRDisplay> m_display;
+  String m_reason;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // VRDisplayEvent_h
+#endif  // VRDisplayEvent_h

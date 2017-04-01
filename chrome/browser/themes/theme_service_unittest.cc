@@ -19,6 +19,7 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -31,11 +32,9 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/base/material_design/material_design_controller.h"
-#include "ui/base/test/material_design_controller_test_api.h"
 #include "ui/base/ui_base_switches.h"
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_service.h"
 #include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #endif
@@ -145,7 +144,7 @@ TEST_F(ThemeServiceTest, ThemeInstallUninstall) {
 
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  const std::string& extension_id = LoadUnpackedThemeAt(temp_dir.path());
+  const std::string& extension_id = LoadUnpackedThemeAt(temp_dir.GetPath());
   EXPECT_FALSE(theme_service->UsingDefaultTheme());
   EXPECT_EQ(extension_id, theme_service->GetThemeID());
 
@@ -173,7 +172,7 @@ TEST_F(ThemeServiceTest, DisableUnusedTheme) {
   ASSERT_TRUE(temp_dir2.CreateUniqueTempDir());
 
   // 1) Installing a theme should disable the previously active theme.
-  const std::string& extension1_id = LoadUnpackedThemeAt(temp_dir1.path());
+  const std::string& extension1_id = LoadUnpackedThemeAt(temp_dir1.GetPath());
   EXPECT_FALSE(theme_service->UsingDefaultTheme());
   EXPECT_EQ(extension1_id, theme_service->GetThemeID());
   EXPECT_TRUE(service_->IsExtensionEnabled(extension1_id));
@@ -181,7 +180,7 @@ TEST_F(ThemeServiceTest, DisableUnusedTheme) {
   // Show an infobar to prevent the current theme from being uninstalled.
   theme_service->OnInfobarDisplayed();
 
-  const std::string& extension2_id = LoadUnpackedThemeAt(temp_dir2.path());
+  const std::string& extension2_id = LoadUnpackedThemeAt(temp_dir2.GetPath());
   EXPECT_EQ(extension2_id, theme_service->GetThemeID());
   EXPECT_TRUE(service_->IsExtensionEnabled(extension2_id));
   EXPECT_TRUE(registry_->GetExtensionById(extension1_id,
@@ -235,8 +234,8 @@ TEST_F(ThemeServiceTest, ThemeUpgrade) {
   base::ScopedTempDir temp_dir2;
   ASSERT_TRUE(temp_dir2.CreateUniqueTempDir());
 
-  const std::string& extension1_id = LoadUnpackedThemeAt(temp_dir1.path());
-  const std::string& extension2_id = LoadUnpackedThemeAt(temp_dir2.path());
+  const std::string& extension1_id = LoadUnpackedThemeAt(temp_dir1.GetPath());
+  const std::string& extension2_id = LoadUnpackedThemeAt(temp_dir2.GetPath());
 
   // Test the initial state.
   EXPECT_TRUE(registry_->GetExtensionById(extension1_id,
@@ -284,11 +283,9 @@ TEST_F(ThemeServiceTest, IncognitoTest) {
       ThemeService::GetThemeProviderForProfile(
           profile_->GetOffTheRecordProfile());
   EXPECT_NE(&provider, &otr_provider);
-  // And (some) colors should be different in MD mode.
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    EXPECT_NE(provider.GetColor(ThemeProperties::COLOR_TOOLBAR),
-              otr_provider.GetColor(ThemeProperties::COLOR_TOOLBAR));
-  }
+  // And (some) colors should be different.
+  EXPECT_NE(provider.GetColor(ThemeProperties::COLOR_TOOLBAR),
+            otr_provider.GetColor(ThemeProperties::COLOR_TOOLBAR));
 #endif
 }
 
@@ -337,7 +334,7 @@ TEST_F(ThemeServiceTest, UninstallThemeOnThemeChangeNotification) {
   base::ScopedTempDir temp_dir2;
   ASSERT_TRUE(temp_dir2.CreateUniqueTempDir());
 
-  const std::string& extension1_id = LoadUnpackedThemeAt(temp_dir1.path());
+  const std::string& extension1_id = LoadUnpackedThemeAt(temp_dir1.GetPath());
   ASSERT_EQ(extension1_id, theme_service->GetThemeID());
 
   // Show an infobar.
@@ -348,17 +345,17 @@ TEST_F(ThemeServiceTest, UninstallThemeOnThemeChangeNotification) {
   // NOTIFICATION_BROWSER_THEME_CHANGED notification.
   {
     InfobarDestroyerOnThemeChange destroyer(profile_.get());
-    const std::string& extension2_id = LoadUnpackedThemeAt(temp_dir2.path());
+    const std::string& extension2_id = LoadUnpackedThemeAt(temp_dir2.GetPath());
     ASSERT_EQ(extension2_id, theme_service->GetThemeID());
     ASSERT_FALSE(service_->GetInstalledExtension(extension1_id));
   }
 
   // Check that it is possible to reinstall extension1.
-  ASSERT_EQ(extension1_id, LoadUnpackedThemeAt(temp_dir1.path()));
+  ASSERT_EQ(extension1_id, LoadUnpackedThemeAt(temp_dir1.GetPath()));
   EXPECT_EQ(extension1_id, theme_service->GetThemeID());
 }
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 class ThemeServiceSupervisedUserTest : public ThemeServiceTest {
  public:
   ThemeServiceSupervisedUserTest() {}
@@ -396,34 +393,12 @@ TEST_F(ThemeServiceSupervisedUserTest, SupervisedUserThemeReplacesNativeTheme) {
             CustomThemeSupplier::SUPERVISED_USER_THEME);
 }
 #endif // defined(OS_LINUX) && !defined(OS_CHROMEOS)
-#endif // defined(ENABLE_SUPERVISED_USERS)
+#endif // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
 #if !defined(OS_MACOSX)  // Mac uses different colors than other platforms.
-// Simple class to run tests in material design mode.
-class ThemeServiceMaterialDesignTest : public ThemeServiceTest {
- public:
-  void SetUp() override {
-    ThemeServiceTest::SetUp();
-    material_design_state_.reset(
-        new ui::test::MaterialDesignControllerTestAPI(
-            ui::MaterialDesignController::MATERIAL_NORMAL));
-  }
-
-  void TearDown() override {
-    material_design_state_.reset();
-    ThemeServiceTest::TearDown();
-  }
-
- private:
-  std::unique_ptr<ui::test::MaterialDesignControllerTestAPI>
-      material_design_state_;
-};
-
 // Check that the function which computes the separator color behaves as
-// expected for a variety of inputs.  We run in material design mode so we can
-// use the material normal and incognito color combinations, which differ from
-// each other in ways that are interesting to test.
-TEST_F(ThemeServiceMaterialDesignTest, SeparatorColor) {
+// expected for a variety of inputs.
+TEST_F(ThemeServiceTest, SeparatorColor) {
   // Ensure Windows 10 machines use the built-in default colors rather than the
   // current system native colors.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(

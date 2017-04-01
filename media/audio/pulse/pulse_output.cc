@@ -8,9 +8,11 @@
 #include <stdint.h>
 
 #include "base/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "media/audio/audio_device_description.h"
 #include "media/audio/audio_manager_base.h"
 #include "media/audio/pulse/pulse_util.h"
+#include "media/base/audio_sample_types.h"
 
 namespace media {
 
@@ -42,7 +44,14 @@ void PulseAudioOutputStream::StreamRequestCallback(pa_stream* s, size_t len,
 PulseAudioOutputStream::PulseAudioOutputStream(const AudioParameters& params,
                                                const std::string& device_id,
                                                AudioManagerBase* manager)
-    : params_(params),
+    : params_(AudioParameters(params.format(),
+                              params.channel_layout(),
+                              params.sample_rate(),
+                              // Ignore the given bits per sample. We
+                              // want 32 because we're outputting
+                              // floats.
+                              32,
+                              params.frames_per_buffer())),
       device_id_(device_id),
       manager_(manager),
       pa_context_(NULL),
@@ -132,10 +141,9 @@ void PulseAudioOutputStream::FulfillWriteRequest(size_t requested_bytes) {
 
     int frames_filled = 0;
     if (source_callback_) {
-      const uint32_t hardware_delay = pulse::GetHardwareLatencyInBytes(
-          pa_stream_, params_.sample_rate(), params_.GetBytesPerFrame());
-      frames_filled =
-          source_callback_->OnMoreData(audio_bus_.get(), hardware_delay, 0);
+      const base::TimeDelta delay = pulse::GetHardwareLatency(pa_stream_);
+      frames_filled = source_callback_->OnMoreData(
+          delay, base::TimeTicks::Now(), 0, audio_bus_.get());
 
       // Zero any unfilled data so it plays back as silence.
       if (frames_filled < audio_bus_->frames()) {
@@ -143,11 +151,9 @@ void PulseAudioOutputStream::FulfillWriteRequest(size_t requested_bytes) {
             frames_filled, audio_bus_->frames() - frames_filled);
       }
 
-      // Note: If this ever changes to output raw float the data must be clipped
-      // and sanitized since it may come from an untrusted source such as NaCl.
       audio_bus_->Scale(volume_);
-      audio_bus_->ToInterleaved(
-          audio_bus_->frames(), params_.bits_per_sample() / 8, buffer);
+      audio_bus_->ToInterleaved<Float32SampleTypeTraits>(
+          audio_bus_->frames(), reinterpret_cast<float*>(buffer));
     } else {
       memset(buffer, 0, bytes_to_fill);
     }
@@ -227,6 +233,9 @@ void PulseAudioOutputStream::Stop() {
 void PulseAudioOutputStream::SetVolume(double volume) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
+  // Waiting for the main loop lock will ensure outstanding callbacks have
+  // completed and |volume_| is not accessed from them.
+  AutoPulseLock auto_lock(pa_mainloop_);
   volume_ = static_cast<float>(volume);
 }
 

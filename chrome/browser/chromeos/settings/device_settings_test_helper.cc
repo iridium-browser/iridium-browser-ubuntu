@@ -110,7 +110,9 @@ bool DeviceSettingsTestHelper::IsScreenLocked() const { return false; }
 void DeviceSettingsTestHelper::EmitLoginPromptVisible() {}
 
 void DeviceSettingsTestHelper::RestartJob(
-    const std::vector<std::string>& argv) {}
+    int socket_fd,
+    const std::vector<std::string>& argv,
+    const VoidDBusMethodCallback& callback) {}
 
 void DeviceSettingsTestHelper::StartSession(
     const cryptohome::Identification& cryptohome_id) {}
@@ -185,12 +187,19 @@ void DeviceSettingsTestHelper::CheckArcAvailability(
 
 void DeviceSettingsTestHelper::StartArcInstance(
     const cryptohome::Identification& cryptohome_id,
-    const ArcCallback& callback) {}
+    bool disable_boot_completed_broadcast,
+    const StartArcInstanceCallback& callback) {}
 
 void DeviceSettingsTestHelper::StopArcInstance(const ArcCallback& callback) {}
 
 void DeviceSettingsTestHelper::PrioritizeArcInstance(
     const ArcCallback& callback) {}
+
+void DeviceSettingsTestHelper::SetArcCpuRestriction(
+    login_manager::ContainerCpuRestrictionState restriction_state,
+    const ArcCallback& callback) {}
+
+void DeviceSettingsTestHelper::EmitArcBooted() {}
 
 void DeviceSettingsTestHelper::GetArcStartTime(
     const GetArcStartTimeCallback& callback) {}

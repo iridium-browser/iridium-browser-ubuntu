@@ -40,10 +40,6 @@ class Profile;
 class ScopedBundleSwizzlerMac;
 #endif  // defined(OS_MACOSX)
 
-namespace content {
-class ContentRendererClient;
-}
-
 // Base class for tests wanting to bring up a browser in the unit test process.
 // Writing tests with InProcessBrowserTest is slightly different than that of
 // other tests. This is necessitated by InProcessBrowserTest running a message
@@ -117,6 +113,17 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
   // Restores state configured in SetUp.
   void TearDown() override;
+
+  using SetUpBrowserFunction = bool(const Browser*);
+
+  // Sets a function that is called from InProcessBrowserTest::SetUp() with the
+  // first browser. This is intended to set up state applicable to all tests
+  // in the suite. For example, interactive_ui_tests installs a function that
+  // ensures the first browser is in the foreground, active and has focus.
+  static void set_global_browser_set_up_function(
+      SetUpBrowserFunction* set_up_function) {
+    global_browser_set_up_function_ = set_up_function;
+  }
 
  protected:
   // Returns the browser created by CreateBrowser.
@@ -233,6 +240,8 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
   // Quits all open browsers and waits until there are no more browsers.
   void QuitBrowsers();
+
+  static SetUpBrowserFunction* global_browser_set_up_function_;
 
   // Browser created from CreateBrowser.
   Browser* browser_;

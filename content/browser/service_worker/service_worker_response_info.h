@@ -5,6 +5,8 @@
 #ifndef CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_RESPONSE_INFO_H_
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_RESPONSE_INFO_H_
 
+#include <vector>
+
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_types.h"
@@ -35,7 +37,7 @@ class CONTENT_EXPORT ServiceWorkerResponseInfo
       bool was_fetched_via_service_worker,
       bool was_fetched_via_foreign_fetch,
       bool was_fallback_required,
-      const GURL& original_url_via_service_worker,
+      const std::vector<GURL>& url_list_via_service_worker,
       blink::WebServiceWorkerResponseType response_type_via_service_worker,
       base::TimeTicks service_worker_start_time,
       base::TimeTicks service_worker_ready_time,
@@ -44,12 +46,33 @@ class CONTENT_EXPORT ServiceWorkerResponseInfo
       const ServiceWorkerHeaderList& cors_exposed_header_names);
   void ResetData();
 
+  // Returns true if a service worker responded to the request. If the service
+  // worker received a fetch event and did not call respondWith(), or was
+  // bypassed due to absence of a fetch event handler, this function
+  // typically returns false but returns true if "fallback to renderer" was
+  // required (however in this case the response is not an actual resource and
+  // the request will be reissued by the renderer).
   bool was_fetched_via_service_worker() const {
     return was_fetched_via_service_worker_;
   }
+
+  // Returns true if "fallback to renderer" was required. This happens when a
+  // request was directed to a service worker but it did not call respondWith()
+  // or was bypassed due to absense of a fetch event handler, and the browser
+  // could not directly fall back to network because the CORS algorithm must be
+  // run, which is implemented in the renderer.
   bool was_fallback_required() const { return was_fallback_required_; }
-  const GURL& original_url_via_service_worker() const {
-    return original_url_via_service_worker_;
+
+  // Returns the URL list of the Response object the service worker passed to
+  // respondWith() to create this response. For example, if the service worker
+  // calls respondWith(fetch('http://example.com/a')) and http://example.com/a
+  // redirects to http://example.net/b which redirects to http://example.org/c,
+  // the URL list is the vector <"http://example.com/a", "http://example.net/b",
+  // "http://example.org/c">. This is empty if the response was programatically
+  // generated as in respondWith(new Response()). It is also empty if a service
+  // worker did not respond to the request or did not call respondWith().
+  const std::vector<GURL>& url_list_via_service_worker() const {
+    return url_list_via_service_worker_;
   }
   blink::WebServiceWorkerResponseType response_type_via_service_worker() const {
     return response_type_via_service_worker_;
@@ -73,7 +96,7 @@ class CONTENT_EXPORT ServiceWorkerResponseInfo
   bool was_fetched_via_service_worker_ = false;
   bool was_fetched_via_foreign_fetch_ = false;
   bool was_fallback_required_ = false;
-  GURL original_url_via_service_worker_;
+  std::vector<GURL> url_list_via_service_worker_;
   blink::WebServiceWorkerResponseType response_type_via_service_worker_ =
       blink::WebServiceWorkerResponseTypeDefault;
   base::TimeTicks service_worker_start_time_;

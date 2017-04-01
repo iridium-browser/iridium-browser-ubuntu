@@ -6,18 +6,26 @@
 #define CONTENT_RENDERER_SERVICE_WORKER_EMBEDDED_WORKER_DISPATCHER_H_
 
 #include <map>
+#include <memory>
 
 #include "base/id_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "content/public/common/console_message_level.h"
+#include "content/child/scoped_child_process_reference.h"
 #include "ipc/ipc_listener.h"
 
-struct EmbeddedWorkerMsg_StartWorker_Params;
-class GURL;
+namespace blink {
+
+class WebEmbeddedWorker;
+
+}  // namespace blink
 
 namespace content {
+
+class EmbeddedWorkerDevToolsAgent;
+class ServiceWorkerContextClient;
+struct EmbeddedWorkerStartParams;
 
 // A tiny dispatcher which handles embedded worker start/stop messages.
 class EmbeddedWorkerDispatcher : public IPC::Listener {
@@ -31,16 +39,43 @@ class EmbeddedWorkerDispatcher : public IPC::Listener {
   void WorkerContextDestroyed(int embedded_worker_id);
 
  private:
-  class WorkerWrapper;
+  friend class EmbeddedWorkerInstanceClientImpl;
 
-  void OnStartWorker(const EmbeddedWorkerMsg_StartWorker_Params& params);
+  // A thin wrapper of WebEmbeddedWorker which also adds and releases process
+  // references automatically.
+  class WorkerWrapper {
+   public:
+    WorkerWrapper(blink::WebEmbeddedWorker* worker,
+                  int devtools_agent_route_id);
+    ~WorkerWrapper();
+
+    blink::WebEmbeddedWorker* worker() { return worker_.get(); }
+    EmbeddedWorkerDevToolsAgent* devtools_agent() {
+      return devtools_agent_.get();
+    }
+
+   private:
+    ScopedChildProcessReference process_ref_;
+    std::unique_ptr<blink::WebEmbeddedWorker> worker_;
+    std::unique_ptr<EmbeddedWorkerDevToolsAgent> devtools_agent_;
+  };
+
   void OnStopWorker(int embedded_worker_id);
-  void OnResumeAfterDownload(int embedded_worker_id);
-  void OnAddMessageToConsole(int embedded_worker_id,
-                             ConsoleMessageLevel level,
-                             const std::string& message);
 
-  IDMap<WorkerWrapper, IDMapOwnPointer> workers_;
+  std::unique_ptr<WorkerWrapper> StartWorkerContext(
+      const EmbeddedWorkerStartParams& params,
+      std::unique_ptr<ServiceWorkerContextClient> context_client);
+
+  // These methods are used by EmbeddedWorkerInstanceClientImpl to keep
+  // consistency between chromium IPC and mojo IPC.
+  // TODO(shimazu): Remove them after all messages for EmbeddedWorker are
+  // replaced by mojo IPC. (Tracking issue: https://crbug.com/629701)
+  void RegisterWorker(int embedded_worker_id,
+                      std::unique_ptr<WorkerWrapper> wrapper);
+  void UnregisterWorker(int embedded_worker_id);
+  void RecordStopWorkerTimer(int embedded_worker_id);
+
+  IDMap<std::unique_ptr<WorkerWrapper>> workers_;
   std::map<int /* embedded_worker_id */, base::TimeTicks> stop_worker_times_;
   base::WeakPtrFactory<EmbeddedWorkerDispatcher> weak_factory_;
 

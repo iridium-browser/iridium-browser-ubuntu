@@ -21,7 +21,6 @@ class SingleThreadTaskRunner;
 namespace media {
 
 class MediaLog;
-class TextRenderer;
 
 // Pipeline runs the media pipeline.  Filters are created and called on the
 // task runner injected into this object. Pipeline works like a state
@@ -169,6 +168,15 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
 
   // Current duration as reported by Demuxer.
   base::TimeDelta duration_;
+
+  // Set by GetMediaTime(), used to prevent the current media time value as
+  // reported to JavaScript from going backwards in time.
+  mutable base::TimeDelta last_media_time_;
+
+  // Set by Seek(), used in place of asking the renderer for current media time
+  // while a seek is pending. Renderer's time cannot be trusted until the seek
+  // has completed.
+  base::TimeDelta seek_time_;
 
   base::ThreadChecker thread_checker_;
   base::WeakPtrFactory<PipelineImpl> weak_factory_;

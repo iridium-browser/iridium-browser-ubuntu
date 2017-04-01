@@ -7,8 +7,9 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
+#include "modules/serviceworkers/NavigationPreloadManager.h"
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/Supplementable.h"
@@ -21,84 +22,107 @@ namespace blink {
 
 class ScriptPromise;
 class ScriptState;
-class WebServiceWorkerProvider;
 
 // The implementation of a service worker registration object in Blink. Actual
 // registration representation is in the embedder and this class accesses it
 // via WebServiceWorkerRegistration::Handle object.
 class ServiceWorkerRegistration final
-    : public EventTargetWithInlineData
-    , public ActiveScriptWrappable
-    , public ActiveDOMObject
-    , public WebServiceWorkerRegistrationProxy
-    , public Supplementable<ServiceWorkerRegistration> {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
-    USING_PRE_FINALIZER(ServiceWorkerRegistration, dispose);
-public:
-    // ScriptWrappable overrides.
-    bool hasPendingActivity() const final;
+    : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<ServiceWorkerRegistration>,
+      public ContextLifecycleObserver,
+      public WebServiceWorkerRegistrationProxy,
+      public Supplementable<ServiceWorkerRegistration> {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
+  USING_PRE_FINALIZER(ServiceWorkerRegistration, dispose);
 
-    // EventTarget overrides.
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override { return ActiveDOMObject::getExecutionContext(); }
+ public:
+  // Called from CallbackPromiseAdapter.
+  using WebType = std::unique_ptr<WebServiceWorkerRegistration::Handle>;
+  static ServiceWorkerRegistration* take(
+      ScriptPromiseResolver*,
+      std::unique_ptr<WebServiceWorkerRegistration::Handle>);
 
-    // WebServiceWorkerRegistrationProxy overrides.
-    void dispatchUpdateFoundEvent() override;
-    void setInstalling(std::unique_ptr<WebServiceWorker::Handle>) override;
-    void setWaiting(std::unique_ptr<WebServiceWorker::Handle>) override;
-    void setActive(std::unique_ptr<WebServiceWorker::Handle>) override;
+  // ScriptWrappable overrides.
+  bool hasPendingActivity() const final;
 
-    // Returns an existing registration object for the handle if it exists.
-    // Otherwise, returns a new registration object.
-    static ServiceWorkerRegistration* getOrCreate(ExecutionContext*, std::unique_ptr<WebServiceWorkerRegistration::Handle>);
+  // EventTarget overrides.
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override {
+    return ContextLifecycleObserver::getExecutionContext();
+  }
 
-    ServiceWorker* installing() { return m_installing; }
-    ServiceWorker* waiting() { return m_waiting; }
-    ServiceWorker* active() { return m_active; }
+  // WebServiceWorkerRegistrationProxy overrides.
+  void dispatchUpdateFoundEvent() override;
+  void setInstalling(std::unique_ptr<WebServiceWorker::Handle>) override;
+  void setWaiting(std::unique_ptr<WebServiceWorker::Handle>) override;
+  void setActive(std::unique_ptr<WebServiceWorker::Handle>) override;
 
-    String scope() const;
+  // Returns an existing registration object for the handle if it exists.
+  // Otherwise, returns a new registration object.
+  static ServiceWorkerRegistration* getOrCreate(
+      ExecutionContext*,
+      std::unique_ptr<WebServiceWorkerRegistration::Handle>);
 
-    WebServiceWorkerRegistration* webRegistration() { return m_handle->registration(); }
+  ServiceWorker* installing() { return m_installing; }
+  ServiceWorker* waiting() { return m_waiting; }
+  ServiceWorker* active() { return m_active; }
+  NavigationPreloadManager* navigationPreload();
 
-    ScriptPromise update(ScriptState*);
-    ScriptPromise unregister(ScriptState*);
+  String scope() const;
 
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(updatefound);
+  WebServiceWorkerRegistration* webRegistration() {
+    return m_handle->registration();
+  }
 
-    ~ServiceWorkerRegistration() override;
+  ScriptPromise update(ScriptState*);
+  ScriptPromise unregister(ScriptState*);
 
-    DECLARE_VIRTUAL_TRACE();
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(updatefound);
 
-private:
-    ServiceWorkerRegistration(ExecutionContext*, std::unique_ptr<WebServiceWorkerRegistration::Handle>);
-    void dispose();
+  ~ServiceWorkerRegistration() override;
 
-    // ActiveDOMObject overrides.
-    void stop() override;
+  DECLARE_VIRTUAL_TRACE();
 
-    // A handle to the registration representation in the embedder.
-    std::unique_ptr<WebServiceWorkerRegistration::Handle> m_handle;
+ private:
+  ServiceWorkerRegistration(
+      ExecutionContext*,
+      std::unique_ptr<WebServiceWorkerRegistration::Handle>);
+  void dispose();
 
-    Member<ServiceWorker> m_installing;
-    Member<ServiceWorker> m_waiting;
-    Member<ServiceWorker> m_active;
+  // ContextLifecycleObserver overrides.
+  void contextDestroyed(ExecutionContext*) override;
 
-    bool m_stopped;
+  // A handle to the registration representation in the embedder.
+  std::unique_ptr<WebServiceWorkerRegistration::Handle> m_handle;
+
+  Member<ServiceWorker> m_installing;
+  Member<ServiceWorker> m_waiting;
+  Member<ServiceWorker> m_active;
+  Member<NavigationPreloadManager> m_navigationPreload;
+
+  bool m_stopped;
 };
 
 class ServiceWorkerRegistrationArray {
-    STATIC_ONLY(ServiceWorkerRegistrationArray);
-public:
-    static HeapVector<Member<ServiceWorkerRegistration>> take(ScriptPromiseResolver* resolver, Vector<std::unique_ptr<WebServiceWorkerRegistration::Handle>>* webServiceWorkerRegistrations)
-    {
-        HeapVector<Member<ServiceWorkerRegistration>> registrations;
-        for (auto& registration : *webServiceWorkerRegistrations)
-            registrations.append(ServiceWorkerRegistration::getOrCreate(resolver->getExecutionContext(), std::move(registration)));
-        return registrations;
+  STATIC_ONLY(ServiceWorkerRegistrationArray);
+
+ public:
+  // Called from CallbackPromiseAdapter.
+  using WebType = std::unique_ptr<
+      WebVector<std::unique_ptr<WebServiceWorkerRegistration::Handle>>>;
+  static HeapVector<Member<ServiceWorkerRegistration>> take(
+      ScriptPromiseResolver* resolver,
+      WebType webServiceWorkerRegistrations) {
+    HeapVector<Member<ServiceWorkerRegistration>> registrations;
+    for (auto& registration : *webServiceWorkerRegistrations) {
+      registrations.push_back(
+          ServiceWorkerRegistration::take(resolver, std::move(registration)));
     }
+    return registrations;
+  }
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ServiceWorkerRegistration_h
+#endif  // ServiceWorkerRegistration_h

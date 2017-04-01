@@ -4,12 +4,12 @@
 
 package org.chromium.chrome.browser;
 
-import android.os.Environment;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 import android.text.TextUtils;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.infobar.InfoBar;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
@@ -26,6 +26,7 @@ import java.util.concurrent.Callable;
 /**
  * Tests whether popup windows appear.
  */
+@RetryOnFailure
 public class PopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final String POPUP_HTML_PATH = "/chrome/test/data/android/popup_test.html";
 
@@ -51,8 +52,7 @@ public class PopupTest extends ChromeActivityTestCaseBase<ChromeActivity> {
             }
         });
 
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
         mPopupHtmlUrl = mTestServer.getURL(POPUP_HTML_PATH);
     }
 

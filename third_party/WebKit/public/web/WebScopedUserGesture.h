@@ -37,6 +37,7 @@
 namespace blink {
 
 class UserGestureIndicator;
+class WebLocalFrame;
 class WebUserGestureToken;
 
 // An instance of this class, while kept alive, will indicate that we are in
@@ -53,15 +54,15 @@ class WebUserGestureToken;
 // WebScopedUserGesture will not indicate that we are in the context of a user
 // gesture.
 class WebScopedUserGesture {
-public:
-    BLINK_EXPORT explicit WebScopedUserGesture(const WebUserGestureToken& token);
-    BLINK_EXPORT WebScopedUserGesture();
-    BLINK_EXPORT ~WebScopedUserGesture();
+ public:
+  BLINK_EXPORT explicit WebScopedUserGesture(const WebUserGestureToken& token);
+  BLINK_EXPORT WebScopedUserGesture(WebLocalFrame*);
+  BLINK_EXPORT ~WebScopedUserGesture();
 
-private:
-    std::unique_ptr<UserGestureIndicator> m_indicator;
+ private:
+  std::unique_ptr<UserGestureIndicator> m_indicator;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebScopedUserGesture_h
+#endif  // WebScopedUserGesture_h

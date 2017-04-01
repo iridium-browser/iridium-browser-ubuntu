@@ -35,6 +35,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventTarget.h"
 #include "platform/heap/Handle.h"
+#include "platform/scroll/ScrollTypes.h"
 
 namespace blink {
 
@@ -42,35 +43,35 @@ class LocalDOMWindow;
 class ExecutionContext;
 
 class DOMVisualViewport final : public EventTargetWithInlineData {
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static DOMVisualViewport* create(LocalDOMWindow* window)
-    {
-        return new DOMVisualViewport(window);
-    }
+  DEFINE_WRAPPERTYPEINFO();
 
-    ~DOMVisualViewport() override;
+ public:
+  static DOMVisualViewport* create(LocalDOMWindow* window) {
+    return new DOMVisualViewport(window);
+  }
 
-    DECLARE_VIRTUAL_TRACE();
+  ~DOMVisualViewport() override;
 
-    // EventTarget overrides:
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override;
+  DECLARE_VIRTUAL_TRACE();
 
-    double scrollLeft();
-    double scrollTop();
-    double pageX();
-    double pageY();
-    double clientWidth();
-    double clientHeight();
-    double scale();
+  // EventTarget overrides:
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override;
 
-private:
-    explicit DOMVisualViewport(LocalDOMWindow*);
+  float scrollLeft();
+  float scrollTop();
+  float pageX();
+  float pageY();
+  double clientWidth();
+  double clientHeight();
+  double scale();
 
-    Member<LocalDOMWindow> m_window;
+ private:
+  explicit DOMVisualViewport(LocalDOMWindow*);
+
+  Member<LocalDOMWindow> m_window;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // DOMVisualViewport_h
+#endif  // DOMVisualViewport_h

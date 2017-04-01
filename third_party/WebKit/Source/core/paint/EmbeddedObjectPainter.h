@@ -10,24 +10,22 @@
 namespace blink {
 
 struct PaintInfo;
-class FloatRect;
-class Font;
 class LayoutEmbeddedObject;
 class LayoutPoint;
-class Path;
-class TextRun;
 
 class EmbeddedObjectPainter {
-    STACK_ALLOCATED();
-public:
-    EmbeddedObjectPainter(const LayoutEmbeddedObject& layoutEmbeddedObject) : m_layoutEmbeddedObject(layoutEmbeddedObject) { }
+  STACK_ALLOCATED();
 
-    void paintReplaced(const PaintInfo&, const LayoutPoint& paintOffset);
+ public:
+  EmbeddedObjectPainter(const LayoutEmbeddedObject& layoutEmbeddedObject)
+      : m_layoutEmbeddedObject(layoutEmbeddedObject) {}
 
-private:
-    const LayoutEmbeddedObject& m_layoutEmbeddedObject;
+  void paintReplaced(const PaintInfo&, const LayoutPoint& paintOffset);
+
+ private:
+  const LayoutEmbeddedObject& m_layoutEmbeddedObject;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // EmbeddedObjectPainter_h
+#endif  // EmbeddedObjectPainter_h

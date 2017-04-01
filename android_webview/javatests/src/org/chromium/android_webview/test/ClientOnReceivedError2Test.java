@@ -4,7 +4,7 @@
 
 package org.chromium.android_webview.test;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 import android.webkit.WebSettings;
 
 import org.chromium.android_webview.AwContents;
@@ -31,7 +31,7 @@ public class ClientOnReceivedError2Test extends AwTestBase {
     private TestWebServer mWebServer;
 
     private static final String BAD_HTML_URL =
-            "http://man.id.be.really.surprised.if.this.address.existed/a.html";
+            "http://id.be.really.surprised.if.this.address.existed/a.html";
 
     @Override
     public void setUp() throws Exception {
@@ -56,9 +56,9 @@ public class ClientOnReceivedError2Test extends AwTestBase {
     }
 
     private static class VerifyOnReceivedError2CallClient extends TestAwContentsClient {
-        private boolean mBypass = false;
-        private boolean mIsOnPageFinishedCalled = false;
-        private boolean mIsOnReceivedError2Called = false;
+        private boolean mBypass;
+        private boolean mIsOnPageFinishedCalled;
+        private boolean mIsOnReceivedError2Called;
 
         void enableBypass() {
             mBypass = true;

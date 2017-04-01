@@ -9,9 +9,9 @@
 
 #include "Resources.h"
 #include "SkBlurImageFilter.h"
+#include "SkCanvas.h"
 #include "SkColorFilterImageFilter.h"
 #include "SkColorMatrixFilter.h"
-#include "SkCanvas.h"
 #include "SkGradientShader.h"
 #include "SkStream.h"
 #include "SkTypeface.h"
@@ -20,9 +20,9 @@
  * Spits out a dummy gradient to test blur with shader on paint
  */
 static sk_sp<SkShader> MakeLinear() {
-    static const SkPoint     kPts[] = { { 0, 0 }, { 32, 32 } };
-    static const SkScalar    kPos[] = { 0, SK_Scalar1/2, SK_Scalar1 };
-    static const SkColor kColors[] = {0x80F00080, 0xF0F08000, 0x800080F0 };
+    constexpr SkPoint     kPts[] = { { 0, 0 }, { 32, 32 } };
+    constexpr SkScalar    kPos[] = { 0, SK_Scalar1/2, SK_Scalar1 };
+    constexpr SkColor kColors[] = {0x80F00080, 0xF0F08000, 0x800080F0 };
     return SkGradientShader::MakeLinear(kPts, kColors, kPos, SK_ARRAY_COUNT(kColors),
                                         SkShader::kClamp_TileMode);
 }
@@ -40,6 +40,11 @@ static sk_sp<SkImageFilter> make_grayscale(sk_sp<SkImageFilter> input) {
 
 static sk_sp<SkImageFilter> make_blur(float amount, sk_sp<SkImageFilter> input) {
     return SkBlurImageFilter::Make(amount, amount, std::move(input));
+}
+
+static sk_sp<SkColorFilter> make_color_filter() {
+    return SkColorMatrixFilter::MakeLightingFilter(SkColorSetRGB(0x00, 0x80, 0xFF),
+                                                   SkColorSetRGB(0xFF, 0x20, 0x00));
 }
 
 namespace skiagm {
@@ -64,9 +69,7 @@ protected:
         return name;
     }
 
-    SkISize onISize() override {
-        return SkISize::Make(650, 900);
-    }
+    SkISize onISize() override { return SkISize::Make(650, 1200); }
 
     void onDraw(SkCanvas* canvas) override {
 
@@ -77,7 +80,7 @@ protected:
         const char* text = emojiFont.text;
 
         // draw text at different point sizes
-        static constexpr SkScalar textSizes[] = { 10, 30, 50, };
+        constexpr SkScalar textSizes[] = { 10, 30, 50, };
         SkPaint::FontMetrics metrics;
         SkScalar y = 0;
         for (const SkScalar& textSize : textSizes) {
@@ -94,26 +97,36 @@ protected:
         for (int makeLinear = 0; makeLinear < 2; makeLinear++) {
             for (int makeBlur = 0; makeBlur < 2; makeBlur++) {
                 for (int makeGray = 0; makeGray < 2; makeGray++) {
-                    SkPaint shaderPaint;
-                    shaderPaint.setTypeface(sk_ref_sp(paint.getTypeface()));
-                    if (SkToBool(makeLinear)) {
-                        shaderPaint.setShader(MakeLinear());
-                    }
+                    for (int makeMode = 0; makeMode < 2; ++makeMode) {
+                        for (int alpha = 0; alpha < 2; ++alpha) {
+                            SkPaint shaderPaint;
+                            shaderPaint.setTypeface(sk_ref_sp(paint.getTypeface()));
+                            if (SkToBool(makeLinear)) {
+                                shaderPaint.setShader(MakeLinear());
+                            }
 
-                    if (SkToBool(makeBlur) && SkToBool(makeGray)) {
-                        sk_sp<SkImageFilter> grayScale(make_grayscale(nullptr));
-                        sk_sp<SkImageFilter> blur(make_blur(3.0f, std::move(grayScale)));
-                        shaderPaint.setImageFilter(std::move(blur));
-                    } else if (SkToBool(makeBlur)) {
-                        shaderPaint.setImageFilter(make_blur(3.0f, nullptr));
-                    } else if (SkToBool(makeGray)) {
-                        shaderPaint.setImageFilter(make_grayscale(nullptr));
+                            if (SkToBool(makeBlur) && SkToBool(makeGray)) {
+                                sk_sp<SkImageFilter> grayScale(make_grayscale(nullptr));
+                                sk_sp<SkImageFilter> blur(make_blur(3.0f, std::move(grayScale)));
+                                shaderPaint.setImageFilter(std::move(blur));
+                            } else if (SkToBool(makeBlur)) {
+                                shaderPaint.setImageFilter(make_blur(3.0f, nullptr));
+                            } else if (SkToBool(makeGray)) {
+                                shaderPaint.setImageFilter(make_grayscale(nullptr));
+                            }
+                            if (makeMode) {
+                                shaderPaint.setColorFilter(make_color_filter());
+                            }
+                            if (alpha) {
+                                shaderPaint.setAlpha(0x80);
+                            }
+                            shaderPaint.setTextSize(30);
+                            shaderPaint.getFontMetrics(&metrics);
+                            y += -metrics.fAscent;
+                            canvas->drawText(text, strlen(text), 380, y, shaderPaint);
+                            y += metrics.fDescent + metrics.fLeading;
+                        }
                     }
-                    shaderPaint.setTextSize(30);
-                    shaderPaint.getFontMetrics(&metrics);
-                    y += -metrics.fAscent;
-                    canvas->drawText(text, strlen(text), 380, y, shaderPaint);
-                    y += metrics.fDescent + metrics.fLeading;
                 }
             }
         }
@@ -137,7 +150,7 @@ protected:
         SkRect interiorClip = bounds;
         interiorClip.inset(boundsQuarterWidth, boundsQuarterHeight);
 
-        static const SkRect clipRects[] = { bounds, upperLeftClip, lowerRightClip, interiorClip };
+        const SkRect clipRects[] = { bounds, upperLeftClip, lowerRightClip, interiorClip };
 
         SkPaint clipHairline;
         clipHairline.setColor(SK_ColorWHITE);

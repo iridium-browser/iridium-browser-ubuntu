@@ -13,6 +13,7 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/label.h"
@@ -22,7 +23,7 @@
 
 std::unique_ptr<infobars::InfoBar> InfoBarService::CreateConfirmInfoBar(
     std::unique_ptr<ConfirmInfoBarDelegate> delegate) {
-  return base::WrapUnique(new ConfirmInfoBar(std::move(delegate)));
+  return base::MakeUnique<ConfirmInfoBar>(std::move(delegate));
 }
 
 
@@ -33,7 +34,11 @@ ConfirmInfoBar::ConfirmInfoBar(std::unique_ptr<ConfirmInfoBarDelegate> delegate)
       label_(nullptr),
       ok_button_(nullptr),
       cancel_button_(nullptr),
-      link_(nullptr) {}
+      link_(nullptr) {
+  // Always use the standard theme for the platform on infobars (infobars in
+  // incognito should have the same appearance as normal infobars).
+  SetNativeTheme(ui::NativeTheme::GetInstanceForNativeUi());
+}
 
 ConfirmInfoBar::~ConfirmInfoBar() {
   // Ensure |elevation_icon_setter_| is destroyed before |ok_button_|.
@@ -72,15 +77,9 @@ void ConfirmInfoBar::ViewHierarchyChanged(
     AddViewToContentArea(label_);
 
     if (delegate->GetButtons() & ConfirmInfoBarDelegate::BUTTON_OK) {
-      if (ui::MaterialDesignController::IsModeMaterial()) {
-        views::MdTextButton* button = views::MdTextButton::CreateMdButton(
-            this, delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_OK));
-        button->SetCallToAction(true);
-        ok_button_ = button;
-      } else {
-        ok_button_ = CreateTextButton(
-            this, delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_OK));
-      }
+      ok_button_ = views::MdTextButton::Create(
+          this, delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_OK));
+      ok_button_->SetProminent(true);
       if (delegate->OKButtonTriggersUACPrompt()) {
         elevation_icon_setter_.reset(new ElevationIconSetter(
             ok_button_,
@@ -91,26 +90,12 @@ void ConfirmInfoBar::ViewHierarchyChanged(
     }
 
     if (delegate->GetButtons() & ConfirmInfoBarDelegate::BUTTON_CANCEL) {
-      if (ui::MaterialDesignController::IsModeMaterial()) {
-        views::MdTextButton* button = views::MdTextButton::CreateMdButton(
-            this,
-            delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_CANCEL));
-        if (delegate->GetButtons() == ConfirmInfoBarDelegate::BUTTON_CANCEL) {
-          // Apply CTA only if the cancel button is the only button.
-          button->SetCallToAction(true);
-        } else {
-          // Otherwise set the bg color to white and the text color to black.
-          // TODO(estade): These should be removed and moved into the native
-          // theme. Also, infobars should always use the normal (non-incognito)
-          // native theme.
-          button->set_bg_color_override(SK_ColorWHITE);
-          button->SetEnabledTextColors(kTextColor);
-        }
-        cancel_button_ = button;
-      } else {
-        cancel_button_ = CreateTextButton(
-            this,
-            delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_CANCEL));
+      cancel_button_ = views::MdTextButton::Create(
+          this,
+          delegate->GetButtonLabel(ConfirmInfoBarDelegate::BUTTON_CANCEL));
+      if (delegate->GetButtons() == ConfirmInfoBarDelegate::BUTTON_CANCEL) {
+        // Apply prominent styling only if the cancel button is the only button.
+        cancel_button_->SetProminent(true);
       }
       AddViewToContentArea(cancel_button_);
       cancel_button_->SizeToPreferredSize();

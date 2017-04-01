@@ -47,7 +47,7 @@ class ASH_EXPORT PaletteTray : public TrayBackgroundView,
   bool PerformAction(const ui::Event& event) override;
 
   // SessionStateObserver:
-  void SessionStateChanged(SessionStateDelegate::SessionState state) override;
+  void SessionStateChanged(session_manager::SessionState state) override;
 
   // ShellObserver:
   void OnLockStateChanged(bool locked) override;
@@ -58,9 +58,11 @@ class ASH_EXPORT PaletteTray : public TrayBackgroundView,
   void HideBubbleWithView(const views::TrayBubbleView* bubble_view) override;
   void SetShelfAlignment(ShelfAlignment alignment) override;
   void AnchorUpdated() override;
+  void Initialize() override;
 
   // PaletteToolManager::Delegate:
   void HidePalette() override;
+  void HidePaletteImmediately() override;
   void RecordPaletteOptionsUsage(PaletteTrayOptions option) override;
   void RecordPaletteModeCancellation(PaletteModeCancelType type) override;
 
@@ -81,9 +83,6 @@ class ASH_EXPORT PaletteTray : public TrayBackgroundView,
   void OnMouseEnteredView() override;
   void OnMouseExitedView() override;
   base::string16 GetAccessibleNameForBubble() override;
-  gfx::Rect GetAnchorRect(views::Widget* anchor_widget,
-                          AnchorType anchor_type,
-                          AnchorAlignment anchor_alignment) const override;
   void OnBeforeBubbleWidgetInit(
       views::Widget* anchor_widget,
       views::Widget* bubble_widget,
@@ -110,8 +109,6 @@ class ASH_EXPORT PaletteTray : public TrayBackgroundView,
   // Called when the palette enabled pref has changed.
   void OnPaletteEnabledPrefChanged(bool enabled);
 
-  void AddToolsToView(views::View* host);
-
   std::unique_ptr<PaletteToolManager> palette_tool_manager_;
   std::unique_ptr<TrayBubbleWrapper> bubble_;
 
@@ -122,6 +119,14 @@ class ASH_EXPORT PaletteTray : public TrayBackgroundView,
 
   // Weak pointer, will be parented by TrayContainer for its lifetime.
   views::ImageView* icon_;
+
+  // The shelf auto-hide state is checked during the tray constructor, so we
+  // have to use a helper variable instead of just checking if we have a tray
+  // instance.
+  bool should_block_shelf_auto_hide_ = false;
+
+  // Cached palette enabled/disabled pref value.
+  bool is_palette_enabled_ = true;
 
   // Used to indicate whether the palette bubble is automatically opened by a
   // stylus eject event.

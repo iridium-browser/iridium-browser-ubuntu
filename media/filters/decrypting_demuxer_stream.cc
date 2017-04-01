@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_number_conversions.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/media_log.h"
@@ -234,8 +235,7 @@ void DecryptingDemuxerStream::DecryptBuffer(
   }
 
   DCHECK(buffer->decrypt_config());
-  // An empty iv string signals that the frame is unencrypted.
-  if (buffer->decrypt_config()->iv().empty()) {
+  if (!buffer->decrypt_config()->is_encrypted()) {
     DVLOG(2) << "DoDecryptBuffer() - clear buffer.";
     scoped_refptr<DecoderBuffer> decrypted = DecoderBuffer::CopyFrom(
         buffer->data(), buffer->data_size());
@@ -296,10 +296,16 @@ void DecryptingDemuxerStream::DeliverBuffer(
   }
 
   if (status == Decryptor::kNoKey) {
-    DVLOG(2) << "DoDeliverBuffer() - kNoKey";
-    MEDIA_LOG(DEBUG, media_log_) << GetDisplayName() << ": no key";
+    std::string key_id = pending_buffer_to_decrypt_->decrypt_config()->key_id();
+    std::string missing_key_id = base::HexEncode(key_id.data(), key_id.size());
+    DVLOG(1) << "DeliverBuffer() - no key for key ID " << missing_key_id;
+    MEDIA_LOG(INFO, media_log_) << GetDisplayName() << ": no key for key ID "
+                                << missing_key_id;
+
     if (need_to_try_again_if_nokey) {
       // The |state_| is still kPendingDecrypt.
+      MEDIA_LOG(INFO, media_log_) << GetDisplayName()
+                                  << ": key was added, resuming decrypt";
       DecryptPendingBuffer();
       return;
     }
@@ -330,6 +336,8 @@ void DecryptingDemuxerStream::OnKeyAdded() {
   }
 
   if (state_ == kWaitingForKey) {
+    MEDIA_LOG(INFO, media_log_) << GetDisplayName()
+                                << ": key added, resuming decrypt";
     state_ = kPendingDecrypt;
     DecryptPendingBuffer();
   }

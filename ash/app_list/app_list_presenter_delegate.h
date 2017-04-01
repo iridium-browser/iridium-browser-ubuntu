@@ -16,8 +16,7 @@
 #include "ui/keyboard/keyboard_controller_observer.h"
 
 namespace app_list {
-class ApplicationDragAndDropHost;
-class AppListPresenter;
+class AppListPresenterImpl;
 class AppListView;
 class AppListViewDelegateFactory;
 }
@@ -27,10 +26,6 @@ class LocatedEvent;
 }
 
 namespace ash {
-
-namespace test {
-class AppListPresenterAshTestApi;
-}
 
 // Non-Mus+ash implementation of AppListPresetnerDelegate.
 // Responsible for laying out the app list UI as well as updating the Shelf
@@ -45,7 +40,7 @@ class ASH_EXPORT AppListPresenterDelegate
       public WmShelfObserver {
  public:
   AppListPresenterDelegate(
-      app_list::AppListPresenter* presenter,
+      app_list::AppListPresenterImpl* presenter,
       app_list::AppListViewDelegateFactory* view_delegate_factory);
   ~AppListPresenterDelegate() override;
 
@@ -69,9 +64,9 @@ class ASH_EXPORT AppListPresenterDelegate
 
   // KeyboardControllerObserver overrides:
   void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
+  void OnKeyboardClosed() override;
 
   // ShellObserver overrides:
-  void OnShelfAlignmentChanged(WmWindow* root_window) override;
   void OnOverviewModeStarting() override;
   void OnMaximizeModeStarted() override;
   void OnMaximizeModeEnded() override;
@@ -82,11 +77,8 @@ class ASH_EXPORT AppListPresenterDelegate
   // Whether the app list is visible (or in the process of being shown).
   bool is_visible_ = false;
 
-  // Whether the app list should remain centered.
-  bool is_centered_ = false;
-
   // Not owned. Pointer is guaranteed to be valid while this object is alive.
-  app_list::AppListPresenter* presenter_;
+  app_list::AppListPresenterImpl* presenter_;
 
   // Not owned. Pointer is guaranteed to be valid while this object is alive.
   app_list::AppListViewDelegateFactory* view_delegate_factory_;

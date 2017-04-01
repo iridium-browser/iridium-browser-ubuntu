@@ -221,6 +221,11 @@ bool Context::IsFenceSyncFlushReceived(uint64_t release) {
   return display_->IsFenceSyncFlushReceived(release);
 }
 
+bool Context::IsFenceSyncReleased(uint64_t release) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
 void Context::SignalSyncToken(const gpu::SyncToken& sync_token,
                               const base::Closure& callback) {
   NOTIMPLEMENTED();
@@ -259,7 +264,7 @@ bool Context::CreateService(gl::GLSurface* gl_surface) {
   scoped_refptr<gpu::gles2::ContextGroup> group(new gpu::gles2::ContextGroup(
       gpu_preferences_, nullptr, nullptr,
       new gpu::gles2::ShaderTranslatorCache(gpu_preferences_),
-      new gpu::gles2::FramebufferCompletenessCache, feature_info, true,
+      new gpu::gles2::FramebufferCompletenessCache, feature_info, true, nullptr,
       nullptr));
 
   std::unique_ptr<gpu::gles2::GLES2Decoder> decoder(
@@ -273,8 +278,10 @@ bool Context::CreateService(gl::GLSurface* gl_surface) {
 
   decoder->set_engine(command_executor.get());
 
+  gl::GLContextAttribs context_attribs;
+  context_attribs.gpu_preference = gl::PreferDiscreteGpu;
   scoped_refptr<gl::GLContext> gl_context(
-      gl::init::CreateGLContext(nullptr, gl_surface, gl::PreferDiscreteGpu));
+      gl::init::CreateGLContext(nullptr, gl_surface, context_attribs));
   if (!gl_context)
     return false;
 

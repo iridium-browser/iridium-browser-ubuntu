@@ -9,15 +9,18 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "content/common/content_export.h"
 #include "content/common/navigation_params.h"
 #include "content/common/resource_request_body_impl.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/common/appcache_info.h"
+#include "content/public/common/previews_state.h"
 #include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
 #include "net/base/request_priority.h"
+#include "third_party/WebKit/public/platform/WebMixedContentContextType.h"
 #include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
 #include "ui/base/page_transition_types.h"
@@ -34,19 +37,20 @@ struct CONTENT_EXPORT ResourceRequest {
   // The request method: GET, POST, etc.
   std::string method;
 
-  // The requested URL.
+  // The absolute requested URL encoded in ASCII per the rules of RFC-2396.
   GURL url;
 
-  // Usually the URL of the document in the top-level window, which may be
-  // checked by the third-party cookie blocking policy. Leaving it empty may
-  // lead to undesired cookie blocking. Third-party cookie blocking can be
-  // bypassed by setting first_party_for_cookies = url, but this should ideally
-  // only be done if there really is no way to determine the correct value.
+  // URL representing the first-party origin for the request, which may be
+  // checked by the third-party cookie blocking policy. This is usually the URL
+  // of the document in the top-level window. Leaving it empty may lead to
+  // undesired cookie blocking. Third-party cookie blocking can be bypassed by
+  // setting first_party_for_cookies = url, but this should ideally only be
+  // done if there really is no way to determine the correct value.
   GURL first_party_for_cookies;
 
   // The origin of the context which initiated the request, which will be used
   // for cookie checks like 'First-Party-Only'.
-  url::Origin request_initiator;
+  base::Optional<url::Origin> request_initiator;
 
   // The referrer to use (may be empty).
   GURL referrer;
@@ -54,11 +58,16 @@ struct CONTENT_EXPORT ResourceRequest {
   // The referrer policy to use.
   blink::WebReferrerPolicy referrer_policy = blink::WebReferrerPolicyAlways;
 
-  // The frame's visiblity state.
-  blink::WebPageVisibilityState visiblity_state =
+  // The frame's visibility state.
+  blink::WebPageVisibilityState visibility_state =
       blink::WebPageVisibilityStateVisible;
 
   // Additional HTTP request headers.
+  //
+  // For HTTP(S) requests, the headers parameter can be a \r\n-delimited and
+  // \r\n-terminated list of MIME headers.  They should be ASCII-encoded using
+  // the standard MIME header encoding rules.  The headers parameter can also
+  // be null if no extra request headers need to be set.
   std::string headers;
 
   // net::URLRequest load flags (0 by default).
@@ -72,7 +81,7 @@ struct CONTENT_EXPORT ResourceRequest {
   // object).
   ResourceType resource_type = RESOURCE_TYPE_MAIN_FRAME;
 
-  // The priority of this request.
+  // The priority of this request determined by Blink.
   net::RequestPriority priority = net::IDLE;
 
   // Used by plugin->browser requests to get the correct net::URLRequestContext.
@@ -109,6 +118,10 @@ struct CONTENT_EXPORT ResourceRequest {
   RequestContextType fetch_request_context_type =
       REQUEST_CONTEXT_TYPE_UNSPECIFIED;
 
+  // The mixed content context type to be used for mixed content checks.
+  blink::WebMixedContentContextType fetch_mixed_content_context_type =
+      blink::WebMixedContentContextType::Blockable;
+
   // The frame type passed to the ServiceWorker.
   RequestContextFrameType fetch_frame_type =
       REQUEST_CONTEXT_FRAME_TYPE_AUXILIARY;
@@ -116,18 +129,23 @@ struct CONTENT_EXPORT ResourceRequest {
   // Optional resource request body (may be null).
   scoped_refptr<ResourceRequestBodyImpl> request_body;
 
+  // If true, then the response body will be downloaded to a file and the path
+  // to that file will be provided in ResponseInfo::download_file_path.
   bool download_to_file = false;
 
   // True if the request was user initiated.
   bool has_user_gesture = false;
 
+  // TODO(mmenke): Investigate if enable_load_timing is safe to remove.
+  //
   // True if load timing data should be collected for request.
   bool enable_load_timing = false;
 
   // True if upload progress should be available for request.
   bool enable_upload_progress = false;
 
-  // True if login prompts for this request should be supressed.
+  // True if login prompts for this request should be supressed. Cached
+  // credentials or default credentials may still be used for authentication.
   bool do_not_prompt_for_login = false;
 
   // The routing id of the RenderFrame.
@@ -162,9 +180,9 @@ struct CONTENT_EXPORT ResourceRequest {
   // Whether to intercept headers to pass back to the renderer.
   bool report_raw_headers = false;
 
-  // Whether or not to request a LoFi version of the resource or let the browser
-  // decide.
-  LoFiState lofi_state = LOFI_UNSPECIFIED;
+  // Whether or not to request a Preview version of the resource or let the
+  // browser decide.
+  PreviewsState previews_state = PREVIEWS_UNSPECIFIED;
 
   // PlzNavigate: the stream url associated with a navigation. Used to get
   // access to the body of the response that has already been fetched by the
@@ -173,6 +191,10 @@ struct CONTENT_EXPORT ResourceRequest {
 
   // Wether or not the initiator of this request is a secure context.
   bool initiated_in_secure_context = false;
+
+  // The response should be downloaded and stored in the network cache, but not
+  // sent back to the renderer.
+  bool download_to_network_cache_only = false;
 };
 
 }  // namespace content

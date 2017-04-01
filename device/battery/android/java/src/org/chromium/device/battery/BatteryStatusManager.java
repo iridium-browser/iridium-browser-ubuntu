@@ -14,7 +14,7 @@ import android.os.Build;
 import android.util.Log;
 
 import org.chromium.base.VisibleForTesting;
-import org.chromium.mojom.device.BatteryStatus;
+import org.chromium.device.BatteryStatus;
 
 import javax.annotation.Nullable;
 
@@ -48,7 +48,7 @@ class BatteryStatusManager {
     // Only used in L (API level 21) and higher.
     private AndroidBatteryManagerWrapper mAndroidBatteryManager;
 
-    private boolean mEnabled = false;
+    private boolean mEnabled;
 
     @VisibleForTesting
     static class AndroidBatteryManagerWrapper {

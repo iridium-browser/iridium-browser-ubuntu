@@ -7,11 +7,10 @@
 #include "base/auto_reset.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/simple_message_box.h"
-#include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -29,7 +28,8 @@ void ShowProfileErrorDialog(ProfileErrorType type,
 #if defined(OS_ANDROID)
   NOTIMPLEMENTED();
 #else
-  UMA_HISTOGRAM_ENUMERATION("Profile.ProfileError", type, PROFILE_ERROR_END);
+  UMA_HISTOGRAM_ENUMERATION("Profile.ProfileError", static_cast<int>(type),
+                            static_cast<int>(ProfileErrorType::END));
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNoErrorDialogs)) {
     return;

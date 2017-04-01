@@ -5,10 +5,14 @@
 import os
 import unittest
 
+from telemetry import benchmark
 from telemetry import story
 from telemetry.internal.results import base_test_results_unittest
+from telemetry.internal.results import chart_json_output_formatter
+from telemetry.internal.results import json_output_formatter
 from telemetry.internal.results import page_test_results
 from telemetry import page as page_module
+from telemetry.testing import stream
 from telemetry.timeline import trace_data
 from telemetry.value import failure
 from telemetry.value import histogram
@@ -16,6 +20,7 @@ from telemetry.value import improvement_direction
 from telemetry.value import scalar
 from telemetry.value import skip
 from telemetry.value import trace
+
 
 class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
   def setUp(self):
@@ -309,11 +314,13 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
   def testTraceValue(self):
     results = page_test_results.PageTestResults()
     results.WillRunPage(self.pages[0])
-    results.AddValue(trace.TraceValue(None, trace_data.TraceData({'test' : 1})))
+    results.AddValue(trace.TraceValue(
+        None, trace_data.CreateTraceDataFromRawData([[{'test': 1}]])))
     results.DidRunPage(self.pages[0])
 
     results.WillRunPage(self.pages[1])
-    results.AddValue(trace.TraceValue(None, trace_data.TraceData({'test' : 2})))
+    results.AddValue(trace.TraceValue(
+        None, trace_data.CreateTraceDataFromRawData([[{'test': 2}]])))
     results.DidRunPage(self.pages[1])
 
     results.PrintSummary()
@@ -323,8 +330,10 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
 
   def testCleanUpCleansUpTraceValues(self):
     results = page_test_results.PageTestResults()
-    v0 = trace.TraceValue(None, trace_data.TraceData({'test': 1}))
-    v1 = trace.TraceValue(None, trace_data.TraceData({'test': 2}))
+    v0 = trace.TraceValue(
+        None, trace_data.CreateTraceDataFromRawData([{'test': 1}]))
+    v1 = trace.TraceValue(
+        None, trace_data.CreateTraceDataFromRawData([{'test': 2}]))
 
     results.WillRunPage(self.pages[0])
     results.AddValue(v0)
@@ -340,8 +349,10 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
 
   def testNoTracesLeftAfterCleanUp(self):
     results = page_test_results.PageTestResults()
-    v0 = trace.TraceValue(None, trace_data.TraceData({'test': 1}))
-    v1 = trace.TraceValue(None, trace_data.TraceData({'test': 2}))
+    v0 = trace.TraceValue(None,
+                          trace_data.CreateTraceDataFromRawData([{'test': 1}]))
+    v1 = trace.TraceValue(None,
+                          trace_data.CreateTraceDataFromRawData([{'test': 2}]))
 
     results.WillRunPage(self.pages[0])
     results.AddValue(v0)
@@ -353,6 +364,22 @@ class PageTestResultsTest(base_test_results_unittest.BaseTestResultsUnittest):
 
     results.CleanUp()
     self.assertFalse(results.FindAllTraceValues())
+
+  def testPrintSummaryDisabledResults(self):
+    output_stream = stream.TestOutputStream()
+    output_formatters = []
+    benchmark_metadata = benchmark.BenchmarkMetadata(
+      'benchmark_name', 'benchmark_description')
+    output_formatters.append(
+        chart_json_output_formatter.ChartJsonOutputFormatter(
+            output_stream, benchmark_metadata))
+    output_formatters.append(json_output_formatter.JsonOutputFormatter(
+        output_stream, benchmark_metadata))
+    results = page_test_results.PageTestResults(
+        output_formatters=output_formatters, benchmark_enabled=False)
+    results.PrintSummary()
+    self.assertEquals(output_stream.output_data,
+      "{\n  \"enabled\": false,\n  \"benchmark_name\": \"benchmark_name\"\n}\n")
 
 
 class PageTestResultsFilterTest(unittest.TestCase):

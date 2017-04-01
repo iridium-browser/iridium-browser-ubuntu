@@ -403,10 +403,11 @@ void vpx_hz_lpf_t16_16w(uint8_t *src, int32_t pitch, uint8_t *filter48) {
   }
 }
 
-void vpx_lpf_horizontal_16_dual_msa(uint8_t *src, int32_t pitch,
-                                    const uint8_t *b_limit_ptr,
-                                    const uint8_t *limit_ptr,
-                                    const uint8_t *thresh_ptr, int32_t count) {
+static void mb_lpf_horizontal_edge_dual(uint8_t *src, int32_t pitch,
+                                        const uint8_t *b_limit_ptr,
+                                        const uint8_t *limit_ptr,
+                                        const uint8_t *thresh_ptr,
+                                        int32_t count) {
   DECLARE_ALIGNED(32, uint8_t, filter48[16 * 8]);
   uint8_t early_exit = 0;
 
@@ -448,7 +449,7 @@ static void mb_lpf_horizontal_edge(uint8_t *src, int32_t pitch,
     LPF_MASK_HEV(p3, p2, p1, p0, q0, q1, q2, q3, limit, b_limit, thresh, hev,
                  mask, flat);
     VP9_FLAT4(p3, p2, p0, q0, q2, q3, flat);
-    VP9_LPF_FILTER4_8W(p1, p0, q0, q1, mask, hev, p1_out, p0_out, q0_out,
+    VP9_LPF_FILTER4_4W(p1, p0, q0, q1, mask, hev, p1_out, p0_out, q0_out,
                        q1_out);
 
     flat = (v16u8)__msa_ilvr_d((v2i64)zero, (v2i64)flat);
@@ -638,19 +639,19 @@ static void mb_lpf_horizontal_edge(uint8_t *src, int32_t pitch,
       }
     }
   } else {
-    vpx_lpf_horizontal_16_dual_msa(src, pitch, b_limit_ptr, limit_ptr,
-                                   thresh_ptr, count);
+    mb_lpf_horizontal_edge_dual(src, pitch, b_limit_ptr, limit_ptr, thresh_ptr,
+                                count);
   }
 }
 
-void vpx_lpf_horizontal_edge_8_msa(uint8_t *src, int32_t pitch,
-                                   const uint8_t *b_limit_ptr,
-                                   const uint8_t *limit_ptr,
-                                   const uint8_t *thresh_ptr) {
+void vpx_lpf_horizontal_16_msa(uint8_t *src, int32_t pitch,
+                               const uint8_t *b_limit_ptr,
+                               const uint8_t *limit_ptr,
+                               const uint8_t *thresh_ptr) {
   mb_lpf_horizontal_edge(src, pitch, b_limit_ptr, limit_ptr, thresh_ptr, 1);
 }
 
-void vpx_lpf_horizontal_edge_16_msa(uint8_t *src, int32_t pitch,
+void vpx_lpf_horizontal_16_dual_msa(uint8_t *src, int32_t pitch,
                                     const uint8_t *b_limit_ptr,
                                     const uint8_t *limit_ptr,
                                     const uint8_t *thresh_ptr) {
@@ -778,7 +779,7 @@ int32_t vpx_vt_lpf_t4_and_t8_8w(uint8_t *src, uint8_t *filter48,
   /* flat4 */
   VP9_FLAT4(p3, p2, p0, q0, q2, q3, flat);
   /* filter4 */
-  VP9_LPF_FILTER4_8W(p1, p0, q0, q1, mask, hev, p1_out, p0_out, q0_out, q1_out);
+  VP9_LPF_FILTER4_4W(p1, p0, q0, q1, mask, hev, p1_out, p0_out, q0_out, q1_out);
 
   flat = (v16u8)__msa_ilvr_d((v2i64)zero, (v2i64)flat);
 

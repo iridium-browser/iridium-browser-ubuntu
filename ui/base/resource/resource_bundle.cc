@@ -17,7 +17,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
@@ -45,7 +44,6 @@
 
 #if defined(OS_ANDROID)
 #include "ui/base/resource/resource_bundle_android.h"
-#include "ui/gfx/android/device_display_info.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -216,7 +214,7 @@ void ResourceBundle::InitSharedInstanceWithPakFileRegion(
     NOTREACHED() << "failed to load pak file";
     return;
   }
-  g_shared_instance_->locale_resources_data_.reset(data_pack.release());
+  g_shared_instance_->locale_resources_data_ = std::move(data_pack);
   g_shared_instance_->InitDefaultFontList();
 }
 
@@ -332,14 +330,12 @@ std::string ResourceBundle::LoadLocaleResources(
 
   std::unique_ptr<DataPack> data_pack(new DataPack(SCALE_FACTOR_100P));
   if (!data_pack->LoadFromPath(locale_file_path)) {
-    UMA_HISTOGRAM_ENUMERATION("ResourceBundle.LoadLocaleResourcesError",
-                              logging::GetLastSystemErrorCode(), 16000);
     LOG(ERROR) << "failed to load locale.pak";
     NOTREACHED();
     return std::string();
   }
 
-  locale_resources_data_.reset(data_pack.release());
+  locale_resources_data_ = std::move(data_pack);
   return app_locale;
 }
 #endif  // defined(OS_ANDROID)
@@ -356,7 +352,7 @@ void ResourceBundle::LoadTestResources(const base::FilePath& path,
 
   data_pack.reset(new DataPack(ui::SCALE_FACTOR_NONE));
   if (!locale_path.empty() && data_pack->LoadFromPath(locale_path)) {
-    locale_resources_data_.reset(data_pack.release());
+    locale_resources_data_ = std::move(data_pack);
   } else {
     locale_resources_data_.reset(new DataPack(ui::SCALE_FACTOR_NONE));
   }
@@ -559,6 +555,22 @@ base::string16 ResourceBundle::GetLocalizedString(int message_id) {
   return msg;
 }
 
+base::RefCountedMemory* ResourceBundle::LoadLocalizedResourceBytes(
+    int resource_id) {
+  {
+    base::AutoLock lock_scope(*locale_resources_data_lock_);
+    base::StringPiece data;
+    if (locale_resources_data_.get() &&
+        locale_resources_data_->GetStringPiece(
+            static_cast<uint16_t>(resource_id), &data) &&
+        !data.empty()) {
+      return new base::RefCountedStaticMemory(data.data(), data.length());
+    }
+  }
+  // Release lock_scope and fall back to main data pack.
+  return LoadDataResourceBytes(resource_id);
+}
+
 const gfx::FontList& ResourceBundle::GetFontListWithDelta(
     int size_delta,
     gfx::Font::FontStyle style,
@@ -680,8 +692,7 @@ void ResourceBundle::InitSharedInstance(Delegate* delegate) {
   if (display::Display::HasForceDeviceScaleFactor()) {
     display_density = display::Display::GetForcedDeviceScaleFactor();
   } else {
-    gfx::DeviceDisplayInfo device_info;
-    display_density = device_info.GetDIPScale();
+    display_density = GetPrimaryDisplayScale();
   }
   const ScaleFactor closest = FindClosestScaleFactorUnsafe(display_density);
   if (closest != SCALE_FACTOR_100P)
@@ -809,31 +820,30 @@ bool ResourceBundle::LoadBitmap(int resource_id,
                                 SkBitmap* bitmap,
                                 bool* fell_back_to_1x) const {
   DCHECK(fell_back_to_1x);
-  ResourceHandle* data_handle_100_percent = nullptr;
-  for (size_t i = 0; i < data_packs_.size(); ++i) {
-    if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_NONE &&
-        LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
+  for (const auto& pack : data_packs_) {
+    if (pack->GetScaleFactor() == ui::SCALE_FACTOR_NONE &&
+        LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {
       DCHECK(!*fell_back_to_1x);
       *scale_factor = ui::SCALE_FACTOR_NONE;
       return true;
     }
-    if (data_packs_[i]->GetScaleFactor() == ui::SCALE_FACTOR_100P)
-      data_handle_100_percent = data_packs_[i];
 
-    if (data_packs_[i]->GetScaleFactor() == *scale_factor &&
-        LoadBitmap(*data_packs_[i], resource_id, bitmap, fell_back_to_1x)) {
+    if (pack->GetScaleFactor() == *scale_factor &&
+        LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {
       return true;
     }
   }
 
   // Unit tests may only have 1x data pack. Allow them to fallback to 1x
   // resources.
-  if (*scale_factor != ui::SCALE_FACTOR_100P && is_test_resources_ &&
-      data_handle_100_percent &&
-      LoadBitmap(*data_handle_100_percent, resource_id, bitmap,
-                 fell_back_to_1x)) {
-    *fell_back_to_1x = true;
-    return true;
+  if (is_test_resources_ && *scale_factor != ui::SCALE_FACTOR_100P) {
+    for (const auto& pack : data_packs_) {
+      if (pack->GetScaleFactor() == ui::SCALE_FACTOR_100P &&
+          LoadBitmap(*pack, resource_id, bitmap, fell_back_to_1x)) {
+        *fell_back_to_1x = true;
+        return true;
+      }
+    }
   }
 
   return false;

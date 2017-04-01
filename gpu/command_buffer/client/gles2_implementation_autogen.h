@@ -872,6 +872,10 @@ void* MapBufferRange(GLenum target,
 
 GLboolean UnmapBuffer(GLenum target) override;
 
+void FlushMappedBufferRange(GLenum target,
+                            GLintptr offset,
+                            GLsizeiptr size) override;
+
 void* MapTexSubImage2DCHROMIUM(GLenum target,
                                GLint level,
                                GLint xoffset,
@@ -938,7 +942,9 @@ void PostSubBufferCHROMIUM(GLint x,
                            GLint height) override;
 
 void CopyTextureCHROMIUM(GLenum source_id,
+                         GLint source_level,
                          GLenum dest_id,
+                         GLint dest_level,
                          GLint internalformat,
                          GLenum dest_type,
                          GLboolean unpack_flip_y,
@@ -946,7 +952,9 @@ void CopyTextureCHROMIUM(GLenum source_id,
                          GLboolean unpack_unmultiply_alpha) override;
 
 void CopySubTextureCHROMIUM(GLenum source_id,
+                            GLint source_level,
                             GLenum dest_id,
+                            GLint dest_level,
                             GLint xoffset,
                             GLint yoffset,
                             GLint x,
@@ -1167,6 +1175,10 @@ void ProgramPathFragmentInputGenCHROMIUM(GLuint program,
                                          GLint components,
                                          const GLfloat* coeffs) override;
 
+void* GetBufferSubDataAsyncCHROMIUM(GLenum target,
+                                    GLintptr offset,
+                                    GLsizeiptr size) override;
+
 void CoverageModulationCHROMIUM(GLenum components) override;
 
 GLenum GetGraphicsResetStatusKHR() override;
@@ -1190,5 +1202,15 @@ void UniformMatrix4fvStreamTextureMatrixCHROMIUM(
     GLint location,
     GLboolean transpose,
     const GLfloat* transform) override;
+
+void OverlayPromotionHintCHROMIUM(GLuint texture,
+                                  GLboolean promotion_hint,
+                                  GLint display_x,
+                                  GLint display_y) override;
+
+void SwapBuffersWithDamageCHROMIUM(GLint x,
+                                   GLint y,
+                                   GLint width,
+                                   GLint height) override;
 
 #endif  // GPU_COMMAND_BUFFER_CLIENT_GLES2_IMPLEMENTATION_AUTOGEN_H_

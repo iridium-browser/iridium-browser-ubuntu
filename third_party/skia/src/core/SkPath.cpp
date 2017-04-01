@@ -8,7 +8,6 @@
 #include <cmath>
 #include "SkBuffer.h"
 #include "SkCubicClipper.h"
-#include "SkErrorInternals.h"
 #include "SkGeometry.h"
 #include "SkMath.h"
 #include "SkPathPriv.h"
@@ -221,7 +220,7 @@ bool SkPath::interpolate(const SkPath& ending, SkScalar weight, SkPath* out) con
     }
     out->reset();
     out->addPath(*this);
-    fPathRef->interpolate(*ending.fPathRef, weight, out->fPathRef);
+    fPathRef->interpolate(*ending.fPathRef, weight, out->fPathRef.get());
     return true;
 }
 
@@ -1089,7 +1088,7 @@ static int build_arc_conics(const SkRect& oval, const SkVector& start, const SkV
 
     int count = SkConic::BuildUnitArc(start, stop, dir, &matrix, conics);
     if (0 == count) {
-        matrix.mapXY(start.x(), start.y(), singlePt);
+        matrix.mapXY(stop.x(), stop.y(), singlePt);
     }
     return count;
 }
@@ -1205,10 +1204,6 @@ void SkPath::addRoundRect(const SkRect& rect, SkScalar rx, SkScalar ry,
     assert_known_direction(dir);
 
     if (rx < 0 || ry < 0) {
-        SkErrorInternals::SetError( kInvalidArgument_SkError,
-                                    "I got %f and %f as radii to SkPath::AddRoundRect, "
-                                    "but negative radii are not allowed.",
-                                    SkScalarToDouble(rx), SkScalarToDouble(ry) );
         return;
     }
 
@@ -1290,6 +1285,25 @@ void SkPath::arcTo(const SkRect& oval, SkScalar startAngle, SkScalar sweepAngle,
     angles_to_unit_vectors(startAngle, sweepAngle, &startV, &stopV, &dir);
 
     SkPoint singlePt;
+
+    // At this point, we know that the arc is not a lone point, but startV == stopV
+    // indicates that the sweepAngle is too small such that angles_to_unit_vectors
+    // cannot handle it.
+    if (startV == stopV) {
+        SkScalar endAngle = SkDegreesToRadians(startAngle + sweepAngle);
+        SkScalar radiusX = oval.width() / 2;
+        SkScalar radiusY = oval.height() / 2;
+        // We cannot use SkScalarSinCos function in the next line because
+        // SkScalarSinCos has a threshold *SkScalarNearlyZero*. When sin(startAngle)
+        // is 0 and sweepAngle is very small and radius is huge, the expected
+        // behavior here is to draw a line. But calling SkScalarSinCos will
+        // make sin(endAngle) to be 0 which will then draw a dot.
+        singlePt.set(oval.centerX() + radiusX * sk_float_cos(endAngle),
+            oval.centerY() + radiusY * sk_float_sin(endAngle));
+        forceMoveTo ? this->moveTo(singlePt) : this->lineTo(singlePt);
+        return;
+    }
+
     SkConic conics[SkConic::kMaxConicsForArc];
     int count = build_arc_conics(oval, startV, stopV, dir, conics, &singlePt);
     if (count) {
@@ -1553,49 +1567,41 @@ static int pts_in_verb(unsigned verb) {
 
 // ignore the last point of the 1st contour
 void SkPath::reversePathTo(const SkPath& path) {
-    int i, vcount = path.fPathRef->countVerbs();
-    // exit early if the path is empty, or just has a moveTo.
-    if (vcount < 2) {
+    const uint8_t* verbs = path.fPathRef->verbsMemBegin(); // points at the last verb
+    if (!verbs) {  // empty path returns nullptr
         return;
     }
+    const uint8_t* verbsEnd = path.fPathRef->verbs() - 1; // points just past the first verb
+    SkASSERT(verbsEnd[0] == kMove_Verb);
+    const SkPoint*  pts = path.fPathRef->pointsEnd() - 1;
+    const SkScalar* conicWeights = path.fPathRef->conicWeightsEnd();
 
-    SkPathRef::Editor(&fPathRef, vcount, path.countPoints());
-
-    const uint8_t*  verbs = path.fPathRef->verbs();
-    const SkPoint*  pts = path.fPathRef->points();
-    const SkScalar* conicWeights = path.fPathRef->conicWeights();
-
-    SkASSERT(verbs[~0] == kMove_Verb);
-    for (i = 1; i < vcount; ++i) {
-        unsigned v = verbs[~i];
-        int n = pts_in_verb(v);
-        if (n == 0) {
-            break;
-        }
-        pts += n;
-        conicWeights += (SkPath::kConic_Verb == v);
-    }
-
-    while (--i > 0) {
-        switch (verbs[~i]) {
+    while (verbs < verbsEnd) {
+        uint8_t v = *verbs++;
+        pts -= pts_in_verb(v);
+        switch (v) {
+            case kMove_Verb:
+                // if the path has multiple contours, stop after reversing the last
+                return;
             case kLine_Verb:
-                this->lineTo(pts[-1].fX, pts[-1].fY);
+                this->lineTo(pts[0]);
                 break;
             case kQuad_Verb:
-                this->quadTo(pts[-1].fX, pts[-1].fY, pts[-2].fX, pts[-2].fY);
+                this->quadTo(pts[1], pts[0]);
                 break;
             case kConic_Verb:
-                this->conicTo(pts[-1], pts[-2], *--conicWeights);
+                this->conicTo(pts[1], pts[0], *--conicWeights);
                 break;
             case kCubic_Verb:
-                this->cubicTo(pts[-1].fX, pts[-1].fY, pts[-2].fX, pts[-2].fY,
-                              pts[-3].fX, pts[-3].fY);
+                this->cubicTo(pts[2], pts[1], pts[0]);
+                break;
+            case kClose_Verb:
+                SkASSERT(verbs - path.fPathRef->verbsMemBegin() == 1);
                 break;
             default:
                 SkDEBUGFAIL("bad verb");
                 break;
         }
-        pts -= pts_in_verb(verbs[~i]);
     }
 }
 
@@ -1783,7 +1789,10 @@ void SkPath::Iter::setPath(const SkPath& path, bool forceClose) {
     fPts = path.fPathRef->points();
     fVerbs = path.fPathRef->verbs();
     fVerbStop = path.fPathRef->verbsMemBegin();
-    fConicWeights = path.fPathRef->conicWeights() - 1; // begin one behind
+    fConicWeights = path.fPathRef->conicWeights();
+    if (fConicWeights) {
+      fConicWeights -= 1;  // begin one behind
+    }
     fLastPt.fX = fLastPt.fY = 0;
     fMoveTo.fX = fMoveTo.fY = 0;
     fForceClose = SkToU8(forceClose);
@@ -2045,7 +2054,7 @@ size_t SkPath::writeToMemory(void* storage) const {
 }
 
 size_t SkPath::readFromMemory(const void* storage, size_t length) {
-    SkRBufferWithSizeCheck buffer(storage, length);
+    SkRBuffer buffer(storage, length);
 
     int32_t packed;
     if (!buffer.readS32(&packed)) {
@@ -2138,11 +2147,15 @@ void SkPath::dump(SkWStream* wStream, bool forceClose, bool dumpAsHex) const {
     SkPoint pts[4];
     Verb    verb;
 
-    if (!wStream) {
-        SkDebugf("path: forceClose=%s\n", forceClose ? "true" : "false");
-    }
     SkString builder;
-
+    char const * const gFillTypeStrs[] = {
+        "Winding",
+        "EvenOdd",
+        "InverseWinding",
+        "InverseEvenOdd",
+    };
+    builder.printf("path.setFillType(SkPath::k%s_FillType);\n",
+            gFillTypeStrs[(int) this->getFillType()]);
     while ((verb = iter.next(pts, false)) != kDone_Verb) {
         switch (verb) {
             case kMove_Verb:
@@ -2388,8 +2401,9 @@ private:
                 break;
             case kBackwards_DirChange:
                 if (fIsCurve) {
-                    fConvexity = SkPath::kConcave_Convexity;
-                    fFirstDirection = SkPathPriv::kUnknown_FirstDirection;
+                    // If any of the subsequent dir is non-backward, it'll be concave.
+                    // Otherwise, it's still convex.
+                    fExpectedDir = dir;
                 }
                 fLastVec = vec;
                 break;
@@ -3340,4 +3354,43 @@ bool SkPathPriv::IsSimpleClosedRect(const SkPath& path, SkRect* rect, SkPath::Di
             break;
     }
     return true;
+}
+
+void SkPathPriv::CreateDrawArcPath(SkPath* path, const SkRect& oval, SkScalar startAngle,
+                                   SkScalar sweepAngle, bool useCenter, bool isFillNoPathEffect) {
+    SkASSERT(!oval.isEmpty());
+    SkASSERT(sweepAngle);
+
+    path->reset();
+    path->setIsVolatile(true);
+    path->setFillType(SkPath::kWinding_FillType);
+    if (isFillNoPathEffect && SkScalarAbs(sweepAngle) >= 360.f) {
+        path->addOval(oval);
+        return;
+    }
+    if (useCenter) {
+        path->moveTo(oval.centerX(), oval.centerY());
+    }
+    // Arc to mods at 360 and drawArc is not supposed to.
+    bool forceMoveTo = !useCenter;
+    while (sweepAngle <= -360.f) {
+        path->arcTo(oval, startAngle, -180.f, forceMoveTo);
+        startAngle -= 180.f;
+        path->arcTo(oval, startAngle, -180.f, false);
+        startAngle -= 180.f;
+        forceMoveTo = false;
+        sweepAngle += 360.f;
+    }
+    while (sweepAngle >= 360.f) {
+        path->arcTo(oval, startAngle, 180.f, forceMoveTo);
+        startAngle += 180.f;
+        path->arcTo(oval, startAngle, 180.f, false);
+        startAngle += 180.f;
+        forceMoveTo = false;
+        sweepAngle -= 360.f;
+    }
+    path->arcTo(oval, startAngle, sweepAngle, forceMoveTo);
+    if (useCenter) {
+        path->close();
+    }
 }

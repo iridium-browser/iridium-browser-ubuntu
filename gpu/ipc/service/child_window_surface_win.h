@@ -5,17 +5,19 @@
 #ifndef GPU_IPC_SERVICE_CHILD_WINDOW_SURFACE_WIN_H_
 #define GPU_IPC_SERVICE_CHILD_WINDOW_SURFACE_WIN_H_
 
+#include "base/memory/weak_ptr.h"
+#include "gpu/ipc/service/child_window_win.h"
+#include "gpu/ipc/service/image_transport_surface_delegate.h"
 #include "ui/gl/gl_surface_egl.h"
 
 #include <windows.h>
 
 namespace gpu {
 
-class GpuChannelManager;
-
 class ChildWindowSurfaceWin : public gl::NativeViewGLSurfaceEGL {
  public:
-  ChildWindowSurfaceWin(GpuChannelManager* manager, HWND parent_window);
+  ChildWindowSurfaceWin(base::WeakPtr<ImageTransportSurfaceDelegate> delegate,
+                        HWND parent_window);
 
   // GLSurface implementation.
   EGLConfig GetConfig() override;
@@ -26,17 +28,11 @@ class ChildWindowSurfaceWin : public gl::NativeViewGLSurfaceEGL {
   gfx::SwapResult SwapBuffers() override;
   gfx::SwapResult PostSubBuffer(int x, int y, int width, int height) override;
 
-  void InvalidateWindowRect(const gfx::Rect& rect);
-
  protected:
   ~ChildWindowSurfaceWin() override;
 
  private:
-  void ClearInvalidContents();
-
-  HWND parent_window_;
-  GpuChannelManager* manager_;
-  gfx::Rect rect_to_clear_;
+  ChildWindowWin child_window_;
   bool alpha_;
   bool first_swap_;
 

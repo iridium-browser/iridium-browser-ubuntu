@@ -14,7 +14,6 @@ class WebView;
 
 namespace test_runner {
 
-class EventSender;
 class TestRunner;
 class WebTestDelegate;
 class WebViewTestProxyBase;
@@ -25,10 +24,8 @@ class WebViewTestProxyBase;
 // WebViewTestClient or to the product code (i.e. to RenderViewImpl).
 class WebViewTestClient : public blink::WebViewClient {
  public:
-  // Caller has to ensure that all arguments (i.e. |test_runner| and |delegate|)
-  // live longer than |this|.
-  WebViewTestClient(TestRunner* test_runner,
-                    WebViewTestProxyBase* web_view_test_proxy_base);
+  // Caller has to ensure |web_view_test_proxy_base| lives longer than |this|.
+  WebViewTestClient(WebViewTestProxyBase* web_view_test_proxy_base);
 
   virtual ~WebViewTestClient();
 
@@ -38,11 +35,6 @@ class WebViewTestClient : public blink::WebViewClient {
                              blink::WebTextDirection main_message_hint,
                              const blink::WebString& sub_message,
                              blink::WebTextDirection sub_message_hint) override;
-  void startDragging(blink::WebLocalFrame* frame,
-                     const blink::WebDragData& data,
-                     blink::WebDragOperationsMask mask,
-                     const blink::WebImage& image,
-                     const blink::WebPoint& point) override;
   void didChangeContents() override;
   blink::WebView* createView(blink::WebLocalFrame* creator,
                              const blink::WebURLRequest& request,
@@ -58,9 +50,9 @@ class WebViewTestClient : public blink::WebViewClient {
 
  private:
   WebTestDelegate* delegate();
+  TestRunner* test_runner();
 
-  // Borrowed pointers to other parts of Layout Tests state.
-  TestRunner* test_runner_;
+  // Borrowed pointer to WebViewTestProxyBase.
   WebViewTestProxyBase* web_view_test_proxy_base_;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewTestClient);

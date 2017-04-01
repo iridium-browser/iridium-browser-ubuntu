@@ -9,14 +9,13 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
-#include "chrome/common/features.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
 #include "chrome/browser/android/offline_pages/offline_page_tab_helper.h"
-#endif  // BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // defined(OS_ANDROID)
 
 namespace previews {
 
@@ -39,21 +38,22 @@ const char kHistogramOfflinePreviewsParseStart[] =
 
 }  // namespace internal
 
-PreviewsPageLoadMetricsObserver::PreviewsPageLoadMetricsObserver()
-    : is_offline_preview_(false) {}
+PreviewsPageLoadMetricsObserver::PreviewsPageLoadMetricsObserver() {}
 
 PreviewsPageLoadMetricsObserver::~PreviewsPageLoadMetricsObserver() {}
 
-void PreviewsPageLoadMetricsObserver::OnCommit(
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+PreviewsPageLoadMetricsObserver::OnCommit(
     content::NavigationHandle* navigation_handle) {
-  is_offline_preview_ = IsOfflinePreview(navigation_handle->GetWebContents());
+  return IsOfflinePreview(navigation_handle->GetWebContents())
+             ? CONTINUE_OBSERVING
+             : STOP_OBSERVING;
 }
 
 void PreviewsPageLoadMetricsObserver::OnDomContentLoadedEventStart(
     const page_load_metrics::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!is_offline_preview_ ||
-      !WasStartedInForegroundOptionalEventInForeground(
+  if (!WasStartedInForegroundOptionalEventInForeground(
           timing.dom_content_loaded_event_start, info)) {
     return;
   }
@@ -65,8 +65,7 @@ void PreviewsPageLoadMetricsObserver::OnDomContentLoadedEventStart(
 void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
     const page_load_metrics::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!is_offline_preview_ ||
-      !WasStartedInForegroundOptionalEventInForeground(
+  if (!WasStartedInForegroundOptionalEventInForeground(
           timing.dom_content_loaded_event_start, info)) {
     return;
   }
@@ -77,8 +76,7 @@ void PreviewsPageLoadMetricsObserver::OnLoadEventStart(
 void PreviewsPageLoadMetricsObserver::OnFirstLayout(
     const page_load_metrics::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!is_offline_preview_ ||
-      !WasStartedInForegroundOptionalEventInForeground(
+  if (!WasStartedInForegroundOptionalEventInForeground(
           timing.dom_content_loaded_event_start, info)) {
     return;
   }
@@ -89,8 +87,7 @@ void PreviewsPageLoadMetricsObserver::OnFirstLayout(
 void PreviewsPageLoadMetricsObserver::OnFirstContentfulPaint(
     const page_load_metrics::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!is_offline_preview_ ||
-      !WasStartedInForegroundOptionalEventInForeground(
+  if (!WasStartedInForegroundOptionalEventInForeground(
           timing.dom_content_loaded_event_start, info)) {
     return;
   }
@@ -101,8 +98,7 @@ void PreviewsPageLoadMetricsObserver::OnFirstContentfulPaint(
 void PreviewsPageLoadMetricsObserver::OnParseStart(
     const page_load_metrics::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
-  if (!is_offline_preview_ ||
-      !WasStartedInForegroundOptionalEventInForeground(
+  if (!WasStartedInForegroundOptionalEventInForeground(
           timing.dom_content_loaded_event_start, info)) {
     return;
   }
@@ -112,13 +108,13 @@ void PreviewsPageLoadMetricsObserver::OnParseStart(
 
 bool PreviewsPageLoadMetricsObserver::IsOfflinePreview(
     content::WebContents* web_contents) const {
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   offline_pages::OfflinePageTabHelper* tab_helper =
       offline_pages::OfflinePageTabHelper::FromWebContents(web_contents);
-  return tab_helper && tab_helper->is_offline_preview();
+  return tab_helper && tab_helper->IsShowingOfflinePreview();
 #else
   return false;
-#endif  // BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // defined(OS_ANDROID)
 }
 
 }  // namespace previews

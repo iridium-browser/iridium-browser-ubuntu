@@ -11,7 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
-#include "ui/accessibility/ax_view_state.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/animation/animation_delegate.h"
@@ -238,10 +238,6 @@ void ToastContentsView::AnimationCanceled(
 }
 
 // views::WidgetDelegate
-views::View* ToastContentsView::GetContentsView() {
-  return this;
-}
-
 void ToastContentsView::WindowClosing() {
   if (!is_closing_ && collection_.get())
     collection_->ForgetToast(this);
@@ -313,10 +309,10 @@ void ToastContentsView::UpdatePreferredSize() {
   SetBoundsWithAnimation(bounds());
 }
 
-void ToastContentsView::GetAccessibleState(ui::AXViewState* state) {
+void ToastContentsView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   if (child_count() > 0)
-    child_at(0)->GetAccessibleState(state);
-  state->role = ui::AX_ROLE_WINDOW;
+    child_at(0)->GetAccessibleNodeData(node_data);
+  node_data->role = ui::AX_ROLE_WINDOW;
 }
 
 void ToastContentsView::ClickOnNotification(
@@ -365,7 +361,11 @@ void ToastContentsView::CreateWidget(
     PopupAlignmentDelegate* alignment_delegate) {
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.keep_on_top = true;
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  params.opacity = views::Widget::InitParams::OPAQUE_WINDOW;
+#else
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
+#endif
   params.delegate = this;
   views::Widget* widget = new views::Widget();
   alignment_delegate->ConfigureWidgetInitParamsForContainer(widget, &params);

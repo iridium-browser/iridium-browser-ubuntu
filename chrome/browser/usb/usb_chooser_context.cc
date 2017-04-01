@@ -13,7 +13,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
-#include "device/core/device_client.h"
+#include "device/base/device_client.h"
 #include "device/usb/public/interfaces/device.mojom.h"
 #include "device/usb/usb_device.h"
 
@@ -100,9 +100,9 @@ UsbChooserContext::GetAllGrantedObjects() {
       base::DictionaryValue object;
       object.SetString(kDeviceNameKey, device->product_string());
       object.SetString(kGuidKey, device->guid());
-      objects.push_back(base::WrapUnique(new ChooserContextBase::Object(
+      objects.push_back(base::MakeUnique<ChooserContextBase::Object>(
           requesting_origin, embedding_origin, &object, "preference",
-          is_incognito_)));
+          is_incognito_));
     }
   }
 

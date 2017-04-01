@@ -10,14 +10,15 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/gpu_export.h"
 #include "gpu/ipc/service/gpu_memory_manager.h"
@@ -56,7 +57,7 @@ namespace gpu {
 class GpuChannel;
 class GpuChannelManagerDelegate;
 class GpuMemoryBufferFactory;
-class GpuWatchdog;
+class GpuWatchdogThread;
 
 // A GpuChannelManager is a thread responsible for issuing rendering commands
 // managing the lifetimes of GPU channels and forwarding IPC requests from the
@@ -65,7 +66,7 @@ class GPU_EXPORT GpuChannelManager {
  public:
   GpuChannelManager(const GpuPreferences& gpu_preferences,
                     GpuChannelManagerDelegate* delegate,
-                    GpuWatchdog* watchdog,
+                    GpuWatchdogThread* watchdog,
                     base::SingleThreadTaskRunner* task_runner,
                     base::SingleThreadTaskRunner* io_task_runner,
                     base::WaitableEvent* shutdown_event,
@@ -132,6 +133,12 @@ class GPU_EXPORT GpuChannelManager {
     return exiting_for_lost_context_;
   }
 
+  gles2::MailboxManager* mailbox_manager() const {
+    return mailbox_manager_.get();
+  }
+
+  gl::GLShareGroup* share_group() const { return share_group_.get(); }
+
  protected:
   virtual std::unique_ptr<GpuChannel> CreateGpuChannel(
       int client_id,
@@ -144,21 +151,15 @@ class GPU_EXPORT GpuChannelManager {
     return sync_point_manager_;
   }
 
-  gl::GLShareGroup* share_group() const { return share_group_.get(); }
-  gles2::MailboxManager* mailbox_manager() const {
-    return mailbox_manager_.get();
-  }
-  PreemptionFlag* preemption_flag() const {
-    return preemption_flag_.get();
-  }
+  PreemptionFlag* preemption_flag() const { return preemption_flag_.get(); }
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
-  // These objects manage channels to individual renderer processes there is
+  // These objects manage channels to individual renderer processes. There is
   // one channel for each renderer process that has connected to this GPU
   // process.
-  base::ScopedPtrHashMap<int32_t, std::unique_ptr<GpuChannel>> gpu_channels_;
+  std::unordered_map<int32_t, std::unique_ptr<GpuChannel>> gpu_channels_;
 
  private:
   void InternalDestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id, int client_id);
@@ -169,12 +170,12 @@ class GPU_EXPORT GpuChannelManager {
   void DoWakeUpGpu();
 #endif
 
-  const GpuPreferences& gpu_preferences_;
+  const GpuPreferences gpu_preferences_;
   GpuDriverBugWorkarounds gpu_driver_bug_workarounds_;
 
   GpuChannelManagerDelegate* const delegate_;
 
-  GpuWatchdog* watchdog_;
+  GpuWatchdogThread* watchdog_;
 
   base::WaitableEvent* shutdown_event_;
 

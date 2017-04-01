@@ -4,14 +4,15 @@
 
 package org.chromium.chrome.browser.webapps;
 
+import android.support.test.filters.SmallTest;
 import android.test.InstrumentationTestCase;
 import android.test.UiThreadTest;
-import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -44,6 +45,7 @@ public class ActivityAssignerTest extends InstrumentationTestCase {
     @UiThreadTest
     @SmallTest
     @Feature({"Webapps"})
+    @RetryOnFailure
     public void testEntriesCreated() {
         ActivityAssigner assigner = ActivityAssigner.instance(ActivityAssigner.WEBAPP_NAMESPACE);
 
@@ -78,6 +80,7 @@ public class ActivityAssignerTest extends InstrumentationTestCase {
     @UiThreadTest
     @SmallTest
     @Feature({"Webapps"})
+    @RetryOnFailure
     public void testCorruptedPreferences() {
         String wrongVariableType = "omgwtfbbq";
         int index = ActivityAssigner.WEBAPP_NAMESPACE;

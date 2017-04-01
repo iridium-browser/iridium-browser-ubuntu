@@ -119,7 +119,7 @@ static INLINE uint64_t xgetbv(void) {
                    : "c"(ecx));
   return ((uint64_t)edx << 32) | eax;
 }
-#elif(defined(_M_X64) || defined(_M_IX86)) && defined(_MSC_FULL_VER) && \
+#elif (defined(_M_X64) || defined(_M_IX86)) && defined(_MSC_FULL_VER) && \
     _MSC_FULL_VER >= 160040219  // >= VS2010 SP1
 #include <immintrin.h>
 #define xgetbv() _xgetbv(0)
@@ -140,6 +140,11 @@ static INLINE uint64_t xgetbv(void) {
 #endif
 
 #if defined(_MSC_VER) && _MSC_VER >= 1700
+#undef NOMINMAX
+#define NOMINMAX
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 #if WINAPI_FAMILY_PARTITION(WINAPI_FAMILY_APP)
 #define getenv(x) NULL

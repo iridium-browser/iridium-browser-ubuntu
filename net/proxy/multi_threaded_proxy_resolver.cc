@@ -21,6 +21,8 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_resolver.h"
 
@@ -117,13 +119,12 @@ class MultiThreadedProxyResolver : public ProxyResolver,
   int GetProxyForURL(const GURL& url,
                      ProxyInfo* results,
                      const CompletionCallback& callback,
-                     RequestHandle* request,
-                     const BoundNetLog& net_log) override;
-  void CancelRequest(RequestHandle request) override;
-  LoadState GetLoadState(RequestHandle request) const override;
+                     std::unique_ptr<Request>* request,
+                     const NetLogWithSource& net_log) override;
 
  private:
   class GetProxyForURLJob;
+  class RequestImpl;
   // FIFO queue of pending jobs waiting to be started.
   // TODO(eroman): Make this priority queue.
   typedef std::deque<scoped_refptr<Job>> PendingJobsQueue;
@@ -231,6 +232,20 @@ class Job : public base::RefCountedThreadSafe<Job> {
   bool was_cancelled_;
 };
 
+class MultiThreadedProxyResolver::RequestImpl : public ProxyResolver::Request {
+ public:
+  explicit RequestImpl(scoped_refptr<Job> job) : job_(std::move(job)) {}
+
+  ~RequestImpl() override { job_->Cancel(); }
+
+  LoadState GetLoadState() override {
+    return LOAD_STATE_RESOLVING_PROXY_FOR_URL;
+  }
+
+ private:
+  scoped_refptr<Job> job_;
+};
+
 // CreateResolverJob -----------------------------------------------------------
 
 // Runs on the worker thread to call ProxyResolverFactory::CreateProxyResolver.
@@ -281,7 +296,7 @@ class MultiThreadedProxyResolver::GetProxyForURLJob : public Job {
   GetProxyForURLJob(const GURL& url,
                     ProxyInfo* results,
                     const CompletionCallback& callback,
-                    const BoundNetLog& net_log)
+                    const NetLogWithSource& net_log)
       : Job(TYPE_GET_PROXY_FOR_URL, callback),
         results_(results),
         net_log_(net_log),
@@ -290,22 +305,22 @@ class MultiThreadedProxyResolver::GetProxyForURLJob : public Job {
     DCHECK(!callback.is_null());
   }
 
-  BoundNetLog* net_log() { return &net_log_; }
+  NetLogWithSource* net_log() { return &net_log_; }
 
   void WaitingForThread() override {
     was_waiting_for_thread_ = true;
-    net_log_.BeginEvent(NetLog::TYPE_WAITING_FOR_PROXY_RESOLVER_THREAD);
+    net_log_.BeginEvent(NetLogEventType::WAITING_FOR_PROXY_RESOLVER_THREAD);
   }
 
   void FinishedWaitingForThread() override {
     DCHECK(executor());
 
     if (was_waiting_for_thread_) {
-      net_log_.EndEvent(NetLog::TYPE_WAITING_FOR_PROXY_RESOLVER_THREAD);
+      net_log_.EndEvent(NetLogEventType::WAITING_FOR_PROXY_RESOLVER_THREAD);
     }
 
     net_log_.AddEvent(
-        NetLog::TYPE_SUBMITTED_TO_RESOLVER_THREAD,
+        NetLogEventType::SUBMITTED_TO_RESOLVER_THREAD,
         NetLog::IntCallback("thread_number", executor()->thread_number()));
   }
 
@@ -341,7 +356,7 @@ class MultiThreadedProxyResolver::GetProxyForURLJob : public Job {
   ProxyInfo* results_;
 
   // Can be used on either "origin" or worker thread.
-  BoundNetLog net_log_;
+  NetLogWithSource net_log_;
   const GURL url_;
 
   // Usable from within DoQuery on the worker thread.
@@ -442,8 +457,11 @@ MultiThreadedProxyResolver::~MultiThreadedProxyResolver() {
 }
 
 int MultiThreadedProxyResolver::GetProxyForURL(
-    const GURL& url, ProxyInfo* results, const CompletionCallback& callback,
-    RequestHandle* request, const BoundNetLog& net_log) {
+    const GURL& url,
+    ProxyInfo* results,
+    const CompletionCallback& callback,
+    std::unique_ptr<Request>* request,
+    const NetLogWithSource& net_log) {
   DCHECK(CalledOnValidThread());
   DCHECK(!callback.is_null());
 
@@ -453,7 +471,7 @@ int MultiThreadedProxyResolver::GetProxyForURL(
   // Completion will be notified through |callback|, unless the caller cancels
   // the request using |request|.
   if (request)
-    *request = reinterpret_cast<RequestHandle>(job.get());
+    request->reset(new RequestImpl(job));
 
   // If there is an executor that is ready to run this request, submit it!
   Executor* executor = FindIdleExecutor();
@@ -474,32 +492,6 @@ int MultiThreadedProxyResolver::GetProxyForURL(
     AddNewExecutor();
 
   return ERR_IO_PENDING;
-}
-
-void MultiThreadedProxyResolver::CancelRequest(RequestHandle req) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(req);
-
-  Job* job = reinterpret_cast<Job*>(req);
-  DCHECK_EQ(Job::TYPE_GET_PROXY_FOR_URL, job->type());
-
-  if (job->executor()) {
-    // If the job was already submitted to the executor, just mark it
-    // as cancelled so the user callback isn't run on completion.
-    job->Cancel();
-  } else {
-    // Otherwise the job is just sitting in a queue.
-    PendingJobsQueue::iterator it =
-        std::find(pending_jobs_.begin(), pending_jobs_.end(), job);
-    DCHECK(it != pending_jobs_.end());
-    pending_jobs_.erase(it);
-  }
-}
-
-LoadState MultiThreadedProxyResolver::GetLoadState(RequestHandle req) const {
-  DCHECK(CalledOnValidThread());
-  DCHECK(req);
-  return LOAD_STATE_RESOLVING_PROXY_FOR_URL;
 }
 
 Executor* MultiThreadedProxyResolver::FindIdleExecutor() {
@@ -526,14 +518,14 @@ void MultiThreadedProxyResolver::AddNewExecutor() {
 
 void MultiThreadedProxyResolver::OnExecutorReady(Executor* executor) {
   DCHECK(CalledOnValidThread());
-  if (pending_jobs_.empty())
-    return;
-
-  // Get the next job to process (FIFO). Transfer it from the pending queue
-  // to the executor.
-  scoped_refptr<Job> job = pending_jobs_.front();
-  pending_jobs_.pop_front();
-  executor->StartJob(job.get());
+  while (!pending_jobs_.empty()) {
+    scoped_refptr<Job> job = pending_jobs_.front();
+    pending_jobs_.pop_front();
+    if (!job->was_cancelled()) {
+      executor->StartJob(job.get());
+      return;
+    }
+  }
 }
 
 }  // namespace

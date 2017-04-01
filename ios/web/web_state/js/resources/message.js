@@ -13,25 +13,13 @@ goog.require('__crWeb.common');
  */
 __gCrWeb.message = {};
 
+// Store message namespace object in a global __gCrWeb object referenced by a
+// string, so it does not get renamed by closure compiler during the
+// minification.
+__gCrWeb['message'] = __gCrWeb.message;
+
 /* Beginning of anonymous object. */
 (function() {
-  /**
-   * Object to manage queue of messages waiting to be sent to the main
-   * application for immediate processing.
-   * @type {Object}
-   * @private
-   */
-  var immediateMessageQueue_ = {
-    scheme: 'crwebinvokeimmediate',
-    reset: function() {
-      immediateMessageQueue_.queue = [];
-      // Since the array will be JSON serialized, protect against non-standard
-      // custom versions of Array.prototype.toJSON.
-      immediateMessageQueue_.queue.toJSON = null;
-    }
-  };
-  immediateMessageQueue_.reset();
-
   /**
    * Object to manage queue of messages waiting to be sent to the main
    * application for asynchronous processing.
@@ -44,38 +32,17 @@ __gCrWeb.message = {};
       messageQueue_.queue = [];
       // Since the array will be JSON serialized, protect against non-standard
       // custom versions of Array.prototype.toJSON.
-      messageQueue_.queue.toJSON = null
+      delete messageQueue_.queue.toJSON;
     }
   };
   messageQueue_.reset();
 
   /**
-   * Invokes a command immediately on the Objective-C side.
-   * An immediate command is a special class of command that must be handled at
-   * the earliest opportunity. See the notes in CRWWebController for
-   * restrictions and precautions.
-   * @param {Object} command The command in a JavaScript object.
-   * @private
-   */
-  __gCrWeb.message.invokeOnHostImmediate = function(command) {
-    // If there is no document or body, the command will be silently dropped.
-    if (!document || !document.body)
-      return;
-    immediateMessageQueue_.queue.push(command);
-    sendQueue_(immediateMessageQueue_);
-  };
-
-  /**
    * Invokes a command on the Objective-C side.
    * @param {Object} command The command in a JavaScript object.
-   * @private
+   * @public
    */
   __gCrWeb.message.invokeOnHost = function(command) {
-    // Avoid infinite loops in sites that send messages as a side effect
-    // of URL verification (e.g., due to logging in an XHR override).
-    if (window.__gCrWeb_Verifying) {
-      return;
-    }
     messageQueue_.queue.push(command);
     sendQueue_(messageQueue_);
   };
@@ -94,15 +61,13 @@ __gCrWeb.message = {};
    * Sends both queues if they contain messages.
    */
   __gCrWeb.message.invokeQueues = function() {
-    if (immediateMessageQueue_.queue.length > 0)
-      sendQueue_(immediateMessageQueue_);
     if (messageQueue_.queue.length > 0)
       sendQueue_(messageQueue_);
   };
 
   function sendQueue_(queueObject) {
     // Do nothing if windowId has not been set.
-    if (!__gCrWeb.windowIdObject || typeof __gCrWeb.windowId != 'string') {
+    if (typeof __gCrWeb.windowId != 'string') {
       return;
     }
     // Some pages/plugins implement Object.prototype.toJSON, which can result
@@ -112,17 +77,15 @@ __gCrWeb.message = {};
       delete Object.prototype.toJSON;
 
     queueObject.queue.forEach(function(command) {
-        var stringifiedMessage = __gCrWeb.common.JSONStringify({
-            "crwCommand": command,
-            "crwWindowId": __gCrWeb.windowId
-        });
         // A web page can override |window.webkit| with any value. Deleting the
         // object ensures that original and working implementation of
         // window.webkit is restored.
         var oldWebkit = window.webkit;
-        delete window.webkit;
-        window.webkit.messageHandlers[queueObject.scheme].postMessage(
-            stringifiedMessage);
+        delete window['webkit'];
+        window.webkit.messageHandlers[queueObject.scheme].postMessage({
+            "crwCommand": command,
+            "crwWindowId": __gCrWeb['windowId']
+        });
         window.webkit = oldWebkit;
     });
     queueObject.reset();

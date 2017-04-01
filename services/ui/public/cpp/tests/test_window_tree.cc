@@ -30,12 +30,13 @@ bool TestWindowTree::WasEventAcked(uint32_t event_id) const {
 void TestWindowTree::NewWindow(
     uint32_t change_id,
     uint32_t window_id,
-    mojo::Map<mojo::String, mojo::Array<uint8_t>> properties) {}
+    const base::Optional<std::unordered_map<std::string, std::vector<uint8_t>>>&
+        properties) {}
 
 void TestWindowTree::NewTopLevelWindow(
     uint32_t change_id,
     uint32_t window_id,
-    mojo::Map<mojo::String, mojo::Array<uint8_t>> properties) {
+    const std::unordered_map<std::string, std::vector<uint8_t>>& properties) {
   got_change_ = true;
   change_id_ = change_id;
   window_id_ = window_id;
@@ -53,10 +54,13 @@ void TestWindowTree::SetWindowBounds(uint32_t change_id,
 void TestWindowTree::SetClientArea(
     uint32_t window_id,
     const gfx::Insets& insets,
-    mojo::Array<gfx::Rect> additional_client_areas) {}
+    const base::Optional<std::vector<gfx::Rect>>& additional_client_areas) {}
 
 void TestWindowTree::SetHitTestMask(uint32_t window_id,
                                     const base::Optional<gfx::Rect>& mask) {}
+
+void TestWindowTree::SetCanAcceptDrops(uint32_t window_id, bool accepts_drops) {
+}
 
 void TestWindowTree::SetWindowVisibility(uint32_t change_id,
                                          uint32_t window_id,
@@ -65,10 +69,11 @@ void TestWindowTree::SetWindowVisibility(uint32_t change_id,
   change_id_ = change_id;
 }
 
-void TestWindowTree::SetWindowProperty(uint32_t change_id,
-                                       uint32_t window_id,
-                                       const mojo::String& name,
-                                       mojo::Array<uint8_t> value) {
+void TestWindowTree::SetWindowProperty(
+    uint32_t change_id,
+    uint32_t window_id,
+    const std::string& name,
+    const base::Optional<std::vector<uint8_t>>& value) {
   got_change_ = true;
   change_id_ = change_id;
 }
@@ -80,11 +85,10 @@ void TestWindowTree::SetWindowOpacity(uint32_t change_id,
   change_id_ = change_id;
 }
 
-void TestWindowTree::AttachSurface(
+void TestWindowTree::AttachCompositorFrameSink(
     uint32_t window_id,
-    mojom::SurfaceType type,
-    mojo::InterfaceRequest<mojom::Surface> surface,
-    mojom::SurfaceClientPtr client) {}
+    mojo::InterfaceRequest<cc::mojom::MojoCompositorFrameSink> surface,
+    cc::mojom::MojoCompositorFrameSinkClientPtr client) {}
 
 void TestWindowTree::AddWindow(uint32_t change_id,
                                uint32_t parent,
@@ -160,6 +164,8 @@ void TestWindowTree::OnWindowInputEventAck(uint32_t event_id,
   acked_events_.insert(event_id);
 }
 
+void TestWindowTree::DeactivateWindow(uint32_t window_id) {}
+
 void TestWindowTree::GetWindowManagerClient(
     mojo::AssociatedInterfaceRequest<mojom::WindowManagerClient> internal) {}
 
@@ -167,6 +173,14 @@ void TestWindowTree::GetCursorLocationMemory(
     const GetCursorLocationMemoryCallback& callback) {
   callback.Run(mojo::ScopedSharedBufferHandle());
 }
+
+void TestWindowTree::PerformDragDrop(
+    uint32_t change_id,
+    uint32_t source_window_id,
+    const std::unordered_map<std::string, std::vector<uint8_t>>& drag_data,
+    uint32_t drag_operation) {}
+
+void TestWindowTree::CancelDragDrop(uint32_t window_id) {}
 
 void TestWindowTree::PerformWindowMove(uint32_t change_id,
                                        uint32_t window_id,

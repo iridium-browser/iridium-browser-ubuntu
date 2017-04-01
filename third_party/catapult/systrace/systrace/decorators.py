@@ -14,7 +14,17 @@ def HostOnlyTest(func):
 def ClientOnlyTest(func):
   """Decorator for running unit tests only on client devices (Android).
   """
-  return _SkipTestDecoratorHelper(func, ['windows', 'linux', 'mac'])
+  return _SkipTestDecoratorHelper(func, ['win', 'linux', 'mac'])
+
+
+def Disabled(func):
+  """Decorator for not running a unit test on any Trybot platform.
+  """
+  return _SkipTestDecoratorHelper(func, ['win', 'linux', 'mac', 'android'])
+
+
+def LinuxMacTest(func):
+  return _SkipTestDecoratorHelper(func, ['win', 'android'])
 
 
 def _SkipTestDecoratorHelper(func, disabled_strings):

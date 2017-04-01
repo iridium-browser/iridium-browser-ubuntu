@@ -5,19 +5,20 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_SYNC_BROWSER_PASSWORD_MANAGER_SETTING_MIGRATOR_SERVICE_H_
 #define COMPONENTS_PASSWORD_MANAGER_SYNC_BROWSER_PASSWORD_MANAGER_SETTING_MIGRATOR_SERVICE_H_
 
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
-#include "components/syncable_prefs/pref_service_syncable_observer.h"
+#include "components/sync_preferences/pref_service_syncable_observer.h"
 
-namespace sync_driver {
+namespace syncer {
 class SyncService;
 }
 
-namespace syncable_prefs {
+namespace sync_preferences {
 class PrefServiceSyncable;
 }
 
@@ -76,10 +77,10 @@ namespace password_manager {
 // depends on PrefServiceSyncable https://crbug.com/522536.
 class PasswordManagerSettingMigratorService
     : public KeyedService,
-      public syncable_prefs::PrefServiceSyncableObserver {
+      public sync_preferences::PrefServiceSyncableObserver {
  public:
   explicit PasswordManagerSettingMigratorService(
-      syncable_prefs::PrefServiceSyncable* prefs);
+      sync_preferences::PrefServiceSyncable* prefs);
   ~PasswordManagerSettingMigratorService() override;
 
   void Shutdown() override;
@@ -87,7 +88,7 @@ class PasswordManagerSettingMigratorService
   // PrefServiceSyncableObserver:
   void OnIsSyncingChanged() override;
 
-  void InitializeMigration(sync_driver::SyncService* sync_service);
+  void InitializeMigration(syncer::SyncService* sync_service);
 
   // Only use for testing.
   static void set_force_disabled_for_testing(bool force_disabled) {
@@ -146,8 +147,8 @@ class PasswordManagerSettingMigratorService
   // The initial value for kPasswordManagerSavingEnabled.
   bool initial_legacy_pref_value_;
 
-  syncable_prefs::PrefServiceSyncable* prefs_;
-  sync_driver::SyncService* sync_service_;
+  sync_preferences::PrefServiceSyncable* prefs_;
+  syncer::SyncService* sync_service_;
 
   PrefChangeRegistrar pref_change_registrar_;
 

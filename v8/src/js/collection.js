@@ -14,17 +14,13 @@ var GlobalMap = global.Map;
 var GlobalObject = global.Object;
 var GlobalSet = global.Set;
 var hashCodeSymbol = utils.ImportNow("hash_code_symbol");
-var MathRandom;
+var MathRandom = global.Math.random;
 var MapIterator;
-var NumberIsNaN;
 var SetIterator;
-var speciesSymbol = utils.ImportNow("species_symbol");
 var toStringTagSymbol = utils.ImportNow("to_string_tag_symbol");
 
 utils.Import(function(from) {
-  MathRandom = from.MathRandom;
   MapIterator = from.MapIterator;
-  NumberIsNaN = from.NumberIsNaN;
   SetIterator = from.SetIterator;
 });
 
@@ -42,9 +38,9 @@ function SetFindEntry(table, numBuckets, key, hash) {
   if (entry === NOT_FOUND) return entry;
   var candidate = ORDERED_HASH_SET_KEY_AT(table, entry, numBuckets);
   if (key === candidate) return entry;
-  var keyIsNaN = NumberIsNaN(key);
+  var keyIsNaN = NUMBER_IS_NAN(key);
   while (true) {
-    if (keyIsNaN && NumberIsNaN(candidate)) {
+    if (keyIsNaN && NUMBER_IS_NAN(candidate)) {
       return entry;
     }
     entry = ORDERED_HASH_SET_CHAIN_AT(table, entry, numBuckets);
@@ -62,9 +58,9 @@ function MapFindEntry(table, numBuckets, key, hash) {
   if (entry === NOT_FOUND) return entry;
   var candidate = ORDERED_HASH_MAP_KEY_AT(table, entry, numBuckets);
   if (key === candidate) return entry;
-  var keyIsNaN = NumberIsNaN(key);
+  var keyIsNaN = NUMBER_IS_NAN(key);
   while (true) {
-    if (keyIsNaN && NumberIsNaN(candidate)) {
+    if (keyIsNaN && NUMBER_IS_NAN(candidate)) {
       return entry;
     }
     entry = ORDERED_HASH_MAP_CHAIN_AT(table, entry, numBuckets);
@@ -254,12 +250,6 @@ function SetForEach(f, receiver) {
   }
 }
 
-
-function SetSpecies() {
-  return this;
-}
-
-
 // -------------------------------------------------------------------
 
 %SetCode(GlobalSet, SetConstructor);
@@ -270,8 +260,6 @@ function SetSpecies() {
                   DONT_ENUM | READ_ONLY);
 
 %FunctionSetLength(SetForEach, 1);
-
-utils.InstallGetter(GlobalSet, speciesSymbol, SetSpecies);
 
 // Set up the non-enumerable functions on the Set prototype object.
 utils.InstallGetter(GlobalSet.prototype, "size", SetGetSize);
@@ -442,11 +430,6 @@ function MapForEach(f, receiver) {
   }
 }
 
-
-function MapSpecies() {
-  return this;
-}
-
 // -------------------------------------------------------------------
 
 %SetCode(GlobalMap, MapConstructor);
@@ -457,8 +440,6 @@ function MapSpecies() {
     GlobalMap.prototype, toStringTagSymbol, "Map", DONT_ENUM | READ_ONLY);
 
 %FunctionSetLength(MapForEach, 1);
-
-utils.InstallGetter(GlobalMap, speciesSymbol, MapSpecies);
 
 // Set up the non-enumerable functions on the Map prototype object.
 utils.InstallGetter(GlobalMap.prototype, "size", MapGetSize);

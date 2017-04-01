@@ -14,8 +14,10 @@
 #include <string>
 #include <vector>
 
+#include "webrtc/api/video/video_frame.h"
 #include "webrtc/modules/include/module_common_types.h"
 #include "webrtc/typedefs.h"
+// For EncodedImage
 #include "webrtc/video_frame.h"
 
 namespace webrtc {
@@ -77,9 +79,7 @@ class VCMReceiveCallback {
 // and the name of the encoder.
 class VCMSendStatisticsCallback {
  public:
-  virtual void SendStatistics(uint32_t bitRate,
-                              uint32_t frameRate,
-                              const std::string& encoder_name) = 0;
+  virtual void SendStatistics(uint32_t bitRate, uint32_t frameRate) = 0;
 
  protected:
   virtual ~VCMSendStatisticsCallback() {}

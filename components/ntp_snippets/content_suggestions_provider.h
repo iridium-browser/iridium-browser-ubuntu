@@ -5,18 +5,17 @@
 #ifndef COMPONENTS_NTP_SNIPPETS_CONTENT_SUGGESTIONS_PROVIDER_H_
 #define COMPONENTS_NTP_SNIPPETS_CONTENT_SUGGESTIONS_PROVIDER_H_
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "components/ntp_snippets/callbacks.h"
 #include "components/ntp_snippets/category.h"
 #include "components/ntp_snippets/category_info.h"
 #include "components/ntp_snippets/category_status.h"
 #include "components/ntp_snippets/content_suggestion.h"
-
-namespace gfx {
-class Image;
-}
+#include "components/ntp_snippets/status.h"
 
 namespace ntp_snippets {
 
@@ -28,11 +27,6 @@ namespace ntp_snippets {
 // shut down by the ContentSuggestionsService.
 class ContentSuggestionsProvider {
  public:
-  using ImageFetchedCallback =
-      base::Callback<void(const std::string& suggestion_id, const gfx::Image&)>;
-  using DismissedSuggestionsCallback = base::Callback<void(
-      std::vector<ContentSuggestion> dismissed_suggestions)>;
-
   // The observer of a provider is notified when new data is available.
   class Observer {
    public:
@@ -44,8 +38,6 @@ class ContentSuggestionsProvider {
     // that to clear them from the UI immediately, the provider needs to change
     // the status of the respective category. If the given |category| is not
     // known yet, the calling |provider| will be registered as its provider.
-    // IDs for the ContentSuggestions should be generated with
-    // |MakeUniqueID(..)| below.
     virtual void OnNewSuggestions(
         ContentSuggestionsProvider* provider,
         Category category,
@@ -71,13 +63,13 @@ class ContentSuggestionsProvider {
     // |FetchSuggestionImage| or |DismissSuggestion| anymore, and should
     // immediately be cleared from the UI and caches. This happens, for example,
     // when the content that the suggestion refers to is gone.
-    // Note that this event may be fired even if the corresponding |category| is
+    // Note that this event may be fired even if the corresponding category is
     // not currently AVAILABLE, because open UIs may still be showing the
     // suggestion that is to be removed. This event may also be fired for
     // |suggestion_id|s that never existed and should be ignored in that case.
-    virtual void OnSuggestionInvalidated(ContentSuggestionsProvider* provider,
-                                         Category category,
-                                         const std::string& suggestion_id) = 0;
+    virtual void OnSuggestionInvalidated(
+        ContentSuggestionsProvider* provider,
+        const ContentSuggestion::ID& suggestion_id) = 0;
   };
 
   virtual ~ContentSuggestionsProvider();
@@ -90,17 +82,33 @@ class ContentSuggestionsProvider {
 
   // Dismisses the suggestion with the given ID. A provider needs to ensure that
   // a once-dismissed suggestion is never delivered again (through the
-  // Observer). The provider must not call Observer::OnSuggestionsChanged if the
+  // Observer). The provider must not call Observer::OnNewSuggestions if the
   // removal of the dismissed suggestion is the only change.
-  virtual void DismissSuggestion(const std::string& suggestion_id) = 0;
+  virtual void DismissSuggestion(
+      const ContentSuggestion::ID& suggestion_id) = 0;
 
   // Fetches the image for the suggestion with the given ID and returns it
   // through the callback. This fetch may occur locally or from the internet.
   // If that suggestion doesn't exist, doesn't have an image or if the fetch
   // fails, the callback gets a null image. The callback will not be called
   // synchronously.
-  virtual void FetchSuggestionImage(const std::string& suggestion_id,
+  virtual void FetchSuggestionImage(const ContentSuggestion::ID& suggestion_id,
                                     const ImageFetchedCallback& callback) = 0;
+
+  // Fetches more suggestions for the given category. The new suggestions
+  // will not include any suggestion of the |known_suggestion_ids| sets.
+  // The given |callback| is called with these suggestions, along with all
+  // existing suggestions. It has to be invoked exactly once as the front-end
+  // might wait for its completion.
+  virtual void Fetch(const Category& category,
+                     const std::set<std::string>& known_suggestion_ids,
+                     const FetchDoneCallback& callback) = 0;
+
+  // Reloads suggestions from all categories. If the suggestions change, the
+  // observer must be notified via OnNewSuggestions();
+  // TODO(jkcal): make pure virtual (involves touching all providers) or remove
+  // by resolving the pull/push dichotomy.
+  virtual void ReloadSuggestions() {}
 
   // Removes history from the specified time range where the URL matches the
   // |filter|. The data removed depends on the provider. Note that the
@@ -116,6 +124,12 @@ class ContentSuggestionsProvider {
   // Clears all caches for the given category, so that the next fetch starts
   // from scratch.
   virtual void ClearCachedSuggestions(Category category) = 0;
+
+  // Called when the sign in state has changed. Should be used instead of
+  // directly registering with the SignInManager so that the
+  // ContentSuggestionService can control the order of the updates between
+  // the providers and the observers.
+  virtual void OnSignInStateChanged() {}
 
   // Used only for debugging purposes. Retrieves suggestions for the given
   // |category| that have previously been dismissed and are still stored in the
@@ -134,28 +148,11 @@ class ContentSuggestionsProvider {
   virtual void ClearDismissedSuggestionsForDebugging(Category category) = 0;
 
  protected:
-  ContentSuggestionsProvider(Observer* observer,
-                             CategoryFactory* category_factory);
-
-  // Creates a unique ID. The given |within_category_id| must be unique among
-  // all suggestion IDs from this provider for the given |category|. This method
-  // combines it with the |category| to form an ID that is unique
-  // application-wide, because this provider is the only one that provides
-  // suggestions for that category.
-  std::string MakeUniqueID(Category category,
-                           const std::string& within_category_id) const;
-
-  // Reverse functions for MakeUniqueID()
-  Category GetCategoryFromUniqueID(const std::string& unique_id) const;
-  std::string GetWithinCategoryIDFromUniqueID(
-      const std::string& unique_id) const;
+  ContentSuggestionsProvider(Observer* observer);
 
   Observer* observer() const { return observer_; }
-  CategoryFactory* category_factory() const { return category_factory_; }
-
  private:
   Observer* observer_;
-  CategoryFactory* category_factory_;
 };
 
 }  // namespace ntp_snippets

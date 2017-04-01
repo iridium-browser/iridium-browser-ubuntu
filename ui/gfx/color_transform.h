@@ -18,11 +18,13 @@ class ColorSpace;
 
 class GFX_EXPORT ColorTransform {
  public:
-  enum class Intent { INTENT_ABSOLUTE, INTENT_PERCEPTUAL };
+  enum class Intent { INTENT_ABSOLUTE, INTENT_PERCEPTUAL, TEST_NO_OPT };
 
   // TriStimulus is a color coordinate in any color space.
   // Channel order is XYZ, RGB or YUV.
   typedef Point3F TriStim;
+
+  virtual ~ColorTransform() {}
 
   // Perform transformation of colors, |colors| is both input and output.
   virtual void transform(TriStim* colors, size_t num) = 0;

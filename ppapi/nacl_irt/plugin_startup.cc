@@ -12,7 +12,6 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "ipc/ipc_channel_handle.h"
-#include "mojo/edk/embedder/embedder.h"
 #include "ppapi/nacl_irt/manifest_service.h"
 #include "ppapi/shared_impl/ppb_audio_shared.h"
 
@@ -28,8 +27,15 @@ base::Thread* g_io_thread = NULL;
 ManifestService* g_manifest_service = NULL;
 
 bool IsValidChannelHandle(IPC::ChannelHandle* handle) {
-  // ChannelMojo not yet supported.
-  return handle && handle->socket.fd != -1 && !handle->mojo_handle.is_valid();
+  // In SFI mode the underlying handle is wrapped by a NaClIPCAdapter, which is
+  // exposed as an FD. Otherwise, the handle is the underlying mojo message
+  // pipe.
+  return handle &&
+#if defined(OS_NACL_SFI)
+         handle->socket.fd != -1;
+#else
+         handle->is_mojo_channel_handle();
+#endif
 }
 
 // Creates the manifest service on IO thread so that its Listener's thread and
@@ -69,9 +75,6 @@ void StartUpPlugin() {
   // The start up must be called only once.
   DCHECK(!g_shutdown_event);
   DCHECK(!g_io_thread);
-
-  // The Mojo EDK must be initialized before using IPC.
-  mojo::edk::Init();
 
   g_shutdown_event =
       new base::WaitableEvent(base::WaitableEvent::ResetPolicy::MANUAL,

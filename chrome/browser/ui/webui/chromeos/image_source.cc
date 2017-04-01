@@ -38,11 +38,10 @@ void ImageLoaded(
     std::unique_ptr<user_manager::UserImage> user_image) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  // TODO(crbug.com/593251): Remove the data copy.
   if (user_image->has_image_bytes())
-    got_data_callback.Run(new base::RefCountedBytes(user_image->image_bytes()));
+    got_data_callback.Run(user_image->image_bytes());
   else
-    got_data_callback.Run(NULL);
+    got_data_callback.Run(nullptr);
 }
 
 }  // namespace
@@ -64,11 +63,10 @@ std::string ImageSource::GetSource() const {
 
 void ImageSource::StartDataRequest(
     const std::string& path,
-    int render_process_id,
-    int render_frame_id,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& got_data_callback) {
   if (!IsWhitelisted(path)) {
-    got_data_callback.Run(NULL);
+    got_data_callback.Run(nullptr);
     return;
   }
 

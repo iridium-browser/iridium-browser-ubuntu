@@ -4,6 +4,7 @@
 
 #include "extensions/renderer/user_script_set_manager.h"
 
+#include "base/memory/ptr_util.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/extension_messages.h"
@@ -115,8 +116,10 @@ void UserScriptSetManager::OnUpdateUserScripts(
     // or just the owner.
     CHECK(changed_hosts.size() <= 1);
     if (programmatic_scripts_.find(host_id) == programmatic_scripts_.end()) {
-      scripts = new UserScriptSet();
-      programmatic_scripts_[host_id] = make_linked_ptr(scripts);
+      scripts = programmatic_scripts_
+                    .insert(std::make_pair(host_id,
+                                           base::MakeUnique<UserScriptSet>()))
+                    .first->second.get();
     } else {
       scripts = programmatic_scripts_[host_id].get();
     }
@@ -149,8 +152,8 @@ void UserScriptSetManager::OnUpdateUserScripts(
   if (scripts->UpdateUserScripts(shared_memory,
                                  *effective_hosts,
                                  whitelisted_only)) {
-    FOR_EACH_OBSERVER(Observer, observers_,
-                      OnUserScriptsUpdated(*effective_hosts));
+    for (auto& observer : observers_)
+      observer.OnUserScriptsUpdated(*effective_hosts);
   }
 }
 

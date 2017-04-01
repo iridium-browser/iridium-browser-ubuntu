@@ -11,7 +11,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "components/sync/driver/non_ui_data_type_controller.h"
+#include "components/sync/driver/async_directory_type_controller.h"
 
 namespace autofill {
 class AutofillWebDataService;
@@ -20,25 +20,18 @@ class AutofillWebDataService;
 namespace browser_sync {
 
 // A class that manages the startup and shutdown of autofill sync.
-class AutofillDataTypeController : public sync_driver::NonUIDataTypeController {
+class AutofillDataTypeController : public syncer::AsyncDirectoryTypeController {
  public:
+  // |dump_stack| is called when an unrecoverable error occurs.
   AutofillDataTypeController(
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
-      const scoped_refptr<base::SingleThreadTaskRunner>& db_thread,
-      const base::Closure& error_callback,
-      sync_driver::SyncClient* sync_client,
+      scoped_refptr<base::SingleThreadTaskRunner> db_thread,
+      const base::Closure& dump_stack,
+      syncer::SyncClient* sync_client,
       const scoped_refptr<autofill::AutofillWebDataService>& web_data_service);
-
-  // NonUIDataTypeController implementation.
-  syncer::ModelType type() const override;
-  syncer::ModelSafeGroup model_safe_group() const override;
-
- protected:
   ~AutofillDataTypeController() override;
 
-  // NonUIDataTypeController implementation.
-  bool PostTaskOnBackendThread(const tracked_objects::Location& from_here,
-                               const base::Closure& task) override;
+ protected:
+  // AsyncDirectoryTypeController implementation.
   bool StartModels() override;
 
  private:
@@ -48,9 +41,6 @@ class AutofillDataTypeController : public sync_driver::NonUIDataTypeController {
 
   // Callback once WebDatabase has loaded.
   void WebDatabaseLoaded();
-
-  // A reference to the DB thread's task runner.
-  const scoped_refptr<base::SingleThreadTaskRunner> db_thread_;
 
   // A reference to the AutofillWebDataService for this controller.
   scoped_refptr<autofill::AutofillWebDataService> web_data_service_;

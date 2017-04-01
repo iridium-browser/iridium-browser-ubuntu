@@ -11,13 +11,7 @@
 
 #include "components/safe_browsing_db/database_manager.h"
 
-namespace net {
-class URLRequestContextGetter;
-}
-
 namespace safe_browsing {
-
-struct V4ProtocolConfig;
 
 // This is a non-pure-virtual implementation of the SafeBrowsingDatabaseManager
 // interface.  It's used in tests by overriding only the functions that get
@@ -27,12 +21,10 @@ class TestSafeBrowsingDatabaseManager
     : public SafeBrowsingDatabaseManager {
  public:
   // SafeBrowsingDatabaseManager implementation:
-  bool IsSupported() const override;
-  safe_browsing::ThreatSource GetThreatSource() const override;
-  bool ChecksAreAlwaysAsync() const override;
+  void CancelCheck(Client* client) override;
   bool CanCheckResourceType(content::ResourceType resource_type) const override;
   bool CanCheckUrl(const GURL& url) const override;
-  bool IsDownloadProtectionEnabled() const override;
+  bool ChecksAreAlwaysAsync() const override;
   bool CheckBrowseUrl(const GURL& url, Client* client) override;
   bool CheckDownloadUrl(const std::vector<GURL>& url_chain,
                         Client* client) override;
@@ -40,13 +32,15 @@ class TestSafeBrowsingDatabaseManager
                          Client* client) override;
   bool CheckResourceUrl(const GURL& url, Client* client) override;
   bool MatchCsdWhitelistUrl(const GURL& url) override;
-  bool MatchMalwareIP(const std::string& ip_address) override;
-  bool MatchDownloadWhitelistUrl(const GURL& url) override;
   bool MatchDownloadWhitelistString(const std::string& str) override;
+  bool MatchDownloadWhitelistUrl(const GURL& url) override;
+  bool MatchMalwareIP(const std::string& ip_address) override;
   bool MatchModuleWhitelistString(const std::string& str) override;
-  bool IsMalwareKillSwitchOn() override;
+  safe_browsing::ThreatSource GetThreatSource() const override;
   bool IsCsdWhitelistKillSwitchOn() override;
-  void CancelCheck(Client* client) override;
+  bool IsDownloadProtectionEnabled() const override;
+  bool IsMalwareKillSwitchOn() override;
+  bool IsSupported() const override;
 
  protected:
   ~TestSafeBrowsingDatabaseManager() override {};

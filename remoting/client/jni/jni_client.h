@@ -17,7 +17,7 @@ namespace remoting {
 
 class ChromotingJniRuntime;
 class ChromotingJniInstance;
-class DisplayUpdaterFactory;
+class JniGlDisplayHandler;
 class JniPairingSecretFetcher;
 
 // Houses resources scoped to a session and exposes JNI interface to the
@@ -29,11 +29,11 @@ class JniClient {
             base::android::ScopedJavaGlobalRef<jobject> java_client);
   virtual ~JniClient();
 
+  // TODO(yuweih): Put these arguments into a struct.
   // Initiates a connection with the specified host. To skip the attempt at
   // pair-based authentication, leave |pairing_id| and |pairing_secret| as
   // empty strings.
-  void ConnectToHost(DisplayUpdaterFactory* updater_factory,
-                     const std::string& username,
+  void ConnectToHost(const std::string& username,
                      const std::string& auth_token,
                      const std::string& host_jid,
                      const std::string& host_id,
@@ -41,7 +41,10 @@ class JniClient {
                      const std::string& pairing_id,
                      const std::string& pairing_secret,
                      const std::string& capabilities,
-                     const std::string& flags);
+                     const std::string& flags,
+                     const std::string& host_version,
+                     const std::string& host_os,
+                     const std::string& host_os_version);
 
   // Terminates any ongoing connection attempt and cleans up by nullifying
   // |session_|. This is a no-op unless |session| is currently non-null.
@@ -88,7 +91,10 @@ class JniClient {
                const base::android::JavaParamRef<jstring>& pairId,
                const base::android::JavaParamRef<jstring>& pairSecret,
                const base::android::JavaParamRef<jstring>& capabilities,
-               const base::android::JavaParamRef<jstring>& flags);
+               const base::android::JavaParamRef<jstring>& flags,
+               const base::android::JavaParamRef<jstring>& host_version,
+               const base::android::JavaParamRef<jstring>& host_os,
+               const base::android::JavaParamRef<jstring>& host_os_version);
 
   void Disconnect(JNIEnv* env,
                   const base::android::JavaParamRef<jobject>& caller);
@@ -157,7 +163,7 @@ class JniClient {
   // Reference to the Java client object.
   base::android::ScopedJavaGlobalRef<jobject> java_client_;
 
-  std::unique_ptr<DisplayUpdaterFactory> display_handler_;
+  std::unique_ptr<JniGlDisplayHandler> display_handler_;
 
   // Deleted on UI thread.
   std::unique_ptr<JniPairingSecretFetcher> secret_fetcher_;

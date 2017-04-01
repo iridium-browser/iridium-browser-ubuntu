@@ -4,14 +4,13 @@
 
 #include "content/renderer/webgraphicscontext3d_provider_impl.h"
 
-#include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "gpu/command_buffer/client/context_support.h"
-#include "third_party/WebKit/public/platform/functional/WebFunction.h"
+#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
 
 namespace content {
 
 WebGraphicsContext3DProviderImpl::WebGraphicsContext3DProviderImpl(
-    scoped_refptr<ContextProviderCommandBuffer> provider,
+    scoped_refptr<ui::ContextProviderCommandBuffer> provider,
     bool software_rendering)
     : provider_(std::move(provider)), software_rendering_(software_rendering) {}
 
@@ -38,13 +37,18 @@ bool WebGraphicsContext3DProviderImpl::isSoftwareRendering() const {
 }
 
 void WebGraphicsContext3DProviderImpl::setLostContextCallback(
-    blink::WebClosure c) {
-  provider_->SetLostContextCallback(c.TakeBaseCallback());
+    const base::Closure& c) {
+  provider_->SetLostContextCallback(c);
 }
 
 void WebGraphicsContext3DProviderImpl::setErrorMessageCallback(
-    blink::WebFunction<void(const char*, int32_t)> c) {
-  provider_->ContextSupport()->SetErrorMessageCallback(c.TakeBaseCallback());
+    const base::Callback<void(const char*, int32_t)>& c) {
+  provider_->ContextSupport()->SetErrorMessageCallback(c);
+}
+
+void WebGraphicsContext3DProviderImpl::signalQuery(
+    uint32_t query, const base::Closure& callback) {
+  provider_->ContextSupport()->SignalQuery(query, callback);
 }
 
 }  // namespace content

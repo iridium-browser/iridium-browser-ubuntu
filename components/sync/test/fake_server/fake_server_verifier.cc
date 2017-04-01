@@ -4,19 +4,13 @@
 
 #include "components/sync/test/fake_server/fake_server_verifier.h"
 
-#include <stddef.h>
-
 #include <map>
 #include <memory>
 #include <set>
 #include <vector>
 
 #include "base/json/json_writer.h"
-#include "base/values.h"
-#include "components/sync/base/model_type.h"
 #include "components/sync/test/fake_server/fake_server.h"
-#include "components/sync/test/fake_server/sessions_hierarchy.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using base::JSONWriter;
 using std::string;
@@ -83,7 +77,7 @@ AssertionResult FakeServerVerifier::VerifyEntityCountByType(
   }
 
   string model_type_string = ModelTypeToString(model_type);
-  base::ListValue* entity_list = NULL;
+  base::ListValue* entity_list = nullptr;
   if (!entities->GetList(model_type_string, &entity_list)) {
     return UnknownTypeAssertionFailure(model_type_string);
   } else if (expected_count != entity_list->GetSize()) {
@@ -107,7 +101,7 @@ AssertionResult FakeServerVerifier::VerifyEntityCountByTypeAndName(
   }
 
   string model_type_string = ModelTypeToString(model_type);
-  base::ListValue* entity_list = NULL;
+  base::ListValue* entity_list = nullptr;
   size_t actual_count = 0;
   if (entities->GetList(model_type_string, &entity_list)) {
     base::StringValue name_value(name);

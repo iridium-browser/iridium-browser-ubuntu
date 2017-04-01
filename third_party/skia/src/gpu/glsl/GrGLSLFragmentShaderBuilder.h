@@ -8,10 +8,9 @@
 #ifndef GrGLSLFragmentShaderBuilder_DEFINED
 #define GrGLSLFragmentShaderBuilder_DEFINED
 
+#include "GrBlend.h"
 #include "GrGLSLShaderBuilder.h"
-
 #include "GrProcessor.h"
-#include "glsl/GrGLSLProcessorTypes.h"
 
 class GrRenderTarget;
 class GrGLSLVarying;
@@ -30,8 +29,7 @@ public:
      * if code is added that uses one of these features without calling enableFeature()
      */
     enum GLSLFeature {
-        kStandardDerivatives_GLSLFeature = kLastGLSLPrivateFeature + 1,
-        kPixelLocalStorage_GLSLFeature,
+        kPixelLocalStorage_GLSLFeature = kLastGLSLPrivateFeature + 1,
         kMultisampleInterpolation_GLSLFeature
     };
 
@@ -43,10 +41,11 @@ public:
 
     /**
      * This returns a variable name to access the 2D, perspective correct version of the coords in
-     * the fragment shader. If the coordinates at index are 3-dimensional, it immediately emits a
-     * perspective divide into the fragment shader (xy / z) to convert them to 2D.
+     * the fragment shader. The passed in coordinates must either be of type kVec2f or kVec3f. If
+     * the coordinates are 3-dimensional, it a perspective divide into is emitted into the
+     * fragment shader (xy / z) to convert them to 2D.
      */
-    virtual SkString ensureFSCoords2D(const GrGLSLTransformedCoordsArray& coords, int index) = 0;
+    virtual SkString ensureCoords2D(const GrShaderVar&) = 0;
 
 
     /** Returns a variable name that represents the position of the fragment in the FS. The position
@@ -167,8 +166,7 @@ public:
 
     // Shared GrGLSLFragmentBuilder interface.
     bool enableFeature(GLSLFeature) override;
-    virtual SkString ensureFSCoords2D(const GrGLSLTransformedCoordsArray& coords,
-                                      int index) override;
+    virtual SkString ensureCoords2D(const GrShaderVar&) override;
     const char* fragmentPosition() override;
     const char* distanceVectorName() const override;
 
@@ -204,7 +202,7 @@ private:
     }
 #endif
 
-    static const char* DeclaredColorOutputName() { return "fsColorOut"; }
+    static const char* DeclaredColorOutputName() { return "sk_FragColor"; }
     static const char* DeclaredSecondaryColorOutputName() { return "fsSecondaryColorOut"; }
 
     GrSurfaceOrigin getSurfaceOrigin() const;

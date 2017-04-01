@@ -14,12 +14,13 @@
 #include "gl/GrGLVaryingHandler.h"
 #include "glsl/GrGLSLProgramBuilder.h"
 #include "glsl/GrGLSLProgramDataManager.h"
+#include "ir/SkSLProgram.h"
 
 class GrFragmentProcessor;
 class GrGLContextInfo;
-class GrGLSLProgramDesc;
+class GrProgramDesc;
 class GrGLSLShaderBuilder;
-class GrGLSLCaps;
+class GrShaderCaps;
 
 class GrGLProgramBuilder : public GrGLSLProgramBuilder {
 public:
@@ -32,22 +33,23 @@ public:
      */
     static GrGLProgram* CreateProgram(const GrPipeline&,
                                       const GrPrimitiveProcessor&,
-                                      const GrGLSLProgramDesc&,
+                                      const GrProgramDesc&,
                                       GrGLGpu*);
 
     const GrCaps* caps() const override;
-    const GrGLSLCaps* glslCaps() const override;
 
     GrGLGpu* gpu() const { return fGpu; }
 
 private:
     GrGLProgramBuilder(GrGLGpu*, const GrPipeline&, const GrPrimitiveProcessor&,
-                       const GrGLSLProgramDesc&);
+                       const GrProgramDesc&);
 
     bool compileAndAttachShaders(GrGLSLShaderBuilder& shader,
                                  GrGLuint programId,
                                  GrGLenum type,
-                                 SkTDArray<GrGLuint>* shaderIds);
+                                 SkTDArray<GrGLuint>* shaderIds,
+                                 const SkSL::Program::Settings& settings,
+                                 SkSL::Program::Inputs* outInputs);
     GrGLProgram* finalize();
     void bindProgramResourceLocations(GrGLuint programID);
     bool checkLinkStatus(GrGLuint programID);

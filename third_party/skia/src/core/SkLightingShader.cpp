@@ -9,7 +9,6 @@
 #include "SkBitmapProcState.h"
 #include "SkColor.h"
 #include "SkEmptyShader.h"
-#include "SkErrorInternals.h"
 #include "SkLightingShader.h"
 #include "SkMathPriv.h"
 #include "SkNormalSource.h"
@@ -106,7 +105,6 @@ private:
 #include "GrCoordTransform.h"
 #include "GrFragmentProcessor.h"
 #include "GrInvariantOutput.h"
-#include "GrTextureAccess.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
 #include "glsl/GrGLSLFragmentShaderBuilder.h"
 #include "glsl/GrGLSLProgramDataManager.h"
@@ -122,11 +120,9 @@ public:
     LightingFP(sk_sp<GrFragmentProcessor> normalFP, sk_sp<SkLights> lights) {
 
         // fuse all ambient lights into a single one
-        fAmbientColor.set(0.0f, 0.0f, 0.0f);
+        fAmbientColor = lights->ambientLightColor();
         for (int i = 0; i < lights->numLights(); ++i) {
-            if (SkLights::Light::kAmbient_LightType == lights->light(i).type()) {
-                fAmbientColor += lights->light(i).color();
-            } else if (SkLights::Light::kDirectional_LightType == lights->light(i).type()) {
+            if (SkLights::Light::kDirectional_LightType == lights->light(i).type()) {
                 fDirectionalLights.push_back(lights->light(i));
                 // TODO get the handle to the shadow map if there is one
             } else {
@@ -203,8 +199,7 @@ public:
                                                "diffuseColor.a);", args.fOutputColor);
         }
 
-        static void GenKey(const GrProcessor& proc, const GrGLSLCaps&,
-                           GrProcessorKeyBuilder* b) {
+        static void GenKey(const GrProcessor& proc, const GrShaderCaps&, GrProcessorKeyBuilder* b) {
             const LightingFP& lightingFP = proc.cast<LightingFP>();
             b->add32(lightingFP.fDirectionalLights.count());
         }
@@ -244,7 +239,7 @@ public:
         GrGLSLProgramDataManager::UniformHandle fAmbientColorUni;
     };
 
-    void onGetGLSLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override {
+    void onGetGLSLProcessorKey(const GrShaderCaps& caps, GrProcessorKeyBuilder* b) const override {
         GLSLLightingFP::GenKey(*this, caps, b);
     }
 
@@ -386,6 +381,12 @@ void SkLightingShaderImpl::LightingShaderContext::shadeSpan(int x, int y,
             }
 
             SkColor3f accum = SkColor3f::Make(0.0f, 0.0f, 0.0f);
+
+            // Adding ambient light
+            accum.fX += lightShader.fLights->ambientLightColor().fX * SkColorGetR(diffColor);
+            accum.fY += lightShader.fLights->ambientLightColor().fY * SkColorGetG(diffColor);
+            accum.fZ += lightShader.fLights->ambientLightColor().fZ * SkColorGetB(diffColor);
+
             // This is all done in linear unpremul color space (each component 0..255.0f though)
             for (int l = 0; l < lightShader.fLights->numLights(); ++l) {
                 const SkLights::Light& light = lightShader.fLights->light(l);

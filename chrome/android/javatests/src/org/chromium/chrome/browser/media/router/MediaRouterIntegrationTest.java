@@ -7,15 +7,17 @@ package org.chromium.chrome.browser.media.router;
 import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
 
 import android.app.Dialog;
-import android.os.Environment;
 import android.os.StrictMode;
-import android.test.suitebuilder.annotation.LargeTest;
+import android.support.test.filters.LargeTest;
 import android.view.View;
+
+import org.json.JSONObject;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.media.RouterTestUtils;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -26,8 +28,6 @@ import org.chromium.content.browser.test.util.JavaScriptUtils;
 import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.net.test.EmbeddedTestServer;
-
-import org.json.JSONObject;
 
 import java.io.StringWriter;
 import java.util.concurrent.TimeoutException;
@@ -84,8 +84,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
                 StrictMode.allowThreadDiskWrites();
             }
         });
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-            getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 
     @Override
@@ -245,6 +244,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     @Feature({"MediaRouter"})
     @LargeTest
+    @RetryOnFailure
     public void testOnClose() throws InterruptedException, TimeoutException {
         MockMediaRouteProvider.Builder.sProvider.setCloseRouteWithErrorOnSend(true);
         loadUrl(mTestServer.getURL(TEST_PAGE));
@@ -264,6 +264,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     @Feature({"MediaRouter"})
     @LargeTest
+    @RetryOnFailure
     public void testFailNoProvider() throws InterruptedException, TimeoutException {
         MockMediaRouteProvider.Builder.sProvider.setIsSupportsSource(false);
         loadUrl(mTestServer.getURL(TEST_PAGE));
@@ -296,6 +297,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     @Feature({"MediaRouter"})
     @LargeTest
+    @RetryOnFailure
     public void testReconnectSession() throws InterruptedException, TimeoutException {
         loadUrl(mTestServer.getURL(TEST_PAGE));
         WebContents webContents = getActivity().getActivityTab().getWebContents();
@@ -320,6 +322,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     @Feature({"MediaRouter"})
     @LargeTest
+    @RetryOnFailure
     public void testFailReconnectSession() throws InterruptedException, TimeoutException {
         loadUrl(mTestServer.getURL(TEST_PAGE));
         WebContents webContents = getActivity().getActivityTab().getWebContents();
@@ -342,6 +345,7 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
     @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
     @Feature({"MediaRouter"})
     @LargeTest
+    @RetryOnFailure
     public void testFailStartCancelled() throws InterruptedException, TimeoutException {
         loadUrl(mTestServer.getURL(TEST_PAGE));
         WebContents webContents = getActivity().getActivityTab().getWebContents();
@@ -356,6 +360,6 @@ public class MediaRouterIntegrationTest extends ChromeActivityTestCaseBase<Chrom
                     routeSelectionDialog.cancel();
                 }
             });
-        checkStartFailed(webContents, "AbortError", "Dialog closed.");
+        checkStartFailed(webContents, "NotAllowedError", "Dialog closed.");
     }
 }

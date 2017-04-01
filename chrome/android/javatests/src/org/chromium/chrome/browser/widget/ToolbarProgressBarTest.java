@@ -6,13 +6,13 @@ package org.chromium.chrome.browser.widget;
 
 import android.animation.Animator;
 import android.animation.Animator.AnimatorListener;
-import android.os.Environment;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 import android.view.View;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Tests related to the ToolbarProgressBar.
  */
+@RetryOnFailure
 public class ToolbarProgressBarTest extends ChromeActivityTestCaseBase<ChromeTabbedActivity> {
 
     static final int TEST_WAIT_TIME_MS = 60000;
@@ -56,8 +57,8 @@ public class ToolbarProgressBarTest extends ChromeActivityTestCaseBase<ChromeTab
     public void testToolbarTraversesScreenOnce()
             throws InterruptedException, TimeoutException {
 
-        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        EmbeddedTestServer testServer = EmbeddedTestServer.createAndStartServer(
+                getInstrumentation().getContext());
 
         final WebContents webContents =
                 getActivity().getActivityTab().getWebContents();

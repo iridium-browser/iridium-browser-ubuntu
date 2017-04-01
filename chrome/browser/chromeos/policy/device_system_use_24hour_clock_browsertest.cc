@@ -3,22 +3,28 @@
 // found in the LICENSE file.
 
 #include "ash/common/login_status.h"
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/system/date/date_default_view.h"
 #include "ash/common/system/date/date_view.h"
+#include "ash/common/system/date/system_info_default_view.h"
+#include "ash/common/system/date/tray_system_info.h"
+#include "ash/common/system/tray/system_tray.h"
 #include "ash/common/wm_shell.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
+#include "chrome/browser/chromeos/system/system_clock.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
-#include "chrome/browser/ui/ash/system_tray_delegate_chromeos.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -55,23 +61,33 @@ class SystemUse24HourClockPolicyTest
 
  protected:
   void RefreshPolicyAndWaitDeviceSettingsUpdated() {
+    base::RunLoop run_loop;
     std::unique_ptr<CrosSettings::ObserverSubscription> observer =
         CrosSettings::Get()->AddSettingsObserver(
-            kSystemUse24HourClock,
-            base::MessageLoop::current()->QuitWhenIdleClosure());
+            kSystemUse24HourClock, run_loop.QuitWhenIdleClosure());
 
     RefreshDevicePolicy();
-    base::MessageLoop::current()->Run();
+    run_loop.Run();
   }
 
-  static bool GetSystemTrayDelegateShouldUse24HourClock() {
-    chromeos::SystemTrayDelegateChromeOS* tray_delegate =
-        static_cast<chromeos::SystemTrayDelegateChromeOS*>(
-            ash::WmShell::Get()->system_tray_delegate());
-    return tray_delegate->GetShouldUse24HourClockForTesting();
+  static bool SystemClockShouldUse24Hour() {
+    return g_browser_process->platform_part()
+        ->GetSystemClock()
+        ->ShouldUse24HourClock();
   }
 
   static base::HourClockType TestGetPrimarySystemTrayTimeHourType() {
+    if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      const ash::TraySystemInfo* tray_system_info =
+          ash::Shell::GetInstance()
+              ->GetPrimarySystemTray()
+              ->GetTraySystemInfoForTesting();
+      const ash::tray::TimeView* time_tray =
+          tray_system_info->GetTimeTrayForTesting();
+
+      return time_tray->GetHourTypeForTesting();
+    }
+
     const ash::TrayDate* tray_date = ash::Shell::GetInstance()
                                          ->GetPrimarySystemTray()
                                          ->GetTrayDateForTesting();
@@ -81,22 +97,52 @@ class SystemUse24HourClockPolicyTest
   }
 
   static bool TestPrimarySystemTrayHasDateDefaultView() {
+    if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      const ash::TraySystemInfo* tray_system_info =
+          ash::Shell::GetInstance()
+              ->GetPrimarySystemTray()
+              ->GetTraySystemInfoForTesting();
+      const ash::SystemInfoDefaultView* system_info_default_view =
+          tray_system_info->GetDefaultViewForTesting();
+      return system_info_default_view != nullptr;
+    }
+
     const ash::TrayDate* tray_date = ash::Shell::GetInstance()
                                          ->GetPrimarySystemTray()
                                          ->GetTrayDateForTesting();
     const ash::DateDefaultView* date_default_view =
         tray_date->GetDefaultViewForTesting();
-    return (date_default_view != NULL);
+    return date_default_view != nullptr;
   }
 
   static void TestPrimarySystemTrayCreateDefaultView() {
-    ash::TrayDate* tray_date = ash::Shell::GetInstance()
-                                   ->GetPrimarySystemTray()
-                                   ->GetTrayDateForTesting();
-    tray_date->CreateDefaultViewForTesting(ash::LoginStatus::NOT_LOGGED_IN);
+    if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      ash::TraySystemInfo* tray_system_info =
+          ash::Shell::GetInstance()
+              ->GetPrimarySystemTray()
+              ->GetTraySystemInfoForTesting();
+      tray_system_info->CreateDefaultViewForTesting(
+          ash::LoginStatus::NOT_LOGGED_IN);
+    } else {
+      ash::TrayDate* tray_date = ash::Shell::GetInstance()
+                                     ->GetPrimarySystemTray()
+                                     ->GetTrayDateForTesting();
+      tray_date->CreateDefaultViewForTesting(ash::LoginStatus::NOT_LOGGED_IN);
+    }
   }
 
   static base::HourClockType TestGetPrimarySystemTrayDateHourType() {
+    if (ash::MaterialDesignController::IsSystemTrayMenuMaterial()) {
+      const ash::TraySystemInfo* tray_system_info =
+          ash::Shell::GetInstance()
+              ->GetPrimarySystemTray()
+              ->GetTraySystemInfoForTesting();
+      const ash::SystemInfoDefaultView* system_info_default_view =
+          tray_system_info->GetDefaultViewForTesting();
+
+      return system_info_default_view->GetDateView()->GetHourTypeForTesting();
+    }
+
     const ash::TrayDate* tray_date = ash::Shell::GetInstance()
                                          ->GetPrimarySystemTray()
                                          ->GetTrayDateForTesting();
@@ -115,7 +161,7 @@ IN_PROC_BROWSER_TEST_F(SystemUse24HourClockPolicyTest, CheckUnset) {
   EXPECT_FALSE(CrosSettings::Get()->GetBoolean(kSystemUse24HourClock,
                                                &system_use_24hour_clock));
 
-  EXPECT_FALSE(GetSystemTrayDelegateShouldUse24HourClock());
+  EXPECT_FALSE(SystemClockShouldUse24Hour());
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayTimeHourType());
   EXPECT_FALSE(TestPrimarySystemTrayHasDateDefaultView());
 
@@ -129,7 +175,7 @@ IN_PROC_BROWSER_TEST_F(SystemUse24HourClockPolicyTest, CheckTrue) {
                                                &system_use_24hour_clock));
   EXPECT_FALSE(TestPrimarySystemTrayHasDateDefaultView());
 
-  EXPECT_FALSE(GetSystemTrayDelegateShouldUse24HourClock());
+  EXPECT_FALSE(SystemClockShouldUse24Hour());
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayTimeHourType());
   TestPrimarySystemTrayCreateDefaultView();
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayDateHourType());
@@ -142,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(SystemUse24HourClockPolicyTest, CheckTrue) {
   EXPECT_TRUE(CrosSettings::Get()->GetBoolean(kSystemUse24HourClock,
                                               &system_use_24hour_clock));
   EXPECT_TRUE(system_use_24hour_clock);
-  EXPECT_TRUE(GetSystemTrayDelegateShouldUse24HourClock());
+  EXPECT_TRUE(SystemClockShouldUse24Hour());
   EXPECT_EQ(base::k24HourClock, TestGetPrimarySystemTrayTimeHourType());
 
   EXPECT_TRUE(TestPrimarySystemTrayHasDateDefaultView());
@@ -155,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(SystemUse24HourClockPolicyTest, CheckFalse) {
                                                &system_use_24hour_clock));
   EXPECT_FALSE(TestPrimarySystemTrayHasDateDefaultView());
 
-  EXPECT_FALSE(GetSystemTrayDelegateShouldUse24HourClock());
+  EXPECT_FALSE(SystemClockShouldUse24Hour());
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayTimeHourType());
   TestPrimarySystemTrayCreateDefaultView();
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayDateHourType());
@@ -168,7 +214,7 @@ IN_PROC_BROWSER_TEST_F(SystemUse24HourClockPolicyTest, CheckFalse) {
   EXPECT_TRUE(CrosSettings::Get()->GetBoolean(kSystemUse24HourClock,
                                               &system_use_24hour_clock));
   EXPECT_FALSE(system_use_24hour_clock);
-  EXPECT_FALSE(GetSystemTrayDelegateShouldUse24HourClock());
+  EXPECT_FALSE(SystemClockShouldUse24Hour());
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayTimeHourType());
   EXPECT_TRUE(TestPrimarySystemTrayHasDateDefaultView());
   EXPECT_EQ(base::k12HourClock, TestGetPrimarySystemTrayDateHourType());

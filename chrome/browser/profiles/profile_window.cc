@@ -38,7 +38,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/flags_ui/pref_service_flags_storage.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_reconcilor.h"
@@ -49,15 +49,16 @@
 #include "components/signin/core/common/signin_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
+#include "extensions/features/features.h"
 #include "net/base/escape.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_service.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_factory.h"
 #include "extensions/browser/extension_system.h"
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 #if !defined(OS_ANDROID)
 #include "chrome/browser/ui/browser_finder.h"
@@ -72,7 +73,7 @@ using content::BrowserThread;
 
 namespace {
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 void BlockExtensions(Profile* profile) {
   ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
@@ -84,7 +85,7 @@ void UnblockExtensions(Profile* profile) {
       extensions::ExtensionSystem::Get(profile)->extension_service();
   extension_service->UnblockAllExtensions();
 }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 // Handles running a callback when a new Browser for the given profile
 // has been completely created.
@@ -124,27 +125,21 @@ class BrowserAddedForProfileObserver : public chrome::BrowserListObserver {
 
 // Called after a |system_profile| is available to be used by the user manager.
 // Based on the value of |tutorial_mode| we determine a url to be displayed
-// by the webui and run the |callback|, if it exists. After opening a profile,
-// perform |profile_open_action|.
+// by the webui and run the |callback|, if it exists. Depending on the value of
+// |user_manager_action|, executes an action once the user manager displays or
+// after a profile is opened.
 void OnUserManagerSystemProfileCreated(
     const base::FilePath& profile_path_to_focus,
     profiles::UserManagerTutorialMode tutorial_mode,
-    profiles::UserManagerProfileSelected profile_open_action,
+    profiles::UserManagerAction user_manager_action,
     const base::Callback<void(Profile*, const std::string&)>& callback,
     Profile* system_profile,
     Profile::CreateStatus status) {
   if (status != Profile::CREATE_STATUS_INITIALIZED || callback.is_null())
     return;
 
-  // Force Material Design user manager on when Material Design settings are on.
-  bool use_material_design_user_manager =
-      switches::IsMaterialDesignUserManager() ||
-      base::FeatureList::IsEnabled(features::kMaterialDesignSettings);
-
   // Tell the webui which user should be focused.
-  std::string page = use_material_design_user_manager
-                         ? chrome::kChromeUIMdUserManagerUrl
-                         : chrome::kChromeUIUserManagerURL;
+  std::string page = chrome::kChromeUIMdUserManagerUrl;
 
   if (tutorial_mode == profiles::USER_MANAGER_TUTORIAL_OVERVIEW) {
     page += profiles::kUserManagerDisplayTutorial;
@@ -154,16 +149,19 @@ void OnUserManagerSystemProfileCreated(
     page += "#";
     page += net::EscapeUrlEncodedData(profile_path_to_focus.AsUTF8Unsafe(),
                                       false);
-  } else if (profile_open_action ==
+  } else if (user_manager_action ==
+             profiles::USER_MANAGER_OPEN_CREATE_USER_PAGE) {
+    page += profiles::kUserManagerOpenCreateUserPage;
+  } else if (user_manager_action ==
              profiles::USER_MANAGER_SELECT_PROFILE_TASK_MANAGER) {
     page += profiles::kUserManagerSelectProfileTaskManager;
-  } else if (profile_open_action ==
+  } else if (user_manager_action ==
              profiles::USER_MANAGER_SELECT_PROFILE_ABOUT_CHROME) {
     page += profiles::kUserManagerSelectProfileAboutChrome;
-  } else if (profile_open_action ==
+  } else if (user_manager_action ==
              profiles::USER_MANAGER_SELECT_PROFILE_CHROME_SETTINGS) {
     page += profiles::kUserManagerSelectProfileChromeSettings;
-  } else if (profile_open_action ==
+  } else if (user_manager_action ==
              profiles::USER_MANAGER_SELECT_PROFILE_APP_LAUNCHER) {
     page += profiles::kUserManagerSelectProfileAppLauncher;
   }
@@ -190,6 +188,7 @@ namespace profiles {
 
 // User Manager parameters are prefixed with hash.
 const char kUserManagerDisplayTutorial[] = "#tutorial";
+const char kUserManagerOpenCreateUserPage[] = "#create-user";
 const char kUserManagerSelectProfileTaskManager[] = "#task-manager";
 const char kUserManagerSelectProfileAboutChrome[] = "#about-chrome";
 const char kUserManagerSelectProfileChromeSettings[] = "#chrome-settings";
@@ -250,7 +249,7 @@ void OpenBrowserWindowForProfile(
     is_first_run = chrome::startup::IS_FIRST_RUN;
   }
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // The signin bit will still be set if the profile is being unlocked and the
   // browser window for it is opening. As part of this unlock process, unblock
   // all the extensions.
@@ -262,7 +261,7 @@ void OpenBrowserWindowForProfile(
       UnblockExtensions(profile);
     }
   }
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
   // If |always_create| is false, and we have a |callback| to run, check
   // whether a browser already exists so that we can run the callback. We don't
@@ -373,7 +372,8 @@ void CloseGuestProfileWindows() {
 
   if (profile) {
     BrowserList::CloseAllBrowsersWithProfile(
-        profile, base::Bind(&ProfileBrowserCloseSuccess));
+        profile, base::Bind(&ProfileBrowserCloseSuccess),
+        BrowserList::CloseCallback());
   }
 }
 
@@ -385,10 +385,10 @@ void LockBrowserCloseSuccess(const base::FilePath& profile_path) {
   DCHECK(has_entry);
   entry->SetIsSigninRequired(true);
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Profile guaranteed to exist for it to have been locked.
   BlockExtensions(profile_manager->GetProfileByPath(profile_path));
-#endif  // defined(ENABLE_EXTENSIONS)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
   chrome::HideTaskManager();
   UserManager::Show(profile_path,
@@ -400,7 +400,8 @@ void LockProfile(Profile* profile) {
   DCHECK(profile);
   if (profile) {
     BrowserList::CloseAllBrowsersWithProfile(
-        profile, base::Bind(&LockBrowserCloseSuccess));
+        profile, base::Bind(&LockBrowserCloseSuccess),
+        BrowserList::CloseCallback());
   }
 }
 
@@ -444,13 +445,14 @@ bool IsLockAvailable(Profile* profile) {
 void CloseProfileWindows(Profile* profile) {
   DCHECK(profile);
   BrowserList::CloseAllBrowsersWithProfile(
-      profile, base::Bind(&ProfileBrowserCloseSuccess));
+      profile, base::Bind(&ProfileBrowserCloseSuccess),
+      BrowserList::CloseCallback());
 }
 
 void CreateSystemProfileForUserManager(
     const base::FilePath& profile_path_to_focus,
     profiles::UserManagerTutorialMode tutorial_mode,
-    profiles::UserManagerProfileSelected profile_open_action,
+    profiles::UserManagerAction user_manager_action,
     const base::Callback<void(Profile*, const std::string&)>& callback) {
   // Create the system profile, if necessary, and open the User Manager
   // from the system profile.
@@ -459,7 +461,7 @@ void CreateSystemProfileForUserManager(
       base::Bind(&OnUserManagerSystemProfileCreated,
                  profile_path_to_focus,
                  tutorial_mode,
-                 profile_open_action,
+                 user_manager_action,
                  callback),
       base::string16(),
       std::string(),

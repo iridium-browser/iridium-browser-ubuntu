@@ -33,63 +33,69 @@
 
 #include "core/InputTypeNames.h"
 #include "core/dom/Document.h"
+#include "core/editing/FrameSelection.h"
+#include "core/frame/LocalFrame.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/forms/FormController.h"
+#include "core/layout/LayoutTextControlSingleLine.h"
 #include "wtf/Assertions.h"
 #include "wtf/PassRefPtr.h"
 
 namespace blink {
 
-InputType* PasswordInputType::create(HTMLInputElement& element)
-{
-    return new PasswordInputType(element);
+InputType* PasswordInputType::create(HTMLInputElement& element) {
+  return new PasswordInputType(element);
 }
 
-void PasswordInputType::countUsage()
-{
-    countUsageIfVisible(UseCounter::InputTypePassword);
-    if (element().fastHasAttribute(HTMLNames::maxlengthAttr))
-        countUsageIfVisible(UseCounter::InputTypePasswordMaxLength);
+void PasswordInputType::countUsage() {
+  countUsageIfVisible(UseCounter::InputTypePassword);
+  if (element().fastHasAttribute(HTMLNames::maxlengthAttr))
+    countUsageIfVisible(UseCounter::InputTypePasswordMaxLength);
 }
 
-const AtomicString& PasswordInputType::formControlType() const
-{
-    return InputTypeNames::password;
+const AtomicString& PasswordInputType::formControlType() const {
+  return InputTypeNames::password;
 }
 
-bool PasswordInputType::shouldSaveAndRestoreFormControlState() const
-{
-    return false;
+bool PasswordInputType::shouldSaveAndRestoreFormControlState() const {
+  return false;
 }
 
-FormControlState PasswordInputType::saveFormControlState() const
-{
-    // Should never save/restore password fields.
-    NOTREACHED();
-    return FormControlState();
+FormControlState PasswordInputType::saveFormControlState() const {
+  // Should never save/restore password fields.
+  NOTREACHED();
+  return FormControlState();
 }
 
-void PasswordInputType::restoreFormControlState(const FormControlState&)
-{
-    // Should never save/restore password fields.
-    NOTREACHED();
+void PasswordInputType::restoreFormControlState(const FormControlState&) {
+  // Should never save/restore password fields.
+  NOTREACHED();
 }
 
-bool PasswordInputType::shouldRespectListAttribute()
-{
-    return false;
+bool PasswordInputType::shouldRespectListAttribute() {
+  return false;
 }
 
-void PasswordInputType::enableSecureTextInput()
-{
-    if (element().document().frame())
-        element().document().setUseSecureKeyboardEntryWhenActive(true);
+void PasswordInputType::enableSecureTextInput() {
+  LocalFrame* frame = element().document().frame();
+  if (!frame)
+    return;
+  frame->selection().setUseSecureKeyboardEntryWhenActive(true);
 }
 
-void PasswordInputType::disableSecureTextInput()
-{
-    if (element().document().frame())
-        element().document().setUseSecureKeyboardEntryWhenActive(false);
+void PasswordInputType::disableSecureTextInput() {
+  LocalFrame* frame = element().document().frame();
+  if (!frame)
+    return;
+  frame->selection().setUseSecureKeyboardEntryWhenActive(false);
 }
 
-} // namespace blink
+void PasswordInputType::onAttachWithLayoutObject() {
+  element().document().incrementPasswordCount();
+}
+
+void PasswordInputType::onDetachWithLayoutObject() {
+  element().document().decrementPasswordCount();
+}
+
+}  // namespace blink

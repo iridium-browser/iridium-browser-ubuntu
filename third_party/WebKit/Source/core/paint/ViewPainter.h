@@ -11,21 +11,21 @@ namespace blink {
 
 class LayoutPoint;
 struct PaintInfo;
-class LayoutBox;
 class LayoutView;
 
 class ViewPainter {
-    STACK_ALLOCATED();
-public:
-    ViewPainter(const LayoutView& layoutView) : m_layoutView(layoutView) { }
+  STACK_ALLOCATED();
 
-    void paint(const PaintInfo&, const LayoutPoint& paintOffset);
-    void paintBoxDecorationBackground(const PaintInfo&);
+ public:
+  ViewPainter(const LayoutView& layoutView) : m_layoutView(layoutView) {}
 
-private:
-    const LayoutView& m_layoutView;
+  void paint(const PaintInfo&, const LayoutPoint& paintOffset);
+  void paintBoxDecorationBackground(const PaintInfo&);
+
+ private:
+  const LayoutView& m_layoutView;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ViewPainter_h
+#endif  // ViewPainter_h

@@ -11,21 +11,68 @@ found in the LICENSE file.
 'use strict';
 
 tr.exportTo('tr.v.d', function() {
-  /** @constructor */
-  function Diagnostic() {
-  }
+  class Diagnostic {
+    constructor() {
+      this.guid_ = undefined;
+    }
 
-  Diagnostic.prototype = {
-    asDict: function() {
+    get guid() {
+      if (this.guid_ === undefined) {
+        this.guid_ = tr.b.GUID.allocateUUID4();
+      }
+
+      return this.guid_;
+    }
+
+    set guid(guid) {
+      if (this.guid_ !== undefined) {
+        throw new Error('Cannot reset guid');
+      }
+
+      this.guid_ = guid;
+    }
+
+    /**
+     * If this Diagnostic is shared between multiple Histograms, then return its
+     * |guid|. Otherwise, serialize this Diagnostic to a dictionary.
+     *
+     * @return {string|!Object}
+     */
+    asDictOrReference() {
+      if (this.guid_ !== undefined) {
+        return this.guid_;
+      }
+      return this.asDict();
+    }
+
+    /**
+     * Serialize all of the information in this Diagnostic to a dictionary,
+     * regardless of whether it is shared between multiple Histograms.
+     *
+     * @return {!Object}
+     */
+    asDict() {
       var result = {type: this.constructor.name};
+      if (this.guid_ !== undefined) {
+        result.guid = this.guid_;
+      }
       this.asDictInto_(result);
       return result;
-    },
+    }
 
-    asDictInto_: function(d) {
+    asDictInto_(d) {
       throw new Error('Abstract virtual method');
     }
-  };
+
+    static fromDict(d) {
+      var typeInfo = Diagnostic.findTypeInfoWithName(d.type);
+      if (!typeInfo) {
+        throw new Error('Unrecognized diagnostic type: ' + d.type);
+      }
+
+      return typeInfo.constructor.fromDict(d);
+    }
+  }
 
   var options = new tr.b.ExtensionRegistryOptions(tr.b.BASIC_REGISTRY_MODE);
   options.defaultMetadata = {};
@@ -35,26 +82,14 @@ tr.exportTo('tr.v.d', function() {
   Diagnostic.addEventListener('will-register', function(e) {
     var constructor = e.typeInfo.constructor;
     if (!(constructor.fromDict instanceof Function) ||
+        (constructor.fromDict === Diagnostic.fromDict) ||
         (constructor.fromDict.length !== 1)) {
       throw new Error('Diagnostics must define fromDict(d)');
     }
-
-    // When subclasses set their prototype to an entirely new object and omit
-    // their constructor, then it becomes impossible for asDict() to find their
-    // constructor name. Add it back here so that asDict() can find it.
-    constructor.prototype.constructor = constructor;
   });
 
-  Diagnostic.fromDict = function(d) {
-    var typeInfo = Diagnostic.findTypeInfoWithName(d.type);
-    if (!typeInfo)
-      throw new Error('Unrecognized diagnostic type: ' + d.type);
-
-    return typeInfo.constructor.fromDict(d);
-  };
-
   return {
-    Diagnostic: Diagnostic
+    Diagnostic,
   };
 });
 </script>

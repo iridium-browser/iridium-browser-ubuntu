@@ -29,12 +29,14 @@ class MockEnrollmentScreenActor
 
   MOCK_METHOD2(SetParameters,
                void(Controller*, const policy::EnrollmentConfig& config));
-  MOCK_METHOD0(PrepareToShow, void());
   MOCK_METHOD0(Show, void());
   MOCK_METHOD0(Hide, void());
   MOCK_METHOD0(ShowSigninScreen, void());
+  MOCK_METHOD0(ShowAdJoin, void());
   MOCK_METHOD2(ShowAttributePromptScreen,
                void(const std::string& asset_id, const std::string& location));
+  MOCK_METHOD1(ShowAttestationBasedEnrollmentSuccessScreen,
+               void(const std::string& enterprise_domain));
   MOCK_METHOD0(ShowEnrollmentSpinnerScreen, void());
   MOCK_METHOD1(ShowAuthError, void(const GoogleServiceAuthError&));
   MOCK_METHOD1(ShowOtherError, void(EnterpriseEnrollmentHelper::OtherError));

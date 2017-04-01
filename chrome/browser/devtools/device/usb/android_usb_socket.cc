@@ -201,7 +201,7 @@ int AndroidUsbSocket::GetLocalAddress(net::IPEndPoint* address) const {
   return net::ERR_NOT_IMPLEMENTED;
 }
 
-const net::BoundNetLog& AndroidUsbSocket::NetLog() const {
+const net::NetLogWithSource& AndroidUsbSocket::NetLog() const {
   return net_log_;
 }
 
@@ -218,7 +218,7 @@ bool AndroidUsbSocket::WasEverUsed() const {
   return true;
 }
 
-bool AndroidUsbSocket::WasNpnNegotiated() const {
+bool AndroidUsbSocket::WasAlpnNegotiated() const {
   NOTIMPLEMENTED();
   return true;
 }

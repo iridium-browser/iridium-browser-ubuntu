@@ -4,13 +4,10 @@
 
 #include "components/sync/engine_impl/cycle/nudge_tracker.h"
 
-#include <stddef.h>
-
 #include <utility>
 
 #include "base/memory/ptr_util.h"
 #include "components/sync/engine/polling_constants.h"
-#include "components/sync/protocol/sync.pb.h"
 
 namespace syncer {
 
@@ -19,7 +16,6 @@ namespace {
 // Delays for syncer nudges.
 const int kDefaultNudgeDelayMilliseconds = 200;
 const int kSlowNudgeDelayMilliseconds = 2000;
-const int kDefaultSessionsCommitDelaySeconds = 10;
 const int kSyncRefreshDelayMilliseconds = 500;
 const int kSyncSchedulerDelayMilliseconds = 250;
 
@@ -32,15 +28,12 @@ base::TimeDelta GetDefaultDelayForType(ModelType model_type,
       return base::TimeDelta::FromSeconds(kDefaultShortPollIntervalSeconds);
     case BOOKMARKS:
     case PREFERENCES:
-      // Types with sometimes automatic changes get longer delays to allow more
-      // coalescing.
-      return base::TimeDelta::FromMilliseconds(kSlowNudgeDelayMilliseconds);
     case SESSIONS:
     case FAVICON_IMAGES:
     case FAVICON_TRACKING:
-      // Types with navigation triggered changes get longer delays to allow more
+      // Types with sometimes automatic changes get longer delays to allow more
       // coalescing.
-      return base::TimeDelta::FromSeconds(kDefaultSessionsCommitDelaySeconds);
+      return base::TimeDelta::FromMilliseconds(kSlowNudgeDelayMilliseconds);
     default:
       return minimum_delay;
   }
@@ -157,7 +150,7 @@ base::TimeDelta NudgeTracker::RecordLocalRefreshRequest(ModelTypeSet types) {
 }
 
 base::TimeDelta NudgeTracker::RecordRemoteInvalidation(
-    syncer::ModelType type,
+    ModelType type,
     std::unique_ptr<InvalidationInterface> invalidation) {
   // Forward the invalidations to the proper recipient.
   TypeTrackerMap::const_iterator tracker_it = type_trackers_.find(type);
@@ -166,13 +159,13 @@ base::TimeDelta NudgeTracker::RecordRemoteInvalidation(
   return remote_invalidation_nudge_delay_;
 }
 
-void NudgeTracker::RecordInitialSyncRequired(syncer::ModelType type) {
+void NudgeTracker::RecordInitialSyncRequired(ModelType type) {
   TypeTrackerMap::const_iterator tracker_it = type_trackers_.find(type);
   DCHECK(tracker_it != type_trackers_.end());
   tracker_it->second->RecordInitialSyncRequired();
 }
 
-void NudgeTracker::RecordCommitConflict(syncer::ModelType type) {
+void NudgeTracker::RecordCommitConflict(ModelType type) {
   TypeTrackerMap::const_iterator tracker_it = type_trackers_.find(type);
   DCHECK(tracker_it != type_trackers_.end());
   tracker_it->second->RecordCommitConflict();
@@ -196,51 +189,71 @@ void NudgeTracker::SetTypesThrottledUntil(ModelTypeSet types,
   }
 }
 
-void NudgeTracker::UpdateTypeThrottlingState(base::TimeTicks now) {
+void NudgeTracker::SetTypeBackedOff(ModelType type,
+                                    base::TimeDelta length,
+                                    base::TimeTicks now) {
+  TypeTrackerMap::const_iterator tracker_it = type_trackers_.find(type);
+  DCHECK(tracker_it != type_trackers_.end());
+  tracker_it->second->BackOffType(length, now);
+}
+
+void NudgeTracker::UpdateTypeThrottlingAndBackoffState() {
   for (TypeTrackerMap::const_iterator it = type_trackers_.begin();
        it != type_trackers_.end(); ++it) {
-    it->second->UpdateThrottleState(now);
+    it->second->UpdateThrottleOrBackoffState();
   }
 }
 
-bool NudgeTracker::IsAnyTypeThrottled() const {
+bool NudgeTracker::IsAnyTypeBlocked() const {
   for (TypeTrackerMap::const_iterator it = type_trackers_.begin();
        it != type_trackers_.end(); ++it) {
-    if (it->second->IsThrottled()) {
+    if (it->second->IsBlocked()) {
       return true;
     }
   }
   return false;
 }
 
-bool NudgeTracker::IsTypeThrottled(ModelType type) const {
+bool NudgeTracker::IsTypeBlocked(ModelType type) const {
   DCHECK(type_trackers_.find(type) != type_trackers_.end());
-  return type_trackers_.find(type)->second->IsThrottled();
+  return type_trackers_.find(type)->second->IsBlocked();
 }
 
-base::TimeDelta NudgeTracker::GetTimeUntilNextUnthrottle(
-    base::TimeTicks now) const {
-  DCHECK(IsAnyTypeThrottled()) << "This function requires a pending unthrottle";
+WaitInterval::BlockingMode NudgeTracker::GetTypeBlockingMode(
+    ModelType type) const {
+  DCHECK(type_trackers_.find(type) != type_trackers_.end());
+  return type_trackers_.find(type)->second->GetBlockingMode();
+}
 
-  // Return min of GetTimeUntilUnthrottle() values for all IsThrottled() types.
-  base::TimeDelta time_until_next_unthrottle = base::TimeDelta::Max();
+base::TimeDelta NudgeTracker::GetTimeUntilNextUnblock() const {
+  DCHECK(IsAnyTypeBlocked()) << "This function requires a pending unblock.";
+
+  // Return min of GetTimeUntilUnblock() values for all IsBlocked() types.
+  base::TimeDelta time_until_next_unblock = base::TimeDelta::Max();
   for (TypeTrackerMap::const_iterator it = type_trackers_.begin();
        it != type_trackers_.end(); ++it) {
-    if (it->second->IsThrottled()) {
-      time_until_next_unthrottle = std::min(
-          time_until_next_unthrottle, it->second->GetTimeUntilUnthrottle(now));
+    if (it->second->IsBlocked()) {
+      time_until_next_unblock =
+          std::min(time_until_next_unblock, it->second->GetTimeUntilUnblock());
     }
   }
-  DCHECK(!time_until_next_unthrottle.is_max());
+  DCHECK(!time_until_next_unblock.is_max());
 
-  return time_until_next_unthrottle;
+  return time_until_next_unblock;
 }
 
-ModelTypeSet NudgeTracker::GetThrottledTypes() const {
+base::TimeDelta NudgeTracker::GetTypeLastBackoffInterval(ModelType type) const {
+  TypeTrackerMap::const_iterator tracker_it = type_trackers_.find(type);
+  DCHECK(tracker_it != type_trackers_.end());
+
+  return tracker_it->second->GetLastBackoffInterval();
+}
+
+ModelTypeSet NudgeTracker::GetBlockedTypes() const {
   ModelTypeSet result;
   for (TypeTrackerMap::const_iterator it = type_trackers_.begin();
        it != type_trackers_.end(); ++it) {
-    if (it->second->IsThrottled()) {
+    if (it->second->IsBlocked()) {
       result.Put(it->first);
     }
   }
@@ -305,16 +318,16 @@ sync_pb::GetUpdatesCallerInfo::GetUpdatesSource NudgeTracker::GetLegacySource()
   for (TypeTrackerMap::const_iterator it = type_trackers_.begin();
        it != type_trackers_.end(); ++it) {
     const DataTypeTracker& tracker = *it->second;
-    if (!tracker.IsThrottled() && tracker.HasPendingInvalidation()) {
+    if (!tracker.IsBlocked() && tracker.HasPendingInvalidation()) {
       has_invalidation_pending = true;
     }
-    if (!tracker.IsThrottled() && tracker.HasRefreshRequestPending()) {
+    if (!tracker.IsBlocked() && tracker.HasRefreshRequestPending()) {
       has_refresh_request_pending = true;
     }
-    if (!tracker.IsThrottled() && tracker.HasLocalChangePending()) {
+    if (!tracker.IsBlocked() && tracker.HasLocalChangePending()) {
       has_commit_pending = true;
     }
-    if (!tracker.IsThrottled() && tracker.IsInitialSyncRequired()) {
+    if (!tracker.IsBlocked() && tracker.IsInitialSyncRequired()) {
       is_initial_sync_required = true;
     }
   }
@@ -387,7 +400,7 @@ void NudgeTracker::OnReceivedCustomNudgeDelays(
            delay_map.begin();
        iter != delay_map.end(); ++iter) {
     ModelType type = iter->first;
-    DCHECK(syncer::ProtocolTypes().Has(type));
+    DCHECK(ProtocolTypes().Has(type));
     TypeTrackerMap::const_iterator type_iter = type_trackers_.find(type);
     if (type_iter == type_trackers_.end())
       continue;

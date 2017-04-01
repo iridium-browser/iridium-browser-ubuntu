@@ -4,10 +4,10 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "core/fxge/include/cfx_graphstatedata.h"
+#include "core/fxge/cfx_graphstatedata.h"
 
-#include "core/fxcrt/include/fx_memory.h"
-#include "core/fxcrt/include/fx_system.h"
+#include "core/fxcrt/fx_memory.h"
+#include "core/fxcrt/fx_system.h"
 
 CFX_GraphStateData::CFX_GraphStateData()
     : m_LineCap(LineCapButt),

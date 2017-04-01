@@ -8,6 +8,7 @@
 
 #include <utility>
 
+#include "base/atomicops.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -263,16 +264,12 @@ int Node::GetStatus(const PortRef& port_ref, PortStatus* port_status) {
   return OK;
 }
 
-int Node::GetMessage(const PortRef& port_ref, ScopedMessage* message) {
-  return GetMessageIf(port_ref, nullptr, message);
-}
-
-int Node::GetMessageIf(const PortRef& port_ref,
-                       std::function<bool(const Message&)> selector,
-                       ScopedMessage* message) {
+int Node::GetMessage(const PortRef& port_ref,
+                     ScopedMessage* message,
+                     MessageFilter* filter) {
   *message = nullptr;
 
-  DVLOG(2) << "GetMessageIf for " << port_ref.name() << "@" << name_;
+  DVLOG(4) << "GetMessage for " << port_ref.name() << "@" << name_;
 
   Port* port = port_ref.port();
   {
@@ -288,7 +285,7 @@ int Node::GetMessageIf(const PortRef& port_ref,
     if (!CanAcceptMoreMessages(port))
       return ERROR_PORT_PEER_CLOSED;
 
-    port->message_queue.GetNextMessageIf(std::move(selector), message);
+    port->message_queue.GetNextMessage(message, filter);
   }
 
   // Allow referenced ports to trigger PortStatusChanged calls.
@@ -428,7 +425,7 @@ int Node::OnUserMessage(ScopedMessage message) {
     ports_buf << message->ports()[i];
   }
 
-  DVLOG(2) << "AcceptMessage " << event->sequence_num
+  DVLOG(4) << "AcceptMessage " << event->sequence_num
              << " [ports=" << ports_buf.str() << "] at "
              << port_name << "@" << name_;
 #endif
@@ -808,6 +805,11 @@ scoped_refptr<Port> Node::GetPort_Locked(const PortName& port_name) {
   if (iter == ports_.end())
     return nullptr;
 
+#if defined(OS_ANDROID) && defined(ARCH_CPU_ARM64)
+  // Workaround for https://crbug.com/665869.
+  base::subtle::MemoryBarrier();
+#endif
+
   return iter->second;
 }
 
@@ -994,7 +996,7 @@ int Node::AcceptPort(const PortName& port_name,
            << port->last_sequence_num_to_receive << "]";
 
   // A newly accepted port is not signalable until the message referencing the
-  // new port finds its way to the consumer (see GetMessageIf).
+  // new port finds its way to the consumer (see GetMessage).
   port->message_queue.set_signalable(false);
 
   int rv = AddPortWithName(port_name, port);
@@ -1078,7 +1080,7 @@ int Node::WillSendMessage_Locked(const LockedPort& port,
   }
 
 #if DCHECK_IS_ON()
-  DVLOG(2) << "Sending message "
+  DVLOG(4) << "Sending message "
            << GetEventData<UserEventData>(*message)->sequence_num
            << " [ports=" << ports_buf.str() << "]"
            << " from " << port_name << "@" << name_
@@ -1176,7 +1178,7 @@ int Node::ForwardMessages_Locked(const LockedPort& port,
 
   for (;;) {
     ScopedMessage message;
-    port->message_queue.GetNextMessageIf(nullptr, &message);
+    port->message_queue.GetNextMessage(&message, nullptr);
     if (!message)
       break;
 

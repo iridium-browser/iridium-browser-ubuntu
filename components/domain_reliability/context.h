@@ -61,7 +61,10 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContext {
   // Notifies the context of a beacon on its domain(s); may or may not save the
   // actual beacon to be uploaded, depending on the sample rates in the config,
   // but will increment one of the request counters in any case.
-  void OnBeacon(std::unique_ptr<DomainReliabilityBeacon> beacon);
+  //
+  // Returns |true| if the beacon was queued or |false| if it was discarded,
+  // for metrics purposes.
+  bool OnBeacon(std::unique_ptr<DomainReliabilityBeacon> beacon);
 
   // Called to clear browsing data, since beacons are like browsing history.
   void ClearBeacons();
@@ -83,9 +86,6 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContext {
   static const size_t kMaxQueuedBeacons;
 
  private:
-  // Deque of beacons owned by this context. (Deleted after uploading.)
-  typedef std::deque<DomainReliabilityBeacon*> BeaconDeque;
-
   void ScheduleUpload(base::TimeDelta min_delay, base::TimeDelta max_delay);
   void StartUpload();
   void OnUploadComplete(const DomainReliabilityUploader::UploadResult& result);
@@ -110,6 +110,8 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContext {
   // when there are too many beacons queued.)
   void RemoveOldestBeacon();
 
+  void RemoveExpiredBeacons();
+
   std::unique_ptr<const DomainReliabilityConfig> config_;
   MockableTime* time_;
   const std::string& upload_reporter_string_;
@@ -117,13 +119,15 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityContext {
   DomainReliabilityDispatcher* dispatcher_;
   DomainReliabilityUploader* uploader_;
 
-  BeaconDeque beacons_;
+  std::deque<std::unique_ptr<DomainReliabilityBeacon>> beacons_;
   size_t uploading_beacons_size_;
   base::TimeTicks upload_time_;
   base::TimeTicks last_upload_time_;
   // The last network change time is not tracked per-context, so this is a
   // pointer to that value in a wider (e.g. per-Monitor or unittest) scope.
   const base::TimeTicks* last_network_change_time_;
+
+  base::TimeTicks last_queued_beacon_time_;
 
   base::WeakPtrFactory<DomainReliabilityContext> weak_factory_;
 

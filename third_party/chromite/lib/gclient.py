@@ -9,8 +9,8 @@ from __future__ import print_function
 import os
 import pprint
 
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import git
 from chromite.lib import osutils
@@ -185,7 +185,10 @@ def _GetGclientSpec(internal, rev, template, use_cache):
   # cache set up; but how can we tell whether this code is running on a bot
   # or a developer's machine?
   if cros_build_lib.HostIsCIBuilder() and use_cache:
-    result += "cache_dir = '/b/git-cache'\n"
+    if cros_build_lib.IsInsideChroot():
+      result += "cache_dir = '/tmp/b/git-cache'\n"
+    else:
+      result += "cache_dir = '/b/git-cache'\n"
 
   return result
 
@@ -236,7 +239,7 @@ def Sync(gclient, cwd, reset=False):
     cwd: Directory to sync.
     reset: Reset to pristine version of the source code.
   """
-  cmd = [gclient, 'sync', '--verbose', '--nohooks', '--transitive',
+  cmd = [gclient, 'sync', '--verbose', '--nohooks',
          '--with_branch_heads', '--with_tags']
 
   if reset:

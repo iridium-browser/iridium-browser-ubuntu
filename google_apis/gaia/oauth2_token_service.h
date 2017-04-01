@@ -93,8 +93,12 @@ class OAuth2TokenService : public base::NonThreadSafe {
    public:
     // Called whenever a new login-scoped refresh token is available for
     // account |account_id|. Once available, access tokens can be retrieved for
-    // this account.  This is called during initial startup for each token
-    // loaded.
+    // this account. This is called during initial startup for each token
+    // loaded (and any time later when, e.g., credentials change). When called,
+    // any pending token request is cancelled and needs to be retried. Such a
+    // pending request can easily occur on Android, where refresh tokens are
+    // held by the OS and are thus often available on startup even before
+    // OnRefreshTokenAvailable() is called.
     virtual void OnRefreshTokenAvailable(const std::string& account_id) {}
     // Called whenever the login-scoped refresh token becomes unavailable for
     // account |account_id|.
@@ -310,8 +314,6 @@ class OAuth2TokenService : public base::NonThreadSafe {
     ScopeSet scopes;
   };
 
-  typedef std::map<RequestParameters, Fetcher*> PendingFetcherMap;
-
   // Provide a request context used for fetching access tokens with the
   // |StartRequest| method.
   net::URLRequestContextGetter* GetRequestContext() const;
@@ -368,7 +370,7 @@ class OAuth2TokenService : public base::NonThreadSafe {
 
   // A map from fetch parameters to a fetcher that is fetching an OAuth2 access
   // token using these parameters.
-  PendingFetcherMap pending_fetchers_;
+  std::map<RequestParameters, std::unique_ptr<Fetcher>> pending_fetchers_;
 
   // List of observers to notify when access token status changes.
   base::ObserverList<DiagnosticsObserver, true> diagnostics_observer_list_;

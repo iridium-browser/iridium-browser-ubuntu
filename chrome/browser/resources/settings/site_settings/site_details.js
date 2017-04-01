@@ -10,7 +10,7 @@
 Polymer({
   is: 'site-details',
 
-  behaviors: [SiteSettingsBehavior],
+  behaviors: [SiteSettingsBehavior, settings.RouteObserverBehavior],
 
   properties: {
     /**
@@ -24,6 +24,7 @@ Polymer({
 
     /**
      * The amount of data stored for the origin.
+     * @private
      */
     storedData_: {
       type: String,
@@ -32,39 +33,83 @@ Polymer({
 
     /**
      * The type of storage for the origin.
+     * @private
      */
     storageType_: Number,
+
+    /** @private */
+    confirmationDeleteMsg_: String,
   },
 
   listeners: {
-    'usage-deleted': 'onUsageDeleted',
+    'usage-deleted': 'onUsageDeleted_',
   },
 
+  /** @override */
   ready: function() {
     this.ContentSettingsTypes = settings.ContentSettingsTypes;
   },
 
   /**
+   * settings.RouteObserverBehavior
+   * @param {!settings.Route} route
+   * @protected
+   */
+  currentRouteChanged: function(route) {
+    var site = settings.getQueryParameters().get('site');
+    if (!site)
+      return;
+    this.browserProxy.getSiteDetails(site).then(function(siteInfo) {
+      this.site = this.expandSiteException(siteInfo);
+    }.bind(this));
+  },
+
+  /**
    * Handler for when the origin changes.
+   * @private
    */
   onSiteChanged_: function() {
-    // Using originForDisplay avoids the [*.] prefix that some exceptions use.
-    var url = new URL(this.ensureUrlHasScheme(this.site.originForDisplay));
-    this.$.usageApi.fetchUsageTotal(url.hostname);
+    // origin may be initially undefined if the user follows a direct
+    // link (URL) to this page.
+    var origin = this.site.origin;
+    if (origin !== undefined)
+      this.$.usageApi.fetchUsageTotal(this.toUrl(origin).hostname);
+  },
+
+  /** @private */
+  onCloseDialog_: function() {
+    this.$.confirmDeleteDialog.close();
+  },
+
+  /**
+   * Confirms the deletion of storage for a site.
+   * @param {!Event} e
+   * @private
+   */
+  onConfirmClearStorage_: function(e) {
+    e.preventDefault();
+    this.confirmationDeleteMsg_ = loadTimeData.getStringF(
+        'siteSettingsSiteRemoveConfirmation',
+        this.toUrl(this.site.origin).href);
+    this.$.confirmDeleteDialog.showModal();
   },
 
   /**
    * Clears all data stored for the current origin.
+   * @private
    */
   onClearStorage_: function() {
-    this.$.usageApi.clearUsage(this.site.origin, this.storageType_);
+    this.$.usageApi.clearUsage(
+        this.toUrl(this.site.origin).href, this.storageType_);
   },
 
   /**
    * Called when usage has been deleted for an origin.
+   * @param {!{detail: !{origin: string}}} event
+   * @private
    */
-  onUsageDeleted: function(event) {
-    if (event.detail.origin == this.site.origin) {
+  onUsageDeleted_: function(event) {
+    if (event.detail.origin == this.toUrl(this.site.origin).href) {
       this.storedData_ = '';
       this.navigateBackIfNoData_();
     }
@@ -72,6 +117,7 @@ Polymer({
 
   /**
    * Resets all permissions and clears all data stored for the current origin.
+   * @private
    */
   onClearAndReset_: function() {
     Array.prototype.forEach.call(
@@ -86,14 +132,16 @@ Polymer({
 
   /**
    * Navigate back if the UI is empty (everything been cleared).
+   * @private
    */
   navigateBackIfNoData_: function() {
     if (this.storedData_ == '' && !this.permissionShowing_())
-      settings.navigateTo(settings.Route.SITE_SETTINGS_ALL);
+      settings.navigateToPreviousRoute();
   },
 
   /**
    * Returns true if one or more permission is showing.
+   * @private
    */
   permissionShowing_: function() {
     return Array.prototype.some.call(

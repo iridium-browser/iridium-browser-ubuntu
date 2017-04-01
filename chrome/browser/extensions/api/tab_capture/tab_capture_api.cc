@@ -15,6 +15,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/tab_capture/offscreen_tab.h"
@@ -87,7 +88,7 @@ void FilterDeprecatedGoogConstraints(TabCapture::CaptureOptions* options) {
     std::vector<std::string> bad_keys;
     base::DictionaryValue::Iterator it(*dict);
     for (; !it.IsAtEnd(); it.Advance()) {
-      if (it.key().find("goog") == 0)
+      if (base::StartsWith(it.key(), "goog", base::CompareCase::SENSITIVE))
         bad_keys.push_back(it.key());
     }
     for (const std::string& k : bad_keys) {
@@ -199,25 +200,21 @@ const char* const kMediaRouterExtensionIds[] = {
     "ekpaaapppgpmolpcldedioblbkmijaca",  // Beta
 };
 
-bool TabCaptureCaptureFunction::RunSync() {
+ExtensionFunction::ResponseAction TabCaptureCaptureFunction::Run() {
   std::unique_ptr<api::tab_capture::Capture::Params> params =
       TabCapture::Capture::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
 
   // Figure out the active WebContents and retrieve the needed ids.
-  Browser* target_browser =
-      chrome::FindAnyBrowser(GetProfile(), include_incognito());
-  if (!target_browser) {
-    error_ = kFindingTabError;
-    return false;
-  }
+  Browser* target_browser = chrome::FindAnyBrowser(
+      Profile::FromBrowserContext(browser_context()), include_incognito());
+  if (!target_browser)
+    return RespondNow(Error(kFindingTabError));
 
   content::WebContents* target_contents =
       target_browser->tab_strip_model()->GetActiveWebContents();
-  if (!target_contents) {
-    error_ = kFindingTabError;
-    return false;
-  }
+  if (!target_contents)
+    return RespondNow(Error(kFindingTabError));
 
   const std::string& extension_id = extension()->id();
 
@@ -232,21 +229,17 @@ bool TabCaptureCaptureFunction::RunSync() {
                                   arraysize(kChromecastExtensionIds)) &&
       !SimpleFeature::IsIdInArray(extension_id, kMediaRouterExtensionIds,
                                   arraysize(kMediaRouterExtensionIds))) {
-    error_ = kGrantError;
-    return false;
+    return RespondNow(Error(kGrantError));
   }
 
-  if (!OptionsSpecifyAudioOrVideo(params->options)) {
-    error_ = kNoAudioOrVideo;
-    return false;
-  }
+  if (!OptionsSpecifyAudioOrVideo(params->options))
+    return RespondNow(Error(kNoAudioOrVideo));
 
-  TabCaptureRegistry* registry = TabCaptureRegistry::Get(GetProfile());
+  TabCaptureRegistry* registry = TabCaptureRegistry::Get(browser_context());
   if (!registry->AddRequest(target_contents, extension_id, false)) {
     // TODO(miu): Allow multiple consumers of single tab capture.
     // http://crbug.com/535336
-    error_ = kCapturingSameTab;
-    return false;
+    return RespondNow(Error(kCapturingSameTab));
   }
   FilterDeprecatedGoogConstraints(&params->options);
   AddMediaStreamSourceConstraints(target_contents, &params->options);
@@ -261,20 +254,18 @@ bool TabCaptureCaptureFunction::RunSync() {
   // chrome/renderer/resources/extensions/tab_capture_custom_bindings.js
   std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->MergeDictionary(params->options.ToValue().get());
-  SetResult(std::move(result));
-  return true;
+  return RespondNow(OneArgument(std::move(result)));
 }
 
-bool TabCaptureGetCapturedTabsFunction::RunSync() {
-  TabCaptureRegistry* registry = TabCaptureRegistry::Get(GetProfile());
+ExtensionFunction::ResponseAction TabCaptureGetCapturedTabsFunction::Run() {
+  TabCaptureRegistry* registry = TabCaptureRegistry::Get(browser_context());
   std::unique_ptr<base::ListValue> list(new base::ListValue());
   if (registry)
     registry->GetCapturedTabs(extension()->id(), list.get());
-  SetResult(std::move(list));
-  return true;
+  return RespondNow(OneArgument(std::move(list)));
 }
 
-bool TabCaptureCaptureOffscreenTabFunction::RunSync() {
+ExtensionFunction::ResponseAction TabCaptureCaptureOffscreenTabFunction::Run() {
   std::unique_ptr<TabCapture::CaptureOffscreenTab::Params> params =
       TabCapture::CaptureOffscreenTab::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
@@ -291,21 +282,15 @@ bool TabCaptureCaptureOffscreenTabFunction::RunSync() {
                                  arraysize(kChromecastExtensionIds)) ||
       SimpleFeature::IsIdInArray(extension()->id(), kMediaRouterExtensionIds,
                                  arraysize(kMediaRouterExtensionIds));
-  if (!is_whitelisted_extension) {
-    error_ = kNotWhitelistedForOffscreenTabApi;
-    return false;
-  }
+  if (!is_whitelisted_extension)
+    return RespondNow(Error(kNotWhitelistedForOffscreenTabApi));
 
   const GURL start_url(params->start_url);
-  if (!IsAcceptableOffscreenTabUrl(start_url)) {
-    SetError(kInvalidStartUrl);
-    return false;
-  }
+  if (!IsAcceptableOffscreenTabUrl(start_url))
+    return RespondNow(Error(kInvalidStartUrl));
 
-  if (!OptionsSpecifyAudioOrVideo(params->options)) {
-    SetError(kNoAudioOrVideo);
-    return false;
-  }
+  if (!OptionsSpecifyAudioOrVideo(params->options))
+    return RespondNow(Error(kNoAudioOrVideo));
 
   content::WebContents* const extension_web_contents = GetSenderWebContents();
   EXTENSION_FUNCTION_VALIDATE(extension_web_contents);
@@ -315,17 +300,14 @@ bool TabCaptureCaptureOffscreenTabFunction::RunSync() {
           DetermineInitialSize(params->options),
           (is_whitelisted_extension && params->options.presentation_id) ?
               *params->options.presentation_id : std::string());
-  if (!offscreen_tab) {
-    SetError(kTooManyOffscreenTabs);
-    return false;
-  }
+  if (!offscreen_tab)
+    return RespondNow(Error(kTooManyOffscreenTabs));
 
   if (!TabCaptureRegistry::Get(browser_context())->AddRequest(
           offscreen_tab->web_contents(), extension()->id(), true)) {
     // TODO(miu): Allow multiple consumers of single tab capture.
     // http://crbug.com/535336
-    SetError(kCapturingSameOffscreenTab);
-    return false;
+    return RespondNow(Error(kCapturingSameOffscreenTab));
   }
   FilterDeprecatedGoogConstraints(&params->options);
   AddMediaStreamSourceConstraints(offscreen_tab->web_contents(),
@@ -335,10 +317,7 @@ bool TabCaptureCaptureOffscreenTabFunction::RunSync() {
   // the custom JS bindings in the extension's render process to complete the
   // request.  See the comment at end of TabCaptureCaptureFunction::RunSync()
   // for more details.
-  std::unique_ptr<base::DictionaryValue> result(new base::DictionaryValue());
-  result->MergeDictionary(params->options.ToValue().get());
-  SetResult(std::move(result));
-  return true;
+  return RespondNow(OneArgument(params->options.ToValue()));
 }
 
 // static

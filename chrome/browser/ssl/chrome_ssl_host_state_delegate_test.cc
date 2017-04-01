@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <utility>
 
+#include "base/callback.h"
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/simple_test_clock.h"
@@ -19,13 +20,13 @@
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
@@ -50,6 +51,10 @@ scoped_refptr<net::X509Certificate> GetOkCert() {
 void SetFinchConfig(base::CommandLine* command_line, const std::string& group) {
   command_line->AppendSwitchASCII("--force-fieldtrials",
                                   "RevertCertificateErrorDecisions/" + group);
+}
+
+bool CStrStringMatcher(const char* a, const std::string& b) {
+  return a == b;
 }
 
 }  // namespace
@@ -171,11 +176,22 @@ IN_PROC_BROWSER_TEST_F(ChromeSSLHostStateDelegateTest, Clear) {
   // Simulate a user decision to allow an invalid certificate exception for
   // kWWWGoogleHost and for kExampleHost.
   state->AllowCert(kWWWGoogleHost, *cert, net::CERT_STATUS_DATE_INVALID);
+  state->AllowCert(kExampleHost, *cert, net::CERT_STATUS_DATE_INVALID);
 
-  // Do a full clear, then make sure that both kWWWGoogleHost, which had a
-  // decision made, and kExampleHost, which was untouched, are now in a denied
-  // state.
-  state->Clear();
+  EXPECT_TRUE(state->HasAllowException(kWWWGoogleHost));
+  EXPECT_TRUE(state->HasAllowException(kExampleHost));
+
+  // Clear data for kWWWGoogleHost. kExampleHost will not be modified.
+  state->Clear(
+      base::Bind(&CStrStringMatcher, base::Unretained(kWWWGoogleHost)));
+
+  EXPECT_FALSE(state->HasAllowException(kWWWGoogleHost));
+  EXPECT_TRUE(state->HasAllowException(kExampleHost));
+
+  // Do a full clear, then make sure that both kWWWGoogleHost and kExampleHost,
+  // which had a decision made, and kGoogleHost, which was untouched, are now
+  // in a denied state.
+  state->Clear(base::Callback<bool(const std::string&)>());
   EXPECT_FALSE(state->HasAllowException(kWWWGoogleHost));
   EXPECT_EQ(content::SSLHostStateDelegate::DENIED,
             state->QueryPolicy(kWWWGoogleHost, *cert,
@@ -183,6 +199,10 @@ IN_PROC_BROWSER_TEST_F(ChromeSSLHostStateDelegateTest, Clear) {
   EXPECT_FALSE(state->HasAllowException(kExampleHost));
   EXPECT_EQ(content::SSLHostStateDelegate::DENIED,
             state->QueryPolicy(kExampleHost, *cert,
+                               net::CERT_STATUS_DATE_INVALID, &unused_value));
+  EXPECT_FALSE(state->HasAllowException(kGoogleHost));
+  EXPECT_EQ(content::SSLHostStateDelegate::DENIED,
+            state->QueryPolicy(kGoogleHost, *cert,
                                net::CERT_STATUS_DATE_INVALID, &unused_value));
 }
 
@@ -600,7 +620,8 @@ class RemoveBrowsingHistorySSLHostStateDelegateTest
         BrowsingDataRemoverFactory::GetForBrowserContext(profile);
     BrowsingDataRemoverCompletionObserver completion_observer(remover);
     remover->RemoveAndReply(
-        BrowsingDataRemover::Period(browsing_data::LAST_HOUR),
+        browsing_data::CalculateBeginDeleteTime(browsing_data::LAST_HOUR),
+        browsing_data::CalculateEndDeleteTime(browsing_data::LAST_HOUR),
         BrowsingDataRemover::REMOVE_HISTORY,
         BrowsingDataHelper::UNPROTECTED_WEB, &completion_observer);
     completion_observer.BlockUntilCompletion();

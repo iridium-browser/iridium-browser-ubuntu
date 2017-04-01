@@ -30,7 +30,6 @@ import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.document.DocumentUtils;
-import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.metrics.WebappUma;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
@@ -38,7 +37,6 @@ import org.chromium.chrome.browser.tab.TabDelegateFactory;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.UrlUtilities;
-import org.chromium.chrome.browser.widget.ControlContainer;
 import org.chromium.content.browser.ScreenOrientationProvider;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.net.NetworkChangeNotifier;
@@ -60,8 +58,6 @@ public class WebappActivity extends FullScreenActivity {
 
     protected WebappInfo mWebappInfo;
 
-    private boolean mOldWebappCleanupStarted;
-
     private ViewGroup mSplashScreen;
     private WebappUrlBar mUrlBar;
 
@@ -78,7 +74,7 @@ public class WebappActivity extends FullScreenActivity {
      * of the WebappActivity.
      */
     public WebappActivity() {
-        mWebappInfo = WebappInfo.createEmpty();
+        mWebappInfo = createWebappInfo(null);
         mDirectoryManager = new WebappDirectoryManager();
         mWebappUma = new WebappUma();
     }
@@ -88,7 +84,7 @@ public class WebappActivity extends FullScreenActivity {
         if (intent == null) return;
         super.onNewIntent(intent);
 
-        WebappInfo newWebappInfo = WebappInfo.create(intent);
+        WebappInfo newWebappInfo = createWebappInfo(intent);
         if (newWebappInfo == null) {
             Log.e(TAG, "Failed to parse new Intent: " + intent);
             finish();
@@ -103,6 +99,10 @@ public class WebappActivity extends FullScreenActivity {
 
     protected boolean isInitialized() {
         return mIsInitialized;
+    }
+
+    protected WebappInfo createWebappInfo(Intent intent) {
+        return (intent == null) ? WebappInfo.createEmpty() : WebappInfo.create(intent);
     }
 
     private void initializeUI(Bundle savedInstanceState) {
@@ -125,10 +125,27 @@ public class WebappActivity extends FullScreenActivity {
 
     @Override
     public void preInflationStartup() {
-        WebappInfo info = WebappInfo.create(getIntent());
-        if (info != null) mWebappInfo = info;
+        WebappInfo info = createWebappInfo(getIntent());
 
-        ScreenOrientationProvider.lockOrientation((byte) mWebappInfo.orientation(), this);
+        String id = "";
+        if (info != null) {
+            mWebappInfo = info;
+            id = info.id();
+        }
+
+        // Initialize the WebappRegistry and warm up the shared preferences for this web app. No-ops
+        // if the registry and this web app are already initialized. Must override Strict Mode to
+        // avoid a violation.
+        StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
+        try {
+            WebappRegistry.getInstance();
+            WebappRegistry.warmUpSharedPrefsForId(id);
+        } finally {
+            StrictMode.setThreadPolicy(oldPolicy);
+        }
+
+        ScreenOrientationProvider.lockOrientation(getWindowAndroid(),
+                (byte) mWebappInfo.orientation(), this);
         super.preInflationStartup();
     }
 
@@ -152,7 +169,7 @@ public class WebappActivity extends FullScreenActivity {
     @Override
     public void onStartWithNative() {
         super.onStartWithNative();
-        mDirectoryManager.cleanUpDirectories(this, getId());
+        mDirectoryManager.cleanUpDirectories(this, getActivityId());
     }
 
     @Override
@@ -195,13 +212,6 @@ public class WebappActivity extends FullScreenActivity {
             updateTaskDescription();
         }
         super.onResume();
-
-        // Kick off the old web app cleanup (if we haven't already) now that we have queued the
-        // current web app's storage to be opened.
-        if (!mOldWebappCleanupStarted) {
-            WebappRegistry.unregisterOldWebapps(this, System.currentTimeMillis());
-            mOldWebappCleanupStarted = true;
-        }
     }
 
     @Override
@@ -233,14 +243,19 @@ public class WebappActivity extends FullScreenActivity {
         return mWebappInfo;
     }
 
-    protected int getBackgroundColor() {
-        return ColorUtils.getOpaqueColor(mWebappInfo.backgroundColor(
-                ApiCompatibilityUtils.getColor(getResources(), R.color.webapp_default_bg)));
+    /**
+     * @return A string containing the scope of the webapp opened in this activity.
+     */
+    public String getWebappScope() {
+        return mWebappInfo.scopeUri().toString();
     }
 
     private void initializeWebappData() {
+        final int backgroundColor = ColorUtils.getOpaqueColor(mWebappInfo.backgroundColor(
+                ApiCompatibilityUtils.getColor(getResources(), R.color.webapp_default_bg)));
+
         mSplashScreen = new FrameLayout(this);
-        mSplashScreen.setBackgroundColor(getBackgroundColor());
+        mSplashScreen.setBackgroundColor(backgroundColor);
 
         ViewGroup contentView = (ViewGroup) findViewById(android.R.id.content);
         contentView.addView(mSplashScreen);
@@ -249,27 +264,33 @@ public class WebappActivity extends FullScreenActivity {
         mWebappUma.recordSplashscreenBackgroundColor(mWebappInfo.hasValidBackgroundColor()
                 ? WebappUma.SPLASHSCREEN_COLOR_STATUS_CUSTOM
                 : WebappUma.SPLASHSCREEN_COLOR_STATUS_DEFAULT);
-
-        WebappRegistry.getWebappDataStorage(this, mWebappInfo.id(),
-                new WebappRegistry.FetchWebappDataStorageCallback() {
-                    @Override
-                    public void onWebappDataStorageRetrieved(WebappDataStorage storage) {
-                        onDataStorageFetched(storage);
-                    }
-                }
-        );
-    }
-
-    protected void recordSplashScreenThemeColorUma() {
         mWebappUma.recordSplashscreenThemeColor(mWebappInfo.hasValidThemeColor()
                 ? WebappUma.SPLASHSCREEN_COLOR_STATUS_CUSTOM
                 : WebappUma.SPLASHSCREEN_COLOR_STATUS_DEFAULT);
+
+        initializeSplashScreenWidgets(backgroundColor);
     }
 
-    protected void onDataStorageFetched(WebappDataStorage storage) {
-        recordSplashScreenThemeColorUma();
-        if (storage == null) return;
+    protected void initializeSplashScreenWidgets(final int backgroundColor) {
+        WebappDataStorage storage =
+                WebappRegistry.getInstance().getWebappDataStorage(mWebappInfo.id());
+        if (storage == null) {
+            onStorageIsNull(backgroundColor);
+            return;
+        }
 
+        updateStorage(storage);
+        storage.getSplashScreenImage(new WebappDataStorage.FetchCallback<Bitmap>() {
+            @Override
+            public void onDataRetrieved(Bitmap splashImage) {
+                initializeSplashScreenWidgets(backgroundColor, splashImage);
+            }
+        });
+    }
+
+    protected void onStorageIsNull(int backgroundColor) {}
+
+    protected void updateStorage(WebappDataStorage storage) {
         // The information in the WebappDataStorage may have been purged by the
         // user clearing their history or not launching the web app recently.
         // Restore the data if necessary from the intent.
@@ -283,21 +304,9 @@ public class WebappActivity extends FullScreenActivity {
         if (mWebappInfo.isLaunchedFromHomescreen()) {
             storage.updateLastUsedTime();
         }
-
-        retrieveSplashScreenImage(storage);
     }
 
-    protected void retrieveSplashScreenImage(WebappDataStorage storage) {
-        // Retrieve the splash image if it exists.
-        storage.getSplashScreenImage(new WebappDataStorage.FetchCallback<Bitmap>() {
-            @Override
-            public void onDataRetrieved(Bitmap splashImage) {
-                initializeSplashScreenWidgets(splashImage);
-            }
-        });
-    }
-
-    protected void initializeSplashScreenWidgets(Bitmap splashImage) {
+    protected void initializeSplashScreenWidgets(int backgroundColor, Bitmap splashImage) {
         Bitmap displayIcon = splashImage == null ? mWebappInfo.icon() : splashImage;
         int minimiumSizeThreshold = getResources().getDimensionPixelSize(
                 R.dimen.webapp_splash_image_size_minimum);
@@ -346,7 +355,7 @@ public class WebappActivity extends FullScreenActivity {
         appNameView.setText(mWebappInfo.name());
         if (splashIconView != null) splashIconView.setImageBitmap(displayIcon);
 
-        if (ColorUtils.shouldUseLightForegroundOnBackground(getBackgroundColor())) {
+        if (ColorUtils.shouldUseLightForegroundOnBackground(backgroundColor)) {
             appNameView.setTextColor(ApiCompatibilityUtils.getColor(getResources(),
                     R.color.webapp_splash_title_light));
         }
@@ -373,8 +382,7 @@ public class WebappActivity extends FullScreenActivity {
 
             @Override
             public void onDidStartProvisionalLoadForFrame(
-                    Tab tab, long frameId, long parentFrameId, boolean isMainFrame,
-                    String validatedUrl, boolean isErrorPage, boolean isIframeSrcdoc) {
+                    Tab tab, boolean isMainFrame, String validatedUrl) {
                 if (isMainFrame) updateUrlBar();
             }
 
@@ -502,8 +510,13 @@ public class WebappActivity extends FullScreenActivity {
         // Intentionally do nothing as WebappActivity explicitly sets status bar color.
     }
 
-    /** Returns a unique identifier for this WebappActivity. */
-    protected String getId() {
+    /**
+     * Returns a unique identifier for this WebappActivity.
+     * Note: do not call this function when you need {@link WebappInfo#id()}. Subclasses like
+     * WebappManagedActivity and WebApkManagedActivity overwrite this function and return the
+     * index of the activity.
+     */
+    protected String getActivityId() {
         return mWebappInfo.id();
     }
 
@@ -514,7 +527,7 @@ public class WebappActivity extends FullScreenActivity {
      */
     @Override
     protected final File getActivityDirectory() {
-        return mDirectoryManager.getWebappDirectory(this, getId());
+        return mDirectoryManager.getWebappDirectory(this, getActivityId());
     }
 
     private void hideSplashScreen(final int reason) {
@@ -553,13 +566,6 @@ public class WebappActivity extends FullScreenActivity {
     @VisibleForTesting
     boolean isUrlBarVisible() {
         return findViewById(R.id.control_container).getVisibility() == View.VISIBLE;
-    }
-
-    @Override
-    protected final ChromeFullscreenManager createFullscreenManager(
-            ControlContainer controlContainer) {
-        return new ChromeFullscreenManager(this, controlContainer, getTabModelSelector(),
-                getControlContainerHeightResource(), false /* supportsBrowserOverride */);
     }
 
     @Override

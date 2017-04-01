@@ -35,8 +35,8 @@ except ImportError:
 import types
 
 from chromite.cbuildbot import archive_lib
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import metadata_lib
+from chromite.lib import constants
+from chromite.lib import metadata_lib
 from chromite.cbuildbot import tree_status
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
@@ -170,8 +170,7 @@ class RunAttributes(object):
       'breakpad_symbols_generated',   # Set by DebugSymbolsStage.
       'debug_tarball_generated',      # Set by DebugSymbolsStage.
       'images_generated',             # Set by BuildImageStage.
-      'payloads_generated',           # Set by UploadHWTestArtifacts.
-      'delta_payloads_generated',     # Set by UploadHWTestArtifacts.
+      'test_artifacts_uploaded',      # Set by UploadHWTestArtifacts.
       'instruction_urls_per_channel', # Set by ArchiveStage
       'success',                      # Set by cbuildbot.py:Builder
       'packages_under_test',          # Set by BuildPackagesStage.
@@ -692,10 +691,19 @@ class _BuilderRunBase(object):
     Returns:
       The fully formed URL
     """
-    return tree_status.ConstructDashboardURL(
-        self.GetBuildbotUrl(),
-        self.GetBuilderName(),
-        self.options.buildnumber, stage=stage)
+    # TODO(akeshet): At the moment, stage links still link back to buildbot,
+    # whereas build links link to luci-milo. Eventually, stage links will link
+    # to logdog instead of buildbot.
+    if stage:
+      return tree_status.ConstructBuildStageURL(
+          self.GetBuildbotUrl(),
+          self.GetBuilderName(),
+          self.options.buildnumber, stage=stage)
+    else:
+      return tree_status.ConstructDashboardURL(
+          self.GetWaterfall(),
+          self.GetBuilderName(),
+          self.options.buildnumber)
 
   def ShouldBuildAutotest(self):
     """Return True if this run should build autotest and artifacts."""

@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/rand_util.h"
 #include "base/sequenced_task_runner_helpers.h"
@@ -38,9 +38,9 @@
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/sandboxed_zip_analyzer.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
@@ -48,9 +48,12 @@
 #include "chrome/common/safe_browsing/file_type_policies.h"
 #include "chrome/common/safe_browsing/zip_analyzer_results.h"
 #include "chrome/common/url_constants.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/prefs/pref_service.h"
+#include "components/safe_browsing/common/safebrowsing_switches.h"
+#include "components/safe_browsing_db/safe_browsing_prefs.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
@@ -71,12 +74,19 @@
 #endif
 
 using content::BrowserThread;
+namespace safe_browsing {
 
 namespace {
 
 const int64_t kDownloadRequestTimeoutMs = 7000;
 // We sample 1% of whitelisted downloads to still send out download pings.
 const double kWhitelistDownloadSampleRate = 0.01;
+
+// The number of user gestures we trace back for download attribution.
+const int kDownloadAttributionUserGestureLimit = 2;
+
+const char kDownloadExtensionUmaName[] = "SBClientDownload.DownloadExtensions";
+const char kUnsupportedSchemeUmaPrefix[] = "SBClientDownload.UnsupportedScheme";
 
 enum WhitelistType {
   NO_WHITELIST_MATCH,
@@ -92,8 +102,6 @@ void RecordCountOfWhitelistedDownload(WhitelistType type) {
 
 }  // namespace
 
-namespace safe_browsing {
-
 const char DownloadProtectionService::kDownloadRequestUrl[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/download";
 
@@ -101,16 +109,36 @@ const void* const DownloadProtectionService::kDownloadPingTokenKey
     = &kDownloadPingTokenKey;
 
 namespace {
-void RecordFileExtensionType(const base::FilePath& file) {
+void RecordFileExtensionType(const std::string& metric_name,
+                             const base::FilePath& file) {
   UMA_HISTOGRAM_SPARSE_SLOWLY(
-      "SBClientDownload.DownloadExtensions",
-      FileTypePolicies::GetInstance()->UmaValueForFile(file));
+      metric_name, FileTypePolicies::GetInstance()->UmaValueForFile(file));
 }
 
 void RecordArchivedArchiveFileExtensionType(const base::FilePath& file) {
   UMA_HISTOGRAM_SPARSE_SLOWLY(
       "SBClientDownload.ArchivedArchiveExtensions",
       FileTypePolicies::GetInstance()->UmaValueForFile(file));
+}
+
+std::string GetUnsupportedSchemeName(const GURL& download_url) {
+  if (download_url.SchemeIs(url::kContentScheme))
+    return "ContentScheme";
+  if (download_url.SchemeIs(url::kContentIDScheme))
+    return "ContentIdScheme";
+  if (download_url.SchemeIsFile())
+    return download_url.has_host() ? "RemoteFileScheme" : "LocalFileScheme";
+  if (download_url.SchemeIsFileSystem())
+    return "FileSystemScheme";
+  if (download_url.SchemeIs(url::kFtpScheme))
+    return "FtpScheme";
+  if (download_url.SchemeIs(url::kGopherScheme))
+    return "GopherScheme";
+  if (download_url.SchemeIs(url::kJavaScriptScheme))
+    return "JavaScriptScheme";
+  if (download_url.SchemeIsWSOrWSS())
+    return "WSOrWSSScheme";
+  return "OtherUnsupportedScheme";
 }
 
 // Enumerate for histogramming purposes.
@@ -152,9 +180,9 @@ class DownloadSBClient
         total_type_(total_type),
         dangerous_type_(dangerous_type) {
     Profile* profile = Profile::FromBrowserContext(item.GetBrowserContext());
-    is_extended_reporting_ = profile &&
-                             profile->GetPrefs()->GetBoolean(
-                                 prefs::kSafeBrowsingExtendedReportingEnabled);
+    extended_reporting_level_ =
+        profile ? GetExtendedReportingLevel(*profile->GetPrefs())
+                : SBER_LEVEL_OFF;
   }
 
   virtual void StartCheck() = 0;
@@ -202,7 +230,7 @@ class DownloadSBClient
     hit_report.threat_source = safe_browsing::ThreatSource::LOCAL_PVER3;
     // TODO(nparker) Populate hit_report.population_id once Pver4 is used here.
     hit_report.post_data = post_data;
-    hit_report.is_extended_reporting = is_extended_reporting_;
+    hit_report.extended_reporting_level = extended_reporting_level_;
     hit_report.is_metrics_reporting_active =
         ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
 
@@ -225,7 +253,7 @@ class DownloadSBClient
  private:
   const SBStatsType total_type_;
   const SBStatsType dangerous_type_;
-  bool is_extended_reporting_;
+  ExtendedReportingLevel extended_reporting_level_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadSBClient);
 };
@@ -329,9 +357,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     if (item_->GetBrowserContext()) {
       Profile* profile =
           Profile::FromBrowserContext(item_->GetBrowserContext());
-      is_extended_reporting_ = profile &&
-             profile->GetPrefs()->GetBoolean(
-                 prefs::kSafeBrowsingExtendedReportingEnabled);
+      is_extended_reporting_ =
+          profile && IsExtendedReportingEnabled(*profile->GetPrefs());
       is_incognito_ = item_->GetBrowserContext()->IsOffTheRecord();
     }
 
@@ -341,19 +368,27 @@ class DownloadProtectionService::CheckClientDownloadRequest
       switch (reason) {
         case REASON_EMPTY_URL_CHAIN:
         case REASON_INVALID_URL:
-        case REASON_UNSUPPORTED_URL_SCHEME:
         case REASON_LOCAL_FILE:
         case REASON_REMOTE_FILE:
           PostFinishTask(UNKNOWN, reason);
           return;
-
+        case REASON_UNSUPPORTED_URL_SCHEME:
+          RecordFileExtensionType(
+              base::StringPrintf(
+                  "%s.%s", kUnsupportedSchemeUmaPrefix,
+                  GetUnsupportedSchemeName(item_->GetUrlChain().back())
+                      .c_str()),
+              item_->GetTargetFilePath());
+          PostFinishTask(UNKNOWN, reason);
+          return;
         case REASON_NOT_BINARY_FILE:
           if (ShouldSampleUnsupportedFile(item_->GetTargetFilePath())) {
             // Send a "light ping" and don't use the verdict.
             type_ = ClientDownloadRequest::SAMPLED_UNSUPPORTED_FILE;
             break;
           }
-          RecordFileExtensionType(item_->GetTargetFilePath());
+          RecordFileExtensionType(kDownloadExtensionUmaName,
+                                  item_->GetTargetFilePath());
           PostFinishTask(UNKNOWN, reason);
           return;
 
@@ -362,7 +397,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
           NOTREACHED();
       }
     }
-    RecordFileExtensionType(item_->GetTargetFilePath());
+    RecordFileExtensionType(kDownloadExtensionUmaName,
+                            item_->GetTargetFilePath());
 
     // Compute features from the file contents. Note that we record histograms
     // based on the result, so this runs regardless of whether the pingbacks
@@ -557,6 +593,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
       *reason = REASON_UNSUPPORTED_URL_SCHEME;
       return false;
     }
+    // TODO(jialiul): Remove duplicated counting of REMOTE_FILE and LOCAL_FILE
+    // after SBClientDownload.UnsupportedScheme.* metrics become available in
+    // stable channel.
     if (final_url.SchemeIsFile()) {
       *reason = final_url.has_host() ? REASON_REMOTE_FILE : REASON_LOCAL_FILE;
       return false;
@@ -577,20 +616,6 @@ class DownloadProtectionService::CheckClientDownloadRequest
   ~CheckClientDownloadRequest() override {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK(item_ == NULL);
-  }
-
-  // .zip files that look invalid to Chrome can often be successfully unpacked
-  // by other archive tools, so they may be a real threat.  For that reason,
-  // we send pings for them if !in_incognito && is_extended_reporting.
-  bool CanReportInvalidArchives() {
-    DCHECK_CURRENTLY_ON(BrowserThread::UI);
-    Profile* profile = Profile::FromBrowserContext(item_->GetBrowserContext());
-    if (!profile ||
-        !profile->GetPrefs()->GetBoolean(
-            prefs::kSafeBrowsingExtendedReportingEnabled))
-      return false;
-
-    return !item_->GetBrowserContext()->IsOffTheRecord();
   }
 
   void OnFileFeatureExtractionDone() {
@@ -698,7 +723,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
     if (!archived_executable_) {
       if (results.has_archive) {
         type_ = ClientDownloadRequest::ZIPPED_ARCHIVE;
-      } else if (!results.success && CanReportInvalidArchives()) {
+      } else if (!results.success) {
+        // .zip files that look invalid to Chrome can often be successfully
+        // unpacked by other archive tools, so they may be a real threat.
         type_ = ClientDownloadRequest::INVALID_ZIP;
       } else {
         // Normal zip w/o EXEs, or invalid zip and not extended-reporting.
@@ -778,7 +805,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
     // We currently sample 1% whitelisted downloads from users who opted
     // in extended reporting and are not in incognito mode.
     return service_ && is_extended_reporting_ && !is_incognito_ &&
-        base::RandDouble() < service_->whitelist_sample_rate();
+           base::RandDouble() < service_->whitelist_sample_rate();
   }
 
   void CheckWhitelists() {
@@ -922,8 +949,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
     ClientDownloadRequest request;
     auto population = is_extended_reporting_
-        ? ChromeUserPopulation::EXTENDED_REPORTING
-        : ChromeUserPopulation::SAFE_BROWSING;
+                          ? ChromeUserPopulation::EXTENDED_REPORTING
+                          : ChromeUserPopulation::SAFE_BROWSING;
     request.mutable_population()->set_user_population(population);
 
     request.set_url(SanitizeUrl(item_->GetUrlChain().back()));
@@ -978,6 +1005,12 @@ class DownloadProtectionService::CheckClientDownloadRequest
         item_->GetTargetFilePath().BaseName().AsUTF8Unsafe());
     }
     request.set_download_type(type_);
+
+    service_->AddReferrerChainToClientDownloadRequest(
+      item_->GetURL(),
+      item_->GetWebContents(),
+      &request);
+
     if (archive_is_valid_ != ArchiveValid::UNSET)
       request.set_archive_valid(archive_is_valid_ == ArchiveValid::VALID);
     request.mutable_signature()->CopyFrom(signature_info_);
@@ -1008,6 +1041,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     fetcher_ = net::URLFetcher::Create(0 /* ID used for testing */,
                                        GetDownloadRequestUrl(),
                                        net::URLFetcher::POST, this);
+    data_use_measurement::DataUseUserData::AttachToFetcher(
+        fetcher_.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);
     fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                            net::LOAD_DO_NOT_SAVE_COOKIES |
                            net::LOAD_DO_NOT_SEND_COOKIES);
@@ -1197,6 +1232,8 @@ class DownloadProtectionService::PPAPIDownloadRequest
 
   PPAPIDownloadRequest(
       const GURL& requestor_url,
+      const GURL& initiating_frame_url,
+      content::WebContents* web_contents,
       const base::FilePath& default_file_path,
       const std::vector<base::FilePath::StringType>& alternate_extensions,
       Profile* profile,
@@ -1204,6 +1241,8 @@ class DownloadProtectionService::PPAPIDownloadRequest
       DownloadProtectionService* service,
       scoped_refptr<SafeBrowsingDatabaseManager> database_manager)
       : requestor_url_(requestor_url),
+        initiating_frame_url_(initiating_frame_url),
+        tab_id_(SessionTabHelper::IdForTab(web_contents)),
         default_file_path_(default_file_path),
         alternate_extensions_(alternate_extensions),
         callback_(callback),
@@ -1214,8 +1253,16 @@ class DownloadProtectionService::PPAPIDownloadRequest
             GetSupportedFilePath(default_file_path, alternate_extensions)),
         weakptr_factory_(this) {
     DCHECK(profile);
-    is_extended_reporting_ = profile->GetPrefs()->GetBoolean(
-        prefs::kSafeBrowsingExtendedReportingEnabled);
+    is_extended_reporting_ = IsExtendedReportingEnabled(*profile->GetPrefs());
+
+    if (service->navigation_observer_manager()) {
+      has_user_gesture_ =
+          service->navigation_observer_manager()->HasUserGesture(web_contents);
+      if (has_user_gesture_) {
+        service->navigation_observer_manager()->OnUserGestureConsumed(
+            web_contents, base::Time::Now());
+      }
+    }
   }
 
   ~PPAPIDownloadRequest() override {
@@ -1304,8 +1351,8 @@ class DownloadProtectionService::PPAPIDownloadRequest
 
     ClientDownloadRequest request;
     auto population = is_extended_reporting_
-        ? ChromeUserPopulation::EXTENDED_REPORTING
-        : ChromeUserPopulation::SAFE_BROWSING;
+                          ? ChromeUserPopulation::EXTENDED_REPORTING
+                          : ChromeUserPopulation::SAFE_BROWSING;
     request.mutable_population()->set_user_population(population);
     request.set_download_type(ClientDownloadRequest::PPAPI_SAVE_REQUEST);
     ClientDownloadRequest::Resource* resource = request.add_resources();
@@ -1327,6 +1374,12 @@ class DownloadProtectionService::PPAPIDownloadRequest
           base::FilePath(default_file_path_.FinalExtension()).AsUTF8Unsafe();
     }
 
+    service_->AddReferrerChainToPPAPIClientDownloadRequest(
+        initiating_frame_url_,
+        tab_id_,
+        has_user_gesture_,
+        &request);
+
     if (!request.SerializeToString(&client_download_request_data_)) {
       // More of an internal error than anything else. Note that the UNKNOWN
       // verdict gets interpreted as "allowed".
@@ -1339,6 +1392,8 @@ class DownloadProtectionService::PPAPIDownloadRequest
 
     fetcher_ = net::URLFetcher::Create(0, GetDownloadRequestUrl(),
                                        net::URLFetcher::POST, this);
+    data_use_measurement::DataUseUserData::AttachToFetcher(
+        fetcher_.get(), data_use_measurement::DataUseUserData::SAFE_BROWSING);
     fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
     fetcher_->SetAutomaticallyRetryOn5xx(false);
     fetcher_->SetRequestContext(service_->request_context_getter_.get());
@@ -1447,6 +1502,16 @@ class DownloadProtectionService::PPAPIDownloadRequest
   // URL of document that requested the PPAPI download.
   const GURL requestor_url_;
 
+  // URL of the frame that hosted the PPAPI plugin.
+  const GURL initiating_frame_url_;
+
+  // Tab id that associated with the PPAPI plugin, computed by
+  // SessionTabHelper::IdForTab().
+  int tab_id_;
+
+  // If the user interacted with this PPAPI plugin to trigger the download.
+  bool has_user_gesture_;
+
   // Default download path requested by the PPAPI plugin.
   const base::FilePath default_file_path_;
 
@@ -1491,6 +1556,7 @@ DownloadProtectionService::DownloadProtectionService(
   if (sb_service) {
     ui_manager_ = sb_service->ui_manager();
     database_manager_ = sb_service->database_manager();
+    navigation_observer_manager_ = sb_service->navigation_observer_manager();
     ParseManualBlacklistFlag();
   }
 }
@@ -1513,11 +1579,12 @@ void DownloadProtectionService::SetEnabled(bool enabled) {
 
 void DownloadProtectionService::ParseManualBlacklistFlag() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(switches::kSbManualDownloadBlacklist))
+  if (!command_line->HasSwitch(
+          safe_browsing::switches::kSbManualDownloadBlacklist))
     return;
 
-  std::string flag_val =
-      command_line->GetSwitchValueASCII(switches::kSbManualDownloadBlacklist);
+  std::string flag_val = command_line->GetSwitchValueASCII(
+      safe_browsing::switches::kSbManualDownloadBlacklist);
   for (const std::string& hash_hex : base::SplitString(
            flag_val, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY)) {
     std::vector<uint8_t> bytes;
@@ -1526,7 +1593,7 @@ void DownloadProtectionService::ParseManualBlacklistFlag() {
           std::string(bytes.begin(), bytes.end()));
     } else {
       LOG(FATAL) << "Bad sha256 hex value '" << hash_hex << "' found in --"
-                 << switches::kSbManualDownloadBlacklist;
+                 << safe_browsing::switches::kSbManualDownloadBlacklist;
     }
   }
 }
@@ -1575,6 +1642,8 @@ bool DownloadProtectionService::IsSupportedDownload(
 
 void DownloadProtectionService::CheckPPAPIDownloadRequest(
     const GURL& requestor_url,
+    const GURL& initiating_frame_url,
+    content::WebContents* web_contents,
     const base::FilePath& default_file_path,
     const std::vector<base::FilePath::StringType>& alternate_extensions,
     Profile* profile,
@@ -1582,8 +1651,8 @@ void DownloadProtectionService::CheckPPAPIDownloadRequest(
   DVLOG(1) << __func__ << " url:" << requestor_url
            << " default_file_path:" << default_file_path.value();
   std::unique_ptr<PPAPIDownloadRequest> request(new PPAPIDownloadRequest(
-      requestor_url, default_file_path, alternate_extensions, profile, callback,
-      this, database_manager_));
+      requestor_url, initiating_frame_url, web_contents, default_file_path,
+      alternate_extensions, profile, callback, this, database_manager_));
   PPAPIDownloadRequest* request_copy = request.get();
   auto insertion_result = ppapi_download_requests_.insert(
       std::make_pair(request_copy, std::move(request)));
@@ -1645,11 +1714,9 @@ void DownloadProtectionService::ShowDetailsForDownload(
       learn_more_url, "ctx",
       base::IntToString(static_cast<int>(item.GetDangerType())));
   navigator->OpenURL(
-      content::OpenURLParams(learn_more_url,
-                             content::Referrer(),
-                             NEW_FOREGROUND_TAB,
-                             ui::PAGE_TRANSITION_LINK,
-                             false));
+      content::OpenURLParams(learn_more_url, content::Referrer(),
+                             WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                             ui::PAGE_TRANSITION_LINK, false));
 }
 
 void DownloadProtectionService::SetDownloadPingToken(
@@ -1753,6 +1820,69 @@ GURL DownloadProtectionService::GetDownloadRequestUrl() {
     url = url.Resolve("?key=" + net::EscapeQueryParamValue(api_key, true));
 
   return url;
+}
+
+void DownloadProtectionService::AddReferrerChainToClientDownloadRequest(
+    const GURL& download_url,
+    content::WebContents* web_contents,
+    ClientDownloadRequest* out_request) {
+  if (!base::FeatureList::IsEnabled(
+      SafeBrowsingNavigationObserverManager::kDownloadAttribution) ||
+      !navigation_observer_manager_) {
+    return;
+  }
+
+  int download_tab_id = SessionTabHelper::IdForTab(web_contents);
+  UMA_HISTOGRAM_BOOLEAN(
+      "SafeBrowsing.ReferrerHasInvalidTabID.DownloadAttribution",
+      download_tab_id == -1);
+  SafeBrowsingNavigationObserverManager::ReferrerChain attribution_chain;
+  SafeBrowsingNavigationObserverManager::AttributionResult result =
+      navigation_observer_manager_->IdentifyReferrerChainForDownload(
+          download_url,
+          download_tab_id,
+          kDownloadAttributionUserGestureLimit,
+          &attribution_chain);
+  UMA_HISTOGRAM_COUNTS_100(
+      "SafeBrowsing.ReferrerURLChainSize.DownloadAttribution",
+      attribution_chain.size());
+  UMA_HISTOGRAM_ENUMERATION(
+      "SafeBrowsing.ReferrerAttributionResult.DownloadAttribution", result,
+      SafeBrowsingNavigationObserverManager::ATTRIBUTION_FAILURE_TYPE_MAX);
+  for (auto& entry : attribution_chain)
+    out_request->add_referrer_chain()->Swap(entry.get());
+}
+
+void DownloadProtectionService::AddReferrerChainToPPAPIClientDownloadRequest(
+  const GURL& initiating_frame_url,
+  int tab_id,
+  bool has_user_gesture,
+  ClientDownloadRequest* out_request) {
+  if (!base::FeatureList::IsEnabled(
+      SafeBrowsingNavigationObserverManager::kDownloadAttribution) ||
+      !navigation_observer_manager_) {
+    return;
+  }
+
+  UMA_HISTOGRAM_BOOLEAN(
+      "SafeBrowsing.ReferrerHasInvalidTabID.DownloadAttribution",
+      tab_id == -1);
+  SafeBrowsingNavigationObserverManager::ReferrerChain attribution_chain;
+  SafeBrowsingNavigationObserverManager::AttributionResult result =
+      navigation_observer_manager_->IdentifyReferrerChainForPPAPIDownload(
+          initiating_frame_url,
+          tab_id,
+          has_user_gesture,
+          kDownloadAttributionUserGestureLimit,
+          &attribution_chain);
+  UMA_HISTOGRAM_COUNTS_100(
+      "SafeBrowsing.ReferrerURLChainSize.PPAPIDownloadAttribution",
+      attribution_chain.size());
+  UMA_HISTOGRAM_ENUMERATION(
+      "SafeBrowsing.ReferrerAttributionResult.PPAPIDownloadAttribution", result,
+      SafeBrowsingNavigationObserverManager::ATTRIBUTION_FAILURE_TYPE_MAX);
+  for (auto& entry : attribution_chain)
+    out_request->add_referrer_chain()->Swap(entry.get());
 }
 
 }  // namespace safe_browsing

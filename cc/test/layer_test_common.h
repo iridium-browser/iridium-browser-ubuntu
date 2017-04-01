@@ -35,7 +35,7 @@ namespace gfx { class Rect; }
 
 namespace cc {
 class LayerImpl;
-class OutputSurface;
+class CompositorFrameSink;
 class QuadList;
 class RenderSurfaceImpl;
 class ResourceProvider;
@@ -76,11 +76,11 @@ class LayerTestCommon {
     }
 
     template <typename T>
-    T* AddReplicaLayer(LayerImpl* origin) {
+    T* AddMaskLayer(LayerImpl* origin) {
       std::unique_ptr<T> layer =
           T::Create(host_->host_impl()->active_tree(), layer_impl_id_++);
       T* ptr = layer.get();
-      origin->test_properties()->SetReplicaLayer(std::move(layer));
+      origin->test_properties()->SetMaskLayer(std::move(layer));
       return ptr;
     }
 
@@ -97,6 +97,15 @@ class LayerTestCommon {
     T* AddChildToRoot(const A& a, const B& b) {
       std::unique_ptr<T> layer =
           T::Create(host_->host_impl()->active_tree(), layer_impl_id_++, a, b);
+      T* ptr = layer.get();
+      root_layer_for_testing()->test_properties()->AddChild(std::move(layer));
+      return ptr;
+    }
+
+    template <typename T, typename A, typename B, typename C>
+    T* AddChildToRoot(const A& a, const B& b, const C& c) {
+      std::unique_ptr<T> layer = T::Create(host_->host_impl()->active_tree(),
+                                           layer_impl_id_++, a, b, c);
       T* ptr = layer.get();
       root_layer_for_testing()->test_properties()->AddChild(std::move(layer));
       return ptr;
@@ -140,8 +149,8 @@ class LayerTestCommon {
 
     void RequestCopyOfOutput();
 
-    OutputSurface* output_surface() const {
-      return host_->host_impl()->output_surface();
+    CompositorFrameSink* compositor_frame_sink() const {
+      return host_->host_impl()->compositor_frame_sink();
     }
     ResourceProvider* resource_provider() const {
       return host_->host_impl()->resource_provider();
@@ -165,7 +174,8 @@ class LayerTestCommon {
    private:
     FakeLayerTreeHostClient client_;
     TestTaskGraphRunner task_graph_runner_;
-    std::unique_ptr<OutputSurface> output_surface_;
+    std::unique_ptr<CompositorFrameSink> compositor_frame_sink_;
+    std::unique_ptr<AnimationHost> animation_host_;
     std::unique_ptr<FakeLayerTreeHost> host_;
     std::unique_ptr<RenderPass> render_pass_;
     scoped_refptr<AnimationTimeline> timeline_;

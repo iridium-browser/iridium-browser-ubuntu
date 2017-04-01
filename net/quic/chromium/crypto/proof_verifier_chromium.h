@@ -2,11 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_CRYPTO_PROOF_VERIFIER_CHROMIUM_H_
-#define NET_QUIC_CRYPTO_PROOF_VERIFIER_CHROMIUM_H_
+#ifndef NET_QUIC_CHROMIUM_CRYPTO_PROOF_VERIFIER_CHROMIUM_H_
+#define NET_QUIC_CHROMIUM_CRYPTO_PROOF_VERIFIER_CHROMIUM_H_
 
+#include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
 
@@ -16,7 +16,7 @@
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/ct_verify_result.h"
 #include "net/cert/x509_certificate.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/quic/core/crypto/proof_verifier.h"
 
 namespace net {
@@ -54,11 +54,12 @@ class NET_EXPORT_PRIVATE ProofVerifyDetailsChromium
 // ProofVerifierChromium needs in order to log correctly.
 struct ProofVerifyContextChromium : public ProofVerifyContext {
  public:
-  ProofVerifyContextChromium(int cert_verify_flags, const BoundNetLog& net_log)
+  ProofVerifyContextChromium(int cert_verify_flags,
+                             const NetLogWithSource& net_log)
       : cert_verify_flags(cert_verify_flags), net_log(net_log) {}
 
   int cert_verify_flags;
-  BoundNetLog net_log;
+  NetLogWithSource net_log;
 };
 
 // ProofVerifierChromium implements the QUIC ProofVerifier interface.  It is
@@ -95,12 +96,11 @@ class NET_EXPORT_PRIVATE ProofVerifierChromium : public ProofVerifier {
 
  private:
   class Job;
-  typedef std::set<Job*> JobSet;
 
   void OnJobComplete(Job* job);
 
   // Set owning pointers to active jobs.
-  JobSet active_jobs_;
+  std::map<Job*, std::unique_ptr<Job>> active_jobs_;
 
   // Underlying verifier used to verify certificates.
   CertVerifier* const cert_verifier_;
@@ -114,4 +114,4 @@ class NET_EXPORT_PRIVATE ProofVerifierChromium : public ProofVerifier {
 
 }  // namespace net
 
-#endif  // NET_QUIC_CRYPTO_PROOF_VERIFIER_CHROMIUM_H_
+#endif  // NET_QUIC_CHROMIUM_CRYPTO_PROOF_VERIFIER_CHROMIUM_H_

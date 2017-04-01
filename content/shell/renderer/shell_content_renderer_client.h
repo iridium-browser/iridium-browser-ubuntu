@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/compiler_specific.h"
+#include "build/build_config.h"
 #include "content/public/renderer/content_renderer_client.h"
 
 namespace web_cache {
@@ -34,7 +35,13 @@ class ShellContentRendererClient : public ContentRendererClient {
       v8::Local<v8::Context> context) override;
 
   void ExposeInterfacesToBrowser(
-      shell::InterfaceRegistry* interface_registry) override;
+      service_manager::InterfaceRegistry* interface_registry) override;
+
+#if defined(ENABLE_MOJO_CDM)
+  void AddSupportedKeySystems(
+      std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems)
+      override;
+#endif
 
  private:
   std::unique_ptr<web_cache::WebCacheImpl> web_cache_impl_;

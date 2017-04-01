@@ -15,6 +15,7 @@
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/font_list.h"
+#include "ui/gfx/image/image.h"
 #include "ui/views/view.h"
 #include "ui/views/view_targeter_delegate.h"
 
@@ -23,7 +24,6 @@ class LocationBarView;
 class OmniboxEditModel;
 class OmniboxResultView;
 class OmniboxView;
-class Profile;
 
 // A view representing the contents of the autocomplete popup.
 class OmniboxPopupContentsView : public views::View,
@@ -157,10 +157,6 @@ class OmniboxPopupContentsView : public views::View,
 
   int start_margin_;
   int end_margin_;
-
-  // These pointers are owned by the resource bundle.
-  const gfx::ImageSkia* top_shadow_ = nullptr;
-  const gfx::ImageSkia* bottom_shadow_ = nullptr;
 
   // When the dropdown is not wide enough while displaying postfix suggestions,
   // we use the width of widest match contents to shift the suggestions so that

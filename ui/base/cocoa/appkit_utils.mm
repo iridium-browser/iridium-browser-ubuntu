@@ -4,6 +4,8 @@
 
 #import "ui/base/cocoa/appkit_utils.h"
 
+#include <cmath>
+
 #include "base/mac/mac_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -34,7 +36,7 @@ NSImage* GetImage(int image_id) {
 DoubleClickAction WindowTitleBarDoubleClickAction() {
   // El Capitan introduced a Dock preference to configure the window title bar
   // double-click action (Minimize, Maximize, or nothing).
-  if (base::mac::IsOSElCapitanOrLater()) {
+  if (base::mac::IsAtLeastOS10_11()) {
     NSString* doubleClickAction = [[NSUserDefaults standardUserDefaults]
                                       objectForKey:@"AppleActionOnDoubleClick"];
 
@@ -60,8 +62,8 @@ DoubleClickAction WindowTitleBarDoubleClickAction() {
   // At this point _shouldMiniaturizeOnDoubleClick has returned |NO|. On
   // Yosemite, that means a double-click should Maximize the window, and on
   // all prior OSes a double-click should do nothing.
-  return base::mac::IsOSYosemite() ? DoubleClickAction::MAXIMIZE
-                                   : DoubleClickAction::NONE;
+  return base::mac::IsOS10_10() ? DoubleClickAction::MAXIMIZE
+                                : DoubleClickAction::NONE;
 }
 
 }  // namespace
@@ -107,6 +109,10 @@ bool ForceClickInvokesQuickLook() {
   return [[NSUserDefaults standardUserDefaults]
              integerForKey:@"com.apple.trackpad.forceClick"] ==
          static_cast<NSInteger>(ForceTouchAction::QUICK_LOOK);
+}
+
+bool IsCGFloatEqual(CGFloat a, CGFloat b) {
+  return std::fabs(a - b) <= std::numeric_limits<CGFloat>::epsilon();
 }
 
 }  // namespace ui

@@ -21,11 +21,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
+#include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/features.h"
+#include "chrome/grit/browser_resources.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/crx_file/id_util.h"
@@ -38,30 +40,27 @@
 #include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest_constants.h"
-#include "grit/browser_resources.h"
+#include "ppapi/features/features.h"
+#include "printing/features/features.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/common/system/chromeos/devicetype_utils.h"
+#include "chromeos/chromeos_switches.h"
 #include "components/chrome_apps/grit/chrome_apps_resources.h"
 #include "components/user_manager/user_manager.h"
-#include "grit/keyboard_resources.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/storage_partition.h"
+#include "extensions/browser/extensions_browser_client.h"
+#include "storage/browser/fileapi/file_system_context.h"
 #include "ui/file_manager/grit/file_manager_resources.h"
+#include "ui/keyboard/grit/keyboard_resources.h"
 #include "ui/keyboard/keyboard_util.h"
 #endif
 
 #if defined(GOOGLE_CHROME_BUILD)
 #include "chrome/browser/defaults.h"
-#endif
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
-#include "chromeos/chromeos_switches.h"
-#include "content/public/browser/site_instance.h"
-#include "content/public/browser/storage_partition.h"
-#include "extensions/browser/extensions_browser_client.h"
-#include "storage/browser/fileapi/file_system_context.h"
 #endif
 
 using content::BrowserThread;
@@ -113,15 +112,32 @@ bool IsNormalSession() {
 }  // namespace
 
 ComponentLoader::ComponentExtensionInfo::ComponentExtensionInfo(
-    const base::DictionaryValue* manifest, const base::FilePath& directory)
-    : manifest(manifest),
-      root_directory(directory) {
+    std::unique_ptr<base::DictionaryValue> manifest_param,
+    const base::FilePath& directory)
+    : manifest(std::move(manifest_param)), root_directory(directory) {
   if (!root_directory.IsAbsolute()) {
     CHECK(PathService::Get(chrome::DIR_RESOURCES, &root_directory));
     root_directory = root_directory.Append(directory);
   }
-  extension_id = GenerateId(manifest, root_directory);
+  extension_id = GenerateId(manifest.get(), root_directory);
 }
+
+ComponentLoader::ComponentExtensionInfo::ComponentExtensionInfo(
+    ComponentExtensionInfo&& other)
+    : manifest(std::move(other.manifest)),
+      root_directory(std::move(other.root_directory)),
+      extension_id(std::move(other.extension_id)) {}
+
+ComponentLoader::ComponentExtensionInfo&
+ComponentLoader::ComponentExtensionInfo::operator=(
+    ComponentExtensionInfo&& other) {
+  manifest = std::move(other.manifest);
+  root_directory = std::move(other.root_directory);
+  extension_id = std::move(other.extension_id);
+  return *this;
+}
+
+ComponentLoader::ComponentExtensionInfo::~ComponentExtensionInfo() {}
 
 ComponentLoader::ComponentLoader(ExtensionServiceInterface* extension_service,
                                  PrefService* profile_prefs,
@@ -135,54 +151,26 @@ ComponentLoader::ComponentLoader(ExtensionServiceInterface* extension_service,
       weak_factory_(this) {}
 
 ComponentLoader::~ComponentLoader() {
-  ClearAllRegistered();
 }
 
 void ComponentLoader::LoadAll() {
   TRACE_EVENT0("browser,startup", "ComponentLoader::LoadAll");
   SCOPED_UMA_HISTOGRAM_TIMER("Extensions.LoadAllComponentTime");
 
-  for (RegisteredComponentExtensions::iterator it =
-          component_extensions_.begin();
-      it != component_extensions_.end(); ++it) {
-    Load(*it);
-  }
+  for (const auto& component_extension : component_extensions_)
+    Load(component_extension);
 }
 
-base::DictionaryValue* ComponentLoader::ParseManifest(
+std::unique_ptr<base::DictionaryValue> ComponentLoader::ParseManifest(
     base::StringPiece manifest_contents) const {
   JSONStringValueDeserializer deserializer(manifest_contents);
   std::unique_ptr<base::Value> manifest = deserializer.Deserialize(NULL, NULL);
 
-  if (!manifest.get() || !manifest->IsType(base::Value::TYPE_DICTIONARY)) {
+  if (!manifest.get() || !manifest->IsType(base::Value::Type::DICTIONARY)) {
     LOG(ERROR) << "Failed to parse extension manifest.";
-    return NULL;
+    return std::unique_ptr<base::DictionaryValue>();
   }
-  // Transfer ownership to the caller.
-  return static_cast<base::DictionaryValue*>(manifest.release());
-}
-
-void ComponentLoader::ClearAllRegistered() {
-  for (RegisteredComponentExtensions::iterator it =
-          component_extensions_.begin();
-      it != component_extensions_.end(); ++it) {
-      delete it->manifest;
-  }
-
-  component_extensions_.clear();
-}
-
-std::string ComponentLoader::GetExtensionID(
-    int manifest_resource_id,
-    const base::FilePath& root_directory) {
-  base::DictionaryValue* manifest =
-      ParseManifest(ResourceBundle::GetSharedInstance().GetRawDataResource(
-          manifest_resource_id));
-  if (!manifest)
-    return std::string();
-
-  ComponentExtensionInfo info(manifest, root_directory);
-  return info.extension_id;
+  return base::DictionaryValue::From(std::move(manifest));
 }
 
 std::string ComponentLoader::Add(int manifest_resource_id,
@@ -207,25 +195,28 @@ std::string ComponentLoader::Add(const base::StringPiece& manifest_contents,
                                  bool skip_whitelist) {
   // The Value is kept for the lifetime of the ComponentLoader. This is
   // required in case LoadAll() is called again.
-  base::DictionaryValue* manifest = ParseManifest(manifest_contents);
+  std::unique_ptr<base::DictionaryValue> manifest =
+      ParseManifest(manifest_contents);
   if (manifest)
-    return Add(manifest, root_directory, skip_whitelist);
+    return Add(std::move(manifest), root_directory, skip_whitelist);
   return std::string();
 }
 
-std::string ComponentLoader::Add(const base::DictionaryValue* parsed_manifest,
-                                 const base::FilePath& root_directory,
-                                 bool skip_whitelist) {
-  ComponentExtensionInfo info(parsed_manifest, root_directory);
+std::string ComponentLoader::Add(
+    std::unique_ptr<base::DictionaryValue> parsed_manifest,
+    const base::FilePath& root_directory,
+    bool skip_whitelist) {
+  ComponentExtensionInfo info(std::move(parsed_manifest), root_directory);
   if (!ignore_whitelist_for_testing_ &&
       !skip_whitelist &&
       !IsComponentExtensionWhitelisted(info.extension_id))
     return std::string();
 
-  component_extensions_.push_back(info);
+  component_extensions_.push_back(std::move(info));
+  ComponentExtensionInfo& added_info = component_extensions_.back();
   if (extension_service_->is_ready())
-    Load(info);
-  return info.extension_id;
+    Load(added_info);
+  return added_info.extension_id;
 }
 
 std::string ComponentLoader::AddOrReplace(const base::FilePath& path) {
@@ -242,15 +233,13 @@ std::string ComponentLoader::AddOrReplace(const base::FilePath& path) {
 
   // We don't check component extensions loaded by path because this is only
   // used by developers for testing.
-  return Add(manifest.release(), absolute_path, true);
+  return Add(std::move(manifest), absolute_path, true);
 }
 
 void ComponentLoader::Reload(const std::string& extension_id) {
-  for (RegisteredComponentExtensions::iterator it =
-         component_extensions_.begin(); it != component_extensions_.end();
-         ++it) {
-    if (it->extension_id == extension_id) {
-      Load(*it);
+  for (const auto& component_extension : component_extensions_) {
+    if (component_extension.extension_id == extension_id) {
+      Load(component_extension);
       break;
     }
   }
@@ -270,32 +259,31 @@ void ComponentLoader::Load(const ComponentExtensionInfo& info) {
 
 void ComponentLoader::Remove(const base::FilePath& root_directory) {
   // Find the ComponentExtensionInfo for the extension.
-  RegisteredComponentExtensions::iterator it = component_extensions_.begin();
-  for (; it != component_extensions_.end(); ++it) {
-    if (it->root_directory == root_directory) {
-      Remove(GenerateId(it->manifest, root_directory));
+  for (const auto& component_extension : component_extensions_) {
+    if (component_extension.root_directory == root_directory) {
+      Remove(GenerateId(component_extension.manifest.get(), root_directory));
       break;
     }
   }
 }
 
 void ComponentLoader::Remove(const std::string& id) {
-  RegisteredComponentExtensions::iterator it = component_extensions_.begin();
-  for (; it != component_extensions_.end(); ++it) {
+  for (RegisteredComponentExtensions::iterator it =
+           component_extensions_.begin();
+       it != component_extensions_.end(); ++it) {
     if (it->extension_id == id) {
       UnloadComponent(&(*it));
-      it = component_extensions_.erase(it);
+      component_extensions_.erase(it);
       break;
     }
   }
 }
 
 bool ComponentLoader::Exists(const std::string& id) const {
-  RegisteredComponentExtensions::const_iterator it =
-      component_extensions_.begin();
-  for (; it != component_extensions_.end(); ++it)
-    if (it->extension_id == id)
+  for (const auto& component_extension : component_extensions_) {
+    if (component_extension.extension_id == id)
       return true;
+  }
   return false;
 }
 
@@ -340,7 +328,7 @@ void ComponentLoader::AddWebstoreWidgetExtension() {
 }
 
 void ComponentLoader::AddHangoutServicesExtension() {
-#if defined(GOOGLE_CHROME_BUILD) || defined(ENABLE_HANGOUT_SERVICES_EXTENSION)
+#if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
   Add(IDR_HANGOUT_SERVICES_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("hangout_services")));
 #endif
@@ -365,10 +353,10 @@ void ComponentLoader::AddHotwordHelperExtension() {
 }
 
 void ComponentLoader::AddImageLoaderExtension() {
-#if defined(IMAGE_LOADER_EXTENSION)
+#if defined(OS_CHROMEOS)
   Add(IDR_IMAGE_LOADER_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("image_loader")));
-#endif  // defined(IMAGE_LOADER_EXTENSION)
+#endif  // defined(OS_CHROMEOS)
 }
 
 void ComponentLoader::AddNetworkSpeechSynthesisExtension() {
@@ -377,30 +365,8 @@ void ComponentLoader::AddNetworkSpeechSynthesisExtension() {
 }
 
 #if defined(OS_CHROMEOS)
-void ComponentLoader::AddChromeVoxExtension(
-    const base::Closure& done_cb) {
-  base::FilePath resources_path;
-  CHECK(PathService::Get(chrome::DIR_RESOURCES, &resources_path));
-
-  base::FilePath chromevox_path =
-      resources_path.Append(extension_misc::kChromeVoxExtensionPath);
-
-  const base::FilePath::CharType* manifest_filename =
-      IsNormalSession() ? extensions::kManifestFilename
-                        : extension_misc::kGuestManifestFilename;
-  AddWithManifestFile(
-      manifest_filename,
-      chromevox_path,
-      extension_misc::kChromeVoxExtensionId,
-      done_cb);
-}
-
 void ComponentLoader::AddChromeOsSpeechSynthesisExtension() {
-  const base::FilePath::CharType* manifest_filename =
-      IsNormalSession() ? extensions::kManifestFilename
-                        : extension_misc::kGuestManifestFilename;
-  AddWithManifestFile(
-      manifest_filename,
+  AddComponentFromDir(
       base::FilePath(extension_misc::kSpeechSynthesisExtensionPath),
       extension_misc::kSpeechSynthesisExtensionId,
       base::Bind(&ComponentLoader::EnableFileSystemInGuestMode,
@@ -424,17 +390,18 @@ void ComponentLoader::AddWithNameAndDescription(
 
   // The Value is kept for the lifetime of the ComponentLoader. This is
   // required in case LoadAll() is called again.
-  base::DictionaryValue* manifest = ParseManifest(manifest_contents);
+  std::unique_ptr<base::DictionaryValue> manifest =
+      ParseManifest(manifest_contents);
 
   if (manifest) {
     manifest->SetString(manifest_keys::kName, name_string);
     manifest->SetString(manifest_keys::kDescription, description_string);
-    Add(manifest, root_directory, true);
+    Add(std::move(manifest), root_directory, true);
   }
 }
 
 void ComponentLoader::AddChromeApp() {
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
   AddWithNameAndDescription(
       IDR_CHROME_APP_MANIFEST, base::FilePath(FILE_PATH_LITERAL("chrome_app")),
       l10n_util::GetStringUTF8(IDS_SHORT_PRODUCT_NAME),
@@ -491,29 +458,35 @@ void ComponentLoader::AddDefaultComponentExtensions(
     Add(IDR_HELP_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
                                "/usr/share/chromeos-assets/helpapp")));
   }
-#endif
+#endif  // defined(GOOGLE_CHROME_BUILD)
 
   // Skip all other extensions that require user session presence.
   if (!skip_session_components) {
     const base::CommandLine* command_line =
         base::CommandLine::ForCurrentProcess();
-    if (!command_line->HasSwitch(chromeos::switches::kGuestSession))
+    if (!command_line->HasSwitch(chromeos::switches::kGuestSession) &&
+        !MdBookmarksUI::IsEnabled()) {
       Add(IDR_BOOKMARKS_MANIFEST,
           base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+    }
 
     Add(IDR_CROSH_BUILTIN_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/crosh_builtin")));
   }
-#else  // !defined(OS_CHROMEOS)
+#else  // defined(OS_CHROMEOS)
   DCHECK(!skip_session_components);
-  Add(IDR_BOOKMARKS_MANIFEST,
-      base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-#if 0
+  if (!MdBookmarksUI::IsEnabled()) {
+    Add(IDR_BOOKMARKS_MANIFEST,
+        base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
+  }
+#if BUILDFLAG(ENABLE_PRINTING)
+#if 0 /* IRIDIUM */
   // Cloud Print component app. Not required on Chrome OS.
   Add(IDR_CLOUDPRINT_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("cloud_print")));
 #endif
-#endif
+#endif  // BUILDFLAG(ENABLE_PRINTING)
+#endif  // defined(OS_CHROMEOS)
 
   if (!skip_session_components) {
     AddWebStoreApp();
@@ -524,7 +497,7 @@ void ComponentLoader::AddDefaultComponentExtensions(
 
   AddDefaultComponentExtensionsWithBackgroundPages(skip_session_components);
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   Add(pdf_extension_util::GetManifest(),
       base::FilePath(FILE_PATH_LITERAL("pdf")));
 #endif
@@ -547,7 +520,7 @@ void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
 
   AddDefaultComponentExtensionsWithBackgroundPagesForKioskMode();
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   Add(pdf_extension_util::GetManifest(),
       base::FilePath(FILE_PATH_LITERAL("pdf")));
 #endif
@@ -627,12 +600,6 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     Add(IDR_ARC_SUPPORT_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("chromeos/arc_support")));
   }
-
-  // Load ChromeVox extension now if spoken feedback is enabled.
-  if (chromeos::AccessibilityManager::Get() &&
-      chromeos::AccessibilityManager::Get()->IsSpokenFeedbackEnabled()) {
-    AddChromeVoxExtension(base::Closure());
-  }
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -664,7 +631,6 @@ void ComponentLoader::
 }
 
 void ComponentLoader::UnloadComponent(ComponentExtensionInfo* component) {
-  delete component->manifest;
   if (extension_service_->is_ready()) {
     extension_service_->
         RemoveComponentExtension(component->extension_id);
@@ -691,24 +657,26 @@ void ComponentLoader::EnableFileSystemInGuestMode(const std::string& id) {
 }
 
 #if defined(OS_CHROMEOS)
-void ComponentLoader::AddWithManifestFile(
-    const base::FilePath::CharType* manifest_filename,
+void ComponentLoader::AddComponentFromDir(
     const base::FilePath& root_directory,
     const char* extension_id,
     const base::Closure& done_cb) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  const base::FilePath::CharType* manifest_filename =
+      IsNormalSession() ? extensions::kManifestFilename
+                        : extension_misc::kGuestManifestFilename;
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE,
       FROM_HERE,
       base::Bind(&LoadManifestOnFileThread, root_directory, manifest_filename),
-      base::Bind(&ComponentLoader::FinishAddWithManifestFile,
+      base::Bind(&ComponentLoader::FinishAddComponentFromDir,
                  weak_factory_.GetWeakPtr(),
                  root_directory,
                  extension_id,
                  done_cb));
 }
 
-void ComponentLoader::FinishAddWithManifestFile(
+void ComponentLoader::FinishAddComponentFromDir(
     const base::FilePath& root_directory,
     const char* extension_id,
     const base::Closure& done_cb,
@@ -716,10 +684,8 @@ void ComponentLoader::FinishAddWithManifestFile(
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!manifest)
     return;  // Error already logged.
-  std::string actual_extension_id = Add(
-      manifest.release(),
-      root_directory,
-      false);
+  std::string actual_extension_id =
+      Add(std::move(manifest), root_directory, false);
   CHECK_EQ(extension_id, actual_extension_id);
   if (!done_cb.is_null())
     done_cb.Run();

@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/passwords/passwords_model_delegate.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/password_form.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -21,7 +21,7 @@
 namespace {
 
 bool IsSmartLockBrandingEnabled(Profile* profile) {
-  const ProfileSyncService* sync_service =
+  const browser_sync::ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile);
   return password_bubble_experiment::IsSmartLockUser(sync_service);
 }
@@ -43,13 +43,11 @@ PasswordDialogControllerImpl::~PasswordDialogControllerImpl() {
 
 void PasswordDialogControllerImpl::ShowAccountChooser(
     AccountChooserPrompt* dialog,
-    std::vector<std::unique_ptr<autofill::PasswordForm>> locals,
-    std::vector<std::unique_ptr<autofill::PasswordForm>> federations) {
+    std::vector<std::unique_ptr<autofill::PasswordForm>> locals) {
   DCHECK(!account_chooser_dialog_);
   DCHECK(!autosignin_dialog_);
   DCHECK(dialog);
   local_credentials_.swap(locals);
-  federated_credentials_.swap(federations);
   account_chooser_dialog_ = dialog;
   account_chooser_dialog_->ShowAccountChooser();
 }
@@ -66,11 +64,6 @@ void PasswordDialogControllerImpl::ShowAutosigninPrompt(
 const PasswordDialogController::FormsVector&
 PasswordDialogControllerImpl::GetLocalForms() const {
   return local_credentials_;
-}
-
-const PasswordDialogController::FormsVector&
-PasswordDialogControllerImpl::GetFederationsForms() const {
-  return federated_credentials_;
 }
 
 std::pair<base::string16, gfx::Range>

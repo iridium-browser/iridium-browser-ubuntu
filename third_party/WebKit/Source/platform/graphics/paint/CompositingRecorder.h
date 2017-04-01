@@ -9,7 +9,7 @@
 #include "platform/geometry/FloatRect.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/paint/DisplayItem.h"
-#include "third_party/skia/include/core/SkXfermode.h"
+#include "third_party/skia/include/core/SkBlendMode.h"
 #include "wtf/Allocator.h"
 
 namespace blink {
@@ -17,22 +17,33 @@ namespace blink {
 class GraphicsContext;
 
 class PLATFORM_EXPORT CompositingRecorder {
-    USING_FAST_MALLOC(CompositingRecorder);
-public:
-    CompositingRecorder(GraphicsContext&, const DisplayItemClient&, const SkXfermode::Mode, const float opacity, const FloatRect* bounds = 0, ColorFilter = ColorFilterNone);
+  USING_FAST_MALLOC(CompositingRecorder);
 
-    ~CompositingRecorder();
+ public:
+  CompositingRecorder(GraphicsContext&,
+                      const DisplayItemClient&,
+                      const SkBlendMode,
+                      const float opacity,
+                      const FloatRect* bounds = 0,
+                      ColorFilter = ColorFilterNone);
 
-    // FIXME: These helpers only exist to ease the transition to slimming paint
-    //        and should be removed once slimming paint is enabled by default.
-    static void beginCompositing(GraphicsContext&, const DisplayItemClient&, const SkXfermode::Mode, const float opacity, const FloatRect* bounds = 0, ColorFilter = ColorFilterNone);
-    static void endCompositing(GraphicsContext&, const DisplayItemClient&);
+  ~CompositingRecorder();
 
-private:
-    const DisplayItemClient& m_client;
-    GraphicsContext& m_graphicsContext;
+  // FIXME: These helpers only exist to ease the transition to slimming paint
+  //        and should be removed once slimming paint is enabled by default.
+  static void beginCompositing(GraphicsContext&,
+                               const DisplayItemClient&,
+                               const SkBlendMode,
+                               const float opacity,
+                               const FloatRect* bounds = 0,
+                               ColorFilter = ColorFilterNone);
+  static void endCompositing(GraphicsContext&, const DisplayItemClient&);
+
+ private:
+  const DisplayItemClient& m_client;
+  GraphicsContext& m_graphicsContext;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // CompositingRecorder_h
+#endif  // CompositingRecorder_h

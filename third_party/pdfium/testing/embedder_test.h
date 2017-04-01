@@ -105,6 +105,12 @@ class EmbedderTest : public ::testing::Test,
   // is prohibited after this call is made.
   virtual void UnloadPage(FPDF_PAGE page);
 
+  // Check |bitmap| to make sure it has the right dimensions and content.
+  static void CompareBitmap(FPDF_BITMAP bitmap,
+                            int expected_width,
+                            int expected_height,
+                            const char* expected_md5sum);
+
  protected:
   void SetupFormFillEnvironment();
 
@@ -124,6 +130,7 @@ class EmbedderTest : public ::testing::Test,
   size_t file_length_;
   std::unique_ptr<char, pdfium::FreeDeleter> file_contents_;
   std::map<int, FPDF_PAGE> page_map_;
+  std::map<FPDF_PAGE, int> page_reverse_map_;
 
  private:
   static void UnsupportedHandlerTrampoline(UNSUPPORT_INFO*, int type);

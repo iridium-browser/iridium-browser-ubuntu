@@ -16,8 +16,9 @@
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
+#include "chrome/grit/theme_resources.h"
 #include "components/prefs/pref_service.h"
-#include "components/sync/api/string_ordinal.h"
+#include "components/sync/model/string_ordinal.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
@@ -26,7 +27,6 @@
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 #include "extensions/common/manifest_url_handlers.h"
-#include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/events/event_constants.h"
 #include "ui/gfx/canvas.h"
@@ -95,7 +95,7 @@ class RoundedCornersImageSource : public gfx::CanvasImageSource {
         kRoundingRadius, opaque_paint);
 
     SkPaint masking_paint;
-    masking_paint.setXfermodeMode(SkXfermode::kDstIn_Mode);
+    masking_paint.setBlendMode(SkBlendMode::kDstIn);
     canvas->DrawImageInt(
         gfx::ImageSkia(masking_canvas->ExtractImageRep()), 0, 0, masking_paint);
   }

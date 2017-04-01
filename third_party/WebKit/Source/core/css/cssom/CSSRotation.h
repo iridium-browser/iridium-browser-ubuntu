@@ -12,70 +12,63 @@
 namespace blink {
 
 class CORE_EXPORT CSSRotation final : public CSSTransformComponent {
-    WTF_MAKE_NONCOPYABLE(CSSRotation);
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static CSSRotation* create(double angle)
-    {
-        return new CSSRotation(angle);
-    }
+  WTF_MAKE_NONCOPYABLE(CSSRotation);
+  DEFINE_WRAPPERTYPEINFO();
 
-    static CSSRotation* create(const CSSAngleValue* angleValue)
-    {
-        return new CSSRotation(angleValue->degrees());
-    }
+ public:
+  static CSSRotation* create(const CSSAngleValue* angleValue) {
+    return new CSSRotation(angleValue);
+  }
 
-    static CSSRotation* create(double x, double y, double z, double angle)
-    {
-        return new CSSRotation(x, y, z, angle);
-    }
+  static CSSRotation* create(double x,
+                             double y,
+                             double z,
+                             const CSSAngleValue* angleValue) {
+    return new CSSRotation(x, y, z, angleValue);
+  }
 
-    static CSSRotation* create(double x, double y, double z, const CSSAngleValue* angleValue)
-    {
-        return new CSSRotation(x, y, z, angleValue->degrees());
-    }
+  static CSSRotation* fromCSSValue(const CSSFunctionValue&);
 
-    static CSSRotation* fromCSSValue(const CSSFunctionValue&);
+  // Bindings requires returning non-const pointers. This is safe because
+  // CSSAngleValues are immutable.
+  CSSAngleValue* angle() const {
+    return const_cast<CSSAngleValue*>(m_angle.get());
+  }
+  double x() const { return m_x; }
+  double y() const { return m_y; }
+  double z() const { return m_z; }
 
-    double angle() const { return m_angle; }
-    double x() const { return m_x; }
-    double y() const { return m_y; }
-    double z() const { return m_z; }
+  TransformComponentType type() const override {
+    return m_is2D ? RotationType : Rotation3DType;
+  }
 
-    TransformComponentType type() const override { return m_is2D ? RotationType : Rotation3DType; }
+  CSSMatrixTransformComponent* asMatrix() const override {
+    return m_is2D ? CSSMatrixTransformComponent::rotate(m_angle->degrees())
+                  : CSSMatrixTransformComponent::rotate3d(m_angle->degrees(),
+                                                          m_x, m_y, m_z);
+  }
 
-    CSSMatrixTransformComponent* asMatrix() const override
-    {
-        return m_is2D ? CSSMatrixTransformComponent::rotate(m_angle)
-            : CSSMatrixTransformComponent::rotate3d(m_angle, m_x, m_y, m_z);
-    }
+  CSSFunctionValue* toCSSValue() const override;
 
-    CSSFunctionValue* toCSSValue() const override;
+  DEFINE_INLINE_VIRTUAL_TRACE() {
+    visitor->trace(m_angle);
+    CSSTransformComponent::trace(visitor);
+  }
 
-private:
-    CSSRotation(double angle)
-        : m_x(0)
-        , m_y(0)
-        , m_z(1)
-        , m_angle(angle)
-        , m_is2D(true)
-    { }
+ private:
+  CSSRotation(const CSSAngleValue* angle)
+      : m_angle(angle), m_x(0), m_y(0), m_z(1), m_is2D(true) {}
 
-    CSSRotation(double x, double y, double z, double angle)
-        : m_x(x)
-        , m_y(y)
-        , m_z(z)
-        , m_angle(angle)
-        , m_is2D(false)
-    { }
+  CSSRotation(double x, double y, double z, const CSSAngleValue* angle)
+      : m_angle(angle), m_x(x), m_y(y), m_z(z), m_is2D(false) {}
 
-    double m_x;
-    double m_y;
-    double m_z;
-    double m_angle;
-    bool m_is2D;
+  Member<const CSSAngleValue> m_angle;
+  double m_x;
+  double m_y;
+  double m_z;
+  bool m_is2D;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

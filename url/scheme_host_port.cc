@@ -13,6 +13,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "url/gurl.h"
+#include "url/third_party/mozilla/url_parse.h"
 #include "url/url_canon.h"
 #include "url/url_canon_stdstring.h"
 #include "url/url_constants.h"
@@ -48,19 +49,14 @@ bool IsCanonicalHost(const base::StringPiece& host) {
 
 bool IsValidInput(const base::StringPiece& scheme,
                   const base::StringPiece& host,
-                  uint16_t port) {
+                  uint16_t port,
+                  SchemeHostPort::ConstructPolicy policy) {
   SchemeType scheme_type = SCHEME_WITH_PORT;
   bool is_standard = GetStandardSchemeType(
       scheme.data(),
       Component(0, base::checked_cast<int>(scheme.length())),
       &scheme_type);
   if (!is_standard)
-    return false;
-
-  // These schemes do not follow the generic URL syntax, so we treat them as
-  // invalid (scheme, host, port) tuples (even though such URLs' _Origin_ might
-  // have a (scheme, host, port) tuple, they themselves do not).
-  if (scheme == kFileSystemScheme || scheme == kBlobScheme)
     return false;
 
   switch (scheme_type) {
@@ -71,8 +67,14 @@ bool IsValidInput(const base::StringPiece& scheme,
       if (host.empty() || port == 0)
         return false;
 
-      if (!IsCanonicalHost(host))
+      // Don't do an expensive canonicalization if the host is already
+      // canonicalized.
+      DCHECK(policy == SchemeHostPort::CHECK_CANONICALIZATION ||
+             IsCanonicalHost(host));
+      if (policy == SchemeHostPort::CHECK_CANONICALIZATION &&
+          !IsCanonicalHost(host)) {
         return false;
+      }
 
       return true;
 
@@ -83,8 +85,14 @@ bool IsValidInput(const base::StringPiece& scheme,
         return false;
       }
 
-      if (!IsCanonicalHost(host))
+      // Don't do an expensive canonicalization if the host is already
+      // canonicalized.
+      DCHECK(policy == SchemeHostPort::CHECK_CANONICALIZATION ||
+             IsCanonicalHost(host));
+      if (policy == SchemeHostPort::CHECK_CANONICALIZATION &&
+          !IsCanonicalHost(host)) {
         return false;
+      }
 
       return true;
 
@@ -102,17 +110,26 @@ bool IsValidInput(const base::StringPiece& scheme,
 SchemeHostPort::SchemeHostPort() : port_(0) {
 }
 
+SchemeHostPort::SchemeHostPort(std::string scheme,
+                               std::string host,
+                               uint16_t port,
+                               ConstructPolicy policy)
+    : port_(0) {
+  if (!IsValidInput(scheme, host, port, policy))
+    return;
+
+  scheme_ = std::move(scheme);
+  host_ = std::move(host);
+  port_ = port;
+}
+
 SchemeHostPort::SchemeHostPort(base::StringPiece scheme,
                                base::StringPiece host,
                                uint16_t port)
-    : port_(0) {
-  if (!IsValidInput(scheme, host, port))
-    return;
-
-  scheme.CopyToString(&scheme_);
-  host.CopyToString(&host_);
-  port_ = port;
-}
+    : SchemeHostPort(scheme.as_string(),
+                     host.as_string(),
+                     port,
+                     ConstructPolicy::CHECK_CANONICALIZATION) {}
 
 SchemeHostPort::SchemeHostPort(const GURL& url) : port_(0) {
   if (!url.is_valid())
@@ -126,7 +143,7 @@ SchemeHostPort::SchemeHostPort(const GURL& url) : port_(0) {
   if (port == PORT_UNSPECIFIED)
     port = 0;
 
-  if (!IsValidInput(scheme, host, port))
+  if (!IsValidInput(scheme, host, port, ALREADY_CANONICALIZED))
     return;
 
   scheme.CopyToString(&scheme_);
@@ -142,13 +159,57 @@ bool SchemeHostPort::IsInvalid() const {
 }
 
 std::string SchemeHostPort::Serialize() const {
+  // Null checking for |parsed| in SerializeInternal is probably slower than
+  // just filling it in and discarding it here.
+  url::Parsed parsed;
+  return SerializeInternal(&parsed);
+}
+
+GURL SchemeHostPort::GetURL() const {
+  url::Parsed parsed;
+  std::string serialized = SerializeInternal(&parsed);
+
+  if (IsInvalid())
+    return GURL(std::move(serialized), parsed, false);
+
+  // If the serialized string is passed to GURL for parsing, it will append an
+  // empty path "/". Add that here. Note: per RFC 6454 we cannot do this for
+  // normal Origin serialization.
+  DCHECK(!parsed.path.is_valid());
+  parsed.path = Component(serialized.length(), 1);
+  serialized.append("/");
+  return GURL(std::move(serialized), parsed, true);
+}
+
+bool SchemeHostPort::Equals(const SchemeHostPort& other) const {
+  return port_ == other.port() && scheme_ == other.scheme() &&
+         host_ == other.host();
+}
+
+bool SchemeHostPort::operator<(const SchemeHostPort& other) const {
+  return std::tie(port_, scheme_, host_) <
+         std::tie(other.port_, other.scheme_, other.host_);
+}
+
+std::string SchemeHostPort::SerializeInternal(url::Parsed* parsed) const {
   std::string result;
   if (IsInvalid())
     return result;
 
-  result.append(scheme_);
+  // Reserve enough space for the "normal" case of scheme://host/.
+  result.reserve(scheme_.size() + host_.size() + 4);
+
+  if (!scheme_.empty()) {
+    parsed->scheme = Component(0, scheme_.length());
+    result.append(scheme_);
+  }
+
   result.append(kStandardSchemeSeparator);
-  result.append(host_);
+
+  if (!host_.empty()) {
+    parsed->host = Component(result.length(), host_.length());
+    result.append(host_);
+  }
 
   if (port_ == 0)
     return result;
@@ -161,20 +222,12 @@ std::string SchemeHostPort::Serialize() const {
     return result;
   if (port_ != default_port) {
     result.push_back(':');
-    result.append(base::UintToString(port_));
+    std::string port(base::UintToString(port_));
+    parsed->port = Component(result.length(), port.length());
+    result.append(std::move(port));
   }
 
   return result;
-}
-
-bool SchemeHostPort::Equals(const SchemeHostPort& other) const {
-  return port_ == other.port() && scheme_ == other.scheme() &&
-         host_ == other.host();
-}
-
-bool SchemeHostPort::operator<(const SchemeHostPort& other) const {
-  return std::tie(port_, scheme_, host_) <
-         std::tie(other.port_, other.scheme_, other.host_);
 }
 
 }  // namespace url

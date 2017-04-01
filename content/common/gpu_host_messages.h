@@ -12,13 +12,13 @@
 #include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/ipc/common/gpu_command_buffer_traits.h"
-#include "gpu/ipc/common/gpu_memory_uma_stats.h"
 #include "gpu/ipc/common/gpu_param_traits.h"
 #include "gpu/ipc/common/memory_stats.h"
 #include "gpu/ipc/common/surface_handle.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_start.h"
+#include "media/media_features.h"
 #include "ui/events/ipc/latency_info_param_traits.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
@@ -35,15 +35,9 @@ IPC_ENUM_TRAITS_VALIDATE(gpu::GpuPreferences::VpxDecodeVendors,
                          ((value >= gpu::GpuPreferences::VPX_VENDOR_NONE) &&
                           (value <= gpu::GpuPreferences::VPX_VENDOR_ALL)))
 
-IPC_STRUCT_TRAITS_BEGIN(gpu::GPUMemoryUmaStats)
-  IPC_STRUCT_TRAITS_MEMBER(bytes_allocated_current)
-  IPC_STRUCT_TRAITS_MEMBER(bytes_allocated_max)
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(gpu::VideoMemoryUsageStats)
   IPC_STRUCT_TRAITS_MEMBER(process_map)
   IPC_STRUCT_TRAITS_MEMBER(bytes_allocated)
-  IPC_STRUCT_TRAITS_MEMBER(bytes_allocated_historical_max)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(gpu::VideoMemoryUsageStats::ProcessStats)
@@ -76,11 +70,12 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GpuPreferences)
 #if defined(OS_CHROMEOS)
   IPC_STRUCT_TRAITS_MEMBER(disable_vaapi_accelerated_video_encode)
 #endif
-#if defined(ENABLE_WEBRTC)
+#if BUILDFLAG(ENABLE_WEBRTC)
   IPC_STRUCT_TRAITS_MEMBER(disable_web_rtc_hw_encoding)
 #endif
 #if defined(OS_WIN)
   IPC_STRUCT_TRAITS_MEMBER(enable_accelerated_vpx_decode)
+  IPC_STRUCT_TRAITS_MEMBER(enable_low_latency_dxva)
   IPC_STRUCT_TRAITS_MEMBER(enable_zero_copy_dxgi_video)
   IPC_STRUCT_TRAITS_MEMBER(enable_nv12_dxgi_video)
 #endif
@@ -92,18 +87,18 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GpuPreferences)
   IPC_STRUCT_TRAITS_MEMBER(enable_gpu_command_logging)
   IPC_STRUCT_TRAITS_MEMBER(enable_gpu_debugging)
   IPC_STRUCT_TRAITS_MEMBER(enable_gpu_service_logging_gpu)
+  IPC_STRUCT_TRAITS_MEMBER(enable_gpu_driver_debug_logging)
   IPC_STRUCT_TRAITS_MEMBER(disable_gpu_program_cache)
   IPC_STRUCT_TRAITS_MEMBER(enforce_gl_minimums)
   IPC_STRUCT_TRAITS_MEMBER(force_gpu_mem_available)
   IPC_STRUCT_TRAITS_MEMBER(gpu_program_cache_size)
   IPC_STRUCT_TRAITS_MEMBER(disable_gpu_shader_disk_cache)
-  IPC_STRUCT_TRAITS_MEMBER(enable_share_group_async_texture_upload)
   IPC_STRUCT_TRAITS_MEMBER(enable_threaded_texture_mailboxes)
   IPC_STRUCT_TRAITS_MEMBER(gl_shader_interm_output)
   IPC_STRUCT_TRAITS_MEMBER(emulate_shader_precision)
   IPC_STRUCT_TRAITS_MEMBER(enable_gpu_service_logging)
   IPC_STRUCT_TRAITS_MEMBER(enable_gpu_service_tracing)
-  IPC_STRUCT_TRAITS_MEMBER(enable_unsafe_es3_apis)
+  IPC_STRUCT_TRAITS_MEMBER(enable_es3_apis)
   IPC_STRUCT_TRAITS_MEMBER(use_passthrough_cmd_decoder)
 IPC_STRUCT_TRAITS_END()
 
@@ -169,9 +164,6 @@ IPC_MESSAGE_CONTROL0(GpuMsg_Crash)
 // Tells the GPU process to hang.
 IPC_MESSAGE_CONTROL0(GpuMsg_Hang)
 
-// Tells the GPU process to disable the watchdog thread.
-IPC_MESSAGE_CONTROL0(GpuMsg_DisableWatchdog)
-
 // Tells the GPU process that the browser has seen a GPU switch.
 IPC_MESSAGE_CONTROL0(GpuMsg_GpuSwitched)
 
@@ -233,10 +225,6 @@ IPC_MESSAGE_CONTROL3(GpuHostMsg_DidLoseContext,
                      GURL /* url */)
 
 IPC_MESSAGE_CONTROL1(GpuHostMsg_DidDestroyOffscreenContext, GURL /* url */)
-
-// Tells the browser about GPU memory usage statistics for UMA logging.
-IPC_MESSAGE_CONTROL1(GpuHostMsg_GpuMemoryUmaStats,
-                     gpu::GPUMemoryUmaStats /* GPU memory UMA stats */)
 
 // Message from GPU to add a GPU log message to the about:gpu page.
 IPC_MESSAGE_CONTROL3(GpuHostMsg_OnLogMessage,

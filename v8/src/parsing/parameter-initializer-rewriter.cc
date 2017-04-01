@@ -4,9 +4,10 @@
 
 #include "src/parsing/parameter-initializer-rewriter.h"
 
-#include "src/ast/ast.h"
 #include "src/ast/ast-traversal-visitor.h"
+#include "src/ast/ast.h"
 #include "src/ast/scopes.h"
+#include "src/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -47,9 +48,9 @@ void Rewriter::VisitClassLiteral(ClassLiteral* class_literal) {
   }
   // No need to visit the constructor since it will have the class
   // scope on its scope chain.
-  ZoneList<ObjectLiteralProperty*>* props = class_literal->properties();
+  ZoneList<ClassLiteralProperty*>* props = class_literal->properties();
   for (int i = 0; i < props->length(); ++i) {
-    ObjectLiteralProperty* prop = props->at(i);
+    ClassLiteralProperty* prop = props->at(i);
     if (!prop->key()->IsLiteral()) {
       Visit(prop->key());
     }

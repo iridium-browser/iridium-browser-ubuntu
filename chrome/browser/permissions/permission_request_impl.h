@@ -37,8 +37,7 @@ class PermissionRequestImpl : public PermissionRequest {
 
  private:
   // PermissionRequest:
-  gfx::VectorIconId GetVectorIconId() const override;
-  int GetIconId() const override;
+  IconId GetIconId() const override;
   base::string16 GetMessageTextFragment() const override;
   GURL GetOrigin() const override;
   // Remember to call RegisterActionTaken for these methods if you are
@@ -50,6 +49,7 @@ class PermissionRequestImpl : public PermissionRequest {
   bool ShouldShowPersistenceToggle() const override;
   PermissionRequestType GetPermissionRequestType() const override;
   PermissionRequestGestureType GetGestureType() const override;
+  ContentSettingsType GetContentSettingsType() const override;
 
   GURL request_origin_;
   content::PermissionType permission_type_;

@@ -9,14 +9,13 @@ import copy
 import os
 
 from chromite.cbuildbot import cbuildbot_run
-from chromite.cbuildbot import chromeos_config
-from chromite.cbuildbot import constants
+from chromite.lib import config_lib
+from chromite.lib import constants
 from chromite.cbuildbot.builders import generic_builders
 from chromite.cbuildbot.builders import simple_builders
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import parallel
-from chromite.lib import parallel_unittest
 from chromite.scripts import cbuildbot
 
 
@@ -45,9 +44,6 @@ class SimpleBuilderTest(cros_test_lib.MockTempDirTestCase):
     chroot_path = os.path.join(self.buildroot, constants.DEFAULT_CHROOT_DIR)
     osutils.SafeMakedirs(os.path.join(chroot_path, 'tmp'))
 
-    # Parallel mock is used since some work in simple builders get done on a
-    # separate process.
-    self.StartPatcher(parallel_unittest.ParallelMock())
     self.PatchObject(generic_builders.Builder, '_RunStage',
                      new=run_stage)
     self.PatchObject(simple_builders.SimpleBuilder, '_RunParallelStages',
@@ -64,7 +60,7 @@ class SimpleBuilderTest(cros_test_lib.MockTempDirTestCase):
 
   def _initConfig(self, bot_id, extra_argv=None, override_hw_test_config=None):
     """Return normal options/build_config for |bot_id|"""
-    site_config = chromeos_config.GetConfig()
+    site_config = config_lib.GetConfig()
     build_config = copy.deepcopy(site_config[bot_id])
     build_config['master'] = False
     build_config['important'] = False

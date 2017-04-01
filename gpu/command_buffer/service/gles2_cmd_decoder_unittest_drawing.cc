@@ -803,6 +803,18 @@ TEST_P(GLES2DecoderWithShaderTest,
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
 }
 
+TEST_P(GLES2DecoderWithShaderTest, DrawArraysIntOverflow) {
+  DoEnableVertexAttribArray(1);
+
+  GLint large = std::numeric_limits<GLint>::max();
+
+  EXPECT_CALL(*gl_, DrawArrays(_, _, _)).Times(0);
+  DrawArrays cmd;
+  cmd.Init(GL_TRIANGLES, large, large);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
+}
+
 TEST_P(GLES2DecoderWithShaderTest, DrawArraysValidAttributesSucceeds) {
   SetupTexture();
   SetupVertexBuffer();
@@ -2325,6 +2337,24 @@ TEST_P(GLES2DecoderManualInitTest, DrawClearsDepthTexture) {
   cmd.Init(GL_TRIANGLES, 0, kNumVertices);
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES3DecoderTest, DrawNoProgram) {
+  SetupAllNeededVertexBuffers();
+
+  EXPECT_CALL(*gl_, DrawArrays(GL_TRIANGLES, _, _)).Times(0);
+  DrawArrays cmd;
+  cmd.Init(GL_TRIANGLES, 0, kNumVertices);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest, ClearInvalidValue) {
+  EXPECT_CALL(*gl_, Clear(_)).Times(0);
+  Clear cmd;
+  cmd.Init(0xffffffff);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
 }
 
 }  // namespace gles2

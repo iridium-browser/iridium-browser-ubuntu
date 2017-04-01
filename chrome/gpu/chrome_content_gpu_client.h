@@ -8,7 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "chrome/common/variations/child_process_field_trial_syncer.h"
+#include "base/profiler/stack_sampling_profiler.h"
+#include "components/variations/child_process_field_trial_syncer.h"
 #include "content/public/gpu/content_gpu_client.h"
 
 class ChromeContentGpuClient : public content::ContentGpuClient {
@@ -19,14 +20,15 @@ class ChromeContentGpuClient : public content::ContentGpuClient {
   // content::ContentGpuClient:
   void Initialize(base::FieldTrialList::Observer* observer) override;
   void ExposeInterfacesToBrowser(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       const gpu::GpuPreferences& gpu_preferences) override;
   void ConsumeInterfacesFromBrowser(
-      shell::InterfaceProvider* provider) override;
+      service_manager::InterfaceProvider* provider) override;
 
  private:
-  std::unique_ptr<chrome_variations::ChildProcessFieldTrialSyncer>
-      field_trial_syncer_;
+  std::unique_ptr<variations::ChildProcessFieldTrialSyncer> field_trial_syncer_;
+  // Used to profile process startup.
+  base::StackSamplingProfiler stack_sampling_profiler_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentGpuClient);
 };

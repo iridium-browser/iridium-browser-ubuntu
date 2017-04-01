@@ -14,6 +14,7 @@
 #include "base/lazy_instance.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 
 namespace {
 
@@ -137,11 +138,14 @@ static base::LazyInstance<LatencyInfoEnabledInitializer>::Leaky
 
 namespace ui {
 
-LatencyInfo::LatencyInfo()
+LatencyInfo::LatencyInfo() : LatencyInfo(SourceEventType::UNKNOWN) {}
+
+LatencyInfo::LatencyInfo(SourceEventType type)
     : input_coordinates_size_(0),
       trace_id_(-1),
       coalesced_(false),
-      terminated_(false) {}
+      terminated_(false),
+      source_event_type_(type) {}
 
 LatencyInfo::LatencyInfo(const LatencyInfo& other) = default;
 
@@ -150,7 +154,8 @@ LatencyInfo::~LatencyInfo() {}
 LatencyInfo::LatencyInfo(int64_t trace_id, bool terminated)
     : input_coordinates_size_(0),
       trace_id_(trace_id),
-      terminated_(terminated) {}
+      terminated_(terminated),
+      source_event_type_(SourceEventType::UNKNOWN) {}
 
 bool LatencyInfo::Verify(const std::vector<LatencyInfo>& latency_info,
                          const char* referring_msg) {
@@ -238,16 +243,16 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
       // originally created, e.g. the timestamp of its ORIGINAL/UI_COMPONENT,
       // not when we actually issue the ASYNC_BEGIN trace event.
       LatencyComponent begin_component;
-      int64_t ts = 0;
+      base::TimeTicks ts;
       if (FindLatency(INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
                       0,
                       &begin_component) ||
           FindLatency(INPUT_EVENT_LATENCY_UI_COMPONENT,
                       0,
                       &begin_component)) {
-        ts = begin_component.event_time.ToInternalValue();
+        ts = begin_component.event_time;
       } else {
-        ts = base::TimeTicks::Now().ToInternalValue();
+        ts = base::TimeTicks::Now();
       }
 
       if (trace_name_str) {
@@ -274,7 +279,8 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
   LatencyMap::key_type key = std::make_pair(component, id);
   LatencyMap::iterator it = latency_components_.find(key);
   if (it == latency_components_.end()) {
-    LatencyComponent info = {component_sequence_number, time, event_count};
+    LatencyComponent info = {component_sequence_number, time, event_count, time,
+                             time};
     latency_components_[key] = info;
   } else {
     it->second.sequence_number = std::max(component_sequence_number,
@@ -287,6 +293,7 @@ void LatencyInfo::AddLatencyNumberWithTimestampImpl(
       it->second.event_time += (time - it->second.event_time) * event_count /
           new_count;
       it->second.event_count = new_count;
+      it->second.last_event_time = std::max(it->second.last_event_time, time);
     }
   }
 

@@ -32,6 +32,8 @@
 #include "net/base/network_interfaces.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_source_type.h"
 #include "url/gurl.h"
 
 #if defined(OS_CHROMEOS)
@@ -53,6 +55,8 @@ using net::StringIOBuffer;
 using net::UDPSocket;
 
 namespace extensions {
+namespace api {
+namespace dial {
 
 namespace {
 
@@ -163,7 +167,7 @@ DialServiceImpl::DialSocket::~DialSocket() {
 bool DialServiceImpl::DialSocket::CreateAndBindSocket(
     const IPAddress& bind_ip_address,
     net::NetLog* net_log,
-    net::NetLog::Source net_log_source) {
+    net::NetLogSource net_log_source) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!socket_);
   DCHECK(bind_ip_address.IsIPv4());
@@ -389,7 +393,7 @@ DialServiceImpl::DialServiceImpl(net::NetLog* net_log)
   DCHECK(success);
   send_address_ = net::IPEndPoint(address, kDialRequestPort);
   send_buffer_ = new StringIOBuffer(BuildRequest());
-  net_log_source_.type = net::NetLog::SOURCE_UDP_SOCKET;
+  net_log_source_.type = net::NetLogSourceType::UDP_SOCKET;
   net_log_source_.id = net_log_->NextID();
 }
 
@@ -448,8 +452,8 @@ void DialServiceImpl::StartDiscovery() {
 #else
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE, FROM_HERE, base::Bind(&GetNetworkListOnFileThread),
-      base::Bind(base::Bind(&DialServiceImpl::SendNetworkList,
-                            weak_factory_.GetWeakPtr())));
+      base::Bind(&DialServiceImpl::SendNetworkList,
+                 weak_factory_.GetWeakPtr()));
 #endif
 }
 
@@ -560,7 +564,8 @@ void DialServiceImpl::NotifyOnDiscoveryRequest() {
   }
 
   VLOG(2) << "Notifying observers of discovery request";
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnDiscoveryRequest(this));
+  for (auto& observer : observer_list_)
+    observer.OnDiscoveryRequest(this);
   // If we need to send additional requests, schedule a timer to do so.
   if (num_requests_sent_ < max_requests_ && num_requests_sent_ == 1) {
     VLOG(2) << "Scheduling timer to send additional requests";
@@ -580,18 +585,18 @@ void DialServiceImpl::NotifyOnDeviceDiscovered(
     VLOG(2) << "Got response after discovery finished.  Ignoring.";
     return;
   }
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnDeviceDiscovered(this, device_data));
+  for (auto& observer : observer_list_)
+    observer.OnDeviceDiscovered(this, device_data);
 }
 
 void DialServiceImpl::NotifyOnError() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // TODO(imcheng): Modify upstream so that the device list is not cleared
   // when it could still potentially discover devices on other sockets.
-  FOR_EACH_OBSERVER(Observer, observer_list_,
-                    OnError(this,
-                            HasOpenSockets() ? DIAL_SERVICE_SOCKET_ERROR
-                                             : DIAL_SERVICE_NO_INTERFACES));
+  for (auto& observer : observer_list_) {
+    observer.OnError(this, HasOpenSockets() ? DIAL_SERVICE_SOCKET_ERROR
+                                            : DIAL_SERVICE_NO_INTERFACES);
+  }
 }
 
 void DialServiceImpl::FinishDiscovery() {
@@ -604,7 +609,8 @@ void DialServiceImpl::FinishDiscovery() {
   request_timer_.Stop();
   discovery_active_ = false;
   num_requests_sent_ = 0;
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnDiscoveryFinished(this));
+  for (auto& observer : observer_list_)
+    observer.OnDiscoveryFinished(this);
 }
 
 bool DialServiceImpl::HasOpenSockets() {
@@ -615,4 +621,6 @@ bool DialServiceImpl::HasOpenSockets() {
   return false;
 }
 
+}  // namespace dial
+}  // namespace api
 }  // namespace extensions

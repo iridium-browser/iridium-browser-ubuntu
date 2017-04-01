@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -18,18 +19,19 @@
 #include "base/sys_info.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/crx_file/id_util.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/grit/extensions_browser_resources.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/web_ui_util.h"
@@ -212,12 +214,23 @@ void KioskAppsHandler::OnKioskExtensionDownloadFailed(
 void KioskAppsHandler::OnGetConsumerKioskAutoLaunchStatus(
     chromeos::KioskAppManager::ConsumerKioskAutoLaunchStatus status) {
   initialized_ = true;
-  is_kiosk_enabled_ = user_manager::UserManager::Get()->IsCurrentUserOwner() ||
-                      !base::SysInfo::IsRunningOnChromeOS();
-
-  is_auto_launch_enabled_ =
-      status == KioskAppManager::CONSUMER_KIOSK_AUTO_LAUNCH_ENABLED ||
-      !base::SysInfo::IsRunningOnChromeOS();
+  if (KioskAppManager::IsConsumerKioskEnabled()) {
+    if (!base::SysInfo::IsRunningOnChromeOS()) {
+      // Enable everything when running on a dev box.
+      is_kiosk_enabled_ = true;
+      is_auto_launch_enabled_ = true;
+    } else {
+      // Enable consumer kiosk for owner and enable auto launch if configured.
+      is_kiosk_enabled_ =
+          ProfileHelper::IsOwnerProfile(Profile::FromWebUI(web_ui()));
+      is_auto_launch_enabled_ =
+          status == KioskAppManager::CONSUMER_KIOSK_AUTO_LAUNCH_ENABLED;
+    }
+  } else {
+    // Otherwise, consumer kiosk is disabled.
+    is_kiosk_enabled_ = false;
+    is_auto_launch_enabled_ = false;
+  }
 
   if (is_kiosk_enabled_) {
     base::DictionaryValue kiosk_params;
@@ -258,7 +271,7 @@ void KioskAppsHandler::SendKioskAppSettings() {
 
     std::unique_ptr<base::DictionaryValue> app_info(new base::DictionaryValue);
     PopulateAppDict(app_data, app_info.get());
-    apps_list->Append(app_info.release());
+    apps_list->Append(std::move(app_info));
   }
   settings.SetWithoutPathExpansion("apps", apps_list.release());
 

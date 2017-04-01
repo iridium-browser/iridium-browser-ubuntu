@@ -425,10 +425,10 @@ namespace sw
 		Int2 tmp2 = UnpackLow(row0, row1);
 		Int2 tmp3 = UnpackLow(row2, row3);
 
-		row0 = As<Short4>(UnpackLow(tmp2, tmp3));
-		row1 = As<Short4>(UnpackHigh(tmp2, tmp3));
-		row2 = As<Short4>(UnpackLow(tmp0, tmp1));
-		row3 = As<Short4>(UnpackHigh(tmp0, tmp1));
+		row0 = UnpackLow(tmp2, tmp3);
+		row1 = UnpackHigh(tmp2, tmp3);
+		row2 = UnpackLow(tmp0, tmp1);
+		row3 = UnpackHigh(tmp0, tmp1);
 	}
 
 	void transpose4x4(Float4 &row0, Float4 &row1, Float4 &row2, Float4 &row3)
@@ -475,18 +475,13 @@ namespace sw
 
 	void transpose2x4(Float4 &row0, Float4 &row1, Float4 &row2, Float4 &row3)
 	{
-		row0 = UnpackLow(row0, row1);
-		row1 = Float4(row0.zw, row1.zw);
-		row2 = UnpackHigh(row0, row1);
-		row3 = Float4(row2.zw, row3.zw);
-	}
+		Float4 tmp01 = UnpackLow(row0, row1);
+		Float4 tmp23 = UnpackHigh(row0, row1);
 
-	void transpose2x4h(Float4 &row0, Float4 &row1, Float4 &row2, Float4 &row3)
-	{
-		row0 = UnpackLow(row2, row3);
-		row1 = Float4(row0.zw, row1.zw);
-		row2 = UnpackHigh(row2, row3);
-		row3 = Float4(row2.zw, row3.zw);
+		row0 = tmp01;
+		row1 = Float4(tmp01.zw, row1.zw);
+		row2 = tmp23;
+		row3 = Float4(tmp23.zw, row3.zw);
 	}
 
 	void transpose4xN(Float4 &row0, Float4 &row1, Float4 &row2, Float4 &row3, int N)
@@ -1777,7 +1772,7 @@ namespace sw
 		dst = As<Float4>(As<Int4>(src.x) | As<Int4>(src.y) | As<Int4>(src.z) | As<Int4>(src.w));
 	}
 
-	void ShaderCore::not(Vector4f &dst, const Vector4f &src)
+	void ShaderCore::bitwise_not(Vector4f &dst, const Vector4f &src)
 	{
 		dst.x = As<Float4>(As<Int4>(src.x) ^ Int4(0xFFFFFFFF));
 		dst.y = As<Float4>(As<Int4>(src.y) ^ Int4(0xFFFFFFFF));
@@ -1785,7 +1780,7 @@ namespace sw
 		dst.w = As<Float4>(As<Int4>(src.w) ^ Int4(0xFFFFFFFF));
 	}
 
-	void ShaderCore::or(Vector4f &dst, const Vector4f &src0, const Vector4f &src1)
+	void ShaderCore::bitwise_or(Vector4f &dst, const Vector4f &src0, const Vector4f &src1)
 	{
 		dst.x = As<Float4>(As<Int4>(src0.x) | As<Int4>(src1.x));
 		dst.y = As<Float4>(As<Int4>(src0.y) | As<Int4>(src1.y));
@@ -1793,7 +1788,7 @@ namespace sw
 		dst.w = As<Float4>(As<Int4>(src0.w) | As<Int4>(src1.w));
 	}
 
-	void ShaderCore::xor(Vector4f &dst, const Vector4f &src0, const Vector4f &src1)
+	void ShaderCore::bitwise_xor(Vector4f &dst, const Vector4f &src0, const Vector4f &src1)
 	{
 		dst.x = As<Float4>(As<Int4>(src0.x) ^ As<Int4>(src1.x));
 		dst.y = As<Float4>(As<Int4>(src0.y) ^ As<Int4>(src1.y));
@@ -1801,7 +1796,7 @@ namespace sw
 		dst.w = As<Float4>(As<Int4>(src0.w) ^ As<Int4>(src1.w));
 	}
 
-	void ShaderCore::and(Vector4f &dst, const Vector4f &src0, const Vector4f &src1)
+	void ShaderCore::bitwise_and(Vector4f &dst, const Vector4f &src0, const Vector4f &src1)
 	{
 		dst.x = As<Float4>(As<Int4>(src0.x) & As<Int4>(src1.x));
 		dst.y = As<Float4>(As<Int4>(src0.y) & As<Int4>(src1.y));

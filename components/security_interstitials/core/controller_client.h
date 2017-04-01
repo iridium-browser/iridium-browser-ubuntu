@@ -46,8 +46,9 @@ enum SecurityInterstitialCommands {
   CMD_DO_REPORT = 8,
   CMD_DONT_REPORT = 9,
   CMD_OPEN_REPORTING_PRIVACY = 10,
+  CMD_OPEN_WHITEPAPER = 11,
   // Report a phishing error
-  CMD_REPORT_PHISHING_ERROR = 11,
+  CMD_REPORT_PHISHING_ERROR = 12,
 };
 
 // Provides methods for handling commands from the user, which requires some
@@ -55,19 +56,26 @@ enum SecurityInterstitialCommands {
 // by the JavaScript error page.
 class ControllerClient {
  public:
-  ControllerClient();
+  explicit ControllerClient(std::unique_ptr<MetricsHelper> metrics_helper);
   virtual ~ControllerClient();
 
   // Handle the user's reporting preferences.
   void SetReportingPreference(bool report);
   void OpenExtendedReportingPrivacyPolicy();
+  void OpenExtendedReportingWhitepaper();
 
   // If available, open the operating system's date/time settings.
   virtual bool CanLaunchDateAndTimeSettings() = 0;
   virtual void LaunchDateAndTimeSettings() = 0;
 
-  // Close the error and go back to the previous page.
+  // Close the error and go back to the previous page. This applies to
+  // situations where navigation is blocked before committing.
   virtual void GoBack() = 0;
+
+  // If the offending entry has committed, go back or to a safe page without
+  // closing the error page. This error page will be closed when the new page
+  // commits.
+  virtual void GoBackAfterNavigationCommitted() = 0;
 
   // Close the error and proceed to the blocked page.
   virtual void Proceed() = 0;
@@ -76,14 +84,15 @@ class ControllerClient {
   virtual void Reload() = 0;
 
   MetricsHelper* metrics_helper() const;
-  void set_metrics_helper(std::unique_ptr<MetricsHelper> metrics_helper);
 
   virtual void OpenUrlInCurrentTab(const GURL& url) = 0;
 
- protected:
-  virtual const std::string& GetApplicationLocale() = 0;
   virtual PrefService* GetPrefService() = 0;
-  virtual const std::string GetExtendedReportingPrefName() = 0;
+
+  virtual const std::string& GetApplicationLocale() const = 0;
+
+ protected:
+  virtual const std::string GetExtendedReportingPrefName() const = 0;
 
  private:
   std::unique_ptr<MetricsHelper> metrics_helper_;

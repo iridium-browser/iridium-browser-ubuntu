@@ -5,11 +5,13 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_OPTIONS_CLEAR_BROWSER_DATA_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_CLEAR_BROWSER_DATA_HANDLER_H_
 
+#include <memory>
+#include <vector>
+
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
 #include "components/prefs/pref_member.h"
 
@@ -18,7 +20,7 @@ namespace options {
 // Clear browser data handler page UI handler.
 class ClearBrowserDataHandler : public OptionsPageUIHandler,
                                 public BrowsingDataRemover::Observer,
-                                public sync_driver::SyncServiceObserver {
+                                public syncer::SyncServiceObserver {
  public:
   ClearBrowserDataHandler();
   ~ClearBrowserDataHandler() override;
@@ -81,10 +83,10 @@ class ClearBrowserDataHandler : public OptionsPageUIHandler,
   BooleanPrefMember allow_deleting_browser_history_;
 
   // Counters that calculate the data volume for some of the data types.
-  ScopedVector<browsing_data::BrowsingDataCounter> counters_;
+  std::vector<std::unique_ptr<browsing_data::BrowsingDataCounter>> counters_;
 
   // Informs us whether the user is syncing their data.
-  ProfileSyncService* sync_service_;
+  browser_sync::ProfileSyncService* sync_service_;
 
   // Whether we should show a notice about other forms of browsing history.
   bool should_show_history_notice_;

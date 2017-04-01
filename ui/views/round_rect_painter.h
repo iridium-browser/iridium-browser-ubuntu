@@ -12,7 +12,6 @@
 
 namespace gfx {
 class Canvas;
-class Path;
 class Size;
 }
 
@@ -21,6 +20,8 @@ namespace views {
 // Painter to draw a border with rounded corners.
 class VIEWS_EXPORT RoundRectPainter : public Painter {
  public:
+  enum { kBorderWidth = 1 };
+
   RoundRectPainter(SkColor border_color, int corner_radius);
   ~RoundRectPainter() override;
 

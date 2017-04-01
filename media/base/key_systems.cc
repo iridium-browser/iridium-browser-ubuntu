@@ -19,6 +19,8 @@
 #include "media/base/key_system_names.h"
 #include "media/base/key_system_properties.h"
 #include "media/base/media.h"
+#include "media/base/media_switches.h"
+#include "ppapi/features/features.h"
 #include "media/base/media_client.h"
 #include "third_party/widevine/cdm/widevine_cdm_common.h"
 
@@ -85,16 +87,6 @@ class ClearKeyProperties : public KeySystemProperties {
     // http://developer.android.com/guide/appendix/media-formats.html
     // VP9 support is device dependent.
     SupportedCodecs codecs = EME_CODEC_WEBM_ALL;
-
-#if defined(OS_ANDROID)
-    // Temporarily disable VP9 support for Android.
-    // TODO(xhwang): Use mime_util.h to query VP9 support on Android.
-    codecs &= ~EME_CODEC_WEBM_VP9;
-
-    // Opus is not supported on Android yet. http://crbug.com/318436.
-    // TODO(sandersd): Check for platform support to set this bit.
-    codecs &= ~EME_CODEC_WEBM_OPUS;
-#endif  // defined(OS_ANDROID)
 
 #if defined(USE_PROPRIETARY_CODECS)
     codecs |= EME_CODEC_MP4_ALL;
@@ -183,7 +175,7 @@ class KeySystemsImpl : public KeySystems {
 
   bool UseAesDecryptor(const std::string& key_system) const;
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
   std::string GetPepperType(const std::string& key_system) const;
 #endif
 
@@ -360,6 +352,33 @@ void KeySystemsImpl::UpdateSupportedKeySystems() {
   AddSupportedKeySystems(&key_systems_properties);
 }
 
+// Returns whether distinctive identifiers and persistent state can be reliably
+// blocked for |properties| (and therefore be safely configurable).
+static bool CanBlock(const KeySystemProperties& properties) {
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
+  // Distinctive identifiers and persistent state can be reliably blocked for
+  // Pepper-hosted key systems.
+  DCHECK_EQ(properties.UseAesDecryptor(), properties.GetPepperType().empty());
+  if (!properties.GetPepperType().empty())
+    return true;
+#endif
+
+  // When AesDecryptor is used, we are sure we can block.
+  if (properties.UseAesDecryptor())
+    return true;
+
+  // For External Clear Key, it is either implemented as a pepper CDM (Clear Key
+  // CDM), which is covered above, or by using AesDecryptor remotely, e.g. via
+  // MojoCdm. In both cases, we can block. This is only used for testing.
+  if (base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting) &&
+      IsExternalClearKey(properties.GetKeySystemName()))
+    return true;
+
+  // For other platforms assume the CDM can and will do anything. So we cannot
+  // block.
+  return false;
+}
+
 void KeySystemsImpl::AddSupportedKeySystems(
     std::vector<std::unique_ptr<KeySystemProperties>>* key_systems) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -408,18 +427,7 @@ void KeySystemsImpl::AddSupportedKeySystems(
              EmeSessionTypeSupport::SUPPORTED_WITH_IDENTIFIER);
     }
 
-    // Distinctive identifiers and persistent state can only be reliably blocked
-    // (and therefore be safely configurable) for Pepper-hosted key systems. For
-    // other platforms, (except for the AES decryptor) assume that the CDM can
-    // and will do anything.
-    bool can_block = properties->UseAesDecryptor();
-#if defined(ENABLE_PEPPER_CDMS)
-    DCHECK_EQ(properties->UseAesDecryptor(),
-              properties->GetPepperType().empty());
-    if (!properties->GetPepperType().empty())
-      can_block = true;
-#endif
-    if (!can_block) {
+    if (!CanBlock(*properties)) {
       DCHECK(properties->GetDistinctiveIdentifierSupport() ==
              EmeFeatureSupport::ALWAYS_ENABLED);
       DCHECK(properties->GetPersistentStateSupport() ==
@@ -511,7 +519,7 @@ bool KeySystemsImpl::UseAesDecryptor(const std::string& key_system) const {
   return key_system_iter->second->UseAesDecryptor();
 }
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
 std::string KeySystemsImpl::GetPepperType(const std::string& key_system) const {
   DCHECK(thread_checker_.CalledOnValidThread());
 
@@ -710,7 +718,7 @@ bool CanUseAesDecryptor(const std::string& key_system) {
   return KeySystemsImpl::GetInstance()->UseAesDecryptor(key_system);
 }
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
 std::string GetPepperType(const std::string& key_system) {
   return KeySystemsImpl::GetInstance()->GetPepperType(key_system);
 }

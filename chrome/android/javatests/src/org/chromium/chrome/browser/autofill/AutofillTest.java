@@ -4,7 +4,8 @@
 
 package org.chromium.chrome.browser.autofill;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.graphics.Color;
+import android.support.test.filters.SmallTest;
 import android.view.View;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
@@ -12,15 +13,16 @@ import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
+import org.chromium.components.autofill.AutofillDelegate;
+import org.chromium.components.autofill.AutofillPopup;
+import org.chromium.components.autofill.AutofillSuggestion;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.TouchCommon;
 import org.chromium.ui.DropdownItem;
-import org.chromium.ui.autofill.AutofillDelegate;
-import org.chromium.ui.autofill.AutofillPopup;
-import org.chromium.ui.autofill.AutofillSuggestion;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
@@ -31,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Tests the Autofill's java code for creating the AutofillPopup object, opening and selecting
  * popups.
  */
+@RetryOnFailure
 public class AutofillTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private AutofillPopup mAutofillPopup;
@@ -65,7 +68,10 @@ public class AutofillTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
                 mWindowAndroid = new ActivityWindowAndroid(activity);
                 mAutofillPopup = new AutofillPopup(activity, anchorView, mMockAutofillCallback);
-                mAutofillPopup.filterAndShow(new AutofillSuggestion[0], false);
+                mAutofillPopup.filterAndShow(new AutofillSuggestion[0], false /* isRtl */,
+                        Color.TRANSPARENT /* backgroundColor */,
+                        Color.TRANSPARENT /* dividerColor */, 0 /* dropdownItemHeight */,
+                        0 /* margin */);
             }
         });
     }
@@ -88,7 +94,7 @@ public class AutofillTest extends ChromeActivityTestCaseBase<ChromeActivity> {
         public void deleteSuggestion(int listIndex) {
         }
 
-        public void waitForCallback() throws InterruptedException {
+        public void waitForCallback() {
             CriteriaHelper.pollInstrumentationThread(new Criteria() {
                 @Override
                 public boolean isSatisfied() {
@@ -105,30 +111,35 @@ public class AutofillTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private AutofillSuggestion[] createTwoAutofillSuggestionArray() {
         return new AutofillSuggestion[] {
                 new AutofillSuggestion("Sherlock Holmes", "221B Baker Street", DropdownItem.NO_ICON,
-                        42, false, false),
-                new AutofillSuggestion(
-                        "Arthur Dent", "West Country", DropdownItem.NO_ICON, 43, false, false),
+                        false, 42, false, false, false),
+                new AutofillSuggestion("Arthur Dent", "West Country", DropdownItem.NO_ICON,
+                        false, 43, false, false, false),
         };
     }
 
     private AutofillSuggestion[] createFiveAutofillSuggestionArray() {
         return new AutofillSuggestion[] {
                 new AutofillSuggestion("Sherlock Holmes", "221B Baker Street", DropdownItem.NO_ICON,
-                        42, false, false),
-                new AutofillSuggestion(
-                        "Arthur Dent", "West Country", DropdownItem.NO_ICON, 43, false, false),
-                new AutofillSuggestion("Arthos", "France", DropdownItem.NO_ICON, 44, false, false),
-                new AutofillSuggestion("Porthos", "France", DropdownItem.NO_ICON, 45, false, false),
-                new AutofillSuggestion("Aramis", "France", DropdownItem.NO_ICON, 46, false, false),
+                        false, 42, false, false, false),
+                new AutofillSuggestion("Arthur Dent", "West Country", DropdownItem.NO_ICON,
+                        false, 43, false, false, false),
+                new AutofillSuggestion("Arthos", "France", DropdownItem.NO_ICON,
+                        false, 44, false, false, false),
+                new AutofillSuggestion("Porthos", "France", DropdownItem.NO_ICON,
+                        false, 45, false, false, false),
+                new AutofillSuggestion("Aramis", "France", DropdownItem.NO_ICON,
+                        false, 46, false, false, false),
         };
     }
 
-    public void openAutofillPopupAndWaitUntilReady(final AutofillSuggestion[] suggestions)
-            throws InterruptedException {
+    public void openAutofillPopupAndWaitUntilReady(final AutofillSuggestion[] suggestions) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                mAutofillPopup.filterAndShow(suggestions, false);
+                mAutofillPopup.filterAndShow(suggestions, false /* isRtl */,
+                        Color.TRANSPARENT /* backgroundColor */,
+                        Color.TRANSPARENT /* dividerColor */, 0 /* dropdownItemHeight */,
+                        0 /* margin */);
             }
         });
         CriteriaHelper.pollInstrumentationThread(new Criteria() {

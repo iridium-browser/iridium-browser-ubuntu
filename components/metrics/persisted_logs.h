@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,8 @@
 class PrefService;
 
 namespace metrics {
+
+class PersistedLogsMetrics;
 
 // Maintains a list of unsent logs that are written and restored from disk.
 class PersistedLogs {
@@ -49,7 +52,8 @@ class PersistedLogs {
   //
   // If the optional |max_log_size| parameter is non-zero, all logs larger than
   // that limit will be skipped when writing to disk.
-  PersistedLogs(PrefService* local_state,
+  PersistedLogs(std::unique_ptr<PersistedLogsMetrics> metrics,
+                PrefService* local_state,
                 const char* pref_name,
                 size_t min_log_count,
                 size_t min_log_bytes,
@@ -87,6 +91,12 @@ class PersistedLogs {
     return list_[staged_log_index_].hash;
   }
 
+  // Returns the timestamp of the element in the front of the list.
+  const std::string& staged_log_timestamp() const {
+    DCHECK(has_staged_log());
+    return list_[staged_log_index_].timestamp;
+  }
+
   // The number of elements currently stored.
   size_t size() const { return list_.size(); }
 
@@ -99,6 +109,9 @@ class PersistedLogs {
 
   // Reads the list from the ListValue.
   LogReadStatus ReadLogsFromPrefList(const base::ListValue& list);
+
+  // An object for recording UMA metrics.
+  std::unique_ptr<PersistedLogsMetrics> metrics_;
 
   // A weak pointer to the PrefService object to read and write the preference
   // from.  Calling code should ensure this object continues to exist for the
@@ -117,19 +130,26 @@ class PersistedLogs {
   // Logs greater than this size will not be written to disk.
   const size_t max_log_size_;
 
-  struct LogHashPair {
-    // Initializes the members based on uncompressed |log_data|.
-    void Init(const std::string& log_data);
+  struct LogInfo {
+    // Initializes the members based on uncompressed |log_data| and
+    // |log_timestamp|.
+    // |metrics| is the parent's metrics_ object, and should not be held.
+    void Init(PersistedLogsMetrics* metrics,
+              const std::string& log_data,
+              const std::string& log_timestamp);
 
     // Compressed log data - a serialized protobuf that's been gzipped.
     std::string compressed_log_data;
 
     // The SHA1 hash of log, stored to catch errors from memory corruption.
     std::string hash;
+
+    // The timestamp of when the log was created as a time_t value.
+    std::string timestamp;
   };
   // A list of all of the stored logs, stored with SHA1 hashes to check for
   // corruption while they are stored in memory.
-  std::vector<LogHashPair> list_;
+  std::vector<LogInfo> list_;
 
   // The index and type of the log staged for upload. If nothing has been
   // staged, the index will be -1.

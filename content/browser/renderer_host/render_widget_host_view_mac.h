@@ -40,16 +40,12 @@
 #include "ui/display/display_observer.h"
 
 namespace content {
+class RenderWidgetHost;
 class RenderWidgetHostImpl;
 class RenderWidgetHostViewMac;
 class RenderWidgetHostViewMacEditCommandHelper;
 class WebContents;
 struct TextInputState;
-}
-
-namespace ui {
-class Compositor;
-class Layer;
 }
 
 @class FullscreenWindowManager;
@@ -195,7 +191,7 @@ class Layer;
 // Cancel ongoing composition (abandon the marked text).
 - (void)cancelComposition;
 // Confirm ongoing composition.
-- (void)confirmComposition;
+- (void)finishComposingText;
 - (void)updateCursor:(NSCursor*)cursor;
 - (NSRect)firstViewRectForCharacterRange:(NSRange)theRange
                              actualRange:(NSRangePointer)actualRange;
@@ -302,7 +298,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
       std::unique_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
   void EndFrameSubscription() override;
   ui::AcceleratedWidgetMac* GetAcceleratedWidgetMac() const override;
-  void OnSwapCompositorFrame(uint32_t output_surface_id,
+  void FocusedNodeChanged(bool is_editable_node,
+                          const gfx::Rect& node_bounds_in_screen) override;
+  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
                              cc::CompositorFrame frame) override;
   void ClearCompositorFrame() override;
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
@@ -317,16 +315,17 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
 
   bool LockMouse() override;
   void UnlockMouse() override;
+  void OnSetNeedsFlushInput() override;
   void GestureEventAck(const blink::WebGestureEvent& event,
                        InputEventAckState ack_result) override;
 
   std::unique_ptr<SyntheticGestureTarget> CreateSyntheticGestureTarget()
       override;
 
-  uint32_t GetSurfaceClientId() override;
-  uint32_t SurfaceClientIdAtPoint(cc::SurfaceHittestDelegate* delegate,
-                                  const gfx::Point& point,
-                                  gfx::Point* transformed_point) override;
+  cc::FrameSinkId GetFrameSinkId() override;
+  cc::FrameSinkId FrameSinkIdAtPoint(cc::SurfaceHittestDelegate* delegate,
+                                     const gfx::Point& point,
+                                     gfx::Point* transformed_point) override;
   // Returns true when we can do SurfaceHitTesting for the event type.
   bool ShouldRouteEvent(const blink::WebInputEvent& event) const;
   void ProcessMouseEvent(const blink::WebMouseEvent& event,
@@ -337,12 +336,13 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
                          const ui::LatencyInfo& latency) override;
   void ProcessGestureEvent(const blink::WebGestureEvent& event,
                            const ui::LatencyInfo& latency) override;
-  gfx::Point TransformPointToLocalCoordSpace(
+  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+                                       const cc::SurfaceId& original_surface,
+                                       gfx::Point* transformed_point) override;
+  bool TransformPointToCoordSpaceForView(
       const gfx::Point& point,
-      const cc::SurfaceId& original_surface) override;
-  gfx::Point TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
-      RenderWidgetHostViewBase* target_view) override;
+      RenderWidgetHostViewBase* target_view,
+      gfx::Point* transformed_point) override;
 
   // TextInputManager::Observer implementation.
   void OnUpdateTextInputStateCalled(TextInputManager* text_input_manager,
@@ -351,6 +351,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void OnImeCancelComposition(TextInputManager* text_input_manager,
                               RenderWidgetHostViewBase* updated_view) override;
   void OnImeCompositionRangeChanged(
+      TextInputManager* text_input_manager,
+      RenderWidgetHostViewBase* updated_view) override;
+  void OnSelectionBoundsChanged(
       TextInputManager* text_input_manager,
       RenderWidgetHostViewBase* updated_view) override;
   void OnTextSelectionChanged(TextInputManager* text_input_manager,
@@ -447,13 +450,9 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   NSView* BrowserCompositorMacGetNSView() const override;
   SkColor BrowserCompositorMacGetGutterColor(SkColor color) const override;
   void BrowserCompositorMacSendReclaimCompositorResources(
-      int output_surface_id,
+      int compositor_frame_sink_id,
       bool is_swap_ack,
       const cc::ReturnedResourceArray& resources) override;
-  void BrowserCompositorMacOnLostCompositorResources() override;
-  void BrowserCompositorMacUpdateVSyncParameters(
-      const base::TimeTicks& timebase,
-      const base::TimeDelta& interval) override;
   void BrowserCompositorMacSendBeginFrame(
       const cc::BeginFrameArgs& args) override;
 
@@ -488,11 +487,17 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // IPC message handlers.
   void OnGetRenderedTextCompleted(const std::string& text);
 
-  // Send updated vsync parameters to the renderer.
-  void SendVSyncParametersToRenderer();
+  // Send updated vsync parameters to the top level display.
+  void UpdateDisplayVSyncParameters();
 
   // Dispatches a TTS session.
   void SpeakText(const std::string& text);
+
+  // Get the focused view that should be used for retrieving the text selection.
+  RenderWidgetHostViewBase* GetFocusedViewForTextSelection();
+
+  // Adds/Removes frame observer based on state.
+  void UpdateNeedsBeginFramesInternal();
 
   // The associated view. This is weak and is inserted into the view hierarchy
   // to own this RenderWidgetHostViewMac object. Set to nil at the start of the
@@ -538,6 +543,12 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   // The current composition character range and its bounds.
   gfx::Range composition_range_;
   std::vector<gfx::Rect> composition_bounds_;
+
+  // Whether a request for begin frames has been issued.
+  bool needs_begin_frames_;
+
+  // Whether a request to flush input has been issued.
+  bool needs_flush_input_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
   base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;

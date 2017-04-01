@@ -18,14 +18,15 @@
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
+#include "chrome/browser/ui/views/harmony/layout_delegate.h"
 #include "chrome/browser/ui/views/sync/bubble_sync_promo_view.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/components_strings.h"
-#include "ui/accessibility/ax_view_state.h"
+#include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/views/bubble/bubble_frame_view.h"
@@ -80,6 +81,10 @@ views::Widget* BookmarkBubbleView::ShowBubble(
   bookmark_bubble_ =
       new BookmarkBubbleView(anchor_view, observer, std::move(delegate),
                              profile, url, !already_bookmarked);
+  // Bookmark bubble should always anchor TOP_RIGHT, but the
+  // LocationBarBubbleDelegateView does not know that and may use different
+  // arrow anchoring.
+  bookmark_bubble_->set_arrow(views::BubbleBorder::TOP_RIGHT);
   if (!anchor_view) {
     bookmark_bubble_->SetAnchorRect(anchor_rect);
     bookmark_bubble_->set_parent_window(parent_window);
@@ -173,8 +178,8 @@ void BookmarkBubbleView::Init() {
   // buttons at the bottom.
   const int cs_id = 0;
   ColumnSet* cs = layout->AddColumnSet(cs_id);
-  cs->AddColumn(views::kControlLabelGridAlignment, GridLayout::CENTER, 0,
-                GridLayout::USE_PREF, 0, 0);
+  cs->AddColumn(LayoutDelegate::Get()->GetControlLabelGridAlignment(),
+                GridLayout::CENTER, 0, GridLayout::USE_PREF, 0, 0);
   cs->AddPaddingColumn(0, views::kUnrelatedControlHorizontalSpacing);
 
   cs->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
@@ -278,12 +283,11 @@ base::string16 BookmarkBubbleView::GetTitle() {
   return base::string16();
 }
 
-void BookmarkBubbleView::GetAccessibleState(ui::AXViewState* state) {
-  LocationBarBubbleDelegateView::GetAccessibleState(state);
-  state->name =
-      l10n_util::GetStringUTF16(
-          newly_bookmarked_ ? IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARKED :
-                              IDS_BOOKMARK_AX_BUBBLE_PAGE_BOOKMARK);
+void BookmarkBubbleView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
+  LocationBarBubbleDelegateView::GetAccessibleNodeData(node_data);
+  node_data->SetName(l10n_util::GetStringUTF8(
+      newly_bookmarked_ ? IDS_BOOKMARK_BUBBLE_PAGE_BOOKMARKED
+                        : IDS_BOOKMARK_AX_BUBBLE_PAGE_BOOKMARK));
 }
 
 void BookmarkBubbleView::ButtonPressed(views::Button* sender,

@@ -5,6 +5,7 @@
 #include "base/threading/thread.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <vector>
 
@@ -18,6 +19,7 @@
 #include "base/test/gtest_util.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -135,14 +137,16 @@ void ReturnThreadId(base::Thread* thread,
 TEST_F(ThreadTest, StartWithOptions_StackSize) {
   Thread a("StartWithStackSize");
   // Ensure that the thread can work with only 12 kb and still process a
-  // message.
+  // message. At the same time, we should scale with the bitness of the system
+  // where 12 kb is definitely not enough.
+  // 12 kb = 3072 Slots on a 32-bit system, so we'll scale based off of that.
   Thread::Options options;
 #if defined(ADDRESS_SANITIZER) || !defined(NDEBUG)
-  // ASan bloats the stack variables and overflows the 12 kb stack. Some debug
-  // builds also grow the stack too much.
-  options.stack_size = 24*1024;
+  // ASan bloats the stack variables and overflows the 3072 slot stack. Some
+  // debug builds also grow the stack too much.
+  options.stack_size = 2 * 3072 * sizeof(uintptr_t);
 #else
-  options.stack_size = 12*1024;
+  options.stack_size = 3072 * sizeof(uintptr_t);
 #endif
   EXPECT_TRUE(a.StartWithOptions(options));
   EXPECT_TRUE(a.message_loop());
@@ -436,6 +440,39 @@ TEST_F(ThreadTest, MultipleWaitUntilThreadStarted) {
   EXPECT_TRUE(a.WaitUntilThreadStarted());
 }
 
+TEST_F(ThreadTest, FlushForTesting) {
+  Thread a("FlushForTesting");
+
+  // Flushing a non-running thread should be a no-op.
+  a.FlushForTesting();
+
+  ASSERT_TRUE(a.Start());
+
+  // Flushing a thread with no tasks shouldn't block.
+  a.FlushForTesting();
+
+  constexpr base::TimeDelta kSleepPerTestTask =
+      base::TimeDelta::FromMilliseconds(50);
+  constexpr size_t kNumSleepTasks = 5;
+
+  const base::TimeTicks ticks_before_post = base::TimeTicks::Now();
+
+  for (size_t i = 0; i < kNumSleepTasks; ++i) {
+    a.task_runner()->PostTask(
+        FROM_HERE, base::Bind(&base::PlatformThread::Sleep, kSleepPerTestTask));
+  }
+
+  // All tasks should have executed, as reflected by the elapsed time.
+  a.FlushForTesting();
+  EXPECT_GE(base::TimeTicks::Now() - ticks_before_post,
+            kNumSleepTasks * kSleepPerTestTask);
+
+  a.Stop();
+
+  // Flushing a stopped thread should be a no-op.
+  a.FlushForTesting();
+}
+
 namespace {
 
 // A Thread which uses a MessageLoop on the stack. It won't start a real
@@ -449,6 +486,12 @@ class ExternalMessageLoopThread : public Thread {
 
   void InstallMessageLoop() { SetMessageLoop(&external_message_loop_); }
 
+  void VerifyUsingExternalMessageLoop(
+      bool expected_using_external_message_loop) {
+    EXPECT_EQ(expected_using_external_message_loop,
+              using_external_message_loop());
+  }
+
  private:
   base::MessageLoop external_message_loop_;
 
@@ -461,10 +504,12 @@ TEST_F(ThreadTest, ExternalMessageLoop) {
   ExternalMessageLoopThread a;
   EXPECT_FALSE(a.message_loop());
   EXPECT_FALSE(a.IsRunning());
+  a.VerifyUsingExternalMessageLoop(false);
 
   a.InstallMessageLoop();
   EXPECT_TRUE(a.message_loop());
   EXPECT_TRUE(a.IsRunning());
+  a.VerifyUsingExternalMessageLoop(true);
 
   bool ran = false;
   a.task_runner()->PostTask(
@@ -475,6 +520,7 @@ TEST_F(ThreadTest, ExternalMessageLoop) {
   a.Stop();
   EXPECT_FALSE(a.message_loop());
   EXPECT_FALSE(a.IsRunning());
+  a.VerifyUsingExternalMessageLoop(true);
 
   // Confirm that running any remaining tasks posted from Stop() goes smoothly
   // (e.g. https://codereview.chromium.org/2135413003/#ps300001 crashed if

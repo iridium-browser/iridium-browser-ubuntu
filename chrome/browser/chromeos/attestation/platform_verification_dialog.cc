@@ -15,10 +15,11 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "components/strings/grit/components_strings.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
-#include "grit/components_strings.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
@@ -73,8 +74,8 @@ PlatformVerificationDialog::PlatformVerificationDialog(
       domain_(domain),
       callback_(callback) {
   SetLayoutManager(new views::FillLayout());
-  SetBorder(views::Border::CreateEmptyBorder(
-      0, views::kButtonHEdgeMarginNew, 0, views::kButtonHEdgeMarginNew));
+  SetBorder(views::CreateEmptyBorder(0, views::kButtonHEdgeMarginNew, 0,
+                                     views::kButtonHEdgeMarginNew));
   const base::string16 learn_more = l10n_util::GetStringUTF16(IDS_LEARN_MORE);
   std::vector<size_t> offsets;
   base::string16 headline = l10n_util::GetStringFUTF16(
@@ -87,22 +88,21 @@ PlatformVerificationDialog::PlatformVerificationDialog(
 }
 
 bool PlatformVerificationDialog::Cancel() {
-  // This method is called when user clicked "Disable on <origin>" button or
-  // when user pressed the "Esc" key. See http://crbug.com/467155
+  // This method is called when user clicked "Block" button.
   callback_.Run(CONSENT_RESPONSE_DENY);
   return true;
 }
 
 bool PlatformVerificationDialog::Accept() {
-  // This method is called when user clicked "OK, I got it" button.
+  // This method is called when user clicked "Allow" button.
   callback_.Run(CONSENT_RESPONSE_ALLOW);
   return true;
 }
 
 bool PlatformVerificationDialog::Close() {
-  // This method is called when user clicked "x" to dismiss the dialog, the
-  // permission request is canceled, or when the tab containing this dialog is
-  // closed.
+  // This method is called when user clicked "x" or pressed "Esc" to dismiss the
+  // dialog, the permission request is canceled, or when the tab containing this
+  // dialog is closed.
   callback_.Run(CONSENT_RESPONSE_NONE);
   return true;
 }
@@ -143,16 +143,18 @@ void PlatformVerificationDialog::StyledLabelLinkClicked(
         Profile::FromBrowserContext(web_contents()->GetBrowserContext());
     chrome::NavigateParams params(
         profile, learn_more_url, ui::PAGE_TRANSITION_LINK);
-    params.disposition = SINGLETON_TAB;
+    params.disposition = WindowOpenDisposition::SINGLETON_TAB;
     chrome::Navigate(&params);
   } else {
     chrome::ShowSingletonTab(browser, learn_more_url);
   }
 }
 
-void PlatformVerificationDialog::DidStartNavigationToPendingEntry(
-    const GURL& url,
-    content::NavigationController::ReloadType reload_type) {
+void PlatformVerificationDialog::DidStartNavigation(
+    content::NavigationHandle* navigation_handle) {
+  if (!navigation_handle->IsInMainFrame() || navigation_handle->IsSamePage())
+    return;
+
   views::Widget* widget = GetWidget();
   if (widget)
     widget->Close();

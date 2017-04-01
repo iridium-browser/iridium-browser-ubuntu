@@ -52,10 +52,12 @@ class ExtensionHostDelegate;
 class ExtensionPrefsObserver;
 class ExtensionApiFrameIdMap;
 class ExtensionApiFrameIdMapHelper;
+class ExtensionNavigationUIData;
 class ExtensionSystem;
 class ExtensionSystemProvider;
 class ExtensionWebContentsObserver;
 class InfoMap;
+class KioskDelegate;
 class ProcessManagerDelegate;
 class RuntimeAPIDelegate;
 
@@ -254,6 +256,12 @@ class ExtensionsBrowserClient {
 
   // Returns true if activity logging is enabled for the given |context|.
   virtual bool IsActivityLoggingEnabled(content::BrowserContext* context);
+
+  virtual ExtensionNavigationUIData* GetExtensionNavigationUIData(
+      net::URLRequest* request);
+
+  // Returns a delegate that provides kiosk mode functionality.
+  virtual KioskDelegate* GetKioskDelegate() = 0;
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

@@ -71,10 +71,6 @@ class BluetoothRemoteGattCharacteristicTest : public BluetoothTest {
     }
     ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(properties));
 
-#if !defined(OS_MACOSX)
-    // macOS: Not applicable. CoreBluetooth exposes -[CBPeripheral
-    // setNotifyValue:forCharacteristic:] which handles all interactions with
-    // the CCC descriptor.
     size_t expected_descriptors_count = 0;
     if (error != StartNotifySetupError::CONFIG_DESCRIPTOR_MISSING) {
       SimulateGattDescriptor(
@@ -92,7 +88,6 @@ class BluetoothRemoteGattCharacteristicTest : public BluetoothTest {
     }
     ASSERT_EQ(expected_descriptors_count,
               characteristic1_->GetDescriptors().size());
-#endif  // !defined(OS_MACOSX)
 
     if (error == StartNotifySetupError::SET_NOTIFY) {
       SimulateGattCharacteristicSetNotifyWillFailSynchronouslyOnce(
@@ -366,7 +361,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
 
   characteristic1_->ReadRemoteCharacteristic(
       GetReadValueCallback(Call::NOT_EXPECTED),
-      GetGattErrorCallback(Call::NOT_EXPECTED));
+      GetGattErrorCallback(Call::EXPECTED));
 
   RememberCharacteristicForSubsequentAction(characteristic1_);
   DeleteDevice(device_);  // TODO(576906) delete only the characteristic.
@@ -377,6 +372,46 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   EXPECT_TRUE("Did not crash!");
 }
 #endif  // defined(OS_ANDROID) || defined(OS_WIN)
+
+// TODO(crbug.com/663131): Enable test on windows when disconnection is
+// implemented.
+#if defined(OS_ANDROID) || defined(OS_MACOSX)
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       ReadRemoteCharacteristic_Disconnected) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_READ));
+
+  characteristic1_->ReadRemoteCharacteristic(
+      GetReadValueCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+
+// Set up for receiving a read response after disconnection.
+// On macOS no events arrive after disconnection so there is no point
+// in building the infrastructure to test this behavior. FYI
+// the code CHECKs that responses arrive only when the device is connected.
+#if !defined(OS_MACOSX)
+  RememberCharacteristicForSubsequentAction(characteristic1_);
+#endif
+
+  ASSERT_EQ(1u, adapter_->GetDevices().size());
+  SimulateGattDisconnection(adapter_->GetDevices()[0]);
+
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+
+// Dispatch read response after disconnection. See above explanation for why
+// we don't do this in macOS.
+#if !defined(OS_MACOSX)
+  std::vector<uint8_t> empty_vector;
+  SimulateGattCharacteristicRead(nullptr /* use remembered characteristic */,
+                                 empty_vector);
+#endif
+}
+#endif  // defined(OS_ANDROID) || defined(OS_MACOSX)
 
 #if defined(OS_ANDROID) || defined(OS_WIN)
 // Tests WriteRemoteCharacteristic completing after Chrome objects are deleted.
@@ -394,7 +429,7 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   std::vector<uint8_t> empty_vector;
   characteristic1_->WriteRemoteCharacteristic(
       empty_vector, GetCallback(Call::NOT_EXPECTED),
-      GetGattErrorCallback(Call::NOT_EXPECTED));
+      GetGattErrorCallback(Call::EXPECTED));
 
   RememberCharacteristicForSubsequentAction(characteristic1_);
   DeleteDevice(device_);  // TODO(576906) delete only the characteristic.
@@ -403,6 +438,45 @@ TEST_F(BluetoothRemoteGattCharacteristicTest,
   EXPECT_TRUE("Did not crash!");
 }
 #endif  // defined(OS_ANDROID) || defined(OS_WIN)
+
+// TODO(crbug.com/663131): Enable test on windows when disconnection is
+// implemented.
+#if defined(OS_ANDROID) || defined(OS_MACOSX)
+TEST_F(BluetoothRemoteGattCharacteristicTest,
+       WriteRemoteCharacteristic_Disconnected) {
+  if (!PlatformSupportsLowEnergy()) {
+    LOG(WARNING) << "Low Energy Bluetooth unavailable, skipping unit test.";
+    return;
+  }
+  ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
+      BluetoothRemoteGattCharacteristic::PROPERTY_WRITE));
+
+  std::vector<uint8_t> empty_vector;
+  characteristic1_->WriteRemoteCharacteristic(
+      empty_vector, GetCallback(Call::NOT_EXPECTED),
+      GetGattErrorCallback(Call::EXPECTED));
+
+// Set up for receiving a write response after disconnection.
+// On macOS no events arrive after disconnection so there is no point
+// in building the infrastructure to test this behavior. FYI
+// the code CHECKs that responses arrive only when the device is connected.
+#if !defined(OS_MACOSX)
+  RememberCharacteristicForSubsequentAction(characteristic1_);
+#endif  // !defined(OS_MACOSX)
+
+  ASSERT_EQ(1u, adapter_->GetDevices().size());
+  SimulateGattDisconnection(adapter_->GetDevices()[0]);
+
+  EXPECT_EQ(BluetoothRemoteGattService::GATT_ERROR_FAILED,
+            last_gatt_error_code_);
+
+// Dispatch write response after disconnection. See above explanation for why
+// we don't do this in macOS.
+#if !defined(OS_MACOSX)
+  SimulateGattCharacteristicWrite(/* use remembered characteristic */ nullptr);
+#endif  // !defined(OS_MACOSX)
+}
+#endif  // defined(OS_ANDROID) || defined(OS_MACOSX)
 
 #if defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)
 // Tests ReadRemoteCharacteristic and GetValue with non-empty value buffer.
@@ -482,6 +556,8 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteRemoteCharacteristic) {
   ASSERT_NO_FATAL_FAILURE(FakeCharacteristicBoilerplate(
       BluetoothRemoteGattCharacteristic::PROPERTY_WRITE));
 
+  TestBluetoothAdapterObserver observer(adapter_);
+
   uint8_t values[] = {0, 1, 2, 3, 4, 0xf, 0xf0, 0xff};
   std::vector<uint8_t> test_vector(values, values + arraysize(values));
   characteristic1_->WriteRemoteCharacteristic(
@@ -491,6 +567,10 @@ TEST_F(BluetoothRemoteGattCharacteristicTest, WriteRemoteCharacteristic) {
   SimulateGattCharacteristicWrite(characteristic1_);
 
   EXPECT_EQ(1, gatt_write_characteristic_attempts_);
+#if !defined(OS_WIN)
+  // TODO(crbug.com/653291): remove this #if once the bug on windows is fixed.
+  EXPECT_EQ(0, observer.gatt_characteristic_value_changed_count());
+#endif
   EXPECT_EQ(test_vector, last_write_value_);
 }
 #endif  // defined(OS_ANDROID) || defined(OS_MACOSX) || defined(OS_WIN)

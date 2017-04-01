@@ -32,6 +32,7 @@ class ResultsRendererTest(unittest.TestCase):
     return self.output_stream.read()
 
   def tearDown(self):
+    self.output_stream.close()
     os.remove(self.output_file)
 
   def testBasic(self):
@@ -39,12 +40,14 @@ class ResultsRendererTest(unittest.TestCase):
     value0_json = json.dumps(value0, separators=(',', ':'))
 
     results_renderer.RenderHTMLView([], self.output_stream, False)
-    self.assertEquals([],
-                      results_renderer.ReadExistingResults(self.output_stream))
+    self.output_stream.seek(0)
+    self.assertEquals([], results_renderer.ReadExistingResults(
+        self.output_stream.read()))
     results_renderer.RenderHTMLView([value0], self.output_stream, False)
+    self.output_stream.seek(0)
     self.assertEquals(
         sorted([value0]),
-        sorted(results_renderer.ReadExistingResults(self.output_stream)))
+        sorted(results_renderer.ReadExistingResults(self.output_stream.read())))
     self.assertIn(value0_json, self.GetOutputFileContent())
 
   def testExistingResults(self):
@@ -56,9 +59,10 @@ class ResultsRendererTest(unittest.TestCase):
 
     results_renderer.RenderHTMLView([value0], self.output_stream, False)
     results_renderer.RenderHTMLView([value1], self.output_stream, False)
+    self.output_stream.seek(0)
     self.assertEquals(
         sorted([value0, value1]),
-        sorted(results_renderer.ReadExistingResults(self.output_stream)))
+        sorted(results_renderer.ReadExistingResults(self.output_stream.read())))
     self.assertIn(value0_json, self.GetOutputFileContent())
     self.assertIn(value1_json, self.GetOutputFileContent())
 
@@ -71,8 +75,9 @@ class ResultsRendererTest(unittest.TestCase):
 
     results_renderer.RenderHTMLView([value0], self.output_stream, False)
     results_renderer.RenderHTMLView([value1], self.output_stream, True)
+    self.output_stream.seek(0)
     self.assertEquals(
         sorted([value1]),
-        sorted(results_renderer.ReadExistingResults(self.output_stream)))
+        sorted(results_renderer.ReadExistingResults(self.output_stream.read())))
     self.assertNotIn(value0_json, self.GetOutputFileContent())
     self.assertIn(value1_json, self.GetOutputFileContent())

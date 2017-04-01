@@ -27,7 +27,7 @@ const base::Feature kUseZoomForDsfEnabledByDefault {
 #endif
 
 bool IsUseZoomForDSFEnabledByDefault() {
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
   return true;
 #elif defined(OS_WIN)
   return base::FeatureList::IsEnabled(kUseZoomForDsfEnabledByDefault);
@@ -35,6 +35,12 @@ bool IsUseZoomForDSFEnabledByDefault() {
   return false;
 #endif
 }
+
+#if defined(ANDROID)
+const base::Feature kProgressBarCompletionResourcesBeforeDOMContentLoaded {
+    "progress-bar-completion-resources-before-domContentLoaded",
+    base::FEATURE_DISABLED_BY_DEFAULT};
+#endif
 
 }  // namespace
 
@@ -48,11 +54,11 @@ bool IsPinchToZoomEnabled() {
 
 #if defined(OS_WIN)
 
-bool IsWin32kRendererLockdownEnabled() {
+bool IsWin32kLockdownEnabled() {
   if (base::win::GetVersion() < base::win::VERSION_WIN8)
     return false;
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-  if (cmd_line->HasSwitch(switches::kDisableWin32kRendererLockDown))
+  if (cmd_line->HasSwitch(switches::kDisableWin32kLockDown))
     return false;
   return true;
 }
@@ -105,6 +111,12 @@ ProgressBarCompletion GetProgressBarCompletionPolicy() {
   if (progress_bar_completion ==
       "resourcesBeforeDOMContentLoadedAndSameOriginIframes") {
     return ProgressBarCompletion::RESOURCES_BEFORE_DCL_AND_SAME_ORIGIN_IFRAMES;
+  }
+  // The command line, which is set by the user, takes priority. Otherwise,
+  // fall back to the feature flag.
+  if (base::FeatureList::IsEnabled(
+          kProgressBarCompletionResourcesBeforeDOMContentLoaded)) {
+    return ProgressBarCompletion::RESOURCES_BEFORE_DCL;
   }
 #endif
   return ProgressBarCompletion::LOAD_EVENT;

@@ -14,36 +14,34 @@ import org.chromium.chrome.browser.tab.Tab;
  */
 public class BarOverlapTapSuppression extends ContextualSearchHeuristic {
     private final ChromeActivity mActivity;
-    private final boolean mDoesBarOverlap;
     private final boolean mIsConditionSatisfied;
+    private final boolean mIsEnabled;
     private final float mPxToDp;
 
     /**
      * Constructs a Tap suppression heuristic that handles a Tap near where the Bar shows.
      * @param selectionController The {@link ContextualSearchSelectionController}.
-     * @param x The x position of the Tap.
      * @param y The y position of the Tap.
      */
     BarOverlapTapSuppression(
-            ContextualSearchSelectionController selectionController, int x, int y) {
+            ContextualSearchSelectionController selectionController, int y) {
         // TODO(donnd): rather than getting the Activity, find a way to access the panel
         // and ask it to determine overlap.  E.g. isCoordinateInsidePeekingBarArea(x, y) modeled
         // after isCoordinateInsideBar(x, y).
         mPxToDp = selectionController.getPxToDp();
         mActivity = selectionController.getActivity();
-        mDoesBarOverlap = doesBarOverlap(x, y);
-        mIsConditionSatisfied =
-                mDoesBarOverlap && ContextualSearchFieldTrial.isBarOverlapSuppressionEnabled();
+        mIsEnabled = ContextualSearchFieldTrial.isBarOverlapSuppressionEnabled();
+        mIsConditionSatisfied = doesBarOverlap(y);
     }
 
     @Override
-    protected boolean isConditionSatisfied() {
-        return mIsConditionSatisfied;
+    protected boolean isConditionSatisfiedAndEnabled() {
+        return mIsEnabled && mIsConditionSatisfied;
     }
 
     @Override
     protected void logConditionState() {
-        if (ContextualSearchFieldTrial.isBarOverlapSuppressionEnabled()) {
+        if (mIsEnabled) {
             ContextualSearchUma.logBarOverlapSuppression(mIsConditionSatisfied);
         }
     }
@@ -52,8 +50,23 @@ public class BarOverlapTapSuppression extends ContextualSearchHeuristic {
     protected void logResultsSeen(boolean wasSearchContentViewSeen, boolean wasActivatedByTap) {
         if (ContextualSearchFieldTrial.isBarOverlapCollectionEnabled()) {
             ContextualSearchUma.logBarOverlapResultsSeen(
-                    wasSearchContentViewSeen, wasActivatedByTap, mDoesBarOverlap);
+                    wasSearchContentViewSeen, wasActivatedByTap, mIsConditionSatisfied);
         }
+    }
+
+    @Override
+    protected boolean shouldAggregateLogForTapSuppression() {
+        return true;
+    }
+
+    @Override
+    protected boolean isConditionSatisfiedForAggregateLogging() {
+        return !mIsEnabled && mIsConditionSatisfied;
+    }
+
+    @Override
+    protected void logRankerTapSuppression(ContextualSearchRankerLogger logger) {
+        logger.log(ContextualSearchRankerLogger.Feature.WAS_SCREEN_BOTTOM, mIsConditionSatisfied);
     }
 
     /**
@@ -65,17 +78,21 @@ public class BarOverlapTapSuppression extends ContextualSearchHeuristic {
         ChromeFullscreenManager fullscreenManager = mActivity.getFullscreenManager();
         if (fullscreenManager == null || currentTab == null) return 0.f;
 
-        float controlsOffset = fullscreenManager.getControlOffset();
-        float controlsHeight = fullscreenManager.getTopControlsHeight();
+        float topControlsOffset = fullscreenManager.getTopControlOffset();
+        float topControlsHeight = fullscreenManager.getTopControlsHeight();
+        float bottomControlsOffset = fullscreenManager.getBottomControlOffset();
+        float bottomControlsHeight = fullscreenManager.getBottomControlsHeight();
+
         float tabHeight = currentTab.getHeight();
-        return tabHeight - (controlsHeight + controlsOffset);
+        return (tabHeight - (topControlsHeight + topControlsOffset))
+                - (bottomControlsHeight - bottomControlsOffset);
     }
 
     /**
-     * @return Whether the Bar would overlap the given x,y coordinate when in its normal
+     * @return Whether the Bar would overlap the given y coordinate when in its normal
      *         peeking state.
      */
-    private boolean doesBarOverlap(int x, int y) {
+    private boolean doesBarOverlap(int y) {
         float contentHeightPx = getContentHeightPx();
         if (contentHeightPx == 0) return false;
 
@@ -84,12 +101,7 @@ public class BarOverlapTapSuppression extends ContextualSearchHeuristic {
         float barHeightDp = 56; // DPs
         float yDp = y * mPxToDp;
         float contentHeightDp = contentHeightPx * mPxToDp;
-        if (yDp < contentHeightDp - barHeightDp) return false;
 
-        // Is there also a horizontal overlap?
-        float overlayPanelWidth = 600;
-        Tab currentTab = mActivity.getActivityTab();
-        float overlayPanelX = (currentTab.getWidth() - overlayPanelWidth) / 2;
-        return x > overlayPanelX && x < overlayPanelX + overlayPanelWidth;
+        return yDp >= (contentHeightDp - barHeightDp);
     }
 }

@@ -37,20 +37,17 @@ namespace blink {
 
 class WebDevToolsFrontendClient;
 class WebLocalFrame;
-class WebString;
-class WebView;
 
-// WebDevToolsFrontend represents DevTools client sitting in the Glue. It provides
-// direct and delegate Apis to the host.
+// WebDevToolsFrontend represents DevTools client sitting in the Glue. It
+// provides direct and delegate Apis to the host.
 class WebDevToolsFrontend {
-public:
-    BLINK_EXPORT static WebDevToolsFrontend* create(
-        WebLocalFrame*,
-        WebDevToolsFrontendClient*);
+ public:
+  BLINK_EXPORT static WebDevToolsFrontend* create(WebLocalFrame*,
+                                                  WebDevToolsFrontendClient*);
 
-    virtual ~WebDevToolsFrontend() {}
+  virtual ~WebDevToolsFrontend() {}
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

@@ -28,8 +28,8 @@ namespace extensions {
 
 namespace {
 
-const char* kRendererDestroyed = "The tab was closed.";
-const char* kFrameRemoved = "The frame was removed.";
+const char kRendererDestroyed[] = "The tab was closed.";
+const char kFrameRemoved[] = "The frame was removed.";
 
 // A handler for a single injection request. On creation this will send the
 // injection request to the renderer, and it will be destroyed after either the
@@ -141,9 +141,9 @@ class Handler : public content::WebContentsObserver {
       // If this is the main result, we put it at index 0. Otherwise, we just
       // append it at the end.
       if (is_root_frame && !results_.empty())
-        CHECK(results_.Insert(0u, script_value->DeepCopy()));
+        CHECK(results_.Insert(0u, script_value->CreateDeepCopy()));
       else
-        results_.Append(script_value->DeepCopy());
+        results_.Append(script_value->CreateDeepCopy());
     }
 
     if (is_root_frame) {  // Only use the root frame's error and url.
@@ -168,9 +168,8 @@ class Handler : public content::WebContentsObserver {
         host_id_.type() == HostID::EXTENSIONS) {
       ScriptExecutionObserver::ExecutingScriptsMap id_map;
       id_map[host_id_.id()] = std::set<std::string>();
-      FOR_EACH_OBSERVER(
-          ScriptExecutionObserver, *script_observers_,
-          OnScriptsExecuted(web_contents(), id_map, root_frame_url_));
+      for (auto& observer : *script_observers_)
+        observer.OnScriptsExecuted(web_contents(), id_map, root_frame_url_);
     }
 
     if (!callback_.is_null())

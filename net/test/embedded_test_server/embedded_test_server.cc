@@ -11,11 +11,11 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
@@ -23,8 +23,10 @@
 #include "crypto/rsa_private_key.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
+#include "net/base/port_util.h"
 #include "net/cert/pem_tokenizer.h"
 #include "net/cert/test_root_certs.h"
+#include "net/log/net_log_source.h"
 #include "net/socket/ssl_server_socket.h"
 #include "net/socket/stream_socket.h"
 #include "net/socket/tcp_server_socket.h"
@@ -91,21 +93,38 @@ bool EmbeddedTestServer::Start() {
 bool EmbeddedTestServer::InitializeAndListen() {
   DCHECK(!Started());
 
-  listen_socket_.reset(new TCPServerSocket(nullptr, NetLog::Source()));
+  const int max_tries = 5;
+  int num_tries = 0;
+  bool is_valid_port = false;
 
-  int result = listen_socket_->ListenWithAddressAndPort("127.0.0.1", 0, 10);
-  if (result) {
-    LOG(ERROR) << "Listen failed: " << ErrorToString(result);
-    listen_socket_.reset();
-    return false;
-  }
+  do {
+    if (++num_tries > max_tries) {
+      LOG(ERROR) << "Failed to listen on a valid port after " << max_tries
+                 << " attempts.";
+      listen_socket_.reset();
+      return false;
+    }
 
-  result = listen_socket_->GetLocalAddress(&local_endpoint_);
-  if (result != OK) {
-    LOG(ERROR) << "GetLocalAddress failed: " << ErrorToString(result);
-    listen_socket_.reset();
-    return false;
-  }
+    listen_socket_.reset(new TCPServerSocket(nullptr, NetLogSource()));
+
+    int result = listen_socket_->ListenWithAddressAndPort("127.0.0.1", 0, 10);
+    if (result) {
+      LOG(ERROR) << "Listen failed: " << ErrorToString(result);
+      listen_socket_.reset();
+      return false;
+    }
+
+    result = listen_socket_->GetLocalAddress(&local_endpoint_);
+    if (result != OK) {
+      LOG(ERROR) << "GetLocalAddress failed: " << ErrorToString(result);
+      listen_socket_.reset();
+      return false;
+    }
+
+    port_ = local_endpoint_.port();
+    is_valid_port |= net::IsPortAllowedForScheme(
+        port_, is_using_ssl_ ? url::kHttpsScheme : url::kHttpScheme);
+  } while (!is_valid_port);
 
   if (is_using_ssl_) {
     base_url_ = GURL("https://" + local_endpoint_.ToString());
@@ -116,7 +135,6 @@ bool EmbeddedTestServer::InitializeAndListen() {
   } else {
     base_url_ = GURL("http://" + local_endpoint_.ToString());
   }
-  port_ = local_endpoint_.port();
 
   listen_socket_->DetachFromThread();
 
@@ -170,14 +188,13 @@ void EmbeddedTestServer::ShutdownOnIOThread() {
   DCHECK(io_thread_->task_runner()->BelongsToCurrentThread());
   weak_factory_.InvalidateWeakPtrs();
   listen_socket_.reset();
-  base::STLDeleteContainerPairSecondPointers(connections_.begin(),
-                                             connections_.end());
   connections_.clear();
 }
 
 void EmbeddedTestServer::HandleRequest(HttpConnection* connection,
                                        std::unique_ptr<HttpRequest> request) {
   DCHECK(io_thread_->task_runner()->BelongsToCurrentThread());
+  request->base_url = base_url_;
 
   for (const auto& monitor : request_monitors_)
     monitor.Run(*request);
@@ -298,22 +315,22 @@ void EmbeddedTestServer::AddDefaultHandlers(const base::FilePath& directory) {
 
 void EmbeddedTestServer::RegisterRequestHandler(
     const HandleRequestCallback& callback) {
-  // TODO(svaldez): Add check to prevent RegisterRequestHandler from being
-  // called after the server has started. https://crbug.com/546060
+  DCHECK(!io_thread_.get())
+      << "Handlers must be registered before starting the server.";
   request_handlers_.push_back(callback);
 }
 
 void EmbeddedTestServer::RegisterRequestMonitor(
     const MonitorRequestCallback& callback) {
-  // TODO(svaldez): Add check to prevent RegisterRequestMonitor from being
-  // called after the server has started. https://crbug.com/546060
+  DCHECK(!io_thread_.get())
+      << "Monitors must be registered before starting the server.";
   request_monitors_.push_back(callback);
 }
 
 void EmbeddedTestServer::RegisterDefaultHandler(
     const HandleRequestCallback& callback) {
-  // TODO(svaldez): Add check to prevent RegisterDefaultHandler from being
-  // called after the server has started. https://crbug.com/546060
+  DCHECK(!io_thread_.get())
+      << "Handlers must be registered before starting the server.";
   default_request_handlers_.push_back(callback);
 }
 
@@ -343,8 +360,6 @@ bool EmbeddedTestServer::FlushAllSocketsAndConnectionsOnUIThread() {
 }
 
 void EmbeddedTestServer::FlushAllSocketsAndConnections() {
-  base::STLDeleteContainerPairSecondPointers(connections_.begin(),
-                                             connections_.end());
   connections_.clear();
 }
 
@@ -370,10 +385,12 @@ void EmbeddedTestServer::HandleAcceptResult(
   if (is_using_ssl_)
     socket = DoSSLUpgrade(std::move(socket));
 
-  HttpConnection* http_connection = new HttpConnection(
-      std::move(socket),
-      base::Bind(&EmbeddedTestServer::HandleRequest, base::Unretained(this)));
-  connections_[http_connection->socket_.get()] = http_connection;
+  std::unique_ptr<HttpConnection> http_connection_ptr =
+      base::MakeUnique<HttpConnection>(
+          std::move(socket), base::Bind(&EmbeddedTestServer::HandleRequest,
+                                        base::Unretained(this)));
+  HttpConnection* http_connection = http_connection_ptr.get();
+  connections_[http_connection->socket_.get()] = std::move(http_connection_ptr);
 
   if (is_using_ssl_) {
     SSLServerSocket* ssl_socket =
@@ -429,18 +446,16 @@ void EmbeddedTestServer::DidClose(HttpConnection* connection) {
   DCHECK_EQ(1u, connections_.count(connection->socket_.get()));
 
   connections_.erase(connection->socket_.get());
-  delete connection;
 }
 
 HttpConnection* EmbeddedTestServer::FindConnection(StreamSocket* socket) {
   DCHECK(io_thread_->task_runner()->BelongsToCurrentThread());
 
-  std::map<StreamSocket*, HttpConnection*>::iterator it =
-      connections_.find(socket);
+  auto it = connections_.find(socket);
   if (it == connections_.end()) {
-    return NULL;
+    return nullptr;
   }
-  return it->second;
+  return it->second.get();
 }
 
 bool EmbeddedTestServer::PostTaskToIOThreadAndWait(

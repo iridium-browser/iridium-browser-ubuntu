@@ -521,6 +521,7 @@ const GoogleConfigParams kGoogleConfigs[] = {
 };
 
 const char* kGoogleStandardCollectors[] = {
+  "https://beacons.gcp.gvt2.com/domainreliability/upload",
   "https://beacons.gvt2.com/domainreliability/upload",
   "https://beacons2.gvt2.com/domainreliability/upload",
   "https://beacons3.gvt2.com/domainreliability/upload",
@@ -551,10 +552,11 @@ static std::unique_ptr<DomainReliabilityConfig> CreateGoogleConfig(
     GURL::Replacements replacements;
     replacements.SetPathStr(kGoogleOriginSpecificCollectorPathString);
     config->collectors.push_back(
-        new GURL(config->origin.ReplaceComponents(replacements)));
+        base::MakeUnique<GURL>(config->origin.ReplaceComponents(replacements)));
   }
   for (size_t i = 0; i < arraysize(kGoogleStandardCollectors); i++)
-    config->collectors.push_back(new GURL(kGoogleStandardCollectors[i]));
+    config->collectors.push_back(
+        base::MakeUnique<GURL>(kGoogleStandardCollectors[i]));
   config->success_sample_rate = 0.05;
   config->failure_sample_rate = 1.00;
   config->path_prefixes.clear();
@@ -565,13 +567,13 @@ static std::unique_ptr<DomainReliabilityConfig> CreateGoogleConfig(
 
 // static
 void GetAllGoogleConfigs(
-    std::vector<DomainReliabilityConfig*>* configs_out) {
+    std::vector<std::unique_ptr<DomainReliabilityConfig>>* configs_out) {
   configs_out->clear();
 
   for (auto& params : kGoogleConfigs) {
-    configs_out->push_back(CreateGoogleConfig(params, false).release());
+    configs_out->push_back(CreateGoogleConfig(params, false));
     if (params.duplicate_for_www)
-      configs_out->push_back(CreateGoogleConfig(params, true).release());
+      configs_out->push_back(CreateGoogleConfig(params, true));
   }
 }
 

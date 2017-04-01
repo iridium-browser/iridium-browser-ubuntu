@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/threading/thread_checker.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/network_change_notifier.h"
@@ -55,9 +56,14 @@ class DataReductionProxyBypassStats
 
   ~DataReductionProxyBypassStats() override;
 
+  // Performs initialization on the IO thread.
+  void InitializeOnIOThread();
+
   // Callback intended to be called from |DataReductionProxyNetworkDelegate|
   // when a request completes. This method is used to gather bypass stats.
-  void OnUrlRequestCompleted(const net::URLRequest* request, bool started);
+  void OnUrlRequestCompleted(const net::URLRequest* request,
+                             bool started,
+                             int net_error);
 
   // Records the last bypass reason to |bypass_type_| and sets
   // |triggering_request_| to true. A triggering request is the first request to
@@ -151,6 +157,8 @@ class DataReductionProxyBypassStats
 
   // Whether or not the data reduction proxy is unavailable.
   bool unavailable_;
+
+  base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyBypassStats);
 };

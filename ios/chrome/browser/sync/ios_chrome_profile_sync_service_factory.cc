@@ -9,7 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/time/time.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/keyed_service/ios/browser_state_dependency_manager.h"
 #include "components/network_time/network_time_tracker.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -37,6 +37,8 @@
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
 #include "url/gurl.h"
+
+using browser_sync::ProfileSyncService;
 
 namespace {
 
@@ -139,11 +141,11 @@ IOSChromeProfileSyncServiceFactory::BuildServiceInstanceFor(
   init_params.url_request_context = browser_state->GetRequestContext();
   init_params.debug_identifier = browser_state->GetDebugName();
   init_params.channel = ::GetChannel();
-  init_params.db_thread =
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::DB);
-  init_params.file_thread =
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::FILE);
-  init_params.blocking_pool = web::WebThread::GetBlockingPool();
+  base::SequencedWorkerPool* blocking_pool = web::WebThread::GetBlockingPool();
+  init_params.blocking_task_runner =
+      blocking_pool->GetSequencedTaskRunnerWithShutdownBehavior(
+          blocking_pool->GetSequenceToken(),
+          base::SequencedWorkerPool::SKIP_ON_SHUTDOWN);
 
   auto pss = base::MakeUnique<ProfileSyncService>(std::move(init_params));
 

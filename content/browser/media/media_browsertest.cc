@@ -13,6 +13,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "media/base/media_switches.h"
 #include "media/base/test_data_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -26,6 +27,7 @@ const char MediaBrowserTest::kFailed[] = "FAILED";
 void MediaBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
   command_line->AppendSwitch(
       switches::kDisableGestureRequirementForMediaPlayback);
+  command_line->AppendSwitch(switches::kEnableVp9InMp4);
 }
 
 void MediaBrowserTest::RunMediaTestPage(const std::string& html_page,
@@ -53,13 +55,13 @@ std::string MediaBrowserTest::RunTest(const GURL& gurl,
   VLOG(0) << "Running test URL: " << gurl;
   TitleWatcher title_watcher(shell()->web_contents(),
                              base::ASCIIToUTF16(expected_title));
-  AddWaitForTitles(&title_watcher);
+  AddTitlesToAwait(&title_watcher);
   NavigateToURL(shell(), gurl);
   base::string16 result = title_watcher.WaitAndGetTitle();
   return base::UTF16ToASCII(result);
 }
 
-void MediaBrowserTest::AddWaitForTitles(content::TitleWatcher* title_watcher) {
+void MediaBrowserTest::AddTitlesToAwait(content::TitleWatcher* title_watcher) {
   title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEnded));
   title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kError));
   title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kFailed));
@@ -82,14 +84,6 @@ class MediaTest : public testing::WithParamInterface<bool>,
     PlayMedia("video", media_file, http);
   }
 
-  // Run specified color format test with the expected result.
-  void RunColorFormatTest(const std::string& media_file,
-                          const std::string& expected) {
-    base::FilePath test_file_path =
-        media::GetTestDataFilePath("blackwhite.html");
-    RunTest(GetFileUrlWithQuery(test_file_path, media_file), expected);
-  }
-
   void PlayMedia(const std::string& tag,
                  const std::string& media_file,
                  bool http) {
@@ -109,6 +103,8 @@ class MediaTest : public testing::WithParamInterface<bool>,
   }
 };
 
+// Android doesn't support Theora.
+#if !defined(OS_ANDROID)
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearTheora) {
   PlayVideo("bear.ogv", GetParam());
 }
@@ -116,6 +112,7 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearTheora) {
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearSilentTheora) {
   PlayVideo("bear_silent.ogv", GetParam());
 }
+#endif  // !defined(OS_ANDROID)
 
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearWebm) {
   PlayVideo("bear.webm", GetParam());
@@ -133,9 +130,21 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearSilentWebm) {
   PlayVideo("bear_silent.webm", GetParam());
 }
 
+// We don't expect android devices to support highbit yet.
+#if defined(ARCH_CPU_X86_FAMILY) && !defined(OS_ANDROID)
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearHighBitDepthVP9) {
+  PlayVideo("bear-320x180-hi10p-vp9.webm", GetParam());
+}
+
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoBear12DepthVP9) {
+  PlayVideo("bear-320x180-hi12p-vp9.webm", GetParam());
+}
+#endif
+
 #if defined(USE_PROPRIETARY_CODECS)
-// Crashes on Mac only.  http://crbug.com/621857
-#if defined(OS_MACOSX)
+// Crashes on Mac http://crbug.com/621857
+// Fails on Android http://crbug.com/682387
+#if defined(OS_MACOSX) || defined(OS_ANDROID)
 #define MAYBE_VideoBearMp4 DISABLED_VideoBearMp4
 #else
 #define MAYBE_VideoBearMp4 VideoBearMp4
@@ -144,9 +153,16 @@ IN_PROC_BROWSER_TEST_P(MediaTest, MAYBE_VideoBearMp4) {
   PlayVideo("bear.mp4", GetParam());
 }
 
+IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearMp4Vp9) {
+  PlayVideo("bear-320x240-v_frag-vp9.mp4", GetParam());
+}
+
+// Android devices usually only support baseline, main and high.
+#if !defined(OS_ANDROID)
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearHighBitDepthMp4) {
   PlayVideo("bear-320x180-hi10p.mp4", GetParam());
 }
+#endif  // !defined(OS_ANDROID)
 
 // Crashes on Mac only.  http://crbug.com/621857
 #if defined(OS_MACOSX)
@@ -211,13 +227,12 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoBear3gpAmrnbMpeg4) {
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearWavGsmms) {
   PlayAudio("bear_gsm_ms.wav", GetParam());
 }
-
-IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearFlac) {
-  PlayAudio("bear.flac", GetParam());
-}
 #endif  // defined(USE_PROPRIETARY_CODECS)
 #endif  // defined(OS_CHROMEOS)
 
+IN_PROC_BROWSER_TEST_P(MediaTest, AudioBearFlac) {
+  PlayAudio("bear.flac", GetParam());
+}
 
 IN_PROC_BROWSER_TEST_P(MediaTest, VideoBearWavAlaw) {
   PlayAudio("bear_alaw.wav", GetParam());
@@ -245,64 +260,12 @@ IN_PROC_BROWSER_TEST_P(MediaTest, VideoTulipWebm) {
 
 // Covers tear-down when navigating away as opposed to browser exiting.
 IN_PROC_BROWSER_TEST_F(MediaTest, Navigate) {
-  PlayVideo("bear.ogv", false);
+  PlayVideo("bear.webm", false);
   NavigateToURL(shell(), GURL(url::kAboutBlankURL));
   EXPECT_FALSE(shell()->web_contents()->IsCrashed());
 }
 
 INSTANTIATE_TEST_CASE_P(File, MediaTest, ::testing::Values(false));
 INSTANTIATE_TEST_CASE_P(Http, MediaTest, ::testing::Values(true));
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv420pTheora) {
-  RunColorFormatTest("yuv420p.ogv", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv422pTheora) {
-  RunColorFormatTest("yuv422p.ogv", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv444pTheora) {
-  RunColorFormatTest("yuv444p.ogv", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv420pVp8) {
-  RunColorFormatTest("yuv420p.webm", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv444pVp9) {
-  RunColorFormatTest("yuv444p.webm", "ENDED");
-}
-
-#if defined(USE_PROPRIETARY_CODECS)
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv420pH264) {
-  RunColorFormatTest("yuv420p.mp4", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv420pRec709H264) {
-  RunColorFormatTest("yuv420p_rec709.mp4", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv420pHighBitDepth) {
-  RunColorFormatTest("yuv420p_hi10p.mp4", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuvj420pH264) {
-  RunColorFormatTest("yuvj420p.mp4", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv422pH264) {
-  RunColorFormatTest("yuv422p.mp4", kEnded);
-}
-
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv444pH264) {
-  RunColorFormatTest("yuv444p.mp4", kEnded);
-}
-
-#if defined(OS_CHROMEOS)
-IN_PROC_BROWSER_TEST_F(MediaTest, Yuv420pMpeg4) {
-  RunColorFormatTest("yuv420p.avi", kEnded);
-}
-#endif  // defined(OS_CHROMEOS)
-#endif  // defined(USE_PROPRIETARY_CODECS)
 
 }  // namespace content

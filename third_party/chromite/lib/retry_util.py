@@ -6,11 +6,13 @@
 
 from __future__ import print_function
 
+import random
 import sys
 import time
 
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import metrics
 
 
 def GenericRetry(handler, max_retry, functor, *args, **kwargs):
@@ -32,6 +34,7 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
       the command before giving up.  Worst case, the command is invoked
       (max_retry + 1) times before failing.
     functor: A callable to pass args and kwargs to.
+    log_all_retries: when True, log all retries.
     args: Positional args passed to functor.
     kwargs: Optional args passed to functor.
     sleep: Optional keyword.  Multiplier for how long to sleep between
@@ -49,6 +52,12 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
                                       retries. If True, the first exception
                                       that was encountered. If False, the
                                       final one. Default: True.
+    mon_name: Optional metrics name (string) to count. If provided, increment
+              count on this name for every call.
+    mon_retry_name: Optional retry_name (string) to count. If provided,
+                    increment count on this name for every retry call.
+    mon_fields: Optional fields dict associated with mon_name and
+                mon_retry_name.
 
   Returns:
     Whatever functor(*args, **kwargs) returns.
@@ -58,7 +67,13 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
       isn't suppressed is raised.  Note that the first exception encountered
       is what's thrown.
   """
+  def delay():
+    """'Jitter' the delay, up to 50% in either direction."""
+    random_delay = random.uniform(.5 * delay_sec, 1.5 * delay_sec)
+    logging.debug('Retrying in %f seconds...', random_delay)
+    time.sleep(random_delay)
 
+  log_all_retries = kwargs.pop('log_all_retries', False)
   sleep = kwargs.pop('sleep', 0)
   if max_retry < 0:
     raise ValueError('max_retry needs to be zero or more: %s' % max_retry)
@@ -73,11 +88,24 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
 
   raise_first_exception_on_failure = kwargs.pop(
       'raise_first_exception_on_failure', True)
+  delay_sec = kwargs.pop('delay_sec', 0)
+  exception_to_raise = kwargs.pop('exception_to_raise', None)
+
+  mon_name = kwargs.pop('mon_name', None)
+  mon_retry_name = kwargs.pop('mon_retry_name', None)
+  mon_fields = kwargs.pop('mon_fields', None)
 
   attempt = 0
 
   exc_info = None
   for attempt in xrange(max_retry + 1):
+    if attempt > 0 and delay_sec:
+      delay()
+
+    if attempt and log_all_retries:
+      fname = functor.__name__ if hasattr(functor, '__name__') else "<nameless>"
+      logging.debug('retrying %s (attempt %d)', fname, attempt + 1)
+
     if attempt and sleep:
       if backoff_factor > 1:
         sleep_time = sleep * backoff_factor ** (attempt - 1)
@@ -85,6 +113,12 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
         sleep_time = sleep * attempt
       time.sleep(sleep_time)
     try:
+      if mon_name is not None:
+        metrics.Counter(mon_name).increment(fields=mon_fields)
+
+      if attempt > 0 and mon_retry_name is not None:
+        metrics.Counter(mon_retry_name).increment(fields=mon_fields)
+
       ret = functor(*args, **kwargs)
       success = True
       break
@@ -92,7 +126,14 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
       # Note we're not snagging BaseException, so MemoryError/KeyboardInterrupt
       # and friends don't enter this except block.
       if not handler(e):
-        raise
+        logging.debug('ending retries with error: %s(%s)', e.__class__, e)
+        if exception_to_raise:
+          raise exception_to_raise(
+              '%s, %s: %s' % (str(e), exc_info[0], exc_info[1]))
+        else:
+          raise
+
+      logging.debug('%s(%s)', e.__class__, e)
       # If raise_first_exception_on_failure, we intentionally ignore
       # any failures in later attempts since we'll throw the original
       # failure if all retries fail.
@@ -103,7 +144,10 @@ def GenericRetry(handler, max_retry, functor, *args, **kwargs):
     success_functor(attempt + 1)
     return ret
 
-  raise exc_info[0], exc_info[1], exc_info[2]
+  if exception_to_raise:
+    raise exception_to_raise('%s: %s' % (exc_info[0], exc_info[1]))
+  else:
+    raise exc_info[0], exc_info[1], exc_info[2]
 
 
 def RetryException(exc_retry, max_retry, functor, *args, **kwargs):

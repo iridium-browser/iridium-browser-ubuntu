@@ -58,6 +58,14 @@ class MimeHandlerViewGuest :
 
   static const char Type[];
 
+  // BrowserPluginGuestDelegate overrides.
+  bool CanUseCrossProcessFrames() override;
+  bool CanBeEmbeddedInsideCrossProcessFrames() override;
+  content::RenderWidgetHost* GetOwnerRenderWidgetHost() override;
+  content::SiteInstance* GetOwnerSiteInstance() override;
+
+  void SetEmbedderFrame(int process_id, int routing_id);
+
  protected:
   explicit MimeHandlerViewGuest(content::WebContents* owner_web_contents);
   ~MimeHandlerViewGuest() override;
@@ -87,6 +95,7 @@ class MimeHandlerViewGuest :
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) final;
   bool SaveFrame(const GURL& url, const content::Referrer& referrer) final;
+  void OnRenderFrameHostDeleted(int process_id, int routing_id) final;
 
   // content::WebContentsObserver implementation.
   void DocumentOnLoadCompletedInMainFrame() final;
@@ -97,6 +106,10 @@ class MimeHandlerViewGuest :
   std::unique_ptr<MimeHandlerViewGuestDelegate> delegate_;
   std::unique_ptr<StreamContainer> stream_;
   std::string view_id_;
+
+  int embedder_frame_process_id_;
+  int embedder_frame_routing_id_;
+  int embedder_widget_routing_id_;
 
   DISALLOW_COPY_AND_ASSIGN(MimeHandlerViewGuest);
 };

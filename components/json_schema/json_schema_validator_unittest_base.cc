@@ -13,6 +13,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -57,12 +58,12 @@ base::Value* LoadValue(const std::string& filename, base::Value::Type type) {
 
 base::ListValue* LoadList(const std::string& filename) {
   return static_cast<base::ListValue*>(
-      LoadValue(filename, base::Value::TYPE_LIST));
+      LoadValue(filename, base::Value::Type::LIST));
 }
 
 base::DictionaryValue* LoadDictionary(const std::string& filename) {
   return static_cast<base::DictionaryValue*>(
-      LoadValue(filename, base::Value::TYPE_DICTIONARY));
+      LoadValue(filename, base::Value::Type::DICTIONARY));
 }
 
 }  // namespace
@@ -98,7 +99,7 @@ void JSONSchemaValidatorTestBase::TestComplex() {
   ExpectValid(TEST_SOURCE, instance.get(), schema.get(), NULL);
   instance->Remove(instance->GetSize() - 1, NULL);
   ExpectValid(TEST_SOURCE, instance.get(), schema.get(), NULL);
-  instance->Append(new base::DictionaryValue());
+  instance->Append(base::MakeUnique<base::DictionaryValue>());
   ExpectNotValid(TEST_SOURCE, instance.get(), schema.get(), NULL, "1",
                  JSONSchemaValidator::FormatErrorMessage(
                      JSONSchemaValidator::kInvalidType,

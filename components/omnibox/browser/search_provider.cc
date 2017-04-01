@@ -515,7 +515,7 @@ void SearchProvider::UpdateMatches() {
     // relevances with minimal impact, preserving other suggested relevances.
     const TemplateURL* keyword_url = providers_.GetKeywordProviderURL();
     const bool is_extension_keyword = (keyword_url != NULL) &&
-        (keyword_url->GetType() == TemplateURL::OMNIBOX_API_EXTENSION);
+        (keyword_url->type() == TemplateURL::OMNIBOX_API_EXTENSION);
     if ((keyword_url != NULL) && !is_extension_keyword &&
         (FindTopMatch() == matches_.end())) {
       // In non-extension keyword mode, disregard the keyword verbatim suggested
@@ -890,8 +890,12 @@ std::unique_ptr<net::URLFetcher> SearchProvider::CreateSuggestFetcher(
   fetcher->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   // Add Chrome experiment state to the request headers.
   net::HttpRequestHeaders headers;
-  variations::AppendVariationHeaders(
-      fetcher->GetOriginalURL(), client()->IsOffTheRecord(), false, &headers);
+  // Note: It's OK to pass |is_signed_in| false if it's unknown, as it does
+  // not affect transmission of experiments coming from the variations server.
+  bool is_signed_in = false;
+  variations::AppendVariationHeaders(fetcher->GetOriginalURL(),
+                                     client()->IsOffTheRecord(), false,
+                                     is_signed_in, &headers);
   fetcher->SetExtraRequestHeaders(headers.ToString());
   fetcher->Start();
   return fetcher;
@@ -954,7 +958,7 @@ void SearchProvider::ConvertResultsToAutocompleteMatches() {
     // to the keyword verbatim search query.  Do not create other matches
     // of type SEARCH_OTHER_ENGINE.
     if (keyword_url &&
-        (keyword_url->GetType() != TemplateURL::OMNIBOX_API_EXTENSION)) {
+        (keyword_url->type() != TemplateURL::OMNIBOX_API_EXTENSION)) {
       bool keyword_relevance_from_server;
       const int keyword_verbatim_relevance =
           GetKeywordVerbatimRelevance(&keyword_relevance_from_server);

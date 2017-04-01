@@ -5,9 +5,9 @@
 #ifndef COMPONENTS_SYNC_ENGINE_COMMIT_QUEUE_H_
 #define COMPONENTS_SYNC_ENGINE_COMMIT_QUEUE_H_
 
-#include "components/sync/core/non_blocking_sync_common.h"
+#include "components/sync/engine/non_blocking_sync_common.h"
 
-namespace syncer_v2 {
+namespace syncer {
 
 // Interface used by a synced data type to issue requests to the sync backend.
 class CommitQueue {
@@ -19,6 +19,6 @@ class CommitQueue {
   virtual void EnqueueForCommit(const CommitRequestDataList& list) = 0;
 };
 
-}  // namespace syncer_v2
+}  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_ENGINE_COMMIT_QUEUE_H_

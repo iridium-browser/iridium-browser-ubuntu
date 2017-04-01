@@ -4,12 +4,13 @@
 
 #include "chrome/browser/ui/webui/policy_ui.h"
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/policy_ui_handler.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/browser_resources.h"
-#include "grit/components_strings.h"
 
 namespace {
 
@@ -20,6 +21,7 @@ content::WebUIDataSource* CreatePolicyUIHtmlSource() {
   source->AddLocalizedString("filterPlaceholder",
                              IDS_POLICY_FILTER_PLACEHOLDER);
   source->AddLocalizedString("reloadPolicies", IDS_POLICY_RELOAD_POLICIES);
+  source->AddLocalizedString("chromeForWork", IDS_POLICY_CHROME_FOR_WORK);
   source->AddLocalizedString("status", IDS_POLICY_STATUS);
   source->AddLocalizedString("statusDevice", IDS_POLICY_STATUS_DEVICE);
   source->AddLocalizedString("statusUser", IDS_POLICY_STATUS_USER);
@@ -52,7 +54,7 @@ content::WebUIDataSource* CreatePolicyUIHtmlSource() {
 }  // namespace
 
 PolicyUI::PolicyUI(content::WebUI* web_ui) : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(new PolicyUIHandler);
+  web_ui->AddMessageHandler(base::MakeUnique<PolicyUIHandler>());
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui),
                                 CreatePolicyUIHtmlSource());
 }

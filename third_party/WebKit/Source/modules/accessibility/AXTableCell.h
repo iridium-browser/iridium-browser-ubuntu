@@ -35,40 +35,46 @@ namespace blink {
 
 class AXObjectCacheImpl;
 
-class AXTableCell : public AXLayoutObject {
-    WTF_MAKE_NONCOPYABLE(AXTableCell);
+class MODULES_EXPORT AXTableCell : public AXLayoutObject {
+  WTF_MAKE_NONCOPYABLE(AXTableCell);
 
-protected:
-    AXTableCell(LayoutObject*, AXObjectCacheImpl&);
+ protected:
+  AXTableCell(LayoutObject*, AXObjectCacheImpl&);
 
-public:
-    static AXTableCell* create(LayoutObject*, AXObjectCacheImpl&);
-    ~AXTableCell() override;
+ public:
+  static AXTableCell* create(LayoutObject*, AXObjectCacheImpl&);
+  ~AXTableCell() override;
 
-    bool isTableCell() const final;
+  bool isTableCell() const final;
 
-    // fills in the start location and row span of cell
-    virtual void rowIndexRange(std::pair<unsigned, unsigned>& rowRange);
-    // fills in the start location and column span of cell
-    virtual void columnIndexRange(std::pair<unsigned, unsigned>& columnRange);
-    // In the case of cells that act as row or column headers.
-    SortDirection getSortDirection() const final;
-    virtual AccessibilityRole scanToDecideHeaderRole();
+  // fills in the start location and row span of cell
+  virtual void rowIndexRange(std::pair<unsigned, unsigned>& rowRange);
+  // fills in the start location and column span of cell
+  virtual void columnIndexRange(std::pair<unsigned, unsigned>& columnRange);
+  // In the case of cells that act as row or column headers.
+  SortDirection getSortDirection() const final;
+  virtual AccessibilityRole scanToDecideHeaderRole();
 
-protected:
-    virtual AXObject* parentTable() const;
-    AccessibilityRole determineAccessibilityRole() final;
+  unsigned ariaColumnIndex() const;
+  unsigned ariaRowIndex() const;
+  void setARIAColIndexFromRow(int index) { m_ariaColIndexFromRow = index; }
 
-private:
-    bool isTableHeaderCell() const;
-    bool isRowHeaderCell() const;
-    bool isColumnHeaderCell() const;
+ protected:
+  virtual AXObject* parentTable() const;
+  AccessibilityRole determineAccessibilityRole() final;
 
-    bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const final;
+ private:
+  bool isTableHeaderCell() const;
+  bool isRowHeaderCell() const;
+  bool isColumnHeaderCell() const;
+
+  bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const final;
+
+  unsigned m_ariaColIndexFromRow;
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXTableCell, isTableCell());
 
-} // namespace blink
+}  // namespace blink
 
-#endif // AXTableCell_h
+#endif  // AXTableCell_h

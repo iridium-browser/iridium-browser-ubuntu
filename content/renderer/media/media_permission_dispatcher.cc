@@ -16,17 +16,26 @@ namespace {
 
 using Type = media::MediaPermission::Type;
 
-blink::mojom::PermissionName MediaPermissionTypeToPermissionName(Type type) {
+blink::mojom::PermissionDescriptorPtr MediaPermissionTypeToPermissionDescriptor(
+    Type type) {
+  auto descriptor = blink::mojom::PermissionDescriptor::New();
   switch (type) {
     case Type::PROTECTED_MEDIA_IDENTIFIER:
-      return blink::mojom::PermissionName::PROTECTED_MEDIA_IDENTIFIER;
+      descriptor->name =
+          blink::mojom::PermissionName::PROTECTED_MEDIA_IDENTIFIER;
+      break;
     case Type::AUDIO_CAPTURE:
-      return blink::mojom::PermissionName::AUDIO_CAPTURE;
+      descriptor->name = blink::mojom::PermissionName::AUDIO_CAPTURE;
+      break;
     case Type::VIDEO_CAPTURE:
-      return blink::mojom::PermissionName::VIDEO_CAPTURE;
+      descriptor->name = blink::mojom::PermissionName::VIDEO_CAPTURE;
+      break;
+    default:
+      NOTREACHED() << type;
+      descriptor->name =
+          blink::mojom::PermissionName::PROTECTED_MEDIA_IDENTIFIER;
   }
-  NOTREACHED();
-  return blink::mojom::PermissionName::PROTECTED_MEDIA_IDENTIFIER;
+  return descriptor;
 }
 
 }  // namespace
@@ -66,13 +75,14 @@ void MediaPermissionDispatcher::HasPermission(
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
 
   if (!permission_service_)
-    connect_to_service_cb_.Run(mojo::GetProxy(&permission_service_));
+    connect_to_service_cb_.Run(mojo::MakeRequest(&permission_service_));
 
   int request_id = RegisterCallback(permission_status_cb);
   DVLOG(2) << __func__ << ": request ID " << request_id;
 
   permission_service_->HasPermission(
-      MediaPermissionTypeToPermissionName(type), url::Origin(security_origin),
+      MediaPermissionTypeToPermissionDescriptor(type),
+      url::Origin(security_origin),
       base::Bind(&MediaPermissionDispatcher::OnPermissionStatus, weak_ptr_,
                  request_id));
 }
@@ -92,13 +102,14 @@ void MediaPermissionDispatcher::RequestPermission(
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
 
   if (!permission_service_)
-    connect_to_service_cb_.Run(mojo::GetProxy(&permission_service_));
+    connect_to_service_cb_.Run(mojo::MakeRequest(&permission_service_));
 
   int request_id = RegisterCallback(permission_status_cb);
   DVLOG(2) << __func__ << ": request ID " << request_id;
 
   permission_service_->RequestPermission(
-      MediaPermissionTypeToPermissionName(type), url::Origin(security_origin),
+      MediaPermissionTypeToPermissionDescriptor(type),
+      url::Origin(security_origin),
       blink::WebUserGestureIndicator::isProcessingUserGesture(),
       base::Bind(&MediaPermissionDispatcher::OnPermissionStatus, weak_ptr_,
                  request_id));

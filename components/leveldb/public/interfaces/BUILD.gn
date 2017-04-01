@@ -13,5 +13,7 @@ mojom("interfaces") {
     "//components/filesystem/public/interfaces",
   ]
 
-  use_new_wrapper_types = false
+  public_deps = [
+    "//mojo/common:common_custom_types",
+  ]
 }

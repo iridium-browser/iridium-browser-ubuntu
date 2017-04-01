@@ -11,7 +11,7 @@
 
 #include "base/macros.h"
 #include "base/strings/string16.h"
-#include "components/security_state/security_state_model.h"
+#include "components/security_state/core/security_state.h"
 #include "url/gurl.h"
 
 namespace gfx {
@@ -23,7 +23,7 @@ enum class VectorIconId;
 // from the navigation controller returned by GetNavigationController().
 class ToolbarModel {
  public:
-  virtual ~ToolbarModel();
+  virtual ~ToolbarModel() = default;
 
   // Returns a formatted URL for display in the toolbar. The formatting
   // includes:
@@ -40,17 +40,17 @@ class ToolbarModel {
   // |ignore_editing| is true, the result reflects the underlying state of the
   // page without regard to any user edits that may be in progress in the
   // omnibox.
-  virtual security_state::SecurityStateModel::SecurityLevel GetSecurityLevel(
+  virtual security_state::SecurityLevel GetSecurityLevel(
       bool ignore_editing) const = 0;
 
-  // Returns the resource_id of the icon to show to the left of the address,
-  // based on the current URL.  When search term replacement is active, this
-  // returns a search icon.  This doesn't cover specialized icons while the
-  // user is editing; see OmniboxView::GetIcon().
-  virtual int GetIcon() const = 0;
-
-  // Like GetIcon(), but gets the vector asset ID.
+  // Returns the id of the icon to show to the left of the address, based on the
+  // current URL.  When search term replacement is active, this returns a search
+  // icon.  This doesn't cover specialized icons while the user is editing; see
+  // OmniboxView::GetVectorIcon().
   virtual gfx::VectorIconId GetVectorIcon() const = 0;
+
+  // Returns text for the omnibox secure verbose chip.
+  virtual base::string16 GetSecureVerboseText() const = 0;
 
   // Returns the name of the EV cert holder.  This returns an empty string if
   // the security level is not EV_SECURE.
@@ -66,21 +66,11 @@ class ToolbarModel {
   }
   bool input_in_progress() const { return input_in_progress_; }
 
-  // Whether URL replacement should be enabled.
-  // TODO(treib,pkasting): Remove this. crbug.com/627747
-  void set_url_replacement_enabled(bool enabled) {
-    url_replacement_enabled_ = enabled;
-  }
-  bool url_replacement_enabled() const {
-    return url_replacement_enabled_;
-  }
-
  protected:
-  ToolbarModel();
+  ToolbarModel() : input_in_progress_(false) {}
 
  private:
   bool input_in_progress_;
-  bool url_replacement_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(ToolbarModel);
 };

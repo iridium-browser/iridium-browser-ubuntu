@@ -7,12 +7,11 @@
 #include <AclAPI.h>
 #include <stddef.h>
 
-#include <memory>
 #include <utility>
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/stl_util.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
@@ -54,8 +53,7 @@ enum {
 // Helper structure that allows the Broker to associate a job notification
 // with a job object and with a policy.
 struct JobTracker {
-  JobTracker(base::win::ScopedHandle job,
-             scoped_refptr<sandbox::PolicyBase> policy)
+  JobTracker(base::win::ScopedHandle job, sandbox::PolicyBase* policy)
       : job(std::move(job)), policy(policy) {}
   ~JobTracker() {
     FreeResources();
@@ -66,7 +64,7 @@ struct JobTracker {
   void FreeResources();
 
   base::win::ScopedHandle job;
-  scoped_refptr<sandbox::PolicyBase> policy;
+  sandbox::PolicyBase* policy;
 };
 
 void JobTracker::FreeResources() {
@@ -80,7 +78,8 @@ void JobTracker::FreeResources() {
 
     // In OnJobEmpty() we don't actually use the job handle directly.
     policy->OnJobEmpty(stale_job_handle);
-    policy = nullptr;
+    policy->Release();
+    policy = NULL;
   }
 }
 
@@ -88,13 +87,12 @@ void JobTracker::FreeResources() {
 
 namespace sandbox {
 
-BrokerServicesBase::BrokerServicesBase() : thread_pool_(NULL) {
-}
+BrokerServicesBase::BrokerServicesBase() {}
 
 // The broker uses a dedicated worker thread that services the job completion
 // port to perform policy notifications and associated cleanup tasks.
 ResultCode BrokerServicesBase::Init() {
-  if (job_port_.IsValid() || (NULL != thread_pool_))
+  if (job_port_.IsValid() || thread_pool_)
     return SBOX_ERROR_UNEXPECTED_CALL;
 
   ::InitializeCriticalSection(&lock_);
@@ -136,19 +134,16 @@ BrokerServicesBase::~BrokerServicesBase() {
     return;
   }
 
-  base::STLDeleteElements(&tracker_list_);
-  delete thread_pool_;
+  tracker_list_.clear();
+  thread_pool_.reset();
 
   ::DeleteCriticalSection(&lock_);
 }
 
-scoped_refptr<TargetPolicy> BrokerServicesBase::CreatePolicy() {
+TargetPolicy* BrokerServicesBase::CreatePolicy() {
   // If you change the type of the object being created here you must also
   // change the downcast to it in SpawnTarget().
-  scoped_refptr<TargetPolicy> policy(new PolicyBase);
-  // PolicyBase starts with refcount 1.
-  policy->Release();
-  return policy;
+  return new PolicyBase;
 }
 
 // The worker thread stays in a loop waiting for asynchronous notifications
@@ -271,7 +266,7 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
 // process inside the sandbox.
 ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
                                            const wchar_t* command_line,
-                                           scoped_refptr<TargetPolicy> policy,
+                                           TargetPolicy* policy,
                                            ResultCode* last_warning,
                                            DWORD* last_error,
                                            PROCESS_INFORMATION* target_info) {
@@ -292,7 +287,7 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   AutoLock lock(&lock_);
 
   // This downcast is safe as long as we control CreatePolicy()
-  scoped_refptr<PolicyBase> policy_base(static_cast<PolicyBase*>(policy.get()));
+  PolicyBase* policy_base = static_cast<PolicyBase*>(policy);
 
   // Construct the tokens and the job object that we are going to associate
   // with the soon to be created target process.
@@ -406,15 +401,15 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
   // Construct the thread pool here in case it is expensive.
   // The thread pool is shared by all the targets
-  if (NULL == thread_pool_)
-    thread_pool_ = new Win2kThreadPool();
+  if (!thread_pool_)
+    thread_pool_ = base::MakeUnique<Win2kThreadPool>();
 
   // Create the TargetProcess object and spawn the target suspended. Note that
   // Brokerservices does not own the target object. It is owned by the Policy.
   base::win::ScopedProcessInformation process_info;
   TargetProcess* target =
       new TargetProcess(std::move(initial_token), std::move(lockdown_token),
-                        job.Get(), thread_pool_);
+                        job.Get(), thread_pool_.get());
 
   result = target->Create(exe_path, command_line, inherit_handles, startup_info,
                           &process_info, last_error);
@@ -444,9 +439,10 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
   // We are going to keep a pointer to the policy because we'll call it when
   // the job object generates notifications using the completion port.
+  policy_base->AddRef();
   if (job.IsValid()) {
-    std::unique_ptr<JobTracker> tracker(
-        new JobTracker(std::move(job), policy_base));
+    std::unique_ptr<JobTracker> tracker =
+        base::MakeUnique<JobTracker>(std::move(job), policy_base);
 
     // There is no obvious recovery after failure here. Previous version with
     // SpawnCleanup() caused deletion of TargetProcess twice. crbug.com/480639
@@ -455,7 +451,7 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
     // Save the tracker because in cleanup we might need to force closing
     // the Jobs.
-    tracker_list_.push_back(tracker.release());
+    tracker_list_.push_back(std::move(tracker));
     child_process_ids_.insert(process_info.process_id());
   } else {
     // We have to signal the event once here because the completion port will

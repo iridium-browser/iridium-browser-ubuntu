@@ -4,8 +4,14 @@
 
 #include "ash/common/system/chromeos/screen_security/screen_tray_item.h"
 #include "ash/common/system/tray/system_tray.h"
+#include "ash/common/wm/overview/window_selector_controller.h"
+#include "ash/common/wm_shell.h"
 #include "ash/test/ash_test_base.h"
+#include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/ash/multi_user/user_switch_util.h"
+#include "chrome/browser/ui/simple_message_box.h"
+#include "ui/aura/window.h"
 
 namespace ash {
 
@@ -65,23 +71,31 @@ class TrySwitchingUserTest : public ash::test::AshTestBase {
   // The passed |action| type parameter defines the outcome (which will be
   // checked) and the action the user will choose.
   void SwitchUser(ActionType action) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::Bind(&CloseMessageBox, action));
     TrySwitchingActiveUser(base::Bind(&TrySwitchingUserTest::SwitchCallback,
                                       base::Unretained(this)));
-    switch (action) {
-      case NO_DIALOG:
-        EXPECT_TRUE(!TestAndTerminateDesktopCastingWarningForTest(true));
-        return;
-      case ACCEPT_DIALOG:
-        EXPECT_TRUE(TestAndTerminateDesktopCastingWarningForTest(true));
-        return;
-      case DECLINE_DIALOG:
-        EXPECT_TRUE(TestAndTerminateDesktopCastingWarningForTest(false));
-        return;
-    }
+    base::RunLoop().RunUntilIdle();
   }
 
   // Called when the user will get actually switched.
   void SwitchCallback() { switch_callback_hit_count_++; }
+
+  // Methods needed to test with overview mode.
+  const WindowSelectorController* window_selector_controller() const {
+    return WmShell::Get()->window_selector_controller();
+  }
+  WindowSelectorController* window_selector_controller() {
+    return const_cast<WindowSelectorController*>(
+        const_cast<const TrySwitchingUserTest*>(this)
+            ->window_selector_controller());
+  }
+  bool ToggleOverview() {
+    return window_selector_controller()->ToggleOverview();
+  }
+  bool IsSelecting() const {
+    return window_selector_controller()->IsSelecting();
+  }
 
   // Various counter accessors.
   int stop_capture_callback_hit_count() const {
@@ -93,6 +107,20 @@ class TrySwitchingUserTest : public ash::test::AshTestBase {
   int switch_callback_hit_count() const { return switch_callback_hit_count_; }
 
  private:
+  static void CloseMessageBox(ActionType action) {
+    switch (action) {
+      case NO_DIALOG:
+        EXPECT_FALSE(chrome::CloseMessageBoxForTest(true));
+        return;
+      case ACCEPT_DIALOG:
+        EXPECT_TRUE(chrome::CloseMessageBoxForTest(true));
+        return;
+      case DECLINE_DIALOG:
+        EXPECT_TRUE(chrome::CloseMessageBoxForTest(false));
+        return;
+    }
+  }
+
   // The two items from the SystemTray for the screen capture / share
   // functionality.
   ScreenTrayItem* capture_item_;
@@ -209,6 +237,18 @@ TEST_F(TrySwitchingUserTest, BothActiveAccepted) {
   EXPECT_EQ(1, switch_callback_hit_count());
   EXPECT_EQ(1, stop_capture_callback_hit_count());
   EXPECT_EQ(1, stop_share_callback_hit_count());
+}
+
+// Test that overview mode is dismissed before switching user profile.
+TEST_F(TrySwitchingUserTest, OverviewModeDismissed) {
+  EXPECT_EQ(0, switch_callback_hit_count());
+  gfx::Rect bounds(0, 0, 100, 100);
+  std::unique_ptr<aura::Window> w(CreateTestWindowInShellWithBounds(bounds));
+  ASSERT_TRUE(ToggleOverview());
+  ASSERT_TRUE(IsSelecting());
+  SwitchUser(TrySwitchingUserTest::NO_DIALOG);
+  ASSERT_FALSE(IsSelecting());
+  EXPECT_EQ(1, switch_callback_hit_count());
 }
 
 }  // namespace ash

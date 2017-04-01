@@ -445,6 +445,21 @@ typedef EGLBoolean (EGLAPIENTRYP PFNEGLQUERYSTREAMTIMEKHRPROC)(EGLDisplay dpy, E
 /* No tokens/entry points, just relaxes an error condition */
 #endif
 
+#ifndef EGL_KHR_swap_buffers_with_damage
+#define EGL_KHR_swap_buffers_with_damage 1
+typedef EGLBoolean(EGLAPIENTRYP PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC)(
+    EGLDisplay dpy,
+    EGLSurface surface,
+    EGLint* rects,
+    EGLint n_rects);
+#ifdef EGL_EGLEXT_PROTOTYPES
+EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffersWithDamageKHR(EGLDisplay dpy,
+                                                          EGLSurface surface,
+                                                          EGLint* rects,
+                                                          EGLint n_rects);
+#endif
+#endif /* EGL_KHR_swap_buffers_with_damage */
+
 #ifdef EGL_KHR_stream /* Requires KHR_stream extension */
 #ifndef EGL_KHR_stream_cross_process_fd
 #define EGL_KHR_stream_cross_process_fd 1
@@ -561,13 +576,22 @@ typedef EGLint (EGLAPIENTRYP PFNEGLDUPNATIVEFENCEFDANDROIDPROC)(EGLDisplay dpy, 
 #define EGL_YUV_NARROW_RANGE_EXT		0x3283
 #define EGL_YUV_CHROMA_SITING_0_EXT		0x3284
 #define EGL_YUV_CHROMA_SITING_0_5_EXT		0x3285
-#define EGL_LINUX_DRM_PLANE0_MODIFIER0_EXT	0x3286
-#define EGL_LINUX_DRM_PLANE0_MODIFIER1_EXT	0x3287
-#define EGL_LINUX_DRM_PLANE1_MODIFIER0_EXT	0x3288
-#define EGL_LINUX_DRM_PLANE1_MODIFIER1_EXT	0x3289
-#define EGL_LINUX_DRM_PLANE2_MODIFIER0_EXT	0x328a
-#define EGL_LINUX_DRM_PLANE2_MODIFIER1_EXT	0x328b
 #endif
+
+#ifndef EGL_EXT_image_dma_buf_import_modifiers
+#define EGL_EXT_image_dma_buf_import_modifiers
+#define EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT	0x3443
+#define EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT	0x3444
+#define EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT	0x3445
+#define EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT	0x3446
+#define EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT	0x3447
+#define EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT	0x3448
+#define EGL_DMA_BUF_PLANE3_FD_EXT		0x3440
+#define EGL_DMA_BUF_PLANE3_OFFSET_EXT		0x3441
+#define EGL_DMA_BUF_PLANE3_PITCH_EXT		0x3442
+#define EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT	0x3449
+#define EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT	0x344A
+#endif /* EGL_EXT_image_dma_buf_import_modifiers */
 
 #ifndef EGL_ARM_implicit_external_sync
 #define EGL_ARM_implicit_external_sync 1

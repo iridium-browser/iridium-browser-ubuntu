@@ -9,20 +9,24 @@
 
 #include "base/macros.h"
 #include "base/timer/timer.h"
+#include "cc/ipc/display_compositor.mojom.h"
+#include "cc/surfaces/frame_sink_id.h"
+#include "cc/surfaces/surface_id.h"
+#include "cc/surfaces/surface_id_allocator.h"
+#include "cc/surfaces/surface_reference.h"
+#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
+#include "services/ui/ws/ids.h"
+#include "services/ui/ws/server_window_delegate.h"
+#include "services/ui/ws/server_window_tracker.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace cc {
-class CompositorFrame;
-class CopyOutputRequest;
 class RenderPass;
+class SurfaceId;
 }
 
 namespace ui {
-
-class DisplayCompositor;
-class SurfacesState;
-
 namespace ws {
 
 namespace test {
@@ -33,59 +37,56 @@ class FrameGeneratorDelegate;
 class ServerWindow;
 
 // Responsible for redrawing the display in response to the redraw requests by
-// submitting CompositorFrames to the owned DisplayCompositor.
-class FrameGenerator {
+// submitting CompositorFrames to the owned CompositorFrameSink.
+class FrameGenerator : public ServerWindowTracker,
+                       public cc::mojom::MojoCompositorFrameSinkClient {
  public:
-  FrameGenerator(FrameGeneratorDelegate* delegate,
-                 scoped_refptr<SurfacesState> surfaces_state);
-  virtual ~FrameGenerator();
+  FrameGenerator(FrameGeneratorDelegate* delegate, ServerWindow* root_window);
+  ~FrameGenerator() override;
+
+  void set_device_scale_factor(float device_scale_factor) {
+    device_scale_factor_ = device_scale_factor;
+  }
 
   // Schedules a redraw for the provided region.
-  void RequestRedraw(const gfx::Rect& redraw_region);
   void OnAcceleratedWidgetAvailable(gfx::AcceleratedWidget widget);
-  void RequestCopyOfOutput(
-      std::unique_ptr<cc::CopyOutputRequest> output_request);
 
-  bool is_frame_pending() { return frame_pending_; }
+  // If |window| corresponds to the active WM for the display then update
+  // |window_manager_surface_id_|.
+  void OnSurfaceCreated(const cc::SurfaceId& surface_id, ServerWindow* window);
 
  private:
   friend class ui::ws::test::FrameGeneratorTest;
 
-  void WantToDraw();
+  // cc::mojom::MojoCompositorFrameSinkClient implementation:
+  void DidReceiveCompositorFrameAck() override;
+  void OnBeginFrame(const cc::BeginFrameArgs& begin_frame_arags) override;
+  void ReclaimResources(const cc::ReturnedResourceArray& resources) override;
+  void WillDrawSurface() override;
 
-  // This method initiates a top level redraw of the display.
-  // TODO(fsamuel): This should use vblank as a signal rather than a timer
-  // http://crbug.com/533042
-  void Draw();
+  // Generates the CompositorFrame.
+  cc::CompositorFrame GenerateCompositorFrame(const gfx::Rect& output_rect);
 
-  // This is called after the DisplayCompositor has completed generating a new
-  // frame for the display. TODO(fsamuel): Idle time processing should happen
-  // here if there is budget for it.
-  void DidDraw();
+  // DrawWindow creates SurfaceDrawQuad for the provided ServerWindow and
+  // appends it to the provided cc::RenderPass.
+  void DrawWindow(cc::RenderPass* pass, ServerWindow* window);
 
-  // Generates the CompositorFrame for the current |dirty_rect_|.
-  cc::CompositorFrame GenerateCompositorFrame(
-      const gfx::Rect& output_rect) const;
-
-  // DrawWindowTree recursively visits ServerWindows, creating a SurfaceDrawQuad
-  // for each that lacks one.
-  void DrawWindowTree(cc::RenderPass* pass,
-                      ServerWindow* window,
-                      const gfx::Vector2d& parent_to_root_origin_offset,
-                      float opacity,
-                      bool* may_contain_video) const;
+  // ServerWindowObserver implementation.
+  void OnWindowDestroying(ServerWindow* window) override;
 
   FrameGeneratorDelegate* delegate_;
-  scoped_refptr<SurfacesState> surfaces_state_;
+  ServerWindow* const root_window_;
+  float device_scale_factor_ = 1.f;
 
-  std::unique_ptr<DisplayCompositor> display_compositor_;
+  gfx::Size last_submitted_frame_size_;
+  cc::LocalFrameId local_frame_id_;
+  cc::SurfaceIdAllocator id_allocator_;
+  cc::mojom::MojoCompositorFrameSinkPtr compositor_frame_sink_;
+  cc::mojom::DisplayPrivatePtr display_private_;
 
-  // The region that needs to be redrawn next time the compositor frame is
-  // generated.
-  gfx::Rect dirty_rect_;
-  base::Timer draw_timer_;
-  bool frame_pending_ = false;
-  bool may_contain_video_ = false;
+  cc::SurfaceId window_manager_surface_id_;
+
+  mojo::Binding<cc::mojom::MojoCompositorFrameSinkClient> binding_;
 
   base::WeakPtrFactory<FrameGenerator> weak_factory_;
 

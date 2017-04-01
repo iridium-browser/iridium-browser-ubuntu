@@ -13,6 +13,7 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/buffer_format_util.h"
 
@@ -21,7 +22,7 @@ namespace gpu {
 template <typename GpuMemoryBufferImplType>
 class GpuMemoryBufferImplTest : public testing::Test {
  public:
-  GpuMemoryBufferImpl::DestructionCallback AllocateGpuMemoryBuffer(
+  GpuMemoryBufferImpl::DestructionCallback CreateGpuMemoryBuffer(
       const gfx::Size& size,
       gfx::BufferFormat format,
       gfx::BufferUsage usage,
@@ -61,8 +62,8 @@ TYPED_TEST_P(GpuMemoryBufferImplTest, CreateFromHandle) {
       bool destroyed = false;
       gfx::GpuMemoryBufferHandle handle;
       GpuMemoryBufferImpl::DestructionCallback destroy_callback =
-          TestFixture::AllocateGpuMemoryBuffer(kBufferSize, format, usage,
-                                               &handle, &destroyed);
+          TestFixture::CreateGpuMemoryBuffer(kBufferSize, format, usage,
+                                             &handle, &destroyed);
       std::unique_ptr<TypeParam> buffer(TypeParam::CreateFromHandle(
           handle, kBufferSize, format, usage, destroy_callback));
       ASSERT_TRUE(buffer);
@@ -87,7 +88,7 @@ TYPED_TEST_P(GpuMemoryBufferImplTest, Map) {
 
     gfx::GpuMemoryBufferHandle handle;
     GpuMemoryBufferImpl::DestructionCallback destroy_callback =
-        TestFixture::AllocateGpuMemoryBuffer(
+        TestFixture::CreateGpuMemoryBuffer(
             kBufferSize, format, gfx::BufferUsage::GPU_READ_CPU_READ_WRITE,
             &handle, nullptr);
     std::unique_ptr<TypeParam> buffer(TypeParam::CreateFromHandle(
@@ -137,7 +138,7 @@ TYPED_TEST_P(GpuMemoryBufferImplTest, PersistentMap) {
 
     gfx::GpuMemoryBufferHandle handle;
     GpuMemoryBufferImpl::DestructionCallback destroy_callback =
-        TestFixture::AllocateGpuMemoryBuffer(
+        TestFixture::CreateGpuMemoryBuffer(
             kBufferSize, format,
             gfx::BufferUsage::GPU_READ_CPU_READ_WRITE_PERSISTENT, &handle,
             nullptr);

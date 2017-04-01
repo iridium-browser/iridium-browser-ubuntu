@@ -26,6 +26,7 @@
 #ifndef WebGLContextObject_h
 #define WebGLContextObject_h
 
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "modules/webgl/WebGLObject.h"
 
 namespace blink {
@@ -35,34 +36,29 @@ class WebGLRenderingContextBase;
 // WebGLContextObject the base class for objects that are owned by a specific
 // WebGLRenderingContextBase.
 class WebGLContextObject : public WebGLObject {
-public:
-    ~WebGLContextObject() override;
+ public:
+  WebGLRenderingContextBase* context() const { return m_context; }
 
-    WebGLRenderingContextBase* context() const { return m_context; }
+  bool validate(const WebGLContextGroup*,
+                const WebGLRenderingContextBase*) const final;
 
-    bool validate(const WebGLContextGroup*, const WebGLRenderingContextBase* context) const final
-    {
-        return context == m_context;
-    }
+  DECLARE_VIRTUAL_TRACE();
 
-    void detachContext();
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
-    DECLARE_VIRTUAL_TRACE();
+ protected:
+  explicit WebGLContextObject(WebGLRenderingContextBase*);
 
-protected:
-    explicit WebGLContextObject(WebGLRenderingContextBase*);
+  bool hasGroupOrContext() const final { return m_context; }
 
-    bool hasGroupOrContext() const final
-    {
-        return m_context;
-    }
+  uint32_t currentNumberOfContextLosses() const final;
 
-    gpu::gles2::GLES2Interface* getAGLInterface() const final;
+  gpu::gles2::GLES2Interface* getAGLInterface() const final;
 
-private:
-    Member<WebGLRenderingContextBase> m_context;
+ private:
+  TraceWrapperMember<WebGLRenderingContextBase> m_context;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebGLContextObject_h
+#endif  // WebGLContextObject_h

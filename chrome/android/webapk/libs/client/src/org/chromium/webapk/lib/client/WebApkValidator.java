@@ -100,7 +100,7 @@ public class WebApkValidator {
         }
 
         final Signature[] arrSignatures = packageInfo.signatures;
-        if (arrSignatures != null) {
+        if (arrSignatures != null && arrSignatures.length == 2) {
             for (Signature signature : arrSignatures) {
                 if (Arrays.equals(sExpectedSignature, signature.toByteArray())) {
                     Log.d(TAG, "WebApk valid - signature match!");

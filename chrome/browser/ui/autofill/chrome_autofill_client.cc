@@ -25,21 +25,18 @@
 #include "chrome/browser/ui/autofill/create_card_unmask_prompt_view.h"
 #include "chrome/browser/ui/autofill/credit_card_scanner_controller.h"
 #include "chrome/browser/ui/autofill/save_card_bubble_controller_impl.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/web_data_service_factory.h"
-#include "chrome/common/features.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
-#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_identity_provider.h"
@@ -48,26 +45,26 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/ssl_status.h"
 #include "ui/gfx/geometry/rect.h"
-
-#if BUILDFLAG(ANDROID_JAVA_UI)
-#include "chrome/browser/android/chrome_application.h"
-#include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
-#else
-#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
-#include "components/zoom/zoom_controller.h"
-#endif
 
 #if defined(OS_ANDROID)
 #include "base/android/context_utils.h"
+#include "chrome/browser/android/chrome_application.h"
 #include "chrome/browser/android/signin/signin_promo_util_android.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #include "chrome/browser/ui/android/infobars/autofill_credit_card_filling_infobar.h"
 #include "components/autofill/core/browser/autofill_credit_card_filling_infobar_delegate_mobile.h"
 #include "components/autofill/core/browser/autofill_save_card_infobar_delegate_mobile.h"
 #include "components/autofill/core/browser/autofill_save_card_infobar_mobile.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/android/content_view_core.h"
+#else  // !OS_ANDROID
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
+#include "components/zoom/zoom_controller.h"
 #endif
 
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(autofill::ChromeAutofillClient);
@@ -82,7 +79,7 @@ ChromeAutofillClient::ChromeAutofillClient(content::WebContents* web_contents)
               ->IsOffTheRecord()) {
   DCHECK(web_contents);
 
-#if !BUILDFLAG(ANDROID_JAVA_UI)
+#if !defined(OS_ANDROID)
   // Since ZoomController is also a WebContentsObserver, we need to be careful
   // about disconnecting from it since the relative order of destruction of
   // WebContentsObservers is not guaranteed. ZoomController silently clears
@@ -123,7 +120,7 @@ PrefService* ChromeAutofillClient::GetPrefs() {
       ->GetPrefs();
 }
 
-sync_driver::SyncService* ChromeAutofillClient::GetSyncService() {
+syncer::SyncService* ChromeAutofillClient::GetSyncService() {
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   return ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
@@ -135,7 +132,7 @@ IdentityProvider* ChromeAutofillClient::GetIdentityProvider() {
         Profile::FromBrowserContext(web_contents()->GetBrowserContext())
             ->GetOriginalProfile();
     base::Closure login_callback;
-#if !BUILDFLAG(ANDROID_JAVA_UI)
+#if !defined(OS_ANDROID)
     login_callback =
         LoginUIServiceFactory::GetShowLoginPopupCallbackForProfile(profile);
 #endif
@@ -148,18 +145,18 @@ IdentityProvider* ChromeAutofillClient::GetIdentityProvider() {
   return identity_provider_.get();
 }
 
-rappor::RapporService* ChromeAutofillClient::GetRapporService() {
+rappor::RapporServiceImpl* ChromeAutofillClient::GetRapporServiceImpl() {
   return g_browser_process->rappor_service();
 }
 
 void ChromeAutofillClient::ShowAutofillSettings() {
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   chrome::android::ChromeApplication::ShowAutofillSettings();
 #else
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
   if (browser)
     chrome::ShowSettingsSubPage(browser, chrome::kAutofillSubPage);
-#endif  // #if BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // #if defined(OS_ANDROID)
 }
 
 void ChromeAutofillClient::ShowUnmaskPrompt(
@@ -182,9 +179,9 @@ void ChromeAutofillClient::ConfirmSaveCreditCardLocally(
 #if defined(OS_ANDROID)
   InfoBarService::FromWebContents(web_contents())
       ->AddInfoBar(CreateSaveCardInfoBarMobile(
-          base::WrapUnique(new AutofillSaveCardInfoBarDelegateMobile(
+          base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
               false, card, std::unique_ptr<base::DictionaryValue>(nullptr),
-              callback))));
+              callback)));
 #else
   // Do lazy initialization of SaveCardBubbleControllerImpl.
   autofill::SaveCardBubbleControllerImpl::CreateForWebContents(
@@ -202,8 +199,8 @@ void ChromeAutofillClient::ConfirmSaveCreditCardToCloud(
 #if defined(OS_ANDROID)
   InfoBarService::FromWebContents(web_contents())
       ->AddInfoBar(CreateSaveCardInfoBarMobile(
-          base::WrapUnique(new AutofillSaveCardInfoBarDelegateMobile(
-              true, card, std::move(legal_message), callback))));
+          base::MakeUnique<AutofillSaveCardInfoBarDelegateMobile>(
+              true, card, std::move(legal_message), callback)));
 #else
   // Do lazy initialization of SaveCardBubbleControllerImpl.
   autofill::SaveCardBubbleControllerImpl::CreateForWebContents(web_contents());
@@ -290,7 +287,7 @@ bool ChromeAutofillClient::IsAutocompleteEnabled() {
 }
 
 void ChromeAutofillClient::MainFrameWasResized(bool width_changed) {
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   // Ignore virtual keyboard showing and hiding a strip of suggestions.
   if (!width_changed)
     return;
@@ -324,10 +321,10 @@ void ChromeAutofillClient::PropagateAutofillPredictions(
 void ChromeAutofillClient::DidFillOrPreviewField(
     const base::string16& autofilled_value,
     const base::string16& profile_full_name) {
-#if BUILDFLAG(ANDROID_JAVA_UI)
+#if defined(OS_ANDROID)
   AutofillLoggerAndroid::DidFillOrPreviewField(autofilled_value,
                                                profile_full_name);
-#endif  // BUILDFLAG(ANDROID_JAVA_UI)
+#endif  // defined(OS_ANDROID)
 }
 
 void ChromeAutofillClient::OnFirstUserGestureObserved() {
@@ -356,7 +353,10 @@ bool ChromeAutofillClient::IsContextSecure(const GURL& form_origin) {
   ssl_status = navigation_entry->GetSSL();
   // Note: If changing the implementation below, also change
   // AwAutofillClient::IsContextSecure. See crbug.com/505388
-  return ssl_status.security_style == content::SECURITY_STYLE_AUTHENTICATED &&
+  return navigation_entry->GetURL().SchemeIsCryptographic() &&
+         ssl_status.certificate &&
+         (!net::IsCertStatusError(ssl_status.cert_status) ||
+          net::IsCertStatusMinorError(ssl_status.cert_status)) &&
          !(ssl_status.content_status &
            content::SSLStatus::RAN_INSECURE_CONTENT);
 }
@@ -386,6 +386,28 @@ void ChromeAutofillClient::StartSigninFlow() {
           signin::ManageAccountsParams(),
           signin_metrics::AccessPoint::ACCESS_POINT_AUTOFILL_DROPDOWN);
 #endif
+}
+
+void ChromeAutofillClient::ShowHttpNotSecureExplanation() {
+#if !defined(OS_ANDROID)
+  // On desktop platforms, open Page Info, which briefly explains the HTTP
+  // warning message and provides a link to the Help Center for more details.
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+  if (browser && chrome::ShowWebsiteSettings(browser, web_contents()))
+    return;
+// Otherwise fall through to the section below that opens the URL directly.
+#endif
+
+  // On Android, where Page Info does not (yet) contain a link to the Help
+  // Center (https://crbug.com/679532), or in corner cases where Page Info is
+  // not shown (for example, no navigation entry), just launch the Help topic
+  // directly.
+  const GURL kSecurityIndicatorHelpCenterUrl(
+      "https://support.google.com/chrome/?p=ui_security_indicator");
+  web_contents()->OpenURL(content::OpenURLParams(
+      GURL(kSecurityIndicatorHelpCenterUrl), content::Referrer(),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK,
+      false /* is_renderer_initiated */));
 }
 
 }  // namespace autofill

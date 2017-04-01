@@ -3,9 +3,13 @@
 # found in the LICENSE file.
 
 import optparse
+import os
+import random
+import string
 import subprocess
 import sys
 
+from devil.android.constants import chrome
 
 class OptionParserIgnoreErrors(optparse.OptionParser):
   """Wrapper for OptionParser that ignores errors and produces no output."""
@@ -135,16 +139,73 @@ def get_device_sdk_version():
 
   return version
 
-def get_device_serials():
-  """Get the serial numbers of devices connected via adb.
 
-  Only gets serial numbers of "active" devices (e.g. does not get serial
-  numbers of devices which have not been authorized.)
-  """
+def generate_random_filename_for_test():
+  """Used for temporary files used in tests.
 
-  adb_output, adb_return_code = run_adb_command(['adb', 'devices'])
-  if adb_return_code == 0:
-    lines = [x.split() for x in adb_output.splitlines()[1:-1]]
-    return [x[0] for x in lines if x[1] == 'device']
-  else:
-    sys.exit(1)
+  Files created from 'NamedTemporaryFile' have inconsistent reuse support across
+  platforms, so it's not guaranteed that they can be reopened. Since many tests
+  communicate files via path, we typically use this method, as well as
+  manual file removal."""
+  name = ''.join(random.choice(string.ascii_uppercase +
+              string.digits) for _ in range(10))
+  return os.path.abspath(name)
+
+
+def get_supported_browsers():
+  """Returns the package names of all supported browsers."""
+  # Add aliases for backwards compatibility.
+  supported_browsers = {
+    'stable': chrome.PACKAGE_INFO['chrome_stable'],
+    'beta': chrome.PACKAGE_INFO['chrome_beta'],
+    'dev': chrome.PACKAGE_INFO['chrome_dev'],
+    'build': chrome.PACKAGE_INFO['chrome'],
+  }
+  supported_browsers.update(chrome.PACKAGE_INFO)
+  return supported_browsers
+
+
+def get_default_serial():
+  if 'ANDROID_SERIAL' in os.environ:
+    return os.environ['ANDROID_SERIAL']
+  return None
+
+
+def get_main_options(parser):
+  parser.add_option('-o', dest='output_file', help='write trace output to FILE',
+                    default=None, metavar='FILE')
+  parser.add_option('-t', '--time', dest='trace_time', type='int',
+                    help='trace for N seconds', metavar='N')
+  parser.add_option('-j', '--json', dest='write_json',
+                    default=False, action='store_true',
+                    help='write a JSON file')
+  parser.add_option('--link-assets', dest='link_assets', default=False,
+                    action='store_true',
+                    help='(deprecated)')
+  parser.add_option('--from-file', dest='from_file', action='store',
+                    help='read the trace from a file (compressed) rather than'
+                    'running a live trace')
+  parser.add_option('--asset-dir', dest='asset_dir', default='trace-viewer',
+                    type='string', help='(deprecated)')
+  parser.add_option('-e', '--serial', dest='device_serial_number',
+                    default=get_default_serial(),
+                    type='string', help='adb device serial number')
+  parser.add_option('--target', dest='target', default='android', type='string',
+                    help='choose tracing target (android or linux)')
+  parser.add_option('--timeout', dest='timeout', type='int',
+                    help='timeout for start and stop tracing (seconds)')
+  parser.add_option('--collection-timeout', dest='collection_timeout',
+                    type='int', help='timeout for data collection (seconds)')
+  parser.add_option('-a', '--app', dest='app_name', default=None,
+                    type='string', action='store',
+                    help='enable application-level tracing for '
+                    'comma-separated list of app cmdlines')
+  parser.add_option('-t', '--time', dest='trace_time', type='int',
+                    help='trace for N seconds', metavar='N')
+  parser.add_option('--target', dest='target', default='android',
+                    type='string', help='choose tracing target (android or '
+                    ' linux)')
+  parser.add_option('-b', '--buf-size', dest='trace_buf_size',
+                    type='int', help='use a trace buffer size '
+                    ' of N KB', metavar='N')
+  return parser

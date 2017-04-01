@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_API_FEEDBACK_PRIVATE_FEEDBACK_PRIVATE_API_H_
 
 #include "chrome/browser/extensions/chrome_extension_function.h"
+#include "chrome/browser/feedback/system_logs/system_logs_fetcher_base.h"
 #include "chrome/common/extensions/api/feedback_private.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
@@ -50,7 +51,7 @@ class FeedbackPrivateAPI : public BrowserContextKeyedAPI {
 };
 
 // Feedback strings.
-class FeedbackPrivateGetStringsFunction : public ChromeSyncExtensionFunction {
+class FeedbackPrivateGetStringsFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getStrings",
                              FEEDBACKPRIVATE_GETSTRINGS)
@@ -63,36 +64,35 @@ class FeedbackPrivateGetStringsFunction : public ChromeSyncExtensionFunction {
  protected:
   ~FeedbackPrivateGetStringsFunction() override {}
 
-  // SyncExtensionFunction overrides.
-  bool RunSync() override;
+  // ExtensionFunction:
+  ResponseAction Run() override;
 
  private:
   static base::Closure* test_callback_;
 };
 
-class FeedbackPrivateGetUserEmailFunction : public ChromeSyncExtensionFunction {
+class FeedbackPrivateGetUserEmailFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getUserEmail",
                              FEEDBACKPRIVATE_GETUSEREMAIL);
 
  protected:
   ~FeedbackPrivateGetUserEmailFunction() override {}
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class FeedbackPrivateGetSystemInformationFunction
-    : public ChromeAsyncExtensionFunction {
+    : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("feedbackPrivate.getSystemInformation",
                              FEEDBACKPRIVATE_GETSYSTEMINFORMATION);
 
  protected:
   ~FeedbackPrivateGetSystemInformationFunction() override {}
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
-  void OnCompleted(
-      const std::vector<api::feedback_private::SystemInformation>& sys_info);
+  void OnCompleted(std::unique_ptr<system_logs::SystemLogsResponse> sys_info);
 };
 
 class FeedbackPrivateSendFeedbackFunction

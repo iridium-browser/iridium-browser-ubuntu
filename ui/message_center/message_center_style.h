@@ -80,7 +80,7 @@ const int kMessageLineHeight = 18;         // In DIPs.
 // Background of the card.
 const SkColor kNotificationBackgroundColor = SK_ColorWHITE;
 // Background of the image.
-const SkColor kImageBackgroundColor = SkColorSetRGB(0x22, 0x22, 0x22);
+const SkColor kImageBackgroundColor = kNotificationBackgroundColor;
 // Title, message, ...
 const SkColor kRegularTextColor = SkColorSetRGB(0x33, 0x33, 0x33);
 const SkColor kDimTextColor = SkColorSetRGB(0x7f, 0x7f, 0x7f);
@@ -121,11 +121,13 @@ const SkColor kHoveredButtonBackgroundColor = SkColorSetRGB(243, 243, 243);
 #endif
 
 // Progress bar.
-const int kProgressBarThickness = 5;
 const int kProgressBarTopPadding = 16;
+#if defined(OS_MACOSX)
+const int kProgressBarThickness = 5;
 const int kProgressBarCornerRadius = 3;
 const SkColor kProgressBarBackgroundColor = SkColorSetARGB(26, 0, 0, 0);
 const SkColor kProgressBarSliceColor = SkColorSetRGB(26, 194, 34);
+#endif
 
 // Line limits.
 const int kMaxTitleLines = 2;

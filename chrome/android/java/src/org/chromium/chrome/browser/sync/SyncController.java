@@ -15,17 +15,18 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.ChromeApplication;
+import org.chromium.chrome.browser.childaccounts.ChildAccountService;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGeneratorFactory;
 import org.chromium.chrome.browser.invalidation.InvalidationController;
 import org.chromium.chrome.browser.signin.AccountManagementFragment;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.sync.ui.PassphraseActivity;
+import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.components.sync.AndroidSyncSettings;
 import org.chromium.components.sync.ModelType;
 import org.chromium.components.sync.PassphraseType;
 import org.chromium.components.sync.StopSource;
-import org.chromium.components.sync.signin.ChromeSigninController;
 
 import javax.annotation.Nullable;
 
@@ -61,7 +62,7 @@ public class SyncController implements ProfileSyncService.SyncStateChangedListen
     public static final String SESSION_TAG_PREFIX = "session_sync";
 
     private static SyncController sInstance;
-    private static boolean sInitialized = false;
+    private static boolean sInitialized;
 
     private final Context mContext;
     private final ChromeSigninController mChromeSigninController;
@@ -144,14 +145,21 @@ public class SyncController implements ProfileSyncService.SyncStateChangedListen
         if (isSyncEnabled) {
             mProfileSyncService.requestStart();
         } else {
-            if (AndroidSyncSettings.isMasterSyncEnabled(mContext)) {
-                RecordHistogram.recordEnumeratedHistogram("Sync.StopSource",
-                        StopSource.ANDROID_CHROME_SYNC, StopSource.STOP_SOURCE_LIMIT);
+            if (ChildAccountService.isChildAccount()) {
+                // For child accounts, Sync needs to stay enabled, so we reenable it in settings.
+                // TODO(bauerb): Remove the dependency on child account code and instead go through
+                // prefs (here and in the Sync customization UI).
+                AndroidSyncSettings.enableChromeSync(mContext);
             } else {
-                RecordHistogram.recordEnumeratedHistogram("Sync.StopSource",
-                        StopSource.ANDROID_MASTER_SYNC, StopSource.STOP_SOURCE_LIMIT);
+                if (AndroidSyncSettings.isMasterSyncEnabled(mContext)) {
+                    RecordHistogram.recordEnumeratedHistogram("Sync.StopSource",
+                            StopSource.ANDROID_CHROME_SYNC, StopSource.STOP_SOURCE_LIMIT);
+                } else {
+                    RecordHistogram.recordEnumeratedHistogram("Sync.StopSource",
+                            StopSource.ANDROID_MASTER_SYNC, StopSource.STOP_SOURCE_LIMIT);
+                }
+                mProfileSyncService.requestStop();
             }
-            mProfileSyncService.requestStop();
         }
     }
 
@@ -204,7 +212,7 @@ public class SyncController implements ProfileSyncService.SyncStateChangedListen
      * @return Whether sync is enabled to sync urls or open tabs with a non custom passphrase.
      */
     public boolean isSyncingUrlsWithKeystorePassphrase() {
-        return mProfileSyncService.isBackendInitialized()
+        return mProfileSyncService.isEngineInitialized()
                 && mProfileSyncService.getPreferredDataTypes().contains(ModelType.TYPED_URLS)
                 && mProfileSyncService.getPassphraseType().equals(
                            PassphraseType.KEYSTORE_PASSPHRASE);

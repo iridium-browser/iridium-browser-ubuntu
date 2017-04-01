@@ -30,8 +30,6 @@ namespace storage {
 class ShareableFileReference;
 }
 
-class GURL;
-
 namespace storage {
 
 class FileSystemContext;
@@ -297,6 +295,8 @@ class FileSystemOperation {
   //   CopyInForeignFile and CreateDirectory on dest filesystem
   //   for cross-filesystem case.
   //
+  // TODO(crbug.com/171284): Restore directory timestamps after the Move
+  //                         operation.
   virtual void Move(const FileSystemURL& src_path,
                     const FileSystemURL& dest_path,
                     CopyOrMoveOption option,

@@ -41,222 +41,259 @@ namespace blink {
 class ComputedStyle;
 class Element;
 class FileList;
+class HostWindow;
 class HTMLInputElement;
 class LayoutObject;
 class Theme;
 class ThemePainter;
 
 class CORE_EXPORT LayoutTheme : public RefCounted<LayoutTheme> {
-protected:
-    explicit LayoutTheme(Theme*);
+ protected:
+  explicit LayoutTheme(Theme*);
 
-public:
-    virtual ~LayoutTheme() { }
+ public:
+  virtual ~LayoutTheme() {}
 
-    static LayoutTheme& theme();
+  static LayoutTheme& theme();
 
-    virtual ThemePainter& painter() = 0;
+  virtual ThemePainter& painter() = 0;
 
-    static void setSizeIfAuto(ComputedStyle&, const IntSize&);
+  // This function is called after associated WebThemeEngine instance
+  // was replaced. This is called only in tests.
+  virtual void didChangeThemeEngine() {}
 
-    // This method is called whenever style has been computed for an element and the appearance
-    // property has been set to a value other than "none".  The theme should map in all of the appropriate
-    // metrics and defaults given the contents of the style.  This includes sophisticated operations like
-    // selection of control size based off the font, the disabling of appearance when certain other properties like
-    // "border" are set, or if the appearance is not supported by the theme.
-    void adjustStyle(ComputedStyle&, Element*);
+  static void setSizeIfAuto(ComputedStyle&, const IntSize&);
 
-    // The remaining methods should be implemented by the platform-specific portion of the theme, e.g.,
-    // LayoutThemeMac.cpp for Mac OS X.
+  // This method is called whenever style has been computed for an element and
+  // the appearance property has been set to a value other than "none".
+  // The theme should map in all of the appropriate metrics and defaults given
+  // the contents of the style. This includes sophisticated operations like
+  // selection of control size based off the font, the disabling of appearance
+  // when certain other properties like "border" are set, or if the appearance
+  // is not supported by the theme.
+  void adjustStyle(ComputedStyle&, Element*);
 
-    // These methods return the theme's extra style sheets rules, to let each platform
-    // adjust the default CSS rules in html.css, quirks.css or mediaControls.css.
-    virtual String extraDefaultStyleSheet();
-    virtual String extraQuirksStyleSheet() { return String(); }
-    virtual String extraMediaControlsStyleSheet() { return String(); }
-    virtual String extraFullscreenStyleSheet() { return String(); }
+  // The remaining methods should be implemented by the platform-specific
+  // portion of the theme, e.g., LayoutThemeMac.cpp for Mac OS X.
 
-    // A method to obtain the baseline position for a "leaf" control.  This will only be used if a baseline
-    // position cannot be determined by examining child content. Checkboxes and radio buttons are examples of
-    // controls that need to do this.
-    virtual int baselinePosition(const LayoutObject*) const;
+  // These methods return the theme's extra style sheets rules, to let each
+  // platform adjust the default CSS rules in html.css, quirks.css or
+  // mediaControls.css.
+  virtual String extraDefaultStyleSheet();
+  virtual String extraQuirksStyleSheet() { return String(); }
+  virtual String extraMediaControlsStyleSheet() { return String(); }
+  virtual String extraFullscreenStyleSheet() { return String(); }
 
-    // A method for asking if a control is a container or not.  Leaf controls have to have some special behavior (like
-    // the baseline position API above).
-    bool isControlContainer(ControlPart) const;
+  // A method to obtain the baseline position for a "leaf" control. This will
+  // only be used if a baseline position cannot be determined by examining child
+  // content. Checkboxes and radio buttons are examples of controls that need to
+  // do this.
+  virtual int baselinePosition(const LayoutObject*) const;
 
-    // Whether or not the control has been styled enough by the author to disable the native appearance.
-    virtual bool isControlStyled(const ComputedStyle&) const;
+  // A method for asking if a control is a container or not.  Leaf controls have
+  // to have some special behavior (like the baseline position API above).
+  bool isControlContainer(ControlPart) const;
 
-    // Some controls may spill out of their containers (e.g., the check on an OSX 10.9 checkbox). Add this
-    // "visual overflow" to the object's border box rect.
-    virtual void addVisualOverflow(const LayoutObject&, IntRect& borderBox);
+  // Whether or not the control has been styled enough by the author to disable
+  // the native appearance.
+  virtual bool isControlStyled(const ComputedStyle&) const;
 
-    // This method is called whenever a control state changes on a particular themed object, e.g., the mouse becomes pressed
-    // or a control becomes disabled. The ControlState parameter indicates which state has changed (from having to not having,
-    // or vice versa).
-    bool controlStateChanged(LayoutObject&, ControlState) const;
+  // Some controls may spill out of their containers (e.g., the check on an OSX
+  // 10.9 checkbox). Add this "visual overflow" to the object's border box rect.
+  virtual void addVisualOverflow(const LayoutObject&, IntRect& borderBox);
 
-    bool shouldDrawDefaultFocusRing(const LayoutObject&) const;
+  // This method is called whenever a control state changes on a particular
+  // themed object, e.g., the mouse becomes pressed or a control becomes
+  // disabled. The ControlState parameter indicates which state has changed
+  // (from having to not having, or vice versa).
+  bool controlStateChanged(LayoutObject&, ControlState) const;
 
-    // A method asking if the theme's controls actually care about redrawing when hovered.
-    virtual bool supportsHover(const ComputedStyle&) const { return false; }
+  bool shouldDrawDefaultFocusRing(const LayoutObject&) const;
 
-    // A method asking if the platform is able to show a calendar picker for a
-    // given input type.
-    virtual bool supportsCalendarPicker(const AtomicString&) const;
+  // A method asking if the theme's controls actually care about redrawing when
+  // hovered.
+  virtual bool supportsHover(const ComputedStyle&) const { return false; }
 
-    // Text selection colors.
-    Color activeSelectionBackgroundColor() const;
-    Color inactiveSelectionBackgroundColor() const;
-    Color activeSelectionForegroundColor() const;
-    Color inactiveSelectionForegroundColor() const;
+  // A method asking if the platform is able to show a calendar picker for a
+  // given input type.
+  virtual bool supportsCalendarPicker(const AtomicString&) const;
 
-    // List box selection colors
-    Color activeListBoxSelectionBackgroundColor() const;
-    Color activeListBoxSelectionForegroundColor() const;
-    Color inactiveListBoxSelectionBackgroundColor() const;
-    Color inactiveListBoxSelectionForegroundColor() const;
+  // Text selection colors.
+  Color activeSelectionBackgroundColor() const;
+  Color inactiveSelectionBackgroundColor() const;
+  Color activeSelectionForegroundColor() const;
+  Color inactiveSelectionForegroundColor() const;
 
-    // Highlight and text colors for TextMatches.
-    Color platformTextSearchHighlightColor(bool activeMatch) const;
-    Color platformTextSearchColor(bool activeMatch) const;
+  // List box selection colors
+  Color activeListBoxSelectionBackgroundColor() const;
+  Color activeListBoxSelectionForegroundColor() const;
+  Color inactiveListBoxSelectionBackgroundColor() const;
+  Color inactiveListBoxSelectionForegroundColor() const;
 
-    Color focusRingColor() const;
-    virtual Color platformFocusRingColor() const { return Color(0, 0, 0); }
-    void setCustomFocusRingColor(const Color&);
-    static Color tapHighlightColor();
-    virtual Color platformTapHighlightColor() const { return LayoutTheme::defaultTapHighlightColor; }
-    virtual Color platformDefaultCompositionBackgroundColor() const { return defaultCompositionBackgroundColor; }
-    virtual void platformColorsDidChange();
+  // Highlight and text colors for TextMatches.
+  Color platformTextSearchHighlightColor(bool activeMatch) const;
+  Color platformTextSearchColor(bool activeMatch) const;
 
-    void setCaretBlinkInterval(double);
-    virtual double caretBlinkInterval() const;
+  Color focusRingColor() const;
+  virtual Color platformFocusRingColor() const { return Color(0, 0, 0); }
+  void setCustomFocusRingColor(const Color&);
+  static Color tapHighlightColor();
+  virtual Color platformTapHighlightColor() const {
+    return LayoutTheme::defaultTapHighlightColor;
+  }
+  virtual Color platformDefaultCompositionBackgroundColor() const {
+    return defaultCompositionBackgroundColor;
+  }
+  virtual void platformColorsDidChange();
 
-    // System fonts and colors for CSS.
-    virtual void systemFont(CSSValueID systemFontID, FontStyle&, FontWeight&, float& fontSize, AtomicString& fontFamily) const = 0;
-    void systemFont(CSSValueID systemFontID, FontDescription&);
-    virtual Color systemColor(CSSValueID) const;
+  void setCaretBlinkInterval(double);
+  virtual double caretBlinkInterval() const;
 
-    // Whether the default system font should have its average character width
-    // adjusted to match MS Shell Dlg.
-    virtual bool needsHackForTextControlWithFontFamily(const AtomicString&) const { return false; }
+  // System fonts and colors for CSS.
+  virtual void systemFont(CSSValueID systemFontID,
+                          FontStyle&,
+                          FontWeight&,
+                          float& fontSize,
+                          AtomicString& fontFamily) const = 0;
+  void systemFont(CSSValueID systemFontID, FontDescription&);
+  virtual Color systemColor(CSSValueID) const;
 
-    virtual int minimumMenuListSize(const ComputedStyle&) const { return 0; }
+  // Whether the default system font should have its average character width
+  // adjusted to match MS Shell Dlg.
+  virtual bool needsHackForTextControlWithFontFamily(
+      const AtomicString&) const {
+    return false;
+  }
 
-    virtual void adjustSliderThumbSize(ComputedStyle&) const;
+  virtual int minimumMenuListSize(const ComputedStyle&) const { return 0; }
 
-    virtual int popupInternalPaddingStart(const ComputedStyle&) const { return 0; }
-    virtual int popupInternalPaddingEnd(const ComputedStyle&) const { return 0; }
-    virtual int popupInternalPaddingTop(const ComputedStyle&) const { return 0; }
-    virtual int popupInternalPaddingBottom(const ComputedStyle&) const { return 0; }
+  virtual void adjustSliderThumbSize(ComputedStyle&) const;
 
-    virtual ScrollbarControlSize scrollbarControlSizeForPart(ControlPart) { return RegularScrollbar; }
+  virtual int popupInternalPaddingStart(const ComputedStyle&) const {
+    return 0;
+  }
+  virtual int popupInternalPaddingEnd(const HostWindow*,
+                                      const ComputedStyle&) const {
+    return 0;
+  }
+  virtual int popupInternalPaddingTop(const ComputedStyle&) const { return 0; }
+  virtual int popupInternalPaddingBottom(const ComputedStyle&) const {
+    return 0;
+  }
 
-    virtual void adjustProgressBarBounds(ComputedStyle& style) const { }
+  virtual ScrollbarControlSize scrollbarControlSizeForPart(ControlPart) {
+    return RegularScrollbar;
+  }
 
-    // Returns the repeat interval of the animation for the progress bar.
-    virtual double animationRepeatIntervalForProgressBar() const;
-    // Returns the duration of the animation for the progress bar.
-    virtual double animationDurationForProgressBar() const;
+  virtual void adjustProgressBarBounds(ComputedStyle& style) const {}
 
-    // Media controls
-    String formatMediaControlsTime(float time) const;
-    String formatMediaControlsCurrentTime(float currentTime, float duration) const;
+  // Returns the repeat interval of the animation for the progress bar.
+  virtual double animationRepeatIntervalForProgressBar() const;
+  // Returns the duration of the animation for the progress bar.
+  virtual double animationDurationForProgressBar() const;
 
-    // Returns size of one slider tick mark for a horizontal track.
-    // For vertical tracks we rotate it and use it. i.e. Width is always length along the track.
-    virtual IntSize sliderTickSize() const = 0;
-    // Returns the distance of slider tick origin from the slider track center.
-    virtual int sliderTickOffsetFromTrackCenter() const = 0;
+  // Media controls
+  String formatMediaControlsTime(float time) const;
+  String formatMediaControlsCurrentTime(float currentTime,
+                                        float duration) const;
 
-    virtual bool shouldHaveSpinButton(HTMLInputElement*) const;
+  // Returns size of one slider tick mark for a horizontal track.
+  // For vertical tracks we rotate it and use it. i.e. Width is always length
+  // along the track.
+  virtual IntSize sliderTickSize() const = 0;
+  // Returns the distance of slider tick origin from the slider track center.
+  virtual int sliderTickOffsetFromTrackCenter() const = 0;
 
-    // Functions for <select> elements.
-    virtual bool delegatesMenuListRendering() const { return false; }
-    virtual bool popsMenuByArrowKeys() const { return false; }
-    virtual bool popsMenuBySpaceKey() const { return false; }
-    virtual bool popsMenuByReturnKey() const { return false; }
-    virtual bool popsMenuByAltDownUpOrF4Key() const { return false; }
+  virtual bool shouldHaveSpinButton(HTMLInputElement*) const;
 
-    virtual String fileListNameForWidth(Locale&, const FileList*, const Font&, int width) const;
+  // Functions for <select> elements.
+  virtual bool delegatesMenuListRendering() const { return false; }
+  virtual bool popsMenuByArrowKeys() const { return false; }
+  virtual bool popsMenuBySpaceKey() const { return false; }
+  virtual bool popsMenuByReturnKey() const { return false; }
+  virtual bool popsMenuByAltDownUpOrF4Key() const { return false; }
 
-    virtual bool shouldOpenPickerWithF4Key() const;
+  virtual String fileListNameForWidth(Locale&,
+                                      const FileList*,
+                                      const Font&,
+                                      int width) const;
 
-    virtual bool supportsSelectionForegroundColors() const { return true; }
+  virtual bool shouldOpenPickerWithF4Key() const;
 
-    virtual bool isModalColorChooser() const { return true; }
+  virtual bool supportsSelectionForegroundColors() const { return true; }
 
-    virtual bool shouldUseFallbackTheme(const ComputedStyle&) const;
+  virtual bool isModalColorChooser() const { return true; }
 
-protected:
-    // The platform selection color.
-    virtual Color platformActiveSelectionBackgroundColor() const;
-    virtual Color platformInactiveSelectionBackgroundColor() const;
-    virtual Color platformActiveSelectionForegroundColor() const;
-    virtual Color platformInactiveSelectionForegroundColor() const;
+  virtual bool shouldUseFallbackTheme(const ComputedStyle&) const;
 
-    virtual Color platformActiveListBoxSelectionBackgroundColor() const;
-    virtual Color platformInactiveListBoxSelectionBackgroundColor() const;
-    virtual Color platformActiveListBoxSelectionForegroundColor() const;
-    virtual Color platformInactiveListBoxSelectionForegroundColor() const;
+ protected:
+  // The platform selection color.
+  virtual Color platformActiveSelectionBackgroundColor() const;
+  virtual Color platformInactiveSelectionBackgroundColor() const;
+  virtual Color platformActiveSelectionForegroundColor() const;
+  virtual Color platformInactiveSelectionForegroundColor() const;
 
-    virtual bool themeDrawsFocusRing(const ComputedStyle&) const = 0;
+  virtual Color platformActiveListBoxSelectionBackgroundColor() const;
+  virtual Color platformInactiveListBoxSelectionBackgroundColor() const;
+  virtual Color platformActiveListBoxSelectionForegroundColor() const;
+  virtual Color platformInactiveListBoxSelectionForegroundColor() const;
 
-    // Methods for each appearance value.
-    virtual void adjustCheckboxStyle(ComputedStyle&) const;
-    virtual void setCheckboxSize(ComputedStyle&) const { }
+  virtual bool themeDrawsFocusRing(const ComputedStyle&) const = 0;
 
-    virtual void adjustRadioStyle(ComputedStyle&) const;
-    virtual void setRadioSize(ComputedStyle&) const { }
+  // Methods for each appearance value.
+  virtual void adjustCheckboxStyle(ComputedStyle&) const;
+  virtual void setCheckboxSize(ComputedStyle&) const {}
 
-    virtual void adjustButtonStyle(ComputedStyle&) const;
-    virtual void adjustInnerSpinButtonStyle(ComputedStyle&) const;
+  virtual void adjustRadioStyle(ComputedStyle&) const;
+  virtual void setRadioSize(ComputedStyle&) const {}
 
-    virtual void adjustMenuListStyle(ComputedStyle&, Element*) const;
-    virtual void adjustMenuListButtonStyle(ComputedStyle&, Element*) const;
-    virtual void adjustSliderContainerStyle(ComputedStyle&, Element*) const;
-    virtual void adjustSliderThumbStyle(ComputedStyle&) const;
-    virtual void adjustSearchFieldStyle(ComputedStyle&) const;
-    virtual void adjustSearchFieldCancelButtonStyle(ComputedStyle&) const;
-    void adjustStyleUsingFallbackTheme(ComputedStyle&);
-    void adjustCheckboxStyleUsingFallbackTheme(ComputedStyle&) const;
-    void adjustRadioStyleUsingFallbackTheme(ComputedStyle&) const;
+  virtual void adjustButtonStyle(ComputedStyle&) const;
+  virtual void adjustInnerSpinButtonStyle(ComputedStyle&) const;
 
-    bool hasPlatformTheme() const { return m_platformTheme; }
+  virtual void adjustMenuListStyle(ComputedStyle&, Element*) const;
+  virtual void adjustMenuListButtonStyle(ComputedStyle&, Element*) const;
+  virtual void adjustSliderContainerStyle(ComputedStyle&, Element*) const;
+  virtual void adjustSliderThumbStyle(ComputedStyle&) const;
+  virtual void adjustSearchFieldStyle(ComputedStyle&) const;
+  virtual void adjustSearchFieldCancelButtonStyle(ComputedStyle&) const;
+  void adjustStyleUsingFallbackTheme(ComputedStyle&);
+  void adjustCheckboxStyleUsingFallbackTheme(ComputedStyle&) const;
+  void adjustRadioStyleUsingFallbackTheme(ComputedStyle&) const;
 
-public:
-    // Methods for state querying
-    static ControlStates controlStatesForLayoutObject(const LayoutObject&);
-    static bool isActive(const LayoutObject&);
-    static bool isChecked(const LayoutObject&);
-    static bool isIndeterminate(const LayoutObject&);
-    static bool isEnabled(const LayoutObject&);
-    static bool isFocused(const LayoutObject&);
-    static bool isPressed(const LayoutObject&);
-    static bool isSpinUpButtonPartPressed(const LayoutObject&);
-    static bool isHovered(const LayoutObject&);
-    static bool isSpinUpButtonPartHovered(const LayoutObject&);
-    static bool isReadOnlyControl(const LayoutObject&);
+  bool hasPlatformTheme() const { return m_platformTheme; }
 
-private:
-    // This function is to be implemented in your platform-specific theme implementation to hand back the
-    // appropriate platform theme.
-    static LayoutTheme& nativeTheme();
+ public:
+  // Methods for state querying
+  static ControlStates controlStatesForLayoutObject(const LayoutObject&);
+  static bool isActive(const LayoutObject&);
+  static bool isChecked(const LayoutObject&);
+  static bool isIndeterminate(const LayoutObject&);
+  static bool isEnabled(const LayoutObject&);
+  static bool isFocused(const LayoutObject&);
+  static bool isPressed(const LayoutObject&);
+  static bool isSpinUpButtonPartPressed(const LayoutObject&);
+  static bool isHovered(const LayoutObject&);
+  static bool isSpinUpButtonPartHovered(const LayoutObject&);
+  static bool isReadOnlyControl(const LayoutObject&);
 
-    Color m_customFocusRingColor;
-    bool m_hasCustomFocusRingColor;
-    double m_caretBlinkInterval = 0.5;
+ private:
+  // This function is to be implemented in your platform-specific theme
+  // implementation to hand back the appropriate platform theme.
+  static LayoutTheme& nativeTheme();
 
-    // This color is expected to be drawn on a semi-transparent overlay,
-    // making it more transparent than its alpha value indicates.
-    static const RGBA32 defaultTapHighlightColor = 0x66000000;
+  Color m_customFocusRingColor;
+  bool m_hasCustomFocusRingColor;
+  double m_caretBlinkInterval = 0.5;
 
-    static const RGBA32 defaultCompositionBackgroundColor = 0xFFFFDD55;
+  // This color is expected to be drawn on a semi-transparent overlay,
+  // making it more transparent than its alpha value indicates.
+  static const RGBA32 defaultTapHighlightColor = 0x66000000;
 
-    Theme* m_platformTheme; // The platform-specific theme.
+  static const RGBA32 defaultCompositionBackgroundColor = 0xFFFFDD55;
+
+  Theme* m_platformTheme;  // The platform-specific theme.
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutTheme_h
+#endif  // LayoutTheme_h

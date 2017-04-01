@@ -9,7 +9,7 @@
 #include "build/build_config.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
 #include "content/browser/site_instance_impl.h"
-#include "content/public/common/ssl_status.h"
+#include "content/public/browser/ssl_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::ASCIIToUTF16;
@@ -26,7 +26,7 @@ class NavigationEntryTest : public testing::Test {
 
     instance_ = SiteInstanceImpl::Create(NULL);
     entry2_.reset(new NavigationEntryImpl(
-          instance_, 3,
+          instance_,
           GURL("test:url"),
           Referrer(GURL("from"), blink::WebReferrerPolicyDefault),
           ASCIIToUTF16("title"),
@@ -137,9 +137,9 @@ TEST_F(NavigationEntryTest, NavigationEntryFavicons) {
 // Test SSLStatus inner class
 TEST_F(NavigationEntryTest, NavigationEntrySSLStatus) {
   // Default (unknown)
-  EXPECT_EQ(SECURITY_STYLE_UNKNOWN, entry1_->GetSSL().security_style);
-  EXPECT_EQ(SECURITY_STYLE_UNKNOWN, entry2_->GetSSL().security_style);
-  EXPECT_EQ(0, entry1_->GetSSL().cert_id);
+  EXPECT_FALSE(entry1_->GetSSL().initialized);
+  EXPECT_FALSE(entry2_->GetSSL().initialized);
+  EXPECT_FALSE(!!entry1_->GetSSL().certificate);
   EXPECT_EQ(0U, entry1_->GetSSL().cert_status);
   EXPECT_EQ(-1, entry1_->GetSSL().security_bits);
   int content_status = entry1_->GetSSL().content_status;
@@ -180,12 +180,6 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   entry2_->SetPageState(PageState::CreateFromEncodedData("state"));
   EXPECT_EQ("state", entry2_->GetPageState().ToEncodedData());
 
-  // Page ID
-  EXPECT_EQ(-1, entry1_->GetPageID());
-  EXPECT_EQ(3, entry2_->GetPageID());
-  entry2_->SetPageID(2);
-  EXPECT_EQ(2, entry2_->GetPageID());
-
   // Transition type
   EXPECT_TRUE(ui::PageTransitionTypeIncludingQualifiersIs(
       entry1_->GetTransitionType(), ui::PAGE_TRANSITION_LINK));
@@ -208,14 +202,12 @@ TEST_F(NavigationEntryTest, NavigationEntryAccessors) {
   EXPECT_TRUE(entry2_->GetHasPostData());
 
   // Restored
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_NONE, entry1_->restore_type());
+  EXPECT_EQ(RestoreType::NONE, entry1_->restore_type());
   EXPECT_FALSE(entry1_->IsRestored());
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_NONE, entry2_->restore_type());
+  EXPECT_EQ(RestoreType::NONE, entry2_->restore_type());
   EXPECT_FALSE(entry2_->IsRestored());
-  entry2_->set_restore_type(
-      NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY);
-  EXPECT_EQ(NavigationEntryImpl::RESTORE_LAST_SESSION_EXITED_CLEANLY,
-            entry2_->restore_type());
+  entry2_->set_restore_type(RestoreType::LAST_SESSION_EXITED_CLEANLY);
+  EXPECT_EQ(RestoreType::LAST_SESSION_EXITED_CLEANLY, entry2_->restore_type());
   EXPECT_TRUE(entry2_->IsRestored());
 
   // Original URL

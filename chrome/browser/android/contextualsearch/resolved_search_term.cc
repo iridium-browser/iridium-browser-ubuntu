@@ -16,18 +16,27 @@ ResolvedSearchTerm::ResolvedSearchTerm(int response_code)
       prevent_preload(false),
       selection_start_adjust(0),
       selection_end_adjust(0),
-      context_language("") {}
+      context_language(""),
+      thumbnail_url(""),
+      caption(""),
+      quick_action_uri(""),
+      quick_action_category(QUICK_ACTION_CATEGORY_NONE) {}
 
-ResolvedSearchTerm::ResolvedSearchTerm(bool is_invalid,
-                                       int response_code,
-                                       const std::string& search_term,
-                                       const std::string& display_text,
-                                       const std::string& alternate_term,
-                                       const std::string& mid,
-                                       bool prevent_preload,
-                                       int selection_start_adjust,
-                                       int selection_end_adjust,
-                                       const std::string& context_language)
+ResolvedSearchTerm::ResolvedSearchTerm(
+    bool is_invalid,
+    int response_code,
+    const std::string& search_term,
+    const std::string& display_text,
+    const std::string& alternate_term,
+    const std::string& mid,
+    bool prevent_preload,
+    int selection_start_adjust,
+    int selection_end_adjust,
+    const std::string& context_language,
+    const std::string& thumbnail_url,
+    const std::string& caption,
+    const std::string& quick_action_uri,
+    const QuickActionCategory& quick_action_category)
     : is_invalid(is_invalid),
       response_code(response_code),
       search_term(search_term),
@@ -37,6 +46,10 @@ ResolvedSearchTerm::ResolvedSearchTerm(bool is_invalid,
       prevent_preload(prevent_preload),
       selection_start_adjust(selection_start_adjust),
       selection_end_adjust(selection_end_adjust),
-      context_language(context_language) {}
+      context_language(context_language),
+      thumbnail_url(thumbnail_url),
+      caption(caption),
+      quick_action_uri(quick_action_uri),
+      quick_action_category(quick_action_category) {}
 
 ResolvedSearchTerm::~ResolvedSearchTerm() {}

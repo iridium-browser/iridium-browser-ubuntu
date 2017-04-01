@@ -24,8 +24,10 @@ const char kChromeUIIndexedDBInternalsHost[] = "indexeddb-internals";
 const char kChromeUIAccessibilityHost[] = "accessibility";
 const char kChromeUIBlobInternalsHost[] = "blob-internals";
 const char kChromeUIBrowserCrashHost[] = "inducebrowsercrashforrealz";
+const char kChromeUIDinoHost[] = "dino";
 const char kChromeUIGpuHost[] = "gpu";
 const char kChromeUIHistogramHost[] = "histograms";
+const char kChromeUIHistoryHost[] = "history";
 const char kChromeUIMediaInternalsHost[] = "media-internals";
 const char kChromeUIMemoryExhaustHost[] = "memory-exhaust";
 const char kChromeUINetworkViewCacheHost[] = "view-http-cache";
@@ -34,24 +36,25 @@ const char kChromeUINetworkErrorsListingHost[] = "network-errors";
 const char kChromeUIResourcesHost[] = "resources";
 const char kChromeUIServiceWorkerInternalsHost[] = "serviceworker-internals";
 const char kChromeUITracingHost[] = "tracing";
+const char kChromeUIUberHost[] = "chrome";
 const char kChromeUIWebRTCInternalsHost[] = "webrtc-internals";
 
-const char kChromeUIBadCastCrashURL[] = "chrome://badcastcrash";
-const char kChromeUIBrowserCrashURL[] = "chrome://inducebrowsercrashforrealz";
-const char kChromeUIBrowserUIHang[] = "chrome://uithreadhang";
-const char kChromeUICrashURL[] = "chrome://crash";
-const char kChromeUIDelayedBrowserUIHang[] = "chrome://delayeduithreadhang";
-const char kChromeUIDumpURL[] = "chrome://crashdump";
-const char kChromeUIGpuCleanURL[] = "chrome://gpuclean";
-const char kChromeUIGpuCrashURL[] = "chrome://gpucrash";
-const char kChromeUIGpuHangURL[] = "chrome://gpuhang";
-const char kChromeUIHangURL[] = "chrome://hang";
-const char kChromeUIKillURL[] = "chrome://kill";
-const char kChromeUIMemoryExhaustURL[] = "chrome://memory-exhaust";
-const char kChromeUINetworkErrorURL[] = "chrome://network-error";
-const char kChromeUINetworkErrorsListingURL[] = "chrome://network-errors";
-const char kChromeUIPpapiFlashCrashURL[] = "chrome://ppapiflashcrash";
-const char kChromeUIPpapiFlashHangURL[] = "chrome://ppapiflashhang";
+const char kChromeUIBadCastCrashURL[] = "chrome://badcastcrash/";
+const char kChromeUIBrowserCrashURL[] = "chrome://inducebrowsercrashforrealz/";
+const char kChromeUIBrowserUIHang[] = "chrome://uithreadhang/";
+const char kChromeUICrashURL[] = "chrome://crash/";
+const char kChromeUIDelayedBrowserUIHang[] = "chrome://delayeduithreadhang/";
+const char kChromeUIDumpURL[] = "chrome://crashdump/";
+const char kChromeUIGpuCleanURL[] = "chrome://gpuclean/";
+const char kChromeUIGpuCrashURL[] = "chrome://gpucrash/";
+const char kChromeUIGpuHangURL[] = "chrome://gpuhang/";
+const char kChromeUIHangURL[] = "chrome://hang/";
+const char kChromeUIKillURL[] = "chrome://kill/";
+const char kChromeUIMemoryExhaustURL[] = "chrome://memory-exhaust/";
+const char kChromeUINetworkErrorURL[] = "chrome://network-error/";
+const char kChromeUINetworkErrorsListingURL[] = "chrome://network-errors/";
+const char kChromeUIPpapiFlashCrashURL[] = "chrome://ppapiflashcrash/";
+const char kChromeUIPpapiFlashHangURL[] = "chrome://ppapiflashhang/";
 
 // This error URL is loaded in normal web renderer processes, so it should not
 // have a chrome:// scheme that might let it be confused with a WebUI page.
@@ -59,6 +62,6 @@ const char kUnreachableWebDataURL[] = "data:text/html,chromewebdata";
 
 const char kChromeUINetworkViewCacheURL[] = "chrome://view-http-cache/";
 const char kChromeUIResourcesURL[] = "chrome://resources/";
-const char kChromeUIShorthangURL[] = "chrome://shorthang";
+const char kChromeUIShorthangURL[] = "chrome://shorthang/";
 
 }  // namespace content

@@ -9,8 +9,8 @@
 
 #include <memory>
 
-#include "core/fxcrt/include/fx_system.h"
-#include "xfa/fxgraphics/include/cfx_graphics.h"
+#include "core/fxcrt/fx_system.h"
+#include "xfa/fxgraphics/cfx_graphics.h"
 
 class CFX_PathData;
 class CFX_PathGenerator;
@@ -70,7 +70,7 @@ class CFX_Path final {
   FWL_Error AddSubpath(CFX_Path* path);
   FWL_Error Clear();
 
-  FX_BOOL IsEmpty() const;
+  bool IsEmpty() const;
   CFX_PathData* GetPathData() const;
 
  private:

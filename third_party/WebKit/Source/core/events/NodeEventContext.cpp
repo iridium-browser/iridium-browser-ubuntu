@@ -30,38 +30,37 @@
 #include "core/events/Event.h"
 #include "core/events/FocusEvent.h"
 #include "core/events/MouseEvent.h"
+#include "core/events/PointerEvent.h"
 #include "core/events/TouchEventContext.h"
 
 namespace blink {
 
 NodeEventContext::NodeEventContext(Node* node, EventTarget* currentTarget)
-    : m_node(node)
-    , m_currentTarget(currentTarget)
-{
-    DCHECK(m_node);
+    : m_node(node), m_currentTarget(currentTarget) {
+  DCHECK(m_node);
 }
 
-DEFINE_TRACE(NodeEventContext)
-{
-    visitor->trace(m_node);
-    visitor->trace(m_currentTarget);
-    visitor->trace(m_treeScopeEventContext);
+DEFINE_TRACE(NodeEventContext) {
+  visitor->trace(m_node);
+  visitor->trace(m_currentTarget);
+  visitor->trace(m_treeScopeEventContext);
 }
 
-void NodeEventContext::handleLocalEvents(Event& event) const
-{
-    if (TouchEventContext* touchContext = touchEventContext()) {
-        touchContext->handleLocalEvents(event);
-    } else if (relatedTarget()) {
-        if (event.isMouseEvent()) {
-            toMouseEvent(event).setRelatedTarget(relatedTarget());
-        } else if (event.isFocusEvent()) {
-            toFocusEvent(event).setRelatedTarget(relatedTarget());
-        }
+void NodeEventContext::handleLocalEvents(Event& event) const {
+  if (TouchEventContext* touchContext = touchEventContext()) {
+    touchContext->handleLocalEvents(event);
+  } else if (relatedTarget()) {
+    if (event.isMouseEvent()) {
+      toMouseEvent(event).setRelatedTarget(relatedTarget());
+    } else if (event.isPointerEvent()) {
+      toPointerEvent(event).setRelatedTarget(relatedTarget());
+    } else if (event.isFocusEvent()) {
+      toFocusEvent(event).setRelatedTarget(relatedTarget());
     }
-    event.setTarget(target());
-    event.setCurrentTarget(m_currentTarget.get());
-    m_node->handleLocalEvents(event);
+  }
+  event.setTarget(target());
+  event.setCurrentTarget(m_currentTarget.get());
+  m_node->handleLocalEvents(event);
 }
 
-} // namespace blink
+}  // namespace blink

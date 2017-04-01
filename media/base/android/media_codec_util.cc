@@ -31,6 +31,8 @@ namespace {
 const char kMp4aMimeType[] = "audio/mp4a-latm";
 const char kOpusMimeType[] = "audio/opus";
 const char kVorbisMimeType[] = "audio/vorbis";
+const char kAc3MimeType[] = "audio/ac3";
+const char kEac3MimeType[] = "audio/eac3";
 const char kAvcMimeType[] = "video/avc";
 const char kHevcMimeType[] = "video/hevc";
 const char kVp8MimeType[] = "video/x-vnd.on2.vp8";
@@ -54,6 +56,11 @@ static std::string CodecTypeToAndroidMimeType(const std::string& codec) {
     return kVorbisMimeType;
   if (codec == "opus")
     return kOpusMimeType;
+  if (codec == "ac3")
+    return kAc3MimeType;
+  if (codec == "eac3")
+    return kEac3MimeType;
+
   DLOG(WARNING) << "Cannot convert codec to Android MIME type: " << codec;
   return std::string();
 }
@@ -87,20 +94,33 @@ static bool IsDecoderSupportedByDevice(const std::string& android_mime_type) {
   return Java_MediaCodecUtil_isDecoderSupportedForDevice(env, j_mime);
 }
 
+static bool IsEncoderSupportedByDevice(const std::string& android_mime_type) {
+  DCHECK(MediaCodecUtil::IsMediaCodecAvailable());
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> j_mime =
+      ConvertUTF8ToJavaString(env, android_mime_type);
+  return Java_MediaCodecUtil_isEncoderSupportedByDevice(env, j_mime);
+}
+
 // static
 bool MediaCodecUtil::IsMediaCodecAvailable() {
-  // MediaCodec is only available on JB and greater.
-  if (base::android::BuildInfo::GetInstance()->sdk_int() < 16)
-    return false;
-
-  // Blacklist some devices on Jellybean as for MediaCodec support is buggy.
+  // Blacklist some devices on Jellybean as MediaCodec is buggy.
   // http://crbug.com/365494, http://crbug.com/615872
   // Blacklist Lenovo A6600 / A6800 on KitKat, which tends to crash a lot.
   // See crbug.com/628059 .  We include < K since they don't exist.
+  // Blacklist Samsung Galaxy Star Pro (GT-S7262) (crbug.com/634920).
+  // GT-S5282 and GT-I8552 are for crbug.com/634920 .
   if (base::android::BuildInfo::GetInstance()->sdk_int() <= 19) {
     std::string model(base::android::BuildInfo::GetInstance()->model());
     return model != "GT-I9100" && model != "GT-I9300" && model != "GT-N7000" &&
-           model != "GT-N7100" && model != "A6600" && model != "A6800";
+           model != "GT-N7100" && model != "A6600" && model != "A6800" &&
+           model != "GT-S7262" && model != "GT-S5282" && model != "GT-I8552";
+  } else if (base::android::BuildInfo::GetInstance()->sdk_int() < 19) {
+    // For JB, these tend to fail often (crbug.com/654905), but not with K+.
+    std::string model(base::android::BuildInfo::GetInstance()->model());
+    return model != "GT-P3113" && model != "GT-P5110" && model != "GT-P5100" &&
+           model != "GT-P5113" && model != "GT-P3110" && model != "GT-N5110" &&
+           model != "e-tab4" && model != "GT-I8200Q";
   }
 
   return true;
@@ -155,7 +175,7 @@ bool MediaCodecUtil::IsKnownUnaccelerated(const std::string& android_mime_type,
 
   std::string codec_name =
       GetDefaultCodecName(android_mime_type, direction, false);
-  DVLOG(1) << __FUNCTION__ << "Default codec for " << android_mime_type << " : "
+  DVLOG(1) << __func__ << "Default codec for " << android_mime_type << " : "
            << codec_name << ", direction: " << direction;
   if (codec_name.empty())
     return true;
@@ -211,6 +231,11 @@ bool MediaCodecUtil::IsVp8EncoderAvailable() {
 // static
 bool MediaCodecUtil::IsVp9DecoderAvailable() {
   return IsMediaCodecAvailable() && IsDecoderSupportedByDevice(kVp9MimeType);
+}
+
+// static
+bool MediaCodecUtil::IsH264EncoderAvailable() {
+  return IsMediaCodecAvailable() && IsEncoderSupportedByDevice(kAvcMimeType);
 }
 
 // static

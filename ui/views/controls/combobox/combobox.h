@@ -36,12 +36,16 @@ class PrefixSelector;
 // Combobox has two distinct parts, the drop down arrow and the text. Combobox
 // offers two distinct behaviors:
 // * STYLE_NORMAL: typical combobox, clicking on the text and/or button shows
-// the drop down, arrow keys change selection, selected index can be changed by
-// the user to something other than the first item.
+//   the drop down, arrow keys change selection or show the menu depending on
+//   the platform, selected index can be changed by the user to something other
+//   than the first item.
 // * STYLE_ACTION: clicking on the text notifies the listener. The menu can be
-// shown only by clicking on the arrow. The selected index is always reverted to
-// 0 after the listener is notified.
-class VIEWS_EXPORT Combobox : public PrefixDelegate, public ButtonListener {
+//   shown only by clicking on the arrow, except on Mac where it can be shown
+//   through the keyboard. The selected index is always reverted to 0 after the
+//   listener is notified.
+class VIEWS_EXPORT Combobox : public View,
+                              public PrefixDelegate,
+                              public ButtonListener {
  public:
   // The style of the combobox.
   enum Style {
@@ -92,9 +96,10 @@ class VIEWS_EXPORT Combobox : public PrefixDelegate, public ButtonListener {
   void OnPaint(gfx::Canvas* canvas) override;
   void OnFocus() override;
   void OnBlur() override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void Layout() override;
   void OnEnabledChanged() override;
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
   // Overridden from PrefixDelegate:
   int GetRowCount() override;
@@ -113,9 +118,9 @@ class VIEWS_EXPORT Combobox : public PrefixDelegate, public ButtonListener {
  private:
   friend class test::ComboboxTestApi;
 
-  class ComboboxMenuModelAdapter;
+  class ComboboxMenuModel;
 
-  // Updates the border according to the current state.
+  // Updates the border according to the current node_data.
   void UpdateBorder();
 
   // Given bounds within our View, this helper mirrors the bounds if necessary.
@@ -129,6 +134,9 @@ class VIEWS_EXPORT Combobox : public PrefixDelegate, public ButtonListener {
 
   // Show the drop down list
   void ShowDropDownMenu(ui::MenuSourceType source_type);
+
+  // Cleans up after the menu as closed
+  void OnMenuClosed(Button::ButtonState original_button_state);
 
   // Called when the selection is changed by the user.
   void OnPerformAction();
@@ -172,8 +180,8 @@ class VIEWS_EXPORT Combobox : public PrefixDelegate, public ButtonListener {
   // A helper used to select entries by keyboard input.
   std::unique_ptr<PrefixSelector> selector_;
 
-  // Adapts a ComboboxModel for use by a views MenuRunner.
-  std::unique_ptr<ui::MenuModel> menu_model_adapter_;
+  // The ComboboxModel for use by |menu_runner_|.
+  std::unique_ptr<ui::MenuModel> menu_model_;
 
   // Like MenuButton, we use a time object in order to keep track of when the
   // combobox was closed. The time is used for simulating menu behavior; that
@@ -204,7 +212,7 @@ class VIEWS_EXPORT Combobox : public PrefixDelegate, public ButtonListener {
 
   // Set while the dropdown is showing. Ensures the menu is closed if |this| is
   // destroyed.
-  std::unique_ptr<views::MenuRunner> menu_runner_;
+  std::unique_ptr<MenuRunner> menu_runner_;
 
   // The image to be drawn for this combobox's arrow.
   gfx::ImageSkia arrow_image_;

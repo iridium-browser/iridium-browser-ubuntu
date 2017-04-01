@@ -32,7 +32,8 @@ class WebrtcConnectionToClient : public ConnectionToClient,
   WebrtcConnectionToClient(
       std::unique_ptr<Session> session,
       scoped_refptr<protocol::TransportContext> transport_context,
-      scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner);
   ~WebrtcConnectionToClient() override;
 
   // ConnectionToClient interface.
@@ -40,10 +41,10 @@ class WebrtcConnectionToClient : public ConnectionToClient,
       ConnectionToClient::EventHandler* event_handler) override;
   Session* session() override;
   void Disconnect(ErrorCode error) override;
-  void OnInputEventReceived(int64_t timestamp) override;
   std::unique_ptr<VideoStream> StartVideoStream(
       std::unique_ptr<webrtc::DesktopCapturer> desktop_capturer) override;
-  AudioStub* audio_stub() override;
+  std::unique_ptr<AudioStream> StartAudioStream(
+      std::unique_ptr<AudioSource> audio_source) override;
   ClientStub* client_stub() override;
   void set_clipboard_stub(ClipboardStub* clipboard_stub) override;
   void set_host_stub(HostStub* host_stub) override;
@@ -79,6 +80,7 @@ class WebrtcConnectionToClient : public ConnectionToClient,
   std::unique_ptr<Session> session_;
 
   scoped_refptr<base::SingleThreadTaskRunner> video_encode_task_runner_;
+  scoped_refptr<base::SingleThreadTaskRunner> audio_task_runner_;
 
   std::unique_ptr<HostControlDispatcher> control_dispatcher_;
   std::unique_ptr<HostEventDispatcher> event_dispatcher_;

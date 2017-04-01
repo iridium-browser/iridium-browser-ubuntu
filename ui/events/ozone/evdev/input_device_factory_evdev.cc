@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
@@ -39,9 +38,6 @@ namespace ui {
 
 namespace {
 
-typedef base::Callback<void(std::unique_ptr<EventConverterEvdev>)>
-    OpenInputDeviceReplyCallback;
-
 struct OpenInputDeviceParams {
   // Unique identifier for the new device.
   int id;
@@ -49,10 +45,10 @@ struct OpenInputDeviceParams {
   // Device path to open.
   base::FilePath path;
 
-  // Dispatcher for events. Call on UI thread only.
+  // Dispatcher for events.
   DeviceEventDispatcherEvdev* dispatcher;
 
-  // State shared between devices. Must not be dereferenced on worker thread.
+  // State shared between devices.
   CursorDelegateEvdev* cursor;
 #if defined(USE_EVDEV_GESTURES)
   GesturePropertyProvider* gesture_property_provider;
@@ -86,7 +82,7 @@ void SetGestureBoolProperty(GesturePropertyProvider* provider,
 
 std::unique_ptr<EventConverterEvdev> CreateConverter(
     const OpenInputDeviceParams& params,
-    int fd,
+    ScopedInputDevice fd,
     const EventDeviceInfo& devinfo) {
 #if defined(USE_EVDEV_GESTURES)
   // Touchpad or mouse: use gestures library.
@@ -96,16 +92,17 @@ std::unique_ptr<EventConverterEvdev> CreateConverter(
         base::MakeUnique<GestureInterpreterLibevdevCros>(
             params.id, params.cursor, params.gesture_property_provider,
             params.dispatcher);
-    return base::MakeUnique<EventReaderLibevdevCros>(
-        fd, params.path, params.id, devinfo, std::move(gesture_interp));
+    return base::MakeUnique<EventReaderLibevdevCros>(std::move(fd), params.path,
+                                                     params.id, devinfo,
+                                                     std::move(gesture_interp));
   }
 #endif
 
   // Touchscreen: use TouchEventConverterEvdev.
   if (devinfo.HasTouchscreen()) {
     std::unique_ptr<TouchEventConverterEvdev> converter(
-        new TouchEventConverterEvdev(fd, params.path, params.id, devinfo,
-                                     params.dispatcher));
+        new TouchEventConverterEvdev(std::move(fd), params.path, params.id,
+                                     devinfo, params.dispatcher));
     converter->Initialize(devinfo);
     return std::move(converter);
   }
@@ -113,65 +110,41 @@ std::unique_ptr<EventConverterEvdev> CreateConverter(
   // Graphics tablet
   if (devinfo.HasTablet())
     return base::WrapUnique<EventConverterEvdev>(new TabletEventConverterEvdev(
-        fd, params.path, params.id, params.cursor, devinfo, params.dispatcher));
+        std::move(fd), params.path, params.id, params.cursor, devinfo,
+        params.dispatcher));
 
   // Everything else: use EventConverterEvdevImpl.
-  return base::WrapUnique<EventConverterEvdevImpl>(new EventConverterEvdevImpl(
-      fd, params.path, params.id, devinfo, params.cursor, params.dispatcher));
+  return base::WrapUnique<EventConverterEvdevImpl>(
+      new EventConverterEvdevImpl(std::move(fd), params.path, params.id,
+                                  devinfo, params.cursor, params.dispatcher));
 }
 
-// Open an input device. Opening may put the calling thread to sleep, and
-// therefore should be run on a thread where latency is not critical. We
-// run it on a thread from the worker pool.
-//
-// This takes a TaskRunner and runs the reply on that thread, so that we
-// can hop threads if necessary (back to the UI thread).
-void OpenInputDevice(std::unique_ptr<OpenInputDeviceParams> params,
-                     scoped_refptr<base::TaskRunner> reply_runner,
-                     const OpenInputDeviceReplyCallback& reply_callback) {
-  const base::FilePath& path = params->path;
-  std::unique_ptr<EventConverterEvdev> converter;
-
+// Open an input device and construct an EventConverterEvdev.
+std::unique_ptr<EventConverterEvdev> OpenInputDevice(
+    const OpenInputDeviceParams& params) {
+  const base::FilePath& path = params.path;
   TRACE_EVENT1("evdev", "OpenInputDevice", "path", path.value());
 
-  int fd = open(path.value().c_str(), O_RDWR | O_NONBLOCK);
-  if (fd < 0) {
-    PLOG(ERROR) << "Cannot open '" << path.value();
-    reply_runner->PostTask(
-        FROM_HERE, base::Bind(reply_callback, base::Passed(&converter)));
-    return;
+  ScopedInputDevice fd(open(path.value().c_str(), O_RDWR | O_NONBLOCK));
+  if (fd.get() < 0) {
+    PLOG(ERROR) << "Cannot open " << path.value();
+    return nullptr;
   }
 
   // Use monotonic timestamps for events. The touch code in particular
   // expects event timestamps to correlate to the monotonic clock
   // (base::TimeTicks).
   unsigned int clk = CLOCK_MONOTONIC;
-  if (ioctl(fd, EVIOCSCLOCKID, &clk))
+  if (ioctl(fd.get(), EVIOCSCLOCKID, &clk))
     PLOG(ERROR) << "failed to set CLOCK_MONOTONIC";
 
   EventDeviceInfo devinfo;
-  if (!devinfo.Initialize(fd, path)) {
+  if (!devinfo.Initialize(fd.get(), path)) {
     LOG(ERROR) << "Failed to get device information for " << path.value();
-    close(fd);
-    reply_runner->PostTask(
-        FROM_HERE, base::Bind(reply_callback, base::Passed(&converter)));
-    return;
+    return nullptr;
   }
 
-  converter = CreateConverter(*params, fd, devinfo);
-
-  // Reply with the constructed converter.
-  reply_runner->PostTask(FROM_HERE,
-                         base::Bind(reply_callback, base::Passed(&converter)));
-}
-
-// Close an input device. Closing may put the calling thread to sleep, and
-// therefore should be run on a thread where latency is not critical. We
-// run it on the FILE thread.
-void CloseInputDevice(const base::FilePath& path,
-                      std::unique_ptr<EventConverterEvdev> converter) {
-  TRACE_EVENT1("evdev", "CloseInputDevice", "path", path.value());
-  converter.reset();
+  return CreateConverter(params, std::move(fd), devinfo);
 }
 
 }  // namespace
@@ -189,32 +162,28 @@ InputDeviceFactoryEvdev::InputDeviceFactoryEvdev(
 }
 
 InputDeviceFactoryEvdev::~InputDeviceFactoryEvdev() {
-  base::STLDeleteValues(&converters_);
 }
 
 void InputDeviceFactoryEvdev::AddInputDevice(int id,
                                              const base::FilePath& path) {
-  std::unique_ptr<OpenInputDeviceParams> params(new OpenInputDeviceParams);
-  params->id = id;
-  params->path = path;
-  params->cursor = cursor_;
-  params->dispatcher = dispatcher_.get();
+  OpenInputDeviceParams params;
+  params.id = id;
+  params.path = path;
+  params.cursor = cursor_;
+  params.dispatcher = dispatcher_.get();
 
 #if defined(USE_EVDEV_GESTURES)
-  params->gesture_property_provider = gesture_property_provider_.get();
+  params.gesture_property_provider = gesture_property_provider_.get();
 #endif
 
-  OpenInputDeviceReplyCallback reply_callback =
+  std::unique_ptr<EventConverterEvdev> converter = OpenInputDevice(params);
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
       base::Bind(&InputDeviceFactoryEvdev::AttachInputDevice,
-                 weak_ptr_factory_.GetWeakPtr());
+                 weak_ptr_factory_.GetWeakPtr(), base::Passed(&converter)));
 
   ++pending_device_changes_;
-
-  // Dispatch task to open from the worker pool, since open may block.
-  base::WorkerPool::PostTask(FROM_HERE,
-                             base::Bind(&OpenInputDevice, base::Passed(&params),
-                                        task_runner_, reply_callback),
-                             false /* task_is_slow */);
 }
 
 void InputDeviceFactoryEvdev::RemoveInputDevice(const base::FilePath& path) {
@@ -247,9 +216,9 @@ void InputDeviceFactoryEvdev::AttachInputDevice(
     }
 
     // Add initialized device to map.
-    converters_[path] = converter.release();
+    converters_[path] = std::move(converter);
     converters_[path]->Start();
-    UpdateDirtyFlags(converters_[path]);
+    UpdateDirtyFlags(converters_[path].get());
 
     // Sync settings to new device.
     ApplyInputDeviceSettings();
@@ -265,24 +234,18 @@ void InputDeviceFactoryEvdev::DetachInputDevice(const base::FilePath& path) {
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
 
   // Remove device from map.
-  std::unique_ptr<EventConverterEvdev> converter(converters_[path]);
+  std::unique_ptr<EventConverterEvdev> converter = std::move(converters_[path]);
   converters_.erase(path);
 
   if (converter) {
     // Disable the device (to release keys/buttons/etc).
     converter->SetEnabled(false);
 
-    // Cancel libevent notifications from this converter. This part must be
-    // on UI since the polling happens on UI.
+    // Cancel libevent notifications from this converter.
     converter->Stop();
 
     UpdateDirtyFlags(converter.get());
     NotifyDevicesUpdated();
-
-    // Dispatch task to close from the worker pool, since close may block.
-    base::WorkerPool::PostTask(
-        FROM_HERE,
-        base::Bind(&CloseInputDevice, path, base::Passed(&converter)), true);
   }
 }
 
@@ -350,7 +313,7 @@ void InputDeviceFactoryEvdev::ApplyInputDeviceSettings() {
                             input_device_settings_.tap_to_click_paused);
 
   for (const auto& it : converters_) {
-    EventConverterEvdev* converter = it.second;
+    EventConverterEvdev* converter = it.second.get();
     converter->SetEnabled(IsDeviceEnabled(converter));
 
     if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
@@ -367,7 +330,7 @@ void InputDeviceFactoryEvdev::ApplyInputDeviceSettings() {
 
 void InputDeviceFactoryEvdev::ApplyCapsLockLed() {
   for (const auto& it : converters_) {
-    EventConverterEvdev* converter = it.second;
+    EventConverterEvdev* converter = it.second.get();
     converter->SetCapsLockLed(caps_lock_led_enabled_);
   }
 }
@@ -431,8 +394,11 @@ void InputDeviceFactoryEvdev::NotifyTouchscreensUpdated() {
   std::vector<TouchscreenDevice> touchscreens;
   for (auto it = converters_.begin(); it != converters_.end(); ++it) {
     if (it->second->HasTouchscreen()) {
-      touchscreens.push_back(TouchscreenDevice(it->second->input_device(),
-          it->second->GetTouchscreenSize(), it->second->GetTouchPoints()));
+      TouchscreenDevice device(it->second->input_device(),
+          it->second->GetTouchscreenSize(), it->second->GetTouchPoints());
+      if (it->second->HasPen())
+        device.is_stylus = true;
+      touchscreens.push_back(device);
     }
   }
 
@@ -509,7 +475,7 @@ void InputDeviceFactoryEvdev::EnablePalmSuppression(bool enabled) {
   palm_suppression_enabled_ = enabled;
 
   for (const auto& it : converters_) {
-    it.second->SetEnabled(IsDeviceEnabled(it.second));
+    it.second->SetEnabled(IsDeviceEnabled(it.second.get()));
   }
 }
 

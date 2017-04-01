@@ -8,7 +8,6 @@ alexis.menard@intel.com
 bokan@chromium.org
 cbiesinger@chromium.org
 chrishtr@chromium.org
-davve@opera.com
 dcheng@chromium.org
 dglazkov@chromium.org
 dgozman@chromium.org
@@ -38,7 +37,6 @@ kenneth.r.christiansen@intel.com
 kinuko@chromium.org
 kouhei@chromium.org
 mkwst@chromium.org
-morrita@chromium.org
 mstensho@opera.com
 ojan@chromium.org
 # pdr reviews many svg and text autosizing patches.
@@ -53,6 +51,7 @@ rob.buis@samsung.com
 rune@opera.com
 schenney@chromium.org
 senorblanco@chromium.org
+sashab@chromium.org
 sigbjornf@opera.com
 skobes@chromium.org
 svillar@igalia.com
@@ -65,3 +64,6 @@ vollick@chromium.org
 wangxianzhu@chromium.org
 yoav@yoav.ws
 yutak@chromium.org
+
+# TEAM: blink-dev@chromium.org
+# COMPONENT: Blink

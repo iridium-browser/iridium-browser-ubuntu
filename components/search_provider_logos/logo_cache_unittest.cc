@@ -94,7 +94,7 @@ void ExpectLogosEqual(const EncodedLogo& expected_logo,
 void ShortenFile(base::FilePath path) {
   base::File file(path, base::File::FLAG_OPEN | base::File::FLAG_WRITE);
   int64_t file_length = file.GetLength();
-  ASSERT_NE(file_length, 0);
+  ASSERT_GT(file_length, 0);
   file.SetLength(file_length - 1);
 }
 
@@ -107,7 +107,7 @@ class LogoCacheTest : public ::testing::Test {
 
   void InitCache() {
     cache_.reset(new LogoCache(
-        cache_parent_dir_.path().Append(FILE_PATH_LITERAL("cache"))));
+        cache_parent_dir_.GetPath().Append(FILE_PATH_LITERAL("cache"))));
   }
 
   void ExpectMetadata(const LogoMetadata* expected_metadata) {

@@ -19,7 +19,7 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/dialog_test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/signin/core/browser/account_fetcher_service.h"
 #include "components/signin/core/browser/fake_account_fetcher_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
@@ -55,25 +55,18 @@ class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
     web_ui()->set_web_contents(
         browser()->tab_strip_model()->GetActiveWebContents());
 
-    // WebUI owns the handlers.
-    handler_ = new TestingSyncConfirmationHandler(web_ui());
+    auto handler = base::MakeUnique<TestingSyncConfirmationHandler>(web_ui());
+    handler_ = handler.get();
     sync_confirmation_ui_.reset(
-        new SyncConfirmationUI(web_ui(), handler_));
+        new SyncConfirmationUI(web_ui(), std::move(handler)));
 
     // This dialog assumes the signin flow was completed, which kicks off the
     // SigninManager.
     new OneClickSigninSyncStarter(
-        profile(),
-        browser(),
-        "gaia",
-        "foo@example.com",
-        "password",
-        "refresh_token",
-        OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS,
-        nullptr,
-        OneClickSigninSyncStarter::NO_CONFIRMATION,
-        GURL(),
-        GURL(),
+        profile(), browser(), "gaia", "foo@example.com", "password",
+        "refresh_token", OneClickSigninSyncStarter::CURRENT_PROFILE,
+        OneClickSigninSyncStarter::SYNC_WITH_DEFAULT_SETTINGS, nullptr,
+        OneClickSigninSyncStarter::NO_CONFIRMATION, GURL(), GURL(),
         OneClickSigninSyncStarter::Callback());
   }
 
@@ -107,7 +100,7 @@ class SyncConfirmationHandlerTest : public BrowserWithTestWindowTest {
         SigninManagerFactory::GetForProfile(profile()));
   }
 
-  ProfileSyncService* sync() {
+  browser_sync::ProfileSyncService* sync() {
     return ProfileSyncServiceFactory::GetForProfile(profile());
   }
 
@@ -160,7 +153,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReady) {
   EXPECT_EQ("sync.confirmation.setUserImageURL",
             web_ui()->call_data()[0]->function_name());
   EXPECT_TRUE(
-      web_ui()->call_data()[0]->arg1()->IsType(base::Value::TYPE_STRING));
+      web_ui()->call_data()[0]->arg1()->IsType(base::Value::Type::STRING));
   std::string passed_picture_url;
   EXPECT_TRUE(
       web_ui()->call_data()[0]->arg1()->GetAsString(&passed_picture_url));
@@ -204,7 +197,7 @@ TEST_F(SyncConfirmationHandlerTest, TestSetImageIfPrimaryAccountReadyLater) {
   EXPECT_EQ("sync.confirmation.setUserImageURL",
             web_ui()->call_data()[1]->function_name());
   EXPECT_TRUE(
-      web_ui()->call_data()[1]->arg1()->IsType(base::Value::TYPE_STRING));
+      web_ui()->call_data()[1]->arg1()->IsType(base::Value::Type::STRING));
   std::string passed_picture_url;
   EXPECT_TRUE(
       web_ui()->call_data()[1]->arg1()->GetAsString(&passed_picture_url));

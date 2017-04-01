@@ -19,9 +19,9 @@ import shutil
 import sys
 import tempfile
 
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import failures_lib
+from chromite.lib import config_lib
+from chromite.lib import constants
+from chromite.lib import failures_lib
 from chromite.cbuildbot import swarming_lib
 from chromite.cbuildbot import topology
 from chromite.cli.cros.tests import cros_vm_test
@@ -205,16 +205,21 @@ def BuildRootGitCleanup(buildroot, prune_all=False):
             logging.warning('Deleting %s as well', store)
             osutils.RmDir(store, ignore_missing=True)
 
+      # TODO: Make the deletions below smarter. Look to see what exists, instead
+      # of just deleting things we think might be there.
+
       # Delete all branches created by cbuildbot.
       if os.path.isdir(repo_git_store):
         cmd = ['branch', '-D'] + list(constants.CREATED_BRANCHES)
+        # Ignore errors, since we delete branches without checking existence.
         git.RunGit(repo_git_store, cmd, error_code_ok=True)
 
       if os.path.isdir(cwd):
         # Above we deleted refs/heads/<branch> for each created branch, now we
         # need to delete the bare ref <branch> if it was created somehow.
         for ref in constants.CREATED_BRANCHES:
-          git.RunGit(cwd, ['update-ref', '-d', ref])
+          # Ignore errors, since we delete branches without checking existence.
+          git.RunGit(cwd, ['update-ref', '-d', ref], error_code_ok=True)
 
 
   # Cleanup all of the directories.
@@ -314,11 +319,20 @@ def UpdateChroot(buildroot, usepkg, toolchain_boards=None, extra_env=None):
   if toolchain_boards:
     cmd.extend(['--toolchain_boards', ','.join(toolchain_boards)])
 
-  RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True)
+  # workaround http://crbug.com/225509
+  # Building with FEATURES=separatedebug will create a dedicated tarball with
+  # the debug files, and the debug files won't be in the glibc.tbz2, which is
+  # where the build scripts expect them.
+  extra_env_local = extra_env.copy()
+  extra_env_local.setdefault('FEATURES', '')
+  extra_env_local['FEATURES'] += ' -separatedebug splitdebug'
+
+  RunBuildScript(buildroot, cmd, extra_env=extra_env_local, enter_chroot=True)
 
 
 def SetupBoard(buildroot, board, usepkg, chrome_binhost_only=False,
-               extra_env=None, force=False, profile=None, chroot_upgrade=True):
+               extra_env=None, force=False, profile=None, chroot_upgrade=True,
+               chroot_args=None):
   """Wrapper around setup_board.
 
   Args:
@@ -332,6 +346,7 @@ def SetupBoard(buildroot, board, usepkg, chrome_binhost_only=False,
     profile: The profile to use with this board.
     chroot_upgrade: Whether to update the chroot. If the chroot is already up to
       date, you can specify chroot_upgrade=False.
+    chroot_args: The args to the chroot.
   """
   cmd = ['./setup_board', '--board=%s' % board,
          '--accept_licenses=@CHROMEOS']
@@ -354,7 +369,8 @@ def SetupBoard(buildroot, board, usepkg, chrome_binhost_only=False,
   if force:
     cmd.append('--force')
 
-  RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True)
+  RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True,
+                 chroot_args=chroot_args)
 
 
 class MissingBinpkg(failures_lib.StepFailure):
@@ -421,6 +437,20 @@ def RunBranchUtilTest(buildroot, version):
     RunBuildScript(buildroot, cmd, chromite_cmd=True)
 
 
+def RunCrosSigningTests(buildroot):
+  """Run the signer unittests.
+
+  These tests don't have a matching ebuild, and don't need to be run during
+  most builds, so we have a special helper to run them.
+
+  Args:
+    buildroot: The buildroot of the current build.
+  """
+  test_runner = path_util.ToChrootPath(os.path.join(
+      buildroot, 'cros-signing', 'signer', 'run_tests.py'))
+  cros_build_lib.RunCommand([test_runner], enter_chroot=True)
+
+
 def UpdateBinhostJson(buildroot):
   """Test prebuilts for all boards, making sure everybody gets Chrome prebuilts.
 
@@ -433,7 +463,8 @@ def UpdateBinhostJson(buildroot):
 
 def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
           packages=(), skip_chroot_upgrade=True, noworkon=False,
-          extra_env=None, chrome_root=None, noretry=False):
+          extra_env=None, chrome_root=None, noretry=False,
+          chroot_args=None, event_file=None):
   """Wrapper around build_packages.
 
   Args:
@@ -451,6 +482,8 @@ def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
     extra_env: A dictionary of environmental variables to set during generation.
     chrome_root: The directory where chrome is stored.
     noretry: Do not retry package failures.
+    chroot_args: The args to the chroot.
+    event_file: File name that events will be logged to.
   """
   cmd = ['./build_packages', '--board=%s' % board,
          '--accept_licenses=@CHROMEOS', '--withdebugsymbols']
@@ -473,9 +506,15 @@ def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
   if noretry:
     cmd.append('--nobuildretry')
 
-  chroot_args = []
+  if not chroot_args:
+    chroot_args = []
+
   if chrome_root:
     chroot_args.append('--chrome_root=%s' % chrome_root)
+
+  if event_file:
+    cmd.append('--withevents')
+    cmd.append('--eventfile=%s' % event_file)
 
   cmd.extend(packages)
   RunBuildScript(buildroot, cmd, extra_env=extra_env, chroot_args=chroot_args,
@@ -517,7 +556,20 @@ def GetFirmwareVersions(buildroot, board):
 
 
 def BuildImage(buildroot, board, images_to_build, version=None,
-               rootfs_verification=True, extra_env=None, disk_layout=None):
+               builder_path=None, rootfs_verification=True, extra_env=None,
+               disk_layout=None):
+  """Run the script which builds images.
+
+  Args:
+    buildroot: The buildroot of the current build.
+    board: The board of the image.
+    images_to_build: The images to be built.
+    version: The version of image.
+    builder_path: The path of the builder to build the image.
+    rootfs_verification: Whether to enable the rootfs verification.
+    extra_env: A dictionary of environmental variables to set during generation.
+    disk_layout: The disk layout.
+  """
 
   # Default to base if images_to_build is passed empty.
   if not images_to_build:
@@ -525,7 +577,10 @@ def BuildImage(buildroot, board, images_to_build, version=None,
 
   version_str = '--version=%s' % (version or '')
 
-  cmd = ['./build_image', '--board=%s' % board, '--replace', version_str]
+  builder_path_str = '--builder_path=%s' % (builder_path or '')
+
+  cmd = ['./build_image', '--board=%s' % board, '--replace', version_str,
+         builder_path_str]
 
   if not rootfs_verification:
     cmd += ['--noenable_rootfs_verification']
@@ -631,6 +686,7 @@ def RunTestSuite(buildroot, board, image_path, results_dir, test_type,
          '--board=%s' % board,
          '--type=%s' % dut_type,
          '--no_graphics',
+         '--verbose',
          '--target_image=%s' % image_path,
          '--test_results_root=%s' % results_dir_in_chroot
         ]
@@ -896,7 +952,8 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
                             priority, timeout_mins, retry, max_retries,
                             minimum_duts, suite_min_duts, offload_failures_only,
                             subsystems, skip_duts_check)
-    swarming_args = _CreateSwarmingArgs(build, suite, timeout_mins)
+    swarming_args = _CreateSwarmingArgs(build, suite, board, priority,
+                                        timeout_mins)
     running_json_dump_flag = False
     json_dump_result = None
     job_id = _HWTestCreate(cmd, debug, **swarming_args)
@@ -926,9 +983,11 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
           '** Failed to fullfill request with proxy server, code(%d) **'
           % result.returncode)
     else:
-      logging.debug('swarming info: name: %s, bot_id: %s, created_ts: %s',
+      logging.debug('swarming info: name: %s, bot_id: %s, task_id: %s, '
+                    'created_ts: %s',
                     result.GetValue('name'),
                     result.GetValue('bot_id'),
+                    result.GetValue('id'),
                     result.GetValue('created_ts'))
       # If running json_dump cmd, write the pass/fail subsys dict into console,
       # otherwise, write the cmd output to the console.
@@ -1045,8 +1104,7 @@ def _GetRunSuiteArgs(build, suite, board, pool=None, num=None,
   return args
 
 
-# pylint: disable=docstring-missing-args
-def _CreateSwarmingArgs(build, suite, timeout_mins=None):
+def _CreateSwarmingArgs(build, suite, board, priority, timeout_mins=None):
   """Create args for swarming client.
 
   Args:
@@ -1054,6 +1112,8 @@ def _CreateSwarmingArgs(build, suite, timeout_mins=None):
     suite: Name of the suite, will be part of the swarming task name.
     timeout_mins: run_suite timeout mins, will be used to figure out
                   timeouts for swarming task.
+    board: Name of the board.
+    priority: Priority of this call.
 
   Returns:
     A dictionary of args for swarming client.
@@ -1062,7 +1122,7 @@ def _CreateSwarmingArgs(build, suite, timeout_mins=None):
   swarming_timeout = timeout_mins or _DEFAULT_HWTEST_TIMEOUT_MINS
   swarming_timeout = swarming_timeout * 60 + _SWARMING_ADDITIONAL_TIMEOUT
 
-  swarming_args = {
+  return {
       'swarming_server': topology.topology.get(
           topology.SWARMING_PROXY_HOST_KEY),
       'task_name': '-'.join([build, suite]),
@@ -1072,8 +1132,15 @@ def _CreateSwarmingArgs(build, suite, timeout_mins=None):
       'timeout_secs': swarming_timeout,
       'io_timeout_secs': swarming_timeout,
       'hard_timeout_secs': swarming_timeout,
-      'expiration_secs': _SWARMING_EXPIRATION}
-  return swarming_args
+      'expiration_secs': _SWARMING_EXPIRATION,
+      'tags': {
+          'task_name': '-'.join([build, suite]),
+          'build': build,
+          'suite': suite,
+          'board': board,
+          'priority': priority,
+      },
+  }
 
 
 def _HWTestCreate(cmd, debug=False, **kwargs):
@@ -1557,7 +1624,8 @@ def GenerateBreakpadSymbols(buildroot, board, debug):
   RunBuildScript(buildroot, cmd, enter_chroot=True, chromite_cmd=True)
 
 
-def GenerateDebugTarball(buildroot, board, archive_path, gdb_symbols):
+def GenerateDebugTarball(buildroot, board, archive_path, gdb_symbols,
+                         archive_name='debug.tgz'):
   """Generates a debug tarball in the archive_dir.
 
   Args:
@@ -1565,6 +1633,7 @@ def GenerateDebugTarball(buildroot, board, archive_path, gdb_symbols):
     board: Board type that was built on this machine
     archive_path: Directory where tarball should be stored.
     gdb_symbols: Include *.debug files for debugging core files with gdb.
+    archive_name: Name of the tarball to generate.
 
   Returns:
     The filename of the created debug tarball.
@@ -1573,7 +1642,7 @@ def GenerateDebugTarball(buildroot, board, archive_path, gdb_symbols):
   # symbols are only readable by root.
   chroot = os.path.join(buildroot, 'chroot')
   board_dir = os.path.join(chroot, 'build', board, 'usr', 'lib')
-  debug_tgz = os.path.join(archive_path, 'debug.tgz')
+  debug_tarball = os.path.join(archive_path, archive_name)
   extra_args = None
   inputs = None
 
@@ -1585,18 +1654,19 @@ def GenerateDebugTarball(buildroot, board, archive_path, gdb_symbols):
   else:
     inputs = ['debug/breakpad']
 
+  compression = cros_build_lib.CompressionExtToType(debug_tarball)
   cros_build_lib.CreateTarball(
-      debug_tgz, board_dir, sudo=True, compression=cros_build_lib.COMP_GZIP,
-      chroot=chroot, inputs=inputs, extra_args=extra_args)
+      debug_tarball, board_dir, sudo=True, compression=compression,
+      inputs=inputs, extra_args=extra_args)
 
   # Fix permissions and ownership on debug tarball.
-  cros_build_lib.SudoRunCommand(['chown', str(os.getuid()), debug_tgz])
-  os.chmod(debug_tgz, 0o644)
+  cros_build_lib.SudoRunCommand(['chown', str(os.getuid()), debug_tarball])
+  os.chmod(debug_tarball, 0o644)
 
-  return os.path.basename(debug_tgz)
+  return os.path.basename(debug_tarball)
 
 
-def GenerateHtmlIndex(index, files, url_base=None, head=None, tail=None):
+def GenerateHtmlIndex(index, files, title='Index', url_base=None):
   """Generate a simple index.html file given a set of filenames
 
   Args:
@@ -1604,9 +1674,8 @@ def GenerateHtmlIndex(index, files, url_base=None, head=None, tail=None):
     files: The list of files to create the index of.  If a string, then it
            may be a path to a file (with one file per line), or a directory
            (which will be listed).
+    title: Title string for the HTML file.
     url_base: The URL to prefix to all elements (otherwise they'll be relative).
-    head: All the content before the listing.  '<html><body>' if not specified.
-    tail: All the content after the listing.  '</body></html>' if not specified.
   """
   def GenLink(target, name=None):
     if name == '':
@@ -1621,10 +1690,12 @@ def GenerateHtmlIndex(index, files, url_base=None, head=None, tail=None):
       files = osutils.ReadFile(files).splitlines()
   url_base = url_base + '/' if url_base else ''
 
-  if not head:
-    head = '<html><body>'
-  html = head + '<ul>'
+  # Head + open list.
+  html = '<html>'
+  html += '<head><title>%s</title></head>' % title
+  html += '<body><h2>%s</h2><ul>' % title
 
+  # List members.
   dot = ('.',)
   dot_dot = ('..',)
   links = []
@@ -1640,9 +1711,8 @@ def GenerateHtmlIndex(index, files, url_base=None, head=None, tail=None):
   links.insert(0, GenLink(*dot))
   html += '\n'.join(links)
 
-  if not tail:
-    tail = '</body></html>'
-  html += '</ul>' + tail
+  # Close list and file.
+  html += '</ul></body></html>'
 
   osutils.WriteFile(index, html)
 
@@ -1707,31 +1777,26 @@ def GenerateHtmlTimeline(timeline, rows, title):
       }
     </script>
 """
-  def GenRow(row):
+  def GenRow(entry, start, end):
     def GenDate(time):
       # Javascript months are 0..11 instead of 1..12
       return ('new Date(%d, %d, %d, %d, %d, %d)' %
               (time.year, time.month - 1, time.day,
                time.hour, time.minute, time.second))
-    # Skip stages that don't have a start time.
-    if row[0] is None or row[1] is None:
-      return None
-    # Treat stages without a finish time as ending now.
-    finish_time = row[2]
-    if finish_time is None:
-      finish_time = datetime.datetime.utcnow()
     return ('data.addRow(["%s", %s, %s]);\n' %
-            (row[0], GenDate(row[1]), GenDate(finish_time)))
+            (entry, GenDate(start), GenDate(end)))
 
-  javascript = _JAVASCRIPT_HEAD
-  for r in rows:
-    line = GenRow(r)
-    if line is not None:
-      javascript += line
-  javascript += _JAVASCRIPT_TAIL
+  now = datetime.datetime.utcnow()
+  rows = [(entry, start, end or now)
+          for (entry, start, end) in rows
+          if entry and start]
+
+  javascript = [_JAVASCRIPT_HEAD]
+  javascript += [GenRow(entry, start, end) for (entry, start, end) in rows]
+  javascript.append(_JAVASCRIPT_TAIL)
 
   data = {
-      'javascript': javascript,
+      'javascript': ''.join(javascript),
       'title': title if title else ''
   }
 
@@ -1875,23 +1940,6 @@ def MakeNetboot(buildroot, board, image_dir):
   cmd = ['./make_netboot.sh',
          '--board=%s' % board,
          '--image_dir=%s' % path_util.ToChrootPath(image_dir)]
-  RunBuildScript(buildroot, cmd, capture_output=True, enter_chroot=True)
-
-
-def MakeFactoryToolkit(buildroot, board, output_dir, version=None):
-  """Build a factory toolkit.
-
-  Args:
-    buildroot: Root directory where build occurs.
-    board: Board type that was built on this machine.
-    output_dir: Directory for the resulting factory toolkit.
-    version: Version string to be included in ID string.
-  """
-  cmd = ['./make_factory_toolkit.sh',
-         '--board=%s' % board,
-         '--output_dir=%s' % path_util.ToChrootPath(output_dir)]
-  if version is not None:
-    cmd.extend(['--version', version])
   RunBuildScript(buildroot, cmd, capture_output=True, enter_chroot=True)
 
 
@@ -2328,7 +2376,7 @@ def BuildFirmwareArchive(buildroot, board, archive_dir):
 
 
 def BuildFactoryZip(buildroot, board, archive_dir, factory_shim_dir,
-                    factory_toolkit_dir, version=None):
+                    version=None):
   """Build factory_image.zip in archive_dir.
 
   Args:
@@ -2336,7 +2384,6 @@ def BuildFactoryZip(buildroot, board, archive_dir, factory_shim_dir,
     board: Board name of build target.
     archive_dir: Directory to store factory_image.zip.
     factory_shim_dir: Directory containing factory shim.
-    factory_toolkit_dir: Directory containing factory toolkit.
     version: The version string to be included in the factory image.zip.
 
   Returns:
@@ -2355,8 +2402,6 @@ def BuildFactoryZip(buildroot, board, archive_dir, factory_shim_dir,
       factory_shim_dir:
           ['*factory_install*.bin', '*partition*',
            os.path.join('netboot', '*')],
-      factory_toolkit_dir:
-          ['*factory_image*.bin', '*partition*', 'install_factory_toolkit.run'],
   }
 
   for folder, patterns in rules.items():

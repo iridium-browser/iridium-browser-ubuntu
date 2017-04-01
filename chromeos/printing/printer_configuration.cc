@@ -6,16 +6,28 @@
 
 #include <string>
 
+#include "base/guid.h"
+
 namespace chromeos {
 
-Printer::Printer() {}
+Printer::Printer() : source_(SRC_USER_PREFS) {
+  id_ = base::GenerateGUID();
+}
 
-Printer::Printer(const std::string& id) : id_(id) {}
+Printer::Printer(const std::string& id) : id_(id), source_(SRC_USER_PREFS) {
+  if (id_.empty())
+    id_ = base::GenerateGUID();
+}
+
+Printer::Printer(const Printer& other) = default;
+
+Printer& Printer::operator=(const Printer& other) = default;
 
 Printer::~Printer() {}
 
-void Printer::SetPPD(std::unique_ptr<Printer::PPDFile> ppd) {
-  ppd_ = *(ppd.get());
+bool Printer::IsIppEverywhere() const {
+  // TODO(skau): Add check for IPP Everywhere value.
+  return false;
 }
 
 }  // namespace chromeos

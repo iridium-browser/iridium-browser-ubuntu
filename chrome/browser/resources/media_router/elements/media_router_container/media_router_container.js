@@ -1286,7 +1286,7 @@ Polymer({
     var focusedSink =
         this.$$('#searchResults').itemForElement(focusedElem).sinkItem;
     setTimeout(function() {
-      var sinkListPaperMenu = this.$$('#sink-list');
+      var sinkListPaperMenu = this.$$('#sink-list-paper-menu');
       var sinks = sinkListPaperMenu.children;
       var sinkList = this.$$('#sinkList');
       for (var i = 0; i < sinks.length; i++) {
@@ -1377,7 +1377,6 @@ Polymer({
     var searchFinalTop = hasList ? list.offsetHeight - search.offsetHeight :
                                    deviceMissing.offsetHeight;
     resultsContainer.style['position'] = 'absolute';
-    resultsContainer.style['overflow-y'] = '';
 
     var duration =
         this.computeAnimationDuration_(searchFinalTop - searchInitialTop);
@@ -1562,16 +1561,8 @@ Polymer({
     if (!clickedMode)
       return;
 
-    this.userHasSelectedCastMode_ = true;
+    this.selectCastMode(clickedMode.type);
     this.fire('cast-mode-selected', {castModeType: clickedMode.type});
-
-    // The list of sinks to show will be the same if the shown cast mode did
-    // not change, regardless of whether the user selected it explicitly.
-    if (clickedMode.type != this.shownCastModeValue_) {
-      this.setShownCastMode_(clickedMode);
-      this.rebuildSinksToShow_();
-    }
-
     this.showSinkList_();
     this.maybeReportUserFirstAction(
         media_router.MediaRouterUserAction.CHANGE_MODE);
@@ -1860,7 +1851,6 @@ Polymer({
     resultsContainer.style['position'] = 'relative';
     resultsContainer.style['padding-top'] = resultsPaddingTop;
     resultsContainer.style['top'] = '';
-    resultsContainer.style['overflow-y'] = 'auto';
 
     view.style['overflow'] = '';
     view.style['padding-bottom'] = '';
@@ -2124,6 +2114,20 @@ Polymer({
   },
 
   /**
+   * Sets the selected cast mode to the one associated with |castModeType|,
+   * and rebuilds sinks to reflect the change.
+   * @param {number} castModeType The type of the selected cast mode.
+   */
+  selectCastMode: function(castModeType) {
+    var castMode = this.findCastModeByType_(castModeType);
+    if (castMode && castModeType != this.shownCastModeValue_) {
+      this.setShownCastMode_(castMode);
+      this.userHasSelectedCastMode_ = true;
+      this.rebuildSinksToShow_();
+    }
+  },
+
+  /**
    * Sets various focus and blur event handlers to handle showing search results
    * when the search input is focused.
    * @private
@@ -2317,9 +2321,12 @@ Polymer({
     // Ensures that conditionally templated elements have finished stamping.
     this.async(function() {
       var headerHeight = this.header.offsetHeight;
+      // Unlike the other elements whose heights are fixed, the first-run-flow
+      // element can have a fractional height. So we use getBoundingClientRect()
+      // to avoid rounding errors.
       var firstRunFlowHeight = this.$$('#first-run-flow') &&
           this.$$('#first-run-flow').style.display != 'none' ?
-              this.$$('#first-run-flow').offsetHeight : 0;
+              this.$$('#first-run-flow').getBoundingClientRect().height : 0;
       var issueHeight = this.$$('#issue-banner') &&
           this.$$('#issue-banner').style.display != 'none' ?
               this.$$('#issue-banner').offsetHeight : 0;
@@ -2337,7 +2344,7 @@ Polymer({
       if (hasSearch && sinkList) {
         // This would need to be reset to '' if search could be disabled again,
         // but once it's enabled it can't be disabled again.
-        sinkList.style.paddingBottom = '0';
+        this.$$('#sink-list-paper-menu').style.paddingBottom = '0';
       }
       var sinkListPadding =
           sinkList ? this.computeElementVerticalPadding_(sinkList) : 0;

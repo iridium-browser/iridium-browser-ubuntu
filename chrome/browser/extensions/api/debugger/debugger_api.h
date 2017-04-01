@@ -13,20 +13,14 @@
 
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/common/extensions/api/debugger.h"
+#include "content/public/browser/devtools_agent_host.h"
 
 using extensions::api::debugger::Debuggee;
 
 // Base debugger function.
 
-class DevToolsTargetImpl;
-
 namespace base {
 class DictionaryValue;
-}
-
-namespace content {
-class DevToolsAgentHost;
-class WebContents;
 }
 
 namespace extensions {
@@ -104,7 +98,7 @@ class DebuggerGetTargetsFunction : public DebuggerFunction {
   bool RunAsync() override;
 
  private:
-  void SendTargetList(const std::vector<DevToolsTargetImpl*>& target_list);
+  void SendTargetList(const content::DevToolsAgentHost::List& target_list);
 };
 
 }  // namespace extensions

@@ -88,8 +88,9 @@ static void best_non_simd_srcover_srgb_srgb(
         } while (dsrc < end);
 
         if ((count & 1) != 0) {
-            srcover_srgb_srgb_1(reinterpret_cast<uint32_t*>(ddst),
-                                *reinterpret_cast<const uint32_t*>(dsrc));
+            uint32_t s1;
+            memcpy(&s1, dsrc, 4);
+            srcover_srgb_srgb_1(reinterpret_cast<uint32_t*>(ddst), s1);
         }
     }
 }
@@ -145,7 +146,8 @@ protected:
         if (!fPixmap.addr()) {
             sk_sp<SkImage> image = GetResourceAsImage(fFileName.c_str());
             SkBitmap bm;
-            if (!as_IB(image)->getROPixels(&bm)) {
+            SkColorSpace* legacyColorSpace = nullptr;
+            if (!as_IB(image)->getROPixels(&bm, legacyColorSpace)) {
                 SkFAIL("Could not read resource");
             }
             bm.peekPixels(&fPixmap);

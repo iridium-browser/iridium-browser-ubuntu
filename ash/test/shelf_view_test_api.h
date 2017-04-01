@@ -5,7 +5,6 @@
 #ifndef ASH_TEST_SHELF_VIEW_TEST_API_H_
 #define ASH_TEST_SHELF_VIEW_TEST_API_H_
 
-#include "ash/common/shelf/shelf_item_delegate.h"
 #include "ash/common/shelf/shelf_item_types.h"
 #include "base/macros.h"
 
@@ -21,10 +20,12 @@ class Event;
 namespace views {
 class Button;
 class InkDrop;
+class View;
 }
 
 namespace ash {
 class OverflowBubble;
+class OverflowButton;
 class ShelfButton;
 class ShelfButtonPressedMetricTracker;
 class ShelfDelegate;
@@ -42,8 +43,12 @@ class ShelfViewTestAPI {
   // Number of icons displayed.
   int GetButtonCount();
 
-  // Retrieve the button at |index|.
+  // Retrieve the button at |index|, doesn't support the app list button,
+  // because the app list button is not a ShelfButton.
   ShelfButton* GetButton(int index);
+
+  // Retrieve the view at |index|.
+  views::View* GetViewAt(int index);
 
   // First visible button index.
   int GetFirstVisibleIndex();
@@ -60,6 +65,12 @@ class ShelfViewTestAPI {
 
   // Makes shelf view show its overflow bubble.
   void ShowOverflowBubble();
+
+  // Makes shelf view hide its overflow bubble.
+  void HideOverflowBubble();
+
+  // Returns true if the overflow bubble is visible.
+  bool IsShowingOverflowBubble() const;
 
   // Sets animation duration in milliseconds for test.
   void SetAnimationDuration(int duration_ms);
@@ -78,6 +89,9 @@ class ShelfViewTestAPI {
 
   // An accessor for overflow bubble.
   OverflowBubble* overflow_bubble();
+
+  // An accessor for overflow button.
+  OverflowButton* overflow_button() const;
 
   // Returns the preferred size of |shelf_view_|.
   gfx::Size GetPreferredSize();

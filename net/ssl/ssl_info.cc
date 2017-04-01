@@ -9,6 +9,8 @@
 #include "net/cert/ct_policy_status.h"
 #include "net/cert/signed_certificate_timestamp.h"
 #include "net/cert/x509_certificate.h"
+#include "net/ssl/ssl_connection_status_flags.h"
+#include "third_party/boringssl/src/include/openssl/ssl.h"
 
 namespace net {
 
@@ -28,7 +30,7 @@ SSLInfo& SSLInfo::operator=(const SSLInfo& info) {
   unverified_cert = info.unverified_cert;
   cert_status = info.cert_status;
   security_bits = info.security_bits;
-  key_exchange_info = info.key_exchange_info;
+  key_exchange_group = info.key_exchange_group;
   connection_status = info.connection_status;
   is_issued_by_known_root = info.is_issued_by_known_root;
   pkp_bypassed = info.pkp_bypassed;
@@ -52,7 +54,7 @@ void SSLInfo::Reset() {
   unverified_cert = NULL;
   cert_status = 0;
   security_bits = -1;
-  key_exchange_info = 0;
+  key_exchange_group = 0;
   connection_status = 0;
   is_issued_by_known_root = false;
   pkp_bypassed = false;

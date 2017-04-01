@@ -16,11 +16,12 @@
 #include <string>
 #include <vector>
 
+#include "webrtc/api/call/transport.h"
+#include "webrtc/base/platform_file.h"
 #include "webrtc/common_types.h"
 #include "webrtc/common_video/include/frame_callback.h"
 #include "webrtc/config.h"
 #include "webrtc/media/base/videosinkinterface.h"
-#include "webrtc/transport.h"
 
 namespace webrtc {
 
@@ -44,7 +45,10 @@ class VideoReceiveStream {
     // used to unpack incoming packets.
     std::string payload_name;
 
-    DecoderSpecificSettings decoder_specific;
+    // This map contains the codec specific parameters from SDP, i.e. the "fmtp"
+    // parameters. It is the same as cricket::CodecParameterMap used in
+    // cricket::VideoCodec.
+    std::map<std::string, std::string> codec_params;
   };
 
   struct Stats {
@@ -64,6 +68,7 @@ class VideoReceiveStream {
     int jitter_buffer_ms = 0;
     int min_playout_delay_ms = 0;
     int render_delay_ms = 10;
+    uint32_t frames_decoded = 0;
 
     int current_payload_type = -1;
 
@@ -133,8 +138,8 @@ class VideoReceiveStream {
       // See NackConfig for description.
       NackConfig nack;
 
-      // See FecConfig for description.
-      FecConfig fec;
+      // See UlpfecConfig for description.
+      UlpfecConfig ulpfec;
 
       // RTX settings for incoming video payloads that may be received. RTX is
       // disabled if there's no config present.
@@ -150,11 +155,6 @@ class VideoReceiveStream {
       typedef std::map<int, Rtx> RtxMap;
       RtxMap rtx;
 
-      // If set to true, the RTX payload type mapping supplied in |rtx| will be
-      // used when restoring RTX packets. Without it, RTX packets will always be
-      // restored to the last non-RTX packet payload type received.
-      bool use_rtx_payload_mapping_on_restore = false;
-
       // RTP header extensions used for the received stream.
       std::vector<RtpExtension> extensions;
     } rtp;
@@ -162,8 +162,7 @@ class VideoReceiveStream {
     // Transport for outgoing packets (RTCP).
     Transport* rtcp_send_transport = nullptr;
 
-    // VideoRenderer will be called for each decoded frame. 'nullptr' disables
-    // rendering of this stream.
+    // Must not be 'nullptr' when the stream is started.
     rtc::VideoSinkInterface<VideoFrame>* renderer = nullptr;
 
     // Expected delay needed by the renderer, i.e. the frame will be delivered
@@ -207,6 +206,17 @@ class VideoReceiveStream {
 
   // TODO(pbos): Add info on currently-received codec to Stats.
   virtual Stats GetStats() const = 0;
+
+  // Takes ownership of the file, is responsible for closing it later.
+  // Calling this method will close and finalize any current log.
+  // Giving rtc::kInvalidPlatformFileValue disables logging.
+  // If a frame to be written would make the log too large the write fails and
+  // the log is closed and finalized. A |byte_limit| of 0 means no limit.
+  virtual void EnableEncodedFrameRecording(rtc::PlatformFile file,
+                                           size_t byte_limit) = 0;
+  inline void DisableEncodedFrameRecording() {
+    EnableEncodedFrameRecording(rtc::kInvalidPlatformFileValue, 0);
+  }
 
  protected:
   virtual ~VideoReceiveStream() {}

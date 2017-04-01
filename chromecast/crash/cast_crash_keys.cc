@@ -51,7 +51,7 @@ size_t RegisterCastCrashKeys() {
     // Copied from common/crash_keys. Remove when
     // http://crbug.com/598854 is resolved.
 
-    // Keys for http://crbug.com/575245
+    // Temporary for http://crbug.com/575245
     { "swapout_frame_id", kSmallSize },
     { "swapout_proxy_id", kSmallSize },
     { "swapout_view_id", kSmallSize },
@@ -81,6 +81,35 @@ size_t RegisterCastCrashKeys() {
     { "initrf_root_is_in_same_site_instance_as_parent", kSmallSize},
     { "initrf_root_process_is_live", kSmallSize},
     { "initrf_root_proxy_is_live", kSmallSize},
+
+    // Temporary for https://crbug.com/626802.
+    { "newframe_routing_id", kSmallSize },
+    { "newframe_proxy_id", kSmallSize },
+    { "newframe_opener_id", kSmallSize },
+    { "newframe_parent_id", kSmallSize },
+    { "newframe_widget_id", kSmallSize },
+    { "newframe_widget_hidden", kSmallSize },
+    { "newframe_replicated_origin", kSmallSize },
+    { "newframe_oopifs_possible", kSmallSize },
+
+    // Temporary for https://crbug.com/630103.
+    { "origin_mismatch_url", kLargeSize },
+    { "origin_mismatch_origin", kMediumSize },
+    { "origin_mismatch_transition", kSmallSize },
+    { "origin_mismatch_redirects", kSmallSize },
+    { "origin_mismatch_same_page", kSmallSize },
+
+    // Temporary for https://crbug.com/612711.
+    { "aci_wrong_sp_extension_id", kSmallSize },
+
+    // Temporary for https://crbug.com/616149.
+    { "existing_extension_pref_value_type", kSmallSize },
+
+    // Temporary for https://crbug.com/668633.
+    { "swdh_set_hosted_version_worker_pid", kSmallSize },
+    { "swdh_set_hosted_version_host_pid", kSmallSize },
+    { "swdh_set_hosted_version_is_new_process", kSmallSize },
+    { "swdh_set_hosted_version_restart_count", kSmallSize },
   };
 
   return base::debug::InitCrashKeys(fixed_keys, arraysize(fixed_keys),

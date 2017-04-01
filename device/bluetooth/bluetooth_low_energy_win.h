@@ -9,16 +9,31 @@
 #include <stdint.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/optional.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_low_energy_defs_win.h"
 
 namespace device {
 namespace win {
+
+//
+// Callback function signature for Bluetooth GATT events. This fixes a bug in
+// this typedef in the Windows 10.0.10586 SDK which is missing the CALLBACK
+// modifier. This corrected typedef should be used throughout Chromium except
+// when casting to the 'official' definition when calling Microsoft functions.
+// This allows Chromium to build with 10.0.14393 or later SDKs (which have the
+// fixed typedef) while doing the correct thing even when built with 10.0.10586.
+// The CALLBACK modifier affects how function parameters are cleaned up from the
+// stack and having a mismatch can lead to misalignment of the stack pointer.
+//
+typedef VOID(CALLBACK* PFNBLUETOOTH_GATT_EVENT_CALLBACK_CORRECTED)(
+    _In_ BTH_LE_GATT_EVENT_TYPE EventType,
+    _In_ PVOID EventOutParameter,
+    _In_opt_ PVOID Context);
 
 // Represents a device registry property value
 class DEVICE_BLUETOOTH_EXPORT DeviceRegistryPropertyValue {
@@ -119,7 +134,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyWrapper {
   // Note: This function returns an error if Bluetooth Low Energy is not
   // supported on this Windows platform.
   virtual bool EnumerateKnownBluetoothLowEnergyDevices(
-      ScopedVector<BluetoothLowEnergyDeviceInfo>* devices,
+      std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
       std::string* error);
 
   // Enumerates the list of known Bluetooth LE GATT service devices on this
@@ -130,7 +145,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyWrapper {
   // Note: This function returns an error if Bluetooth Low Energy is not
   // supported on this Windows platform.
   virtual bool EnumerateKnownBluetoothLowEnergyGattServiceDevices(
-      ScopedVector<BluetoothLowEnergyDeviceInfo>* devices,
+      std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
       std::string* error);
 
   // Enumerates the list of known (i.e. cached) GATT services for a given
@@ -141,7 +156,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyWrapper {
   // supported on this Windows platform.
   virtual bool EnumerateKnownBluetoothLowEnergyServices(
       const base::FilePath& device_path,
-      ScopedVector<BluetoothLowEnergyServiceInfo>* services,
+      std::vector<std::unique_ptr<BluetoothLowEnergyServiceInfo>>* services,
       std::string* error);
 
   // Reads characteristics of |service| with service device path |service_path|.
@@ -181,12 +196,13 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyWrapper {
   // is the function to be invoked if the event happened. |context| is the input
   // parameter to be given back through |callback|. |*out_handle| stores the
   // unique handle in OS for this registration.
-  virtual HRESULT RegisterGattEvents(base::FilePath& service_path,
-                                     BTH_LE_GATT_EVENT_TYPE event_type,
-                                     PVOID event_parameter,
-                                     PFNBLUETOOTH_GATT_EVENT_CALLBACK callback,
-                                     PVOID context,
-                                     BLUETOOTH_GATT_EVENT_HANDLE* out_handle);
+  virtual HRESULT RegisterGattEvents(
+      base::FilePath& service_path,
+      BTH_LE_GATT_EVENT_TYPE event_type,
+      PVOID event_parameter,
+      PFNBLUETOOTH_GATT_EVENT_CALLBACK_CORRECTED callback,
+      PVOID context,
+      BLUETOOTH_GATT_EVENT_HANDLE* out_handle);
   virtual HRESULT UnregisterGattEvent(BLUETOOTH_GATT_EVENT_HANDLE event_handle);
 
   // Writes |descriptor| value in service with service device path

@@ -16,29 +16,41 @@ class LayoutSize;
 struct PaintInvalidatorContext;
 
 class BoxPaintInvalidator {
-    STACK_ALLOCATED();
-public:
-    BoxPaintInvalidator(const LayoutBox& box, const PaintInvalidatorContext& context)
-        : m_box(box), m_context(context) { }
+  STACK_ALLOCATED();
 
-    static void boxWillBeDestroyed(const LayoutBox&);
+ public:
+  BoxPaintInvalidator(const LayoutBox& box,
+                      const PaintInvalidatorContext& context)
+      : m_box(box), m_context(context) {}
 
-    PaintInvalidationReason invalidatePaintIfNeeded();
+  static void boxWillBeDestroyed(const LayoutBox&);
 
-private:
-    PaintInvalidationReason computePaintInvalidationReason();
+  PaintInvalidationReason invalidatePaintIfNeeded();
 
-    bool incrementallyInvalidatePaint();
-    void invalidatePaintRectClippedByOldAndNewBounds(const LayoutRect&);
+ private:
+  bool backgroundGeometryDependsOnLayoutOverflowRect();
+  bool backgroundPaintsOntoScrollingContentsLayer();
+  bool shouldFullyInvalidateBackgroundOnLayoutOverflowChange(
+      const LayoutRect& oldLayoutOverflow,
+      const LayoutRect& newLayoutOverflow);
+  void invalidateScrollingContentsBackgroundIfNeeded();
 
-    bool needsToSavePreviousBoxSizes();
-    void savePreviousBoxSizesIfNeeded();
-    LayoutSize computePreviousBorderBoxSize(const LayoutSize& previousBoundsSize);
+  PaintInvalidationReason computePaintInvalidationReason();
 
-    const LayoutBox& m_box;
-    const PaintInvalidatorContext& m_context;
+  bool incrementallyInvalidatePaint(PaintInvalidationReason,
+                                    const LayoutRect& oldRect,
+                                    const LayoutRect& newRect);
+
+  bool needsToSavePreviousBoxGeometries();
+  void savePreviousBoxGeometriesIfNeeded();
+  LayoutSize previousBorderBoxSize();
+  LayoutRect previousContentBoxRect();
+  LayoutRect previousLayoutOverflowRect();
+
+  const LayoutBox& m_box;
+  const PaintInvalidatorContext& m_context;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

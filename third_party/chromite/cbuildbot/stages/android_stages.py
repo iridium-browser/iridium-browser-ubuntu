@@ -10,9 +10,9 @@ import os
 
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import results_lib
+from chromite.lib import constants
+from chromite.lib import failures_lib
+from chromite.lib import results_lib
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
@@ -132,7 +132,8 @@ class AndroidMetadataStage(generic_stages.BuilderStage,
     """Write Android version to metadata and upload partial json file."""
     self._run.attrs.metadata.UpdateKeyDictWithDict(
         'version',
-        {'android': self._run.attrs.android_version})
+        {'android': self._run.attrs.android_version,
+         'android-branch':  constants.ANDROID_BUILD_BRANCH})
     self.UploadMetadata(filename=constants.PARTIAL_METADATA_JSON)
 
   def _Finish(self):

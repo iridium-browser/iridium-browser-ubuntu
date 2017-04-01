@@ -11,31 +11,44 @@
 
 namespace blink {
 
-class ResourceFetcher;
-
 class CORE_EXPORT ClientHintsPreferences {
-    DISALLOW_NEW();
-public:
-    ClientHintsPreferences();
+  DISALLOW_NEW();
 
-    void updateFrom(const ClientHintsPreferences&);
-    void updateFromAcceptClientHintsHeader(const String& headerValue, ResourceFetcher*);
+ public:
+  class Context {
+   public:
+    virtual void countClientHintsDPR() = 0;
+    virtual void countClientHintsResourceWidth() = 0;
+    virtual void countClientHintsViewportWidth() = 0;
 
-    bool shouldSendDPR() const { return m_shouldSendDPR; }
-    void setShouldSendDPR(bool should) { m_shouldSendDPR = should; }
+   protected:
+    virtual ~Context() {}
+  };
 
-    bool shouldSendResourceWidth() const { return m_shouldSendResourceWidth; }
-    void setShouldSendResourceWidth(bool should) { m_shouldSendResourceWidth = should; }
+  ClientHintsPreferences();
 
-    bool shouldSendViewportWidth() const { return m_shouldSendViewportWidth; }
-    void setShouldSendViewportWidth(bool should) { m_shouldSendViewportWidth = should; }
+  void updateFrom(const ClientHintsPreferences&);
+  void updateFromAcceptClientHintsHeader(const String& headerValue, Context*);
 
-private:
-    bool m_shouldSendDPR;
-    bool m_shouldSendResourceWidth;
-    bool m_shouldSendViewportWidth;
+  bool shouldSendDPR() const { return m_shouldSendDPR; }
+  void setShouldSendDPR(bool should) { m_shouldSendDPR = should; }
+
+  bool shouldSendResourceWidth() const { return m_shouldSendResourceWidth; }
+  void setShouldSendResourceWidth(bool should) {
+    m_shouldSendResourceWidth = should;
+  }
+
+  bool shouldSendViewportWidth() const { return m_shouldSendViewportWidth; }
+  void setShouldSendViewportWidth(bool should) {
+    m_shouldSendViewportWidth = should;
+  }
+
+ private:
+  bool m_shouldSendDPR;
+  bool m_shouldSendResourceWidth;
+  bool m_shouldSendViewportWidth;
 };
 
-} // namespace blink
+}  // namespace blink
 
 #endif

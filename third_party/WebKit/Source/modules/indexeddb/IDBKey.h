@@ -36,128 +36,94 @@
 namespace blink {
 
 class MODULES_EXPORT IDBKey : public GarbageCollectedFinalized<IDBKey> {
-public:
-    typedef HeapVector<Member<IDBKey>> KeyArray;
+ public:
+  typedef HeapVector<Member<IDBKey>> KeyArray;
 
-    static IDBKey* createInvalid()
-    {
-        return new IDBKey();
-    }
+  static IDBKey* createInvalid() { return new IDBKey(); }
 
-    static IDBKey* createNumber(double number)
-    {
-        return new IDBKey(NumberType, number);
-    }
+  static IDBKey* createNumber(double number) {
+    return new IDBKey(NumberType, number);
+  }
 
-    static IDBKey* createBinary(PassRefPtr<SharedBuffer> binary)
-    {
-        return new IDBKey(binary);
-    }
+  static IDBKey* createBinary(PassRefPtr<SharedBuffer> binary) {
+    return new IDBKey(std::move(binary));
+  }
 
-    static IDBKey* createString(const String& string)
-    {
-        return new IDBKey(string);
-    }
+  static IDBKey* createString(const String& string) {
+    return new IDBKey(string);
+  }
 
-    static IDBKey* createDate(double date)
-    {
-        return new IDBKey(DateType, date);
-    }
+  static IDBKey* createDate(double date) { return new IDBKey(DateType, date); }
 
-    static IDBKey* createMultiEntryArray(const KeyArray& array)
-    {
-        KeyArray result;
+  static IDBKey* createArray(const KeyArray& array) {
+    return new IDBKey(array);
+  }
 
-        for (size_t i = 0; i < array.size(); i++) {
-            if (!array[i]->isValid())
-                continue;
+  ~IDBKey();
+  DECLARE_TRACE();
 
-            bool skip = false;
-            for (size_t j = 0; j < result.size(); j++) {
-                if (array[i]->isEqual(result[j].get())) {
-                    skip = true;
-                    break;
-                }
-            }
-            if (!skip) {
-                result.append(array[i]);
-            }
-        }
-        IDBKey* idbKey = new IDBKey(result);
-        ASSERT(idbKey->isValid());
-        return idbKey;
-    }
+  // In order of the least to the highest precedent in terms of sort order.
+  enum Type {
+    InvalidType = 0,
+    ArrayType,
+    BinaryType,
+    StringType,
+    DateType,
+    NumberType,
+    MinType
+  };
 
-    static IDBKey* createArray(const KeyArray& array)
-    {
-        return new IDBKey(array);
-    }
+  Type getType() const { return m_type; }
+  bool isValid() const;
 
-    ~IDBKey();
-    DECLARE_TRACE();
+  const KeyArray& array() const {
+    ASSERT(m_type == ArrayType);
+    return m_array;
+  }
 
-    // In order of the least to the highest precedent in terms of sort order.
-    enum Type {
-        InvalidType = 0,
-        ArrayType,
-        BinaryType,
-        StringType,
-        DateType,
-        NumberType,
-        MinType
-    };
+  PassRefPtr<SharedBuffer> binary() const {
+    ASSERT(m_type == BinaryType);
+    return m_binary;
+  }
 
-    Type getType() const { return m_type; }
-    bool isValid() const;
+  const String& string() const {
+    ASSERT(m_type == StringType);
+    return m_string;
+  }
 
-    const KeyArray& array() const
-    {
-        ASSERT(m_type == ArrayType);
-        return m_array;
-    }
+  double date() const {
+    ASSERT(m_type == DateType);
+    return m_number;
+  }
 
-    PassRefPtr<SharedBuffer> binary() const
-    {
-        ASSERT(m_type == BinaryType);
-        return m_binary;
-    }
+  double number() const {
+    ASSERT(m_type == NumberType);
+    return m_number;
+  }
 
-    const String& string() const
-    {
-        ASSERT(m_type == StringType);
-        return m_string;
-    }
+  int compare(const IDBKey* other) const;
+  bool isLessThan(const IDBKey* other) const;
+  bool isEqual(const IDBKey* other) const;
 
-    double date() const
-    {
-        ASSERT(m_type == DateType);
-        return m_number;
-    }
+  // Returns a new key array with invalid keys and duplicates removed.
+  KeyArray toMultiEntryArray() const;
 
-    double number() const
-    {
-        ASSERT(m_type == NumberType);
-        return m_number;
-    }
+ private:
+  IDBKey() : m_type(InvalidType) {}
+  IDBKey(Type type, double number) : m_type(type), m_number(number) {}
+  explicit IDBKey(const String& value) : m_type(StringType), m_string(value) {}
+  explicit IDBKey(PassRefPtr<SharedBuffer> value)
+      : m_type(BinaryType), m_binary(value) {}
+  explicit IDBKey(const KeyArray& keyArray)
+      : m_type(ArrayType), m_array(keyArray) {}
 
-    int compare(const IDBKey* other) const;
-    bool isLessThan(const IDBKey* other) const;
-    bool isEqual(const IDBKey* other) const;
-
-private:
-    IDBKey() : m_type(InvalidType) { }
-    IDBKey(Type type, double number) : m_type(type), m_number(number) { }
-    explicit IDBKey(const String& value) : m_type(StringType), m_string(value) { }
-    explicit IDBKey(PassRefPtr<SharedBuffer> value) : m_type(BinaryType), m_binary(value) { }
-    explicit IDBKey(const KeyArray& keyArray) : m_type(ArrayType), m_array(keyArray) { }
-
-    const Type m_type;
-    const KeyArray m_array;
-    RefPtr<SharedBuffer> m_binary;
-    const String m_string;
-    const double m_number = 0;
+  const Type m_type;
+  const KeyArray m_array;
+  RefPtr<SharedBuffer> m_binary;
+  const String m_string;
+  const double m_number = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // IDBKey_h
+#endif  // IDBKey_h

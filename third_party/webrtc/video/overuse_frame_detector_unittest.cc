@@ -10,15 +10,19 @@
 
 #include <memory>
 
-#include "webrtc/video/overuse_frame_detector.h"
-
-#include "testing/gmock/include/gmock/gmock.h"
-#include "testing/gtest/include/gtest/gtest.h"
-
+#include "webrtc/api/video/i420_buffer.h"
+#include "webrtc/base/event.h"
 #include "webrtc/system_wrappers/include/clock.h"
+#include "webrtc/test/gmock.h"
+#include "webrtc/test/gtest.h"
+#include "webrtc/video/overuse_frame_detector.h"
 #include "webrtc/video_frame.h"
+#include "webrtc/modules/video_coding/utility/quality_scaler.h"
 
 namespace webrtc {
+
+using ::testing::InvokeWithoutArgs;
+
 namespace {
   const int kWidth = 640;
   const int kHeight = 480;
@@ -27,27 +31,44 @@ namespace {
   const int kProcessTime5ms = 5;
 }  // namespace
 
-class MockCpuOveruseObserver : public CpuOveruseObserver {
+class MockCpuOveruseObserver : public ScalingObserverInterface {
  public:
   MockCpuOveruseObserver() {}
   virtual ~MockCpuOveruseObserver() {}
 
-  MOCK_METHOD0(OveruseDetected, void());
-  MOCK_METHOD0(NormalUsage, void());
+  MOCK_METHOD1(ScaleUp, void(ScaleReason));
+  MOCK_METHOD1(ScaleDown, void(ScaleReason));
 };
 
-class CpuOveruseObserverImpl : public CpuOveruseObserver {
+class CpuOveruseObserverImpl : public ScalingObserverInterface {
  public:
   CpuOveruseObserverImpl() :
     overuse_(0),
     normaluse_(0) {}
   virtual ~CpuOveruseObserverImpl() {}
 
-  void OveruseDetected() { ++overuse_; }
-  void NormalUsage() { ++normaluse_; }
+  void ScaleDown(ScaleReason) { ++overuse_; }
+  void ScaleUp(ScaleReason) { ++normaluse_; }
 
   int overuse_;
   int normaluse_;
+};
+
+class OveruseFrameDetectorUnderTest : public OveruseFrameDetector {
+ public:
+  OveruseFrameDetectorUnderTest(Clock* clock,
+                                const CpuOveruseOptions& options,
+                                ScalingObserverInterface* overuse_observer,
+                                EncodedFrameObserver* encoder_timing,
+                                CpuOveruseMetricsObserver* metrics_observer)
+      : OveruseFrameDetector(clock,
+                             options,
+                             overuse_observer,
+                             encoder_timing,
+                             metrics_observer) {}
+  ~OveruseFrameDetectorUnderTest() {}
+
+  using OveruseFrameDetector::CheckForOveruse;
 };
 
 class OveruseFrameDetectorTest : public ::testing::Test,
@@ -61,7 +82,7 @@ class OveruseFrameDetectorTest : public ::testing::Test,
   }
 
   void ReinitializeOveruseDetector() {
-    overuse_detector_.reset(new OveruseFrameDetector(
+    overuse_detector_.reset(new OveruseFrameDetectorUnderTest(
         clock_.get(), options_, observer_.get(), nullptr, this));
   }
 
@@ -80,14 +101,14 @@ class OveruseFrameDetectorTest : public ::testing::Test,
                                        int width,
                                        int height,
                                        int delay_ms) {
-    VideoFrame frame;
-    frame.CreateEmptyFrame(width, height, width, width / 2, width / 2);
+    VideoFrame frame(I420Buffer::Create(width, height),
+                     webrtc::kVideoRotation_0, 0);
     uint32_t timestamp = 0;
     while (num_frames-- > 0) {
       frame.set_timestamp(timestamp);
-      overuse_detector_->FrameCaptured(frame);
+      overuse_detector_->FrameCaptured(frame, clock_->TimeInMilliseconds());
       clock_->AdvanceTimeMilliseconds(delay_ms);
-      overuse_detector_->FrameSent(timestamp);
+      overuse_detector_->FrameSent(timestamp, clock_->TimeInMilliseconds());
       clock_->AdvanceTimeMilliseconds(interval_ms - delay_ms);
       timestamp += interval_ms * 90;
     }
@@ -105,7 +126,7 @@ class OveruseFrameDetectorTest : public ::testing::Test,
     for (int i = 0; i < num_times; ++i) {
       InsertAndSendFramesWithInterval(
           1000, kFrameInterval33ms, kWidth, kHeight, kDelayMs);
-      overuse_detector_->Process();
+      overuse_detector_->CheckForOveruse();
     }
   }
 
@@ -116,7 +137,7 @@ class OveruseFrameDetectorTest : public ::testing::Test,
         1300, kFrameInterval33ms, kWidth, kHeight, kDelayMs1);
     InsertAndSendFramesWithInterval(
         1, kFrameInterval33ms, kWidth, kHeight, kDelayMs2);
-    overuse_detector_->Process();
+    overuse_detector_->CheckForOveruse();
   }
 
   int UsagePercent() { return metrics_.encode_usage_percent; }
@@ -124,8 +145,10 @@ class OveruseFrameDetectorTest : public ::testing::Test,
   CpuOveruseOptions options_;
   std::unique_ptr<SimulatedClock> clock_;
   std::unique_ptr<MockCpuOveruseObserver> observer_;
-  std::unique_ptr<OveruseFrameDetector> overuse_detector_;
+  std::unique_ptr<OveruseFrameDetectorUnderTest> overuse_detector_;
   CpuOveruseMetrics metrics_;
+
+  static const auto reason_ = ScalingObserverInterface::ScaleReason::kCpu;
 };
 
 
@@ -133,67 +156,67 @@ class OveruseFrameDetectorTest : public ::testing::Test,
 // UsagePercent() < low_encode_usage_threshold_percent => underuse.
 TEST_F(OveruseFrameDetectorTest, TriggerOveruse) {
   // usage > high => overuse
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(1);
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(1);
   TriggerOveruse(options_.high_threshold_consecutive_count);
 }
 
 TEST_F(OveruseFrameDetectorTest, OveruseAndRecover) {
   // usage > high => overuse
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(1);
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(1);
   TriggerOveruse(options_.high_threshold_consecutive_count);
   // usage < low => underuse
-  EXPECT_CALL(*(observer_.get()), NormalUsage()).Times(testing::AtLeast(1));
+  EXPECT_CALL(*(observer_.get()), ScaleUp(reason_)).Times(testing::AtLeast(1));
   TriggerUnderuse();
 }
 
 TEST_F(OveruseFrameDetectorTest, OveruseAndRecoverWithNoObserver) {
-  overuse_detector_.reset(
-      new OveruseFrameDetector(clock_.get(), options_, nullptr, nullptr, this));
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(0);
+  overuse_detector_.reset(new OveruseFrameDetectorUnderTest(
+      clock_.get(), options_, nullptr, nullptr, this));
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(0);
   TriggerOveruse(options_.high_threshold_consecutive_count);
-  EXPECT_CALL(*(observer_.get()), NormalUsage()).Times(0);
+  EXPECT_CALL(*(observer_.get()), ScaleUp(reason_)).Times(0);
   TriggerUnderuse();
 }
 
 TEST_F(OveruseFrameDetectorTest, DoubleOveruseAndRecover) {
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(2);
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(2);
   TriggerOveruse(options_.high_threshold_consecutive_count);
   TriggerOveruse(options_.high_threshold_consecutive_count);
-  EXPECT_CALL(*(observer_.get()), NormalUsage()).Times(testing::AtLeast(1));
+  EXPECT_CALL(*(observer_.get()), ScaleUp(reason_)).Times(testing::AtLeast(1));
   TriggerUnderuse();
 }
 
 TEST_F(OveruseFrameDetectorTest, TriggerUnderuseWithMinProcessCount) {
   options_.min_process_count = 1;
   CpuOveruseObserverImpl overuse_observer;
-  overuse_detector_.reset(new OveruseFrameDetector(
+  overuse_detector_.reset(new OveruseFrameDetectorUnderTest(
       clock_.get(), options_, &overuse_observer, nullptr, this));
   InsertAndSendFramesWithInterval(
       1200, kFrameInterval33ms, kWidth, kHeight, kProcessTime5ms);
-  overuse_detector_->Process();
+  overuse_detector_->CheckForOveruse();
   EXPECT_EQ(0, overuse_observer.normaluse_);
   clock_->AdvanceTimeMilliseconds(kProcessIntervalMs);
-  overuse_detector_->Process();
+  overuse_detector_->CheckForOveruse();
   EXPECT_EQ(1, overuse_observer.normaluse_);
 }
 
 TEST_F(OveruseFrameDetectorTest, ConstantOveruseGivesNoNormalUsage) {
-  EXPECT_CALL(*(observer_.get()), NormalUsage()).Times(0);
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(64);
+  EXPECT_CALL(*(observer_.get()), ScaleUp(reason_)).Times(0);
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(64);
   for (size_t i = 0; i < 64; ++i) {
     TriggerOveruse(options_.high_threshold_consecutive_count);
   }
 }
 
 TEST_F(OveruseFrameDetectorTest, ConsecutiveCountTriggersOveruse) {
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(1);
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(1);
   options_.high_threshold_consecutive_count = 2;
   ReinitializeOveruseDetector();
   TriggerOveruse(2);
 }
 
 TEST_F(OveruseFrameDetectorTest, IncorrectConsecutiveCountTriggersNoOveruse) {
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(0);
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_)).Times(0);
   options_.high_threshold_consecutive_count = 2;
   ReinitializeOveruseDetector();
   TriggerOveruse(1);
@@ -259,45 +282,78 @@ TEST_F(OveruseFrameDetectorTest, InitialProcessingUsage) {
 }
 
 TEST_F(OveruseFrameDetectorTest, MeasuresMultipleConcurrentSamples) {
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(testing::AtLeast(1));
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_))
+      .Times(testing::AtLeast(1));
   static const int kIntervalMs = 33;
   static const size_t kNumFramesEncodingDelay = 3;
-  VideoFrame frame;
-  frame.CreateEmptyFrame(kWidth, kHeight, kWidth, kWidth / 2, kWidth / 2);
+  VideoFrame frame(I420Buffer::Create(kWidth, kHeight),
+                   webrtc::kVideoRotation_0, 0);
   for (size_t i = 0; i < 1000; ++i) {
     // Unique timestamps.
     frame.set_timestamp(static_cast<uint32_t>(i));
-    overuse_detector_->FrameCaptured(frame);
+    overuse_detector_->FrameCaptured(frame, clock_->TimeInMilliseconds());
     clock_->AdvanceTimeMilliseconds(kIntervalMs);
     if (i > kNumFramesEncodingDelay) {
       overuse_detector_->FrameSent(
-          static_cast<uint32_t>(i - kNumFramesEncodingDelay));
+          static_cast<uint32_t>(i - kNumFramesEncodingDelay),
+          clock_->TimeInMilliseconds());
     }
-    overuse_detector_->Process();
+    overuse_detector_->CheckForOveruse();
   }
 }
 
 TEST_F(OveruseFrameDetectorTest, UpdatesExistingSamples) {
   // >85% encoding time should trigger overuse.
-  EXPECT_CALL(*(observer_.get()), OveruseDetected()).Times(testing::AtLeast(1));
+  EXPECT_CALL(*(observer_.get()), ScaleDown(reason_))
+      .Times(testing::AtLeast(1));
   static const int kIntervalMs = 33;
   static const int kDelayMs = 30;
-  VideoFrame frame;
-  frame.CreateEmptyFrame(kWidth, kHeight, kWidth, kWidth / 2, kWidth / 2);
+  VideoFrame frame(I420Buffer::Create(kWidth, kHeight),
+                   webrtc::kVideoRotation_0, 0);
   uint32_t timestamp = 0;
   for (size_t i = 0; i < 1000; ++i) {
     frame.set_timestamp(timestamp);
-    overuse_detector_->FrameCaptured(frame);
+    overuse_detector_->FrameCaptured(frame, clock_->TimeInMilliseconds());
     // Encode and send first parts almost instantly.
     clock_->AdvanceTimeMilliseconds(1);
-    overuse_detector_->FrameSent(timestamp);
+    overuse_detector_->FrameSent(timestamp, clock_->TimeInMilliseconds());
     // Encode heavier part, resulting in >85% usage total.
     clock_->AdvanceTimeMilliseconds(kDelayMs - 1);
-    overuse_detector_->FrameSent(timestamp);
+    overuse_detector_->FrameSent(timestamp, clock_->TimeInMilliseconds());
     clock_->AdvanceTimeMilliseconds(kIntervalMs - kDelayMs);
     timestamp += kIntervalMs * 90;
-    overuse_detector_->Process();
+    overuse_detector_->CheckForOveruse();
   }
+}
+
+TEST_F(OveruseFrameDetectorTest, RunOnTqNormalUsage) {
+  rtc::TaskQueue queue("OveruseFrameDetectorTestQueue");
+
+  rtc::Event event(false, false);
+  queue.PostTask([this, &event] {
+    overuse_detector_->StartCheckForOveruse();
+    event.Set();
+  });
+  event.Wait(rtc::Event::kForever);
+
+  // Expect NormalUsage(). When called, stop the |overuse_detector_| and then
+  // set |event| to end the test.
+  EXPECT_CALL(*(observer_.get()), ScaleUp(reason_))
+      .WillOnce(InvokeWithoutArgs([this, &event] {
+        overuse_detector_->StopCheckForOveruse();
+        event.Set();
+      }));
+
+  queue.PostTask([this, &event] {
+    const int kDelayMs1 = 5;
+    const int kDelayMs2 = 6;
+    InsertAndSendFramesWithInterval(1300, kFrameInterval33ms, kWidth, kHeight,
+                                    kDelayMs1);
+    InsertAndSendFramesWithInterval(1, kFrameInterval33ms, kWidth, kHeight,
+                                    kDelayMs2);
+  });
+
+  EXPECT_TRUE(event.Wait(10000));
 }
 
 }  // namespace webrtc

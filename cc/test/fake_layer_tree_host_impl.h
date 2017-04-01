@@ -10,26 +10,17 @@
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/single_thread_proxy.h"
 
-namespace gpu {
-class GpuMemoryBufferManager;
-}
-
 namespace cc {
+
+class AnimationHost;
 
 class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
  public:
   FakeLayerTreeHostImpl(TaskRunnerProvider* task_runner_provider,
-                        SharedBitmapManager* manager,
                         TaskGraphRunner* task_graph_runner);
   FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
                         TaskRunnerProvider* task_runner_provider,
-                        SharedBitmapManager* manager,
                         TaskGraphRunner* task_graph_runner);
-  FakeLayerTreeHostImpl(const LayerTreeSettings& settings,
-                        TaskRunnerProvider* task_runner_provider,
-                        SharedBitmapManager* manager,
-                        TaskGraphRunner* task_graph_runner,
-                        gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager);
   ~FakeLayerTreeHostImpl() override;
 
   void ForcePrepareToDraw() {
@@ -43,8 +34,11 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   void NotifyTileStateChanged(const Tile* tile) override;
   BeginFrameArgs CurrentBeginFrameArgs() const override;
   void AdvanceToNextFrame(base::TimeDelta advance_by);
-  void UpdateNumChildrenAndDrawPropertiesForActiveTree();
-  static void UpdateNumChildrenAndDrawProperties(LayerTreeImpl* layerTree);
+  void UpdateNumChildrenAndDrawPropertiesForActiveTree(
+      bool force_skip_verify_visible_rect_calculations = false);
+  static void UpdateNumChildrenAndDrawProperties(
+      LayerTreeImpl* layerTree,
+      bool force_skip_verify_visible_rect_calculations = false);
   static int RecursiveUpdateNumChildren(LayerImpl* layer);
 
   using LayerTreeHostImpl::ActivateSyncTree;
@@ -58,6 +52,8 @@ class FakeLayerTreeHostImpl : public LayerTreeHostImpl {
   void set_notify_tile_state_changed_called(bool called) {
     notify_tile_state_changed_called_ = called;
   }
+
+  AnimationHost* animation_host() const;
 
  private:
   FakeLayerTreeHostImplClient client_;

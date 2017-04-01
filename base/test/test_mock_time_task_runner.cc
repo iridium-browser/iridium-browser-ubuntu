@@ -165,12 +165,21 @@ TimeTicks TestMockTimeTaskRunner::NowTicks() const {
 
 std::unique_ptr<Clock> TestMockTimeTaskRunner::GetMockClock() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return WrapUnique(new MockClock(this));
+  return MakeUnique<MockClock>(this);
 }
 
 std::unique_ptr<TickClock> TestMockTimeTaskRunner::GetMockTickClock() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return WrapUnique(new MockTickClock(this));
+  return MakeUnique<MockTickClock>(this);
+}
+
+std::deque<TestPendingTask> TestMockTimeTaskRunner::TakePendingTasks() {
+  std::deque<TestPendingTask> tasks;
+  while (!tasks_.empty()) {
+    tasks.push_back(tasks_.top());
+    tasks_.pop();
+  }
+  return tasks;
 }
 
 bool TestMockTimeTaskRunner::HasPendingTask() const {

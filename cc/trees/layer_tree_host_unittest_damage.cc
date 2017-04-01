@@ -41,9 +41,10 @@ class LayerTreeHostDamageTestSetNeedsRedraw
   }
 
   void DidCommitAndDrawFrame() override {
-    switch (layer_tree_host()->source_frame_number()) {
+    switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
-        layer_tree_host()->SetNeedsRedraw();
+        layer_tree_host()->SetNeedsRedrawRect(
+            gfx::Rect(layer_tree()->device_viewport_size()));
         break;
     }
   }
@@ -103,7 +104,7 @@ class LayerTreeHostDamageTestSetViewportSize
   }
 
   void DidCommitAndDrawFrame() override {
-    switch (layer_tree_host()->source_frame_number()) {
+    switch (layer_tree_host()->SourceFrameNumber()) {
       case 1:
         layer_tree()->SetViewportSize(gfx::Size(15, 15));
         break;
@@ -203,7 +204,7 @@ class LayerTreeHostDamageTestNoDamageDoesNotSwap
   }
 
   void DidCommit() override {
-    int next_frame = layer_tree_host()->source_frame_number();
+    int next_frame = layer_tree_host()->SourceFrameNumber();
     switch (next_frame) {
       case 1:
         layer_tree_host()->SetNeedsCommit();

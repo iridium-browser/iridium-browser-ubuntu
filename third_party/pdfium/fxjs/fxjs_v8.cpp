@@ -4,11 +4,11 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "fxjs/include/fxjs_v8.h"
+#include "fxjs/fxjs_v8.h"
 
 #include <vector>
 
-#include "core/fxcrt/include/fx_basic.h"
+#include "core/fxcrt/fx_basic.h"
 
 // Keep this consistent with the values defined in gin/public/context_holder.h
 // (without actually requiring a dependency on gin itself for the standalone
@@ -38,7 +38,7 @@ class CFXJS_ObjDefinition {
 
   static CFXJS_ObjDefinition* ForID(v8::Isolate* pIsolate, int id) {
     // Note: GetAt() halts if out-of-range even in release builds.
-    return FXJS_PerIsolateData::Get(pIsolate)->m_ObjectDefnArray[id];
+    return FXJS_PerIsolateData::Get(pIsolate)->m_ObjectDefnArray[id].get();
   }
 
   CFXJS_ObjDefinition(v8::Isolate* isolate,
@@ -70,7 +70,7 @@ class CFXJS_ObjDefinition {
 
   int AssignID() {
     FXJS_PerIsolateData* pData = FXJS_PerIsolateData::Get(m_pIsolate);
-    pData->m_ObjectDefnArray.push_back(this);
+    pData->m_ObjectDefnArray.emplace_back(this);
     return pData->m_ObjectDefnArray.size() - 1;
   }
 
@@ -150,7 +150,7 @@ void V8TemplateMapTraits::Dispose(v8::Isolate* isolate,
 V8TemplateMapTraits::MapType* V8TemplateMapTraits::MapFromWeakCallbackInfo(
     const v8::WeakCallbackInfo<WeakCallbackDataType>& data) {
   V8TemplateMap* pMap =
-      (FXJS_PerIsolateData::Get(data.GetIsolate()))->m_pDynamicObjsMap;
+      (FXJS_PerIsolateData::Get(data.GetIsolate()))->m_pDynamicObjsMap.get();
   return pMap ? &pMap->m_map : nullptr;
 }
 
@@ -206,7 +206,7 @@ FXJS_PerIsolateData::~FXJS_PerIsolateData() {}
 // static
 void FXJS_PerIsolateData::SetUp(v8::Isolate* pIsolate) {
   if (!pIsolate->GetData(g_embedderDataSlot))
-    pIsolate->SetData(g_embedderDataSlot, new FXJS_PerIsolateData());
+    pIsolate->SetData(g_embedderDataSlot, new FXJS_PerIsolateData(pIsolate));
 }
 
 // static
@@ -215,14 +215,12 @@ FXJS_PerIsolateData* FXJS_PerIsolateData::Get(v8::Isolate* pIsolate) {
       pIsolate->GetData(g_embedderDataSlot));
 }
 
-#ifndef PDF_ENABLE_XFA
-FXJS_PerIsolateData::FXJS_PerIsolateData() : m_pDynamicObjsMap(nullptr) {}
-#else   // PDF_ENABLE_XFA
-FXJS_PerIsolateData::FXJS_PerIsolateData()
-    : m_pFXJSERuntimeData(nullptr), m_pDynamicObjsMap(nullptr) {}
-#endif  // PDF_ENABLE_XFA
+FXJS_PerIsolateData::FXJS_PerIsolateData(v8::Isolate* pIsolate)
+    : m_pDynamicObjsMap(new V8TemplateMap(pIsolate)) {}
 
 CFXJS_Engine::CFXJS_Engine() : m_isolate(nullptr) {}
+
+CFXJS_Engine::CFXJS_Engine(v8::Isolate* pIsolate) : m_isolate(pIsolate) {}
 
 CFXJS_Engine::~CFXJS_Engine() {
   m_V8PersistentContext.Reset();
@@ -234,14 +232,6 @@ CFXJS_Engine* CFXJS_Engine::CurrentEngineFromIsolate(v8::Isolate* pIsolate) {
       pIsolate->GetCurrentContext()->GetAlignedPointerFromEmbedderData(
           kPerContextDataIndex));
 }
-
-#ifdef PDF_ENABLE_XFA
-// static
-void CFXJS_Engine::SetForV8Context(v8::Local<v8::Context> v8Context,
-                                   CFXJS_Engine* pEngine) {
-  v8Context->SetAlignedPointerInEmbedderData(kPerContextDataIndex, pEngine);
-}
-#endif  // PDF_ENABLE_XFA
 
 // static
 int CFXJS_Engine::GetObjDefnID(v8::Local<v8::Object> pObj) {
@@ -383,10 +373,6 @@ void CFXJS_Engine::InitializeEngine() {
       v8::Context::New(m_isolate, nullptr, GetGlobalObjectTemplate(m_isolate));
   v8::Context::Scope context_scope(v8Context);
 
-  FXJS_PerIsolateData* pData = FXJS_PerIsolateData::Get(m_isolate);
-  if (!pData)
-    return;
-  pData->CreateDynamicObjsMap(m_isolate);
   v8Context->SetAlignedPointerInEmbedderData(kPerContextDataIndex, this);
 
   int maxID = CFXJS_ObjDefinition::MaxID(m_isolate);
@@ -458,12 +444,8 @@ void CFXJS_Engine::ReleaseEngine() {
   if (m_isolate == g_isolate && --g_isolate_ref_count > 0)
     return;
 
-  pData->ReleaseDynamicObjsMap();
-  for (int i = 0; i < maxID; ++i)
-    delete CFXJS_ObjDefinition::ForID(m_isolate, i);
-
-  m_isolate->SetData(g_embedderDataSlot, nullptr);
   delete pData;
+  m_isolate->SetData(g_embedderDataSlot, nullptr);
 }
 
 int CFXJS_Engine::Execute(const CFX_WideString& script, FXJSErr* pError) {
@@ -614,79 +596,21 @@ std::vector<CFX_WideString> CFXJS_Engine::GetObjectPropertyNames(
 
   std::vector<CFX_WideString> result;
   for (uint32_t i = 0; i < val->Length(); ++i) {
-    result.push_back(ToString(val->Get(context, i).ToLocalChecked()));
+    result.push_back(ToWideString(val->Get(context, i).ToLocalChecked()));
   }
 
   return result;
 }
 
-void CFXJS_Engine::PutObjectString(v8::Local<v8::Object> pObj,
-                                   const CFX_WideString& wsPropertyName,
-                                   const CFX_WideString& wsValue) {
-  if (pObj.IsEmpty())
-    return;
-  pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName),
-            WSToJSString(wsValue))
-      .FromJust();
-}
-
-void CFXJS_Engine::PutObjectNumber(v8::Local<v8::Object> pObj,
-                                   const CFX_WideString& wsPropertyName,
-                                   int nValue) {
-  if (pObj.IsEmpty())
-    return;
-  pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName),
-            v8::Int32::New(m_isolate, nValue))
-      .FromJust();
-}
-
-void CFXJS_Engine::PutObjectNumber(v8::Local<v8::Object> pObj,
-                                   const CFX_WideString& wsPropertyName,
-                                   float fValue) {
-  if (pObj.IsEmpty())
-    return;
-  pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName),
-            v8::Number::New(m_isolate, (double)fValue))
-      .FromJust();
-}
-
-void CFXJS_Engine::PutObjectNumber(v8::Local<v8::Object> pObj,
-                                   const CFX_WideString& wsPropertyName,
-                                   double dValue) {
-  if (pObj.IsEmpty())
-    return;
-  pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName),
-            v8::Number::New(m_isolate, (double)dValue))
-      .FromJust();
-}
-
-void CFXJS_Engine::PutObjectBoolean(v8::Local<v8::Object> pObj,
-                                    const CFX_WideString& wsPropertyName,
-                                    bool bValue) {
-  if (pObj.IsEmpty())
-    return;
-  pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName),
-            v8::Boolean::New(m_isolate, bValue))
-      .FromJust();
-}
-
-void CFXJS_Engine::PutObjectObject(v8::Local<v8::Object> pObj,
-                                   const CFX_WideString& wsPropertyName,
-                                   v8::Local<v8::Object> pPut) {
+void CFXJS_Engine::PutObjectProperty(v8::Local<v8::Object> pObj,
+                                     const CFX_WideString& wsPropertyName,
+                                     v8::Local<v8::Value> pPut) {
   if (pObj.IsEmpty())
     return;
   pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName), pPut)
       .FromJust();
 }
 
-void CFXJS_Engine::PutObjectNull(v8::Local<v8::Object> pObj,
-                                 const CFX_WideString& wsPropertyName) {
-  if (pObj.IsEmpty())
-    return;
-  pObj->Set(m_isolate->GetCurrentContext(), WSToJSString(wsPropertyName),
-            v8::Local<v8::Object>())
-      .FromJust();
-}
 
 v8::Local<v8::Array> CFXJS_Engine::NewArray() {
   return v8::Array::New(m_isolate);
@@ -742,8 +666,8 @@ v8::Local<v8::Value> CFXJS_Engine::NewBoolean(bool b) {
   return v8::Boolean::New(m_isolate, b);
 }
 
-v8::Local<v8::Value> CFXJS_Engine::NewString(const wchar_t* str) {
-  return WSToJSString(str);
+v8::Local<v8::Value> CFXJS_Engine::NewString(const CFX_WideString& str) {
+  return WSToJSString(str.c_str());
 }
 
 v8::Local<v8::Value> CFXJS_Engine::NewNull() {
@@ -770,30 +694,30 @@ bool CFXJS_Engine::ToBoolean(v8::Local<v8::Value> pValue) {
   return pValue->ToBoolean(context).ToLocalChecked()->Value();
 }
 
-double CFXJS_Engine::ToNumber(v8::Local<v8::Value> pValue) {
+double CFXJS_Engine::ToDouble(v8::Local<v8::Value> pValue) {
   if (pValue.IsEmpty())
     return 0.0;
   v8::Local<v8::Context> context = m_isolate->GetCurrentContext();
   return pValue->ToNumber(context).ToLocalChecked()->Value();
 }
 
-v8::Local<v8::Object> CFXJS_Engine::ToObject(v8::Local<v8::Value> pValue) {
+CFX_WideString CFXJS_Engine::ToWideString(v8::Local<v8::Value> pValue) {
   if (pValue.IsEmpty())
-    return v8::Local<v8::Object>();
-  v8::Local<v8::Context> context = m_isolate->GetCurrentContext();
-  return pValue->ToObject(context).ToLocalChecked();
-}
-
-CFX_WideString CFXJS_Engine::ToString(v8::Local<v8::Value> pValue) {
-  if (pValue.IsEmpty())
-    return L"";
+    return CFX_WideString();
   v8::Local<v8::Context> context = m_isolate->GetCurrentContext();
   v8::String::Utf8Value s(pValue->ToString(context).ToLocalChecked());
   return CFX_WideString::FromUTF8(CFX_ByteStringC(*s, s.length()));
 }
 
+v8::Local<v8::Object> CFXJS_Engine::ToObject(v8::Local<v8::Value> pValue) {
+  if (pValue.IsEmpty() || !pValue->IsObject())
+    return v8::Local<v8::Object>();
+  v8::Local<v8::Context> context = m_isolate->GetCurrentContext();
+  return pValue->ToObject(context).ToLocalChecked();
+}
+
 v8::Local<v8::Array> CFXJS_Engine::ToArray(v8::Local<v8::Value> pValue) {
-  if (pValue.IsEmpty())
+  if (pValue.IsEmpty() || !pValue->IsArray())
     return v8::Local<v8::Array>();
   v8::Local<v8::Context> context = m_isolate->GetCurrentContext();
   return v8::Local<v8::Array>::Cast(pValue->ToObject(context).ToLocalChecked());

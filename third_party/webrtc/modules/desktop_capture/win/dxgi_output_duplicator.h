@@ -21,9 +21,10 @@
 
 #include "webrtc/base/criticalsection.h"
 #include "webrtc/base/thread_annotations.h"
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "webrtc/modules/desktop_capture/desktop_region.h"
+#include "webrtc/modules/desktop_capture/desktop_frame_rotation.h"
+#include "webrtc/modules/desktop_capture/shared_desktop_frame.h"
 #include "webrtc/modules/desktop_capture/win/d3d_device.h"
 #include "webrtc/modules/desktop_capture/win/dxgi_texture.h"
 
@@ -31,7 +32,6 @@ namespace webrtc {
 
 // Duplicates the content on one IDXGIOutput, i.e. one monitor attached to one
 // video card. None of functions in this class is thread-safe.
-// TODO(zijiehe): Understand the meaning of rotation.
 class DxgiOutputDuplicator {
  public:
   struct Context {
@@ -60,17 +60,14 @@ class DxgiOutputDuplicator {
 
   // Copies the content of current IDXGIOutput to the |target|. To improve the
   // performance, this function copies only regions merged from
-  // |last_frame|.updated_region and DetectUpdatedRegion(). The |offset| decides
-  // the
-  // offset in the |target| where the content should be copied to. i.e. this
+  // |context|->updated_region and DetectUpdatedRegion(). The |offset| decides
+  // the offset in the |target| where the content should be copied to. i.e. this
   // function copies the content to the rectangle of (offset.x(), offset.y()) to
   // (offset.x() + desktop_rect_.width(), offset.y() + desktop_rect_.height()).
-  // The |last_frame| is always expected to be translated by the same offset.
   // Returns false in case of a failure.
   bool Duplicate(Context* context,
-                 const DesktopFrame* last_frame,
-                 const DesktopVector offset,
-                 DesktopFrame* target);
+                 DesktopVector offset,
+                 SharedDesktopFrame* target);
 
   // Returns the desktop rect covered by this DxgiOutputDuplicator.
   DesktopRect desktop_rect() const { return desktop_rect_; }
@@ -82,7 +79,7 @@ class DxgiOutputDuplicator {
   // function will set the |updated_region| as entire DesktopRect starts from
   // offset if it failed to execute Windows APIs.
   void DetectUpdatedRegion(const DXGI_OUTDUPL_FRAME_INFO& frame_info,
-                           const DesktopVector offset,
+                           DesktopVector offset,
                            DesktopRegion* updated_region);
 
   // Returns untranslated updated region, which are directly returned by Windows
@@ -98,7 +95,7 @@ class DxgiOutputDuplicator {
 
   // Returns a DesktopRect with the same size of desktop_size_, but translated
   // by offset.
-  DesktopRect TranslatedDesktopRect(const DesktopVector offset);
+  DesktopRect TranslatedDesktopRect(DesktopVector offset);
 
   void Setup(Context* context);
 
@@ -108,19 +105,27 @@ class DxgiOutputDuplicator {
   // contexts_.
   void SpreadContextChange(const Context* const context);
 
-  const D3dDevice& device_;
+  const D3dDevice device_;
   const Microsoft::WRL::ComPtr<IDXGIOutput1> output_;
   const DesktopRect desktop_rect_;
   Microsoft::WRL::ComPtr<IDXGIOutputDuplication> duplication_;
   DXGI_OUTDUPL_DESC desc_;
-  std::vector<uint8_t> metadata;
+  std::vector<uint8_t> metadata_;
   std::unique_ptr<DxgiTexture> texture_;
+  Rotation rotation_;
+  DesktopSize unrotated_size_;
 
   // After each AcquireNextFrame() function call, updated_region_(s) of all
   // active Context(s) need to be updated. Since they have missed the
   // change this time. And during next Duplicate() function call, their
   // updated_region_ will be merged and copied.
   std::vector<Context*> contexts_;
+
+  // The last full frame of this output and its offset. If on AcquireNextFrame()
+  // failed because of timeout, i.e. no update, we can copy content from
+  // |last_frame_|.
+  std::unique_ptr<SharedDesktopFrame> last_frame_;
+  DesktopVector last_frame_offset_;
 };
 
 }  // namespace webrtc

@@ -24,7 +24,7 @@
 #include "net/cert/test_root_certs.h"
 #include "net/cert/x509_certificate.h"
 #include "net/dns/host_resolver.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -224,6 +224,7 @@ base::FilePath BaseTestServer::SSLOptions::GetCertificateFile() const {
     case CERT_BAD_VALIDITY:
       return base::FilePath(FILE_PATH_LITERAL("bad_validity.pem"));
     case CERT_AUTO:
+    case CERT_AUTO_AIA_INTERMEDIATE:
       return base::FilePath();
     default:
       NOTREACHED();
@@ -354,7 +355,7 @@ bool BaseTestServer::GetAddressList(AddressList* address_list) const {
   TestCompletionCallback callback;
   std::unique_ptr<HostResolver::Request> request;
   int rv = resolver->Resolve(info, DEFAULT_PRIORITY, address_list,
-                             callback.callback(), &request, BoundNetLog());
+                             callback.callback(), &request, NetLogWithSource());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   if (rv != OK) {
@@ -481,7 +482,7 @@ bool BaseTestServer::ParseServerData(const std::string& server_data) {
   VLOG(1) << "Server data: " << server_data;
   base::JSONReader json_reader;
   std::unique_ptr<base::Value> value(json_reader.ReadToValue(server_data));
-  if (!value.get() || !value->IsType(base::Value::TYPE_DICTIONARY)) {
+  if (!value.get() || !value->IsType(base::Value::Type::DICTIONARY)) {
     LOG(ERROR) << "Could not parse server data: "
                << json_reader.GetErrorMessage();
     return false;
@@ -591,6 +592,10 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
 
   if (type_ == TYPE_HTTPS) {
     arguments->Set("https", base::Value::CreateNullValue());
+
+    if (ssl_options_.server_certificate ==
+        SSLOptions::CERT_AUTO_AIA_INTERMEDIATE)
+      arguments->Set("aia-intermediate", base::Value::CreateNullValue());
 
     std::string ocsp_arg = ssl_options_.GetOCSPArgument();
     if (!ocsp_arg.empty())

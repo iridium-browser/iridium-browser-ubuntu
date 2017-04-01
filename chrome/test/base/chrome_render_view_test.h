@@ -10,6 +10,7 @@
 
 #include "chrome/renderer/chrome_mock_render_thread.h"
 #include "content/public/test/render_view_test.h"
+#include "extensions/features/features.h"
 
 class ChromeContentRendererClient;
 
@@ -36,6 +37,9 @@ class ChromeRenderViewTest : public content::RenderViewTest {
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
 
+  // Called from SetUp(). Override to register mojo interfaces.
+  virtual void RegisterMainFrameRemoteInterfaces();
+
   // Initializes commonly needed global state and renderer client parts.
   // Use when overriding CreateContentRendererClient.
   void InitChromeContentRendererClient(ChromeContentRendererClient* client);
@@ -44,7 +48,7 @@ class ChromeRenderViewTest : public content::RenderViewTest {
   void DisableUserGestureSimulationForAutofill();
   void WaitForAutofillDidAssociateFormControl();
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   std::unique_ptr<extensions::DispatcherDelegate>
       extension_dispatcher_delegate_;
 #endif

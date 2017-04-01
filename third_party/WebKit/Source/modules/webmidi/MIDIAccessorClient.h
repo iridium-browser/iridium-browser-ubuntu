@@ -31,22 +31,36 @@
 #ifndef MIDIAccessorClient_h
 #define MIDIAccessorClient_h
 
+#include "media/midi/midi_service.mojom-blink.h"
 #include "modules/webmidi/MIDIAccessor.h"
 #include "wtf/Forward.h"
 
 namespace blink {
 
 class MIDIAccessorClient {
-public:
-    virtual void didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version, MIDIAccessor::MIDIPortState) = 0;
-    virtual void didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version, MIDIAccessor::MIDIPortState) = 0;
-    virtual void didSetInputPortState(unsigned portIndex, MIDIAccessor::MIDIPortState) = 0;
-    virtual void didSetOutputPortState(unsigned portIndex, MIDIAccessor::MIDIPortState) = 0;
+ public:
+  virtual void didAddInputPort(const String& id,
+                               const String& manufacturer,
+                               const String& name,
+                               const String& version,
+                               midi::mojom::PortState) = 0;
+  virtual void didAddOutputPort(const String& id,
+                                const String& manufacturer,
+                                const String& name,
+                                const String& version,
+                                midi::mojom::PortState) = 0;
+  virtual void didSetInputPortState(unsigned portIndex,
+                                    midi::mojom::PortState) = 0;
+  virtual void didSetOutputPortState(unsigned portIndex,
+                                     midi::mojom::PortState) = 0;
 
-    virtual void didStartSession(bool success, const String& error, const String& message) = 0;
-    virtual void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp) = 0;
+  virtual void didStartSession(midi::mojom::Result) = 0;
+  virtual void didReceiveMIDIData(unsigned portIndex,
+                                  const unsigned char* data,
+                                  size_t length,
+                                  double timeStamp) = 0;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MIDIAccessorClient_h
+#endif  // MIDIAccessorClient_h

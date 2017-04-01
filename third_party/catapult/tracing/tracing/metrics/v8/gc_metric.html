@@ -6,11 +6,10 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/unit.html">
 <link rel="import" href="/tracing/metrics/metric_registry.html">
 <link rel="import" href="/tracing/metrics/v8/utils.html">
 <link rel="import" href="/tracing/value/histogram.html">
-<link rel="import" href="/tracing/value/unit.html">
-<link rel="import" href="/tracing/value/value.html">
 
 <script>
 'use strict';
@@ -28,25 +27,28 @@ tr.exportTo('tr.metrics.v8', function() {
     addDurationOfSubEvents(values, model);
     addIdleTimesOfTopEvents(values, model);
     addTotalIdleTimesOfTopEvents(values, model);
+    addPercentageInV8ExecuteOfTopEvents(values, model);
+    addTotalPercentageInV8Execute(values, model);
     addV8ExecuteMutatorUtilization(values, model);
   }
 
   tr.metrics.MetricRegistry.register(gcMetric);
 
   var timeDurationInMs_smallerIsBetter =
-      tr.v.Unit.byName.timeDurationInMs_smallerIsBetter;
+      tr.b.Unit.byName.timeDurationInMs_smallerIsBetter;
   var percentage_biggerIsBetter =
-      tr.v.Unit.byName.normalizedPercentage_biggerIsBetter;
+      tr.b.Unit.byName.normalizedPercentage_biggerIsBetter;
+  var percentage_smallerIsBetter =
+      tr.b.Unit.byName.normalizedPercentage_smallerIsBetter;
 
-  var numericBuilder = new tr.v.NumericBuilder(
-      timeDurationInMs_smallerIsBetter, 0);
   // 0.1 steps from 0 to 20 since it is the most common range.
-  numericBuilder.addLinearBins(20, 200);
   // Exponentially increasing steps from 20 to 200.
-  numericBuilder.addExponentialBins(200, 100);
+  var CUSTOM_BOUNDARIES = tr.v.HistogramBinBoundaries.createLinear(0, 20, 200)
+    .addExponentialBins(200, 100);
 
-  function createNumericForTopEventTime() {
-    var n = numericBuilder.build();
+  function createNumericForTopEventTime(name) {
+    var n = new tr.v.Histogram(name,
+        timeDurationInMs_smallerIsBetter, CUSTOM_BOUNDARIES);
     n.customizeSummaryOptions({
         avg: true,
         count: true,
@@ -58,8 +60,9 @@ tr.exportTo('tr.metrics.v8', function() {
     return n;
   }
 
-  function createNumericForSubEventTime() {
-    var n = numericBuilder.build();
+  function createNumericForSubEventTime(name) {
+    var n = new tr.v.Histogram(name,
+        timeDurationInMs_smallerIsBetter, CUSTOM_BOUNDARIES);
     n.customizeSummaryOptions({
         avg: true,
         count: false,
@@ -72,8 +75,9 @@ tr.exportTo('tr.metrics.v8', function() {
     return n;
   }
 
-  function createNumericForIdleTime() {
-    var n = numericBuilder.build();
+  function createNumericForIdleTime(name) {
+    var n = new tr.v.Histogram(name,
+        timeDurationInMs_smallerIsBetter, CUSTOM_BOUNDARIES);
     n.customizeSummaryOptions({
         avg: true,
         count: false,
@@ -86,9 +90,22 @@ tr.exportTo('tr.metrics.v8', function() {
     return n;
   }
 
-  function createPercentage(numerator, denominator) {
-    var percentage = denominator === 0 ? 0 : numerator / denominator * 100;
-    return new tr.v.ScalarNumeric(percentage_biggerIsBetter, percentage);
+  function createPercentage(name, numerator, denominator, unit) {
+    var hist = new tr.v.Histogram(name, unit);
+    if (denominator === 0)
+      hist.addSample(0);
+    else
+      hist.addSample(numerator / denominator);
+    hist.customizeSummaryOptions({
+        avg: true,
+        count: false,
+        max: false,
+        min: false,
+        std: false,
+        sum: false,
+        percentile: []
+      });
+    return hist;
   }
 
   function isNotForcedTopGarbageCollectionEvent(event) {
@@ -114,11 +131,11 @@ tr.exportTo('tr.metrics.v8', function() {
       isNotForcedTopGarbageCollectionEvent,
       tr.metrics.v8.utils.topGarbageCollectionEventName,
       function(name, events) {
-        var cpuDuration = createNumericForTopEventTime();
+        var cpuDuration = createNumericForTopEventTime(name);
         events.forEach(function(event) {
-          cpuDuration.add(event.cpuDuration);
+          cpuDuration.addSample(event.cpuDuration);
         });
-        values.addValue(new tr.v.NumericValue(name, cpuDuration));
+        values.addHistogram(cpuDuration);
       }
     );
   }
@@ -132,11 +149,11 @@ tr.exportTo('tr.metrics.v8', function() {
       isNotForcedTopGarbageCollectionEvent,
       event => 'v8-gc-total',
       function(name, events) {
-        var cpuDuration = createNumericForTopEventTime();
+        var cpuDuration = createNumericForTopEventTime(name);
         events.forEach(function(event) {
-          cpuDuration.add(event.cpuDuration);
+          cpuDuration.addSample(event.cpuDuration);
         });
-        values.addValue(new tr.v.NumericValue(name, cpuDuration));
+        values.addHistogram(cpuDuration);
       }
     );
   }
@@ -150,11 +167,11 @@ tr.exportTo('tr.metrics.v8', function() {
       isNotForcedSubGarbageCollectionEvent,
       tr.metrics.v8.utils.subGarbageCollectionEventName,
       function(name, events) {
-        var cpuDuration = createNumericForSubEventTime();
+        var cpuDuration = createNumericForSubEventTime(name);
         events.forEach(function(event) {
-          cpuDuration.add(event.cpuDuration);
+          cpuDuration.addSample(event.cpuDuration);
         });
-        values.addValue(new tr.v.NumericValue(name, cpuDuration));
+        values.addHistogram(cpuDuration);
       }
     );
   }
@@ -194,8 +211,9 @@ tr.exportTo('tr.metrics.v8', function() {
   function addIdleTimes(values, model, name, events) {
     var cpuDuration = createNumericForIdleTime();
     var insideIdle = createNumericForIdleTime();
-    var outsideIdle = createNumericForIdleTime();
-    var idleDeadlineOverrun = createNumericForIdleTime();
+    var outsideIdle = createNumericForIdleTime(name + '_outside_idle');
+    var idleDeadlineOverrun = createNumericForIdleTime(
+        name + '_idle_deadline_overrun');
     events.forEach(function(event) {
       var idleTask = tr.metrics.v8.utils.findParent(
           event, tr.metrics.v8.utils.isIdleTask);
@@ -215,20 +233,63 @@ tr.exportTo('tr.metrics.v8', function() {
           inside = event.cpuDuration;
         }
       }
-      cpuDuration.add(event.cpuDuration);
-      insideIdle.add(inside);
-      outsideIdle.add(event.cpuDuration - inside);
-      idleDeadlineOverrun.add(overrun);
+      cpuDuration.addSample(event.cpuDuration);
+      insideIdle.addSample(inside);
+      outsideIdle.addSample(event.cpuDuration - inside);
+      idleDeadlineOverrun.addSample(overrun);
     });
-    values.addValue(new tr.v.NumericValue(
-        name + '_idle_deadline_overrun',
-        idleDeadlineOverrun));
-    values.addValue(new tr.v.NumericValue(
-        name + '_outside_idle', outsideIdle));
-    var percentage = createPercentage(insideIdle.sum,
-                                      cpuDuration.sum);
-    values.addValue(new tr.v.NumericValue(
-        name + '_percentage_idle', percentage));
+    values.addHistogram(idleDeadlineOverrun);
+    values.addHistogram(outsideIdle);
+    var percentage = createPercentage(name + '_percentage_idle', insideIdle.sum,
+                                      cpuDuration.sum,
+                                      percentage_biggerIsBetter);
+    values.addHistogram(percentage);
+  }
+
+
+  /**
+   * Example output:
+   * - v8-gc-full-mark-compactor_percentage_in_v8_execute.
+   */
+  function addPercentageInV8ExecuteOfTopEvents(values, model) {
+    tr.metrics.v8.utils.groupAndProcessEvents(model,
+      isNotForcedTopGarbageCollectionEvent,
+      tr.metrics.v8.utils.topGarbageCollectionEventName,
+      function(name, events) {
+        addPercentageInV8Execute(values, model, name, events);
+      }
+    );
+  }
+
+  /**
+   * Example output:
+   * - v8-gc-total_percentage_in_v8_execute.
+   */
+  function addTotalPercentageInV8Execute(values, model) {
+    tr.metrics.v8.utils.groupAndProcessEvents(model,
+      isNotForcedTopGarbageCollectionEvent,
+      event => 'v8-gc-total',
+      function(name, events) {
+        addPercentageInV8Execute(values, model, name, events);
+      }
+    );
+  }
+
+  function addPercentageInV8Execute(values, model, name, events) {
+    var cpuDurationInV8Execute = 0;
+    var cpuDurationTotal = 0;
+    events.forEach(function(event) {
+      var v8Execute = tr.metrics.v8.utils.findParent(
+          event, tr.metrics.v8.utils.isV8ExecuteEvent);
+      if (v8Execute) {
+        cpuDurationInV8Execute += event.cpuDuration;
+      }
+      cpuDurationTotal += event.cpuDuration;
+    });
+    var percentage = createPercentage(
+        name + '_percentage_in_v8_execute', cpuDurationInV8Execute,
+        cpuDurationTotal, percentage_smallerIsBetter);
+    values.addHistogram(percentage);
   }
 
   function addV8ExecuteMutatorUtilization(values, model) {
@@ -255,24 +316,23 @@ tr.exportTo('tr.metrics.v8', function() {
           var mutatorUtilization = tr.metrics.v8.utils.mutatorUtilization(
               0, time, WINDOW_SIZE_MS, pauses);
           [0.90, 0.95, 0.99].forEach(function(percent) {
-            var value = new tr.v.ScalarNumeric(percentage_biggerIsBetter,
-                mutatorUtilization.percentile(1.0 - percent) * 100);
-            values.addValue(new tr.v.NumericValue(
-                'v8-execute-mutator-utilization_pct_0' +
-                percent * 100,
-                value));
+            var hist = new tr.v.Histogram(
+                'v8-execute-mutator-utilization_pct_0' + percent * 100,
+                percentage_biggerIsBetter);
+            hist.addSample(mutatorUtilization.percentile(1.0 - percent));
+            values.addHistogram(hist);
           });
-          var value = new tr.v.ScalarNumeric(percentage_biggerIsBetter,
-              mutatorUtilization.min);
-          values.addValue(new tr.v.NumericValue(
-              'v8-execute-mutator-utilization_min', value));
+          var hist = new tr.v.Histogram(
+              'v8-execute-mutator-utilization_min', percentage_biggerIsBetter);
+          hist.addSample(mutatorUtilization.min);
+          values.addHistogram(hist);
         }
     );
   }
 
   return {
-    gcMetric: gcMetric,
-    WINDOW_SIZE_MS: WINDOW_SIZE_MS // For testing purposes only.
+    gcMetric,
+    WINDOW_SIZE_MS,  // For testing purposes only.
   };
 });
 </script>

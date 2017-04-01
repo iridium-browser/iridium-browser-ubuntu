@@ -3,6 +3,6 @@
 // found in the LICENSE file.
 
 [
-    RuntimeEnabled=UnsafeES3APIs,
+    DependentLifetime,
 ] interface WebGLTransformFeedback {
 };

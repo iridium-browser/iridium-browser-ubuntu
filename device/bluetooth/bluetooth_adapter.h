@@ -11,16 +11,16 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "device/bluetooth/bluetooth_advertisement.h"
-#include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_export.h"
 
@@ -35,7 +35,6 @@ class BluetoothRemoteGattDescriptor;
 class BluetoothRemoteGattService;
 class BluetoothSocket;
 class BluetoothUUID;
-struct BluetoothAdapterDeleter;
 enum class UMABluetoothDiscoverySessionOutcome;
 
 // BluetoothAdapter represents a local Bluetooth adapter which may be used to
@@ -90,6 +89,13 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
     //  * GetInquiryRSSI()
     //  * GetInquiryTxPower()
     //  * GetUUIDs()
+    //  * GetServiceData()
+    //  * GetServiceDataUUIDs()
+    //  * GetServiceDataForUUID()
+    //  * GetManufacturerData()
+    //  * GetManufacturerDataIDs()
+    //  * GetManufacturerDataForID()
+    //  * GetAdvertisingDataFlags()
     //  * IsConnectable()
     //  * IsConnected()
     //  * IsConnecting()
@@ -240,11 +246,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       base::Callback<void(scoped_refptr<BluetoothSocket>)>;
   using CreateServiceErrorCallback =
       base::Callback<void(const std::string& message)>;
-  using AcquiredCallback =
-      base::Callback<void(scoped_refptr<BluetoothAudioSink>)>;
   using CreateAdvertisementCallback =
       base::Callback<void(scoped_refptr<BluetoothAdvertisement>)>;
-  using CreateAdvertisementErrorCallback =
+  using AdvertisementErrorCallback =
       base::Callback<void(BluetoothAdvertisement::ErrorCode)>;
 
   // Returns a weak pointer to a new adapter.  For platforms with asynchronous
@@ -319,6 +323,16 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // Indicates whether the adapter is currently discovering new devices.
   virtual bool IsDiscovering() const = 0;
 
+  // Inserts all the devices that are connected by the operating system, and not
+  // being connected by Chromium, into |devices_|. This method is useful since
+  // a discovery session cannot find devices that are already connected to the
+  // computer.
+  // TODO(crbug.com/653032): Needs to be implemented for Android, ChromeOS and
+  // Windows.
+  virtual std::unordered_map<BluetoothDevice*, BluetoothDevice::UUIDSet>
+  RetrieveGattConnectedDevicesWithDiscoveryFilter(
+      const BluetoothDiscoveryFilter& discovery_filter);
+
   // Requests the adapter to start a new discovery session. On success, a new
   // instance of BluetoothDiscoverySession will be returned to the caller via
   // |callback| and the adapter will be discovering nearby Bluetooth devices.
@@ -353,8 +367,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       BluetoothDiscoveryFilter* masked_filter) const;
 
   // Requests the list of devices from the adapter. All devices are returned,
-  // including those currently connected and those paired. Use the returned
-  // device pointers to determine which they are.
+  // including those currently connected, those paired and all devices returned
+  // by RetrieveGattConnectedDevicesWithDiscoveryFilter() (from the previous
+  // call). Use the returned device pointers to determine which they are.
   virtual DeviceList GetDevices();
   virtual ConstDeviceList GetDevices() const;
 
@@ -421,16 +436,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       const CreateServiceCallback& callback,
       const CreateServiceErrorCallback& error_callback) = 0;
 
-  // Creates and registers a BluetoothAudioSink with |options|. If the fields in
-  // |options| are not specified, the default values will be used. |callback|
-  // will be called on success with a BluetoothAudioSink which is to be owned by
-  // the caller of this method. |error_callback| will be called on failure with
-  // a message indicating the cause.
-  virtual void RegisterAudioSink(
-      const BluetoothAudioSink::Options& options,
-      const AcquiredCallback& callback,
-      const BluetoothAudioSink::ErrorCallback& error_callback) = 0;
-
   // Creates and registers an advertisement for broadcast over the LE channel.
   // The created advertisement will be returned via the success callback. An
   // advertisement can unregister itself at any time by calling its unregister
@@ -438,7 +443,21 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   virtual void RegisterAdvertisement(
       std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
       const CreateAdvertisementCallback& callback,
-      const CreateAdvertisementErrorCallback& error_callback) = 0;
+      const AdvertisementErrorCallback& error_callback) = 0;
+
+#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+  // Sets the interval between two consecutive advertisements. Valid ranges
+  // for the interval are from 20ms to 10.24 seconds, with min <= max.
+  // Note: This is a best effort. The actual interval may vary non-trivially
+  // from the requested intervals. On some hardware, there is a minimum
+  // interval of 100ms. The minimum and maximum values are specified by the
+  // Core 4.2 Spec, Vol 2, Part E, Section 7.8.5.
+  virtual void SetAdvertisingInterval(
+      const base::TimeDelta& min,
+      const base::TimeDelta& max,
+      const base::Closure& callback,
+      const AdvertisementErrorCallback& error_callback) = 0;
+#endif
 
   // Returns the local GATT services associated with this adapter with the
   // given identifier. Returns NULL if the service doesn't exist.
@@ -481,12 +500,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   friend class BluetoothDiscoverySession;
   friend class BluetoothTestBase;
 
-  typedef base::ScopedPtrHashMap<std::string, std::unique_ptr<BluetoothDevice>>
-      DevicesMap;
-  typedef std::pair<BluetoothDevice::PairingDelegate*, PairingDelegatePriority>
-      PairingDelegatePair;
-  typedef base::Callback<void(UMABluetoothDiscoverySessionOutcome)>
-      DiscoverySessionErrorCallback;
+  using DevicesMap =
+      std::unordered_map<std::string, std::unique_ptr<BluetoothDevice>>;
+  using PairingDelegatePair =
+      std::pair<BluetoothDevice::PairingDelegate*, PairingDelegatePriority>;
+  using DiscoverySessionErrorCallback =
+      base::Callback<void(UMABluetoothDiscoverySessionOutcome)>;
 
   BluetoothAdapter();
   virtual ~BluetoothAdapter();

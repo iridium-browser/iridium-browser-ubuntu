@@ -239,9 +239,10 @@ class TabStrip : public views::View,
   bool CanPaintThrobberToLayer() const override;
   bool IsImmersiveStyle() const override;
   SkColor GetToolbarTopSeparatorColor() const override;
+  base::string16 GetAccessibleTabName(const Tab* tab) const override;
   int GetBackgroundResourceId(bool* custom_image) const override;
   void UpdateTabAccessibilityState(const Tab* tab,
-                                   ui::AXViewState* state) override;
+                                   ui::AXNodeData* node_data) override;
 
   // MouseWatcherListener overrides:
   void MouseMovedOutOfHost() override;
@@ -257,7 +258,7 @@ class TabStrip : public views::View,
   int OnDragUpdated(const ui::DropTargetEvent& event) override;
   void OnDragExited() override;
   int OnPerformDrop(const ui::DropTargetEvent& event) override;
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   views::View* GetTooltipHandlerForPoint(const gfx::Point& point) override;
 
   // Returns preferred height in immersive style.
@@ -275,7 +276,7 @@ class TabStrip : public views::View,
   friend class TabDragControllerTest;
   friend class TabStripTest;
   FRIEND_TEST_ALL_PREFIXES(TabDragControllerTest, GestureEndShouldEndDragTest);
-  FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabHitTestMaskWhenStacked);
+  FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabForEventWhenStacked);
   FRIEND_TEST_ALL_PREFIXES(TabStripTest, TabCloseButtonVisibilityWhenStacked);
 
   // Used during a drop session of a url. Tracks the position of the drop as
@@ -379,7 +380,7 @@ class TabStrip : public views::View,
   int GetPinnedTabCount() const;
 
   // Returns the last tab in the strip that's actually visible.  This will be
-  // the actual last tab unless the strip is in the overflow state.
+  // the actual last tab unless the strip is in the overflow node_data.
   const Tab* GetLastVisibleTab() const;
 
   // Adds the tab at |index| to |tabs_closing_map_| and removes the tab from

@@ -10,11 +10,11 @@
 #include "chrome/browser/usb/usb_chooser_controller.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/test/web_contents_tester.h"
-#include "device/core/mock_device_client.h"
+#include "device/base/mock_device_client.h"
 #include "device/usb/mock_usb_device.h"
 #include "device/usb/mock_usb_service.h"
 #include "device/usb/public/interfaces/device_manager.mojom.h"
-#include "mojo/public/cpp/bindings/array.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -22,23 +22,40 @@ namespace {
 
 const char kDefaultTestUrl[] = "https://www.google.com/";
 
+class MockUsbChooserView : public ChooserController::View {
+ public:
+  MockUsbChooserView() {}
+
+  // ChooserController::View:
+  MOCK_METHOD1(OnOptionAdded, void(size_t index));
+  MOCK_METHOD1(OnOptionRemoved, void(size_t index));
+  void OnOptionsInitialized() override {}
+  void OnOptionUpdated(size_t index) override {}
+  void OnAdapterEnabledChanged(bool enabled) override {}
+  void OnRefreshStateChanged(bool enabled) {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockUsbChooserView);
+};
+
 }  //  namespace
 
 class UsbChooserControllerTest : public ChromeRenderViewHostTestHarness {
  public:
   UsbChooserControllerTest() {}
-  ~UsbChooserControllerTest() override = default;
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 
-    mojo::Array<device::usb::DeviceFilterPtr> device_filters;
+    std::vector<device::UsbDeviceFilter> device_filters;
     device::usb::ChooserService::GetPermissionCallback callback;
     content::WebContentsTester* web_contents_tester =
         content::WebContentsTester::For(web_contents());
     web_contents_tester->NavigateAndCommit(GURL(kDefaultTestUrl));
-    usb_chooser_controller_.reset(new UsbChooserController(
-        main_rfh(), std::move(device_filters), main_rfh(), callback));
+    usb_chooser_controller_.reset(
+        new UsbChooserController(main_rfh(), device_filters, callback));
+    mock_usb_chooser_view_.reset(new MockUsbChooserView());
+    usb_chooser_controller_->set_view(mock_usb_chooser_view_.get());
   }
 
  protected:
@@ -56,6 +73,7 @@ class UsbChooserControllerTest : public ChromeRenderViewHostTestHarness {
 
   device::MockDeviceClient device_client_;
   std::unique_ptr<UsbChooserController> usb_chooser_controller_;
+  std::unique_ptr<MockUsbChooserView> mock_usb_chooser_view_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UsbChooserControllerTest);
@@ -64,18 +82,21 @@ class UsbChooserControllerTest : public ChromeRenderViewHostTestHarness {
 TEST_F(UsbChooserControllerTest, AddDevice) {
   scoped_refptr<device::MockUsbDevice> device_a =
       CreateMockUsbDevice("a", "001");
+  EXPECT_CALL(*mock_usb_chooser_view_, OnOptionAdded(0)).Times(1);
   device_client_.usb_service()->AddDevice(device_a);
   EXPECT_EQ(1u, usb_chooser_controller_->NumOptions());
   EXPECT_EQ(base::ASCIIToUTF16("a"), usb_chooser_controller_->GetOption(0));
 
   scoped_refptr<device::MockUsbDevice> device_b =
       CreateMockUsbDevice("b", "002");
+  EXPECT_CALL(*mock_usb_chooser_view_, OnOptionAdded(1)).Times(1);
   device_client_.usb_service()->AddDevice(device_b);
   EXPECT_EQ(2u, usb_chooser_controller_->NumOptions());
   EXPECT_EQ(base::ASCIIToUTF16("b"), usb_chooser_controller_->GetOption(1));
 
   scoped_refptr<device::MockUsbDevice> device_c =
       CreateMockUsbDevice("c", "003");
+  EXPECT_CALL(*mock_usb_chooser_view_, OnOptionAdded(2)).Times(1);
   device_client_.usb_service()->AddDevice(device_c);
   EXPECT_EQ(3u, usb_chooser_controller_->NumOptions());
   EXPECT_EQ(base::ASCIIToUTF16("c"), usb_chooser_controller_->GetOption(2));
@@ -92,6 +113,7 @@ TEST_F(UsbChooserControllerTest, RemoveDevice) {
       CreateMockUsbDevice("c", "003");
   device_client_.usb_service()->AddDevice(device_c);
 
+  EXPECT_CALL(*mock_usb_chooser_view_, OnOptionRemoved(1)).Times(1);
   device_client_.usb_service()->RemoveDevice(device_b);
   EXPECT_EQ(2u, usb_chooser_controller_->NumOptions());
   EXPECT_EQ(base::ASCIIToUTF16("a"), usb_chooser_controller_->GetOption(0));
@@ -105,10 +127,12 @@ TEST_F(UsbChooserControllerTest, RemoveDevice) {
   EXPECT_EQ(base::ASCIIToUTF16("a"), usb_chooser_controller_->GetOption(0));
   EXPECT_EQ(base::ASCIIToUTF16("c"), usb_chooser_controller_->GetOption(1));
 
+  EXPECT_CALL(*mock_usb_chooser_view_, OnOptionRemoved(0)).Times(1);
   device_client_.usb_service()->RemoveDevice(device_a);
   EXPECT_EQ(1u, usb_chooser_controller_->NumOptions());
   EXPECT_EQ(base::ASCIIToUTF16("c"), usb_chooser_controller_->GetOption(0));
 
+  EXPECT_CALL(*mock_usb_chooser_view_, OnOptionRemoved(0)).Times(1);
   device_client_.usb_service()->RemoveDevice(device_c);
   EXPECT_EQ(0u, usb_chooser_controller_->NumOptions());
 }

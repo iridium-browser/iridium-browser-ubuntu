@@ -112,14 +112,27 @@
     "dependencies": ["permission:autotestPrivate"],
     "contexts": ["blessed_extension"]
   },
-  "bookmarkManagerPrivate": {
+  "bookmarkManagerPrivate": [{
     "dependencies": ["permission:bookmarkManagerPrivate"],
     "contexts": ["blessed_extension"]
-  },
-  "bookmarks": {
+  }, {
+    "channel": "stable",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://bookmarks/*"
+    ]
+  }],
+  "bookmarks": [{
     "dependencies": ["permission:bookmarks"],
-    "contexts": ["blessed_extension"]
-  },
+    "contexts": ["blessed_extension"],
+    "default_parent": true
+  }, {
+    "channel": "stable",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://bookmarks/*"
+    ]
+  }],
   "bookmarks.export": {
     "whitelist": [
       "D5736E4B5CF695CB93A2FB57E4FDC6E5AFAB6FE2", // http://crbug.com/312900
@@ -179,11 +192,6 @@
     "dependencies": ["permission:cast"],
     "contexts": ["blessed_extension"]
   },
-  "cast.devicesPrivate": {
-    "dependencies": ["permission:cast"],
-    "contexts": ["blessed_extension"],
-    "platforms": ["chromeos"]
-  },
   "cast.streaming.rtpStream": {
     "dependencies": ["permission:cast.streaming"],
     "contexts": ["blessed_extension"]
@@ -209,10 +217,17 @@
     "dependencies": ["permission:certificateProvider"],
     "contexts": ["blessed_extension"]
   },
-  "chromeosInfoPrivate": {
+  "chromeosInfoPrivate": [{
     "dependencies": ["permission:chromeosInfoPrivate"],
     "contexts": ["blessed_extension"]
-  },
+  }, {
+    "channel": "stable",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://version/*"
+    ],
+    "platforms": ["chromeos"]
+  }],
   "chromeWebViewInternal": [{
     "internal": true,
     "dependencies": ["permission:webview"],
@@ -582,18 +597,6 @@
     "dependencies": ["permission:mediaPlayerPrivate"],
     "contexts": ["blessed_extension"]
   },
-  "metricsPrivate": [{
-    "dependencies": ["permission:metricsPrivate"],
-    "contexts": ["blessed_extension"]
-  }, {
-    "channel": "trunk",
-    "contexts": ["webui"],
-    "matches": [
-      "chrome://md-settings/*",
-      "chrome://settings/*",
-      "chrome://settings-frame/*"
-    ]
-  }],
   "mdns": {
     "dependencies": ["permission:mdns"],
     "contexts": ["blessed_extension"]
@@ -676,7 +679,6 @@
   },
   "imageWriterPrivate": {
     "dependencies": ["permission:imageWriterPrivate"],
-    "extension_types": ["platform_app"],
     "contexts": ["blessed_extension"]
   },
   "quickUnlockPrivate": {

@@ -7,6 +7,7 @@
 #include "base/auto_reset.h"
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -19,11 +20,11 @@
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
-#include "grit/components_strings.h"
-#include "grit/theme_resources.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMNSAnimation+Duration.h"
 #import "ui/base/cocoa/find_pasteboard.h"
 #import "ui/base/cocoa/focus_tracker.h"
@@ -32,7 +33,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
 #include "ui/resources/grit/ui_resources.h"
 
 using content::NativeWebKeyboardEvent;
@@ -135,12 +135,12 @@ const float kRightEdgeOffset = 25;
   [nextButton_ setTitle:l10n_util::GetNSString(IDS_ACCNAME_NEXT)];
 
   NSImage* image = NSImageFromImageSkia(
-      gfx::CreateVectorIcon(gfx::VectorIconId::FIND_NEXT, SK_ColorBLACK));
+      gfx::CreateVectorIcon(kCaretDownIcon, SK_ColorBLACK));
   [image setTemplate:YES];
   [nextButton_ setImage:image];
 
-  image = NSImageFromImageSkia(
-      gfx::CreateVectorIcon(gfx::VectorIconId::FIND_PREV, SK_ColorBLACK));
+  image =
+      NSImageFromImageSkia(gfx::CreateVectorIcon(kCaretUpIcon, SK_ColorBLACK));
   [image setTemplate:YES];
   [previousButton_ setImage:image];
 
@@ -266,6 +266,10 @@ const float kRightEdgeOffset = 25;
           FindBarController::kActivateSelectionOnPage,
           FindBarController::kClearResultsInFindBox);
     }
+    return YES;
+  } else if (command == @selector(cancelOperation:)) {
+    // Pressing ESC.
+    [closeButton_ performClick:nil];
     return YES;
   } else if (command == @selector(pageUp:) ||
              command == @selector(pageUpAndModifySelection:) ||
@@ -452,6 +456,7 @@ const float kRightEdgeOffset = 25;
   }
 
   [findText_ resetFieldEditorFrameIfNeeded];
+  [findText_ setNeedsDisplay:YES];
 
   // If we found any results, reset the focus tracker, so we always
   // restore focus to the tab contents.

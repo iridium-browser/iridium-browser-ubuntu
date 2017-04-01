@@ -7,12 +7,10 @@
 
 #include <memory>
 
-#include "cc/output/output_surface.h"
+#include "cc/output/compositor_frame_sink.h"
 #include "cc/test/fake_impl_task_runner_provider.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_picture_layer_impl.h"
-#include "cc/test/test_gpu_memory_buffer_manager.h"
-#include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_task_graph_runner.h"
 #include "cc/tiles/tile_priority.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,17 +26,16 @@ class TestLayerTreeHostBase : public testing::Test {
   void SetUp() override;
 
   virtual LayerTreeSettings CreateSettings();
-  virtual std::unique_ptr<OutputSurface> CreateOutputSurface();
+  virtual std::unique_ptr<CompositorFrameSink> CreateCompositorFrameSink();
   virtual std::unique_ptr<FakeLayerTreeHostImpl> CreateHostImpl(
       const LayerTreeSettings& settings,
       TaskRunnerProvider* task_runner_provider,
-      SharedBitmapManager* shared_bitmap_manager,
-      TaskGraphRunner* task_graph_runner,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_);
+      TaskGraphRunner* task_graph_runner);
   virtual std::unique_ptr<TaskGraphRunner> CreateTaskGraphRunner();
   virtual void InitializeRenderer();
 
-  void ResetOutputSurface(std::unique_ptr<OutputSurface> output_surface);
+  void ResetCompositorFrameSink(
+      std::unique_ptr<CompositorFrameSink> compositor_frame_sink);
   std::unique_ptr<FakeLayerTreeHostImpl> TakeHostImpl();
 
   void SetupDefaultTrees(const gfx::Size& layer_bounds);
@@ -55,7 +52,9 @@ class TestLayerTreeHostBase : public testing::Test {
   TaskGraphRunner* task_graph_runner() const {
     return task_graph_runner_.get();
   }
-  OutputSurface* output_surface() const { return output_surface_.get(); }
+  CompositorFrameSink* compositor_frame_sink() const {
+    return compositor_frame_sink_.get();
+  }
   FakePictureLayerImpl* pending_layer() const { return pending_layer_; }
   FakePictureLayerImpl* active_layer() const { return active_layer_; }
   FakePictureLayerImpl* old_pending_layer() const { return old_pending_layer_; }
@@ -65,10 +64,8 @@ class TestLayerTreeHostBase : public testing::Test {
   void SetInitialTreePriority();
 
   FakeImplTaskRunnerProvider task_runner_provider_;
-  TestSharedBitmapManager shared_bitmap_manager_;
   std::unique_ptr<TaskGraphRunner> task_graph_runner_;
-  TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
-  std::unique_ptr<OutputSurface> output_surface_;
+  std::unique_ptr<CompositorFrameSink> compositor_frame_sink_;
   std::unique_ptr<FakeLayerTreeHostImpl> host_impl_;
 
   FakePictureLayerImpl* pending_layer_;

@@ -13,9 +13,9 @@
 
 #import <AVFoundation/AVFoundation.h>
 
+#include "webrtc/api/video/video_frame.h"
 #include "webrtc/common_video/include/i420_buffer_pool.h"
 #include "webrtc/media/base/videocapturer.h"
-#include "webrtc/video_frame.h"
 
 @class RTCAVFoundationVideoCapturerInternal;
 
@@ -25,8 +25,7 @@ class Thread;
 
 namespace webrtc {
 
-class AVFoundationVideoCapturer : public cricket::VideoCapturer,
-                                  public rtc::MessageHandler {
+class AVFoundationVideoCapturer : public cricket::VideoCapturer {
  public:
   AVFoundationVideoCapturer();
   ~AVFoundationVideoCapturer();
@@ -56,16 +55,15 @@ class AVFoundationVideoCapturer : public cricket::VideoCapturer,
 
   // Converts the sample buffer into a cricket::CapturedFrame and signals the
   // frame for capture.
-  void CaptureSampleBuffer(CMSampleBufferRef sampleBuffer);
+  void CaptureSampleBuffer(CMSampleBufferRef sample_buffer,
+                           webrtc::VideoRotation rotation);
 
-  // Handles messages from posts.
-  void OnMessage(rtc::Message *msg) override;
+  // Called to adjust the size of output frames to supplied |width| and
+  // |height|. Also drops frames to make the output match |fps|.
+  void AdaptOutputFormat(int width, int height, int fps);
 
  private:
-  void OnFrameMessage(CVImageBufferRef image_buffer, int64_t capture_time_ns);
-
   RTCAVFoundationVideoCapturerInternal *_capturer;
-  rtc::Thread *_startThread;  // Set in Start(), unset in Stop().
   webrtc::I420BufferPool _buffer_pool;
 };  // AVFoundationVideoCapturer
 

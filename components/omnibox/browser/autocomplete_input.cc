@@ -254,13 +254,6 @@ metrics::OmniboxInputType::Type AutocompleteInput::Parse(
   // between an HTTP URL and a query, or the scheme is HTTP or HTTPS, in which
   // case we should reject invalid formulations.
 
-  // If we have an empty host it can't be a valid HTTP[S] URL.  (This should
-  // only trigger for input that begins with a colon, which GURL will parse as a
-  // valid, non-standard URL; for standard URLs, an empty host would have
-  // resulted in an invalid |canonicalized_url| above.)
-  if (!canonicalized_url->has_host())
-    return metrics::OmniboxInputType::QUERY;
-
   // Determine the host family.  We get this information by (re-)canonicalizing
   // the already-canonicalized host rather than using the user's original input,
   // in case fixup affected the result here (e.g. an input that looks like an
@@ -272,7 +265,7 @@ metrics::OmniboxInputType::Type AutocompleteInput::Parse(
   // Check if the canonicalized host has a known TLD, which we'll want to know
   // below.
   const size_t registry_length =
-      net::registry_controlled_domains::GetRegistryLength(
+      net::registry_controlled_domains::GetCanonicalHostRegistryLength(
           canonicalized_url->host(),
           net::registry_controlled_domains::EXCLUDE_UNKNOWN_REGISTRIES,
           net::registry_controlled_domains::EXCLUDE_PRIVATE_REGISTRIES);

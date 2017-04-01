@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/startup/default_browser_infobar_delegate.h"
 
+#include <memory>
+
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/startup/default_browser_prompt.h"
@@ -11,29 +13,14 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/vector_icons_public.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
-#include "components/variations/variations_associated_data.h"
-#include "ui/base/material_design/material_design_controller.h"
-#include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/color_palette.h"
-#include "ui/gfx/paint_vector_icon.h"
 #endif
 
 namespace chrome {
-
-#if defined(OS_WIN)
-namespace {
-
-// Experiment where different styles for the default browser prompt are tested.
-constexpr char kDefaultBrowserPromptStyle[] = "DefaultBrowserPromptStyle";
-
-}  // namespace
-#endif
 
 bool IsStickyDefaultBrowserPromptEnabled() {
 #if defined(OS_WIN)
@@ -83,13 +70,7 @@ void DefaultBrowserInfoBarDelegate::AllowExpiry() {
 
 infobars::InfoBarDelegate::Type DefaultBrowserInfoBarDelegate::GetInfoBarType()
     const {
-#if defined(OS_WIN)
-  std::string infobar_type = variations::GetVariationParamValue(
-      kDefaultBrowserPromptStyle, "InfoBarType");
-  return (infobar_type == "PageAction") ? PAGE_ACTION_TYPE : WARNING_TYPE;
-#else
   return PAGE_ACTION_TYPE;
-#endif
 }
 
 infobars::InfoBarDelegate::InfoBarIdentifier
@@ -97,38 +78,9 @@ DefaultBrowserInfoBarDelegate::GetIdentifier() const {
   return DEFAULT_BROWSER_INFOBAR_DELEGATE;
 }
 
-int DefaultBrowserInfoBarDelegate::GetIconId() const {
-  return IDR_PRODUCT_LOGO_32;
-}
-
 gfx::VectorIconId DefaultBrowserInfoBarDelegate::GetVectorIconId() const {
-#if defined(OS_MACOSX) || defined(OS_ANDROID)
-  return gfx::VectorIconId::VECTOR_ICON_NONE;
-#else
-  return gfx::VectorIconId::CHROME_PRODUCT;
-#endif
+  return gfx::VectorIconId::PRODUCT;
 }
-
-#if defined(OS_WIN)
-gfx::Image DefaultBrowserInfoBarDelegate::GetIcon() const {
-  // Experiment for the chrome product icon used on the default browser
-  // prompt.
-  if (ui::MaterialDesignController::IsModeMaterial()) {
-    std::string icon_color = variations::GetVariationParamValue(
-        kDefaultBrowserPromptStyle, "IconColor");
-    if (icon_color == "Colored") {
-      return ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-          IDR_PRODUCT_LOGO_16);
-    }
-    if ((icon_color == "Blue") && (GetInfoBarType() == WARNING_TYPE)) {
-      // WARNING_TYPE infobars use orange icons by default.
-      return gfx::Image(
-          gfx::CreateVectorIcon(GetVectorIconId(), 16, gfx::kGoogleBlue500));
-    }
-  }
-  return ConfirmInfoBarDelegate::GetIcon();
-}
-#endif  // defined(OS_WIN)
 
 bool DefaultBrowserInfoBarDelegate::ShouldExpire(
     const NavigationDetails& details) const {

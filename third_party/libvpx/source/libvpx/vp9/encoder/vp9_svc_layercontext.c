@@ -377,9 +377,10 @@ void vp9_inc_frame_in_layer(VP9_COMP *const cpi) {
 
 int vp9_is_upper_layer_key_frame(const VP9_COMP *const cpi) {
   return is_two_pass_svc(cpi) && cpi->svc.spatial_layer_id > 0 &&
-         cpi->svc.layer_context[cpi->svc.spatial_layer_id *
-                                    cpi->svc.number_temporal_layers +
-                                cpi->svc.temporal_layer_id]
+         cpi->svc
+             .layer_context[cpi->svc.spatial_layer_id *
+                                cpi->svc.number_temporal_layers +
+                            cpi->svc.temporal_layer_id]
              .is_key_frame;
 }
 
@@ -409,8 +410,9 @@ static void set_flags_and_fb_idx_for_temporal_mode3(VP9_COMP *const cpi) {
   int spatial_id, temporal_id;
   spatial_id = cpi->svc.spatial_layer_id = cpi->svc.spatial_layer_to_encode;
   frame_num_within_temporal_struct =
-      cpi->svc.layer_context[cpi->svc.spatial_layer_id *
-                             cpi->svc.number_temporal_layers]
+      cpi->svc
+          .layer_context[cpi->svc.spatial_layer_id *
+                         cpi->svc.number_temporal_layers]
           .current_video_frame_in_layer %
       4;
   temporal_id = cpi->svc.temporal_layer_id =
@@ -512,8 +514,9 @@ static void set_flags_and_fb_idx_for_temporal_mode2(VP9_COMP *const cpi) {
   int spatial_id, temporal_id;
   spatial_id = cpi->svc.spatial_layer_id = cpi->svc.spatial_layer_to_encode;
   temporal_id = cpi->svc.temporal_layer_id =
-      cpi->svc.layer_context[cpi->svc.spatial_layer_id *
-                             cpi->svc.number_temporal_layers]
+      cpi->svc
+          .layer_context[cpi->svc.spatial_layer_id *
+                         cpi->svc.number_temporal_layers]
           .current_video_frame_in_layer &
       1;
   cpi->ext_refresh_last_frame = cpi->ext_refresh_golden_frame =
@@ -646,6 +649,21 @@ int vp9_one_pass_cbr_svc_start_layer(VP9_COMP *const cpi) {
   get_layer_resolution(cpi->oxcf.width, cpi->oxcf.height,
                        lc->scaling_factor_num, lc->scaling_factor_den, &width,
                        &height);
+
+  // The usage of use_base_mv assumes down-scale of 2x2. For now, turn off use
+  // of base motion vectors if spatial scale factors for any layers are not 2.
+  // TODO(marpan): Fix this to allow for use_base_mv for scale factors != 2.
+  if (cpi->svc.number_spatial_layers > 1) {
+    int sl;
+    for (sl = 0; sl < cpi->svc.number_spatial_layers - 1; ++sl) {
+      lc = &cpi->svc.layer_context[sl * cpi->svc.number_temporal_layers +
+                                   cpi->svc.temporal_layer_id];
+      if (lc->scaling_factor_num != lc->scaling_factor_den >> 1) {
+        cpi->svc.use_base_mv = 0;
+        break;
+      }
+    }
+  }
 
   if (vp9_set_size_literal(cpi, width, height) != 0)
     return VPX_CODEC_INVALID_PARAM;

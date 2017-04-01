@@ -6,22 +6,31 @@
 
 #import "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "ios/testing/earl_grey/wait_util.h"
+#import "ios/testing/earl_grey/matchers.h"
+#import "ios/testing/wait_util.h"
 #import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/test/earl_grey/web_view_matchers.h"
 #import "ios/web/shell/test/app/web_shell_test_util.h"
 #import "ios/web/shell/view_controller.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace web {
 
-id<GREYMatcher> webViewContainingText(std::string text) {
+id<GREYMatcher> webViewContainingText(const std::string& text) {
   WebState* web_state = shell_test_util::GetCurrentWebState();
   return webViewContainingText(std::move(text), web_state);
 }
 
-id<GREYMatcher> webViewCssSelector(std::string selector) {
+id<GREYMatcher> webViewCssSelector(const std::string& selector) {
   WebState* web_state = shell_test_util::GetCurrentWebState();
   return webViewCssSelector(std::move(selector), web_state);
+}
+
+id<GREYMatcher> webView() {
+  return webViewInWebState(shell_test_util::GetCurrentWebState());
 }
 
 id<GREYMatcher> webViewScrollView() {
@@ -38,9 +47,16 @@ id<GREYMatcher> addressFieldText(std::string text) {
       return NO;
     }
     UITextField* text_field = base::mac::ObjCCastStrict<UITextField>(view);
-    testing::WaitUntilCondition(testing::kWaitForUIElementTimeout, ^bool() {
-      return [text_field.text isEqualToString:base::SysUTF8ToNSString(text)];
-    });
+    NSString* error_message = [NSString
+        stringWithFormat:
+            @"Address field text did not match. expected: %@, actual: %@",
+            base::SysUTF8ToNSString(text), text_field.text];
+    GREYAssert(testing::WaitUntilConditionOrTimeout(
+                   testing::kWaitForUIElementTimeout,
+                   ^{
+                     return base::SysNSStringToUTF8(text_field.text) == text;
+                   }),
+               error_message);
     return YES;
   };
 
@@ -49,9 +65,8 @@ id<GREYMatcher> addressFieldText(std::string text) {
     [description appendText:base::SysUTF8ToNSString(text)];
   };
 
-  return [[[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
-                                               descriptionBlock:describe]
-      autorelease];
+  return [[GREYElementMatcherBlock alloc] initWithMatchesBlock:matches
+                                              descriptionBlock:describe];
 }
 
 id<GREYMatcher> backButton() {

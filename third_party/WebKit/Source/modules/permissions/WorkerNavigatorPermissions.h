@@ -5,6 +5,7 @@
 #ifndef WorkerNavigatorPermissions_h
 #define WorkerNavigatorPermissions_h
 
+#include "core/workers/WorkerNavigator.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
@@ -13,22 +14,25 @@ namespace blink {
 class WorkerNavigator;
 class Permissions;
 
-class WorkerNavigatorPermissions final : public GarbageCollected<WorkerNavigatorPermissions>, public Supplement<WorkerNavigator> {
-    USING_GARBAGE_COLLECTED_MIXIN(WorkerNavigatorPermissions);
-public:
-    static WorkerNavigatorPermissions& from(WorkerNavigator&);
-    static Permissions* permissions(WorkerNavigator&);
+class WorkerNavigatorPermissions final
+    : public GarbageCollected<WorkerNavigatorPermissions>,
+      public Supplement<WorkerNavigator> {
+  USING_GARBAGE_COLLECTED_MIXIN(WorkerNavigatorPermissions);
 
-    DECLARE_VIRTUAL_TRACE();
+ public:
+  static WorkerNavigatorPermissions& from(WorkerNavigator&);
+  static Permissions* permissions(WorkerNavigator&);
 
-private:
-    static const char* supplementName();
+  DECLARE_VIRTUAL_TRACE();
 
-    WorkerNavigatorPermissions();
+ private:
+  static const char* supplementName();
 
-    Member<Permissions> m_permissions;
+  WorkerNavigatorPermissions();
+
+  Member<Permissions> m_permissions;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WorkerNavigatorPermissions_h
+#endif  // WorkerNavigatorPermissions_h

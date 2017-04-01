@@ -143,7 +143,8 @@ OPENSSL_EXPORT int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data,
  * at least this much space. */
 #define EVP_MAX_MD_SIZE 64 /* SHA-512 is the longest so far. */
 
-/* EVP_MAX_MD_BLOCK_SIZE is the largest digest block size supported, in bytes. */
+/* EVP_MAX_MD_BLOCK_SIZE is the largest digest block size supported, in
+ * bytes. */
 #define EVP_MAX_MD_BLOCK_SIZE 128 /* SHA-512 is the longest so far. */
 
 /* EVP_DigestFinal_ex finishes the digest in |ctx| and writes the output to
@@ -175,7 +176,7 @@ OPENSSL_EXPORT int EVP_Digest(const void *data, size_t len, uint8_t *md_out,
  * These functions allow code to learn details about an abstract hash
  * function. */
 
-/* EVP_MD_type returns a NID identifing |md|. (For example, |NID_sha256|.) */
+/* EVP_MD_type returns a NID identifying |md|. (For example, |NID_sha256|.) */
 OPENSSL_EXPORT int EVP_MD_type(const EVP_MD *md);
 
 /* EVP_MD_flags returns the flags for |md|, which is a set of |EVP_MD_FLAG_*|
@@ -261,6 +262,23 @@ struct env_md_ctx_st {
 
 #if defined(__cplusplus)
 }  /* extern C */
+
+#if !defined(BORINGSSL_NO_CXX)
+extern "C++" {
+
+namespace bssl {
+
+BORINGSSL_MAKE_DELETER(EVP_MD_CTX, EVP_MD_CTX_destroy)
+
+using ScopedEVP_MD_CTX =
+    internal::StackAllocated<EVP_MD_CTX, int, EVP_MD_CTX_init,
+                             EVP_MD_CTX_cleanup>;
+
+}  // namespace bssl
+
+}  // extern C++
+#endif
+
 #endif
 
 #define DIGEST_R_INPUT_NOT_INITIALIZED 100

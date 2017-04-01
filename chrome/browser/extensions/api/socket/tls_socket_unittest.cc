@@ -17,6 +17,8 @@
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/rand_callback.h"
+#include "net/log/net_log_source.h"
+#include "net/log/net_log_with_source.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/tcp_client_socket.h"
@@ -51,12 +53,12 @@ class MockSSLClientSocket : public net::SSLClientSocket {
   MOCK_CONST_METHOD0(IsConnectedAndIdle, bool());
   MOCK_CONST_METHOD1(GetPeerAddress, int(net::IPEndPoint*));
   MOCK_CONST_METHOD1(GetLocalAddress, int(net::IPEndPoint*));
-  MOCK_CONST_METHOD0(NetLog, const net::BoundNetLog&());
+  MOCK_CONST_METHOD0(NetLog, const net::NetLogWithSource&());
   MOCK_METHOD0(SetSubresourceSpeculation, void());
   MOCK_METHOD0(SetOmniboxSpeculation, void());
   MOCK_CONST_METHOD0(WasEverUsed, bool());
   MOCK_CONST_METHOD0(UsingTCPFastOpen, bool());
-  MOCK_CONST_METHOD0(WasNpnNegotiated, bool());
+  MOCK_CONST_METHOD0(WasAlpnNegotiated, bool());
   MOCK_CONST_METHOD0(GetNegotiatedProtocol, net::NextProto());
   MOCK_METHOD1(GetSSLInfo, bool(net::SSLInfo*));
   MOCK_CONST_METHOD1(GetConnectionAttempts, void(net::ConnectionAttempts*));
@@ -73,8 +75,10 @@ class MockSSLClientSocket : public net::SSLClientSocket {
   MOCK_CONST_METHOD0(GetUnverifiedServerCertificateChain,
                      scoped_refptr<net::X509Certificate>());
   MOCK_CONST_METHOD0(GetChannelIDService, net::ChannelIDService*());
-  MOCK_METHOD2(GetSignedEKMForTokenBinding,
-               net::Error(crypto::ECPrivateKey*, std::vector<uint8_t>*));
+  MOCK_METHOD3(GetTokenBindingSignature,
+               net::Error(crypto::ECPrivateKey*,
+                          net::TokenBindingType,
+                          std::vector<uint8_t>*));
   MOCK_CONST_METHOD0(GetChannelIDKey, crypto::ECPrivateKey*());
   bool IsConnected() const override { return true; }
 
@@ -85,7 +89,7 @@ class MockSSLClientSocket : public net::SSLClientSocket {
 class MockTCPSocket : public net::TCPClientSocket {
  public:
   explicit MockTCPSocket(const net::AddressList& address_list)
-      : net::TCPClientSocket(address_list, NULL, NULL, net::NetLog::Source()) {}
+      : net::TCPClientSocket(address_list, NULL, NULL, net::NetLogSource()) {}
 
   MOCK_METHOD3(Read,
                int(net::IOBuffer* buf,
@@ -108,8 +112,10 @@ class CompleteHandler {
  public:
   CompleteHandler() {}
   MOCK_METHOD1(OnComplete, void(int result_code));
-  MOCK_METHOD2(OnReadComplete,
-               void(int result_code, scoped_refptr<net::IOBuffer> io_buffer));
+  MOCK_METHOD3(OnReadComplete,
+               void(int result_code,
+                    scoped_refptr<net::IOBuffer> io_buffer,
+                    bool socket_destroying));
   MOCK_METHOD2(OnAccept, void(int, net::TCPClientSocket*));
 
  private:
@@ -146,7 +152,7 @@ TEST_F(TLSSocketTest, TestTLSSocketRead) {
   CompleteHandler handler;
 
   EXPECT_CALL(*ssl_socket_, Read(_, _, _)).Times(1);
-  EXPECT_CALL(handler, OnReadComplete(_, _)).Times(1);
+  EXPECT_CALL(handler, OnReadComplete(_, _, _)).Times(1);
 
   const int count = 512;
   socket_->Read(

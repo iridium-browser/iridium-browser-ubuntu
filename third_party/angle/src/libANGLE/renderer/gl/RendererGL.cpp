@@ -122,6 +122,7 @@ RendererGL::RendererGL(const FunctionsGL *functions, const egl::AttributeMap &at
 #ifndef NDEBUG
     if (mHasDebugOutput)
     {
+        mFunctions->enable(GL_DEBUG_OUTPUT);
         mFunctions->enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_HIGH, 0, nullptr, GL_TRUE);
         mFunctions->debugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_MEDIUM, 0, nullptr, GL_TRUE);
@@ -137,6 +138,17 @@ RendererGL::RendererGL(const FunctionsGL *functions, const egl::AttributeMap &at
     {
         mSkipDrawCalls = true;
     }
+
+    if (mWorkarounds.initializeCurrentVertexAttributes)
+    {
+        GLint maxVertexAttribs = 0;
+        mFunctions->getIntegerv(GL_MAX_VERTEX_ATTRIBS, &maxVertexAttribs);
+
+        for (GLint i = 0; i < maxVertexAttribs; ++i)
+        {
+            mFunctions->vertexAttrib4f(i, 0.0f, 0.0f, 0.0f, 1.0f);
+        }
+    }
 }
 
 RendererGL::~RendererGL()
@@ -148,7 +160,7 @@ RendererGL::~RendererGL()
 gl::Error RendererGL::flush()
 {
     mFunctions->flush();
-    return gl::Error(GL_NO_ERROR);
+    return gl::NoError();
 }
 
 gl::Error RendererGL::finish()
@@ -169,7 +181,7 @@ gl::Error RendererGL::finish()
     }
 #endif
 
-    return gl::Error(GL_NO_ERROR);
+    return gl::NoError();
 }
 
 gl::Error RendererGL::drawArrays(const gl::ContextState &data,
@@ -259,7 +271,34 @@ gl::Error RendererGL::drawRangeElements(const gl::ContextState &data,
         mFunctions->drawRangeElements(mode, start, end, count, type, drawIndexPointer);
     }
 
-    return gl::Error(GL_NO_ERROR);
+    return gl::NoError();
+}
+
+gl::Error RendererGL::drawArraysIndirect(const gl::ContextState &data,
+                                         GLenum mode,
+                                         const GLvoid *indirect)
+{
+    ANGLE_TRY(mStateManager->setDrawIndirectState(data, GL_NONE));
+
+    if (!mSkipDrawCalls)
+    {
+        mFunctions->drawArraysIndirect(mode, indirect);
+    }
+    return gl::NoError();
+}
+
+gl::Error RendererGL::drawElementsIndirect(const gl::ContextState &data,
+                                           GLenum mode,
+                                           GLenum type,
+                                           const GLvoid *indirect)
+{
+    ANGLE_TRY(mStateManager->setDrawIndirectState(data, type));
+
+    if (!mSkipDrawCalls)
+    {
+        mFunctions->drawElementsIndirect(mode, type, indirect);
+    }
+    return gl::NoError();
 }
 
 void RendererGL::stencilFillPath(const gl::ContextState &state,
@@ -425,6 +464,11 @@ void RendererGL::stencilThenCoverStrokePathInstanced(const gl::ContextState &sta
     ASSERT(mFunctions->getError() == GL_NO_ERROR);
 }
 
+GLenum RendererGL::getResetStatus()
+{
+    return mFunctions->getGraphicsResetStatus();
+}
+
 ContextImpl *RendererGL::createContext(const gl::ContextState &state)
 {
     return new ContextGL(state, this);
@@ -444,29 +488,6 @@ void RendererGL::pushGroupMarker(GLsizei length, const char *marker)
 void RendererGL::popGroupMarker()
 {
     mFunctions->popDebugGroup();
-}
-
-void RendererGL::notifyDeviceLost()
-{
-    UNIMPLEMENTED();
-}
-
-bool RendererGL::isDeviceLost() const
-{
-    UNIMPLEMENTED();
-    return bool();
-}
-
-bool RendererGL::testDeviceLost()
-{
-    UNIMPLEMENTED();
-    return bool();
-}
-
-bool RendererGL::testDeviceResettable()
-{
-    UNIMPLEMENTED();
-    return bool();
 }
 
 std::string RendererGL::getVendorString() const

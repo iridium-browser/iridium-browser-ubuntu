@@ -26,16 +26,18 @@
 
 namespace cc {
 
-DrawingDisplayItem::DrawingDisplayItem() {}
+DrawingDisplayItem::DrawingDisplayItem() : DisplayItem(DRAWING) {}
 
-DrawingDisplayItem::DrawingDisplayItem(sk_sp<const SkPicture> picture) {
+DrawingDisplayItem::DrawingDisplayItem(sk_sp<const SkPicture> picture)
+    : DisplayItem(DRAWING) {
   SetNew(std::move(picture));
 }
 
 DrawingDisplayItem::DrawingDisplayItem(
     const proto::DisplayItem& proto,
     ClientPictureCache* client_picture_cache,
-    std::vector<uint32_t>* used_engine_picture_ids) {
+    std::vector<uint32_t>* used_engine_picture_ids)
+    : DisplayItem(DRAWING) {
   DCHECK_EQ(proto::DisplayItem::Type_Drawing, proto.type());
   DCHECK(client_picture_cache);
 
@@ -52,7 +54,8 @@ DrawingDisplayItem::DrawingDisplayItem(
   SetNew(std::move(picture));
 }
 
-DrawingDisplayItem::DrawingDisplayItem(const DrawingDisplayItem& item) {
+DrawingDisplayItem::DrawingDisplayItem(const DrawingDisplayItem& item)
+    : DisplayItem(DRAWING) {
   item.CloneTo(this);
 }
 
@@ -78,6 +81,7 @@ sk_sp<const SkPicture> DrawingDisplayItem::GetPicture() const {
   return picture_;
 }
 
+DISABLE_CFI_PERF
 void DrawingDisplayItem::Raster(SkCanvas* canvas,
                                 SkPicture::AbortCallback* callback) const {
   if (canvas->quickReject(picture_->cullRect()))
@@ -125,6 +129,7 @@ size_t DrawingDisplayItem::ExternalMemoryUsage() const {
   return SkPictureUtils::ApproximateBytesUsed(picture_.get());
 }
 
+DISABLE_CFI_PERF
 int DrawingDisplayItem::ApproximateOpCount() const {
   return picture_->approximateOpCount();
 }

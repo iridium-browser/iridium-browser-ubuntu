@@ -75,7 +75,7 @@ GrVkPipelineState::GrVkPipelineState(GrVkGpu* gpu,
 }
 
 GrVkPipelineState::~GrVkPipelineState() {
-    // Must of freed all GPU resources before this is destroyed
+    // Must have freed all GPU resources before this is destroyed
     SkASSERT(!fPipeline);
     SkASSERT(!fPipelineLayout);
     SkASSERT(!fSamplers.count());
@@ -173,13 +173,16 @@ void GrVkPipelineState::abandonGPUResources() {
 }
 
 static void append_texture_bindings(const GrProcessor& processor,
-                                    SkTArray<const GrTextureAccess*>* textureBindings) {
-    if (int numTextures = processor.numTextures()) {
-        const GrTextureAccess** bindings = textureBindings->push_back_n(numTextures);
+                                    SkTArray<const GrProcessor::TextureSampler*>* textureBindings) {
+    // We don't support image storages in VK.
+    SkASSERT(!processor.numImageStorages());
+    if (int numTextureSamplers = processor.numTextureSamplers()) {
+        const GrProcessor::TextureSampler** bindings =
+                textureBindings->push_back_n(numTextureSamplers);
         int i = 0;
         do {
-            bindings[i] = &processor.textureAccess(i);
-        } while (++i < numTextures);
+            bindings[i] = &processor.textureSampler(i);
+        } while (++i < numTextureSamplers);
     }
 }
 
@@ -192,18 +195,24 @@ void GrVkPipelineState::setData(GrVkGpu* gpu,
 
     this->setRenderTargetState(pipeline);
 
-    SkSTArray<8, const GrTextureAccess*> textureBindings;
+    SkSTArray<8, const GrProcessor::TextureSampler*> textureBindings;
 
-    fGeometryProcessor->setData(fDataManager, primProc);
+    fGeometryProcessor->setData(fDataManager, primProc,
+                                GrFragmentProcessor::CoordTransformIter(pipeline));
     append_texture_bindings(primProc, &textureBindings);
 
-    for (int i = 0; i < fFragmentProcessors.count(); ++i) {
-        const GrFragmentProcessor& processor = pipeline.getFragmentProcessor(i);
-        fFragmentProcessors[i]->setData(fDataManager, processor);
-        fGeometryProcessor->setTransformData(primProc, fDataManager, i,
-                                             processor.coordTransforms());
-        append_texture_bindings(processor, &textureBindings);
+    GrFragmentProcessor::Iter iter(pipeline);
+    GrGLSLFragmentProcessor::Iter glslIter(fFragmentProcessors.begin(),
+                                           fFragmentProcessors.count());
+    const GrFragmentProcessor* fp = iter.next();
+    GrGLSLFragmentProcessor* glslFP = glslIter.next();
+    while (fp && glslFP) {
+        glslFP->setData(fDataManager, *fp);
+        append_texture_bindings(*fp, &textureBindings);
+        fp = iter.next();
+        glslFP = glslIter.next();
     }
+    SkASSERT(!fp && !glslFP);
 
     fXferProcessor->setData(fDataManager, pipeline.getXferProcessor());
     append_texture_bindings(pipeline.getXferProcessor(), &textureBindings);
@@ -220,8 +229,11 @@ void GrVkPipelineState::setData(GrVkGpu* gpu,
     }
 
     if (fVertexUniformBuffer.get() || fFragmentUniformBuffer.get()) {
-        if (fDataManager.uploadUniformBuffers(gpu, fVertexUniformBuffer, fFragmentUniformBuffer) ||
-            !fUniformDescriptorSet) {
+        if (fDataManager.uploadUniformBuffers(gpu,
+                                              fVertexUniformBuffer.get(),
+                                              fFragmentUniformBuffer.get())
+            || !fUniformDescriptorSet)
+        {
             if (fUniformDescriptorSet) {
                 fUniformDescriptorSet->recycle(gpu);
             }
@@ -293,15 +305,16 @@ void GrVkPipelineState::writeUniformBuffers(const GrVkGpu* gpu) {
     }
 }
 
-void GrVkPipelineState::writeSamplers(GrVkGpu* gpu,
-                                      const SkTArray<const GrTextureAccess*>& textureBindings,
-                                      bool allowSRGBInputs) {
+void GrVkPipelineState::writeSamplers(
+        GrVkGpu* gpu,
+        const SkTArray<const GrProcessor::TextureSampler*>& textureBindings,
+        bool allowSRGBInputs) {
     SkASSERT(fNumSamplers == textureBindings.count());
 
     for (int i = 0; i < textureBindings.count(); ++i) {
-        const GrTextureParams& params = textureBindings[i]->getParams();
+        const GrSamplerParams& params = textureBindings[i]->params();
 
-        GrVkTexture* texture = static_cast<GrVkTexture*>(textureBindings[i]->getTexture());
+        GrVkTexture* texture = static_cast<GrVkTexture*>(textureBindings[i]->texture());
 
         fSamplers.push(gpu->resourceProvider().findOrCreateCompatibleSampler(params,
                                                           texture->texturePriv().maxMipMapLevel()));
@@ -483,18 +496,22 @@ uint32_t get_blend_info_key(const GrPipeline& pipeline) {
     return key;
 }
 
-void GrVkPipelineState::BuildStateKey(const GrPipeline& pipeline, GrPrimitiveType primitiveType,
-                                      SkTArray<uint8_t, true>* key) {
-    // Save room for the key length and key header
-    key->reset();
-    key->push_back_n(kData_StateKeyOffset);
+bool GrVkPipelineState::Desc::Build(Desc* desc,
+                                    const GrPrimitiveProcessor& primProc,
+                                    const GrPipeline& pipeline,
+                                    const GrStencilSettings& stencil,
+                                    GrPrimitiveType primitiveType,
+                                    const GrShaderCaps& caps) {
+    if (!INHERITED::Build(desc, primProc, primitiveType == kPoints_GrPrimitiveType, pipeline,
+                          caps)) {
+        return false;
+    }
 
-    GrProcessorKeyBuilder b(key);
-
+    GrProcessorKeyBuilder b(&desc->key());
     GrVkRenderTarget* vkRT = (GrVkRenderTarget*)pipeline.getRenderTarget();
     vkRT->simpleRenderPass()->genKey(&b);
 
-    pipeline.getStencil().genKey(&b);
+    stencil.genKey(&b);
 
     SkASSERT(sizeof(GrDrawFace) <= sizeof(uint32_t));
     b.add32((int32_t)pipeline.getDrawFace());
@@ -503,8 +520,5 @@ void GrVkPipelineState::BuildStateKey(const GrPipeline& pipeline, GrPrimitiveTyp
 
     b.add32(primitiveType);
 
-    // Set key length
-    int keyLength = key->count();
-    SkASSERT(0 == (keyLength % 4));
-    *reinterpret_cast<uint32_t*>(key->begin()) = SkToU32(keyLength);
+    return true;
 }

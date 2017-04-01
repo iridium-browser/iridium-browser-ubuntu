@@ -11,6 +11,7 @@
 
 #include "base/android/jni_android.h"
 #include "cc/resources/scoped_ui_resource.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/android/resources/crushed_sprite_resource.h"
 #include "ui/android/ui_android_export.h"
 #include "ui/gfx/geometry/insets_f.h"
@@ -18,8 +19,6 @@
 #include "ui/gfx/geometry/size.h"
 
 namespace ui {
-
-class UIResourceProvider;
 
 // A Java counterpart will be generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.ui.resources
@@ -45,6 +44,7 @@ class UI_ANDROID_EXPORT ResourceManager {
     ~Resource();
     gfx::Rect Border(const gfx::Size& bounds) const;
     gfx::Rect Border(const gfx::Size& bounds, const gfx::InsetsF& scale) const;
+    size_t EstimateMemoryUsage() const;
 
     std::unique_ptr<cc::ScopedUIResource> ui_resource;
     gfx::Size size;
@@ -64,7 +64,8 @@ class UI_ANDROID_EXPORT ResourceManager {
 
   // Return a handle to a static resource specified by |res_id| that has a tint
   // of |tint_color| applied to it.
-  virtual Resource* GetStaticResourceWithTint(int res_id, int tint_color) = 0;
+  virtual Resource* GetStaticResourceWithTint(int res_id,
+                                              SkColor tint_color) = 0;
 
   // Remove tints that were unused in the current frame being built. This
   // function takes a set |used_tints| and removes all the tints not in the set

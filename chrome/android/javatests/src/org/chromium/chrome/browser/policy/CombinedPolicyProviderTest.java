@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.policy;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.test.ChromeActivityTestCaseBase;
@@ -33,6 +34,7 @@ public class CombinedPolicyProviderTest extends ChromeActivityTestCaseBase<Chrom
      */
     @Feature({"Policy" })
     @SmallTest
+    @RetryOnFailure
     public void testTerminateIncognitoSon() throws InterruptedException {
         final boolean incognitoMode = true;
 

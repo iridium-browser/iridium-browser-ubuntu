@@ -35,6 +35,7 @@ class BufferingState;
 class CodedFrameProvider;
 class DecoderBufferBase;
 class DecryptContextImpl;
+struct EncryptionScheme;
 
 class AvPipelineImpl : MediaPipelineBackend::Decoder::Delegate {
  public:
@@ -50,9 +51,6 @@ class AvPipelineImpl : MediaPipelineBackend::Decoder::Delegate {
                         const scoped_refptr<BufferingState>& buffering_state);
   void Flush(const base::Closure& flush_cb);
 
-  // Stop feeding the backend.
-  void Stop();
-
   virtual void UpdateStatistics() = 0;
 
   int bytes_decoded_since_last_update() const {
@@ -66,7 +64,6 @@ class AvPipelineImpl : MediaPipelineBackend::Decoder::Delegate {
     kPlaying,
     kFlushing,
     kFlushed,
-    kStopped,
     kError,
   };
 
@@ -78,6 +75,7 @@ class AvPipelineImpl : MediaPipelineBackend::Decoder::Delegate {
       StreamId id,
       const ::media::AudioDecoderConfig& audio_config,
       const ::media::VideoDecoderConfig& video_config) = 0;
+  virtual const EncryptionScheme& GetEncryptionScheme(StreamId id) const = 0;
 
   // Setting the frame provider must be done in the |kUninitialized| state.
   void SetCodedFrameProvider(std::unique_ptr<CodedFrameProvider> frame_provider,
@@ -172,6 +170,10 @@ class AvPipelineImpl : MediaPipelineBackend::Decoder::Delegate {
 
   base::WeakPtr<AvPipelineImpl> weak_this_;
   base::WeakPtrFactory<AvPipelineImpl> weak_factory_;
+  // Special weak factory used for asynchronous decryption. This allows us to
+  // cancel pending asynchronous decryption (by invalidating this factory's weak
+  // ptrs) without affecting other bound callbacks.
+  base::WeakPtrFactory<AvPipelineImpl> decrypt_weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AvPipelineImpl);
 };

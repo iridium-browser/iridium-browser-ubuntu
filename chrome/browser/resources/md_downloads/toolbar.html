@@ -12,6 +12,56 @@
 
 <dom-module id="downloads-toolbar">
   <template>
+    <style>
+      :host {
+        align-items: center;
+        background: var(--md-toolbar-color);
+        color: white;
+        display: flex;
+        min-height: 56px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      #toolbar {
+        --cr-toolbar-field-width: var(--downloads-card-width);
+        flex: 1;
+      }
+
+      paper-icon-button {
+        --iron-icon-height: 20px;
+        --iron-icon-width: 20px;
+        --paper-icon-button: {
+          height: 32px;
+          padding: 6px;
+          width: 32px;
+        };
+      }
+
+      #more {
+        --paper-menu-button: {
+          padding: 6px;
+        };
+      }
+
+      paper-menu {
+        --paper-menu-selected-item: {
+          font-weight: normal;
+        };
+      }
+
+      paper-item {
+        -webkit-user-select: none;
+        cursor: pointer;
+        font: inherit;
+        min-height: 40px;
+        /* TODO(michaelpg): fix this for everybody ever.
+         * https://github.com/PolymerElements/paper-menu-button/issues/56 */
+        white-space: nowrap;
+      }
+    </style>
     <cr-toolbar id="toolbar" page-name="$i18n{title}"
         search-prompt="$i18n{search}" clear-label="$i18n{clearSearch}"
         spinner-active="{{spinnerActive}}" on-search-changed="onSearchChanged_">
@@ -22,11 +72,11 @@
                class="dropdown-trigger"></paper-icon-button>
           <paper-menu class="dropdown-content">
             <paper-item class="clear-all" on-tap="onClearAllTap_"
-                on-blur="onItemBlur_">
+                role="menuitem" on-blur="onItemBlur_">
               $i18n{clearAll}
             </paper-item>
             <paper-item on-tap="onOpenDownloadsFolderTap_"
-                on-blur="onItemBlur_">
+                role="menuitem" on-blur="onItemBlur_">
               $i18n{openDownloadsFolder}
             </paper-item>
           </paper-menu>
@@ -34,7 +84,5 @@
       </div>
     </cr-toolbar>
   </template>
-  <link rel="import" type="css" href="chrome://downloads/shared_style.css">
-  <link rel="import" type="css" href="chrome://downloads/toolbar.css">
   <script src="chrome://downloads/toolbar.js"></script>
 </dom-module>

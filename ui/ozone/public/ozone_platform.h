@@ -10,11 +10,19 @@
 #include "base/macros.h"
 #include "ui/ozone/ozone_export.h"
 
+namespace display {
+class NativeDisplayDelegate;
+}
+
 namespace gfx {
 class Rect;
 }
 
-namespace shell {
+namespace IPC {
+class MessageFilter;
+}
+
+namespace service_manager {
 class Connector;
 class InterfaceRegistry;
 }
@@ -23,9 +31,7 @@ namespace ui {
 
 class CursorFactoryOzone;
 class InputController;
-class GpuPlatformSupport;
 class GpuPlatformSupportHost;
-class NativeDisplayDelegate;
 class OverlayManagerOzone;
 class PlatformWindow;
 class PlatformWindowDelegate;
@@ -51,13 +57,13 @@ class OZONE_EXPORT OzonePlatform {
   OzonePlatform();
   virtual ~OzonePlatform();
 
-  // Additional initalization params for the platform. Platforms must not retain
-  // a reference to this structure.
+  // Additional initialization params for the platform. Platforms must not
+  // retain a reference to this structure.
   struct InitParams {
     // Ozone may retain this pointer for later use. An Ozone platform embedder
     // must set this parameter in order for the Ozone platform implementation to
     // be able to use Mojo.
-    shell::Connector* connector = nullptr;
+    service_manager::Connector* connector = nullptr;
 
     // Setting this to true indicates that the platform implementation should
     // operate as a single process for platforms (i.e. drm) that are usually
@@ -93,24 +99,24 @@ class OZONE_EXPORT OzonePlatform {
   virtual ui::OverlayManagerOzone* GetOverlayManager() = 0;
   virtual ui::CursorFactoryOzone* GetCursorFactoryOzone() = 0;
   virtual ui::InputController* GetInputController() = 0;
-  virtual ui::GpuPlatformSupport* GetGpuPlatformSupport() = 0;
+  virtual IPC::MessageFilter* GetGpuMessageFilter();
   virtual ui::GpuPlatformSupportHost* GetGpuPlatformSupportHost() = 0;
   virtual std::unique_ptr<SystemInputInjector> CreateSystemInputInjector() = 0;
   virtual std::unique_ptr<PlatformWindow> CreatePlatformWindow(
       PlatformWindowDelegate* delegate,
       const gfx::Rect& bounds) = 0;
-  virtual std::unique_ptr<ui::NativeDisplayDelegate>
+  virtual std::unique_ptr<display::NativeDisplayDelegate>
   CreateNativeDisplayDelegate() = 0;
 
   // Ozone platform implementations may also choose to expose mojo interfaces to
   // internal functionality. Embedders wishing to take advantage of ozone mojo
   // implementations must invoke AddInterfaces with a valid
-  // shell::InterfaceRegistry* pointer to export all Mojo interfaces defined
-  // within Ozone.
+  // service_manager::InterfaceRegistry* pointer to export all Mojo interfaces
+  // defined within Ozone.
   //
   // A default do-nothing implementation is provided to permit platform
   // implementations to opt out of implementing any Mojo interfaces.
-  virtual void AddInterfaces(shell::InterfaceRegistry* registry);
+  virtual void AddInterfaces(service_manager::InterfaceRegistry* registry);
 
  private:
   virtual void InitializeUI() = 0;

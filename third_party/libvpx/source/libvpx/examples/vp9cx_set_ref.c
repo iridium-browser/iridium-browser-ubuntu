@@ -53,6 +53,7 @@
 #include "vpx/vp8cx.h"
 #include "vpx/vpx_decoder.h"
 #include "vpx/vpx_encoder.h"
+#include "vp9/common/vp9_common.h"
 
 #include "./tools_common.h"
 #include "./video_writer.h"
@@ -190,8 +191,7 @@ static void find_mismatch(const vpx_image_t *const img1,
 }
 
 static void testing_decode(vpx_codec_ctx_t *encoder, vpx_codec_ctx_t *decoder,
-                           vpx_codec_enc_cfg_t *cfg, unsigned int frame_out,
-                           int *mismatch_seen) {
+                           unsigned int frame_out, int *mismatch_seen) {
   vpx_image_t enc_img, dec_img;
   struct vp9_ref_frame ref_enc, ref_dec;
 
@@ -225,11 +225,10 @@ static void testing_decode(vpx_codec_ctx_t *encoder, vpx_codec_ctx_t *decoder,
   vpx_img_free(&dec_img);
 }
 
-static int encode_frame(vpx_codec_ctx_t *ecodec, vpx_codec_enc_cfg_t *cfg,
-                        vpx_image_t *img, unsigned int frame_in,
-                        VpxVideoWriter *writer, int test_decode,
-                        vpx_codec_ctx_t *dcodec, unsigned int *frame_out,
-                        int *mismatch_seen) {
+static int encode_frame(vpx_codec_ctx_t *ecodec, vpx_image_t *img,
+                        unsigned int frame_in, VpxVideoWriter *writer,
+                        int test_decode, vpx_codec_ctx_t *dcodec,
+                        unsigned int *frame_out, int *mismatch_seen) {
   int got_pkts = 0;
   vpx_codec_iter_t iter = NULL;
   const vpx_codec_cx_pkt_t *pkt = NULL;
@@ -270,7 +269,7 @@ static int encode_frame(vpx_codec_ctx_t *ecodec, vpx_codec_enc_cfg_t *cfg,
 
   // Mismatch checking
   if (got_data && test_decode) {
-    testing_decode(ecodec, dcodec, cfg, *frame_out, mismatch_seen);
+    testing_decode(ecodec, dcodec, *frame_out, mismatch_seen);
   }
 
   return got_pkts;
@@ -279,12 +278,12 @@ static int encode_frame(vpx_codec_ctx_t *ecodec, vpx_codec_enc_cfg_t *cfg,
 int main(int argc, char **argv) {
   FILE *infile = NULL;
   // Encoder
-  vpx_codec_ctx_t ecodec = { 0 };
-  vpx_codec_enc_cfg_t cfg = { 0 };
+  vpx_codec_ctx_t ecodec;
+  vpx_codec_enc_cfg_t cfg;
   unsigned int frame_in = 0;
   vpx_image_t raw;
   vpx_codec_err_t res;
-  VpxVideoInfo info = { 0 };
+  VpxVideoInfo info;
   VpxVideoWriter *writer = NULL;
   const VpxInterface *encoder = NULL;
 
@@ -305,7 +304,13 @@ int main(int argc, char **argv) {
   const char *height_arg = NULL;
   const char *infile_arg = NULL;
   const char *outfile_arg = NULL;
+  const char *update_frame_num_arg = NULL;
   unsigned int limit = 0;
+
+  vp9_zero(ecodec);
+  vp9_zero(cfg);
+  vp9_zero(info);
+
   exec_name = argv[0];
 
   if (argc < 6) die("Invalid number of arguments");
@@ -314,25 +319,28 @@ int main(int argc, char **argv) {
   height_arg = argv[2];
   infile_arg = argv[3];
   outfile_arg = argv[4];
+  update_frame_num_arg = argv[5];
 
   encoder = get_vpx_encoder_by_name("vp9");
   if (!encoder) die("Unsupported codec.");
 
-  update_frame_num = atoi(argv[5]);
+  update_frame_num = (unsigned int)strtoul(update_frame_num_arg, NULL, 0);
   // In VP9, the reference buffers (cm->buffer_pool->frame_bufs[i].buf) are
   // allocated while calling vpx_codec_encode(), thus, setting reference for
   // 1st frame isn't supported.
-  if (update_frame_num <= 1) die("Couldn't parse frame number '%s'\n", argv[5]);
+  if (update_frame_num <= 1) {
+    die("Couldn't parse frame number '%s'\n", update_frame_num_arg);
+  }
 
   if (argc > 6) {
-    limit = atoi(argv[6]);
+    limit = (unsigned int)strtoul(argv[6], NULL, 0);
     if (update_frame_num > limit)
       die("Update frame number couldn't larger than limit\n");
   }
 
   info.codec_fourcc = encoder->fourcc;
-  info.frame_width = strtol(width_arg, NULL, 0);
-  info.frame_height = strtol(height_arg, NULL, 0);
+  info.frame_width = (int)strtol(width_arg, NULL, 0);
+  info.frame_height = (int)strtol(height_arg, NULL, 0);
   info.time_base.numerator = 1;
   info.time_base.denominator = fps;
 
@@ -397,7 +405,7 @@ int main(int argc, char **argv) {
       }
     }
 
-    encode_frame(&ecodec, &cfg, &raw, frame_in, writer, test_decode, &dcodec,
+    encode_frame(&ecodec, &raw, frame_in, writer, test_decode, &dcodec,
                  &frame_out, &mismatch_seen);
     frame_in++;
     if (mismatch_seen) break;
@@ -405,8 +413,8 @@ int main(int argc, char **argv) {
 
   // Flush encoder.
   if (!mismatch_seen)
-    while (encode_frame(&ecodec, &cfg, NULL, frame_in, writer, test_decode,
-                        &dcodec, &frame_out, &mismatch_seen)) {
+    while (encode_frame(&ecodec, NULL, frame_in, writer, test_decode, &dcodec,
+                        &frame_out, &mismatch_seen)) {
     }
 
   printf("\n");

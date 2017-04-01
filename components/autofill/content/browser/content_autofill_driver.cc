@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
-#include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_manager.h"
@@ -25,7 +24,7 @@
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "services/shell/public/cpp/interface_provider.h"
+#include "services/service_manager/public/cpp/interface_provider.h"
 #include "ui/gfx/geometry/size_f.h"
 
 namespace autofill {
@@ -160,15 +159,24 @@ void ContentAutofillDriver::PopupHidden() {
 
 gfx::RectF ContentAutofillDriver::TransformBoundingBoxToViewportCoordinates(
     const gfx::RectF& bounding_box) {
-  gfx::Point orig_point(bounding_box.x(), bounding_box.y());
-  gfx::Point transformed_point;
-  transformed_point =
-      render_frame_host_->GetView()->TransformPointToRootCoordSpace(orig_point);
+  content::RenderWidgetHostView* view = render_frame_host_->GetView();
+  if (!view)
+    return bounding_box;
 
-  gfx::RectF new_box;
-  new_box.SetRect(transformed_point.x(), transformed_point.y(),
-                  bounding_box.width(), bounding_box.height());
-  return new_box;
+  gfx::Point orig_point(bounding_box.x(), bounding_box.y());
+  gfx::Point transformed_point =
+      view->TransformPointToRootCoordSpace(orig_point);
+  return gfx::RectF(transformed_point.x(), transformed_point.y(),
+                    bounding_box.width(), bounding_box.height());
+}
+
+void ContentAutofillDriver::DidInteractWithCreditCardForm() {
+  // Notify the WebContents about credit card inputs on HTTP pages.
+  content::WebContents* contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host_);
+  if (contents->GetVisibleURL().SchemeIsCryptographic())
+    return;
+  contents->OnCreditCardInputShownOnHttp();
 }
 
 // mojom::AutofillDriver:
@@ -206,10 +214,6 @@ void ContentAutofillDriver::QueryFormFieldAutofill(
 
 void ContentAutofillDriver::HidePopup() {
   autofill_manager_->OnHidePopup();
-}
-
-void ContentAutofillDriver::PingAck() {
-  autofill_external_delegate_.OnPingAck();
 }
 
 void ContentAutofillDriver::FocusNoLongerOnForm() {
@@ -254,12 +258,12 @@ void ContentAutofillDriver::NotifyFirstUserGestureObservedInTab() {
 
 const mojom::AutofillAgentPtr& ContentAutofillDriver::GetAutofillAgent() {
   // Here is a lazy binding, and will not reconnect after connection error.
-  if (!mojo_autofill_agent_) {
+  if (!autofill_agent_) {
     render_frame_host_->GetRemoteInterfaces()->GetInterface(
-        mojo::GetProxy(&mojo_autofill_agent_));
+        mojo::MakeRequest(&autofill_agent_));
   }
 
-  return mojo_autofill_agent_;
+  return autofill_agent_;
 }
 
 }  // namespace autofill

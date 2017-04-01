@@ -11,7 +11,7 @@
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/interface_ptr_set.h"
-#include "services/ui/public/interfaces/display.mojom.h"
+#include "services/ui/public/interfaces/display_manager.mojom.h"
 #include "services/ui/ws/user_id.h"
 
 namespace gfx {
@@ -23,17 +23,13 @@ namespace ws {
 
 class Display;
 class DisplayManager;
-class DisplayManagerDelegate;
-
-namespace test {
-class UserDisplayManagerTestApi;
-}
+class UserDisplayManagerDelegate;
 
 // Provides per user display state.
 class UserDisplayManager : public mojom::DisplayManager {
  public:
   UserDisplayManager(ws::DisplayManager* display_manager,
-                     DisplayManagerDelegate* delegate,
+                     UserDisplayManagerDelegate* delegate,
                      const UserId& user_id);
   ~UserDisplayManager() override;
 
@@ -43,34 +39,38 @@ class UserDisplayManager : public mojom::DisplayManager {
   void AddDisplayManagerBinding(
       mojo::InterfaceRequest<mojom::DisplayManager> request);
 
+  // Called when something about the display (e.g. pixel-ratio, size) changes.
+  void OnDisplayUpdate(Display* display);
+
   // Called by Display prior to |display| being removed and destroyed.
   void OnWillDestroyDisplay(Display* display);
+
+  // Called when the primary display changes.
+  void OnPrimaryDisplayChanged(int64_t primary_display_id);
 
   // Called from WindowManagerState when its EventDispatcher receives a mouse
   // event.
   void OnMouseCursorLocationChanged(const gfx::Point& point);
 
-  // Called when something about the display (e.g. pixel-ratio, size) changes.
-  void OnDisplayUpdate(Display* display);
-
   // Returns a read-only handle to the shared memory which contains the global
   // mouse cursor position. Each call returns a new handle.
   mojo::ScopedSharedBufferHandle GetCursorLocationMemory();
 
- private:
-  friend class test::UserDisplayManagerTestApi;
+  // Overriden from mojom::DisplayManager:
+  void AddObserver(mojom::DisplayManagerObserverPtr observer) override;
 
+ private:
   // Called when a new observer is added. If frame decorations are available
   // notifies the observer immediately.
   void OnObserverAdded(mojom::DisplayManagerObserver* observer);
 
-  mojo::Array<mojom::WsDisplayPtr> GetAllDisplays();
+  // Fills in a WsDisplayPtr for |display|.
+  mojom::WsDisplayPtr GetWsDisplayPtr(const Display& display);
+
+  std::vector<mojom::WsDisplayPtr> GetAllDisplays();
 
   // Calls OnDisplays() on |observer|.
   void CallOnDisplays(mojom::DisplayManagerObserver* observer);
-
-  // Overriden from mojom::DisplayManager:
-  void AddObserver(mojom::DisplayManagerObserverPtr observer) override;
 
   base::subtle::Atomic32* cursor_location_memory() {
     return reinterpret_cast<base::subtle::Atomic32*>(
@@ -79,7 +79,7 @@ class UserDisplayManager : public mojom::DisplayManager {
 
   ws::DisplayManager* display_manager_;
 
-  DisplayManagerDelegate* delegate_;
+  UserDisplayManagerDelegate* delegate_;
 
   const UserId user_id_;
 
@@ -91,9 +91,6 @@ class UserDisplayManager : public mojom::DisplayManager {
   // WARNING: only use these once |got_valid_frame_decorations_| is true.
   mojo::InterfacePtrSet<mojom::DisplayManagerObserver>
       display_manager_observers_;
-
-  // Observer used for tests.
-  mojom::DisplayManagerObserver* test_observer_ = nullptr;
 
   // The current location of the cursor. This is always kept up to date so we
   // can atomically write this to |cursor_location_memory()| once it is created.

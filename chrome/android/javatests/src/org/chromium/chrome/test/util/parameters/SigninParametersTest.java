@@ -4,12 +4,13 @@
 
 package org.chromium.chrome.test.util.parameters;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.EnormousTest;
 import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.parameter.Parameter;
 import org.chromium.base.test.util.parameter.ParameterizedTest;
 import org.chromium.chrome.browser.ChromeActivity;
@@ -18,6 +19,7 @@ import org.chromium.chrome.test.ChromeActivityTestCaseBase;
 /**
  * Tester class for implementation of Signin testing and ParameterizedTest.
  */
+@RetryOnFailure
 public class SigninParametersTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final String GOOGLE_ACCOUNT_USERNAME = "chromiumforandroid01@gmail.com";
     private static final String GOOGLE_ACCOUNT_PASSWORD = "chromeforandroid";

@@ -40,7 +40,7 @@
 #include "content/public/test/mock_download_item.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gmock_mutant.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -102,7 +102,7 @@ class MockDownloadItemImpl : public DownloadItemImpl {
                          DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
                          DOWNLOAD_INTERRUPT_REASON_NONE,
                          false,
-                         net::BoundNetLog()) {}
+                         net::NetLogWithSource()) {}
   virtual ~MockDownloadItemImpl() {}
 
   MOCK_METHOD4(OnDownloadTargetDetermined,
@@ -117,7 +117,7 @@ class MockDownloadItemImpl : public DownloadItemImpl {
   MOCK_METHOD0(OpenDownload, void());
   MOCK_METHOD0(ShowDownloadInShell, void());
   MOCK_METHOD0(ValidateDangerousDownload, void());
-  MOCK_METHOD1(StealDangerousDownload, void(const AcquireFileCallback&));
+  MOCK_METHOD2(StealDangerousDownload, void(bool, const AcquireFileCallback&));
   MOCK_METHOD3(UpdateProgress, void(int64_t, int64_t, const std::string&));
   MOCK_METHOD1(Cancel, void(bool));
   MOCK_METHOD0(MarkAsComplete, void());
@@ -268,12 +268,12 @@ class MockDownloadItemFactory
       DownloadDangerType danger_type,
       DownloadInterruptReason interrupt_reason,
       bool opened,
-      const net::BoundNetLog& bound_net_log) override;
+      const net::NetLogWithSource& net_log) override;
   DownloadItemImpl* CreateActiveItem(
       DownloadItemImplDelegate* delegate,
       uint32_t download_id,
       const DownloadCreateInfo& info,
-      const net::BoundNetLog& bound_net_log) override;
+      const net::NetLogWithSource& net_log) override;
   DownloadItemImpl* CreateSavePageItem(
       DownloadItemImplDelegate* delegate,
       uint32_t download_id,
@@ -281,7 +281,7 @@ class MockDownloadItemFactory
       const GURL& url,
       const std::string& mime_type,
       std::unique_ptr<DownloadRequestHandleInterface> request_handle,
-      const net::BoundNetLog& bound_net_log) override;
+      const net::NetLogWithSource& net_log) override;
 
  private:
   std::map<uint32_t, MockDownloadItemImpl*> items_;
@@ -340,7 +340,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreatePersistedItem(
     DownloadDangerType danger_type,
     DownloadInterruptReason interrupt_reason,
     bool opened,
-    const net::BoundNetLog& bound_net_log) {
+    const net::NetLogWithSource& net_log) {
   DCHECK(items_.find(download_id) == items_.end());
   MockDownloadItemImpl* result =
       new StrictMock<MockDownloadItemImpl>(&item_delegate_);
@@ -355,7 +355,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreateActiveItem(
     DownloadItemImplDelegate* delegate,
     uint32_t download_id,
     const DownloadCreateInfo& info,
-    const net::BoundNetLog& bound_net_log) {
+    const net::NetLogWithSource& net_log) {
   DCHECK(items_.find(download_id) == items_.end());
 
   MockDownloadItemImpl* result =
@@ -381,7 +381,7 @@ DownloadItemImpl* MockDownloadItemFactory::CreateSavePageItem(
     const GURL& url,
     const std::string& mime_type,
     std::unique_ptr<DownloadRequestHandleInterface> request_handle,
-    const net::BoundNetLog& bound_net_log) {
+    const net::NetLogWithSource& net_log) {
   DCHECK(items_.find(download_id) == items_.end());
 
   MockDownloadItemImpl* result =
@@ -408,7 +408,7 @@ class MockDownloadFileFactory
       std::unique_ptr<DownloadSaveInfo> save_info,
       const base::FilePath& default_download_directory,
       std::unique_ptr<ByteStreamReader> byte_stream,
-      const net::BoundNetLog& bound_net_log,
+      const net::NetLogWithSource& net_log,
       base::WeakPtr<DownloadDestinationObserver> observer) override {
     return MockCreateFile(*save_info, byte_stream.get());
   }
@@ -704,41 +704,6 @@ TEST_F(DownloadManagerTest, DetermineDownloadTarget_False) {
   EXPECT_EQ(path, intermediate_path_);
 }
 
-// Confirm the DownloadManagerImpl::RemoveAllDownloads() functionality
-TEST_F(DownloadManagerTest, RemoveAllDownloads) {
-  base::Time now(base::Time::Now());
-  for (uint32_t i = 0; i < 4; ++i) {
-    MockDownloadItemImpl& item(AddItemToManager());
-    EXPECT_EQ(i, item.GetId());
-    EXPECT_CALL(item, GetStartTime())
-        .WillRepeatedly(Return(now));
-  }
-
-  // Specify states for each.
-  EXPECT_CALL(GetMockDownloadItem(0), GetState())
-      .WillRepeatedly(Return(DownloadItem::COMPLETE));
-  EXPECT_CALL(GetMockDownloadItem(1), GetState())
-      .WillRepeatedly(Return(DownloadItem::CANCELLED));
-  EXPECT_CALL(GetMockDownloadItem(2), GetState())
-      .WillRepeatedly(Return(DownloadItem::INTERRUPTED));
-  EXPECT_CALL(GetMockDownloadItem(3), GetState())
-      .WillRepeatedly(Return(DownloadItem::IN_PROGRESS));
-
-  // Expectations for whether or not they'll actually be removed.
-  EXPECT_CALL(GetMockDownloadItem(0), Remove())
-      .WillOnce(Return());
-  EXPECT_CALL(GetMockDownloadItem(1), Remove())
-      .WillOnce(Return());
-  EXPECT_CALL(GetMockDownloadItem(2), Remove())
-      .WillOnce(Return());
-  EXPECT_CALL(GetMockDownloadItem(3), Remove())
-      .Times(0);
-
-  download_manager_->RemoveAllDownloads();
-  // Because we're mocking the download item, the Remove call doesn't
-  // result in them being removed from the DownloadManager list.
-}
-
 TEST_F(DownloadManagerTest, GetDownloadByGuid) {
   for (uint32_t i = 0; i < 4; ++i)
     AddItemToManager();
@@ -767,7 +732,8 @@ TEST_F(DownloadManagerTest, GetDownloadByGuid) {
 namespace {
 
 base::Callback<bool(const GURL&)> GetSingleURLFilter(const GURL& url) {
-  return base::Bind(&GURL::operator==, base::Owned(new GURL(url)));
+  return base::Bind(static_cast<bool (*)(const GURL&, const GURL&)>(operator==),
+                    GURL(url));
 }
 
 }  // namespace

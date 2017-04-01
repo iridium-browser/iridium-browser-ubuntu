@@ -51,7 +51,6 @@ namespace content {
 class NetworkListObserver;
 class P2PAsyncAddressResolver;
 class P2PSocketClientImpl;
-class RenderViewImpl;
 
 class CONTENT_EXPORT P2PSocketDispatcher : public IPC::MessageFilter,
                                            public NetworkListManager {
@@ -78,7 +77,7 @@ class CONTENT_EXPORT P2PSocketDispatcher : public IPC::MessageFilter,
 
   // IPC::MessageFilter override. Called on IO thread.
   bool OnMessageReceived(const IPC::Message& message) override;
-  void OnFilterAdded(IPC::Sender* sender) override;
+  void OnFilterAdded(IPC::Channel* channel) override;
   void OnFilterRemoved() override;
   void OnChannelClosing() override;
   void OnChannelConnected(int32_t peer_pid) override;
@@ -113,9 +112,9 @@ class CONTENT_EXPORT P2PSocketDispatcher : public IPC::MessageFilter,
   P2PSocketClientImpl* GetClient(int socket_id);
 
   scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner_;
-  IDMap<P2PSocketClientImpl> clients_;
+  IDMap<P2PSocketClientImpl*> clients_;
 
-  IDMap<P2PAsyncAddressResolver> host_address_requests_;
+  IDMap<P2PAsyncAddressResolver*> host_address_requests_;
 
   bool network_notifications_started_;
   scoped_refptr<base::ObserverListThreadSafe<NetworkListObserver>>

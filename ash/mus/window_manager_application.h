@@ -10,83 +10,82 @@
 #include <memory>
 #include <set>
 
+#include "ash/public/interfaces/wallpaper.mojom.h"
 #include "base/macros.h"
-#include "mash/session/public/interfaces/session.mojom.h"
+#include "base/memory/ref_counted.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/shell/public/cpp/service.h"
+#include "services/service_manager/public/cpp/service.h"
 #include "services/tracing/public/cpp/provider.h"
 #include "services/ui/common/types.h"
-#include "services/ui/public/interfaces/accelerator_registrar.mojom.h"
+
+namespace aura {
+class MusContextFactory;
+class WindowTreeClient;
+}
+
+namespace base {
+class SequencedWorkerPool;
+}
+
+namespace chromeos {
+namespace system {
+class ScopedFakeStatisticsProvider;
+}
+}
 
 namespace views {
 class AuraInit;
-class SurfaceContextFactory;
 }
 
 namespace ui {
-class Event;
-class GpuService;
-class WindowTreeClient;
+class Gpu;
 }
 
 namespace ash {
 namespace mus {
 
-class AcceleratorRegistrarImpl;
-class NativeWidgetFactoryMus;
+class NetworkConnectDelegateMus;
 class WindowManager;
 
 // Hosts the window manager and the ash system user interface for mash.
-// TODO(mash): Port ash_sysui's ShelfController and WallpaperController here.
-class WindowManagerApplication
-    : public shell::Service,
-      public shell::InterfaceFactory<ui::mojom::AcceleratorRegistrar>,
-      public mash::session::mojom::ScreenlockStateListener {
+class WindowManagerApplication : public service_manager::Service {
  public:
   WindowManagerApplication();
   ~WindowManagerApplication() override;
 
   WindowManager* window_manager() { return window_manager_.get(); }
 
-  mash::session::mojom::Session* session() { return session_.get(); }
-
  private:
   friend class WmTestBase;
   friend class WmTestHelper;
 
-  void OnAcceleratorRegistrarDestroyed(AcceleratorRegistrarImpl* registrar);
+  void InitWindowManager(
+      std::unique_ptr<aura::WindowTreeClient> window_tree_client,
+      const scoped_refptr<base::SequencedWorkerPool>& blocking_pool);
 
-  void InitWindowManager(ui::WindowTreeClient* window_tree_client);
+  // Initializes lower-level OS-specific components (e.g. D-Bus services).
+  void InitializeComponents();
+  void ShutdownComponents();
 
-  // shell::Service:
-  void OnStart(const shell::Identity& identity) override;
-  bool OnConnect(const shell::Identity& remote_identity,
-                 shell::InterfaceRegistry* registry) override;
-
-  // shell::InterfaceFactory<ui::mojom::AcceleratorRegistrar>:
-  void Create(
-      const shell::Identity& remote_identity,
-      mojo::InterfaceRequest<ui::mojom::AcceleratorRegistrar> request) override;
-
-  // session::mojom::ScreenlockStateListener:
-  void ScreenlockStateChanged(bool locked) override;
+  // service_manager::Service:
+  void OnStart() override;
+  bool OnConnect(const service_manager::ServiceInfo& remote_info,
+                 service_manager::InterfaceRegistry* registry) override;
 
   tracing::Provider tracing_;
 
   std::unique_ptr<views::AuraInit> aura_init_;
-  std::unique_ptr<NativeWidgetFactoryMus> native_widget_factory_mus_;
 
-  std::unique_ptr<ui::GpuService> gpu_service_;
-  std::unique_ptr<views::SurfaceContextFactory> compositor_context_factory_;
+  std::unique_ptr<ui::Gpu> gpu_;
+  std::unique_ptr<aura::MusContextFactory> compositor_context_factory_;
   std::unique_ptr<WindowManager> window_manager_;
 
-  std::set<AcceleratorRegistrarImpl*> accelerator_registrars_;
+  // A blocking pool used by the WindowManager's shell; not used in tests.
+  scoped_refptr<base::SequencedWorkerPool> blocking_pool_;
 
-  mash::session::mojom::SessionPtr session_;
-
-  mojo::Binding<mash::session::mojom::ScreenlockStateListener>
-      screenlock_state_listener_binding_;
+  std::unique_ptr<NetworkConnectDelegateMus> network_connect_delegate_;
+  std::unique_ptr<chromeos::system::ScopedFakeStatisticsProvider>
+      statistics_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowManagerApplication);
 };

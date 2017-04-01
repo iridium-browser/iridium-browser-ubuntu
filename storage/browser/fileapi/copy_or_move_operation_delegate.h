@@ -7,8 +7,8 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <memory>
-#include <set>
 #include <stack>
 
 #include "base/macros.h"
@@ -23,13 +23,11 @@ class IOBufferWithSize;
 
 namespace storage {
 class FileStreamReader;
-class ShareableFileReference;
 enum class FlushPolicy;
 }
 
 namespace storage {
 
-class CopyOrMoveFileValidator;
 class FileStreamWriter;
 
 // A delegate class for recursive copy or move operations.
@@ -156,7 +154,7 @@ class CopyOrMoveOperationDelegate
   CopyProgressCallback progress_callback_;
   StatusCallback callback_;
 
-  std::set<CopyOrMoveImpl*> running_copy_set_;
+  std::map<CopyOrMoveImpl*, std::unique_ptr<CopyOrMoveImpl>> running_copy_set_;
   base::WeakPtrFactory<CopyOrMoveOperationDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CopyOrMoveOperationDelegate);

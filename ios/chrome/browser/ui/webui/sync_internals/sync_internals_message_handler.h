@@ -10,22 +10,26 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/sync/driver/protocol_event_observer.h"
 #include "components/sync/driver/sync_service_observer.h"
 #include "components/sync/engine/cycle/type_debug_info_observer.h"
+#include "components/sync/engine/events/protocol_event_observer.h"
 #include "components/sync/js/js_controller.h"
 #include "components/sync/js/js_event_handler.h"
 #include "ios/web/public/webui/web_ui_ios_message_handler.h"
 
-namespace sync_driver {
+namespace base {
+class DictionaryValue;
+}  // namespace base
+
+namespace syncer {
 class SyncService;
-}
+}  // namespace syncer
 
 // The implementation for the chrome://sync-internals page.
 class SyncInternalsMessageHandler : public web::WebUIIOSMessageHandler,
                                     public syncer::JsEventHandler,
-                                    public sync_driver::SyncServiceObserver,
-                                    public browser_sync::ProtocolEventObserver,
+                                    public syncer::SyncServiceObserver,
+                                    public syncer::ProtocolEventObserver,
                                     public syncer::TypeDebugInfoObserver {
  public:
   SyncInternalsMessageHandler();
@@ -56,7 +60,7 @@ class SyncInternalsMessageHandler : public web::WebUIIOSMessageHandler,
   void OnReceivedAllNodes(int request_id,
                           std::unique_ptr<base::ListValue> nodes);
 
-  // sync_driver::SyncServiceObserver implementation.
+  // syncer::SyncServiceObserver implementation.
   void OnStateChanged() override;
 
   // ProtocolEventObserver implementation.
@@ -84,7 +88,7 @@ class SyncInternalsMessageHandler : public web::WebUIIOSMessageHandler,
   // onAboutInfoUpdated event.
   void SendAboutInfo();
 
-  sync_driver::SyncService* GetSyncService();
+  syncer::SyncService* GetSyncService();
 
   base::WeakPtr<syncer::JsController> js_controller_;
 

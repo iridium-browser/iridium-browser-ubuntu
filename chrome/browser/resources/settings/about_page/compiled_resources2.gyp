@@ -15,6 +15,7 @@
         '../compiled_resources2.gyp:route',
         '../settings_page/compiled_resources2.gyp:main_page_behavior',
         '../settings_page/compiled_resources2.gyp:settings_animated_pages',
+        '<(EXTERNS_GYP):web_animations',
       ],
       'includes': ['../../../../../third_party/closure_compiler/compile_js2.gypi'],
     },
@@ -28,6 +29,14 @@
     },
     {
       'target_name': 'detailed_build_info',
+      'dependencies': [
+        'about_page_browser_proxy',
+        '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:i18n_behavior',
+      ],
+      'includes': ['../../../../../third_party/closure_compiler/compile_js2.gypi'],
+    },
+    {
+      'target_name': 'channel_switcher_dialog',
       'dependencies': [
         'about_page_browser_proxy',
         '<(DEPTH)/ui/webui/resources/js/compiled_resources2.gyp:i18n_behavior',

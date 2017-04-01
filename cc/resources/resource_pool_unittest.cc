@@ -10,9 +10,8 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "cc/resources/resource_util.h"
 #include "cc/resources/scoped_resource.h"
-#include "cc/test/fake_output_surface.h"
-#include "cc/test/fake_output_surface_client.h"
 #include "cc/test/fake_resource_provider.h"
+#include "cc/test/test_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,20 +20,20 @@ namespace cc {
 class ResourcePoolTest : public testing::Test {
  public:
   void SetUp() override {
-    output_surface_ = FakeOutputSurface::CreateDelegating3d();
-    ASSERT_TRUE(output_surface_->BindToClient(&output_surface_client_));
-    shared_bitmap_manager_.reset(new TestSharedBitmapManager());
+    context_provider_ = TestContextProvider::Create();
+    context_provider_->BindToCurrentThread();
+    shared_bitmap_manager_.reset(new TestSharedBitmapManager);
     resource_provider_ = FakeResourceProvider::Create(
-        output_surface_.get(), shared_bitmap_manager_.get());
+        context_provider_.get(), shared_bitmap_manager_.get());
     task_runner_ = base::ThreadTaskRunnerHandle::Get();
     resource_pool_ =
         ResourcePool::Create(resource_provider_.get(), task_runner_.get(),
+                             ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                              ResourcePool::kDefaultExpirationDelay);
   }
 
  protected:
-  FakeOutputSurfaceClient output_surface_client_;
-  std::unique_ptr<FakeOutputSurface> output_surface_;
+  scoped_refptr<TestContextProvider> context_provider_;
   std::unique_ptr<SharedBitmapManager> shared_bitmap_manager_;
   std::unique_ptr<ResourceProvider> resource_provider_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -160,6 +159,7 @@ TEST_F(ResourcePoolTest, BusyResourcesEventuallyFreed) {
   // to run.
   resource_pool_ =
       ResourcePool::Create(resource_provider_.get(), task_runner_.get(),
+                           ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                            base::TimeDelta::FromMilliseconds(10));
 
   // Limits high enough to not be hit by this test.
@@ -200,6 +200,7 @@ TEST_F(ResourcePoolTest, UnusedResourcesEventuallyFreed) {
   // to run.
   resource_pool_ =
       ResourcePool::Create(resource_provider_.get(), task_runner_.get(),
+                           ResourceProvider::TEXTURE_HINT_IMMUTABLE,
                            base::TimeDelta::FromMilliseconds(100));
 
   // Limits high enough to not be hit by this test.
@@ -334,6 +335,61 @@ TEST_F(ResourcePoolTest, ReuseResource) {
   resource = resource_pool_->ReuseResource(size, format, color_space);
   EXPECT_NE(nullptr, resource);
   ASSERT_EQ(nullptr, resource_pool_->ReuseResource(size, format, color_space));
+  resource_pool_->ReleaseResource(resource);
+}
+
+TEST_F(ResourcePoolTest, MemoryStateSuspended) {
+  // Limits high enough to not be hit by this test.
+  size_t bytes_limit = 10 * 1024 * 1024;
+  size_t count_limit = 100;
+  resource_pool_->SetResourceUsageLimits(bytes_limit, count_limit);
+
+  gfx::Size size(100, 100);
+  ResourceFormat format = RGBA_8888;
+  gfx::ColorSpace color_space = gfx::ColorSpace::CreateSRGB();
+  Resource* resource =
+      resource_pool_->AcquireResource(size, format, color_space);
+
+  EXPECT_EQ(1u, resource_pool_->GetTotalResourceCountForTesting());
+  EXPECT_EQ(0u, resource_pool_->GetBusyResourceCountForTesting());
+
+  // Suspending should not impact an in-use resource.
+  resource_pool_->OnMemoryStateChange(base::MemoryState::SUSPENDED);
+  EXPECT_EQ(1u, resource_pool_->GetTotalResourceCountForTesting());
+  EXPECT_EQ(0u, resource_pool_->GetBusyResourceCountForTesting());
+  resource_pool_->OnMemoryStateChange(base::MemoryState::NORMAL);
+
+  // Release the resource making it busy.
+  resource_pool_->ReleaseResource(resource);
+  EXPECT_EQ(1u, resource_pool_->GetTotalResourceCountForTesting());
+  EXPECT_EQ(1u, resource_pool_->GetBusyResourceCountForTesting());
+
+  // Suspending should now free the busy resource.
+  resource_pool_->OnMemoryStateChange(base::MemoryState::SUSPENDED);
+  EXPECT_EQ(0u, resource_pool_->GetTotalResourceCountForTesting());
+  EXPECT_EQ(0u, resource_pool_->GetBusyResourceCountForTesting());
+}
+
+TEST_F(ResourcePoolTest, TextureHintRespected) {
+  gfx::Size size(100, 100);
+  ResourceFormat format = RGBA_8888;
+  gfx::ColorSpace color_space;
+
+  resource_pool_ =
+      ResourcePool::Create(resource_provider_.get(), task_runner_.get(),
+                           ResourceProvider::TEXTURE_HINT_IMMUTABLE,
+                           base::TimeDelta::FromMilliseconds(100));
+  Resource* resource =
+      resource_pool_->AcquireResource(size, format, color_space);
+  EXPECT_TRUE(resource_provider_->IsImmutable(resource->id()));
+  resource_pool_->ReleaseResource(resource);
+
+  resource_pool_ =
+      ResourcePool::Create(resource_provider_.get(), task_runner_.get(),
+                           ResourceProvider::TEXTURE_HINT_DEFAULT,
+                           base::TimeDelta::FromMilliseconds(100));
+  resource = resource_pool_->AcquireResource(size, format, color_space);
+  EXPECT_FALSE(resource_provider_->IsImmutable(resource->id()));
   resource_pool_->ReleaseResource(resource);
 }
 

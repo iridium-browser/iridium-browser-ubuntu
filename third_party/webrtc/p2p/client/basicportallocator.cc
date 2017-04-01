@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "webrtc/api/umametrics.h"
 #include "webrtc/p2p/base/basicpacketsocketfactory.h"
 #include "webrtc/p2p/base/common.h"
 #include "webrtc/p2p/base/port.h"
@@ -57,7 +58,7 @@ int GetProtocolPriority(cricket::ProtocolType protocol) {
     case cricket::PROTO_SSLTCP:
       return 0;
     default:
-      RTC_DCHECK(false);
+      RTC_NOTREACHED();
       return 0;
   }
 }
@@ -69,7 +70,7 @@ int GetAddressFamilyPriority(int ip_family) {
     case AF_INET:
       return 1;
     default:
-      RTC_DCHECK(false);
+      RTC_NOTREACHED();
       return 0;
   }
 }
@@ -99,14 +100,14 @@ const uint32_t DISABLE_ALL_PHASES =
 BasicPortAllocator::BasicPortAllocator(rtc::NetworkManager* network_manager,
                                        rtc::PacketSocketFactory* socket_factory)
     : network_manager_(network_manager), socket_factory_(socket_factory) {
-  ASSERT(network_manager_ != nullptr);
-  ASSERT(socket_factory_ != nullptr);
+  RTC_DCHECK(network_manager_ != nullptr);
+  RTC_DCHECK(socket_factory_ != nullptr);
   Construct();
 }
 
 BasicPortAllocator::BasicPortAllocator(rtc::NetworkManager* network_manager)
     : network_manager_(network_manager), socket_factory_(nullptr) {
-  ASSERT(network_manager_ != nullptr);
+  RTC_DCHECK(network_manager_ != nullptr);
   Construct();
 }
 
@@ -114,7 +115,7 @@ BasicPortAllocator::BasicPortAllocator(rtc::NetworkManager* network_manager,
                                        rtc::PacketSocketFactory* socket_factory,
                                        const ServerAddresses& stun_servers)
     : network_manager_(network_manager), socket_factory_(socket_factory) {
-  ASSERT(socket_factory_ != NULL);
+  RTC_DCHECK(socket_factory_ != NULL);
   SetConfiguration(stun_servers, std::vector<RelayServerConfig>(), 0, false);
   Construct();
 }
@@ -150,14 +151,35 @@ void BasicPortAllocator::Construct() {
   allow_tcp_listen_ = true;
 }
 
+void BasicPortAllocator::OnIceRegathering(PortAllocatorSession* session,
+                                          IceRegatheringReason reason) {
+  if (!metrics_observer()) {
+    return;
+  }
+  // If the session has not been taken by an active channel, do not report the
+  // metric.
+  for (auto& allocator_session : pooled_sessions()) {
+    if (allocator_session.get() == session) {
+      return;
+    }
+  }
+
+  metrics_observer()->IncrementEnumCounter(
+      webrtc::kEnumCounterIceRegathering, static_cast<int>(reason),
+      static_cast<int>(IceRegatheringReason::MAX_VALUE));
+}
+
 BasicPortAllocator::~BasicPortAllocator() {
 }
 
 PortAllocatorSession* BasicPortAllocator::CreateSessionInternal(
     const std::string& content_name, int component,
     const std::string& ice_ufrag, const std::string& ice_pwd) {
-  return new BasicPortAllocatorSession(
+  PortAllocatorSession* session = new BasicPortAllocatorSession(
       this, content_name, component, ice_ufrag, ice_pwd);
+  session->SignalIceRegathering.connect(this,
+                                        &BasicPortAllocator::OnIceRegathering);
+  return session;
 }
 
 void BasicPortAllocator::AddTurnServer(const RelayServerConfig& turn_server) {
@@ -247,13 +269,12 @@ void BasicPortAllocatorSession::StartGettingPorts() {
 
   network_thread_->Post(RTC_FROM_HERE, this, MSG_CONFIG_START);
 
-  LOG(LS_INFO) << "Pruning turn ports "
+  LOG(LS_INFO) << "Start getting ports with prune_turn_ports "
                << (prune_turn_ports_ ? "enabled" : "disabled");
 }
 
 void BasicPortAllocatorSession::StopGettingPorts() {
-  ASSERT(rtc::Thread::Current() == network_thread_);
-  network_thread_->Post(RTC_FROM_HERE, this, MSG_CONFIG_STOP);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   ClearGettingPorts();
   // Note: this must be called after ClearGettingPorts because both may set the
   // session state and we should set the state to STOPPED.
@@ -261,11 +282,12 @@ void BasicPortAllocatorSession::StopGettingPorts() {
 }
 
 void BasicPortAllocatorSession::ClearGettingPorts() {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   network_thread_->Clear(this, MSG_ALLOCATE);
   for (uint32_t i = 0; i < sequences_.size(); ++i) {
     sequences_[i]->Stop();
   }
+  network_thread_->Post(RTC_FROM_HERE, this, MSG_CONFIG_STOP);
   state_ = SessionState::CLEARED;
 }
 
@@ -302,6 +324,8 @@ void BasicPortAllocatorSession::RegatherOnFailedNetworks() {
     return;
   }
 
+  LOG(LS_INFO) << "Regather candidates on failed networks";
+
   // Mark a sequence as "network failed" if its network is in the list of failed
   // networks, so that it won't be considered as equivalent when the session
   // regathers ports and candidates.
@@ -314,9 +338,16 @@ void BasicPortAllocatorSession::RegatherOnFailedNetworks() {
   }
   // Remove ports from being used locally and send signaling to remove
   // the candidates on the remote side.
-  RemovePortsAndCandidates(failed_networks);
+  std::vector<PortData*> ports_to_prune = GetUnprunedPorts(failed_networks);
+  if (!ports_to_prune.empty()) {
+    LOG(LS_INFO) << "Prune " << ports_to_prune.size()
+                 << " ports because their networks failed";
+    PrunePortsAndRemoveCandidates(ports_to_prune);
+  }
 
-  if (allocation_started_ && network_manager_started_) {
+  if (allocation_started_ && network_manager_started_ && !IsStopped()) {
+    SignalIceRegathering(this, IceRegatheringReason::NETWORK_FAILURE);
+
     DoAllocate();
   }
 }
@@ -404,27 +435,27 @@ bool BasicPortAllocatorSession::CandidatesAllocationDone() const {
 void BasicPortAllocatorSession::OnMessage(rtc::Message *message) {
   switch (message->message_id) {
   case MSG_CONFIG_START:
-    ASSERT(rtc::Thread::Current() == network_thread_);
+    RTC_DCHECK(rtc::Thread::Current() == network_thread_);
     GetPortConfigurations();
     break;
   case MSG_CONFIG_READY:
-    ASSERT(rtc::Thread::Current() == network_thread_);
+    RTC_DCHECK(rtc::Thread::Current() == network_thread_);
     OnConfigReady(static_cast<PortConfiguration*>(message->pdata));
     break;
   case MSG_ALLOCATE:
-    ASSERT(rtc::Thread::Current() == network_thread_);
+    RTC_DCHECK(rtc::Thread::Current() == network_thread_);
     OnAllocate();
     break;
   case MSG_SEQUENCEOBJECTS_CREATED:
-    ASSERT(rtc::Thread::Current() == network_thread_);
+    RTC_DCHECK(rtc::Thread::Current() == network_thread_);
     OnAllocationSequenceObjectsCreated();
     break;
   case MSG_CONFIG_STOP:
-    ASSERT(rtc::Thread::Current() == network_thread_);
+    RTC_DCHECK(rtc::Thread::Current() == network_thread_);
     OnConfigStop();
     break;
   default:
-    ASSERT(false);
+    RTC_NOTREACHED();
   }
 }
 
@@ -460,7 +491,7 @@ void BasicPortAllocatorSession::OnConfigReady(PortConfiguration* config) {
 }
 
 void BasicPortAllocatorSession::OnConfigStop() {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
 
   // If any of the allocated ports have not completed the candidates allocation,
   // mark those as error. Since session doesn't need any new candidates
@@ -491,12 +522,12 @@ void BasicPortAllocatorSession::OnConfigStop() {
 }
 
 void BasicPortAllocatorSession::AllocatePorts() {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   network_thread_->Post(RTC_FROM_HERE, this, MSG_ALLOCATE);
 }
 
 void BasicPortAllocatorSession::OnAllocate() {
-  if (network_manager_started_)
+  if (network_manager_started_ && !IsStopped())
     DoAllocate();
 
   allocation_started_ = true;
@@ -505,7 +536,7 @@ void BasicPortAllocatorSession::OnAllocate() {
 std::vector<rtc::Network*> BasicPortAllocatorSession::GetNetworks() {
   std::vector<rtc::Network*> networks;
   rtc::NetworkManager* network_manager = allocator_->network_manager();
-  ASSERT(network_manager != nullptr);
+  RTC_DCHECK(network_manager != nullptr);
   // If the network permission state is BLOCKED, we just act as if the flag has
   // been passed in.
   if (network_manager->enumeration_permission() ==
@@ -520,6 +551,12 @@ std::vector<rtc::Network*> BasicPortAllocatorSession::GetNetworks() {
     network_manager->GetAnyAddressNetworks(&networks);
   } else {
     network_manager->GetNetworks(&networks);
+    // If network enumeration fails, use the ANY address as a fallback, so we
+    // can at least try gathering candidates using the default route chosen by
+    // the OS.
+    if (networks.empty()) {
+      network_manager->GetAnyAddressNetworks(&networks);
+    }
   }
   networks.erase(std::remove_if(networks.begin(), networks.end(),
                                 [this](rtc::Network* network) {
@@ -548,11 +585,11 @@ std::vector<rtc::Network*> BasicPortAllocatorSession::GetNetworks() {
 void BasicPortAllocatorSession::DoAllocate() {
   bool done_signal_needed = false;
   std::vector<rtc::Network*> networks = GetNetworks();
-
   if (networks.empty()) {
     LOG(LS_WARNING) << "Machine has no networks; no ports will be allocated";
     done_signal_needed = true;
   } else {
+    LOG(LS_INFO) << "Allocate ports on "<< networks.size() << " networks";
     PortConfiguration* config = configs_.empty() ? nullptr : configs_.back();
     for (uint32_t i = 0; i < networks.size(); ++i) {
       uint32_t sequence_flags = flags();
@@ -585,17 +622,12 @@ void BasicPortAllocatorSession::DoAllocate() {
 
       AllocationSequence* sequence =
           new AllocationSequence(this, networks[i], config, sequence_flags);
-      if (!sequence->Init()) {
-        delete sequence;
-        continue;
-      }
-      done_signal_needed = true;
       sequence->SignalPortAllocationComplete.connect(
           this, &BasicPortAllocatorSession::OnPortAllocationComplete);
-      if (!IsStopped()) {
-        sequence->Start();
-      }
+      sequence->Init();
+      sequence->Start();
       sequences_.push_back(sequence);
+      done_signal_needed = true;
     }
   }
   if (done_signal_needed) {
@@ -616,11 +648,25 @@ void BasicPortAllocatorSession::OnNetworksChanged() {
       failed_networks.push_back(sequence->network());
     }
   }
-  RemovePortsAndCandidates(failed_networks);
+  std::vector<PortData*> ports_to_prune = GetUnprunedPorts(failed_networks);
+  if (!ports_to_prune.empty()) {
+    LOG(LS_INFO) << "Prune " << ports_to_prune.size()
+                 << " ports because their networks were gone";
+    PrunePortsAndRemoveCandidates(ports_to_prune);
+  }
 
-  network_manager_started_ = true;
-  if (allocation_started_)
+  if (allocation_started_ && !IsStopped()) {
+    if (network_manager_started_) {
+      // If the network manager has started, it must be regathering.
+      SignalIceRegathering(this, IceRegatheringReason::NETWORK_CHANGE);
+    }
     DoAllocate();
+  }
+
+  if (!network_manager_started_) {
+    LOG(LS_INFO) << "Network manager has started";
+    network_manager_started_ = true;
+  }
 }
 
 void BasicPortAllocatorSession::DisableEquivalentPhases(
@@ -674,9 +720,9 @@ void BasicPortAllocatorSession::OnAllocationSequenceObjectsCreated() {
 
 void BasicPortAllocatorSession::OnCandidateReady(
     Port* port, const Candidate& c) {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   PortData* data = FindPort(port);
-  ASSERT(data != NULL);
+  RTC_DCHECK(data != NULL);
   LOG_J(LS_INFO, port) << "Gathered candidate: " << c.ToSensitiveString();
   // Discarding any candidate signal if port allocation status is
   // already done with gathering.
@@ -755,37 +801,40 @@ bool BasicPortAllocatorSession::PruneTurnPorts(Port* newly_pairable_turn_port) {
   RTC_CHECK(best_turn_port != nullptr);
 
   bool pruned = false;
-  std::vector<PortInterface*> pruned_ports;
+  std::vector<PortData*> ports_to_prune;
   for (PortData& data : ports_) {
     if (data.port()->Network()->name() == network_name &&
         data.port()->Type() == RELAY_PORT_TYPE && !data.pruned() &&
         ComparePort(data.port(), best_turn_port) < 0) {
-      data.set_pruned();
       pruned = true;
-      data.port()->Prune();
       if (data.port() != newly_pairable_turn_port) {
-        pruned_ports.push_back(data.port());
+        // These ports will be pruned in PrunePortsAndRemoveCandidates.
+        ports_to_prune.push_back(&data);
+      } else {
+        data.Prune();
       }
     }
   }
-  if (!pruned_ports.empty()) {
-    LOG(LS_INFO) << "Pruned " << pruned_ports.size() << " ports";
-    SignalPortsPruned(this, pruned_ports);
+
+  if (!ports_to_prune.empty()) {
+    LOG(LS_INFO) << "Prune " << ports_to_prune.size()
+                 << " low-priority TURN ports";
+    PrunePortsAndRemoveCandidates(ports_to_prune);
   }
   return pruned;
 }
 
 void BasicPortAllocatorSession::PruneAllPorts() {
   for (PortData& data : ports_) {
-    data.port()->Prune();
+    data.Prune();
   }
 }
 
 void BasicPortAllocatorSession::OnPortComplete(Port* port) {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   LOG_J(LS_INFO, port) << "Port completed gathering candidates.";
   PortData* data = FindPort(port);
-  ASSERT(data != NULL);
+  RTC_DCHECK(data != NULL);
 
   // Ignore any late signals.
   if (!data->inprogress()) {
@@ -799,10 +848,10 @@ void BasicPortAllocatorSession::OnPortComplete(Port* port) {
 }
 
 void BasicPortAllocatorSession::OnPortError(Port* port) {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   LOG_J(LS_INFO, port) << "Port encountered error while gathering candidates.";
   PortData* data = FindPort(port);
-  ASSERT(data != NULL);
+  RTC_DCHECK(data != NULL);
   // We might have already given up on this port and stopped it.
   if (!data->inprogress()) {
     return;
@@ -916,7 +965,7 @@ void BasicPortAllocatorSession::MaybeSignalCandidatesAllocationDone() {
 
 void BasicPortAllocatorSession::OnPortDestroyed(
     PortInterface* port) {
-  ASSERT(rtc::Thread::Current() == network_thread_);
+  RTC_DCHECK(rtc::Thread::Current() == network_thread_);
   for (std::vector<PortData>::iterator iter = ports_.begin();
        iter != ports_.end(); ++iter) {
     if (port == iter->port()) {
@@ -926,7 +975,7 @@ void BasicPortAllocatorSession::OnPortDestroyed(
       return;
     }
   }
-  ASSERT(false);
+  RTC_NOTREACHED();
 }
 
 BasicPortAllocatorSession::PortData* BasicPortAllocatorSession::FindPort(
@@ -940,32 +989,41 @@ BasicPortAllocatorSession::PortData* BasicPortAllocatorSession::FindPort(
   return NULL;
 }
 
-// Removes ports and candidates created on a given list of networks.
-void BasicPortAllocatorSession::RemovePortsAndCandidates(
+std::vector<BasicPortAllocatorSession::PortData*>
+BasicPortAllocatorSession::GetUnprunedPorts(
     const std::vector<rtc::Network*>& networks) {
-  std::vector<PortInterface*> ports_to_remove;
-  std::vector<Candidate> candidates_to_remove;
-  for (PortData& data : ports_) {
-    if (std::find(networks.begin(), networks.end(),
-                  data.sequence()->network()) == networks.end()) {
-      continue;
+  std::vector<PortData*> unpruned_ports;
+  for (PortData& port : ports_) {
+    if (!port.pruned() &&
+        std::find(networks.begin(), networks.end(),
+                  port.sequence()->network()) != networks.end()) {
+      unpruned_ports.push_back(&port);
     }
+  }
+  return unpruned_ports;
+}
+
+void BasicPortAllocatorSession::PrunePortsAndRemoveCandidates(
+    const std::vector<PortData*>& port_data_list) {
+  std::vector<PortInterface*> pruned_ports;
+  std::vector<Candidate> removed_candidates;
+  for (PortData* data : port_data_list) {
     // Prune the port so that it may be destroyed.
-    data.port()->Prune();
-    ports_to_remove.push_back(data.port());
-    if (data.has_pairable_candidate()) {
-      GetCandidatesFromPort(data, &candidates_to_remove);
+    data->Prune();
+    pruned_ports.push_back(data->port());
+    if (data->has_pairable_candidate()) {
+      GetCandidatesFromPort(*data, &removed_candidates);
       // Mark the port as having no pairable candidates so that its candidates
       // won't be removed multiple times.
-      data.set_has_pairable_candidate(false);
+      data->set_has_pairable_candidate(false);
     }
   }
-  if (!ports_to_remove.empty()) {
-    LOG(LS_INFO) << "Removed " << ports_to_remove.size() << " ports";
-    SignalPortsPruned(this, ports_to_remove);
+  if (!pruned_ports.empty()) {
+    SignalPortsPruned(this, pruned_ports);
   }
-  if (!candidates_to_remove.empty()) {
-    SignalCandidatesRemoved(this, candidates_to_remove);
+  if (!removed_candidates.empty()) {
+    LOG(LS_INFO) << "Removed " << removed_candidates.size() << " candidates";
+    SignalCandidatesRemoved(this, removed_candidates);
   }
 }
 
@@ -986,7 +1044,7 @@ AllocationSequence::AllocationSequence(BasicPortAllocatorSession* session,
       phase_(0) {
 }
 
-bool AllocationSequence::Init() {
+void AllocationSequence::Init() {
   if (IsFlagSet(PORTALLOCATOR_ENABLE_SHARED_SOCKET)) {
     udp_socket_.reset(session_->socket_factory()->CreateUdpSocket(
         rtc::SocketAddress(ip_, 0), session_->allocator()->min_port(),
@@ -998,7 +1056,6 @@ bool AllocationSequence::Init() {
     // Continuing if |udp_socket_| is NULL, as local TCP and RelayPort using TCP
     // are next available options to setup a communication channel.
   }
-  return true;
 }
 
 void AllocationSequence::Clear() {
@@ -1066,8 +1123,8 @@ void AllocationSequence::Stop() {
 }
 
 void AllocationSequence::OnMessage(rtc::Message* msg) {
-  ASSERT(rtc::Thread::Current() == session_->network_thread());
-  ASSERT(msg->message_id == MSG_ALLOCATION_PHASE);
+  RTC_DCHECK(rtc::Thread::Current() == session_->network_thread());
+  RTC_DCHECK(msg->message_id == MSG_ALLOCATION_PHASE);
 
   const char* const PHASE_NAMES[kNumPhases] = {
     "Udp", "Relay", "Tcp", "SslTcp"
@@ -1099,7 +1156,7 @@ void AllocationSequence::OnMessage(rtc::Message* msg) {
       break;
 
     default:
-      ASSERT(false);
+      RTC_NOTREACHED();
   }
 
   if (state() == kRunning) {
@@ -1235,7 +1292,7 @@ void AllocationSequence::CreateRelayPorts() {
 
   // If BasicPortAllocatorSession::OnAllocate left relay ports enabled then we
   // ought to have a relay list for them here.
-  ASSERT(config_ && !config_->relays.empty());
+  RTC_DCHECK(config_ && !config_->relays.empty());
   if (!(config_ && !config_->relays.empty())) {
     LOG(LS_WARNING)
         << "AllocationSequence: No relay server configured, skipping.";
@@ -1248,7 +1305,7 @@ void AllocationSequence::CreateRelayPorts() {
     } else if (relay.type == RELAY_TURN) {
       CreateTurnPort(relay);
     } else {
-      ASSERT(false);
+      RTC_NOTREACHED();
     }
   }
 }
@@ -1336,7 +1393,8 @@ void AllocationSequence::CreateTurnPort(const RelayServerConfig& config) {
                               *relay_port, config.credentials, config.priority,
                               session_->allocator()->origin());
     }
-    ASSERT(port != NULL);
+    RTC_DCHECK(port != NULL);
+    port->SetTlsCertPolicy(config.tls_cert_policy);
     session_->AddAllocatedPort(port, this, true);
   }
 }
@@ -1345,7 +1403,7 @@ void AllocationSequence::OnReadPacket(
     rtc::AsyncPacketSocket* socket, const char* data, size_t size,
     const rtc::SocketAddress& remote_addr,
     const rtc::PacketTime& packet_time) {
-  ASSERT(socket == udp_socket_.get());
+  RTC_DCHECK(socket == udp_socket_.get());
 
   bool turn_port_found = false;
 
@@ -1390,7 +1448,7 @@ void AllocationSequence::OnPortDestroyed(PortInterface* port) {
     turn_ports_.erase(it);
   } else {
     LOG(LS_ERROR) << "Unexpected OnPortDestroyed for nonexistent port.";
-    ASSERT(false);
+    RTC_NOTREACHED();
   }
 }
 

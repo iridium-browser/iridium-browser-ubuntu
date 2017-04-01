@@ -19,7 +19,7 @@
 
 #include <memory>
 
-#include "webrtc/test/channel_transport/channel_transport.h"
+#include "webrtc/voice_engine/test/channel_transport/channel_transport.h"
 #include "webrtc/voice_engine/test/auto_test/voe_test_defines.h"
 
 using namespace webrtc;
@@ -74,7 +74,6 @@ int VoECpuTest::DoTest() {
   CHECK(codec->SetRecPayloadType(channel, isac));
   CHECK(codec->SetSendCodec(channel, isac));
 
-  CHECK(base->StartReceive(channel));
   CHECK(base->StartPlayout(channel));
   CHECK(base->StartSend(channel));
   CHECK(file->StartPlayingFileAsMicrophone(channel, _mgr.AudioFilename(),
@@ -92,7 +91,6 @@ int VoECpuTest::DoTest() {
 
   CHECK(base->StopSend(channel));
   CHECK(base->StopPlayout(channel));
-  CHECK(base->StopReceive(channel));
 
   base->DeleteChannel(channel);
   CHECK(base->Terminate());

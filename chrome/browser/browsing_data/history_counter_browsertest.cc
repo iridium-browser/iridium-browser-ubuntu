@@ -14,7 +14,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/ui/browser.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/pref_names.h"
 #include "components/history/core/browser/history_service.h"
@@ -213,28 +213,6 @@ IN_PROC_BROWSER_TEST_F(HistoryCounterTest, PrefChanged) {
   EXPECT_EQ(2u, GetLocalResult());
 }
 
-// Tests that the counter does not count history if the deletion
-// preference is false.
-IN_PROC_BROWSER_TEST_F(HistoryCounterTest, PrefIsFalse) {
-  SetHistoryDeletionPref(false);
-  AddVisit("https://www.google.com");
-
-  Profile* profile = browser()->profile();
-
-  browsing_data::HistoryCounter counter(
-      GetHistoryService(),
-      base::Bind(&HistoryCounterTest::GetRealWebHistoryService,
-                 base::Unretained(this),
-                 base::Unretained(profile)),
-      ProfileSyncServiceFactory::GetForProfile(profile));
-
-  counter.Init(profile->GetPrefs(), base::Bind(&HistoryCounterTest::Callback,
-                                               base::Unretained(this)));
-  counter.Restart();
-
-  EXPECT_FALSE(counter.HasTrackedTasks());
-}
-
 // Tests that changing the deletion period restarts the counting, and that
 // the result takes visit dates into account.
 IN_PROC_BROWSER_TEST_F(HistoryCounterTest, PeriodChanged) {
@@ -383,7 +361,8 @@ IN_PROC_BROWSER_TEST_F(HistoryCounterTest, DISABLED_RestartOnSyncChange) {
   // Set up the Sync client.
   ASSERT_TRUE(SetupClients());
   static const int kFirstProfileIndex = 0;
-  ProfileSyncService* sync_service = GetSyncService(kFirstProfileIndex);
+  browser_sync::ProfileSyncService* sync_service =
+      GetSyncService(kFirstProfileIndex);
   Profile* profile = GetProfile(kFirstProfileIndex);
 
   // Set up the fake web history service and the counter.
@@ -453,7 +432,7 @@ IN_PROC_BROWSER_TEST_F(HistoryCounterTest, DISABLED_RestartOnSyncChange) {
   // active again.
 
   // Stopping the Sync service triggers a restart.
-  sync_service->RequestStop(sync_driver::SyncService::CLEAR_DATA);
+  sync_service->RequestStop(syncer::SyncService::CLEAR_DATA);
   WaitForCountingOrConfirmFinished();
 }
 

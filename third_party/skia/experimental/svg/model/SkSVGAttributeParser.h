@@ -15,6 +15,8 @@ public:
     SkSVGAttributeParser(const char[]);
 
     bool parseColor(SkSVGColorType*);
+    bool parseClipPath(SkSVGClip*);
+    bool parseFillRule(SkSVGFillRule*);
     bool parseNumber(SkSVGNumberType*);
     bool parseLength(SkSVGLength*);
     bool parseViewBox(SkSVGViewBoxType*);
@@ -23,6 +25,8 @@ public:
     bool parseLineCap(SkSVGLineCap*);
     bool parseLineJoin(SkSVGLineJoin*);
     bool parsePoints(SkSVGPointsType*);
+    bool parseIRI(SkSVGStringType*);
+    bool parseSpreadMethod(SkSVGSpreadMethod*);
 
 private:
     // Stack-only
@@ -41,6 +45,9 @@ private:
     bool parseLengthUnitToken(SkSVGLength::Unit*);
     bool parseNamedColorToken(SkColor*);
     bool parseHexColorToken(SkColor*);
+    bool parseColorComponentToken(int32_t*);
+    bool parseRGBColorToken(SkColor*);
+    bool parseFuncIRI(SkSVGStringType*);
 
     // Transform helpers
     bool parseMatrixToken(SkMatrix*);

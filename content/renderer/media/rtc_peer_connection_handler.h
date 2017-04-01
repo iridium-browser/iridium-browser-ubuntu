@@ -30,9 +30,9 @@ namespace blink {
 class WebFrame;
 class WebRTCAnswerOptions;
 class WebRTCDataChannelHandler;
+class WebRTCLegacyStats;
 class WebRTCOfferOptions;
 class WebRTCPeerConnectionHandlerClient;
-class WebRTCStats;
 }
 
 namespace content {
@@ -52,7 +52,7 @@ class CONTENT_EXPORT LocalRTCStatsResponse
   }
 
   virtual blink::WebRTCStatsResponse webKitStatsResponse() const;
-  virtual void addStats(const blink::WebRTCStats& stats);
+  virtual void addStats(const blink::WebRTCLegacyStats& stats);
 
  protected:
   ~LocalRTCStatsResponse() override {}
@@ -132,10 +132,8 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
   blink::WebRTCSessionDescription localDescription() override;
   blink::WebRTCSessionDescription remoteDescription() override;
 
-  bool updateICE(
-      const blink::WebRTCConfiguration& server_configuration) override;
-  void logSelectedRtcpMuxPolicy(
-      blink::RtcpMuxPolicy selectedRtcpMuxPolicy) override;
+  bool setConfiguration(
+      const blink::WebRTCConfiguration& configuration) override;
   bool addICECandidate(const blink::WebRTCICECandidate& candidate) override;
   bool addICECandidate(const blink::WebRTCVoidRequest& request,
                        const blink::WebRTCICECandidate& candidate) override;
@@ -146,6 +144,8 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
                  const blink::WebMediaConstraints& options) override;
   void removeStream(const blink::WebMediaStream& stream) override;
   void getStats(const blink::WebRTCStatsRequest& request) override;
+  void getStats(
+      std::unique_ptr<blink::WebRTCStatsReportCallback> callback) override;
   blink::WebRTCDataChannelHandler* createDataChannel(
       const blink::WebString& label,
       const blink::WebRTCDataChannelInit& init) override;
@@ -165,7 +165,8 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
                 blink::WebMediaStreamSource::Type track_type);
 
   // Tells the |client_| to close RTCPeerConnection.
-  void CloseClientPeerConnection();
+  // Make it virtual for testing purpose.
+  virtual void CloseClientPeerConnection();
 
   // Start recording an event log.
   void StartEventLog(IPC::PlatformFileForTransit file,
@@ -261,12 +262,18 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
   int num_local_candidates_ipv4_ = 0;
   int num_local_candidates_ipv6_ = 0;
 
-  // To make sure the observer is released after the native_peer_connection_,
-  // it has to come first.
+  // To make sure the observers are released after native_peer_connection_,
+  // they have to come first.
   scoped_refptr<Observer> peer_connection_observer_;
+  scoped_refptr<webrtc::UMAObserver> uma_observer_;
 
   // |native_peer_connection_| is the libjingle native PeerConnection object.
   scoped_refptr<webrtc::PeerConnectionInterface> native_peer_connection_;
+
+  // The last applied configuration. Used so that the constraints
+  // used when constructing the PeerConnection carry over when
+  // SetConfiguration is called.
+  webrtc::PeerConnectionInterface::RTCConfiguration configuration_;
 
   // Record info about the first SessionDescription from the local and
   // remote side to record UMA stats once both are set.  We only check
@@ -275,10 +282,9 @@ class CONTENT_EXPORT RTCPeerConnectionHandler
   std::unique_ptr<FirstSessionDescription> first_local_description_;
   std::unique_ptr<FirstSessionDescription> first_remote_description_;
 
-  typedef std::map<webrtc::MediaStreamInterface*,
-      content::RemoteMediaStreamImpl*> RemoteStreamMap;
-  RemoteStreamMap remote_streams_;
-  scoped_refptr<webrtc::UMAObserver> uma_observer_;
+  std::map<webrtc::MediaStreamInterface*,
+           std::unique_ptr<content::RemoteMediaStreamImpl>>
+      remote_streams_;
   base::TimeTicks ice_connection_checking_start_;
 
   // Track which ICE Connection state that this PeerConnection has gone through.

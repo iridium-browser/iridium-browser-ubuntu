@@ -12,13 +12,21 @@
 #include <sys/types.h>
 
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "base/macros.h"
+#include "base/optional.h"
 #include "media/base/media_export.h"
 #include "media/base/ranges.h"
 #include "media/base/video_codecs.h"
 #include "media/filters/h264_bit_reader.h"
+#include "ui/gfx/color_space.h"
+
+namespace gfx {
+class Rect;
+class Size;
+}
 
 namespace media {
 
@@ -150,6 +158,14 @@ struct MEDIA_EXPORT H264SPS {
   int time_scale;
   bool fixed_frame_rate_flag;
 
+  bool video_signal_type_present_flag;
+  int video_format;
+  bool video_full_range_flag;
+  bool colour_description_present_flag;
+  int colour_primaries;
+  int transfer_characteristics;
+  int matrix_coefficients;
+
   // TODO(posciak): actually parse these instead of ParseAndIgnoreHRDParameters.
   bool nal_hrd_parameters_present_flag;
   int cpb_cnt_minus1;
@@ -166,6 +182,13 @@ struct MEDIA_EXPORT H264SPS {
   bool low_delay_hrd_flag;
 
   int chroma_array_type;
+
+  // Helpers to compute frequently-used values. These methods return
+  // base::nullopt if they encounter integer overflow. They do not verify that
+  // the results are in-spec for the given profile or level.
+  base::Optional<gfx::Size> GetCodedSize() const;
+  base::Optional<gfx::Rect> GetVisibleRect() const;
+  gfx::ColorSpace GetColorSpace() const;
 };
 
 struct MEDIA_EXPORT H264PPS {
@@ -474,10 +497,8 @@ class MEDIA_EXPORT H264Parser {
   H264BitReader br_;
 
   // PPSes and SPSes stored for future reference.
-  typedef std::map<int, H264SPS*> SPSById;
-  typedef std::map<int, H264PPS*> PPSById;
-  SPSById active_SPSes_;
-  PPSById active_PPSes_;
+  std::map<int, std::unique_ptr<H264SPS>> active_SPSes_;
+  std::map<int, std::unique_ptr<H264PPS>> active_PPSes_;
 
   // Ranges of encrypted bytes in the buffer passed to
   // SetEncryptedStream().

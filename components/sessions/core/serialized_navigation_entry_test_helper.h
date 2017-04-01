@@ -46,8 +46,11 @@ extern const int kHttpStatusCode;
 extern const GURL kRedirectURL0;
 extern const GURL kRedirectURL1;
 extern const GURL kOtherURL;
-extern const int kPageID;
 extern const SerializedNavigationEntry::PasswordState kPasswordState;
+extern const std::string kExtendedInfoKey1;
+extern const std::string kExtendedInfoKey2;
+extern const std::string kExtendedInfoValue1;
+extern const std::string kExtendedInfoValue2;
 
 }  // namespace test_data
 

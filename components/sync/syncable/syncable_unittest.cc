@@ -13,6 +13,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/synchronization/condition_variable.h"
@@ -114,7 +115,7 @@ TestDirectory::TestDirectory(
     Encryptor* encryptor,
     const WeakHandle<UnrecoverableErrorHandler>& handler,
     TestBackingStore* backing_store)
-    : Directory(backing_store, handler, base::Closure(), NULL, NULL),
+    : Directory(backing_store, handler, base::Closure(), nullptr, nullptr),
       backing_store_(backing_store) {}
 
 TestDirectory::~TestDirectory() {}
@@ -132,7 +133,7 @@ TEST(OnDiskSyncableDirectory, MAYBE_FailInitialWrite) {
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath file_path =
-      temp_dir.path().Append(FILE_PATH_LITERAL("Test.sqlite3"));
+      temp_dir.GetPath().Append(FILE_PATH_LITERAL("Test.sqlite3"));
   std::string name = "user@x.com";
   NullDirectoryChangeDelegate delegate;
 
@@ -152,7 +153,7 @@ class OnDiskSyncableDirectoryTest : public SyncableDirectoryTest {
   void SetUp() override {
     SyncableDirectoryTest::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    file_path_ = temp_dir_.path().Append(FILE_PATH_LITERAL("Test.sqlite3"));
+    file_path_ = temp_dir_.GetPath().Append(FILE_PATH_LITERAL("Test.sqlite3"));
     base::DeleteFile(file_path_, false);
     CreateDirectory();
   }
@@ -342,10 +343,10 @@ TEST_F(OnDiskSyncableDirectoryTest,
   }
 
   dir()->SaveChanges();
-  dir().reset(
-      new Directory(new OnDiskDirectoryBackingStore(kDirectoryName, file_path_),
-                    MakeWeakHandle(unrecoverable_error_handler()->GetWeakPtr()),
-                    base::Closure(), NULL, NULL));
+  dir() = base::MakeUnique<Directory>(
+      new OnDiskDirectoryBackingStore(kDirectoryName, file_path_),
+      MakeWeakHandle(unrecoverable_error_handler()->GetWeakPtr()),
+      base::Closure(), nullptr, nullptr);
 
   ASSERT_TRUE(dir().get());
   ASSERT_EQ(OPENED, dir()->Open(kDirectoryName, directory_change_delegate(),
@@ -551,12 +552,12 @@ class SyncableDirectoryManagement : public testing::Test {
 
 TEST_F(SyncableDirectoryManagement, TestFileRelease) {
   base::FilePath path =
-      temp_dir_.path().Append(Directory::kSyncDatabaseFilename);
+      temp_dir_.GetPath().Append(Directory::kSyncDatabaseFilename);
 
   {
     Directory dir(new OnDiskDirectoryBackingStore("ScopeTest", path),
-                  MakeWeakHandle(handler_.GetWeakPtr()), base::Closure(), NULL,
-                  NULL);
+                  MakeWeakHandle(handler_.GetWeakPtr()), base::Closure(),
+                  nullptr, nullptr);
     DirOpenResult result =
         dir.Open("ScopeTest", &delegate_, NullTransactionObserver());
     ASSERT_EQ(result, OPENED);

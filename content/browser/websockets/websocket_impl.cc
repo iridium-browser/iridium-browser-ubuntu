@@ -22,8 +22,10 @@
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/ssl/ssl_error_handler.h"
 #include "content/browser/ssl/ssl_manager.h"
+#include "content/browser/websockets/websocket_handshake_request_info_impl.h"
 #include "content/public/browser/storage_partition.h"
 #include "ipc/ipc_message.h"
+#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
@@ -43,38 +45,38 @@ namespace {
 
 typedef net::WebSocketEventInterface::ChannelState ChannelState;
 
-// Convert a mojom::WebSocketMessageType to a
+// Convert a blink::mojom::WebSocketMessageType to a
 // net::WebSocketFrameHeader::OpCode
 net::WebSocketFrameHeader::OpCode MessageTypeToOpCode(
-    mojom::WebSocketMessageType type) {
-  DCHECK(type == mojom::WebSocketMessageType::CONTINUATION ||
-         type == mojom::WebSocketMessageType::TEXT ||
-         type == mojom::WebSocketMessageType::BINARY);
+    blink::mojom::WebSocketMessageType type) {
+  DCHECK(type == blink::mojom::WebSocketMessageType::CONTINUATION ||
+         type == blink::mojom::WebSocketMessageType::TEXT ||
+         type == blink::mojom::WebSocketMessageType::BINARY);
   typedef net::WebSocketFrameHeader::OpCode OpCode;
   // These compile asserts verify that the same underlying values are used for
   // both types, so we can simply cast between them.
   static_assert(
-      static_cast<OpCode>(mojom::WebSocketMessageType::CONTINUATION) ==
+      static_cast<OpCode>(blink::mojom::WebSocketMessageType::CONTINUATION) ==
           net::WebSocketFrameHeader::kOpCodeContinuation,
       "enum values must match for opcode continuation");
   static_assert(
-      static_cast<OpCode>(mojom::WebSocketMessageType::TEXT) ==
+      static_cast<OpCode>(blink::mojom::WebSocketMessageType::TEXT) ==
           net::WebSocketFrameHeader::kOpCodeText,
       "enum values must match for opcode text");
   static_assert(
-      static_cast<OpCode>(mojom::WebSocketMessageType::BINARY) ==
+      static_cast<OpCode>(blink::mojom::WebSocketMessageType::BINARY) ==
           net::WebSocketFrameHeader::kOpCodeBinary,
       "enum values must match for opcode binary");
   return static_cast<OpCode>(type);
 }
 
-mojom::WebSocketMessageType OpCodeToMessageType(
+blink::mojom::WebSocketMessageType OpCodeToMessageType(
     net::WebSocketFrameHeader::OpCode opCode) {
   DCHECK(opCode == net::WebSocketFrameHeader::kOpCodeContinuation ||
          opCode == net::WebSocketFrameHeader::kOpCodeText ||
          opCode == net::WebSocketFrameHeader::kOpCodeBinary);
   // This cast is guaranteed valid by the static_assert() statements above.
-  return static_cast<mojom::WebSocketMessageType>(opCode);
+  return static_cast<blink::mojom::WebSocketMessageType>(opCode);
 }
 
 }  // namespace
@@ -89,11 +91,13 @@ class WebSocketImpl::WebSocketEventHandler final
 
   // net::WebSocketEventInterface implementation
 
+  void OnCreateURLRequest(net::URLRequest* url_request) override;
   ChannelState OnAddChannelResponse(const std::string& selected_subprotocol,
                                     const std::string& extensions) override;
   ChannelState OnDataFrame(bool fin,
                            WebSocketMessageType type,
-                           const std::vector<char>& data) override;
+                           scoped_refptr<net::IOBuffer> buffer,
+                           size_t buffer_size) override;
   ChannelState OnClosingHandshake() override;
   ChannelState OnFlowControl(int64_t quota) override;
   ChannelState OnDropChannel(bool was_clean,
@@ -149,6 +153,12 @@ WebSocketImpl::WebSocketEventHandler::~WebSocketEventHandler() {
            << reinterpret_cast<void*>(this);
 }
 
+void WebSocketImpl::WebSocketEventHandler::OnCreateURLRequest(
+    net::URLRequest* url_request) {
+  WebSocketHandshakeRequestInfoImpl::CreateInfoAndAssociateWithRequest(
+      impl_->child_id_, impl_->frame_id_, url_request);
+}
+
 ChannelState WebSocketImpl::WebSocketEventHandler::OnAddChannelResponse(
     const std::string& selected_protocol,
     const std::string& extensions) {
@@ -167,15 +177,19 @@ ChannelState WebSocketImpl::WebSocketEventHandler::OnAddChannelResponse(
 ChannelState WebSocketImpl::WebSocketEventHandler::OnDataFrame(
     bool fin,
     net::WebSocketFrameHeader::OpCode type,
-    const std::vector<char>& data) {
+    scoped_refptr<net::IOBuffer> buffer,
+    size_t buffer_size) {
   DVLOG(3) << "WebSocketEventHandler::OnDataFrame @"
            << reinterpret_cast<void*>(this)
            << " fin=" << fin
-           << " type=" << type << " data is " << data.size() << " bytes";
+           << " type=" << type << " data is " << buffer_size << " bytes";
 
   // TODO(darin): Avoid this copy.
-  std::vector<uint8_t> data_to_pass(data.size());
-  std::copy(data.begin(), data.end(), data_to_pass.begin());
+  std::vector<uint8_t> data_to_pass(buffer_size);
+  if (buffer_size > 0) {
+    std::copy(buffer->data(), buffer->data() + buffer_size,
+              data_to_pass.begin());
+  }
 
   impl_->client_->OnDataFrame(fin, OpCodeToMessageType(type), data_to_pass);
 
@@ -244,12 +258,12 @@ ChannelState WebSocketImpl::WebSocketEventHandler::OnStartOpeningHandshake(
   if (!should_send)
     return WebSocketEventInterface::CHANNEL_ALIVE;
 
-  mojom::WebSocketHandshakeRequestPtr request_to_pass(
-      mojom::WebSocketHandshakeRequest::New());
+  blink::mojom::WebSocketHandshakeRequestPtr request_to_pass(
+      blink::mojom::WebSocketHandshakeRequest::New());
   request_to_pass->url.Swap(&request->url);
   net::HttpRequestHeaders::Iterator it(request->headers);
   while (it.GetNext()) {
-    mojom::HttpHeaderPtr header(mojom::HttpHeader::New());
+    blink::mojom::HttpHeaderPtr header(blink::mojom::HttpHeader::New());
     header->name = it.name();
     header->value = it.value();
     request_to_pass->headers.push_back(std::move(header));
@@ -276,15 +290,15 @@ ChannelState WebSocketImpl::WebSocketEventHandler::OnFinishOpeningHandshake(
   if (!should_send)
     return WebSocketEventInterface::CHANNEL_ALIVE;
 
-  mojom::WebSocketHandshakeResponsePtr response_to_pass(
-      mojom::WebSocketHandshakeResponse::New());
+  blink::mojom::WebSocketHandshakeResponsePtr response_to_pass(
+      blink::mojom::WebSocketHandshakeResponse::New());
   response_to_pass->url.Swap(&response->url);
   response_to_pass->status_code = response->status_code;
   response_to_pass->status_text = response->status_text;
   size_t iter = 0;
   std::string name, value;
   while (response->headers->EnumerateHeaderLines(&iter, &name, &value)) {
-    mojom::HttpHeaderPtr header(mojom::HttpHeader::New());
+    blink::mojom::HttpHeaderPtr header(blink::mojom::HttpHeader::New());
     header->name = name;
     header->value = value;
     response_to_pass->headers.push_back(std::move(header));
@@ -348,15 +362,16 @@ void WebSocketImpl::WebSocketEventHandler::SSLErrorHandlerDelegate::
   callbacks_->ContinueSSLRequest();
 }
 
-WebSocketImpl::WebSocketImpl(
-    Delegate* delegate,
-    mojom::WebSocketRequest request,
-    int frame_id,
-    base::TimeDelta delay)
+WebSocketImpl::WebSocketImpl(Delegate* delegate,
+                             blink::mojom::WebSocketRequest request,
+                             int child_id,
+                             int frame_id,
+                             base::TimeDelta delay)
     : delegate_(delegate),
       binding_(this, std::move(request)),
       delay_(delay),
       pending_flow_control_quota_(0),
+      child_id_(child_id),
       frame_id_(frame_id),
       handshake_succeeded_(false),
       weak_ptr_factory_(this) {
@@ -377,7 +392,7 @@ void WebSocketImpl::AddChannelRequest(
     const url::Origin& origin,
     const GURL& first_party_for_cookies,
     const std::string& user_agent_override,
-    mojom::WebSocketClientPtr client) {
+    blink::mojom::WebSocketClientPtr client) {
   DVLOG(3) << "WebSocketImpl::AddChannelRequest @"
            << reinterpret_cast<void*>(this)
            << " socket_url=\"" << socket_url << "\" requested_protocols=\""
@@ -415,7 +430,7 @@ void WebSocketImpl::AddChannelRequest(
 }
 
 void WebSocketImpl::SendFrame(bool fin,
-                              mojom::WebSocketMessageType type,
+                              blink::mojom::WebSocketMessageType type,
                               const std::vector<uint8_t>& data) {
   DVLOG(3) << "WebSocketImpl::SendFrame @"
            << reinterpret_cast<void*>(this) << " fin=" << fin
@@ -435,10 +450,11 @@ void WebSocketImpl::SendFrame(bool fin,
   }
 
   // TODO(darin): Avoid this copy.
-  std::vector<char> data_to_pass(data.size());
-  std::copy(data.begin(), data.end(), data_to_pass.begin());
+  scoped_refptr<net::IOBuffer> data_to_pass(new net::IOBuffer(data.size()));
+  std::copy(data.begin(), data.end(), data_to_pass->data());
 
-  channel_->SendFrame(fin, MessageTypeToOpCode(type), data_to_pass);
+  channel_->SendFrame(fin, MessageTypeToOpCode(type), std::move(data_to_pass),
+                      data.size());
 }
 
 void WebSocketImpl::SendFlowControl(int64_t quota) {

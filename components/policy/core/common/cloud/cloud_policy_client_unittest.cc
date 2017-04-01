@@ -20,6 +20,7 @@
 #include "base/message_loop/message_loop.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_device_management_service.h"
+#include "components/policy/core/common/cloud/mock_signing_service.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
@@ -53,8 +54,6 @@ const char kAssetId[] = "fake-asset-id";
 const char kLocation[] = "fake-location";
 const char kGcmID[] = "fake-gcm-id";
 const char kEnrollmentCertificate[] = "fake-certificate";
-const char kSignedDataNonce[] = "+nonce";
-const char kSignature[] = "fake-signature";
 
 const int64_t kAgeOfCommand = 123123123;
 const int64_t kLastCommandId = 123456789;
@@ -81,42 +80,6 @@ class MockRemoteCommandsObserver {
   MOCK_METHOD2(OnRemoteCommandsFetched,
                void(DeviceManagementStatus,
                     const std::vector<em::RemoteCommand>&));
-};
-
-// A mock SigningService.
-class FakeSigningService : public CloudPolicyClient::SigningService {
- public:
-  static void SignRegistrationData(
-      em::CertificateBasedDeviceRegistrationData* registration_data,
-      em::SignedData* signed_data) {
-    DoSignData(registration_data->SerializeAsString(), signed_data);
-  }
-
-  void SignData(const std::string& data, const SigningCallback& callback)
-      override {
-    em::SignedData signed_data;
-    const bool success = !ShouldSignDataFail();
-    if (success)
-      DoSignData(data, &signed_data);
-    callback.Run(success, signed_data);
-  }
-
- protected:
-  virtual bool ShouldSignDataFail() const {
-    return false;
-  }
-
- private:
-  static void DoSignData(const std::string& data, em::SignedData* signed_data) {
-    signed_data->set_data(data + kSignedDataNonce);
-    signed_data->set_signature(kSignature);
-    signed_data->set_extra_data_bytes(sizeof(kSignedDataNonce) - 1);
-  }
-};
-
-class MockSigningService : public FakeSigningService {
- public:
-  MOCK_CONST_METHOD0(ShouldSignDataFail, bool());
 };
 
 }  // namespace
@@ -147,9 +110,9 @@ class CloudPolicyClientTest : public testing::Test {
         em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION);
 
     em::CertificateBasedDeviceRegisterRequest* cert_based_register_request =
-        cert_based_registration_request_.mutable_cert_based_register_request();
-    // We are not testing signature.
-    FakeSigningService::SignRegistrationData(&data,
+        cert_based_registration_request_
+        .mutable_certificate_based_register_request();
+    fake_signing_service_.SignDataSynchronously(data.SerializeAsString(),
         cert_based_register_request->mutable_signed_request());
 
     em::PolicyFetchRequest* policy_fetch_request =
@@ -177,7 +140,7 @@ class CloudPolicyClientTest : public testing::Test {
     em::RemoteCommandResult* command_result =
         remote_command_request_.mutable_remote_command_request()
             ->add_command_results();
-    command_result->set_unique_id(kLastCommandId);
+    command_result->set_command_id(kLastCommandId);
     command_result->set_result(
         em::RemoteCommandResult_ResultType_RESULT_SUCCESS);
     command_result->set_payload(kResultPayload);
@@ -188,7 +151,7 @@ class CloudPolicyClientTest : public testing::Test {
             ->add_commands();
     command->set_age_of_command(kAgeOfCommand);
     command->set_payload(kPayload);
-    command->set_unique_id(kLastCommandId + 1);
+    command->set_command_id(kLastCommandId + 1);
     command->set_type(em::RemoteCommand_Type_COMMAND_ECHO_TEST);
 
     attribute_update_permission_request_.
@@ -228,11 +191,9 @@ class CloudPolicyClientTest : public testing::Test {
 
     request_context_ =
         new net::TestURLRequestContextGetter(loop_.task_runner());
-    client_.reset(new CloudPolicyClient(kMachineID, kMachineModel,
-                                        kPolicyVerificationKeyHash,
-                                        &service_,
-                                        request_context_,
-                                        &signing_service_));
+    client_ = base::MakeUnique<CloudPolicyClient>(kMachineID, kMachineModel,
+                                                  &service_, request_context_,
+                                                  &fake_signing_service_);
     client_->AddPolicyTypeToFetch(policy_type_, std::string());
     client_->AddObserver(&observer_);
   }
@@ -394,7 +355,7 @@ class CloudPolicyClientTest : public testing::Test {
   MockDeviceManagementService service_;
   StrictMock<MockCloudPolicyClientObserver> observer_;
   StrictMock<MockStatusCallbackObserver> callback_observer_;
-  MockSigningService signing_service_;
+  FakeSigningService fake_signing_service_;
   std::unique_ptr<CloudPolicyClient> client_;
   // Pointer to the client's request context.
   scoped_refptr<net::URLRequestContextGetter> request_context_;
@@ -440,8 +401,7 @@ TEST_F(CloudPolicyClientTest, RegistrationAndPolicyFetch) {
 
 TEST_F(CloudPolicyClientTest, RegistrationWithCertificateAndPolicyFetch) {
   ExpectCertBasedRegistration();
-  EXPECT_CALL(signing_service_, ShouldSignDataFail())
-      .WillOnce(Return(false));
+  fake_signing_service_.set_success(true);
   EXPECT_CALL(observer_, OnRegistrationStateChanged(_));
   client_->RegisterWithCertificate(em::DeviceRegisterRequest::DEVICE,
       em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION,
@@ -456,13 +416,12 @@ TEST_F(CloudPolicyClientTest, RegistrationWithCertificateAndPolicyFetch) {
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
   CheckPolicyResponse();
 }
+
 TEST_F(CloudPolicyClientTest, RegistrationWithCertificateFailToSignRequest) {
-  EXPECT_CALL(signing_service_, ShouldSignDataFail())
-      .WillOnce(Return(true));
+  fake_signing_service_.set_success(false);
   EXPECT_CALL(observer_, OnClientError(_));
   client_->RegisterWithCertificate(em::DeviceRegisterRequest::DEVICE,
-      // TODO(drcrash): Use FLAVOR_ATTESTATION after 2186623002 has landed.
-      em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_MANUAL,
+      em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION,
       kEnrollmentCertificate, std::string(), std::string(), std::string());
   EXPECT_FALSE(client_->is_registered());
   EXPECT_EQ(DM_STATUS_CANNOT_SIGN_REQUEST, client_->status());
@@ -954,7 +913,7 @@ TEST_F(CloudPolicyClientTest, FetchRemoteCommands) {
   const std::vector<em::RemoteCommandResult> command_results(
       1, remote_command_request_.remote_command_request().command_results(0));
   client_->FetchRemoteCommands(
-      base::WrapUnique(new RemoteCommandJob::UniqueIDType(kLastCommandId)),
+      base::MakeUnique<RemoteCommandJob::UniqueIDType>(kLastCommandId),
       command_results, callback);
 
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());

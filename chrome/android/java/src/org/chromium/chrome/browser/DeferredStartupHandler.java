@@ -29,8 +29,8 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.browser.bookmarkswidget.BookmarkWidgetProvider;
-import org.chromium.chrome.browser.crash.CrashFileManager;
 import org.chromium.chrome.browser.crash.MinidumpUploadService;
+import org.chromium.chrome.browser.init.ProcessInitializationHandler;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.media.MediaCaptureNotificationService;
 import org.chromium.chrome.browser.metrics.LaunchMetrics;
@@ -47,6 +47,8 @@ import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager
 import org.chromium.chrome.browser.share.ShareHelper;
 import org.chromium.chrome.browser.webapps.ChromeWebApkHost;
 import org.chromium.chrome.browser.webapps.WebApkVersionManager;
+import org.chromium.chrome.browser.webapps.WebappRegistry;
+import org.chromium.components.minidump_uploader.CrashFileManager;
 import org.chromium.content.browser.ChildProcessLauncher;
 
 import java.util.ArrayList;
@@ -75,7 +77,6 @@ public class DeferredStartupHandler {
     private long mDeferredStartupDuration;
     private long mMaxTaskDuration;
     private final Context mAppContext;
-    private final LocaleManager mLocaleManager;
 
     private final Queue<Runnable> mDeferredTasks;
 
@@ -90,7 +91,6 @@ public class DeferredStartupHandler {
     private DeferredStartupHandler() {
         mAppContext = ContextUtils.getApplicationContext();
         mDeferredTasks = new LinkedList<>();
-        mLocaleManager = ((ChromeApplication) mAppContext).createLocaleManager();
     }
 
     /**
@@ -137,7 +137,7 @@ public class DeferredStartupHandler {
                 "UMA.Debug.EnableCrashUpload.DeferredStartUpCompleteTime",
                 SystemClock.uptimeMillis() - UmaUtils.getForegroundStartTime(),
                 TimeUnit.MILLISECONDS);
-        mLocaleManager.recordStartupMetrics();
+        LocaleManager.getInstance().recordStartupMetrics();
     }
 
     /**
@@ -193,7 +193,7 @@ public class DeferredStartupHandler {
 
                 PowerMonitor.create(mAppContext);
 
-                ShareHelper.clearSharedImages(mAppContext);
+                ShareHelper.clearSharedImages();
 
                 OfflinePageUtils.clearSharedOfflineFiles(mAppContext);
             }
@@ -229,8 +229,7 @@ public class DeferredStartupHandler {
             }
         });
 
-        // This call will add its own tasks to the queue.
-        application.initializeSharedClasses();
+        ProcessInitializationHandler.getInstance().initializeDeferredStartupTasks();
     }
 
     private void initAsyncDiskTask() {
@@ -240,6 +239,11 @@ public class DeferredStartupHandler {
                 try {
                     TraceEvent.begin("ChromeBrowserInitializer.onDeferredStartup.doInBackground");
                     long asyncTaskStartTime = SystemClock.uptimeMillis();
+
+                    // Initialize the WebappRegistry if it's not already initialized. Must be in
+                    // async task due to shared preferences disk access on N.
+                    WebappRegistry.getInstance();
+
                     boolean crashDumpDisabled = CommandLine.getInstance().hasSwitch(
                             ChromeSwitches.DISABLE_CRASH_DUMP_UPLOAD);
                     if (!crashDumpDisabled) {
@@ -278,10 +282,20 @@ public class DeferredStartupHandler {
                             SystemClock.uptimeMillis() - asyncTaskStartTime,
                             TimeUnit.MILLISECONDS);
 
+                    // Warm up all web app shared prefs. This must be run after the WebappRegistry
+                    // instance is initialized.
+                    WebappRegistry.warmUpSharedPrefs();
+
                     return null;
                 } finally {
                     TraceEvent.end("ChromeBrowserInitializer.onDeferredStartup.doInBackground");
                 }
+            }
+
+            @Override
+            protected void onPostExecute(Void params) {
+                // Must be run on the UI thread after the WebappRegistry has been completely warmed.
+                WebappRegistry.getInstance().unregisterOldWebapps(System.currentTimeMillis());
             }
         }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
@@ -327,6 +341,7 @@ public class DeferredStartupHandler {
         }
     }
 
+    @SuppressWarnings("deprecation")  // InputMethodSubtype.getLocale() deprecated in API 24
     private void recordKeyboardLocaleUma() {
         InputMethodManager imm =
                 (InputMethodManager) mAppContext.getSystemService(Context.INPUT_METHOD_SERVICE);

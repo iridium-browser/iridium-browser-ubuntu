@@ -24,8 +24,8 @@
 #include "ui/base/win/shell.h"
 #endif
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
-#include "ui/gfx/x/x11_switches.h"
+#if defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
 #endif
 
 namespace extensions {
@@ -91,6 +91,10 @@ IN_PROC_BROWSER_TEST_F(ExperimentalPlatformAppBrowserTest, WindowsApiSetIcon) {
 #if defined(TOOLKIT_VIEWS) && !(defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA))
 
 IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest, WindowsApiProperties) {
+#if defined(OS_MACOSX)
+  if (base::mac::IsOS10_10())
+    return;  // Fails when swarmed. http://crbug.com/660582
+#endif
   EXPECT_TRUE(
       RunExtensionTest("platform_apps/windows_api_properties")) << message_;
 }
@@ -151,13 +155,6 @@ IN_PROC_BROWSER_TEST_F(PlatformAppBrowserTest,
   }
 #endif  // OS_WIN
 #endif  // USE_AURA && (OS_CHROMEOS || !OS_LINUX)
-
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
-  if (base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kWindowDepth) == "32") {
-    test_dir = kHasAlphaDir;
-  }
-#endif  // USE_X11 && !OS_CHROMEOS
 
   EXPECT_TRUE(RunPlatformAppTest(test_dir)) << message_;
 }

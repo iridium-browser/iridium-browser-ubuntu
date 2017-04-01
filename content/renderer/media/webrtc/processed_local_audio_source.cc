@@ -5,7 +5,7 @@
 #include "content/renderer/media/webrtc/processed_local_audio_source.h"
 
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/media/media_stream_audio_processor_options.h"
@@ -29,10 +29,14 @@ void* const kClassIdentifier = const_cast<void**>(&kClassIdentifier);
 ProcessedLocalAudioSource::ProcessedLocalAudioSource(
     int consumer_render_frame_id,
     const StreamDeviceInfo& device_info,
+    const blink::WebMediaConstraints& constraints,
+    const ConstraintsCallback& started_callback,
     PeerConnectionDependencyFactory* factory)
     : MediaStreamAudioSource(true /* is_local_source */),
       consumer_render_frame_id_(consumer_render_frame_id),
       pc_factory_(factory),
+      constraints_(constraints),
+      started_callback_(started_callback),
       volume_(0),
       allow_invalid_render_frame_id_for_testing_(false) {
   DCHECK(pc_factory_);
@@ -51,14 +55,6 @@ ProcessedLocalAudioSource* ProcessedLocalAudioSource::From(
   if (source && source->GetClassIdentifier() == kClassIdentifier)
     return static_cast<ProcessedLocalAudioSource*>(source);
   return nullptr;
-}
-
-void ProcessedLocalAudioSource::SetSourceConstraints(
-    const blink::WebMediaConstraints& constraints) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!constraints.isNull());
-  DCHECK(!source_);
-  constraints_ = constraints;
 }
 
 void* ProcessedLocalAudioSource::GetClassIdentifier() const {
@@ -263,6 +259,10 @@ int ProcessedLocalAudioSource::MaxVolume() const {
   return WebRtcAudioDeviceImpl::kMaxVolumeLevel;
 }
 
+void ProcessedLocalAudioSource::OnCaptureStarted() {
+  started_callback_.Run(this, MEDIA_DEVICE_OK, "");
+}
+
 void ProcessedLocalAudioSource::Capture(const media::AudioBus* audio_bus,
                                         int audio_delay_milliseconds,
                                         double volume,
@@ -339,6 +339,7 @@ void ProcessedLocalAudioSource::Capture(const media::AudioBus* audio_bus,
 
 void ProcessedLocalAudioSource::OnCaptureError(const std::string& message) {
   WebRtcLogMessage("ProcessedLocalAudioSource::OnCaptureError: " + message);
+  StopSourceOnError(message);
 }
 
 media::AudioParameters ProcessedLocalAudioSource::GetInputFormat() const {

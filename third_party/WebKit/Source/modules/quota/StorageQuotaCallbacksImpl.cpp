@@ -30,39 +30,42 @@
 
 #include "modules/quota/StorageQuotaCallbacksImpl.h"
 
-#include "core/dom/DOMError.h"
+#include "modules/quota/DOMError.h"
 #include "modules/quota/StorageInfo.h"
 
 namespace blink {
 
-StorageQuotaCallbacksImpl::StorageQuotaCallbacksImpl(ScriptPromiseResolver* resolver)
-    : m_resolver(resolver)
-{
+StorageQuotaCallbacksImpl::StorageQuotaCallbacksImpl(
+    ScriptPromiseResolver* resolver)
+    : m_resolver(resolver) {}
+
+StorageQuotaCallbacksImpl::~StorageQuotaCallbacksImpl() {}
+
+void StorageQuotaCallbacksImpl::didQueryStorageUsageAndQuota(
+    unsigned long long usageInBytes,
+    unsigned long long quotaInBytes) {
+  StorageInfo info;
+  info.setUsage(usageInBytes);
+  info.setQuota(quotaInBytes);
+  m_resolver->resolve(info);
 }
 
-StorageQuotaCallbacksImpl::~StorageQuotaCallbacksImpl()
-{
+void StorageQuotaCallbacksImpl::didGrantStorageQuota(
+    unsigned long long usageInBytes,
+    unsigned long long grantedQuotaInBytes) {
+  StorageInfo info;
+  info.setUsage(usageInBytes);
+  info.setQuota(grantedQuotaInBytes);
+  m_resolver->resolve(info);
 }
 
-void StorageQuotaCallbacksImpl::didQueryStorageUsageAndQuota(unsigned long long usageInBytes, unsigned long long quotaInBytes)
-{
-    m_resolver->resolve(StorageInfo::create(usageInBytes, quotaInBytes));
+void StorageQuotaCallbacksImpl::didFail(WebStorageQuotaError error) {
+  m_resolver->reject(DOMError::create(static_cast<ExceptionCode>(error)));
 }
 
-void StorageQuotaCallbacksImpl::didGrantStorageQuota(unsigned long long usageInBytes, unsigned long long grantedQuotaInBytes)
-{
-    m_resolver->resolve(StorageInfo::create(usageInBytes, grantedQuotaInBytes));
+DEFINE_TRACE(StorageQuotaCallbacksImpl) {
+  visitor->trace(m_resolver);
+  StorageQuotaCallbacks::trace(visitor);
 }
 
-void StorageQuotaCallbacksImpl::didFail(WebStorageQuotaError error)
-{
-    m_resolver->reject(DOMError::create(static_cast<ExceptionCode>(error)));
-}
-
-DEFINE_TRACE(StorageQuotaCallbacksImpl)
-{
-    visitor->trace(m_resolver);
-    StorageQuotaCallbacks::trace(visitor);
-}
-
-} // namespace blink
+}  // namespace blink

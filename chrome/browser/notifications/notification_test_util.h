@@ -15,6 +15,7 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 
+class Browser;
 class Profile;
 
 // NotificationDelegate which does nothing, useful for testing when
@@ -49,6 +50,12 @@ class StubNotificationUIManager : public NotificationUIManager {
   // added to the Notification UI manager. Will be invoked on the UI thread.
   void SetNotificationAddedCallback(const base::Closure& callback);
 
+  // Emulates clearing a notification from the notification center
+  // without running any of the delegates. This may happen when native
+  // notification centers don't inform us about closed notifications,
+  // for example as a result of a system reboot.
+  bool SilentDismissById(const std::string& delegate_id, ProfileID profile_id);
+
   // NotificationUIManager implementation.
   void Add(const Notification& notification, Profile* profile) override;
   bool Update(const Notification& notification, Profile* profile) override;
@@ -71,6 +78,21 @@ class StubNotificationUIManager : public NotificationUIManager {
   base::Closure notification_added_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(StubNotificationUIManager);
+};
+
+// Helper class that has to be created in the stack to check if the fullscreen
+// setting of a browser is in the desired state.
+class FullscreenStateWaiter {
+ public:
+  FullscreenStateWaiter(Browser* browser, bool desired_state);
+
+  void Wait();
+
+ private:
+  Browser* browser_;
+  bool desired_state_;
+
+  DISALLOW_COPY_AND_ASSIGN(FullscreenStateWaiter);
 };
 
 #endif  // CHROME_BROWSER_NOTIFICATIONS_NOTIFICATION_TEST_UTIL_H_

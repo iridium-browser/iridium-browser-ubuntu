@@ -23,10 +23,6 @@
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 
-namespace aura {
-class Window;
-}
-
 namespace gfx {
 class Rect;
 }
@@ -37,12 +33,10 @@ class Widget;
 
 namespace ash {
 class PanelCalloutWidget;
-class Shelf;
-class ShelfLayoutManager;
 class WmShelf;
 
 namespace wm {
-class WmRootWindowController;
+class RootWindowController;
 }
 
 // PanelLayoutManager is responsible for organizing panels within the
@@ -171,11 +165,12 @@ class ASH_EXPORT PanelLayoutManager
 
   // Overridden from keyboard::KeyboardControllerObserver:
   void OnKeyboardBoundsChanging(const gfx::Rect& keyboard_bounds) override;
+  void OnKeyboardClosed() override;
 
   // Parent window associated with this layout manager.
   WmWindow* panel_container_;
 
-  WmRootWindowController* root_window_controller_;
+  RootWindowController* root_window_controller_;
 
   // Protect against recursive calls to OnWindowAddedToLayout().
   bool in_add_window_;

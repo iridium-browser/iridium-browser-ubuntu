@@ -49,16 +49,16 @@ protected:
         fDevice.endSheet();
     }
 
-    bool onClose(SkWStream*) override {
+    void onClose(SkWStream*) override {
         SkASSERT(!fCanvas.get());
-        return fDevice.endPortfolio();
+        (void)fDevice.endPortfolio();
     }
 
     void onAbort() override {}
 
 private:
     SkXPSDevice fDevice;
-    SkAutoTUnref<SkCanvas> fCanvas;
+    std::unique_ptr<SkCanvas> fCanvas;
     SkVector fUnitsPerMeter;
     SkVector fPixelsPerMeter;
 };
@@ -72,7 +72,7 @@ sk_sp<SkDocument> SkDocument::MakeXPS(SkWStream* stream, SkScalar dpi) {
 static void delete_wstream(SkWStream* stream, bool aborted) { delete stream; }
 
 sk_sp<SkDocument> SkDocument::MakeXPS(const char path[], SkScalar dpi) {
-    SkAutoTDelete<SkFILEWStream> stream(new SkFILEWStream(path));
+    std::unique_ptr<SkFILEWStream> stream(new SkFILEWStream(path));
     if (!stream->isValid()) {
         return nullptr;
     }

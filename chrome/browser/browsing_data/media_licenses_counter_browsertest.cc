@@ -119,8 +119,8 @@ class MediaLicensesCounterTest : public InProcessBrowserTest {
     storage::AsyncFileUtil* file_util = filesystem_context->GetAsyncFileUtil(
         storage::kFileSystemTypePluginPrivate);
     std::unique_ptr<storage::FileSystemOperationContext> operation_context =
-        base::WrapUnique(
-            new storage::FileSystemOperationContext(filesystem_context));
+        base::MakeUnique<storage::FileSystemOperationContext>(
+            filesystem_context);
     operation_context->set_allowed_bytes_growth(
         storage::QuotaManager::kNoLimit);
     file_util->EnsureFileExists(
@@ -183,20 +183,6 @@ IN_PROC_BROWSER_TEST_F(MediaLicensesCounterTest, NonEmpty) {
   EXPECT_TRUE(CallbackCalled());
   EXPECT_EQ(1u, GetCount());
   EXPECT_EQ(kOrigin.host(), GetOrigin());
-}
-
-// Tests that the counter does not count if the deletion preference is false.
-IN_PROC_BROWSER_TEST_F(MediaLicensesCounterTest, PrefIsFalse) {
-  SetMediaLicenseDeletionPref(false);
-
-  Profile* profile = browser()->profile();
-  MediaLicensesCounter counter(profile);
-  counter.Init(profile->GetPrefs(),
-               base::Bind(&MediaLicensesCounterTest::CountingCallback,
-                          base::Unretained(this)));
-  counter.Restart();
-
-  EXPECT_FALSE(CallbackCalled());
 }
 
 // Tests that the counter starts counting automatically when the deletion

@@ -6,15 +6,16 @@
 
 #include <cmath>
 #include <utility>
+#include <vector>
 
 #include "base/macros.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/grit/browser_resources.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "grit/browser_resources.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace {
@@ -37,11 +38,12 @@ class SiteEngagementUIHandlerImpl : public mojom::SiteEngagementUIHandler {
   // mojom::SiteEngagementUIHandler overrides:
   void GetSiteEngagementInfo(
       const GetSiteEngagementInfoCallback& callback) override {
-    mojo::Array<mojom::SiteEngagementInfoPtr> engagement_info;
-
     SiteEngagementService* service = SiteEngagementService::Get(profile_);
+    std::map<GURL, double> score_map = service->GetScoreMap();
 
-    for (const std::pair<GURL, double>& info : service->GetScoreMap()) {
+    std::vector<mojom::SiteEngagementInfoPtr> engagement_info;
+    engagement_info.reserve(score_map.size());
+    for (const auto& info : score_map) {
       mojom::SiteEngagementInfoPtr origin_info(
           mojom::SiteEngagementInfo::New());
       origin_info->origin = info.first;
@@ -76,11 +78,6 @@ class SiteEngagementUIHandlerImpl : public mojom::SiteEngagementUIHandler {
 
 SiteEngagementUI::SiteEngagementUI(content::WebUI* web_ui)
     : MojoWebUIController<mojom::SiteEngagementUIHandler>(web_ui) {
-  // Incognito profiles will not have a site engagement service.
-  Profile* profile = Profile::FromWebUI(web_ui);
-  if (!SiteEngagementService::Get(profile))
-    return;
-
   // Set up the chrome://site-engagement/ source.
   std::unique_ptr<content::WebUIDataSource> source(
       content::WebUIDataSource::Create(chrome::kChromeUISiteEngagementHost));
@@ -90,7 +87,8 @@ SiteEngagementUI::SiteEngagementUI(content::WebUI* web_ui)
       IDR_SITE_ENGAGEMENT_MOJO_JS);
   source->AddResourcePath("url/mojo/url.mojom", IDR_URL_MOJO_JS);
   source->SetDefaultResource(IDR_SITE_ENGAGEMENT_HTML);
-    content::WebUIDataSource::Add(profile, source.release());
+  source->UseGzip(std::unordered_set<std::string>());
+  content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source.release());
 }
 
 SiteEngagementUI::~SiteEngagementUI() {}

@@ -41,6 +41,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Application");
     case blink::WebAXRoleArticle:
       return result.append("Article");
+    case blink::WebAXRoleAudio:
+      return result.append("Audio");
     case blink::WebAXRoleBanner:
       return result.append("Banner");
     case blink::WebAXRoleBlockquote:
@@ -127,6 +129,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Legend");
     case blink::WebAXRoleLink:
       return result.append("Link");
+    case blink::WebAXRoleLineBreak:
+      return result.append("LineBreak");
     case blink::WebAXRoleListBoxOption:
       return result.append("ListBoxOption");
     case blink::WebAXRoleListBox:
@@ -259,6 +263,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Unknown");
     case blink::WebAXRoleUserInterfaceTooltip:
       return result.append("UserInterfaceTooltip");
+    case blink::WebAXRoleVideo:
+      return result.append("Video");
     case blink::WebAXRoleWebArea:
       return result.append("WebArea");
     case blink::WebAXRoleWindow:
@@ -326,7 +332,7 @@ blink::WebFloatRect BoundsForObject(const blink::WebAXObject& object) {
   while (!container.isDetached()) {
     computedBounds.Offset(bounds.x, bounds.y);
     computedBounds.Offset(
-        -container.scrollOffset().x, -container.scrollOffset().y);
+        -container.getScrollOffset().x, -container.getScrollOffset().y);
     if (!matrix.isIdentity()) {
       gfx::Transform transform(matrix);
       transform.TransformRect(&computedBounds);
@@ -357,8 +363,9 @@ blink::WebRect BoundsForCharacter(const blink::WebAXObject& object,
     int localIndex = characterIndex - start;
     blink::WebVector<int> character_offsets;
     inline_text_box.characterOffsets(character_offsets);
-    DCHECK(character_offsets.size() > 0 &&
-           character_offsets.size() == name.length());
+    if (character_offsets.size() != name.length())
+      return blink::WebRect();
+
     switch (inline_text_box.textDirection()) {
       case blink::WebAXTextDirectionLR: {
         if (localIndex) {
@@ -659,6 +666,7 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetMethod("nameElementAtIndex", &WebAXObjectProxy::NameElementAtIndex)
       .SetProperty("description", &WebAXObjectProxy::Description)
       .SetProperty("descriptionFrom", &WebAXObjectProxy::DescriptionFrom)
+      .SetProperty("placeholder", &WebAXObjectProxy::Placeholder)
       .SetProperty("misspellingsCount", &WebAXObjectProxy::MisspellingsCount)
       .SetMethod("descriptionElementCount",
                  &WebAXObjectProxy::DescriptionElementCount)
@@ -667,12 +675,9 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       //
       // NEW bounding rect calculation - low-level interface
       //
-      .SetMethod("offsetContainer",
-                 &WebAXObjectProxy::OffsetContainer)
-      .SetMethod("boundsInContainerX",
-                 &WebAXObjectProxy::BoundsInContainerX)
-      .SetMethod("boundsInContainerY",
-                 &WebAXObjectProxy::BoundsInContainerY)
+      .SetMethod("offsetContainer", &WebAXObjectProxy::OffsetContainer)
+      .SetMethod("boundsInContainerX", &WebAXObjectProxy::BoundsInContainerX)
+      .SetMethod("boundsInContainerY", &WebAXObjectProxy::BoundsInContainerY)
       .SetMethod("boundsInContainerWidth",
                  &WebAXObjectProxy::BoundsInContainerWidth)
       .SetMethod("boundsInContainerHeight",
@@ -1049,12 +1054,14 @@ int WebAXObjectProxy::SetSize() {
 
 int WebAXObjectProxy::ClickPointX() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.clickPoint().x;
+  blink::WebFloatRect bounds = BoundsForObject(accessibility_object_);
+  return bounds.x + bounds.width / 2;
 }
 
 int WebAXObjectProxy::ClickPointY() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.clickPoint().y;
+  blink::WebFloatRect bounds = BoundsForObject(accessibility_object_);
+  return bounds.y + bounds.height / 2;
 }
 
 int32_t WebAXObjectProxy::RowCount() {
@@ -1389,12 +1396,12 @@ void WebAXObjectProxy::ScrollToGlobalPoint(int x, int y) {
 
 int WebAXObjectProxy::ScrollX() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.scrollOffset().x;
+  return accessibility_object_.getScrollOffset().x;
 }
 
 int WebAXObjectProxy::ScrollY() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.scrollOffset().y;
+  return accessibility_object_.getScrollOffset().y;
 }
 
 float WebAXObjectProxy::BoundsX() {
@@ -1543,14 +1550,20 @@ std::string WebAXObjectProxy::DescriptionFrom() {
       return "attribute";
     case blink::WebAXDescriptionFromContents:
       return "contents";
-    case blink::WebAXDescriptionFromPlaceholder:
-      return "placeholder";
     case blink::WebAXDescriptionFromRelatedElement:
       return "relatedElement";
   }
 
   NOTREACHED();
   return std::string();
+}
+
+std::string WebAXObjectProxy::Placeholder() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebAXNameFrom nameFrom;
+  blink::WebVector<blink::WebAXObject> nameObjects;
+  accessibility_object_.name(nameFrom, nameObjects);
+  return accessibility_object_.placeholder(nameFrom).utf8();
 }
 
 int WebAXObjectProxy::MisspellingsCount() {

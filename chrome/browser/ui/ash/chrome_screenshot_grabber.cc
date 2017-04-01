@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "ash/common/strings/grit/ash_strings.h"
 #include "ash/common/system/system_notifier.h"
 #include "ash/shell.h"
 #include "base/base64.h"
@@ -20,7 +21,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/open_util.h"
-#include "chrome/browser/chromeos/note_taking_app_utils.h"
+#include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/notifications/notifier_state_tracker.h"
@@ -29,13 +30,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/grit/theme_resources.h"
 #include "chromeos/login/login_state.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/ash_strings.h"
-#include "grit/theme_resources.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -136,8 +136,11 @@ class ScreenshotGrabberNotificationDelegate : public NotificationDelegate {
         break;
       }
       case BUTTON_ANNOTATE: {
-        if (chromeos::IsNoteTakingAppAvailable(profile_))
-          chromeos::LaunchNoteTakingAppForNewNote(profile_, screenshot_path_);
+        chromeos::NoteTakingHelper* helper = chromeos::NoteTakingHelper::Get();
+        if (helper->IsAppAvailable(profile_)) {
+          helper->LaunchAppForNewNote(profile_, screenshot_path_);
+          content::RecordAction(base::UserMetricsAction("Screenshot_Annotate"));
+        }
         break;
       }
       default:
@@ -396,7 +399,7 @@ void ChromeScreenshotGrabber::OnScreenshotCompleted(
     const base::FilePath& screenshot_path) {
   // Do not show a notification that a screenshot was taken while no user is
   // logged in, since it is confusing for the user to get a message about it
-  // after he logs in (crbug.com/235217).
+  // after they log in (crbug.com/235217).
   if (!chromeos::LoginState::Get()->IsUserLoggedIn())
     return;
 
@@ -435,7 +438,7 @@ Notification* ChromeScreenshotGrabber::CreateNotification(
         IDR_NOTIFICATION_SCREENSHOT_COPY_TO_CLIPBOARD);
     optional_field.buttons.push_back(copy_button);
 
-    if (chromeos::IsNoteTakingAppAvailable(GetProfile())) {
+    if (chromeos::NoteTakingHelper::Get()->IsAppAvailable(GetProfile())) {
       message_center::ButtonInfo annotate_button(l10n_util::GetStringUTF16(
           IDS_MESSAGE_CENTER_NOTIFICATION_BUTTON_ANNOTATE_SCREENSHOT));
       annotate_button.icon =

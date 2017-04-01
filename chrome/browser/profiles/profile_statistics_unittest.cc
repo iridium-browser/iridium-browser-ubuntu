@@ -35,8 +35,8 @@ std::unique_ptr<KeyedService> BuildBookmarkModelWithoutLoad(
     content::BrowserContext* context) {
   Profile* profile = Profile::FromBrowserContext(context);
   std::unique_ptr<bookmarks::BookmarkModel> bookmark_model(
-      new bookmarks::BookmarkModel(base::WrapUnique(new ChromeBookmarkClient(
-          profile, ManagedBookmarkServiceFactory::GetForProfile(profile)))));
+      new bookmarks::BookmarkModel(base::MakeUnique<ChromeBookmarkClient>(
+          profile, ManagedBookmarkServiceFactory::GetForProfile(profile))));
   return std::move(bookmark_model);
 }
 
@@ -105,8 +105,8 @@ class ProfileStatisticsTest : public testing::Test {
   TestingProfileManager* manager() { return &manager_; }
 
  private:
-  TestingProfileManager manager_;
   content::TestBrowserThreadBundle thread_bundle_;
+  TestingProfileManager manager_;
 };
 
 TEST_F(ProfileStatisticsTest, ProfileAttributesStorage) {

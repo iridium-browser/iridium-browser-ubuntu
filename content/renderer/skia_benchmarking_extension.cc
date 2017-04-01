@@ -25,6 +25,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColorPriv.h"
 #include "third_party/skia/include/core/SkGraphics.h"
+#include "third_party/skia/include/core/SkImageDeserializer.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "ui/gfx/codec/jpeg_codec.h"
@@ -43,19 +44,34 @@ class Picture {
   sk_sp<SkPicture> picture;
 };
 
-bool DecodeBitmap(const void* buffer, size_t size, SkBitmap* bm) {
-  const unsigned char* data = static_cast<const unsigned char*>(buffer);
-  // Try PNG first.
-  if (gfx::PNGCodec::Decode(data, size, bm))
-    return true;
-  // Try JPEG.
-  std::unique_ptr<SkBitmap> decoded_jpeg(gfx::JPEGCodec::Decode(data, size));
-  if (decoded_jpeg) {
-    *bm = *decoded_jpeg;
-    return true;
+class GfxImageDeserializer final : public SkImageDeserializer {
+ public:
+  sk_sp<SkImage> makeFromData(SkData* data, const SkIRect* subset) override {
+    return makeFromMemory(data->data(), data->size(), subset);
   }
-  return false;
-}
+  sk_sp<SkImage> makeFromMemory(const void* data,
+                                size_t size,
+                                const SkIRect* subset) override {
+    sk_sp<SkImage> img;
+    // Try PNG first.
+    SkBitmap bitmap;
+    if (gfx::PNGCodec::Decode((const uint8_t*)data, size, &bitmap)) {
+      bitmap.setImmutable();
+      img = SkImage::MakeFromBitmap(bitmap);
+    } else {
+      // Try JPEG.
+      std::unique_ptr<SkBitmap> decoded_jpeg(
+          gfx::JPEGCodec::Decode((const uint8_t*)data, size));
+      if (decoded_jpeg) {
+        decoded_jpeg->setImmutable();
+        img = SkImage::MakeFromBitmap(*decoded_jpeg);
+      }
+    }
+    if (img && subset)
+      img = img->makeSubset(*subset);
+    return img;
+  }
+};
 
 std::unique_ptr<base::Value> ParsePictureArg(v8::Isolate* isolate,
                                              v8::Local<v8::Value> arg) {
@@ -70,9 +86,9 @@ std::unique_ptr<Picture> CreatePictureFromEncodedString(
   std::string decoded;
   base::Base64Decode(encoded, &decoded);
   SkMemoryStream stream(decoded.data(), decoded.size());
-
+  GfxImageDeserializer deserializer;
   sk_sp<SkPicture> skpicture =
-      SkPicture::MakeFromStream(&stream, &DecodeBitmap);
+      SkPicture::MakeFromStream(&stream, &deserializer);
   if (!skpicture)
     return nullptr;
 
@@ -187,7 +203,6 @@ void SkiaBenchmarking::Rasterize(gin::Arguments* args) {
   double scale = 1.0;
   gfx::Rect clip_rect(picture->layer_rect);
   int stop_index = -1;
-  bool overdraw = false;
 
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
   if (!args->PeekNext().IsEmpty()) {
@@ -202,7 +217,6 @@ void SkiaBenchmarking::Rasterize(gin::Arguments* args) {
     if (params_value.get() && params_value->GetAsDictionary(&params_dict)) {
       params_dict->GetDouble("scale", &scale);
       params_dict->GetInteger("stop", &stop_index);
-      params_dict->GetBoolean("overdraw", &overdraw);
 
       const base::Value* clip_value = NULL;
       if (params_dict->Get("clip", &clip_value))
@@ -225,9 +239,7 @@ void SkiaBenchmarking::Rasterize(gin::Arguments* args) {
   canvas.scale(scale, scale);
   canvas.translate(picture->layer_rect.x(), picture->layer_rect.y());
 
-  skia::BenchmarkingCanvas benchmarking_canvas(
-      &canvas,
-      overdraw ? skia::BenchmarkingCanvas::kOverdrawVisualization_Flag : 0);
+  skia::BenchmarkingCanvas benchmarking_canvas(&canvas);
   size_t playback_count =
       (stop_index < 0) ? std::numeric_limits<size_t>::max() : stop_index;
   PicturePlaybackController controller(benchmarking_canvas, playback_count);

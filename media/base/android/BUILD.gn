@@ -29,7 +29,7 @@ source_set("anywhere") {
 }
 
 # These should compile on non-android platforms too.
-source_set("anywhere_unittests") {
+source_set("anywhere_unit_tests") {
   testonly = true
   sources = [
     "media_codec_loop_unittest.cc",
@@ -55,17 +55,10 @@ if (is_android) {
     sources = [
       "android_cdm_factory.cc",
       "android_cdm_factory.h",
-      "audio_decoder_job.cc",
-      "audio_decoder_job.h",
-      "demuxer_android.h",
-      "demuxer_stream_player_params.cc",
-      "demuxer_stream_player_params.h",
       "media_client_android.cc",
       "media_client_android.h",
       "media_codec_util.cc",
       "media_codec_util.h",
-      "media_decoder_job.cc",
-      "media_decoder_job.h",
       "media_drm_bridge.cc",
       "media_drm_bridge.h",
       "media_drm_bridge_cdm_context.cc",
@@ -83,17 +76,14 @@ if (is_android) {
       "media_player_manager.h",
       "media_resource_getter.cc",
       "media_resource_getter.h",
-      "media_source_player.cc",
-      "media_source_player.h",
-      "media_statistics.cc",
-      "media_statistics.h",
+      "media_server_crash_listener.cc",
+      "media_server_crash_listener.h",
+      "media_service_throttler.cc",
+      "media_service_throttler.h",
       "media_url_interceptor.h",
-      "provision_fetcher.h",
       "sdk_media_codec_bridge.cc",
       "sdk_media_codec_bridge.h",
       "stream_texture_wrapper.h",
-      "video_decoder_job.cc",
-      "video_decoder_job.h",
     ]
     configs += [
       "//media:media_config",
@@ -103,7 +93,7 @@ if (is_android) {
       ":media_jni_headers",
       "//media:media_features",
       "//media:shared_memory_support",
-      "//third_party/widevine/cdm:version_h",
+      "//third_party/widevine/cdm:headers",
       "//ui/gl",
       "//url",
     ]
@@ -112,16 +102,13 @@ if (is_android) {
     ]
   }
 
-  source_set("unittests") {
+  source_set("unit_tests") {
     testonly = true
     sources = [
       "media_drm_bridge_unittest.cc",
       "media_player_bridge_unittest.cc",
-      "media_source_player_unittest.cc",
+      "media_service_throttler_unittest.cc",
       "sdk_media_codec_bridge_unittest.cc",
-      "test_data_factory.cc",
-      "test_data_factory.h",
-      "test_statistics.h",
     ]
 
     deps = [
@@ -129,7 +116,8 @@ if (is_android) {
       "//media/base:test_support",
       "//testing/gmock",
       "//testing/gtest",
-      "//third_party/widevine/cdm:version_h",
+      "//third_party/widevine/cdm:headers",
+      "//ui/gfx:color_space",
     ]
     configs += [ "//media:media_config" ]
   }
@@ -143,6 +131,7 @@ if (is_android) {
       "java/src/org/chromium/media/MediaDrmBridge.java",
       "java/src/org/chromium/media/MediaPlayerBridge.java",
       "java/src/org/chromium/media/MediaPlayerListener.java",
+      "java/src/org/chromium/media/MediaServerCrashListener.java",
     ]
     jni_package = "media"
   }
@@ -150,6 +139,7 @@ if (is_android) {
   android_library("media_java") {
     deps = [
       "//base:base_java",
+      "//content/public/android:content_java_resources",
     ]
 
     java_files = [
@@ -160,6 +150,7 @@ if (is_android) {
       "java/src/org/chromium/media/MediaDrmBridge.java",
       "java/src/org/chromium/media/MediaPlayerBridge.java",
       "java/src/org/chromium/media/MediaPlayerListener.java",
+      "java/src/org/chromium/media/MediaServerCrashListener.java",
     ]
   }
 }

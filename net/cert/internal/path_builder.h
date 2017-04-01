@@ -9,11 +9,8 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
-#include "net/base/completion_callback.h"
-#include "net/base/net_errors.h"
 #include "net/base/net_export.h"
-#include "net/cert/internal/completion_status.h"
+#include "net/cert/internal/cert_errors.h"
 #include "net/cert/internal/parsed_certificate.h"
 #include "net/cert/internal/trust_store.h"
 #include "net/der/input.h"
@@ -64,17 +61,19 @@ class NET_EXPORT CertPathBuilder {
     ResultPath();
     ~ResultPath();
 
-    // Returns true if this path was successfully verified.
-    bool is_success() const { return error == OK; }
-
-    // The (possibly partial) certificate path. In the case of an
-    // error path.trust_anchor may be nullptr.
+    // The (possibly partial) certificate path. Consumers must always test
+    // |valid| before using |path|. When |!valid| path.trust_anchor may be
+    // nullptr, and the path may be otherwise incomplete/invalid.
     CertPath path;
 
-    // A net error code result of attempting to verify this path.
-    // TODO(mattm): may want to have an independent result enum, which caller
-    // can map to a net error if they want.
-    int error = ERR_UNEXPECTED;
+    // The errors/warnings from this path. Note that the list of errors is
+    // independent of whether the path was |valid| (a valid path may
+    // contain errors/warnings, and vice versa an invalid path may not have
+    // logged any errors).
+    CertErrors errors;
+
+    // True if |path| is a correct verified certificate chain.
+    bool valid = false;
   };
 
   // Provides the overall result of path building. This includes the paths that
@@ -84,21 +83,18 @@ class NET_EXPORT CertPathBuilder {
     ~Result();
 
     // Returns true if there was a valid path.
-    bool is_success() const { return error() == OK; }
+    bool HasValidPath() const;
 
-    // Returns the net error code of the overall best result.
-    int error() const {
-      if (paths.empty())
-        return ERR_CERT_AUTHORITY_INVALID;
-      return paths[best_result_index]->error;
-    }
+    // Returns the ResultPath for the best valid path, or nullptr if there
+    // was none.
+    const ResultPath* GetBestValidPath() const;
 
     // List of paths that were attempted and the result for each.
     std::vector<std::unique_ptr<ResultPath>> paths;
 
     // Index into |paths|. Before use, |paths.empty()| must be checked.
-    // NOTE: currently the definition of "best" is fairly limited. Successful is
-    // better than unsuccessful, but otherwise nothing is guaranteed.
+    // NOTE: currently the definition of "best" is fairly limited. Valid is
+    // better than invalid, but otherwise nothing is guaranteed.
     size_t best_result_index = 0;
 
    private:
@@ -107,6 +103,9 @@ class NET_EXPORT CertPathBuilder {
 
   // TODO(mattm): allow caller specified hook/callback to extend path
   // verification.
+  //
+  // TODO(eroman): The assumption is that |result| is default initialized. Can
+  // probably just internalize |result| into CertPathBuilder.
   //
   // Creates a CertPathBuilder that attempts to find a path from |cert| to a
   // trust anchor in |trust_store|, which satisfies |signature_policy| and is
@@ -130,24 +129,12 @@ class NET_EXPORT CertPathBuilder {
   // it is a trust anchor or is directly signed by a trust anchor.)
   void AddCertIssuerSource(CertIssuerSource* cert_issuer_source);
 
-  // Begins verification of the target certificate.
+  // Executes verification of the target certificate.
   //
-  // If the return value is SYNC then the verification is complete and the
-  // |result| value can be inspected for the status, and |callback| will not be
-  // called.
-  // If the return value is ASYNC, the |callback| will be called asynchronously
-  // once the verification is complete. |result| should not be examined or
-  // modified until the |callback| is run.
-  //
-  // If |callback| is null, verification always completes synchronously, even if
-  // it fails to find a valid path and one could have been found asynchronously.
-  //
-  // The CertPathBuilder may be deleted while an ASYNC verification is pending,
-  // in which case the verification is cancelled, |callback| will not be called,
-  // and the output Result will be in an undefined state.
-  // It is safe to delete the CertPathBuilder during the |callback|.
-  // Run must not be called more than once on each CertPathBuilder instance.
-  CompletionStatus Run(const base::Closure& callback);
+  // Upon return results are written to the |result| object passed into the
+  // constructor. Run must not be called more than once on each CertPathBuilder
+  // instance.
+  void Run();
 
  private:
   enum State {
@@ -156,15 +143,10 @@ class NET_EXPORT CertPathBuilder {
     STATE_GET_NEXT_PATH_COMPLETE,
   };
 
-  CompletionStatus DoLoop(bool allow_async);
+  void DoGetNextPath();
+  void DoGetNextPathComplete();
 
-  CompletionStatus DoGetNextPath(bool allow_async);
-  void HandleGotNextPath();
-  CompletionStatus DoGetNextPathComplete();
-
-  void AddResultPath(const CertPath& path, bool is_success);
-
-  base::Closure callback_;
+  void AddResultPath(std::unique_ptr<ResultPath> result_path);
 
   std::unique_ptr<CertPathIter> cert_path_iter_;
   const SignaturePolicy* signature_policy_;

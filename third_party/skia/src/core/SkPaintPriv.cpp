@@ -11,6 +11,7 @@
 #include "SkImage.h"
 #include "SkPaint.h"
 #include "SkShader.h"
+#include "SkXfermodePriv.h"
 
 static bool changes_alpha(const SkPaint& paint) {
     SkColorFilter* cf = paint.getColorFilter();
@@ -41,7 +42,7 @@ bool SkPaintPriv::Overwrites(const SkPaint* paint, ShaderOverrideOpacity overrid
         }
     }
 
-    return SkXfermode::IsOpaque(paint->getXfermode(), opacityType);
+    return SkXfermode::IsOpaque(paint->getBlendMode(), opacityType);
 }
 
 bool SkPaintPriv::Overwrites(const SkBitmap& bitmap, const SkPaint* paint) {

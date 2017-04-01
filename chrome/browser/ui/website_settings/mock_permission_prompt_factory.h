@@ -10,9 +10,12 @@
 
 #include "chrome/browser/permissions/permission_request_manager.h"
 
-class Browser;
 class MockPermissionPrompt;
 class PermissionPrompt;
+
+namespace content {
+class WebContents;
+}
 
 // Provides a skeleton class for both unit and browser testing when trying to
 // test the bubble manager logic. Should not be used for anything that requires
@@ -25,7 +28,7 @@ class MockPermissionPromptFactory {
   ~MockPermissionPromptFactory();
 
   // Create method called by the PBM to show a bubble.
-  std::unique_ptr<PermissionPrompt> Create(Browser* browser);
+  std::unique_ptr<PermissionPrompt> Create(content::WebContents* web_contents);
 
   void SetCanUpdateUi(bool can_update_ui);
 
@@ -35,6 +38,10 @@ class MockPermissionPromptFactory {
 
   void set_response_type(PermissionRequestManager::AutoResponseType type) {
     response_type_ = type;
+  }
+
+  PermissionRequestManager::AutoResponseType response_type() {
+    return response_type_;
   }
 
   // If the current view is visible.
@@ -53,7 +60,8 @@ class MockPermissionPromptFactory {
 
   // This shouldn't be called. Is here to fail tests that try to create a bubble
   // after the factory has been destroyed.
-  static std::unique_ptr<PermissionPrompt> DoNotCreate(Browser* browser);
+  static std::unique_ptr<PermissionPrompt> DoNotCreate(
+      content::WebContents* web_contents);
 
   void UpdateResponseType();
   void ShowView(MockPermissionPrompt* view);

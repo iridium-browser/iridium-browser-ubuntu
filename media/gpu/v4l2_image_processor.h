@@ -41,6 +41,7 @@ class MEDIA_GPU_EXPORT V4L2ImageProcessor {
   bool Initialize(VideoPixelFormat input_format,
                   VideoPixelFormat output_format,
                   v4l2_memory input_memory_type,
+                  v4l2_memory output_memory_type,
                   gfx::Size input_visible_size,
                   gfx::Size input_allocated_size,
                   gfx::Size output_visible_size,
@@ -54,21 +55,23 @@ class MEDIA_GPU_EXPORT V4L2ImageProcessor {
   std::vector<base::ScopedFD> GetDmabufsForOutputBuffer(
       int output_buffer_index);
 
-  // Returns a vector of supported input formats in fourcc. This can be called
-  // before Initialize.
-  std::vector<uint32_t> GetSupportedInputFormats();
+  // Returns true if image processing is supported on this platform.
+  static bool IsSupported();
 
-  // Returns a vector of supported output formats in fourcc. This can be called
-  // before Initialize.
-  std::vector<uint32_t> GetSupportedOutputFormats();
+  // Returns a vector of supported input formats in fourcc.
+  static std::vector<uint32_t> GetSupportedInputFormats();
 
-  // Gets the output allocated size and number of planes given |pixelformat|
-  // fourcc and visible size |size|. Return true if success. The adjusted coded
-  // size will be stored in |size| and the number of planes will be stored in
-  // |num_planes|. This can be called before Initialize.
-  bool TryOutputFormat(uint32_t pixelformat,
-                       gfx::Size* size,
-                       size_t* num_planes);
+  // Returns a vector of supported output formats in fourcc.
+  static std::vector<uint32_t> GetSupportedOutputFormats();
+
+  // Gets output allocated size and number of planes required by the device
+  // for conversion from |input_pixelformat| to |output_pixelformat|, for
+  // visible size |size|. Returns true on success. Adjusted coded size will be
+  // stored in |size| and the number of planes will be stored in |num_planes|.
+  static bool TryOutputFormat(uint32_t input_pixelformat,
+                              uint32_t output_pixelformat,
+                              gfx::Size* size,
+                              size_t* num_planes);
 
   // Returns input allocated size required by the processor to be fed with.
   gfx::Size input_allocated_size() const { return input_allocated_size_; }
@@ -84,10 +87,18 @@ class MEDIA_GPU_EXPORT V4L2ImageProcessor {
   // Called by client to process |frame|. The resulting processed frame will be
   // stored in |output_buffer_index| output buffer and notified via |cb|. The
   // processor will drop all its references to |frame| after it finishes
-  // accessing it.
-  void Process(const scoped_refptr<VideoFrame>& frame,
+  // accessing it. If |output_memory_type_| is V4L2_MEMORY_DMABUF, the caller
+  // should pass non-empty |output_dmabuf_fds| and the processed frame will be
+  // stored in those buffers. If the number of |output_dmabuf_fds| is not
+  // expected, this function will return false.
+  bool Process(const scoped_refptr<VideoFrame>& frame,
                int output_buffer_index,
+               std::vector<base::ScopedFD> output_dmabuf_fds,
                const FrameReadyCB& cb);
+
+  // Reset all processing frames. After this method returns, no more callbacks
+  // will be invoked. V4L2ImageProcessor is ready to process more frames.
+  bool Reset();
 
   // Stop all processing and clean up. After this method returns no more
   // callbacks will be invoked.  Deletes |this| unconditionally, so make sure
@@ -106,19 +117,26 @@ class MEDIA_GPU_EXPORT V4L2ImageProcessor {
   // Record for output buffers.
   struct OutputRecord {
     OutputRecord();
+    OutputRecord(OutputRecord&&) = default;
     ~OutputRecord();
     bool at_device;
+    // The processed frame will be stored in these buffers if
+    // |output_memory_type_| is V4L2_MEMORY_DMABUF
+    std::vector<base::ScopedFD> dmabuf_fds;
   };
 
   // Job record. Jobs are processed in a FIFO order. This is separate from
   // InputRecord, because an InputRecord may be returned before we dequeue
   // the corresponding output buffer. The processed frame will be stored in
-  // |output_buffer_index| output buffer.
+  // |output_buffer_index| output buffer. If |output_memory_type_| is
+  // V4L2_MEMORY_DMABUF, the processed frame will be stored in
+  // |output_dmabuf_fds|.
   struct JobRecord {
     JobRecord();
     ~JobRecord();
     scoped_refptr<VideoFrame> frame;
     int output_buffer_index;
+    std::vector<base::ScopedFD> output_dmabuf_fds;
     FrameReadyCB ready_cb;
   };
 
@@ -134,14 +152,13 @@ class MEDIA_GPU_EXPORT V4L2ImageProcessor {
 
   void NotifyError();
   void NotifyErrorOnChildThread(const base::Closure& error_cb);
-  void DestroyTask();
 
   void ProcessTask(std::unique_ptr<JobRecord> job_record);
   void ServiceDeviceTask();
 
   // Attempt to start/stop device_poll_thread_.
-  bool StartDevicePoll();
-  bool StopDevicePoll();
+  void StartDevicePoll();
+  void StopDevicePoll();
 
   // Ran on device_poll_thread_ to wait for device events.
   void DevicePollTask(bool poll_device);
@@ -161,6 +178,7 @@ class MEDIA_GPU_EXPORT V4L2ImageProcessor {
   VideoPixelFormat input_format_;
   VideoPixelFormat output_format_;
   v4l2_memory input_memory_type_;
+  v4l2_memory output_memory_type_;
   uint32_t input_format_fourcc_;
   uint32_t output_format_fourcc_;
 

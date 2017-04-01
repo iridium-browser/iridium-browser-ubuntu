@@ -165,11 +165,67 @@ DEF_GM( return new StrokeCircleGM; )
 
 //////////////////////
 
+// Fill circles and rotate them to test our Analytic Anti-Aliasing.
+// This test is based on StrokeCircleGM.
+class FillCircleGM : public skiagm::GM {
+public:
+    FillCircleGM() : fRotate(0) {}
+
+protected:
+    SkString onShortName() override { return SkString("fillcircle"); }
+
+    SkISize onISize() override { return SkISize::Make(520, 520); }
+
+    void onDraw(SkCanvas* canvas) override {
+        canvas->scale(20, 20);
+        canvas->translate(13, 13);
+
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kStroke_Style);
+        paint.setStrokeWidth(SK_Scalar1 / 2);
+
+        const SkScalar strokeWidth = paint.getStrokeWidth();
+        const SkScalar delta = strokeWidth * 3 / 2;
+        SkRect r = SkRect::MakeXYWH(-12, -12, 24, 24);
+        SkRandom rand;
+
+        // Reset style to fill. We only need stroke stype for producing delta and strokeWidth
+        paint.setStyle(SkPaint::kFill_Style);
+
+        SkScalar sign = 1;
+        while (r.width() > strokeWidth * 2) {
+            SkAutoCanvasRestore acr(canvas, true);
+            canvas->rotate(fRotate * sign);
+            paint.setColor(sk_tool_utils::color_to_565(rand.nextU() | (0xFF << 24)));
+            canvas->drawOval(r, paint);
+            r.inset(delta, delta);
+            sign = -sign;
+        }
+    }
+
+    bool onAnimate(const SkAnimTimer& timer) override {
+        fRotate = timer.scaled(60, 360);
+        return true;
+    }
+
+private:
+    SkScalar fRotate;
+
+    typedef skiagm::GM INHERITED;
+};
+DEF_GM( return new FillCircleGM; )
+
+//////////////////////
+
 static void html_canvas_arc(SkPath* path, SkScalar x, SkScalar y, SkScalar r, SkScalar start,
-                            SkScalar end, bool ccw) {
+                            SkScalar end, bool ccw, bool callArcTo) {
     SkRect bounds = { x - r, y - r, x + r, y + r };
     SkScalar sweep = ccw ? end - start : start - end;
-    path->arcTo(bounds, start, sweep, false);
+    if (callArcTo)
+        path->arcTo(bounds, start, sweep, false);
+    else
+        path->addArc(bounds, start, sweep);
 }
 
 // Lifted from canvas-arc-circumference-fill-diffs.html
@@ -216,7 +272,7 @@ protected:
                 SkPath path;
                 path.moveTo(0, 2);
                 html_canvas_arc(&path, 18, 15, 10, startAngle, startAngle + (sweepAngles[j] * sign),
-                                anticlockwise);
+                                anticlockwise, true);
                 path.lineTo(0, 28);
                 canvas->drawPath(path, paint);
                 canvas->translate(30, 0);
@@ -230,3 +286,53 @@ private:
     typedef skiagm::GM INHERITED;
 };
 DEF_GM( return new ManyArcsGM; )
+
+// Lifted from https://bugs.chromium.org/p/chromium/issues/detail?id=640031
+class TinyAngleBigRadiusArcsGM : public skiagm::GM {
+public:
+    TinyAngleBigRadiusArcsGM() {}
+
+protected:
+    SkString onShortName() override { return SkString("tinyanglearcs"); }
+
+    SkISize onISize() override { return SkISize::Make(620, 330); }
+
+    void onDraw(SkCanvas* canvas) override {
+        SkPaint paint;
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kStroke_Style);
+
+        canvas->translate(50, 50);
+
+        SkScalar outerRadius = 100000.0f;
+        SkScalar innerRadius = outerRadius - 20.0f;
+        SkScalar centerX = 50;
+        SkScalar centerY = outerRadius;
+        SkScalar startAngles[] = { 1.5f * SK_ScalarPI , 1.501f * SK_ScalarPI  };
+        SkScalar sweepAngle = 10.0f / outerRadius;
+
+        for (size_t i = 0; i < SK_ARRAY_COUNT(startAngles); ++i) {
+            SkPath path;
+            SkScalar endAngle = startAngles[i] + sweepAngle;
+            path.moveTo(centerX + innerRadius * sk_float_cos(startAngles[i]),
+                        centerY + innerRadius * sk_float_sin(startAngles[i]));
+            path.lineTo(centerX + outerRadius * sk_float_cos(startAngles[i]),
+                        centerY + outerRadius * sk_float_sin(startAngles[i]));
+            // A combination of tiny sweepAngle + large radius, we should draw a line.
+            html_canvas_arc(&path, centerX, outerRadius, outerRadius,
+                            startAngles[i] * 180 / SK_ScalarPI, endAngle * 180 / SK_ScalarPI,
+                            true, true);
+            path.lineTo(centerX + innerRadius * sk_float_cos(endAngle),
+                        centerY + innerRadius * sk_float_sin(endAngle));
+            html_canvas_arc(&path, centerX, outerRadius, innerRadius,
+                            endAngle * 180 / SK_ScalarPI, startAngles[i] * 180 / SK_ScalarPI,
+                            true, false);
+            canvas->drawPath(path, paint);
+            canvas->translate(20, 0);
+        }
+    }
+
+private:
+    typedef skiagm::GM INHERITED;
+};
+DEF_GM( return new TinyAngleBigRadiusArcsGM; )

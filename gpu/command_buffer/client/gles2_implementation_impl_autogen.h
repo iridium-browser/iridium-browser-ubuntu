@@ -2782,25 +2782,6 @@ void GLES2Implementation::VertexAttribI4uiv(GLuint indx, const GLuint* values) {
   CheckGLError();
 }
 
-void GLES2Implementation::Viewport(GLint x,
-                                   GLint y,
-                                   GLsizei width,
-                                   GLsizei height) {
-  GPU_CLIENT_SINGLE_THREAD_CHECK();
-  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glViewport(" << x << ", " << y
-                     << ", " << width << ", " << height << ")");
-  if (width < 0) {
-    SetGLError(GL_INVALID_VALUE, "glViewport", "width < 0");
-    return;
-  }
-  if (height < 0) {
-    SetGLError(GL_INVALID_VALUE, "glViewport", "height < 0");
-    return;
-  }
-  helper_->Viewport(x, y, width, height);
-  CheckGLError();
-}
-
 void GLES2Implementation::BlitFramebufferCHROMIUM(GLint srcX0,
                                                   GLint srcY0,
                                                   GLint srcX1,
@@ -3075,6 +3056,25 @@ void GLES2Implementation::BindVertexArrayOES(GLuint array) {
   CheckGLError();
 }
 
+void GLES2Implementation::FlushMappedBufferRange(GLenum target,
+                                                 GLintptr offset,
+                                                 GLsizeiptr size) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glFlushMappedBufferRange("
+                     << GLES2Util::GetStringBufferTarget(target) << ", "
+                     << offset << ", " << size << ")");
+  if (offset < 0) {
+    SetGLError(GL_INVALID_VALUE, "glFlushMappedBufferRange", "offset < 0");
+    return;
+  }
+  if (size < 0) {
+    SetGLError(GL_INVALID_VALUE, "glFlushMappedBufferRange", "size < 0");
+    return;
+  }
+  helper_->FlushMappedBufferRange(target, offset, size);
+  CheckGLError();
+}
+
 void GLES2Implementation::DescheduleUntilFinishedCHROMIUM() {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glDescheduleUntilFinishedCHROMIUM("
@@ -3112,7 +3112,9 @@ void GLES2Implementation::GetTranslatedShaderSourceANGLE(GLuint shader,
 }
 void GLES2Implementation::CopyTextureCHROMIUM(
     GLenum source_id,
+    GLint source_level,
     GLenum dest_id,
+    GLint dest_level,
     GLint internalformat,
     GLenum dest_type,
     GLboolean unpack_flip_y,
@@ -3121,21 +3123,23 @@ void GLES2Implementation::CopyTextureCHROMIUM(
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG(
       "[" << GetLogPrefix() << "] glCopyTextureCHROMIUM("
-          << GLES2Util::GetStringEnum(source_id) << ", "
-          << GLES2Util::GetStringEnum(dest_id) << ", " << internalformat << ", "
-          << GLES2Util::GetStringPixelType(dest_type) << ", "
-          << GLES2Util::GetStringBool(unpack_flip_y) << ", "
+          << GLES2Util::GetStringEnum(source_id) << ", " << source_level << ", "
+          << GLES2Util::GetStringEnum(dest_id) << ", " << dest_level << ", "
+          << internalformat << ", " << GLES2Util::GetStringPixelType(dest_type)
+          << ", " << GLES2Util::GetStringBool(unpack_flip_y) << ", "
           << GLES2Util::GetStringBool(unpack_premultiply_alpha) << ", "
           << GLES2Util::GetStringBool(unpack_unmultiply_alpha) << ")");
-  helper_->CopyTextureCHROMIUM(source_id, dest_id, internalformat, dest_type,
-                               unpack_flip_y, unpack_premultiply_alpha,
-                               unpack_unmultiply_alpha);
+  helper_->CopyTextureCHROMIUM(
+      source_id, source_level, dest_id, dest_level, internalformat, dest_type,
+      unpack_flip_y, unpack_premultiply_alpha, unpack_unmultiply_alpha);
   CheckGLError();
 }
 
 void GLES2Implementation::CopySubTextureCHROMIUM(
     GLenum source_id,
+    GLint source_level,
     GLenum dest_id,
+    GLint dest_level,
     GLint xoffset,
     GLint yoffset,
     GLint x,
@@ -3148,10 +3152,11 @@ void GLES2Implementation::CopySubTextureCHROMIUM(
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG(
       "[" << GetLogPrefix() << "] glCopySubTextureCHROMIUM("
-          << GLES2Util::GetStringEnum(source_id) << ", "
-          << GLES2Util::GetStringEnum(dest_id) << ", " << xoffset << ", "
-          << yoffset << ", " << x << ", " << y << ", " << width << ", "
-          << height << ", " << GLES2Util::GetStringBool(unpack_flip_y) << ", "
+          << GLES2Util::GetStringEnum(source_id) << ", " << source_level << ", "
+          << GLES2Util::GetStringEnum(dest_id) << ", " << dest_level << ", "
+          << xoffset << ", " << yoffset << ", " << x << ", " << y << ", "
+          << width << ", " << height << ", "
+          << GLES2Util::GetStringBool(unpack_flip_y) << ", "
           << GLES2Util::GetStringBool(unpack_premultiply_alpha) << ", "
           << GLES2Util::GetStringBool(unpack_unmultiply_alpha) << ")");
   if (width < 0) {
@@ -3162,9 +3167,10 @@ void GLES2Implementation::CopySubTextureCHROMIUM(
     SetGLError(GL_INVALID_VALUE, "glCopySubTextureCHROMIUM", "height < 0");
     return;
   }
-  helper_->CopySubTextureCHROMIUM(
-      source_id, dest_id, xoffset, yoffset, x, y, width, height, unpack_flip_y,
-      unpack_premultiply_alpha, unpack_unmultiply_alpha);
+  helper_->CopySubTextureCHROMIUM(source_id, source_level, dest_id, dest_level,
+                                  xoffset, yoffset, x, y, width, height,
+                                  unpack_flip_y, unpack_premultiply_alpha,
+                                  unpack_unmultiply_alpha);
   CheckGLError();
 }
 
@@ -3202,8 +3208,9 @@ void GLES2Implementation::DiscardFramebufferEXT(GLenum target,
                                                 const GLenum* attachments) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
   GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glDiscardFramebufferEXT("
-                     << GLES2Util::GetStringEnum(target) << ", " << count
-                     << ", " << static_cast<const void*>(attachments) << ")");
+                     << GLES2Util::GetStringFramebufferTarget(target) << ", "
+                     << count << ", " << static_cast<const void*>(attachments)
+                     << ")");
   GPU_CLIENT_LOG_CODE_BLOCK({
     for (GLsizei i = 0; i < count; ++i) {
       GPU_CLIENT_LOG("  " << i << ": " << attachments[0 + i * 1]);
@@ -3484,6 +3491,20 @@ void GLES2Implementation::UniformMatrix4fvStreamTextureMatrixCHROMIUM(
     GPU_CLIENT_LOG("value[" << ii << "]: " << transform[ii]);
   helper_->UniformMatrix4fvStreamTextureMatrixCHROMIUMImmediate(
       location, transpose, transform);
+  CheckGLError();
+}
+
+void GLES2Implementation::OverlayPromotionHintCHROMIUM(GLuint texture,
+                                                       GLboolean promotion_hint,
+                                                       GLint display_x,
+                                                       GLint display_y) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glOverlayPromotionHintCHROMIUM("
+                     << texture << ", "
+                     << GLES2Util::GetStringBool(promotion_hint) << ", "
+                     << display_x << ", " << display_y << ")");
+  helper_->OverlayPromotionHintCHROMIUM(texture, promotion_hint, display_x,
+                                        display_y);
   CheckGLError();
 }
 

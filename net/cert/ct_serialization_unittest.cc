@@ -13,7 +13,6 @@
 #include "net/cert/signed_certificate_timestamp.h"
 #include "net/cert/signed_tree_head.h"
 #include "net/cert/x509_certificate.h"
-#include "net/log/net_log.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/ct_test_util.h"
 #include "net/test/test_data_directory.h"
@@ -142,7 +141,7 @@ TEST_F(CtSerializationTest, DecodesSCTList) {
   base::StringPiece encoded("\x0\xa\x0\x3\x61\x62\x63\x0\x3\x64\x65\x66", 12);
   std::vector<base::StringPiece> decoded;
 
-  ASSERT_TRUE(ct::DecodeSCTList(&encoded, &decoded));
+  ASSERT_TRUE(ct::DecodeSCTList(encoded, &decoded));
   ASSERT_STREQ("abc", decoded[0].data());
   ASSERT_STREQ("def", decoded[1].data());
 }
@@ -152,7 +151,7 @@ TEST_F(CtSerializationTest, FailsDecodingInvalidSCTList) {
   base::StringPiece encoded("\x0\xa\x0\x3\x61\x62\x63\x0\x5\x64\x65\x66", 12);
   std::vector<base::StringPiece> decoded;
 
-  ASSERT_FALSE(ct::DecodeSCTList(&encoded, &decoded));
+  ASSERT_FALSE(ct::DecodeSCTList(encoded, &decoded));
 }
 
 TEST_F(CtSerializationTest, DecodesSignedCertificateTimestamp) {
@@ -260,4 +259,3 @@ TEST_F(CtSerializationTest, EncodesValidSignedTreeHead) {
 }
 
 }  // namespace net
-

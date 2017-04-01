@@ -19,7 +19,6 @@
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/resource_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/download_test_observer.h"
 #include "extensions/browser/event_router.h"
@@ -37,7 +36,6 @@ using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::DownloadUrlParameters;
-using content::ResourceController;
 using content::WebContents;
 using extensions::Event;
 using extensions::ExtensionSystem;
@@ -138,8 +136,8 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
   void SetUpOnMainThread() override {
     // Init test server.
     test_server_.reset(new net::EmbeddedTestServer);
-    ASSERT_TRUE(test_server_->Start());
     test_server_->RegisterRequestHandler(base::Bind(&HandleRequest));
+    ASSERT_TRUE(test_server_->Start());
 
     ExtensionApiTest::SetUpOnMainThread();
   }
@@ -158,14 +156,13 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
     // Setup default downloads directory to the scoped tmp directory created for
     // the test.
     browser()->profile()->GetPrefs()->SetFilePath(
-        prefs::kDownloadDefaultDirectory, downloads_dir_.path());
+        prefs::kDownloadDefaultDirectory, downloads_dir_.GetPath());
     // Ensure there are no prompts for download during the test.
     browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kPromptForDownload, false);
 
     DownloadManager* manager = GetDownloadManager();
     DownloadPrefs::FromDownloadManager(manager)->ResetAutoOpen();
-    manager->RemoveAllDownloads();
   }
 
   // Sends onExecuteContentHandler event with the MIME type "test/done" to the
@@ -380,7 +377,7 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, DirectDownload) {
 
   // The download's target file path.
   base::FilePath target_path =
-      downloads_dir_.path().Append(FILE_PATH_LITERAL("download_target.txt"));
+      downloads_dir_.GetPath().Append(FILE_PATH_LITERAL("download_target.txt"));
 
   // Set the downloads parameters.
   content::WebContents* web_contents =

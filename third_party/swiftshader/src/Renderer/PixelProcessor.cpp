@@ -972,9 +972,7 @@ namespace sw
 		{
 			state.depthTestActive = true;
 			state.depthCompareMode = context->depthCompareMode;
-			state.quadLayoutDepthBuffer = context->depthBuffer->getInternalFormat() != FORMAT_D32F_LOCKABLE &&
-			                              context->depthBuffer->getInternalFormat() != FORMAT_D32FS8_TEXTURE &&
-			                              context->depthBuffer->getInternalFormat() != FORMAT_D32FS8_SHADOW;
+			state.quadLayoutDepthBuffer = Surface::hasQuadLayout(context->depthBuffer->getInternalFormat());
 		}
 
 		state.occlusionEnabled = context->occlusionEnabled;
@@ -1111,7 +1109,7 @@ namespace sw
 			{
 				for(int component = 0; component < 4; component++)
 				{
-					const Shader::Semantic &semantic = context->pixelShader->semantic[interpolant][component];
+					const Shader::Semantic &semantic = context->pixelShader->getInput(interpolant, component);
 
 					if(semantic.active())
 					{
@@ -1140,7 +1138,7 @@ namespace sw
 			{
 				for(int component = 0; component < 4; component++)
 				{
-					state.interpolant[interpolant].centroid = context->pixelShader->semantic[interpolant][0].centroid;
+					state.interpolant[interpolant].centroid = context->pixelShader->getInput(interpolant, 0).centroid;
 				}
 			}
 		}

@@ -2,66 +2,74 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef NET_QUIC_QUIC_CHROMIUM_PACKET_WRITER_H_
-#define NET_QUIC_QUIC_CHROMIUM_PACKET_WRITER_H_
+#ifndef NET_QUIC_CHROMIUM_QUIC_CHROMIUM_PACKET_WRITER_H_
+#define NET_QUIC_CHROMIUM_QUIC_CHROMIUM_PACKET_WRITER_H_
 
 #include <stddef.h>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/io_buffer.h"
-#include "net/base/ip_endpoint.h"
+#include "net/base/net_export.h"
 #include "net/quic/core/quic_connection.h"
 #include "net/quic/core/quic_packet_writer.h"
-#include "net/quic/core/quic_protocol.h"
+#include "net/quic/core/quic_packets.h"
 #include "net/quic/core/quic_types.h"
-#include "net/udp/datagram_client_socket.h"
+#include "net/socket/datagram_client_socket.h"
 
 namespace net {
 
 // Chrome specific packet writer which uses a datagram Socket for writing data.
 class NET_EXPORT_PRIVATE QuicChromiumPacketWriter : public QuicPacketWriter {
  public:
-  // Interface which receives notifications on socket write errors.
-  class NET_EXPORT_PRIVATE WriteErrorObserver {
+  // Delegate interface which receives notifications on socket write events.
+  class NET_EXPORT_PRIVATE Delegate {
    public:
-    // Called on socket write error, with the error code of the failure
-    // and the packet that was not written as a result of the failure.
-    // An implementation must return error code from the rewrite
-    // attempt if there was one, else return |error_code|.
-    virtual int OnWriteError(int error_code,
-                             scoped_refptr<StringIOBuffer> last_packet) = 0;
+    // Called when a socket write attempt results in a failure, so
+    // that the delegate may recover from it by perhaps rewriting the
+    // packet to a different socket. An implementation must return the
+    // return value from the rewrite attempt if there is one, and
+    // |error_code| otherwise.
+    virtual int HandleWriteError(int error_code,
+                                 scoped_refptr<StringIOBuffer> last_packet) = 0;
+
+    // Called to propagate the final write error to the delegate.
+    virtual void OnWriteError(int error_code) = 0;
+
+    // Called when the writer is unblocked due to a write completion.
+    virtual void OnWriteUnblocked() = 0;
   };
 
   QuicChromiumPacketWriter();
+  // |socket| must outlive writer.
   explicit QuicChromiumPacketWriter(Socket* socket);
   ~QuicChromiumPacketWriter() override;
 
-  void Initialize(WriteErrorObserver* observer, QuicConnection* connection);
+  // |delegate| must outlive writer.
+  void set_delegate(Delegate* delegate) { delegate_ = delegate; }
+
+  void set_write_blocked(bool write_blocked) { write_blocked_ = write_blocked; }
 
   // Writes |packet| to the socket and returns the error code from the write.
-  int WritePacketToSocket(StringIOBuffer* packet);
+  WriteResult WritePacketToSocket(scoped_refptr<StringIOBuffer> packet);
 
   // QuicPacketWriter
   WriteResult WritePacket(const char* buffer,
                           size_t buf_len,
-                          const IPAddress& self_address,
-                          const IPEndPoint& peer_address,
+                          const QuicIpAddress& self_address,
+                          const QuicSocketAddress& peer_address,
                           PerPacketOptions* options) override;
   bool IsWriteBlockedDataBuffered() const override;
   bool IsWriteBlocked() const override;
   void SetWritable() override;
-  QuicByteCount GetMaxPacketSize(const IPEndPoint& peer_address) const override;
+  QuicByteCount GetMaxPacketSize(
+      const QuicSocketAddress& peer_address) const override;
 
   void OnWriteComplete(int rv);
 
- protected:
-  void set_write_blocked(bool is_blocked) { write_blocked_ = is_blocked; }
-
  private:
-  Socket* socket_;
-  QuicConnection* connection_;
-  WriteErrorObserver* observer_;
+  Socket* socket_;      // Unowned.
+  Delegate* delegate_;  // Unowned.
   // When a write returns asynchronously, |packet_| stores the written
   // packet until OnWriteComplete is called.
   scoped_refptr<StringIOBuffer> packet_;
@@ -76,4 +84,4 @@ class NET_EXPORT_PRIVATE QuicChromiumPacketWriter : public QuicPacketWriter {
 
 }  // namespace net
 
-#endif  // NET_QUIC_QUIC_CHROMIUM_PACKET_WRITER_H_
+#endif  // NET_QUIC_CHROMIUM_QUIC_CHROMIUM_PACKET_WRITER_H_

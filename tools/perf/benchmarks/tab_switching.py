@@ -27,6 +27,10 @@ class TabSwitchingTop10(perf_benchmark.PerfBenchmark):
   def Name(cls):
     return 'tab_switching.top_10'
 
+  @classmethod
+  def ShouldTearDownStateAfterEachStoryRun(cls):
+    return False
+
 
 @benchmark.Enabled('has tabs')
 @benchmark.Disabled('mac-reference')  # http://crbug.com/612774
@@ -48,6 +52,10 @@ class TabSwitchingTypical25(perf_benchmark.PerfBenchmark):
   def Name(cls):
     return 'tab_switching.typical_25'
 
+  @classmethod
+  def ShouldTearDownStateAfterEachStoryRun(cls):
+    return False
+
 
 @benchmark.Disabled('android')  # http://crbug.com/460084
 @benchmark.Disabled('mac-reference')  # http://crbug.com/634360
@@ -68,10 +76,15 @@ class TabSwitchingFiveBlankTabs(perf_benchmark.PerfBenchmark):
   def Name(cls):
     return 'tab_switching.five_blank_pages'
 
+  @classmethod
+  def ShouldTearDownStateAfterEachStoryRun(cls):
+    return False
+
 
 @benchmark.Enabled('has tabs')
 # http://crbug.com/460084, http://crbug.com/488067, http://crbug.com/634347
-@benchmark.Disabled('android', 'linux', 'mac-reference')
+# win: http://crbug.com/677311
+@benchmark.Disabled('android', 'linux', 'mac-reference', 'win')
 class TabSwitchingToughEnergyCases(perf_benchmark.PerfBenchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
@@ -87,6 +100,10 @@ class TabSwitchingToughEnergyCases(perf_benchmark.PerfBenchmark):
   @classmethod
   def Name(cls):
     return 'tab_switching.tough_energy_cases'
+
+  @classmethod
+  def ShouldTearDownStateAfterEachStoryRun(cls):
+    return False
 
 
 @benchmark.Enabled('has tabs')
@@ -105,3 +122,7 @@ class TabSwitchingToughImageCases(perf_benchmark.PerfBenchmark):
   @classmethod
   def Name(cls):
     return 'tab_switching.tough_image_cases'
+
+  @classmethod
+  def ShouldTearDownStateAfterEachStoryRun(cls):
+    return False

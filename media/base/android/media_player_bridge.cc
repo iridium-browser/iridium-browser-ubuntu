@@ -46,13 +46,11 @@ MediaPlayerBridge::MediaPlayerBridge(
     MediaPlayerManager* manager,
     const OnDecoderResourcesReleasedCB& on_decoder_resources_released_cb,
     const GURL& frame_url,
-    bool allow_credentials,
-    int media_session_id)
+    bool allow_credentials)
     : MediaPlayerAndroid(player_id,
                          manager,
                          on_decoder_resources_released_cb,
-                         frame_url,
-                         media_session_id),
+                         frame_url),
       prepared_(false),
       pending_play_(false),
       should_seek_on_prepare_(false),
@@ -470,6 +468,8 @@ void MediaPlayerBridge::OnMediaPrepared() {
   prepared_ = true;
   duration_ = GetDuration();
 
+  UpdateAllowedOperations();
+
   // If media player was recovered from a saved state, consume all the pending
   // events.
   if (should_seek_on_prepare_) {
@@ -486,7 +486,6 @@ void MediaPlayerBridge::OnMediaPrepared() {
     pending_play_ = false;
   }
 
-  UpdateAllowedOperations();
   manager()->OnMediaMetadataChanged(
       player_id(), duration_, width_, height_, true);
 }

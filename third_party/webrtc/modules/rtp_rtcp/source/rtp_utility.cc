@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "webrtc/base/logging.h"
+#include "webrtc/modules/rtp_rtcp/include/rtp_cvo.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 
 namespace webrtc {
@@ -246,7 +247,7 @@ bool RtpHeaderParser::Parse(RTPHeader* header,
 
   // May not be present in packet.
   header->extension.hasVideoRotation = false;
-  header->extension.videoRotation = 0;
+  header->extension.videoRotation = kVideoRotation_0;
 
   // May not be present in packet.
   header->extension.playout_delay.min_ms = -1;
@@ -317,8 +318,13 @@ void RtpHeaderParser::ParseOneByteExtensionHeader(
     const int len = (*ptr & 0x0f);
     ptr++;
 
+    if (id == 0) {
+      // Padding byte, skip ignoring len.
+      continue;
+    }
+
     if (id == 15) {
-      LOG(LS_WARNING)
+      LOG(LS_VERBOSE)
           << "RTP extension header 15 encountered. Terminate parsing.";
       return;
     }
@@ -330,8 +336,8 @@ void RtpHeaderParser::ParseOneByteExtensionHeader(
       return;
     }
 
-    RTPExtensionType type;
-    if (ptrExtensionMap->GetType(id, &type) != 0) {
+    RTPExtensionType type = ptrExtensionMap->GetType(id);
+    if (type == RtpHeaderExtensionMap::kInvalidType) {
       // If we encounter an unknown extension, just skip over it.
       LOG(LS_WARNING) << "Failed to find extension id: " << id;
     } else {
@@ -397,7 +403,8 @@ void RtpHeaderParser::ParseOneByteExtensionHeader(
           // |  ID   | len=0 |0 0 0 0 C F R R|
           // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
           header->extension.hasVideoRotation = true;
-          header->extension.videoRotation = ptr[0];
+          header->extension.videoRotation =
+              ConvertCVOByteToVideoRotation(ptr[0]);
           break;
         }
         case kRtpExtensionTransportSequenceNumber: {
@@ -437,30 +444,16 @@ void RtpHeaderParser::ParseOneByteExtensionHeader(
               max_playout_delay * kPlayoutDelayGranularityMs;
           break;
         }
-        default: {
-          LOG(LS_WARNING) << "Extension type not implemented: " << type;
+        case kRtpExtensionNone:
+        case kRtpExtensionNumberOfExtensions: {
+          RTC_NOTREACHED() << "Invalid extension type: " << type;
           return;
         }
       }
     }
     ptr += (len + 1);
-    uint8_t num_bytes = ParsePaddingBytes(ptrRTPDataExtensionEnd, ptr);
-    ptr += num_bytes;
   }
 }
 
-uint8_t RtpHeaderParser::ParsePaddingBytes(
-    const uint8_t* ptrRTPDataExtensionEnd,
-    const uint8_t* ptr) const {
-  uint8_t num_zero_bytes = 0;
-  while (ptrRTPDataExtensionEnd - ptr > 0) {
-    if (*ptr != 0) {
-      return num_zero_bytes;
-    }
-    ptr++;
-    num_zero_bytes++;
-  }
-  return num_zero_bytes;
-}
 }  // namespace RtpUtility
 }  // namespace webrtc

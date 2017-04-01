@@ -29,6 +29,10 @@
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace translate {
 
 namespace {
@@ -165,7 +169,8 @@ bool IOSTranslateDriver::HasCurrentPage() {
 }
 
 void IOSTranslateDriver::OpenUrlInNewTab(const GURL& url) {
-  web::WebState::OpenURLParams params(url, web::Referrer(), NEW_FOREGROUND_TAB,
+  web::WebState::OpenURLParams params(url, web::Referrer(),
+                                      WindowOpenDisposition::NEW_FOREGROUND_TAB,
                                       ui::PAGE_TRANSITION_LINK, false);
   web_state()->OpenURL(params);
 }

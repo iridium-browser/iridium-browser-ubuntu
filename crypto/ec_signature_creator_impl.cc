@@ -4,18 +4,17 @@
 
 #include "crypto/ec_signature_creator_impl.h"
 
-#include <openssl/bn.h>
-#include <openssl/ec.h>
-#include <openssl/ecdsa.h>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "base/logging.h"
 #include "crypto/ec_private_key.h"
 #include "crypto/openssl_util.h"
-#include "crypto/scoped_openssl_types.h"
+#include "third_party/boringssl/src/include/openssl/bn.h"
+#include "third_party/boringssl/src/include/openssl/ec.h"
+#include "third_party/boringssl/src/include/openssl/ecdsa.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/boringssl/src/include/openssl/sha.h"
 
 namespace crypto {
 
@@ -30,7 +29,7 @@ bool ECSignatureCreatorImpl::Sign(const uint8_t* data,
                                   int data_len,
                                   std::vector<uint8_t>* signature) {
   OpenSSLErrStackTracer err_tracer(FROM_HERE);
-  ScopedEVP_MD_CTX ctx(EVP_MD_CTX_create());
+  bssl::ScopedEVP_MD_CTX ctx;
   size_t sig_len = 0;
   if (!ctx.get() ||
       !EVP_DigestSignInit(ctx.get(), nullptr, EVP_sha256(), nullptr,
@@ -56,7 +55,7 @@ bool ECSignatureCreatorImpl::DecodeSignature(
     std::vector<uint8_t>* out_raw_sig) {
   OpenSSLErrStackTracer err_tracer(FROM_HERE);
   // Create ECDSA_SIG object from DER-encoded data.
-  ScopedECDSA_SIG ecdsa_sig(
+  bssl::UniquePtr<ECDSA_SIG> ecdsa_sig(
       ECDSA_SIG_from_bytes(der_sig.data(), der_sig.size()));
   if (!ecdsa_sig.get())
     return false;

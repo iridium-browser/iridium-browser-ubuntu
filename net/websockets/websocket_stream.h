@@ -31,7 +31,8 @@ class Origin;
 
 namespace net {
 
-class BoundNetLog;
+class NetLogWithSource;
+class URLRequest;
 class URLRequestContext;
 struct WebSocketFrame;
 class WebSocketHandshakeStreamBase;
@@ -71,6 +72,9 @@ class NET_EXPORT_PRIVATE WebSocketStream {
   class NET_EXPORT_PRIVATE ConnectDelegate {
    public:
     virtual ~ConnectDelegate();
+    // Called when the URLRequest is created.
+    virtual void OnCreateRequest(URLRequest* url_request) = 0;
+
     // Called on successful connection. The parameter is an object derived from
     // WebSocketStream.
     virtual void OnSuccess(std::unique_ptr<WebSocketStream> stream) = 0;
@@ -116,7 +120,7 @@ class NET_EXPORT_PRIVATE WebSocketStream {
       const GURL& first_party_for_cookies,
       const std::string& additional_headers,
       URLRequestContext* url_request_context,
-      const BoundNetLog& net_log,
+      const NetLogWithSource& net_log,
       std::unique_ptr<ConnectDelegate> connect_delegate);
 
   // Alternate version of CreateAndConnectStream() for testing use only. It
@@ -129,7 +133,7 @@ class NET_EXPORT_PRIVATE WebSocketStream {
       const GURL& first_party_for_cookies,
       const std::string& additional_headers,
       URLRequestContext* url_request_context,
-      const BoundNetLog& net_log,
+      const NetLogWithSource& net_log,
       std::unique_ptr<ConnectDelegate> connect_delegate,
       std::unique_ptr<base::Timer> timer);
 

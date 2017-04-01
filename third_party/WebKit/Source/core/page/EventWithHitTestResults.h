@@ -23,8 +23,8 @@
 
 #include "core/layout/HitTestResult.h"
 #include "platform/PlatformEvent.h"
-#include "platform/PlatformGestureEvent.h"
 #include "platform/PlatformMouseEvent.h"
+#include "public/platform/WebGestureEvent.h"
 
 namespace blink {
 
@@ -32,32 +32,31 @@ class Scrollbar;
 
 template <typename EventType>
 class EventWithHitTestResults {
-    STACK_ALLOCATED();
+  STACK_ALLOCATED();
 
-public:
-    EventWithHitTestResults(const EventType& event, const HitTestResult& hitTestResult)
-        : m_event(event)
-        , m_hitTestResult(hitTestResult)
-    {
-    }
+ public:
+  EventWithHitTestResults(const EventType& event,
+                          const HitTestResult& hitTestResult)
+      : m_event(event), m_hitTestResult(hitTestResult) {}
 
-    const EventType& event() const { return m_event; }
-    const HitTestResult& hitTestResult() const { return m_hitTestResult; }
-    LayoutPoint localPoint() const { return m_hitTestResult.localPoint(); }
-    Scrollbar* scrollbar() const { return m_hitTestResult.scrollbar(); }
-    bool isOverLink() const { return m_hitTestResult.isOverLink(); }
-    bool isOverWidget() const { return m_hitTestResult.isOverWidget(); }
-    Node* innerNode() const { return m_hitTestResult.innerNode(); }
+  const EventType& event() const { return m_event; }
+  const HitTestResult& hitTestResult() const { return m_hitTestResult; }
+  LayoutPoint localPoint() const { return m_hitTestResult.localPoint(); }
+  Scrollbar* scrollbar() const { return m_hitTestResult.scrollbar(); }
+  bool isOverLink() const { return m_hitTestResult.isOverLink(); }
+  bool isOverWidget() const { return m_hitTestResult.isOverWidget(); }
+  Node* innerNode() const { return m_hitTestResult.innerNode(); }
 
-private:
-    EventType m_event;
-    HitTestResult m_hitTestResult;
+ private:
+  EventType m_event;
+  HitTestResult m_hitTestResult;
 };
 
-using MouseEventWithHitTestResults = EventWithHitTestResults<PlatformMouseEvent>;
+using MouseEventWithHitTestResults =
+    EventWithHitTestResults<PlatformMouseEvent>;
 
-using GestureEventWithHitTestResults = EventWithHitTestResults<PlatformGestureEvent>;
+using GestureEventWithHitTestResults = EventWithHitTestResults<WebGestureEvent>;
 
-} // namespace blink
+}  // namespace blink
 
-#endif // EventWithHitTestResults_h
+#endif  // EventWithHitTestResults_h

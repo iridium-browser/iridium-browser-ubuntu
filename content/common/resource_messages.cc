@@ -145,14 +145,14 @@ bool ParamTraits<storage::DataElement>::Read(const base::Pickle* m,
       if (!iter->ReadData(&data, &len))
         return false;
       r->SetToBytes(data, len);
-      break;
+      return true;
     }
     case storage::DataElement::TYPE_BYTES_DESCRIPTION: {
       uint64_t length;
       if (!ReadParam(m, iter, &length))
         return false;
       r->SetToBytesDescription(length);
-      break;
+      return true;
     }
     case storage::DataElement::TYPE_FILE: {
       base::FilePath file_path;
@@ -168,7 +168,7 @@ bool ParamTraits<storage::DataElement>::Read(const base::Pickle* m,
         return false;
       r->SetToFilePathRange(file_path, offset, length,
                             expected_modification_time);
-      break;
+      return true;
     }
     case storage::DataElement::TYPE_FILE_FILESYSTEM: {
       GURL file_system_url;
@@ -184,7 +184,7 @@ bool ParamTraits<storage::DataElement>::Read(const base::Pickle* m,
         return false;
       r->SetToFileSystemUrlRange(file_system_url, offset, length,
                                  expected_modification_time);
-      break;
+      return true;
     }
     case storage::DataElement::TYPE_BLOB: {
       std::string blob_uuid;
@@ -196,18 +196,18 @@ bool ParamTraits<storage::DataElement>::Read(const base::Pickle* m,
       if (!ReadParam(m, iter, &length))
         return false;
       r->SetToBlobRange(blob_uuid, offset, length);
-      break;
+      return true;
     }
     case storage::DataElement::TYPE_DISK_CACHE_ENTRY: {
       NOTREACHED() << "Can't be sent by IPC.";
-      break;
+      return false;
     }
     case storage::DataElement::TYPE_UNKNOWN: {
       NOTREACHED();
-      break;
+      return false;
     }
   }
-  return true;
+  return false;
 }
 
 void ParamTraits<storage::DataElement>::Log(const param_type& p,
@@ -396,6 +396,7 @@ void ParamTraits<scoped_refptr<content::ResourceRequestBodyImpl>>::GetSize(
   if (p.get()) {
     GetParamSize(s, *p->elements());
     GetParamSize(s, p->identifier());
+    GetParamSize(s, p->contains_sensitive_info());
   }
 }
 
@@ -406,6 +407,7 @@ void ParamTraits<scoped_refptr<content::ResourceRequestBodyImpl>>::Write(
   if (p.get()) {
     WriteParam(m, *p->elements());
     WriteParam(m, p->identifier());
+    WriteParam(m, p->contains_sensitive_info());
   }
 }
 
@@ -424,9 +426,13 @@ bool ParamTraits<scoped_refptr<content::ResourceRequestBodyImpl>>::Read(
   int64_t identifier;
   if (!ReadParam(m, iter, &identifier))
     return false;
+  bool contains_sensitive_info;
+  if (!ReadParam(m, iter, &contains_sensitive_info))
+    return false;
   *r = new content::ResourceRequestBodyImpl;
   (*r)->swap_elements(&elements);
   (*r)->set_identifier(identifier);
+  (*r)->set_contains_sensitive_info(contains_sensitive_info);
   return true;
 }
 

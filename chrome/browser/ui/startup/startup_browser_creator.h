@@ -18,10 +18,8 @@
 #include "chrome/browser/ui/startup/startup_types.h"
 #include "url/gurl.h"
 
-class Browser;
 class GURL;
 class PrefRegistrySimple;
-class PrefService;
 
 namespace base {
 class CommandLine;
@@ -103,11 +101,14 @@ class StartupBrowserCreator {
   static void ClearLaunchedProfilesForTesting();
 
   static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
  private:
   friend class CloudPrintProxyPolicyTest;
   friend class CloudPrintProxyPolicyStartupTest;
   friend class StartupBrowserCreatorImpl;
+  // TODO(crbug.com/642442): Remove this when first_run_tabs gets refactored.
+  friend class StartupTabProviderImpl;
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
                            ReadingWasRestartedAfterNormalStart);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,

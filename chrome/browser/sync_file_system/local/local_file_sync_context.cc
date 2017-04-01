@@ -605,8 +605,8 @@ void LocalFileSyncContext::NotifyAvailableChangesOnIOThread() {
 void LocalFileSyncContext::NotifyAvailableChanges(
     const std::set<GURL>& origins,
     const std::vector<base::Closure>& callbacks) {
-  FOR_EACH_OBSERVER(LocalOriginChangeObserver, origin_change_observers_,
-                    OnChangesAvailableInOrigins(origins));
+  for (auto& observer : origin_change_observers_)
+    observer.OnChangesAvailableInOrigins(origins);
   for (const auto& callback : callbacks)
     callback.Run();
 }
@@ -912,8 +912,7 @@ void LocalFileSyncContext::DidGetWritingStatusForSync(
   DCHECK(file_util);
 
   base::File::Error file_error = file_util->GetFileInfo(
-      base::WrapUnique(new FileSystemOperationContext(file_system_context))
-          .get(),
+      base::MakeUnique<FileSystemOperationContext>(file_system_context).get(),
       url, &file_info, &platform_path);
 
   storage::ScopedFile snapshot;

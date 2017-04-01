@@ -10,7 +10,7 @@
 
 #include "content/common/content_export.h"
 #include "ppapi/c/ppb_input_event.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 
 struct PP_InputEvent;
 
@@ -19,7 +19,6 @@ struct InputEventData;
 }
 
 namespace blink {
-class WebGamepads;
 class WebInputEvent;
 }
 
@@ -47,7 +46,7 @@ CreateSimulatedWebInputEvents(const ppapi::InputEventData& event,
 
 // Returns the PPAPI event class for the given WebKit event type. The given
 // type should not be "Undefined" since there's no corresponding PPAPI class.
-PP_InputEvent_Class ClassifyInputEvent(blink::WebInputEvent::Type type);
+PP_InputEvent_Class ClassifyInputEvent(const blink::WebInputEvent& event);
 
 }  // namespace content
 

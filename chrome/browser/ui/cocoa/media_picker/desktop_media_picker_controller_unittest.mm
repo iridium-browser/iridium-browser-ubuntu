@@ -7,10 +7,10 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/media/desktop_media_list_observer.h"
-#include "chrome/browser/media/fake_desktop_media_list.h"
-#import "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "chrome/browser/media/webrtc/desktop_media_list_observer.h"
+#include "chrome/browser/media/webrtc/fake_desktop_media_list.h"
 #import "chrome/browser/ui/cocoa/media_picker/desktop_media_picker_item.h"
+#import "chrome/browser/ui/cocoa/test/cocoa_test_helper.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest_mac.h"
 

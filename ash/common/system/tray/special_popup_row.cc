@@ -4,6 +4,8 @@
 
 #include "ash/common/system/tray/special_popup_row.h"
 
+#include "ash/common/ash_constants.h"
+#include "ash/common/material_design/material_design_controller.h"
 #include "ash/common/system/tray/hover_highlight_view.h"
 #include "ash/common/system/tray/throbber_view.h"
 #include "ash/common/system/tray/tray_constants.h"
@@ -16,6 +18,9 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/button/custom_button.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/label.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/painter.h"
@@ -29,23 +34,23 @@ const int kSpecialPopupRowHeight = 55;
 const int kBorderHeight = 1;
 const SkColor kBorderColor = SkColorSetRGB(0xaa, 0xaa, 0xaa);
 
-views::View* CreatePopupHeaderButtonsContainer() {
+views::View* CreateViewContainer() {
   views::View* view = new views::View;
   view->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
-  view->SetBorder(views::Border::CreateEmptyBorder(4, 0, 4, 5));
+  view->SetBorder(views::CreateEmptyBorder(4, 0, 4, 5));
   return view;
 }
 
 }  // namespace
 
-SpecialPopupRow::SpecialPopupRow() : content_(NULL), button_container_(NULL) {
+SpecialPopupRow::SpecialPopupRow()
+    : content_(nullptr), views_after_content_container_(nullptr) {
+  DCHECK(!MaterialDesignController::IsSystemTrayMenuMaterial());
   set_background(
       views::Background::CreateSolidBackground(kHeaderBackgroundColor));
-  SetBorder(views::Border::CreateSolidSidedBorder(kBorderHeight, 0, 0, 0,
-                                                  kBorderColor));
-  SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0));
+  SetBorder(
+      views::CreateSolidSidedBorder(kBorderHeight, 0, 0, 0, kBorderColor));
 }
 
 SpecialPopupRow::~SpecialPopupRow() {}
@@ -66,7 +71,7 @@ void SpecialPopupRow::SetTextLabel(int string_id, ViewClickListener* listener) {
       rb.GetLocalizedString(string_id), true /* highlight */);
 
   container->SetBorder(
-      views::Border::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
+      views::CreateEmptyBorder(0, kTrayPopupPaddingHorizontal, 0, 0));
 
   container->SetAccessibleName(
       rb.GetLocalizedString(IDS_ASH_STATUS_TRAY_PREVIOUS_MENU));
@@ -75,28 +80,19 @@ void SpecialPopupRow::SetTextLabel(int string_id, ViewClickListener* listener) {
 
 void SpecialPopupRow::SetContent(views::View* view) {
   CHECK(!content_);
+  views::BoxLayout* box_layout =
+      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 0);
+  SetLayoutManager(box_layout);
   content_ = view;
   AddChildViewAt(content_, 0);
 }
 
-void SpecialPopupRow::AddView(views::View* view, bool add_separator) {
-  if (!button_container_) {
-    button_container_ = CreatePopupHeaderButtonsContainer();
-    AddChildView(button_container_);
-  }
-  if (add_separator) {
-    views::Separator* separator =
-        new views::Separator(views::Separator::VERTICAL);
-    separator->SetColor(ash::kBorderDarkColor);
-    separator->SetBorder(views::Border::CreateEmptyBorder(kSeparatorInset, 0,
-                                                          kSeparatorInset, 0));
-    button_container_->AddChildView(separator);
-  }
-  button_container_->AddChildView(view);
+void SpecialPopupRow::AddViewToTitleRow(views::View* view) {
+  AddViewAfterContent(view);
 }
 
-void SpecialPopupRow::AddButton(TrayPopupHeaderButton* button) {
-  AddView(button, true /* add_separator */);
+void SpecialPopupRow::AddViewToRowNonMd(views::View* view, bool add_separator) {
+  AddViewAfterContent(view, add_separator);
 }
 
 gfx::Size SpecialPopupRow::GetPreferredSize() const {
@@ -111,24 +107,50 @@ int SpecialPopupRow::GetHeightForWidth(int width) const {
 
 void SpecialPopupRow::Layout() {
   views::View::Layout();
-  gfx::Rect content_bounds = GetContentsBounds();
+
+  const gfx::Rect content_bounds = GetContentsBounds();
   if (content_bounds.IsEmpty())
     return;
-  if (!button_container_) {
+
+  if (!views_after_content_container_) {
     content_->SetBoundsRect(GetContentsBounds());
     return;
   }
 
-  gfx::Rect bounds(button_container_->GetPreferredSize());
+  gfx::Rect bounds(views_after_content_container_->GetPreferredSize());
   bounds.set_height(content_bounds.height());
+
   gfx::Rect container_bounds = content_bounds;
   container_bounds.ClampToCenteredSize(bounds.size());
   container_bounds.set_x(content_bounds.width() - container_bounds.width());
-  button_container_->SetBoundsRect(container_bounds);
+  views_after_content_container_->SetBoundsRect(container_bounds);
 
   bounds = content_->bounds();
-  bounds.set_width(button_container_->x());
+  bounds.set_width(views_after_content_container_->x());
   content_->SetBoundsRect(bounds);
+}
+
+void SpecialPopupRow::AddViewAfterContent(views::View* view) {
+  AddViewAfterContent(view, false);
+}
+
+void SpecialPopupRow::AddViewAfterContent(views::View* view,
+                                          bool add_separator) {
+  if (!views_after_content_container_) {
+    views_after_content_container_ = CreateViewContainer();
+    AddChildView(views_after_content_container_);
+  }
+
+  if (add_separator) {
+    views::Separator* separator =
+        new views::Separator(views::Separator::VERTICAL);
+    separator->SetColor(ash::kBorderDarkColor);
+    separator->SetBorder(
+        views::CreateEmptyBorder(kSeparatorInset, 0, kSeparatorInset, 0));
+    views_after_content_container_->AddChildView(separator);
+  }
+
+  views_after_content_container_->AddChildView(view);
 }
 
 }  // namespace ash

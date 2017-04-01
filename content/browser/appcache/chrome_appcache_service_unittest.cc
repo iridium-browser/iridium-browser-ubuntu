@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -9,13 +11,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/appcache/appcache_database.h"
 #include "content/browser/appcache/appcache_storage_impl.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread_impl.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "content/public/test/test_browser_context.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/appcache_test_helper.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -35,9 +39,10 @@ const char kSessionOnlyManifest[] = "http://www.sessiononly.com/cache.manifest";
 
 class MockURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
-  MockURLRequestContextGetter(net::URLRequestContext* context,
-                              base::SingleThreadTaskRunner* task_runner)
-      : context_(context), task_runner_(task_runner) {}
+  MockURLRequestContextGetter(
+      net::URLRequestContext* context,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+      : context_(context), task_runner_(std::move(task_runner)) {}
 
   net::URLRequestContext* GetURLRequestContext() override { return context_; }
 
@@ -62,11 +67,7 @@ class ChromeAppCacheServiceTest : public testing::Test {
       : kProtectedManifestURL(kProtectedManifest),
         kNormalManifestURL(kNormalManifest),
         kSessionOnlyManifestURL(kSessionOnlyManifest),
-        file_thread_(BrowserThread::FILE, &message_loop_),
-        file_user_blocking_thread_(BrowserThread::FILE_USER_BLOCKING,
-                                   &message_loop_),
-        cache_thread_(BrowserThread::CACHE, &message_loop_),
-        io_thread_(BrowserThread::IO, &message_loop_) {}
+        thread_bundle_(TestBrowserThreadBundle::Options::IO_MAINLOOP) {}
 
  protected:
   scoped_refptr<ChromeAppCacheService> CreateAppCacheServiceImpl(
@@ -74,17 +75,13 @@ class ChromeAppCacheServiceTest : public testing::Test {
       bool init_storage);
   void InsertDataIntoAppCache(ChromeAppCacheService* appcache_service);
 
-  base::MessageLoopForIO message_loop_;
   base::ScopedTempDir temp_dir_;
   const GURL kProtectedManifestURL;
   const GURL kNormalManifestURL;
   const GURL kSessionOnlyManifestURL;
 
  private:
-  BrowserThreadImpl file_thread_;
-  BrowserThreadImpl file_user_blocking_thread_;
-  BrowserThreadImpl cache_thread_;
-  BrowserThreadImpl io_thread_;
+  TestBrowserThreadBundle thread_bundle_;
   TestBrowserContext browser_context_;
 };
 
@@ -101,11 +98,11 @@ ChromeAppCacheServiceTest::CreateAppCacheServiceImpl(
   scoped_refptr<MockURLRequestContextGetter> mock_request_context_getter =
       new MockURLRequestContextGetter(
           browser_context_.GetResourceContext()->GetRequestContext(),
-          message_loop_.task_runner().get());
+          base::ThreadTaskRunnerHandle::Get());
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&ChromeAppCacheService::InitializeOnIOThread,
-                 appcache_service.get(), appcache_path,
+                 appcache_service, appcache_path,
                  browser_context_.GetResourceContext(),
                  base::RetainedRef(mock_request_context_getter), mock_policy));
   // Steps needed to initialize the storage of AppCache data.
@@ -141,7 +138,7 @@ void ChromeAppCacheServiceTest::InsertDataIntoAppCache(
 TEST_F(ChromeAppCacheServiceTest, KeepOnDestruction) {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   base::FilePath appcache_path =
-      temp_dir_.path().Append(kTestingAppCacheDirname);
+      temp_dir_.GetPath().Append(kTestingAppCacheDirname);
 
   // Create a ChromeAppCacheService and insert data into it
   scoped_refptr<ChromeAppCacheService> appcache_service =
@@ -178,7 +175,7 @@ TEST_F(ChromeAppCacheServiceTest, KeepOnDestruction) {
 TEST_F(ChromeAppCacheServiceTest, SaveSessionState) {
   ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
   base::FilePath appcache_path =
-      temp_dir_.path().Append(kTestingAppCacheDirname);
+      temp_dir_.GetPath().Append(kTestingAppCacheDirname);
 
   // Create a ChromeAppCacheService and insert data into it
   scoped_refptr<ChromeAppCacheService> appcache_service =

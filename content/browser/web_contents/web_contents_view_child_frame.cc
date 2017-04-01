@@ -35,6 +35,13 @@ const WebContentsView* WebContentsViewChildFrame::GetOuterView() const {
   return web_contents_->GetOuterWebContents()->GetView();
 }
 
+RenderViewHostDelegateView* WebContentsViewChildFrame::GetOuterDelegateView() {
+  RenderViewHostImpl* outer_rvh = static_cast<RenderViewHostImpl*>(
+      web_contents_->GetOuterWebContents()->GetRenderViewHost());
+  CHECK(outer_rvh);
+  return outer_rvh->GetDelegate()->GetDelegateView();
+}
+
 gfx::NativeView WebContentsViewChildFrame::GetNativeView() const {
   return GetOuterView()->GetNativeView();
 }
@@ -47,16 +54,15 @@ gfx::NativeWindow WebContentsViewChildFrame::GetTopLevelNativeWindow() const {
   return GetOuterView()->GetTopLevelNativeWindow();
 }
 
-void WebContentsViewChildFrame::GetScreenInfo(
-    blink::WebScreenInfo* web_screen_info) const {
+void WebContentsViewChildFrame::GetScreenInfo(ScreenInfo* screen_info) const {
   // TODO(wjmaclean): falling back to the default screen info is not what used
   // to happen in RenderWidgetHostViewChildFrame, but it seems like the right
   // thing to do. We should keep an eye on this in case the else-clause below
   // causes problems.
   if (web_contents_->GetOuterWebContents())
-    GetOuterView()->GetScreenInfo(web_screen_info);
+    GetOuterView()->GetScreenInfo(screen_info);
   else
-    WebContentsView::GetDefaultScreenInfo(web_screen_info);
+    WebContentsView::GetDefaultScreenInfo(screen_info);
 }
 
 void WebContentsViewChildFrame::GetContainerBounds(gfx::Rect* out) const {
@@ -88,7 +94,7 @@ void WebContentsViewChildFrame::CreateView(const gfx::Size& initial_size,
 RenderWidgetHostViewBase* WebContentsViewChildFrame::CreateViewForWidget(
     RenderWidgetHost* render_widget_host,
     bool is_guest_view_hack) {
-  return new RenderWidgetHostViewChildFrame(render_widget_host);
+  return RenderWidgetHostViewChildFrame::Create(render_widget_host);
 }
 
 RenderWidgetHostViewBase* WebContentsViewChildFrame::CreateViewForPopupWidget(
@@ -145,7 +151,8 @@ DropData* WebContentsViewChildFrame::GetDropData() const {
 }
 
 void WebContentsViewChildFrame::UpdateDragCursor(WebDragOperation operation) {
-  NOTREACHED();
+  if (auto view = GetOuterDelegateView())
+    view->UpdateDragCursor(operation);
 }
 
 void WebContentsViewChildFrame::GotFocus() {
@@ -168,8 +175,14 @@ void WebContentsViewChildFrame::StartDragging(
     WebDragOperationsMask ops,
     const gfx::ImageSkia& image,
     const gfx::Vector2d& image_offset,
-    const DragEventSourceInfo& event_info) {
-  NOTREACHED();
+    const DragEventSourceInfo& event_info,
+    RenderWidgetHostImpl* source_rwh) {
+  if (auto view = GetOuterDelegateView()) {
+    view->StartDragging(
+        drop_data, ops, image, image_offset, event_info, source_rwh);
+  } else {
+    web_contents_->GetOuterWebContents()->SystemDragEnded(source_rwh);
+  }
 }
 
 }  // namespace content

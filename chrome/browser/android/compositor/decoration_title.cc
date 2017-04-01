@@ -17,7 +17,6 @@
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 
-namespace chrome {
 namespace android {
 
 DecorationTitle::DecorationTitle(ui::ResourceManager* resource_manager,
@@ -152,9 +151,8 @@ void DecorationTitle::setBounds(const gfx::Size& bounds) {
   if (bounds.GetArea() == 0.f) {
     layer_->SetHideLayerAndSubtree(true);
     return;
-  } else {
-    layer_->SetHideLayerAndSubtree(false);
   }
+  layer_->SetHideLayerAndSubtree(false);
 
   // Current implementation assumes there is always enough space
   // to draw favicon and title fade.
@@ -242,4 +240,3 @@ scoped_refptr<cc::Layer> DecorationTitle::layer() {
 }
 
 }  // namespace android
-}  // namespace chrome

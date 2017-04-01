@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_SOCKET_MOCK_TCP_CLIENT_SOCKET_H_
 #define CHROME_BROWSER_EXTENSIONS_API_SOCKET_MOCK_TCP_CLIENT_SOCKET_H_
 
+#include "net/log/net_log_source.h"
+#include "net/log/net_log_with_source.h"
 #include "net/socket/tcp_client_socket.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -15,7 +17,6 @@ class MockTCPClientSocket : public net::TCPClientSocket {
   MockTCPClientSocket();
   virtual ~MockTCPClientSocket();
 
-  // Copied from MockTCPClientSocket in blimp/net/test_common.h
   MOCK_METHOD3(Read, int(net::IOBuffer*, int, const net::CompletionCallback&));
   MOCK_METHOD3(Write, int(net::IOBuffer*, int, const net::CompletionCallback&));
   MOCK_METHOD1(SetReceiveBufferSize, int(int32_t));
@@ -26,14 +27,14 @@ class MockTCPClientSocket : public net::TCPClientSocket {
   MOCK_CONST_METHOD0(IsConnectedAndIdle, bool());
   MOCK_CONST_METHOD1(GetPeerAddress, int(net::IPEndPoint*));
   MOCK_CONST_METHOD1(GetLocalAddress, int(net::IPEndPoint*));
-  MOCK_CONST_METHOD0(NetLog, const net::BoundNetLog&());
+  MOCK_CONST_METHOD0(NetLog, const net::NetLogWithSource&());
   MOCK_METHOD0(SetSubresourceSpeculation, void());
   MOCK_METHOD0(SetOmniboxSpeculation, void());
   MOCK_CONST_METHOD0(WasEverUsed, bool());
   MOCK_CONST_METHOD0(UsingTCPFastOpen, bool());
   MOCK_CONST_METHOD0(NumBytesRead, int64_t());
   MOCK_CONST_METHOD0(GetConnectTimeMicros, base::TimeDelta());
-  MOCK_CONST_METHOD0(WasNpnNegotiated, bool());
+  MOCK_CONST_METHOD0(WasAlpnNegotiated, bool());
   MOCK_CONST_METHOD0(GetNegotiatedProtocol, net::NextProto());
   MOCK_METHOD1(GetSSLInfo, bool(net::SSLInfo*));
   MOCK_CONST_METHOD1(GetConnectionAttempts, void(net::ConnectionAttempts*));
@@ -51,7 +52,7 @@ MockTCPClientSocket::MockTCPClientSocket()
     : TCPClientSocket(net::AddressList(),
                       nullptr,
                       nullptr,
-                      net::NetLog::Source()) {}
+                      net::NetLogSource()) {}
 MockTCPClientSocket::~MockTCPClientSocket() {}
 
 }  // namespace extensions

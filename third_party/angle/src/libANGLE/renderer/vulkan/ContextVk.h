@@ -10,7 +10,10 @@
 #ifndef LIBANGLE_RENDERER_VULKAN_CONTEXTVK_H_
 #define LIBANGLE_RENDERER_VULKAN_CONTEXTVK_H_
 
+#include <vulkan/vulkan.h>
+
 #include "libANGLE/renderer/ContextImpl.h"
+#include "libANGLE/renderer/vulkan/renderervk_utils.h"
 
 namespace rx
 {
@@ -53,12 +56,11 @@ class ContextVk : public ContextImpl
                                 GLenum type,
                                 const GLvoid *indices,
                                 const gl::IndexRange &indexRange) override;
+    gl::Error drawArraysIndirect(GLenum mode, const GLvoid *indirect) override;
+    gl::Error drawElementsIndirect(GLenum mode, GLenum type, const GLvoid *indirect) override;
 
-    // TODO(jmadill): Investigate proper impl methods for this.
-    void notifyDeviceLost() override;
-    bool isDeviceLost() const override;
-    bool testDeviceLost() override;
-    bool testDeviceResettable() override;
+    // Device loss
+    GLenum getResetStatus() override;
 
     // Vendor and description strings.
     std::string getVendorString() const override;
@@ -100,7 +102,7 @@ class ContextVk : public ContextImpl
     RenderbufferImpl *createRenderbuffer() override;
 
     // Buffer creation
-    BufferImpl *createBuffer() override;
+    BufferImpl *createBuffer(const gl::BufferState &state) override;
 
     // Vertex Array creation
     VertexArrayImpl *createVertexArray(const gl::VertexArrayState &state) override;
@@ -119,6 +121,12 @@ class ContextVk : public ContextImpl
 
     // Path object creation
     std::vector<PathImpl *> createPaths(GLsizei) override;
+
+    VkDevice getDevice() const;
+    vk::CommandBuffer *getCommandBuffer();
+    vk::Error submitCommands(const vk::CommandBuffer &commandBuffer);
+
+    RendererVk *getRenderer() { return mRenderer; }
 
   private:
     RendererVk *mRenderer;

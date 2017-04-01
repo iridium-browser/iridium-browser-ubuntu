@@ -11,7 +11,6 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
@@ -32,7 +31,6 @@
 class Profile;
 
 namespace content {
-class NavigationEntry;
 class WebContents;
 }  // namespace content
 
@@ -244,7 +242,7 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
 
   // Removes unrestorable windows from the previous windows list.
   void RemoveUnusedRestoreWindows(
-      std::vector<sessions::SessionWindow*>* window_list);
+      std::vector<std::unique_ptr<sessions::SessionWindow>>* window_list);
 
   // Implementation of RestoreIfNecessary. If |browser| is non-null and we need
   // to restore, the tabs are added to it, otherwise a new browser is created.
@@ -261,8 +259,9 @@ class SessionService : public sessions::BaseSessionServiceDelegate,
   void OnBrowserSetLastActive(Browser* browser) override;
 
   // Converts |commands| to SessionWindows and notifies the callback.
-  void OnGotSessionCommands(const sessions::GetLastSessionCallback& callback,
-                            ScopedVector<sessions::SessionCommand> commands);
+  void OnGotSessionCommands(
+      const sessions::GetLastSessionCallback& callback,
+      std::vector<std::unique_ptr<sessions::SessionCommand>> commands);
 
   // Adds commands to commands that will recreate the state of the specified
   // tab. This adds at most kMaxNavigationCountToPersist navigations (in each

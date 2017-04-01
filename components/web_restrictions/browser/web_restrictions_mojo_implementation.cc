@@ -7,7 +7,9 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "components/web_restrictions/browser/web_restrictions_client.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace web_restrictions {
 
@@ -21,18 +23,19 @@ void ClientRequestPermissionCallback(
 
 }  // namespace
 
+WebRestrictionsMojoImplementation::WebRestrictionsMojoImplementation(
+    WebRestrictionsClient* client)
+    : web_restrictions_client_(client) {}
+
+WebRestrictionsMojoImplementation::~WebRestrictionsMojoImplementation() {}
+
 void WebRestrictionsMojoImplementation::Create(
     WebRestrictionsClient* client,
     mojo::InterfaceRequest<mojom::WebRestrictions> request) {
-  new WebRestrictionsMojoImplementation(client, std::move(request));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<WebRestrictionsMojoImplementation>(client),
+      std::move(request));
 }
-
-WebRestrictionsMojoImplementation::WebRestrictionsMojoImplementation(
-    WebRestrictionsClient* client,
-    mojo::InterfaceRequest<mojom::WebRestrictions> request)
-    : binding_(this, std::move(request)), web_restrictions_client_(client) {}
-
-WebRestrictionsMojoImplementation::~WebRestrictionsMojoImplementation() {}
 
 void WebRestrictionsMojoImplementation::GetResult(
     const std::string& url,

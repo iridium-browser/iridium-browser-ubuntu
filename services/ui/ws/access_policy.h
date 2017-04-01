@@ -49,8 +49,8 @@ class AccessPolicy {
   virtual bool CanEmbed(const ServerWindow* window) const = 0;
   virtual bool CanChangeWindowVisibility(const ServerWindow* window) const = 0;
   virtual bool CanChangeWindowOpacity(const ServerWindow* window) const = 0;
-  virtual bool CanSetWindowSurface(const ServerWindow* window,
-                                   mojom::SurfaceType surface_type) const = 0;
+  virtual bool CanSetWindowCompositorFrameSink(
+      const ServerWindow* window) const = 0;
   virtual bool CanSetWindowBounds(const ServerWindow* window) const = 0;
   virtual bool CanSetWindowProperties(const ServerWindow* window) const = 0;
   virtual bool CanSetWindowTextInputState(const ServerWindow* window) const = 0;
@@ -58,10 +58,12 @@ class AccessPolicy {
   virtual bool CanSetFocus(const ServerWindow* window) const = 0;
   virtual bool CanSetClientArea(const ServerWindow* window) const = 0;
   virtual bool CanSetHitTestMask(const ServerWindow* window) const = 0;
+  virtual bool CanSetAcceptDrops(const ServerWindow* window) const = 0;
   virtual bool CanSetAcceptEvents(const ServerWindow* window) const = 0;
   // Used for all client controllable cursor properties; which cursor should be
   // displayed, visibility, locking, etc.
   virtual bool CanSetCursorProperties(const ServerWindow* window) const = 0;
+  virtual bool CanInitiateDragLoop(const ServerWindow* window) const = 0;
   virtual bool CanInitiateMoveLoop(const ServerWindow* window) const = 0;
 
   // Returns whether the client should notify on a hierarchy change.

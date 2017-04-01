@@ -11,6 +11,7 @@
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
+#include "wtf/text/WTFString.h"
 
 #include <iosfwd>
 
@@ -18,43 +19,92 @@ namespace blink {
 
 // A clip rect created by a css property such as "overflow" or "clip".
 // Along with a reference to the transform space the clip rect is based on,
-// and an (optional) parent ClipPaintPropertyNode for inherited clips.
-class PLATFORM_EXPORT ClipPaintPropertyNode : public RefCounted<ClipPaintPropertyNode> {
-public:
-    static PassRefPtr<ClipPaintPropertyNode> create(
-        PassRefPtr<const ClipPaintPropertyNode> parent,
-        PassRefPtr<const TransformPaintPropertyNode> localTransformSpace,
-        const FloatRoundedRect& clipRect)
-    {
-        return adoptRef(new ClipPaintPropertyNode(parent, localTransformSpace, clipRect));
-    }
+// and a parent ClipPaintPropertyNode for inherited clips.
+//
+// The clip tree is rooted at a node with no parent. This root node should
+// not be modified.
+class PLATFORM_EXPORT ClipPaintPropertyNode
+    : public RefCounted<ClipPaintPropertyNode> {
+ public:
+  // This node is really a sentinel, and does not represent a real clip
+  // space.
+  static ClipPaintPropertyNode* root();
 
-    void update(PassRefPtr<const ClipPaintPropertyNode> parent, PassRefPtr<const TransformPaintPropertyNode> localTransformSpace, const FloatRoundedRect& clipRect)
-    {
-        m_parent = parent;
-        m_localTransformSpace = localTransformSpace;
-        m_clipRect = clipRect;
-    }
+  static PassRefPtr<ClipPaintPropertyNode> create(
+      PassRefPtr<const ClipPaintPropertyNode> parent,
+      PassRefPtr<const TransformPaintPropertyNode> localTransformSpace,
+      const FloatRoundedRect& clipRect,
+      CompositingReasons directCompositingReasons = CompositingReasonNone) {
+    return adoptRef(new ClipPaintPropertyNode(
+        std::move(parent), std::move(localTransformSpace), clipRect,
+        directCompositingReasons));
+  }
 
-    const TransformPaintPropertyNode* localTransformSpace() const { return m_localTransformSpace.get(); }
-    const FloatRoundedRect& clipRect() const { return m_clipRect; }
+  void update(PassRefPtr<const ClipPaintPropertyNode> parent,
+              PassRefPtr<const TransformPaintPropertyNode> localTransformSpace,
+              const FloatRoundedRect& clipRect) {
+    DCHECK(!isRoot());
+    DCHECK(parent != this);
+    m_parent = parent;
+    m_localTransformSpace = localTransformSpace;
+    m_clipRect = clipRect;
+  }
 
-    // Reference to inherited clips, or nullptr if this is the only clip.
-    const ClipPaintPropertyNode* parent() const { return m_parent.get(); }
+  const TransformPaintPropertyNode* localTransformSpace() const {
+    return m_localTransformSpace.get();
+  }
+  const FloatRoundedRect& clipRect() const { return m_clipRect; }
 
-private:
-    ClipPaintPropertyNode(PassRefPtr<const ClipPaintPropertyNode> parent, PassRefPtr<const TransformPaintPropertyNode> localTransformSpace, const FloatRoundedRect& clipRect)
-        : m_parent(parent), m_localTransformSpace(localTransformSpace), m_clipRect(clipRect) { }
+  // Reference to inherited clips, or nullptr if this is the only clip.
+  const ClipPaintPropertyNode* parent() const { return m_parent.get(); }
+  bool isRoot() const { return !m_parent; }
 
-    RefPtr<const ClipPaintPropertyNode> m_parent;
-    RefPtr<const TransformPaintPropertyNode> m_localTransformSpace;
-    FloatRoundedRect m_clipRect;
+#if DCHECK_IS_ON()
+  // The clone function is used by FindPropertiesNeedingUpdate.h for recording
+  // a clip node before it has been updated, to later detect changes.
+  PassRefPtr<ClipPaintPropertyNode> clone() const {
+    return adoptRef(new ClipPaintPropertyNode(m_parent, m_localTransformSpace,
+                                              m_clipRect,
+                                              m_directCompositingReasons));
+  }
+
+  // The equality operator is used by FindPropertiesNeedingUpdate.h for checking
+  // if a clip node has changed.
+  bool operator==(const ClipPaintPropertyNode& o) const {
+    return m_parent == o.m_parent &&
+           m_localTransformSpace == o.m_localTransformSpace &&
+           m_clipRect == o.m_clipRect &&
+           m_directCompositingReasons == o.m_directCompositingReasons;
+  }
+#endif
+
+  String toString() const;
+
+  bool hasDirectCompositingReasons() const {
+    return m_directCompositingReasons != CompositingReasonNone;
+  }
+
+ private:
+  ClipPaintPropertyNode(
+      PassRefPtr<const ClipPaintPropertyNode> parent,
+      PassRefPtr<const TransformPaintPropertyNode> localTransformSpace,
+      const FloatRoundedRect& clipRect,
+      CompositingReasons directCompositingReasons)
+      : m_parent(parent),
+        m_localTransformSpace(localTransformSpace),
+        m_clipRect(clipRect),
+        m_directCompositingReasons(directCompositingReasons) {}
+
+  RefPtr<const ClipPaintPropertyNode> m_parent;
+  RefPtr<const TransformPaintPropertyNode> m_localTransformSpace;
+  FloatRoundedRect m_clipRect;
+  CompositingReasons m_directCompositingReasons;
 };
 
 // Redeclared here to avoid ODR issues.
 // See platform/testing/PaintPrinters.h.
 void PrintTo(const ClipPaintPropertyNode&, std::ostream*);
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ClipPaintPropertyNode_h
+#endif  // ClipPaintPropertyNode_h

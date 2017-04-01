@@ -13,13 +13,13 @@ cr.define('settings', function() {
     // Triggers a browser relaunch.
     relaunch: function() {},
 
-<if expr="chromeos">
+// <if expr="chromeos">
     // First signs out current user and then performs a restart.
-    logOutAndRestart: function() {},
+    signOutAndRestart: function() {},
 
     // Triggers a factory reset.
     factoryReset: function() {},
-</if>
+// </if>
   };
 
   /**
@@ -40,17 +40,17 @@ cr.define('settings', function() {
       chrome.send('relaunch');
     },
 
-<if expr="chromeos">
+// <if expr="chromeos">
     /** @override */
-    logOutAndRestart: function() {
-      chrome.send('logOutAndRestart');
+    signOutAndRestart: function() {
+      chrome.send('signOutAndRestart');
     },
 
     /** @override */
     factoryReset: function() {
       chrome.send('factoryReset');
     },
-</if>
+// </if>
   };
 
   return {

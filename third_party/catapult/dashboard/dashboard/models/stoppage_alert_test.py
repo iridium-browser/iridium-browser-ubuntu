@@ -4,8 +4,8 @@
 
 import unittest
 
-from dashboard import testing_common
-from dashboard import utils
+from dashboard.common import testing_common
+from dashboard.common import utils
 from dashboard.models import graph_data
 from dashboard.models import sheriff
 from dashboard.models import stoppage_alert
@@ -37,6 +37,7 @@ class StoppageAlertTest(testing_common.TestCase):
     self.assertFalse(alert.mail_sent)
     self.assertIsNone(alert.bug_id)
     self.assertIsNotNone(alert.timestamp)
+    self.assertEqual(row.timestamp, alert.last_row_timestamp)
 
   def testCreateStoppageAlert_InternalOnly(self):
     test, row = self._AddSampleData()

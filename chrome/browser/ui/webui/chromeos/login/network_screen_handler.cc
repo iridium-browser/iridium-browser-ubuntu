@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
@@ -38,7 +40,6 @@
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
@@ -67,9 +68,6 @@ NetworkScreenHandler::~NetworkScreenHandler() {
 }
 
 // NetworkScreenHandler, NetworkScreenActor implementation: --------------------
-
-void NetworkScreenHandler::PrepareToShow() {
-}
 
 void NetworkScreenHandler::Show() {
   if (!page_is_ready()) {
@@ -138,8 +136,7 @@ void NetworkScreenHandler::ShowConnectingStatus(
 
 void NetworkScreenHandler::ReloadLocalizedContent() {
   base::DictionaryValue localized_strings;
-  static_cast<OobeUI*>(web_ui()->GetController())
-      ->GetLocalizedStrings(&localized_strings);
+  GetOobeUI()->GetLocalizedStrings(&localized_strings);
   core_oobe_actor_->ReloadContent(localized_strings);
 }
 
@@ -165,9 +162,11 @@ void NetworkScreenHandler::DeclareLocalizedValues(
 
   // MD-OOBE
   builder->Add("oobeOKButtonText", IDS_OOBE_OK_BUTTON_TEXT);
+  builder->Add("welcomeNextButtonText", IDS_OOBE_WELCOME_NEXT_BUTTON_TEXT);
   builder->Add("languageSectionTitle", IDS_LANGUAGE_SECTION_TITLE);
   builder->Add("accessibilitySectionTitle", IDS_ACCESSIBILITY_SECTION_TITLE);
   builder->Add("accessibilitySectionHint", IDS_ACCESSIBILITY_SECTION_HINT);
+  builder->Add("timezoneSectionTitle", IDS_TIMEZONE_SECTION_TITLE);
   builder->Add("networkSectionTitle", IDS_NETWORK_SECTION_TITLE);
   builder->Add("networkSectionHint", IDS_NETWORK_SECTION_HINT);
 
@@ -188,6 +187,8 @@ void NetworkScreenHandler::DeclareLocalizedValues(
   builder->Add("virtualKeyboardOptionOff", IDS_VIRTUAL_KEYBOARD_OPTION_OFF);
   builder->Add("virtualKeyboardOptionOn", IDS_VIRTUAL_KEYBOARD_OPTION_ON);
 
+  builder->Add("timezoneDropdownTitle", IDS_TIMEZONE_DROPDOWN_TITLE);
+  builder->Add("timezoneButtonText", IDS_TIMEZONE_BUTTON_TEXT);
 }
 
 void NetworkScreenHandler::GetAdditionalParameters(
@@ -210,8 +211,8 @@ void NetworkScreenHandler::GetAdditionalParameters(
     }
   }
 
-  if (!language_list.get())
-    language_list.reset(GetMinimalUILanguageList().release());
+  if (!language_list)
+    language_list = GetMinimalUILanguageList();
 
   // GetAdditionalParameters() is called when OOBE language is updated.
   // This happens in three different cases:
@@ -286,7 +287,7 @@ base::ListValue* NetworkScreenHandler::GetTimezoneList() {
     timezone_option->SetString("value", timezone_id);
     timezone_option->SetString("title", timezone_name);
     timezone_option->SetBoolean("selected", timezone_id == current_timezone_id);
-    timezone_list->Append(timezone_option.release());
+    timezone_list->Append(std::move(timezone_option));
   }
 
   return timezone_list.release();

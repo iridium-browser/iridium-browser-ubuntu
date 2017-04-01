@@ -6,10 +6,9 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
-#include "cc/output/compositor_frame.h"
+#include "cc/output/output_surface_frame.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/scheduler/delay_based_time_source.h"
-#include "cc/test/fake_output_surface_client.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/test/test_web_graphics_context_3d.h"
 #include "components/display_compositor/compositor_overlay_candidate_validator.h"
@@ -77,21 +76,27 @@ CreateTestValidatorOzone() {
 
 class TestOutputSurface : public BrowserCompositorOutputSurface {
  public:
-  TestOutputSurface(scoped_refptr<cc::ContextProvider> context_provider,
-                    scoped_refptr<ui::CompositorVSyncManager> vsync_manager,
-                    cc::SyntheticBeginFrameSource* begin_frame_source)
+  TestOutputSurface(scoped_refptr<cc::ContextProvider> context_provider)
       : BrowserCompositorOutputSurface(std::move(context_provider),
-                                       std::move(vsync_manager),
-                                       begin_frame_source,
-                                       CreateTestValidatorOzone()) {
-    surface_size_ = gfx::Size(256, 256);
-    device_scale_factor_ = 1.f;
-  }
+                                       UpdateVSyncParametersCallback(),
+                                       CreateTestValidatorOzone()) {}
 
   void SetFlip(bool flip) { capabilities_.flipped_output_surface = flip; }
 
-  void SwapBuffers(cc::CompositorFrame frame) override {}
+  void BindToClient(cc::OutputSurfaceClient* client) override {}
+  void EnsureBackbuffer() override {}
+  void DiscardBackbuffer() override {}
+  void BindFramebuffer() override {}
+  void Reshape(const gfx::Size& size,
+               float device_scale_factor,
+               const gfx::ColorSpace& color_space,
+               bool has_alpha,
+               bool use_stencil) override {}
+  void SwapBuffers(cc::OutputSurfaceFrame frame) override {}
   uint32_t GetFramebufferCopyTextureFormat() override { return GL_RGB; }
+  bool IsDisplayedAsOverlayPlane() const override { return false; }
+  unsigned GetOverlayTextureId() const override { return 0; }
+  bool SurfaceIsSuspendForRecycle() const override { return false; }
 
   void OnReflectorChanged() override {
     if (!reflector_) {
@@ -100,13 +105,6 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
       reflector_texture_.reset(new ReflectorTexture(context_provider()));
       reflector_->OnSourceTextureMailboxUpdated(reflector_texture_->mailbox());
     }
-  }
-
-  void OnGpuSwapBuffersCompleted(
-      const std::vector<ui::LatencyInfo>& latency_info,
-      gfx::SwapResult result,
-      const gpu::GpuProcessHostedCALayerTreeParamsMac* params_mac) override {
-    NOTREACHED();
   }
 
 #if defined(OS_MACOSX)
@@ -118,6 +116,7 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
 };
 
 const gfx::Rect kSubRect(0, 0, 64, 64);
+const gfx::Size kSurfaceSize(256, 256);
 
 }  // namespace
 
@@ -125,8 +124,11 @@ class ReflectorImplTest : public testing::Test {
  public:
   void SetUp() override {
     bool enable_pixel_output = false;
-    ui::ContextFactory* context_factory =
-        ui::InitializeContextFactoryForTests(enable_pixel_output);
+    ui::ContextFactory* context_factory = nullptr;
+    ui::ContextFactoryPrivate* context_factory_private = nullptr;
+
+    ui::InitializeContextFactoryForTests(enable_pixel_output, &context_factory,
+                                         &context_factory_private);
     ImageTransportFactory::InitializeForUnitTests(
         std::unique_ptr<ImageTransportFactory>(
             new NoTransportImageTransportFactory));
@@ -136,25 +138,28 @@ class ReflectorImplTest : public testing::Test {
     begin_frame_source_.reset(new cc::DelayBasedBeginFrameSource(
         base::MakeUnique<cc::DelayBasedTimeSource>(
             compositor_task_runner_.get())));
-    compositor_.reset(
-        new ui::Compositor(context_factory, compositor_task_runner_.get()));
+    compositor_.reset(new ui::Compositor(
+        context_factory_private->AllocateFrameSinkId(), context_factory,
+        context_factory_private, compositor_task_runner_.get()));
     compositor_->SetAcceleratedWidget(gfx::kNullAcceleratedWidget);
-    output_surface_ = base::MakeUnique<TestOutputSurface>(
-        cc::TestContextProvider::Create(cc::TestWebGraphicsContext3D::Create()),
-        compositor_->vsync_manager(), begin_frame_source_.get());
-    CHECK(output_surface_->BindToClient(&output_surface_client_));
+
+    auto context_provider = cc::TestContextProvider::Create();
+    context_provider->BindToCurrentThread();
+    output_surface_ =
+        base::MakeUnique<TestOutputSurface>(std::move(context_provider));
 
     root_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
     compositor_->SetRootLayer(root_layer_.get());
     mirroring_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
     compositor_->root_layer()->Add(mirroring_layer_.get());
-    gfx::Size size = output_surface_->SurfaceSize();
-    mirroring_layer_->SetBounds(gfx::Rect(size.width(), size.height()));
+    output_surface_->Reshape(kSurfaceSize, 1.f, gfx::ColorSpace(), false,
+                             false);
+    mirroring_layer_->SetBounds(gfx::Rect(kSurfaceSize));
   }
 
   void SetUpReflector() {
-    reflector_ = base::WrapUnique(
-        new ReflectorImpl(compositor_.get(), mirroring_layer_.get()));
+    reflector_ = base::MakeUnique<ReflectorImpl>(compositor_.get(),
+                                                 mirroring_layer_.get());
     reflector_->OnSourceSurfaceReady(output_surface_.get());
   }
 
@@ -171,12 +176,13 @@ class ReflectorImplTest : public testing::Test {
     ImageTransportFactory::Terminate();
   }
 
-  void UpdateTexture() { reflector_->OnSourcePostSubBuffer(kSubRect); }
+  void UpdateTexture() {
+    reflector_->OnSourcePostSubBuffer(kSubRect, kSurfaceSize);
+  }
 
  protected:
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
   std::unique_ptr<cc::SyntheticBeginFrameSource> begin_frame_source_;
-  cc::FakeOutputSurfaceClient output_surface_client_;
   std::unique_ptr<base::MessageLoop> message_loop_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   std::unique_ptr<ui::Compositor> compositor_;
@@ -192,9 +198,8 @@ TEST_F(ReflectorImplTest, CheckNormalOutputSurface) {
   SetUpReflector();
   UpdateTexture();
   EXPECT_TRUE(mirroring_layer_->TextureFlipped());
-  gfx::Rect expected_rect =
-      kSubRect + gfx::Vector2d(0, output_surface_->SurfaceSize().height()) -
-      gfx::Vector2d(0, kSubRect.height());
+  gfx::Rect expected_rect = kSubRect + gfx::Vector2d(0, kSurfaceSize.height()) -
+                            gfx::Vector2d(0, kSubRect.height());
   EXPECT_EQ(expected_rect, mirroring_layer_->damaged_region());
 }
 

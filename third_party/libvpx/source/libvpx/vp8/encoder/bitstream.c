@@ -19,6 +19,7 @@
 #include <limits.h>
 #include "vpx/vpx_encoder.h"
 #include "vpx_mem/vpx_mem.h"
+#include "vpx_ports/system_state.h"
 #include "bitstream.h"
 
 #include "defaultcoefcounts.h"
@@ -338,18 +339,14 @@ static void pack_mb_row_tokens(VP8_COMP *cpi, vp8_writer *w) {
 
 static void write_mv_ref(vp8_writer *w, MB_PREDICTION_MODE m,
                          const vp8_prob *p) {
-#if CONFIG_DEBUG
   assert(NEARESTMV <= m && m <= SPLITMV);
-#endif
   vp8_write_token(w, vp8_mv_ref_tree, p,
                   vp8_mv_ref_encoding_array + (m - NEARESTMV));
 }
 
 static void write_sub_mv_ref(vp8_writer *w, B_PREDICTION_MODE m,
                              const vp8_prob *p) {
-#if CONFIG_DEBUG
   assert(LEFT4X4 <= m && m <= NEW4X4);
-#endif
   vp8_write_token(w, vp8_sub_mv_ref_tree, p,
                   vp8_sub_mv_ref_encoding_array + (m - LEFT4X4));
 }
@@ -847,7 +844,7 @@ int vp8_estimate_entropy_savings(VP8_COMP *cpi) {
   int new_intra, new_last, new_garf, oldtotal, newtotal;
   int ref_frame_cost[MAX_REF_FRAMES];
 
-  vp8_clear_system_state();
+  vpx_clear_system_state();
 
   if (cpi->common.frame_type != KEY_FRAME) {
     if (!(new_intra = rf_intra * 255 / (rf_intra + rf_inter))) new_intra = 1;
@@ -912,7 +909,7 @@ void vp8_update_coef_probs(VP8_COMP *cpi) {
 #endif
   int savings = 0;
 
-  vp8_clear_system_state();
+  vpx_clear_system_state();
 
   do {
     int j = 0;
@@ -1060,7 +1057,7 @@ static void put_delta_q(vp8_writer *bc, int delta_q) {
 }
 
 void vp8_pack_bitstream(VP8_COMP *cpi, unsigned char *dest,
-                        unsigned char *dest_end, unsigned long *size) {
+                        unsigned char *dest_end, size_t *size) {
   int i, j;
   VP8_HEADER oh;
   VP8_COMMON *const pc = &cpi->common;
@@ -1299,7 +1296,7 @@ void vp8_pack_bitstream(VP8_COMP *cpi, unsigned char *dest,
 
 #endif
 
-  vp8_clear_system_state();
+  vpx_clear_system_state();
 
 #if CONFIG_REALTIME_ONLY & CONFIG_ONTHEFLY_BITPACKING
   pack_coef_probs(cpi);
@@ -1351,7 +1348,7 @@ void vp8_pack_bitstream(VP8_COMP *cpi, unsigned char *dest,
 
   *size = VP8_HEADER_SIZE + extra_bytes_packed + cpi->bc->pos;
 
-  cpi->partition_sz[0] = *size;
+  cpi->partition_sz[0] = (unsigned int)*size;
 
 #if CONFIG_REALTIME_ONLY & CONFIG_ONTHEFLY_BITPACKING
   {

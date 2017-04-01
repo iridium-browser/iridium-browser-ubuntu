@@ -44,6 +44,7 @@ enum CommandType {
   R_V_LINE_TO,
   CUBIC_TO,
   R_CUBIC_TO,
+  CUBIC_TO_SHORTHAND,
   CIRCLE,
   ROUND_RECT,
   CLOSE,
@@ -63,13 +64,20 @@ enum CommandType {
 
 // A POD that describes either a path command or an argument for it.
 struct PathElement {
-  PathElement(CommandType value) : type(value) {}
-  PathElement(SkScalar value) : arg(value) {}
+  constexpr PathElement(CommandType value) : type(value) {}
+  constexpr PathElement(SkScalar value) : arg(value) {}
 
   union {
     CommandType type;
     SkScalar arg;
   };
+};
+
+struct VectorIcon {
+  bool is_empty() const { return !path_; }
+
+  const gfx::PathElement* path_;
+  const gfx::PathElement* path_1x_;
 };
 
 // Returns an array of path commands and arguments, terminated by END.

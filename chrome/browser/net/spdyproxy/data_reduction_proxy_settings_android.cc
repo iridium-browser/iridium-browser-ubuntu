@@ -35,12 +35,6 @@ DataReductionProxySettingsAndroid::DataReductionProxySettingsAndroid() {
 DataReductionProxySettingsAndroid::~DataReductionProxySettingsAndroid() {
 }
 
-jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyAllowed(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  return Settings()->Allowed();
-}
-
 jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyPromoAllowed(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
@@ -85,18 +79,6 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyManaged(
   return Settings()->IsDataReductionProxyManaged();
 }
 
-void DataReductionProxySettingsAndroid::IncrementLoFiSnackbarShown(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  Settings()->IncrementLoFiSnackbarShown();
-}
-
-void DataReductionProxySettingsAndroid::IncrementLoFiUserRequestsForImages(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  Settings()->IncrementLoFiUserRequestsForImages();
-}
-
 void DataReductionProxySettingsAndroid::SetDataReductionProxyEnabled(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
@@ -128,6 +110,12 @@ DataReductionProxySettingsAndroid::GetContentLengths(
                                     received_content_length);
 }
 
+jlong DataReductionProxySettingsAndroid::GetTotalHttpContentLengthSaved(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return Settings()->GetTotalHttpContentLengthSaved();
+}
+
 ScopedJavaLocalRef<jlongArray>
 DataReductionProxySettingsAndroid::GetDailyOriginalContentLengths(
     JNIEnv* env,
@@ -153,9 +141,9 @@ jboolean DataReductionProxySettingsAndroid::IsDataReductionProxyUnreachable(
 jboolean DataReductionProxySettingsAndroid::AreLoFiPreviewsEnabled(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
-  return data_reduction_proxy::params::IsIncludedInLoFiPreviewFieldTrial() ||
+  return data_reduction_proxy::params::IsIncludedInLitePageFieldTrial() ||
       (data_reduction_proxy::params::IsLoFiOnViaFlags() &&
-          data_reduction_proxy::params::AreLoFiPreviewsEnabledViaFlags());
+          data_reduction_proxy::params::AreLitePagesEnabledViaFlags());
 }
 
 // static

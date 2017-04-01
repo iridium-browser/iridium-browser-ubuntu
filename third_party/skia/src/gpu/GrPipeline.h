@@ -10,15 +10,14 @@
 
 #include "GrColor.h"
 #include "GrFragmentProcessor.h"
-#include "GrGpu.h"
 #include "GrNonAtomicRef.h"
 #include "GrPendingProgramElement.h"
 #include "GrPrimitiveProcessor.h"
 #include "GrProcOptInfo.h"
 #include "GrProgramDesc.h"
-#include "GrStencilSettings.h"
-#include "GrTypesPriv.h"
-#include "GrWindowRectangles.h"
+#include "GrScissorState.h"
+#include "GrUserStencilSettings.h"
+#include "GrWindowRectsState.h"
 #include "SkMatrix.h"
 #include "SkRefCnt.h"
 
@@ -27,22 +26,38 @@
 #include "effects/GrPorterDuffXferProcessor.h"
 #include "effects/GrSimpleTextureEffect.h"
 
-class GrBatch;
-class GrDrawContext;
+class GrAppliedClip;
 class GrDeviceCoordTexture;
+class GrOp;
 class GrPipelineBuilder;
+class GrRenderTargetContext;
 
-struct GrBatchToXPOverrides {
-    GrBatchToXPOverrides()
-    : fUsePLSDstRead(false) {}
+/**
+ * This Describes aspects of the GrPrimitiveProcessor produced by a GrDrawOp that are used in
+ * pipeline analysis.
+ */
+class GrPipelineAnalysisDrawOpInput {
+public:
+    GrPipelineAnalysisDrawOpInput(GrPipelineInput* color, GrPipelineInput* coverage)
+            : fColorInput(color), fCoverageInput(coverage) {}
+    GrPipelineInput* pipelineColorInput() { return fColorInput; }
+    GrPipelineInput* pipelineCoverageInput() { return fCoverageInput; }
 
-    bool fUsePLSDstRead;
+    void setUsesPLSDstRead() { fUsesPLSDstRead = true; }
+
+    bool usesPLSDstRead() const { return fUsesPLSDstRead; }
+
+private:
+    GrPipelineInput* fColorInput;
+    GrPipelineInput* fCoverageInput;
+    bool fUsesPLSDstRead = false;
 };
 
-struct GrPipelineOptimizations {
+/** This is used to track pipeline analysis through the color and coverage fragment processors. */
+struct GrPipelineAnalysis {
     GrProcOptInfo fColorPOI;
     GrProcOptInfo fCoveragePOI;
-    GrBatchToXPOverrides fOverrides;
+    bool fUsesPLSDstRead = false;
 };
 
 /**
@@ -55,18 +70,16 @@ public:
     /// @name Creation
 
     struct CreateArgs {
-        const GrPipelineBuilder*    fPipelineBuilder;
-        GrDrawContext*              fDrawContext;
-        const GrCaps*               fCaps;
-        GrPipelineOptimizations     fOpts;
-        const GrScissorState*       fScissor;
-        const GrWindowRectangles*   fWindowRects;
-        bool                        fHasStencilClip;
+        const GrPipelineBuilder* fPipelineBuilder;
+        GrAppliedClip* fAppliedClip;
+        GrRenderTargetContext* fRenderTargetContext;
+        const GrCaps* fCaps;
+        GrPipelineAnalysis fAnalysis;
         GrXferProcessor::DstTexture fDstTexture;
     };
 
     /** Creates a pipeline into a pre-allocated buffer */
-    static GrPipeline* CreateAt(void* memory, const CreateArgs&, GrXPOverridesForBatch*);
+    static GrPipeline* CreateAt(void* memory, const CreateArgs&, GrPipelineOptimizations*);
 
     /// @}
 
@@ -79,18 +92,17 @@ public:
      * to combine draws. Therefore we take a param that indicates whether coord transforms should be
      * compared."
      */
-    static bool AreEqual(const GrPipeline& a, const GrPipeline& b, bool ignoreCoordTransforms);
+    static bool AreEqual(const GrPipeline& a, const GrPipeline& b);
 
     /**
-     * Allows a GrBatch subclass to determine whether two GrBatches can combine. This is a stricter
-     * test than isEqual because it also considers blend barriers when the two batches' bounds
-     * overlap
+     * Allows a GrOp subclass to determine whether two GrOp instances can combine. This is a
+     * stricter test than isEqual because it also considers blend barriers when the two ops'
+     * bounds overlap
      */
     static bool CanCombine(const GrPipeline& a, const SkRect& aBounds,
                            const GrPipeline& b, const SkRect& bBounds,
-                           const GrCaps& caps,
-                           bool ignoreCoordTransforms = false)  {
-        if (!AreEqual(a, b, ignoreCoordTransforms)) {
+                           const GrCaps& caps)  {
+        if (!AreEqual(a, b)) {
             return false;
         }
         if (a.xferBarrierType(caps)) {
@@ -107,8 +119,8 @@ public:
     ///////////////////////////////////////////////////////////////////////////
     /// @name GrFragmentProcessors
 
-    // Make the renderTarget's drawTarget (if it exists) be dependent on any
-    // drawTargets in this pipeline
+    // Make the renderTarget's GrOpList (if it exists) be dependent on any
+    // GrOpLists in this pipeline
     void addDependenciesTo(GrRenderTarget* rt) const;
 
     int numColorFragmentProcessors() const { return fNumColorProcessors; }
@@ -150,11 +162,11 @@ public:
      */
     GrRenderTarget* getRenderTarget() const { return fRenderTarget.get(); }
 
-    const GrStencilSettings& getStencil() const { return fStencilSettings; }
+    const GrUserStencilSettings* getUserStencil() const { return fUserStencilSettings; }
 
     const GrScissorState& getScissorState() const { return fScissorState; }
 
-    const GrWindowRectangles& getWindowRectangles() const { return fWindowRects; }
+    const GrWindowRectsState& getWindowRectsState() const { return fWindowRectsState; }
 
     bool isHWAntialiasState() const { return SkToBool(fFlags & kHWAA_Flag); }
     bool snapVerticesToPixelCenters() const { return SkToBool(fFlags & kSnapVertices_Flag); }
@@ -170,6 +182,9 @@ public:
     bool hasStencilClip() const {
         return SkToBool(fFlags & kHasStencilClip_Flag);
     }
+    bool isStencilEnabled() const {
+        return SkToBool(fFlags & kStencilEnabled_Flag);
+    }
 
     GrXferBarrierType xferBarrierType(const GrCaps& caps) const {
         return this->getXferProcessor().xferBarrierType(fRenderTarget.get(), caps);
@@ -183,22 +198,8 @@ public:
     GrDrawFace getDrawFace() const { return fDrawFace; }
 
 
-    ///////////////////////////////////////////////////////////////////////////
-
-    bool ignoresCoverage() const { return fIgnoresCoverage; }
-
 private:
     GrPipeline() { /** Initialized in factory function*/ }
-
-    /**
-     * Alter the program desc and inputs (attribs and processors) based on the blend optimization.
-     */
-    void adjustProgramFromOptimizations(const GrPipelineBuilder& ds,
-                                        GrXferProcessor::OptFlags,
-                                        const GrProcOptInfo& colorPOI,
-                                        const GrProcOptInfo& coveragePOI,
-                                        int* firstColorProcessorIdx,
-                                        int* firstCoverageProcessorIdx);
 
     /**
      * Calculates the primary and secondary output types of the shader. For certain output types
@@ -215,6 +216,7 @@ private:
         kAllowSRGBInputs_Flag               = 0x8,
         kUsesDistanceVectorField_Flag       = 0x10,
         kHasStencilClip_Flag                = 0x20,
+        kStencilEnabled_Flag                = 0x40,
     };
 
     typedef GrPendingIOResource<GrRenderTarget, kWrite_GrIOType> RenderTarget;
@@ -223,13 +225,12 @@ private:
     typedef GrPendingProgramElement<const GrXferProcessor> ProgramXferProcessor;
     RenderTarget                        fRenderTarget;
     GrScissorState                      fScissorState;
-    GrWindowRectangles                  fWindowRects;
-    GrStencilSettings                   fStencilSettings;
+    GrWindowRectsState                  fWindowRectsState;
+    const GrUserStencilSettings*        fUserStencilSettings;
     GrDrawFace                          fDrawFace;
     uint32_t                            fFlags;
     ProgramXferProcessor                fXferProcessor;
     FragmentProcessorArray              fFragmentProcessors;
-    bool                                fIgnoresCoverage;
 
     // This value is also the index in fFragmentProcessors where coverage processors begin.
     int                                 fNumColorProcessors;

@@ -514,7 +514,7 @@ int main(int argc, char **argv) {
   FILE *infile = NULL;
   struct RateControlMetrics rc;
   int64_t cx_time = 0;
-  const int min_args_base = 11;
+  const int min_args_base = 12;
 #if CONFIG_VP9_HIGHBITDEPTH
   vpx_bit_depth_t bit_depth = VPX_BITS_8;
   int input_bit_depth = 8;
@@ -530,15 +530,13 @@ int main(int argc, char **argv) {
   // Check usage and arguments.
   if (argc < min_args) {
 #if CONFIG_VP9_HIGHBITDEPTH
-    die(
-        "Usage: %s <infile> <outfile> <codec_type(vp8/vp9)> <width> <height> "
-        "<rate_num> <rate_den> <speed> <frame_drop_threshold> <mode> "
+    die("Usage: %s <infile> <outfile> <codec_type(vp8/vp9)> <width> <height> "
+        "<rate_num> <rate_den> <speed> <frame_drop_threshold> <threads> <mode> "
         "<Rate_0> ... <Rate_nlayers-1> <bit-depth> \n",
         argv[0]);
 #else
-    die(
-        "Usage: %s <infile> <outfile> <codec_type(vp8/vp9)> <width> <height> "
-        "<rate_num> <rate_den> <speed> <frame_drop_threshold> <mode> "
+    die("Usage: %s <infile> <outfile> <codec_type(vp8/vp9)> <width> <height> "
+        "<rate_num> <rate_den> <speed> <frame_drop_threshold> <threads> <mode> "
         "<Rate_0> ... <Rate_nlayers-1> \n",
         argv[0]);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
@@ -549,15 +547,15 @@ int main(int argc, char **argv) {
 
   printf("Using %s\n", vpx_codec_iface_name(encoder->codec_interface()));
 
-  width = strtol(argv[4], NULL, 0);
-  height = strtol(argv[5], NULL, 0);
+  width = (unsigned int)strtoul(argv[4], NULL, 0);
+  height = (unsigned int)strtoul(argv[5], NULL, 0);
   if (width < 16 || width % 2 || height < 16 || height % 2) {
     die("Invalid resolution: %d x %d", width, height);
   }
 
-  layering_mode = strtol(argv[10], NULL, 0);
+  layering_mode = (int)strtol(argv[11], NULL, 0);
   if (layering_mode < 0 || layering_mode > 13) {
-    die("Invalid layering mode (0..12) %s", argv[10]);
+    die("Invalid layering mode (0..12) %s", argv[11]);
   }
 
   if (argc != min_args + mode_to_num_layers[layering_mode]) {
@@ -611,25 +609,25 @@ int main(int argc, char **argv) {
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
   // Timebase format e.g. 30fps: numerator=1, demoninator = 30.
-  cfg.g_timebase.num = strtol(argv[6], NULL, 0);
-  cfg.g_timebase.den = strtol(argv[7], NULL, 0);
+  cfg.g_timebase.num = (int)strtol(argv[6], NULL, 0);
+  cfg.g_timebase.den = (int)strtol(argv[7], NULL, 0);
 
-  speed = strtol(argv[8], NULL, 0);
+  speed = (int)strtol(argv[8], NULL, 0);
   if (speed < 0) {
     die("Invalid speed setting: must be positive");
   }
 
   for (i = min_args_base;
        (int)i < min_args_base + mode_to_num_layers[layering_mode]; ++i) {
-    rc.layer_target_bitrate[i - 11] = strtol(argv[i], NULL, 0);
+    rc.layer_target_bitrate[i - 12] = (int)strtol(argv[i], NULL, 0);
     if (strncmp(encoder->name, "vp8", 3) == 0)
-      cfg.ts_target_bitrate[i - 11] = rc.layer_target_bitrate[i - 11];
+      cfg.ts_target_bitrate[i - 12] = rc.layer_target_bitrate[i - 12];
     else if (strncmp(encoder->name, "vp9", 3) == 0)
-      cfg.layer_target_bitrate[i - 11] = rc.layer_target_bitrate[i - 11];
+      cfg.layer_target_bitrate[i - 12] = rc.layer_target_bitrate[i - 12];
   }
 
   // Real time parameters.
-  cfg.rc_dropframe_thresh = strtol(argv[9], NULL, 0);
+  cfg.rc_dropframe_thresh = (unsigned int)strtoul(argv[9], NULL, 0);
   cfg.rc_end_usage = VPX_CBR;
   cfg.rc_min_quantizer = 2;
   cfg.rc_max_quantizer = 56;
@@ -644,7 +642,7 @@ int main(int argc, char **argv) {
   cfg.rc_resize_allowed = 0;
 
   // Use 1 thread as default.
-  cfg.g_threads = 1;
+  cfg.g_threads = (unsigned int)strtoul(argv[10], NULL, 0);
 
   // Enable error resilient mode.
   cfg.g_error_resilient = 1;
@@ -704,11 +702,14 @@ int main(int argc, char **argv) {
     vpx_codec_control(&codec, VP8E_SET_CPUUSED, -speed);
     vpx_codec_control(&codec, VP8E_SET_NOISE_SENSITIVITY, kDenoiserOff);
     vpx_codec_control(&codec, VP8E_SET_STATIC_THRESHOLD, 1);
+    vpx_codec_control(&codec, VP8E_SET_GF_CBR_BOOST_PCT, 0);
   } else if (strncmp(encoder->name, "vp9", 3) == 0) {
     vpx_svc_extra_cfg_t svc_params;
     memset(&svc_params, 0, sizeof(svc_params));
     vpx_codec_control(&codec, VP8E_SET_CPUUSED, speed);
     vpx_codec_control(&codec, VP9E_SET_AQ_MODE, 3);
+    vpx_codec_control(&codec, VP9E_SET_GF_CBR_BOOST_PCT, 0);
+    vpx_codec_control(&codec, VP9E_SET_FRAME_PARALLEL_DECODING, 0);
     vpx_codec_control(&codec, VP9E_SET_FRAME_PERIODIC_BOOST, 0);
     vpx_codec_control(&codec, VP9E_SET_NOISE_SENSITIVITY, kDenoiserOff);
     vpx_codec_control(&codec, VP8E_SET_STATIC_THRESHOLD, 1);

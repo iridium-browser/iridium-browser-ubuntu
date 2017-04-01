@@ -53,7 +53,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
       public cc::SurfaceFactoryClient,
       public cc::BeginFrameObserver {
  public:
-  explicit RenderWidgetHostViewChildFrame(RenderWidgetHost* widget);
+  static RenderWidgetHostViewChildFrame* Create(RenderWidgetHost* widget);
   ~RenderWidgetHostViewChildFrame() override;
 
   void SetCrossProcessFrameConnector(
@@ -112,7 +112,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   void GestureEventAck(const blink::WebGestureEvent& event,
                        InputEventAckState ack_result) override;
-  void OnSwapCompositorFrame(uint32_t output_surface_id,
+  void OnSwapCompositorFrame(uint32_t compositor_frame_sink_id,
                              cc::CompositorFrame frame) override;
   // Since the URL of content rendered by this class is not displayed in
   // the URL bar, this method does not need an implementation.
@@ -122,7 +122,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
                               InputEventAckState ack_result) override;
   bool LockMouse() override;
   void UnlockMouse() override;
-  uint32_t GetSurfaceClientId() override;
+  cc::FrameSinkId GetFrameSinkId() override;
   void ProcessKeyboardEvent(const NativeWebKeyboardEvent& event) override;
   void ProcessMouseEvent(const blink::WebMouseEvent& event,
                          const ui::LatencyInfo& latency) override;
@@ -133,12 +133,15 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   void ProcessGestureEvent(const blink::WebGestureEvent& event,
                            const ui::LatencyInfo& latency) override;
   gfx::Point TransformPointToRootCoordSpace(const gfx::Point& point) override;
-  gfx::Point TransformPointToLocalCoordSpace(
+  bool TransformPointToLocalCoordSpace(const gfx::Point& point,
+                                       const cc::SurfaceId& original_surface,
+                                       gfx::Point* transformed_point) override;
+  bool TransformPointToCoordSpaceForView(
       const gfx::Point& point,
-      const cc::SurfaceId& original_surface) override;
-  gfx::Point TransformPointToCoordSpaceForView(
-      const gfx::Point& point,
-      RenderWidgetHostViewBase* target_view) override;
+      RenderWidgetHostViewBase* target_view,
+      gfx::Point* transformed_point) override;
+
+  bool IsRenderWidgetHostViewChildFrame() override;
 
 #if defined(OS_MACOSX)
   // RenderWidgetHostView implementation.
@@ -171,7 +174,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
 
   // Declared 'public' instead of 'protected' here to allow derived classes
   // to Bind() to it.
-  void SurfaceDrawn(uint32_t output_surface_id);
+  void SurfaceDrawn(uint32_t compositor_frame_sink_id);
 
   // Exposed for tests.
   bool IsChildFrameForTesting() const override;
@@ -188,13 +191,18 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   // to the frame tree.
   RenderWidgetHostViewBase* GetParentView();
 
-  void RegisterSurfaceNamespaceId();
-  void UnregisterSurfaceNamespaceId();
+  void RegisterFrameSinkId();
+  void UnregisterFrameSinkId();
+
+  void UpdateViewportIntersection(const gfx::Rect& viewport_intersection);
 
  protected:
   friend class RenderWidgetHostView;
   friend class RenderWidgetHostViewChildFrameTest;
   friend class RenderWidgetHostViewGuestSurfaceTest;
+
+  explicit RenderWidgetHostViewChildFrame(RenderWidgetHost* widget);
+  void Init();
 
   // Clears current compositor surface, if one is in use.
   void ClearCompositorSurfaceIfNecessary();
@@ -208,12 +216,15 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   // The model object.
   RenderWidgetHostImpl* host_;
 
+  // The ID for FrameSink associated with this view.
+  cc::FrameSinkId frame_sink_id_;
+
   // Surface-related state.
   std::unique_ptr<cc::SurfaceIdAllocator> id_allocator_;
   std::unique_ptr<cc::SurfaceFactory> surface_factory_;
-  cc::SurfaceId surface_id_;
+  cc::LocalFrameId local_frame_id_;
   uint32_t next_surface_sequence_;
-  uint32_t last_output_surface_id_;
+  uint32_t last_compositor_frame_sink_id_;
   gfx::Size current_surface_size_;
   float current_surface_scale_factor_;
   gfx::Rect last_screen_rect_;
@@ -243,7 +254,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
   cc::BeginFrameSource* begin_frame_source_;
   cc::BeginFrameArgs last_begin_frame_args_;
   // The surface client ID of the parent RenderWidgetHostView.  0 if none.
-  uint32_t parent_surface_client_id_;
+  cc::FrameSinkId parent_frame_sink_id_;
 
   base::WeakPtrFactory<RenderWidgetHostViewChildFrame> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewChildFrame);

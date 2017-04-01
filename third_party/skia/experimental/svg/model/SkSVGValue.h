@@ -17,7 +17,9 @@
 class SkSVGValue : public SkNoncopyable {
 public:
     enum class Type {
+        kClip,
         kColor,
+        kFillRule,
         kLength,
         kLineCap,
         kLineJoin,
@@ -25,6 +27,8 @@ public:
         kPaint,
         kPath,
         kPoints,
+        kSpreadMethod,
+        kString,
         kTransform,
         kViewBox,
     };
@@ -67,15 +71,20 @@ private:
     typedef SkSVGValue INHERITED;
 };
 
-using SkSVGColorValue     = SkSVGWrapperValue<SkSVGColorType    , SkSVGValue::Type::kColor    >;
-using SkSVGLengthValue    = SkSVGWrapperValue<SkSVGLength       , SkSVGValue::Type::kLength   >;
-using SkSVGPathValue      = SkSVGWrapperValue<SkPath            , SkSVGValue::Type::kPath     >;
-using SkSVGTransformValue = SkSVGWrapperValue<SkSVGTransformType, SkSVGValue::Type::kTransform>;
-using SkSVGViewBoxValue   = SkSVGWrapperValue<SkSVGViewBoxType  , SkSVGValue::Type::kViewBox  >;
-using SkSVGPaintValue     = SkSVGWrapperValue<SkSVGPaint        , SkSVGValue::Type::kPaint    >;
-using SkSVGLineCapValue   = SkSVGWrapperValue<SkSVGLineCap      , SkSVGValue::Type::kLineCap  >;
-using SkSVGLineJoinValue  = SkSVGWrapperValue<SkSVGLineJoin     , SkSVGValue::Type::kLineJoin >;
-using SkSVGNumberValue    = SkSVGWrapperValue<SkSVGNumberType   , SkSVGValue::Type::kNumber   >;
-using SkSVGPointsValue    = SkSVGWrapperValue<SkSVGPointsType   , SkSVGValue::Type::kPoints   >;
+using SkSVGClipValue         = SkSVGWrapperValue<SkSVGClip         , SkSVGValue::Type::kClip     >;
+using SkSVGColorValue        = SkSVGWrapperValue<SkSVGColorType    , SkSVGValue::Type::kColor    >;
+using SkSVGFillRuleValue     = SkSVGWrapperValue<SkSVGFillRule     , SkSVGValue::Type::kFillRule >;
+using SkSVGLengthValue       = SkSVGWrapperValue<SkSVGLength       , SkSVGValue::Type::kLength   >;
+using SkSVGPathValue         = SkSVGWrapperValue<SkPath            , SkSVGValue::Type::kPath     >;
+using SkSVGTransformValue    = SkSVGWrapperValue<SkSVGTransformType, SkSVGValue::Type::kTransform>;
+using SkSVGViewBoxValue      = SkSVGWrapperValue<SkSVGViewBoxType  , SkSVGValue::Type::kViewBox  >;
+using SkSVGPaintValue        = SkSVGWrapperValue<SkSVGPaint        , SkSVGValue::Type::kPaint    >;
+using SkSVGLineCapValue      = SkSVGWrapperValue<SkSVGLineCap      , SkSVGValue::Type::kLineCap  >;
+using SkSVGLineJoinValue     = SkSVGWrapperValue<SkSVGLineJoin     , SkSVGValue::Type::kLineJoin >;
+using SkSVGNumberValue       = SkSVGWrapperValue<SkSVGNumberType   , SkSVGValue::Type::kNumber   >;
+using SkSVGPointsValue       = SkSVGWrapperValue<SkSVGPointsType   , SkSVGValue::Type::kPoints   >;
+using SkSVGStringValue       = SkSVGWrapperValue<SkSVGStringType   , SkSVGValue::Type::kString   >;
+using SkSVGSpreadMethodValue = SkSVGWrapperValue<SkSVGSpreadMethod ,
+                                                 SkSVGValue::Type::kSpreadMethod>;
 
 #endif // SkSVGValue_DEFINED

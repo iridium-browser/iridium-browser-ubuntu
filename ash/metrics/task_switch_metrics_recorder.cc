@@ -19,13 +19,8 @@ const char kDesktopHistogramName[] =
 const char kShelfHistogramName[] =
     "Ash.Shelf.TimeBetweenNavigateToTaskSwitches";
 
-const char kTabStripHistogramName[] =
-    "Ash.Tab.TimeBetweenSwitchToExistingTabUserActions";
-
 const char kAcceleratorWindowCycleHistogramName[] =
     "Ash.WindowCycleController.TimeBetweenTaskSwitches";
-
-const char kAppListHistogramName[] = "Ash.AppList.TimeBetweenTaskSwitches";
 
 const char kOverviewModeHistogramName[] =
     "Ash.WindowSelector.TimeBetweenActiveWindowChanges";
@@ -35,16 +30,12 @@ const char* GetHistogramName(TaskSwitchSource task_switch_source) {
   switch (task_switch_source) {
     case TaskSwitchSource::ANY:
       return kAshTaskSwitchHistogramName;
-    case TaskSwitchSource::APP_LIST:
-      return kAppListHistogramName;
     case TaskSwitchSource::DESKTOP:
       return kDesktopHistogramName;
     case TaskSwitchSource::OVERVIEW_MODE:
       return kOverviewModeHistogramName;
     case TaskSwitchSource::SHELF:
       return kShelfHistogramName;
-    case TaskSwitchSource::TAB_STRIP:
-      return kTabStripHistogramName;
     case TaskSwitchSource::WINDOW_CYCLE_CONTROLLER:
       return kAcceleratorWindowCycleHistogramName;
   }
@@ -82,7 +73,11 @@ void TaskSwitchMetricsRecorder::OnTaskSwitchInternal(
 
 TaskSwitchTimeTracker* TaskSwitchMetricsRecorder::FindTaskSwitchTimeTracker(
     TaskSwitchSource task_switch_source) {
-  return histogram_map_.get(static_cast<int>(task_switch_source));
+  auto it = histogram_map_.find(static_cast<int>(task_switch_source));
+  if (it == histogram_map_.end())
+    return nullptr;
+
+  return it->second.get();
 }
 
 void TaskSwitchMetricsRecorder::AddTaskSwitchTimeTracker(
@@ -93,8 +88,8 @@ void TaskSwitchMetricsRecorder::AddTaskSwitchTimeTracker(
   const char* histogram_name = GetHistogramName(task_switch_source);
   DCHECK(histogram_name);
 
-  histogram_map_.add(static_cast<int>(task_switch_source),
-                     base::MakeUnique<TaskSwitchTimeTracker>(histogram_name));
+  histogram_map_[static_cast<int>(task_switch_source)] =
+      base::MakeUnique<TaskSwitchTimeTracker>(histogram_name);
 }
 
 }  // namespace ash

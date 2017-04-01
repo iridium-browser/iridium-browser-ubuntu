@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_UPDATE_CLIENT_CRX_UPDATE_ITEM_H_
 #define COMPONENTS_UPDATE_CLIENT_CRX_UPDATE_ITEM_H_
 
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -80,7 +82,7 @@ struct CrxUpdateItem {
   CrxComponent component;
 
   // Time when an update check for this CRX has happened.
-  base::Time last_check;
+  base::TimeTicks last_check;
 
   // Time when the update of this CRX has begun.
   base::TimeTicks update_begin;
@@ -135,6 +137,9 @@ struct CrxUpdateItem {
     const std::string& id_;
   };
 };
+
+using IdToCrxUpdateItemMap =
+    std::map<std::string, std::unique_ptr<CrxUpdateItem>>;
 
 }  // namespace update_client
 

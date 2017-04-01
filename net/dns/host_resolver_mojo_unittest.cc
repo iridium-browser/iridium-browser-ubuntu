@@ -14,7 +14,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
-#include "net/dns/mojo_host_type_converters.h"
+#include "net/log/net_log_with_source.h"
 #include "net/test/event_waiter.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -60,33 +60,32 @@ struct HostResolverAction {
     RETAIN,
   };
 
-  static std::unique_ptr<HostResolverAction> ReturnError(Error error) {
-    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
-    result->error = error;
+  static HostResolverAction ReturnError(Error error) {
+    HostResolverAction result;
+    result.error = error;
     return result;
   }
 
-  static std::unique_ptr<HostResolverAction> ReturnResult(
-      const AddressList& address_list) {
-    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
-    result->addresses = interfaces::AddressList::From(address_list);
+  static HostResolverAction ReturnResult(const AddressList& address_list) {
+    HostResolverAction result;
+    result.addresses = address_list;
     return result;
   }
 
-  static std::unique_ptr<HostResolverAction> DropRequest() {
-    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
-    result->action = DROP;
+  static HostResolverAction DropRequest() {
+    HostResolverAction result;
+    result.action = DROP;
     return result;
   }
 
-  static std::unique_ptr<HostResolverAction> RetainRequest() {
-    std::unique_ptr<HostResolverAction> result(new HostResolverAction);
-    result->action = RETAIN;
+  static HostResolverAction RetainRequest() {
+    HostResolverAction result;
+    result.action = RETAIN;
     return result;
   }
 
   Action action = COMPLETE;
-  interfaces::AddressListPtr addresses;
+  AddressList addresses;
   Error error = OK;
 };
 
@@ -96,19 +95,19 @@ class MockMojoHostResolver : public HostResolverMojo::Impl {
       const base::Closure& request_connection_error_callback);
   ~MockMojoHostResolver() override;
 
-  void AddAction(std::unique_ptr<HostResolverAction> action);
+  void AddAction(HostResolverAction action);
 
-  const mojo::Array<interfaces::HostResolverRequestInfoPtr>& requests() {
+  const std::vector<HostResolver::RequestInfo>& requests() {
     return requests_received_;
   }
 
-  void ResolveDns(interfaces::HostResolverRequestInfoPtr request_info,
+  void ResolveDns(std::unique_ptr<HostResolver::RequestInfo> request_info,
                   interfaces::HostResolverRequestClientPtr client) override;
 
  private:
-  std::vector<std::unique_ptr<HostResolverAction>> actions_;
+  std::vector<HostResolverAction> actions_;
   size_t results_returned_ = 0;
-  mojo::Array<interfaces::HostResolverRequestInfoPtr> requests_received_;
+  std::vector<HostResolver::RequestInfo> requests_received_;
   const base::Closure request_connection_error_callback_;
   std::vector<std::unique_ptr<MockMojoHostResolverRequest>> requests_;
 };
@@ -122,20 +121,19 @@ MockMojoHostResolver::~MockMojoHostResolver() {
   EXPECT_EQ(results_returned_, actions_.size());
 }
 
-void MockMojoHostResolver::AddAction(
-    std::unique_ptr<HostResolverAction> action) {
+void MockMojoHostResolver::AddAction(HostResolverAction action) {
   actions_.push_back(std::move(action));
 }
 
 void MockMojoHostResolver::ResolveDns(
-    interfaces::HostResolverRequestInfoPtr request_info,
+    std::unique_ptr<HostResolver::RequestInfo> request_info,
     interfaces::HostResolverRequestClientPtr client) {
-  requests_received_.push_back(std::move(request_info));
+  requests_received_.push_back(std::move(*request_info));
   ASSERT_LE(results_returned_, actions_.size());
-  switch (actions_[results_returned_]->action) {
+  switch (actions_[results_returned_].action) {
     case HostResolverAction::COMPLETE:
-      client->ReportResult(actions_[results_returned_]->error,
-                           std::move(actions_[results_returned_]->addresses));
+      client->ReportResult(actions_[results_returned_].error,
+                           std::move(actions_[results_returned_].addresses));
       break;
     case HostResolverAction::RETAIN:
       requests_.push_back(base::WrapUnique(new MockMojoHostResolverRequest(
@@ -167,9 +165,9 @@ class HostResolverMojoTest : public testing::Test {
   int Resolve(const HostResolver::RequestInfo& request_info,
               AddressList* result) {
     TestCompletionCallback callback;
-    return callback.GetResult(resolver_->Resolve(request_info, DEFAULT_PRIORITY,
-                                                 result, callback.callback(),
-                                                 &request_, BoundNetLog()));
+    return callback.GetResult(
+        resolver_->Resolve(request_info, DEFAULT_PRIORITY, result,
+                           callback.callback(), &request_, NetLogWithSource()));
   }
 
   std::unique_ptr<MockMojoHostResolver> mock_resolver_;
@@ -197,11 +195,11 @@ TEST_F(HostResolverMojoTest, Basic) {
   EXPECT_EQ(address_list[1], result[1]);
 
   ASSERT_EQ(1u, mock_resolver_->requests().size());
-  interfaces::HostResolverRequestInfo& request = *mock_resolver_->requests()[0];
-  EXPECT_EQ("example.com", request.host.To<std::string>());
-  EXPECT_EQ(12345, request.port);
-  EXPECT_EQ(interfaces::AddressFamily::UNSPECIFIED, request.address_family);
-  EXPECT_FALSE(request.is_my_ip_address);
+  const HostResolver::RequestInfo& request = mock_resolver_->requests()[0];
+  EXPECT_EQ("example.com", request.hostname());
+  EXPECT_EQ(12345, request.port());
+  EXPECT_EQ(ADDRESS_FAMILY_UNSPECIFIED, request.address_family());
+  EXPECT_FALSE(request.is_my_ip_address());
 }
 
 TEST_F(HostResolverMojoTest, ResolveCachedResult) {
@@ -259,12 +257,12 @@ TEST_F(HostResolverMojoTest, Multiple) {
   std::unique_ptr<HostResolver::Request> request2;
   TestCompletionCallback callback1;
   TestCompletionCallback callback2;
-  ASSERT_EQ(ERR_IO_PENDING,
-            resolver_->Resolve(request_info1, DEFAULT_PRIORITY, &result1,
-                               callback1.callback(), &request1, BoundNetLog()));
-  ASSERT_EQ(ERR_IO_PENDING,
-            resolver_->Resolve(request_info2, DEFAULT_PRIORITY, &result2,
-                               callback2.callback(), &request2, BoundNetLog()));
+  ASSERT_EQ(ERR_IO_PENDING, resolver_->Resolve(request_info1, DEFAULT_PRIORITY,
+                                               &result1, callback1.callback(),
+                                               &request1, NetLogWithSource()));
+  ASSERT_EQ(ERR_IO_PENDING, resolver_->Resolve(request_info2, DEFAULT_PRIORITY,
+                                               &result2, callback2.callback(),
+                                               &request2, NetLogWithSource()));
   EXPECT_THAT(callback1.GetResult(ERR_IO_PENDING), IsOk());
   EXPECT_THAT(callback2.GetResult(ERR_IO_PENDING),
               IsError(ERR_NAME_NOT_RESOLVED));
@@ -273,16 +271,16 @@ TEST_F(HostResolverMojoTest, Multiple) {
   ASSERT_EQ(0u, result2.size());
 
   ASSERT_EQ(2u, mock_resolver_->requests().size());
-  interfaces::HostResolverRequestInfo& info1 = *mock_resolver_->requests()[0];
-  EXPECT_EQ("example.com", info1.host.To<std::string>());
-  EXPECT_EQ(12345, info1.port);
-  EXPECT_EQ(interfaces::AddressFamily::IPV4, info1.address_family);
-  EXPECT_TRUE(info1.is_my_ip_address);
-  interfaces::HostResolverRequestInfo& info2 = *mock_resolver_->requests()[1];
-  EXPECT_EQ("example.org", info2.host.To<std::string>());
-  EXPECT_EQ(80, info2.port);
-  EXPECT_EQ(interfaces::AddressFamily::IPV6, info2.address_family);
-  EXPECT_FALSE(info2.is_my_ip_address);
+  const HostResolver::RequestInfo& info1 = mock_resolver_->requests()[0];
+  EXPECT_EQ("example.com", info1.hostname());
+  EXPECT_EQ(12345, info1.port());
+  EXPECT_EQ(ADDRESS_FAMILY_IPV4, info1.address_family());
+  EXPECT_TRUE(info1.is_my_ip_address());
+  const HostResolver::RequestInfo& info2 = mock_resolver_->requests()[1];
+  EXPECT_EQ("example.org", info2.hostname());
+  EXPECT_EQ(80, info2.port());
+  EXPECT_EQ(ADDRESS_FAMILY_IPV6, info2.address_family());
+  EXPECT_FALSE(info2.is_my_ip_address());
 }
 
 TEST_F(HostResolverMojoTest, Error) {
@@ -296,11 +294,11 @@ TEST_F(HostResolverMojoTest, Error) {
   EXPECT_TRUE(result.empty());
 
   ASSERT_EQ(1u, mock_resolver_->requests().size());
-  interfaces::HostResolverRequestInfo& request = *mock_resolver_->requests()[0];
-  EXPECT_EQ("example.com", request.host.To<std::string>());
-  EXPECT_EQ(8080, request.port);
-  EXPECT_EQ(interfaces::AddressFamily::IPV4, request.address_family);
-  EXPECT_FALSE(request.is_my_ip_address);
+  const HostResolver::RequestInfo& request = mock_resolver_->requests()[0];
+  EXPECT_EQ("example.com", request.hostname());
+  EXPECT_EQ(8080, request.port());
+  EXPECT_EQ(ADDRESS_FAMILY_IPV4, request.address_family());
+  EXPECT_FALSE(request.is_my_ip_address());
 }
 
 TEST_F(HostResolverMojoTest, EmptyResult) {
@@ -322,17 +320,17 @@ TEST_F(HostResolverMojoTest, Cancel) {
   AddressList result;
   std::unique_ptr<HostResolver::Request> request;
   resolver_->Resolve(request_info, DEFAULT_PRIORITY, &result, base::Bind(&Fail),
-                     &request, BoundNetLog());
+                     &request, NetLogWithSource());
   request.reset();
   waiter_.WaitForEvent(ConnectionErrorSource::REQUEST);
   EXPECT_TRUE(result.empty());
 
   ASSERT_EQ(1u, mock_resolver_->requests().size());
-  interfaces::HostResolverRequestInfo& info1 = *mock_resolver_->requests()[0];
-  EXPECT_EQ("example.com", info1.host.To<std::string>());
-  EXPECT_EQ(80, info1.port);
-  EXPECT_EQ(interfaces::AddressFamily::IPV6, info1.address_family);
-  EXPECT_FALSE(info1.is_my_ip_address);
+  const HostResolver::RequestInfo& info1 = mock_resolver_->requests()[0];
+  EXPECT_EQ("example.com", info1.hostname());
+  EXPECT_EQ(80, info1.port());
+  EXPECT_EQ(ADDRESS_FAMILY_IPV6, info1.address_family());
+  EXPECT_FALSE(info1.is_my_ip_address());
 }
 
 TEST_F(HostResolverMojoTest, ImplDropsClientConnection) {
@@ -344,19 +342,19 @@ TEST_F(HostResolverMojoTest, ImplDropsClientConnection) {
   EXPECT_TRUE(result.empty());
 
   ASSERT_EQ(1u, mock_resolver_->requests().size());
-  interfaces::HostResolverRequestInfo& info2 = *mock_resolver_->requests()[0];
-  EXPECT_EQ("example.com", info2.host.To<std::string>());
-  EXPECT_EQ(1, info2.port);
-  EXPECT_EQ(interfaces::AddressFamily::UNSPECIFIED, info2.address_family);
-  EXPECT_FALSE(info2.is_my_ip_address);
+  const HostResolver::RequestInfo& info2 = mock_resolver_->requests()[0];
+  EXPECT_EQ("example.com", info2.hostname());
+  EXPECT_EQ(1, info2.port());
+  EXPECT_EQ(ADDRESS_FAMILY_UNSPECIFIED, info2.address_family());
+  EXPECT_FALSE(info2.is_my_ip_address());
 }
 
 TEST_F(HostResolverMojoTest, ResolveFromCache_Miss) {
   HostResolver::RequestInfo request_info(
       HostPortPair::FromString("example.com:8080"));
   AddressList result;
-  EXPECT_EQ(ERR_DNS_CACHE_MISS,
-            resolver_->ResolveFromCache(request_info, &result, BoundNetLog()));
+  EXPECT_EQ(ERR_DNS_CACHE_MISS, resolver_->ResolveFromCache(
+                                    request_info, &result, NetLogWithSource()));
   EXPECT_TRUE(result.empty());
 }
 
@@ -374,8 +372,8 @@ TEST_F(HostResolverMojoTest, ResolveFromCache_Hit) {
   EXPECT_EQ(1u, mock_resolver_->requests().size());
 
   result.clear();
-  EXPECT_EQ(OK,
-            resolver_->ResolveFromCache(request_info, &result, BoundNetLog()));
+  EXPECT_EQ(OK, resolver_->ResolveFromCache(request_info, &result,
+                                            NetLogWithSource()));
   ASSERT_EQ(2u, result.size());
   EXPECT_EQ(address_list[0], result[0]);
   EXPECT_EQ(address_list[1], result[1]);
@@ -397,8 +395,8 @@ TEST_F(HostResolverMojoTest, ResolveFromCache_CacheNotAllowed) {
 
   result.clear();
   request_info.set_allow_cached_response(false);
-  EXPECT_EQ(ERR_DNS_CACHE_MISS,
-            resolver_->ResolveFromCache(request_info, &result, BoundNetLog()));
+  EXPECT_EQ(ERR_DNS_CACHE_MISS, resolver_->ResolveFromCache(
+                                    request_info, &result, NetLogWithSource()));
   EXPECT_TRUE(result.empty());
 }
 

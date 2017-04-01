@@ -4,10 +4,15 @@
 
 #include "components/gcm_driver/gcm_internals_helper.h"
 
+#include <memory>
+#include <utility>
+
 #include "base/format_macros.h"
+#include "base/i18n/time_formatting.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/gcm_driver/gcm_activity.h"
 #include "components/gcm_driver/gcm_internals_constants.h"
@@ -20,24 +25,22 @@ namespace {
 void SetCheckinInfo(const std::vector<gcm::CheckinActivity>& checkins,
                     base::ListValue* checkin_info) {
   for (const gcm::CheckinActivity& checkin : checkins) {
-        base::ListValue* row = new base::ListValue();
-    checkin_info->Append(row);
-
+    std::unique_ptr<base::ListValue> row(new base::ListValue());
     row->AppendDouble(checkin.time.ToJsTime());
     row->AppendString(checkin.event);
     row->AppendString(checkin.details);
+    checkin_info->Append(std::move(row));
   }
 }
 
 void SetConnectionInfo(const std::vector<gcm::ConnectionActivity>& connections,
                        base::ListValue* connection_info) {
   for (const gcm::ConnectionActivity& connection : connections) {
-    base::ListValue* row = new base::ListValue();
-    connection_info->Append(row);
-
+    std::unique_ptr<base::ListValue> row(new base::ListValue());
     row->AppendDouble(connection.time.ToJsTime());
     row->AppendString(connection.event);
     row->AppendString(connection.details);
+    connection_info->Append(std::move(row));
   }
 }
 
@@ -45,44 +48,41 @@ void SetRegistrationInfo(
     const std::vector<gcm::RegistrationActivity>& registrations,
     base::ListValue* registration_info) {
   for (const gcm::RegistrationActivity& registration : registrations) {
-    base::ListValue* row = new base::ListValue();
-    registration_info->Append(row);
-
+    std::unique_ptr<base::ListValue> row(new base::ListValue());
     row->AppendDouble(registration.time.ToJsTime());
     row->AppendString(registration.app_id);
     row->AppendString(registration.source);
     row->AppendString(registration.event);
     row->AppendString(registration.details);
+    registration_info->Append(std::move(row));
   }
 }
 
 void SetReceivingInfo(const std::vector<gcm::ReceivingActivity>& receives,
                       base::ListValue* receive_info) {
   for (const gcm::ReceivingActivity& receive : receives) {
-    base::ListValue* row = new base::ListValue();
-    receive_info->Append(row);
-
+    std::unique_ptr<base::ListValue> row(new base::ListValue());
     row->AppendDouble(receive.time.ToJsTime());
     row->AppendString(receive.app_id);
     row->AppendString(receive.from);
     row->AppendString(base::IntToString(receive.message_byte_size));
     row->AppendString(receive.event);
     row->AppendString(receive.details);
+    receive_info->Append(std::move(row));
   }
 }
 
 void SetSendingInfo(const std::vector<gcm::SendingActivity>& sends,
                     base::ListValue* send_info) {
   for (const gcm::SendingActivity& send : sends) {
-    base::ListValue* row = new base::ListValue();
-    send_info->Append(row);
-
+    std::unique_ptr<base::ListValue> row(new base::ListValue());
     row->AppendDouble(send.time.ToJsTime());
     row->AppendString(send.app_id);
     row->AppendString(send.receiver_id);
     row->AppendString(send.message_id);
     row->AppendString(send.event);
     row->AppendString(send.details);
+    send_info->Append(std::move(row));
   }
 }
 
@@ -90,12 +90,11 @@ void SetDecryptionFailureInfo(
     const std::vector<gcm::DecryptionFailureActivity>& failures,
     base::ListValue* failure_info) {
   for (const gcm::DecryptionFailureActivity& failure : failures) {
-    base::ListValue* row = new base::ListValue();
-    failure_info->Append(row);
-
+    std::unique_ptr<base::ListValue> row(new base::ListValue());
     row->AppendDouble(failure.time.ToJsTime());
     row->AppendString(failure.app_id);
     row->AppendString(failure.details);
+    failure_info->Append(std::move(row));
   }
 }
 
@@ -121,6 +120,16 @@ void SetGCMInternalsInfo(const gcm::GCMClient::GCMStatistics* stats,
                            base::JoinString(stats->registered_app_ids, ","));
     if (stats->connection_client_created)
       device_info->SetString(kConnectionState, stats->connection_state);
+    if (!stats->last_checkin.is_null()) {
+      device_info->SetString(
+          kLastCheckin, base::UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
+                            stats->last_checkin)));
+    }
+    if (!stats->next_checkin.is_null()) {
+      device_info->SetString(
+          kNextCheckin, base::UTF16ToUTF8(base::TimeFormatFriendlyDateAndTime(
+                            stats->next_checkin)));
+    }
     if (stats->android_id > 0) {
       device_info->SetString(
           kAndroidId, base::StringPrintf("0x%" PRIx64, stats->android_id));

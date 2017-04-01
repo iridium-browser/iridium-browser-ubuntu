@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,7 +46,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     // However, modifier bit for Control in |webkit_event| should be set.
     EXPECT_EQ(blink::WebInputEvent::ControlKey | blink::WebInputEvent::IsLeft,
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_LEFT), webkit_event.domCode);
     EXPECT_EQ(static_cast<int>(DomKey::CONTROL), webkit_event.domKey);
   }
@@ -55,7 +56,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
                    EF_NONE);
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     // However, modifier bit for Control in |webkit_event| shouldn't be set.
-    EXPECT_EQ(blink::WebInputEvent::IsLeft, webkit_event.modifiers);
+    EXPECT_EQ(blink::WebInputEvent::IsLeft, webkit_event.modifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_LEFT), webkit_event.domCode);
     EXPECT_EQ(static_cast<int>(DomKey::CONTROL), webkit_event.domKey);
   }
@@ -66,7 +67,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     // However, modifier bit for Control in |webkit_event| should be set.
     EXPECT_EQ(blink::WebInputEvent::ControlKey | blink::WebInputEvent::IsRight,
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_RIGHT), webkit_event.domCode);
   }
   {
@@ -75,7 +76,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
                    EF_NONE);
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     // However, modifier bit for Control in |webkit_event| shouldn't be set.
-    EXPECT_EQ(blink::WebInputEvent::IsRight, webkit_event.modifiers);
+    EXPECT_EQ(blink::WebInputEvent::IsRight, webkit_event.modifiers());
     EXPECT_EQ(static_cast<int>(DomCode::CONTROL_RIGHT), webkit_event.domCode);
     EXPECT_EQ(static_cast<int>(DomKey::CONTROL), webkit_event.domKey);
   }
@@ -90,7 +91,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     // However, modifier bit for Control in |webkit_event| should be set.
     EXPECT_EQ(blink::WebInputEvent::ControlKey,
-              webkit_event.modifiers & ~kLocationModifiers);
+              webkit_event.modifiers() & ~kLocationModifiers);
   }
   {
     // Release Ctrl.
@@ -98,7 +99,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEvent) {
     KeyEvent event(xev);
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     // However, modifier bit for Control in |webkit_event| shouldn't be set.
-    EXPECT_EQ(0, webkit_event.modifiers & ~kLocationModifiers);
+    EXPECT_EQ(0, webkit_event.modifiers() & ~kLocationModifiers);
   }
 #endif
 }
@@ -205,7 +206,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEventKeyPadKeyCode) {
                    EF_NONE);
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     EXPECT_EQ(test_case.expected_result,
-              (webkit_event.modifiers & blink::WebInputEvent::IsKeyPad) != 0)
+              (webkit_event.modifiers() & blink::WebInputEvent::IsKeyPad) != 0)
         << "Failed in "
         << "{dom_code:"
         << KeycodeConverter::DomCodeToCodeString(test_case.dom_code)
@@ -232,7 +233,7 @@ TEST(WebInputEventTest, TestMakeWebKeyboardEventKeyPadKeyCode) {
     KeyEvent event(xev);
     blink::WebKeyboardEvent webkit_event = MakeWebKeyboardEvent(event);
     EXPECT_EQ(test_case.expected_result,
-              (webkit_event.modifiers & blink::WebInputEvent::IsKeyPad) != 0)
+              (webkit_event.modifiers() & blink::WebInputEvent::IsKeyPad) != 0)
         << "Failed in " << i << "th test case: "
         << "{dom_code:"
         << KeycodeConverter::DomCodeToCodeString(test_case.dom_code)
@@ -253,11 +254,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Left, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -273,11 +274,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Left, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseUp, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseUp, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -293,11 +294,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Middle, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -313,11 +314,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Middle, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseUp, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseUp, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -333,11 +334,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Right, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -353,11 +354,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Right, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseUp, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseUp, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -372,11 +373,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::NoButton, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseMove, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseMove, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -392,11 +393,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Left, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseMove, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseMove, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -412,11 +413,11 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     blink::WebMouseEvent webkit_event =
         MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::Left, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type);
+    EXPECT_EQ(blink::WebInputEvent::MouseDown, webkit_event.type());
     EXPECT_EQ(ui_event.GetClickCount(), webkit_event.clickCount);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
@@ -437,6 +438,8 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     EXPECT_EQ(0, webkit_event.tiltX);
     EXPECT_EQ(0, webkit_event.tiltY);
     EXPECT_TRUE(std::isnan(webkit_event.force));
+    EXPECT_EQ(0.0f, webkit_event.tangentialPressure);
+    EXPECT_EQ(0, webkit_event.twist);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
     EXPECT_EQ(321, webkit_event.y);
@@ -463,6 +466,8 @@ TEST(WebInputEventTest, TestMakeWebMouseEvent) {
     EXPECT_EQ(90, webkit_event.tiltX);
     EXPECT_EQ(-90, webkit_event.tiltY);
     EXPECT_FLOAT_EQ(0.8f, webkit_event.force);
+    EXPECT_EQ(0.0f, webkit_event.tangentialPressure);
+    EXPECT_EQ(0, webkit_event.twist);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
     EXPECT_EQ(321, webkit_event.y);
@@ -481,49 +486,102 @@ TEST(WebInputEventTest, TestMakeWebMouseWheelEvent) {
     blink::WebMouseWheelEvent webkit_event = MakeWebMouseWheelEvent(
         ui_event, base::Bind(&GetScreenLocationFromEvent));
     EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
+              webkit_event.modifiers());
     EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
+                    webkit_event.timeStampSeconds());
     EXPECT_EQ(blink::WebMouseEvent::Button::NoButton, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseWheel, webkit_event.type);
-    EXPECT_FLOAT_EQ(ui_event.x_offset() / 53.0f, webkit_event.wheelTicksX);
-    EXPECT_FLOAT_EQ(ui_event.y_offset() / 53.0f, webkit_event.wheelTicksY);
+    EXPECT_EQ(blink::WebInputEvent::MouseWheel, webkit_event.type());
+    EXPECT_FLOAT_EQ(ui_event.x_offset() / MouseWheelEvent::kWheelDelta,
+                    webkit_event.wheelTicksX);
+    EXPECT_FLOAT_EQ(ui_event.y_offset() / MouseWheelEvent::kWheelDelta,
+                    webkit_event.wheelTicksY);
     EXPECT_EQ(blink::WebPointerProperties::PointerType::Mouse,
               webkit_event.pointerType);
     EXPECT_EQ(0, webkit_event.tiltX);
     EXPECT_EQ(0, webkit_event.tiltY);
     EXPECT_TRUE(std::isnan(webkit_event.force));
+    EXPECT_EQ(0.0f, webkit_event.tangentialPressure);
+    EXPECT_EQ(0, webkit_event.twist);
     EXPECT_EQ(123, webkit_event.x);
     EXPECT_EQ(123, webkit_event.windowX);
     EXPECT_EQ(321, webkit_event.y);
     EXPECT_EQ(321, webkit_event.windowY);
   }
-  {
-    // Mouse wheel with shift and no x offset.
-    base::TimeTicks timestamp = EventTimeForNow();
-    MouseWheelEvent ui_event(
-        gfx::Vector2d(0, -MouseWheelEvent::kWheelDelta * 2),
-        gfx::Point(123, 321), gfx::Point(123, 321), timestamp, EF_SHIFT_DOWN,
-        0);
-    blink::WebMouseWheelEvent webkit_event = MakeWebMouseWheelEvent(
-        ui_event, base::Bind(&GetScreenLocationFromEvent));
-    EXPECT_EQ(EventFlagsToWebEventModifiers(ui_event.flags()),
-              webkit_event.modifiers);
-    EXPECT_FLOAT_EQ(EventTimeStampToSeconds(timestamp),
-                    webkit_event.timeStampSeconds);
-    EXPECT_EQ(blink::WebMouseEvent::Button::NoButton, webkit_event.button);
-    EXPECT_EQ(blink::WebInputEvent::MouseWheel, webkit_event.type);
-    EXPECT_FLOAT_EQ(ui_event.y_offset() / 53.0f, webkit_event.wheelTicksX);
-    EXPECT_FLOAT_EQ(0, webkit_event.wheelTicksY);
-    EXPECT_EQ(blink::WebPointerProperties::PointerType::Mouse,
-              webkit_event.pointerType);
-    EXPECT_EQ(0, webkit_event.tiltX);
-    EXPECT_EQ(0, webkit_event.tiltY);
-    EXPECT_TRUE(std::isnan(webkit_event.force));
-    EXPECT_EQ(123, webkit_event.x);
-    EXPECT_EQ(123, webkit_event.windowX);
-    EXPECT_EQ(321, webkit_event.y);
-    EXPECT_EQ(321, webkit_event.windowY);
+}
+
+TEST(WebInputEventTest, KeyEvent) {
+  struct {
+    ui::KeyEvent event;
+    blink::WebInputEvent::Type web_type;
+    int web_modifiers;
+  } tests[] = {
+      {ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::EF_NONE),
+       blink::WebInputEvent::RawKeyDown, 0x0},
+      {ui::KeyEvent(L'B', ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN),
+       blink::WebInputEvent::Char,
+       blink::WebInputEvent::ShiftKey | blink::WebInputEvent::ControlKey},
+      {ui::KeyEvent(ui::ET_KEY_RELEASED, ui::VKEY_C, ui::EF_ALT_DOWN),
+       blink::WebInputEvent::KeyUp, blink::WebInputEvent::AltKey}};
+
+  for (size_t i = 0; i < arraysize(tests); i++) {
+    blink::WebKeyboardEvent web_event = MakeWebKeyboardEvent(tests[i].event);
+    ASSERT_TRUE(blink::WebInputEvent::isKeyboardEventType(web_event.type()));
+    ASSERT_EQ(tests[i].web_type, web_event.type());
+    ASSERT_EQ(tests[i].web_modifiers, web_event.modifiers());
+    ASSERT_EQ(static_cast<int>(tests[i].event.GetLocatedWindowsKeyboardCode()),
+              web_event.windowsKeyCode);
+  }
+}
+
+TEST(WebInputEventTest, WheelEvent) {
+  const int kDeltaX = 14;
+  const int kDeltaY = -3;
+  ui::MouseWheelEvent ui_event(
+      ui::MouseEvent(ui::ET_UNKNOWN, gfx::Point(), gfx::Point(),
+                     base::TimeTicks(), 0, 0),
+      kDeltaX, kDeltaY);
+  blink::WebMouseWheelEvent web_event =
+      MakeWebMouseWheelEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
+  ASSERT_EQ(blink::WebInputEvent::MouseWheel, web_event.type());
+  ASSERT_EQ(0, web_event.modifiers());
+  ASSERT_EQ(kDeltaX, web_event.deltaX);
+  ASSERT_EQ(kDeltaY, web_event.deltaY);
+}
+
+TEST(WebInputEventTest, MousePointerEvent) {
+  struct {
+    ui::EventType ui_type;
+    blink::WebInputEvent::Type web_type;
+    int ui_modifiers;
+    int web_modifiers;
+    gfx::Point location;
+    gfx::Point screen_location;
+  } tests[] = {
+      {ui::ET_MOUSE_PRESSED, blink::WebInputEvent::MouseDown, 0x0, 0x0,
+       gfx::Point(3, 5), gfx::Point(113, 125)},
+      {ui::ET_MOUSE_RELEASED, blink::WebInputEvent::MouseUp,
+       ui::EF_LEFT_MOUSE_BUTTON, blink::WebInputEvent::LeftButtonDown,
+       gfx::Point(100, 1), gfx::Point(50, 1)},
+      {ui::ET_MOUSE_MOVED, blink::WebInputEvent::MouseMove,
+       ui::EF_MIDDLE_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON,
+       blink::WebInputEvent::MiddleButtonDown |
+           blink::WebInputEvent::RightButtonDown,
+       gfx::Point(13, 3), gfx::Point(53, 3)},
+  };
+
+  for (size_t i = 0; i < arraysize(tests); i++) {
+    ui::MouseEvent ui_event(tests[i].ui_type, tests[i].location,
+                            tests[i].screen_location, base::TimeTicks(),
+                            tests[i].ui_modifiers, 0);
+    blink::WebMouseEvent web_event =
+        MakeWebMouseEvent(ui_event, base::Bind(&GetScreenLocationFromEvent));
+    ASSERT_TRUE(blink::WebInputEvent::isMouseEventType(web_event.type()));
+    ASSERT_EQ(tests[i].web_type, web_event.type());
+    ASSERT_EQ(tests[i].web_modifiers, web_event.modifiers());
+    ASSERT_EQ(tests[i].location.x(), web_event.x);
+    ASSERT_EQ(tests[i].location.y(), web_event.y);
+    ASSERT_EQ(tests[i].screen_location.x(), web_event.globalX);
+    ASSERT_EQ(tests[i].screen_location.y(), web_event.globalY);
   }
 }
 

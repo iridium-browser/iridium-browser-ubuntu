@@ -12,13 +12,10 @@
 #include "ui/app_list/speech_ui_model_observer.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/views/controls/button/image_button.h"
-#include "ui/views/controls/button/menu_button_listener.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/view.h"
 
 namespace views {
-class ImageView;
-class MenuButton;
 class Textfield;
 }  // namespace views
 
@@ -33,7 +30,6 @@ enum SearchBoxFocus {
   FOCUS_CONTENTS_VIEW,  // Something outside the SearchBox is selected
 };
 
-class AppListMenuViews;
 class AppListModel;
 class AppListViewDelegate;
 class SearchBoxModel;
@@ -47,7 +43,6 @@ class SearchBoxImageButton;
 class APP_LIST_EXPORT SearchBoxView : public views::View,
                                       public views::TextfieldController,
                                       public views::ButtonListener,
-                                      public views::MenuButtonListener,
                                       public SearchBoxModelObserver,
                                       public SpeechUIModelObserver {
  public:
@@ -58,7 +53,6 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   void ModelChanged();
   bool HasSearch() const;
   void ClearSearch();
-  void InvalidateMenu();
 
   // Sets the shadow border of the search box.
   void SetShadow(const gfx::ShadowValue& shadow);
@@ -105,13 +99,7 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   // Overridden from views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
-  // Overridden from views::MenuButtonListener:
-  void OnMenuButtonClicked(views::MenuButton* source,
-                           const gfx::Point& point,
-                           const ui::Event* event) override;
-
   // Overridden from SearchBoxModelObserver:
-  void IconChanged() override;
   void SpeechRecognitionButtonPropChanged() override;
   void HintTextChanged() override;
   void SelectionModelChanged() override;
@@ -125,13 +113,9 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   AppListViewDelegate* view_delegate_;  // Not owned.
   AppListModel* model_;  // Owned by the profile-keyed service.
 
-  std::unique_ptr<AppListMenuViews> menu_;
-
   views::View* content_container_;     // Owned by views hierarchy.
-  views::ImageView* icon_view_;  // Owned by views hierarchy.
   SearchBoxImageButton* back_button_;    // Owned by views hierarchy.
   SearchBoxImageButton* speech_button_;  // Owned by views hierarchy.
-  views::MenuButton* menu_button_;  // Owned by views hierarchy.
   views::Textfield* search_box_;  // Owned by views hierarchy.
   views::View* contents_view_;  // Owned by views hierarchy.
 

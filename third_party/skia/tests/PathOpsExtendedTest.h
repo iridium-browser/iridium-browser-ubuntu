@@ -8,14 +8,10 @@
 #define PathOpsExtendedTest_DEFINED
 
 #include "SkBitmap.h"
-#include "SkCommandLineFlags.h"
 #include "SkPath.h"
 #include "SkPathOpsTypes.h"
 #include "SkStream.h"
 #include "Test.h"
-
-DECLARE_bool(runFail);
-DECLARE_bool(runBinary);
 
 struct PathOpsThreadState;
 
@@ -42,27 +38,17 @@ extern bool testPathOpCheck(skiatest::Reporter* reporter, const SkPath& a, const
                             const SkPathOp , const char* testName, bool checkFail);
 extern bool testPathOpFail(skiatest::Reporter* reporter, const SkPath& a, const SkPath& b,
                            const SkPathOp, const char* testName);
-extern bool testPathOpFailCheck(skiatest::Reporter* reporter, const SkPath& a, const SkPath& b,
-                                const SkPathOp , const char* testName);
-extern bool testPathOpFailSkipAssert(skiatest::Reporter* reporter, const SkPath& a, const SkPath& b,
-                                     const SkPathOp , const char* testName);
-extern bool testPathOpFlakySkipAssert(skiatest::Reporter* reporter, const SkPath& a,
-                                      const SkPath& b, const SkPathOp , const char* testName);
-extern bool testPathOpSkipAssert(skiatest::Reporter* reporter, const SkPath& a, const SkPath& b,
-                                 const SkPathOp , const char* testName);
+extern bool testPathOpFuzz(skiatest::Reporter* reporter, const SkPath& a,
+                           const SkPath& b, const SkPathOp , const char* testName);
 extern bool testSimplify(SkPath& path, bool useXor, SkPath& out, PathOpsThreadState& state,
                          const char* pathStr);
 extern bool testSimplify(skiatest::Reporter* reporter, const SkPath& path, const char* filename);
 extern bool testSimplifyCheck(skiatest::Reporter* reporter, const SkPath& path,
                               const char* filename, bool checkFail);
-extern bool testSimplifyFailSkipAssert(skiatest::Reporter* reporter, const SkPath& path,
+extern bool testSimplifyFuzz(skiatest::Reporter* reporter, const SkPath& path,
                                        const char* filename);
-extern bool testSimplifySkipAssert(skiatest::Reporter* reporter, const SkPath& path,
-                                   const char* filename);
 
 void initializeTests(skiatest::Reporter* reporter, const char* testName);
-void outputProgress(char* ramStr, const char* pathStr, SkPath::FillType );
-void outputProgress(char* ramStr, const char* pathStr, SkPathOp op);
 
 void RunTestSet(skiatest::Reporter* reporter, TestDesc tests[], size_t count,
                 void (*firstTest)(skiatest::Reporter* , const char* filename),

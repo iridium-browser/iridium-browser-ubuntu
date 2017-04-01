@@ -4,6 +4,8 @@
 
 #include "components/precache/core/precache_database.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/location.h"
@@ -133,7 +135,7 @@ PrecacheReferrerHostEntry PrecacheDatabase::GetReferrerHost(
 void PrecacheDatabase::GetURLListForReferrerHost(
     int64_t referrer_host_id,
     std::vector<GURL>* used_urls,
-    std::vector<GURL>* unused_urls) {
+    std::vector<GURL>* downloaded_urls) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK_NE(PrecacheReferrerHostEntry::kInvalidId, referrer_host_id);
 
@@ -141,7 +143,8 @@ void PrecacheDatabase::GetURLListForReferrerHost(
   Flush();
 
   precache_url_table_.GetURLListForReferrerHost(referrer_host_id, used_urls,
-                                                unused_urls);
+                                                downloaded_urls);
+  precache_url_table_.SetDownloadReported(referrer_host_id);
 }
 
 void PrecacheDatabase::RecordURLPrefetchMetrics(
@@ -150,6 +153,9 @@ void PrecacheDatabase::RecordURLPrefetchMetrics(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   UMA_HISTOGRAM_TIMES("Precache.Latency.Prefetch", latency);
+  UMA_HISTOGRAM_ENUMERATION("Precache.CacheStatus.Prefetch",
+                            info.cache_entry_status,
+                            net::HttpResponseInfo::CacheEntryStatus::ENTRY_MAX);
 
   DCHECK(info.headers) << "The headers are required to get the freshness.";
   if (info.headers) {
@@ -196,10 +202,15 @@ void PrecacheDatabase::RecordURLPrefetch(const GURL& url,
   // since it had no significant effect (besides a possible revalidation and a
   // change in the cache LRU priority). If a row for the URL already exists,
   // then the timestamp is updated.
-  buffered_writes_.push_back(base::Bind(
-      &PrecacheDatabase::RecordURLPrefetchInternal, GetWeakPtr(), url,
-      referrer_host, !was_cached || precache_url_table_.IsURLPrecached(url),
-      fetch_time));
+  const PrecacheURLInfo info = precache_url_table_.GetURLInfo(url);
+  bool is_download_reported = info.is_download_reported;
+  if (info.is_precached && !was_cached) {
+    is_download_reported = false;
+  }
+  buffered_writes_.push_back(
+      base::Bind(&PrecacheDatabase::RecordURLPrefetchInternal, GetWeakPtr(),
+                 url, referrer_host, !was_cached || info.is_precached,
+                 fetch_time, is_download_reported));
   buffered_urls_.insert(url.spec());
   MaybePostFlush();
 }
@@ -208,11 +219,17 @@ void PrecacheDatabase::RecordURLPrefetchInternal(
     const GURL& url,
     const std::string& referrer_host,
     bool is_precached,
-    const base::Time& fetch_time) {
-  auto referrer_host_id = precache_referrer_host_table_.UpdateReferrerHost(
-      referrer_host, 0, fetch_time);
+    const base::Time& fetch_time,
+    bool is_download_reported) {
+  int64_t referrer_host_id =
+      precache_referrer_host_table_.GetReferrerHost(referrer_host).id;
+  if (referrer_host_id == PrecacheReferrerHostEntry::kInvalidId) {
+    referrer_host_id = precache_referrer_host_table_.UpdateReferrerHost(
+        referrer_host, 0, fetch_time);
+  }
   DCHECK_NE(referrer_host_id, PrecacheReferrerHostEntry::kInvalidId);
-  precache_url_table_.AddURL(url, referrer_host_id, is_precached, fetch_time);
+  precache_url_table_.AddURL(url, referrer_host_id, is_precached, fetch_time,
+                             is_download_reported);
 }
 
 void PrecacheDatabase::RecordURLNonPrefetch(const GURL& url,
@@ -250,10 +267,13 @@ void PrecacheDatabase::RecordURLNonPrefetch(const GURL& url,
     Flush();
   }
 
-  bool is_precached = precache_url_table_.IsURLPrecachedAndUnused(url);
-  if (info.was_cached && !is_precached) {
-    // Ignore cache hits that precache can't take credit for.
-    return;
+  const PrecacheURLInfo url_info = precache_url_table_.GetURLInfo(url);
+
+  if (url_info.was_precached) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "Precache.CacheStatus.NonPrefetch.FromPrecache",
+        info.cache_entry_status,
+        net::HttpResponseInfo::CacheEntryStatus::ENTRY_MAX);
   }
 
   base::HistogramBase::Sample size_sample =
@@ -275,7 +295,8 @@ void PrecacheDatabase::RecordURLNonPrefetch(const GURL& url,
                    base::Unretained(&precache_url_table_), url));
     buffered_urls_.insert(url.spec());
     MaybePostFlush();
-  } else {  // info.was_cached.
+  } else if (/* info.was_cached && */ url_info.is_precached &&
+             !url_info.was_used) {
     // The fetch was served from the cache, and since there's an entry for this
     // URL in the URL table, this means that the resource was served from the
     // cache only because precaching put it there. Thus, precaching was helpful,
@@ -328,6 +349,7 @@ void PrecacheDatabase::UpdatePrecacheReferrerHostInternal(
     const base::Time& fetch_time) {
   int64_t referrer_host_id = precache_referrer_host_table_.UpdateReferrerHost(
       hostname, manifest_id, fetch_time);
+
   if (referrer_host_id != PrecacheReferrerHostEntry::kInvalidId) {
     precache_url_table_.ClearAllForReferrerHost(referrer_host_id);
   }

@@ -29,9 +29,10 @@ class FakeDB : public ProtoDatabase<T> {
   ~FakeDB() override;
 
   // ProtoDatabase implementation.
-  void Init(const char* client_name,
-            const base::FilePath& database_dir,
-            const typename ProtoDatabase<T>::InitCallback& callback) override;
+  void InitWithOptions(
+      const char* client_name,
+      const Options& options,
+      const typename ProtoDatabase<T>::InitCallback& callback) override;
   void UpdateEntries(
       std::unique_ptr<typename ProtoDatabase<T>::KeyEntryVector>
           entries_to_save,
@@ -39,6 +40,8 @@ class FakeDB : public ProtoDatabase<T> {
       const typename ProtoDatabase<T>::UpdateCallback& callback) override;
   void LoadEntries(
       const typename ProtoDatabase<T>::LoadCallback& callback) override;
+   void LoadKeys(
+      const typename ProtoDatabase<T>::LoadKeysCallback& callback) override;
   void GetEntry(
       const std::string& key,
       const typename ProtoDatabase<T>::GetCallback& callback) override;
@@ -50,6 +53,8 @@ class FakeDB : public ProtoDatabase<T> {
   void InitCallback(bool success);
 
   void LoadCallback(bool success);
+
+  void LoadKeysCallback(bool success);
 
   void GetCallback(bool success);
 
@@ -63,6 +68,11 @@ class FakeDB : public ProtoDatabase<T> {
       std::unique_ptr<typename std::vector<T>> entries,
       bool success);
 
+  static void RunLoadKeysCallback(
+      const typename ProtoDatabase<T>::LoadKeysCallback& callback,
+      std::unique_ptr<std::vector<std::string>> keys,
+      bool success);
+
   static void RunGetCallback(
       const typename ProtoDatabase<T>::GetCallback& callback,
       std::unique_ptr<T> entry,
@@ -73,6 +83,7 @@ class FakeDB : public ProtoDatabase<T> {
 
   Callback init_callback_;
   Callback load_callback_;
+  Callback load_keys_callback_;
   Callback get_callback_;
   Callback update_callback_;
 };
@@ -85,10 +96,11 @@ template <typename T>
 FakeDB<T>::~FakeDB() {}
 
 template <typename T>
-void FakeDB<T>::Init(const char* client_name,
-                     const base::FilePath& database_dir,
-                     const typename ProtoDatabase<T>::InitCallback& callback) {
-  dir_ = database_dir;
+void FakeDB<T>::InitWithOptions(
+    const char* client_name,
+    const Options& options,
+    const typename ProtoDatabase<T>::InitCallback& callback) {
+  dir_ = options.database_dir;
   init_callback_ = callback;
 }
 
@@ -115,6 +127,18 @@ void FakeDB<T>::LoadEntries(
 
   load_callback_ =
       base::Bind(RunLoadCallback, callback, base::Passed(&entries));
+}
+
+template <typename T>
+void FakeDB<T>::LoadKeys(
+    const typename ProtoDatabase<T>::LoadKeysCallback& callback) {
+  std::unique_ptr<std::vector<std::string>> keys(
+      new std::vector<std::string>());
+  for (const auto& pair : *db_)
+    keys->push_back(pair.first);
+
+  load_keys_callback_ =
+      base::Bind(RunLoadKeysCallback, callback, base::Passed(&keys));
 }
 
 template <typename T>
@@ -152,6 +176,12 @@ void FakeDB<T>::LoadCallback(bool success) {
 }
 
 template <typename T>
+void FakeDB<T>::LoadKeysCallback(bool success) {
+  load_keys_callback_.Run(success);
+  load_keys_callback_.Reset();
+}
+
+template <typename T>
 void FakeDB<T>::GetCallback(bool success) {
   get_callback_.Run(success);
   get_callback_.Reset();
@@ -170,6 +200,15 @@ void FakeDB<T>::RunLoadCallback(
     std::unique_ptr<typename std::vector<T>> entries,
     bool success) {
   callback.Run(success, std::move(entries));
+}
+
+// static
+template <typename T>
+void FakeDB<T>::RunLoadKeysCallback(
+    const typename ProtoDatabase<T>::LoadKeysCallback& callback,
+    std::unique_ptr<std::vector<std::string>> keys,
+    bool success) {
+  callback.Run(success, std::move(keys));
 }
 
 // static

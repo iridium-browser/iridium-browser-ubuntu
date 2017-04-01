@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_delta_serialization.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/single_thread_task_runner.h"
 #include "content/child/child_process.h"
@@ -25,8 +26,8 @@ ChildHistogramMessageFilter::ChildHistogramMessageFilter()
 ChildHistogramMessageFilter::~ChildHistogramMessageFilter() {
 }
 
-void ChildHistogramMessageFilter::OnFilterAdded(IPC::Sender* sender) {
-  sender_ = sender;
+void ChildHistogramMessageFilter::OnFilterAdded(IPC::Channel* channel) {
+  sender_ = channel;
 }
 
 void ChildHistogramMessageFilter::OnFilterRemoved() {
@@ -57,12 +58,6 @@ void ChildHistogramMessageFilter::OnSetHistogramMemory(
       base::GlobalHistogramAllocator::Get();
   if (global_allocator)
     global_allocator->CreateTrackingHistograms(global_allocator->Name());
-}
-
-void ChildHistogramMessageFilter::SendHistograms(int sequence_number) {
-  io_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ChildHistogramMessageFilter::UploadAllHistograms,
-                            this, sequence_number));
 }
 
 void ChildHistogramMessageFilter::OnGetChildHistogramData(int sequence_number) {

@@ -39,12 +39,14 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/chrome_style.h"
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
+#include "chrome/browser/ui/cocoa/chrome_style.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
+#include "chrome/browser/ui/cocoa/l10n_util.h"
 #include "chrome/browser/ui/cocoa/profiles/signin_view_controller_delegate_mac.h"
 #import "chrome/browser/ui/cocoa/profiles/user_manager_mac.h"
+#include "chrome/browser/ui/profile_chooser_constants.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/user_manager.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
@@ -53,7 +55,8 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "chrome/grit/theme_resources.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -65,7 +68,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/oauth2_token_service.h"
-#include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/google_toolbox_for_mac/src/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "ui/base/cocoa/cocoa_base_utils.h"
@@ -86,7 +88,6 @@
 #include "ui/gfx/vector_icons_public.h"
 #include "ui/native_theme/common_theme.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/native_theme/native_theme_mac.h"
 
 namespace {
 
@@ -220,7 +221,7 @@ NSTextView* BuildFixedWidthTextViewWithLink(
 // Returns the native dialog background color.
 NSColor* GetDialogBackgroundColor() {
   return skia::SkColorToCalibratedNSColor(
-      ui::NativeThemeMac::instance()->GetSystemColor(
+      ui::NativeTheme::GetInstanceForNativeUi()->GetSystemColor(
           ui::NativeTheme::kColorId_DialogBackground));
 }
 
@@ -848,11 +849,8 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
     backgroundColor:(NSColor*)backgroundColor {
   if ((self = [super initWithFrame:frameRect])) {
     backgroundColor_.reset([backgroundColor retain]);
-    // Use a color from Aura, since this button is not trying to look like a
-    // native control.
-    SkColor hoverColor = ui::GetAuraColor(
-        ui::NativeTheme::kColorId_ButtonHoverBackgroundColor, nullptr);
-    hoverColor_.reset([skia::SkColorToSRGBNSColor(hoverColor) retain]);
+    hoverColor_.reset([skia::SkColorToSRGBNSColor(profiles::kHoverColor)
+                          retain]);
 
     [self setBordered:NO];
     [self setFont:[NSFont labelFontOfSize:kTextFontSize]];
@@ -887,7 +885,7 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   // Since there is no default button in the bubble, it is safe to activate
   // all buttons on Enter as well, and be consistent with the Windows
   // implementation.
-  if ([event keyCode] == kVK_Return)
+  if ([event keyCode] == kVK_Return || [event keyCode] == kVK_ANSI_KeypadEnter)
     [self performClick:self];
   else
     [super keyDown:event];
@@ -1099,8 +1097,9 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 
 - (IBAction)switchToProfile:(id)sender {
   // Check the event flags to see if a new window should be created.
-  bool alwaysCreate = ui::WindowOpenDispositionFromNSEvent(
-      [NSApp currentEvent]) == NEW_WINDOW;
+  bool alwaysCreate =
+      ui::WindowOpenDispositionFromNSEvent([NSApp currentEvent]) ==
+      WindowOpenDisposition::NEW_WINDOW;
   avatarMenu_->SwitchToProfile([sender tag], alwaysCreate,
                                ProfileMetrics::SWITCH_PROFILE_ICON);
 }
@@ -1202,7 +1201,8 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 
 - (IBAction)showSignoutSigninView:(id)sender {
   if (ProfileSyncServiceFactory::GetForProfile(browser_->profile()))
-    ProfileSyncService::SyncEvent(ProfileSyncService::STOP_FROM_OPTIONS);
+    browser_sync::ProfileSyncService::SyncEvent(
+        browser_sync::ProfileSyncService::STOP_FROM_OPTIONS);
   SigninManagerFactory::GetForProfile(browser_->profile())
       ->SignOut(signin_metrics::USER_CLICKED_SIGNOUT_SETTINGS,
                 signin_metrics::SignoutDelete::IGNORE_METRIC);
@@ -1366,8 +1366,13 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
     [window accessibilitySetOverrideValue:
         l10n_util::GetNSString(IDS_PROFILES_NEW_AVATAR_MENU_ACCESSIBLE_NAME)
                              forAttribute:NSAccessibilityHelpAttribute];
-
-    [[self bubble] setAlignment:info_bubble::kAlignRightEdgeToAnchorEdge];
+    BOOL shouldUseLeadingEdgeForBubble =
+        cocoa_l10n_util::ShouldDoExperimentalRTLLayout() &&
+        !cocoa_l10n_util::ShouldFlipWindowControlsInRTL();
+    [[self bubble]
+        setAlignment:shouldUseLeadingEdgeForBubble
+                         ? info_bubble::kAlignLeadingEdgeToAnchorEdge
+                         : info_bubble::kAlignTrailingEdgeToAnchorEdge];
     [[self bubble] setArrowLocation:info_bubble::kNoArrow];
     [[self bubble] setBackgroundColor:GetDialogBackgroundColor()];
     [self initMenuContentsWithView:viewMode_];

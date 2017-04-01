@@ -12,8 +12,6 @@
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
-class Browser;
-
 namespace base {
 class ListValue;
 }
@@ -54,8 +52,6 @@ class SyncConfirmationHandler : public content::WebUIMessageHandler,
 
   // Sets the profile picture shown in the dialog to the image at |url|.
   virtual void SetUserImageURL(const std::string& url);
-
-  Browser* GetDesktopBrowser();
 
   // Closes the modal signin window and calls
   // LoginUIService::SyncConfirmationUIClosed with |result|. |result| indicates

@@ -13,9 +13,9 @@ import time
 
 from chromite.cbuildbot import chromeos_config
 from chromite.cbuildbot import cbuildbot_run
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import config_lib_unittest
-from chromite.cbuildbot import constants
+from chromite.lib import config_lib
+from chromite.lib import config_lib_unittest
+from chromite.lib import constants
 from chromite.lib import cros_test_lib
 from chromite.lib import parallel
 
@@ -155,7 +155,7 @@ class BuilderRunPickleTest(_BuilderRunTestCase):
   """Make sure BuilderRun objects can be pickled."""
 
   def setUp(self):
-    self.real_config = chromeos_config.GetConfig()['gcc-toolchain-group']
+    self.real_config = chromeos_config.GetConfig()['test-ap-group']
     self.PatchObject(cbuildbot_run._BuilderRunBase, 'GetVersion',
                      return_value=DEFAULT_VERSION)
 

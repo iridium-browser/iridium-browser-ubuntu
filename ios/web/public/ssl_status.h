@@ -9,6 +9,7 @@
 
 #include "ios/web/public/security_style.h"
 #include "net/cert/cert_status_flags.h"
+#include "net/cert/x509_certificate.h"
 
 namespace web {
 
@@ -17,29 +18,36 @@ struct SSLStatus {
   // Flags used for the page security content status.
   enum ContentStatusFlags {
     // HTTP page, or HTTPS page with no insecure content.
-    NORMAL_CONTENT             = 0,
+    NORMAL_CONTENT = 0,
 
     // HTTPS page containing "displayed" HTTP resources (e.g. images, CSS).
     DISPLAYED_INSECURE_CONTENT = 1 << 0,
 
     // The RAN_INSECURE_CONTENT flag is intentionally omitted on iOS because
     // there is no way to tell when insecure content is run in a web view.
+
+    // HTTP page containing a password input, used to adjust UI on nonsecure
+    // pages that collect sensitive data.
+    DISPLAYED_PASSWORD_FIELD_ON_HTTP = 1 << 4,
   };
 
   SSLStatus();
+  SSLStatus(const SSLStatus& other);
   ~SSLStatus();
 
   bool Equals(const SSLStatus& status) const {
     return security_style == status.security_style &&
-           cert_id == status.cert_id &&
+           !!certificate == !!status.certificate &&
+           (certificate ? certificate->Equals(status.certificate.get())
+                        : true) &&
            cert_status == status.cert_status &&
            security_bits == status.security_bits &&
            content_status == status.content_status;
-           // |cert_status_host| is not used for comparison intentionally.
+    // |cert_status_host| is not used for comparison intentionally.
   }
 
   web::SecurityStyle security_style;
-  int cert_id;
+  scoped_refptr<net::X509Certificate> certificate;
   net::CertStatus cert_status;
   int security_bits;
   int connection_status;

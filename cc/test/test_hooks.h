@@ -12,9 +12,7 @@
 
 namespace cc {
 
-namespace proto {
-class CompositorMessageToImpl;
-}
+class CompositorFrame;
 
 // Used by test stubs to notify the test when something interesting happens.
 class TestHooks : public AnimationDelegate {
@@ -85,13 +83,13 @@ class TestHooks : public AnimationDelegate {
   virtual void WillBeginMainFrame() {}
   virtual void DidBeginMainFrame() {}
   virtual void UpdateLayerTreeHost() {}
-  virtual void DidInitializeOutputSurface() {}
-  virtual void DidFailToInitializeOutputSurface() {}
+  virtual void DidInitializeCompositorFrameSink() {}
+  virtual void DidFailToInitializeCompositorFrameSink() {}
   virtual void DidAddAnimation() {}
   virtual void WillCommit() {}
   virtual void DidCommit() {}
   virtual void DidCommitAndDrawFrame() {}
-  virtual void DidCompleteSwapBuffers() {}
+  virtual void DidReceiveCompositorFrameAck() {}
   virtual void ScheduleComposite() {}
   virtual void DidActivateSyncTree() {}
 
@@ -111,16 +109,11 @@ class TestHooks : public AnimationDelegate {
                                std::unique_ptr<AnimationCurve> curve) override {
   }
 
-  virtual void RequestNewOutputSurface() = 0;
-
-  // Used to notify the test to create the Remote client LayerTreeHost on
-  // receiving a CompositorMessageToImpl of type INITIALIZE_IMPL.
-  virtual void CreateRemoteClientHost(
-      const proto::CompositorMessageToImpl& proto) {}
-
-  // Used to notify the test to destroy the Remote client LayerTreeHost on
-  // receiving a CompositorMessageToImpl of type CLOSE_IMPL.
-  virtual void DestroyRemoteClientHost() {}
+  // OutputSurface indirections to the LayerTreeTest, that can be further
+  // overridden.
+  virtual void RequestNewCompositorFrameSink() = 0;
+  virtual std::unique_ptr<OutputSurface> CreateDisplayOutputSurfaceOnThread(
+      scoped_refptr<ContextProvider> compositor_context_provider) = 0;
 };
 
 }  // namespace cc

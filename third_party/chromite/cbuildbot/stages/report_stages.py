@@ -14,11 +14,11 @@ import StringIO
 
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot import commands
-from chromite.cbuildbot import config_lib
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import failures_lib
-from chromite.cbuildbot import metadata_lib
-from chromite.cbuildbot import results_lib
+from chromite.lib import config_lib
+from chromite.lib import constants
+from chromite.lib import failures_lib
+from chromite.lib import metadata_lib
+from chromite.lib import results_lib
 from chromite.cbuildbot import tree_status
 from chromite.cbuildbot import triage_lib
 from chromite.cbuildbot import validation_pool
@@ -32,6 +32,7 @@ from chromite.lib import graphite
 from chromite.lib import git
 from chromite.lib import gs
 from chromite.lib import metrics
+from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
 from chromite.lib import portage_util
 from chromite.lib import retry_stats
@@ -66,6 +67,10 @@ def WriteBasicMetadata(builder_run):
       'bot-hostname': cros_build_lib.GetHostName(fully_qualified=True),
       'build-number': builder_run.buildnumber,
       'builder-name': builder_run.GetBuilderName(),
+      # This is something like https://uberchromegw.corp.google.com/i/chromeos/
+      # Note that we are phasing out using the buildbot UI, transitioning
+      # instead to luci-milo.
+      # Once we phase out completely, we can get rid of this metadata entry.
       'buildbot-url': os.environ.get('BUILDBOT_BUILDBOTURL', ''),
       'buildbot-master-name':
           os.environ.get('BUILDBOT_MASTERNAME', ''),
@@ -78,6 +83,70 @@ def WriteBasicMetadata(builder_run):
 
   builder_run.attrs.metadata.UpdateWithDict(metadata)
 
+def WriteTagMetadata(builder_run):
+  """Add a 'tags' sub-dict to metadata.
+
+  This is a proof of concept for using tags to help find commonality
+  in failures.
+  """
+  build_id, _ = builder_run.GetCIDBHandle()
+
+  # Yes, these values match general metadata values, but they are just
+  # proof of concept, so far.
+  tags = {
+      'bot_config': builder_run.config['name'],
+      'bot_hostname': cros_build_lib.GetHostName(fully_qualified=True),
+      'build_id': build_id,
+      'build_number': builder_run.buildnumber,
+      'builder_name': builder_run.GetBuilderName(),
+      'buildbot_url': os.environ.get('BUILDBOT_BUILDBOTURL', ''),
+      'buildbot_master_name':
+          os.environ.get('BUILDBOT_MASTERNAME', ''),
+      'id': ('Build', build_id),
+      'master_build_id': builder_run.options.master_build_id,
+      'important': builder_run.config['important'],
+  }
+
+  # Guess type of bot.
+  tags['bot_type'] = 'unknown'
+  if '.golo.' in tags['bot_hostname']:
+    tags['bot_type'] = 'golo'
+  else:
+    gce_types = ['beefy', 'standard', 'wimpy']
+    for t in gce_types:
+      host_string = 'cros-%s' % t
+      if host_string in tags['bot_hostname']:
+        tags['bot_type'] = 'gce-%s' % t
+        break
+
+  # Look up the git version.
+  try:
+    cmd_result = cros_build_lib.RunCommand(['git', '--version'],
+                                           capture_output=True)
+    tags['git_version'] = cmd_result.output.strip()
+  except cros_build_lib.RunCommandError:
+    pass  # If we fail, just don't include the tag.
+
+  # Look up the repo version.
+  try:
+    cmd_result = cros_build_lib.RunCommand(['repo', '--version'],
+                                           capture_output=True)
+
+    # Convert the following output into 'v1.12.17-cr3':
+    #
+    # repo version v1.12.17-cr3
+    #        (from https://chromium.googlesource.com/external/repo.git)
+    # repo launcher version 1.21
+    #        (from /usr/local/google/home/dgarrett/sand/depot_tools/repo)
+    # git version 2.8.0.rc3.226.g39d4020
+    # Python 2.7.6 (default, Jun 22 2015, 17:58:13)
+    # [GCC 4.8.2]
+    tags['repo_version'] = cmd_result.output.splitlines()[0].split(' ')[-1]
+  except (cros_build_lib.RunCommandError, IndexError):
+    pass  # If we fail, just don't include the tag.
+
+  builder_run.attrs.metadata.UpdateKeyDictWithDict(constants.METADATA_TAGS,
+                                                   tags)
 
 def GetChildConfigListMetadata(child_configs, config_status_map):
   """Creates a list for the child configs metadata.
@@ -140,7 +209,7 @@ class BuildStartStage(generic_stages.BuilderStage):
     # This is a heuristic value for |important|, since patches that get applied
     # later in the build might change the config. We write it now anyway,
     # because in case the build fails before Sync, it is better to have this
-    # heuristic value than None. In BuildReexectuionFinishedStage, we re-write
+    # heuristic value than None. In BuildReexecutionFinishedStage, we re-write
     # the definitive value.
     self._run.attrs.metadata.UpdateWithDict(
         {'important': self._run.config['important']})
@@ -188,14 +257,14 @@ class BuildStartStage(generic_stages.BuilderStage):
         master_build_id = d['master_build_id']
         if master_build_id is not None:
           master_build_status = db.GetBuildStatus(master_build_id)
-          master_waterfall_url = constants.WATERFALL_TO_DASHBOARD[
-              master_build_status['waterfall']]
-
           master_url = tree_status.ConstructDashboardURL(
-              master_waterfall_url,
+              master_build_status['waterfall'],
               master_build_status['builder_name'],
               master_build_status['build_number'])
           logging.PrintBuildbotLink('Link to master build', master_url)
+
+    # Write the tag metadata last so that a build_id is available.
+    WriteTagMetadata(self._run)
 
   def HandleSkip(self):
     """Ensure that re-executions use the same db instance as initial db."""
@@ -231,7 +300,9 @@ class SlaveFailureSummaryStage(generic_stages.BuilderStage):
                    'Doing nothing.')
       return
 
-    slave_failures = db.GetSlaveFailures(build_id)
+    slave_buildbucket_ids = self.GetScheduledSlaveBuildbucketIds()
+    slave_failures = db.GetSlaveFailures(
+        build_id, buildbucket_ids=slave_buildbucket_ids)
     failures_by_build = cros_build_lib.GroupByKey(slave_failures, 'build_id')
     for build_id, build_failures in sorted(failures_by_build.items()):
       failures_by_stage = cros_build_lib.GroupByKey(build_failures,
@@ -249,7 +320,7 @@ class SlaveFailureSummaryStage(generic_stages.BuilderStage):
             failure['build_status'] == constants.BUILDER_STATUS_INFLIGHT):
           continue
         waterfall_url = constants.WATERFALL_TO_DASHBOARD[failure['waterfall']]
-        slave_stage_url = tree_status.ConstructDashboardURL(
+        slave_stage_url = tree_status.ConstructBuildStageURL(
             waterfall_url,
             failure['builder_name'],
             failure['build_number'],
@@ -276,7 +347,7 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
   written at this time rather than in ReportStage.
   """
 
-  def _AbortPreviousHWTestSuites(self):
+  def _AbortPreviousHWTestSuites(self, milestone):
     """Abort any outstanding synchronous hwtest suites from this builder."""
     # Only try to clean up previous HWTests if this is really running on one of
     # our builders in a non-trybot build.
@@ -286,6 +357,7 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
     build_id, db = self._run.GetCIDBHandle()
     if db:
       builds = db.GetBuildHistory(self._run.config.name, 2,
+                                  milestone_version=milestone,
                                   ignore_build_id=build_id)
       for build in builds:
         old_version = build['full_version']
@@ -342,19 +414,46 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
     }
 
     if len(config['boards']) == 1:
-      toolchains = toolchain.GetToolchainsForBoard(config['boards'][0],
-                                                   buildroot=build_root)
-      metadata['toolchain-tuple'] = (
-          toolchain.FilterToolchains(toolchains, 'default', True).keys() +
-          toolchain.FilterToolchains(toolchains, 'default', False).keys())
+      metadata['toolchain-tuple'] = toolchain.GetToolchainTupleForBoard(
+          config['boards'][0], buildroot=build_root)
 
     logging.info('Metadata being written: %s', metadata)
     self._run.attrs.metadata.UpdateWithDict(metadata)
+
+    toolchains = set()
+    toolchain_tuples = []
+    primary_toolchains = []
+    for board in config['boards']:
+      toolchain_tuple = toolchain.GetToolchainTupleForBoard(
+          board, buildroot=build_root)
+      toolchains |= set(toolchain_tuple)
+      toolchain_tuples.append(','.join(toolchain_tuple))
+      if len(toolchain_tuple):
+        primary_toolchains.append(toolchain_tuple[0])
+
     # Update 'version' separately to avoid overwriting the existing
     # entries in it (e.g. PFQ builders may have written the Chrome
     # version to uprev).
     logging.info("Metadata 'version' being written: %s", version)
     self._run.attrs.metadata.UpdateKeyDictWithDict('version', version)
+
+    tags = {
+        'boards': config['boards'],
+        'child_config_names': [cc['name'] for cc in child_configs],
+        'build_type': config['build_type'],
+        'important': config['important'],
+
+        # Data for the toolchain used.
+        'sdk_version': sdk_verinfo.get('SDK_LATEST_VERSION', '<unknown>'),
+        'toolchain_url': sdk_verinfo.get('TC_PATH', '<unknown>'),
+        'toolchains': list(toolchains),
+        'toolchain_tuples': toolchain_tuples,
+        'primary_toolchains': primary_toolchains,
+    }
+    full_version = self._run.attrs.metadata.GetValue('version')
+    tags.update({'version_%s' % v: full_version[v] for v in full_version})
+    self._run.attrs.metadata.UpdateKeyDictWithDict(constants.METADATA_TAGS,
+                                                   tags)
 
     # Ensure that all boards and child config boards have a per-board
     # metadata subdict.
@@ -397,7 +496,7 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
     # Abort previous hw test suites. This happens after reexecution as it
     # requires chromite/third_party/swarming.client, which is not available
     # untill after reexecution.
-    self._AbortPreviousHWTestSuites()
+    self._AbortPreviousHWTestSuites(version['milestone'])
 
 
 class ConfigDumpStage(generic_stages.BuilderStage):
@@ -418,21 +517,6 @@ class ConfigDumpStage(generic_stages.BuilderStage):
 class ReportStage(generic_stages.BuilderStage,
                   generic_stages.ArchivingStageMixin):
   """Summarize all the builds."""
-
-  _HTML_HEAD = """<html>
-<head>
- <title>Archive Index: %(board)s / %(version)s</title>
-</head>
-<body>
-<h2>Artifacts Index: %(board)s / %(version)s (%(config)s config)</h2>"""
-
-  _TIMELINE_HTML_HEAD = """<html>
-<head>
- <title>Build Stages Timeline: %(board)s / %(version)s</title>
- %%(javascript)s
-</head>
-<body>
-<h2>Build Stages Timeline: %(board)s / %(version)s (%(config)s config)</h2>"""
 
   _STATS_HISTORY_DAYS = 7
 
@@ -528,25 +612,18 @@ class ReportStage(generic_stages.BuilderStage,
       tree_status.SendHealthAlert(self._run, title, '\n\n'.join(body),
                                   extra_fields=extra_fields)
 
-  def _GenerateArchiveLinks(self, builder_run):
-    """Generate links to the artifacts at remote archive location.
+  def _LinkArtifacts(self, builder_run):
+    """Upload an HTML index for the artifacts at remote archive location.
 
     If there are no artifacts in the archive then do nothing.
 
     Args:
       builder_run: BuilderRun object for this run.
-
-    Returns:
-      If files have been uploaded then a dict is returned where each value
-        is the same (the URL for the generated HTML index) and the keys are
-        the boards it applies to, including None if applicable.  If no files
-        have been uploaded then this returns None.
     """
     archive = builder_run.GetArchive()
     archive_path = archive.archive_path
 
-    config = builder_run.config
-    boards = config.boards
+    boards = builder_run.config.boards
     if boards:
       board_names = ' '.join(boards)
     else:
@@ -560,8 +637,46 @@ class ReportStage(generic_stages.BuilderStage,
       # is possibly normal.  Regardless, no archive index is needed.
       logging.info('No archived artifacts found for %s run (%s)',
                    builder_run.config.name, board_names)
+      return
+
+    if builder_run.config.internal:
+      # Internal builds simply link to pantheon directories, which require
+      # authenticated access that most Googlers should have.
+      artifacts_url = archive.download_url
+
     else:
-      return dict((b, archive.download_url) for b in boards)
+      # External builds must allow unauthenticated access to build artifacts.
+      # GS doesn't let unauthenticated users browse selected locations without
+      # being able to browse everything (which would expose secret stuff).
+      # So, we upload an index.html file and link to it instead of the
+      # directory.
+      title = 'Artifacts Index: %(board)s / %(version)s (%(config)s config)' % {
+          'board': board_names,
+          'config': builder_run.config.name,
+          'version': builder_run.GetVersion(),
+      }
+
+      files = osutils.ReadFile(uploaded).splitlines() + [
+          '.|Google Storage Index',
+          '..|',
+      ]
+
+      index = os.path.join(archive_path, 'index.html')
+
+      # TODO (sbasi) crbug.com/362776: Rework the way we do uploading to
+      # multiple buckets. Currently this can only be done in the Archive Stage
+      # therefore index.html will only end up in the normal Chrome OS bucket.
+      commands.GenerateHtmlIndex(index, files, title=title)
+      commands.UploadArchivedFile(
+          archive_path, [archive.upload_url], os.path.basename(index),
+          debug=self._run.debug, acl=self.acl)
+
+      artifacts_url = os.path.join(archive.download_url_file, 'index.html')
+
+    links_build_description = '%s/%s' % (builder_run.config.name,
+                                         archive.version)
+    logging.PrintBuildbotLink('Artifacts[%s]' % links_build_description,
+                              artifacts_url)
 
   def _UploadBuildStagesTimeline(self, builder_run, build_id, db):
     """Upload an HTML timeline for the build stages at remote archive location.
@@ -572,7 +687,10 @@ class ReportStage(generic_stages.BuilderStage,
       db: CIDBConnection instance.
 
     Returns:
-      The URL of the timeline is returned.
+      If an index file is uploaded then a dict is returned where each value
+        is the same (the URL for the uploaded HTML index) and the keys are
+        the boards it applies to, including None if applicable.  If no index
+        file is uploaded then this returns None.
     """
     archive = builder_run.GetArchive()
     archive_path = archive.archive_path
@@ -590,7 +708,14 @@ class ReportStage(generic_stages.BuilderStage,
 
     # Gather information about this build from CIDB.
     stages = db.GetBuildStages(build_id)
-    rows = list((s['name'], s['start_time'], s['finish_time']) for s in stages)
+    # Many stages are started in parallel after the build finishes. Stages are
+    # sorted by start_time first bceause it shows that progression most
+    # clearly. Sort by finish_time secondarily to display those paralllel
+    # stages cleanly.
+    epoch = datetime.datetime.fromtimestamp(0)
+    stages.sort(key=lambda stage: (stage['start_time'] or epoch,
+                                   stage['finish_time'] or epoch))
+    rows = ((s['name'], s['start_time'], s['finish_time']) for s in stages)
 
     # Prepare html head.
     title = ('Build Stages Timeline: %s / %s (%s config)' %
@@ -632,8 +757,14 @@ class ReportStage(generic_stages.BuilderStage,
     statuses = db.GetSlaveStatuses(build_id)
     if statuses is None or len(statuses) == 0:
       return None
-    rows = list(('%s - %s' % (s['build_config'], s['build_number']),
-                 s['start_time'], s['finish_time']) for s in statuses)
+    # Slaves may be started at slightly different times, but what matters most
+    # is which slave is the bottleneck - namely, which slave finishes last.
+    # Therefore, sort primarily by finish_time.
+    epoch = datetime.datetime.fromtimestamp(0)
+    statuses.sort(key=lambda stage: (stage['finish_time'] or epoch,
+                                     stage['start_time'] or epoch))
+    rows = (('%s - %s' % (s['build_config'], s['build_number']),
+             s['start_time'], s['finish_time']) for s in statuses)
 
     # Prepare html head.
     title = ('Slave Builds Timeline: %s / %s (%s config)' %
@@ -644,6 +775,20 @@ class ReportStage(generic_stages.BuilderStage,
         archive_path, [archive.upload_url], os.path.basename(timeline),
         debug=self._run.debug, acl=self.acl)
     return os.path.join(archive.download_url_file, timeline_file)
+
+  def _MakeViceroyBuildDetailsLink(self, build_id):
+    """Generates a link to the Viceroy build details page.
+
+    Args:
+      build_id: CIDB id for the master build.
+
+    Returns:
+      The URL of the timeline is returned if slave builds exists.  If no
+        slave builds exists then this returns None.
+    """
+    _LINK = ('https://viceroy.corp.google.com/'
+             'chromeos/build_details?build_id=%(build_id)s')
+    return _LINK % {'build_id': build_id}
 
   def GetReportMetadata(self, config=None, stage=None, final_status=None,
                         completion_instance=None):
@@ -690,9 +835,6 @@ class ReportStage(generic_stages.BuilderStage,
                     constants.FINAL_STATUS_FAILED
       build_id: CIDB id for the current build.
       db: CIDBConnection instance.
-
-    Returns:
-      A dictionary with the aggregated _GenerateArchiveLinks results.
     """
     # Make sure local archive directory is prepared, if it was not already.
     if not os.path.exists(self.archive_path):
@@ -700,7 +842,7 @@ class ReportStage(generic_stages.BuilderStage,
 
     # Upload metadata, and update the pass/fail streak counter for the main
     # run only. These aren't needed for the child builder runs.
-    self.UploadMetadata()
+    self.UploadMetadata(export=True)
     self._UpdateRunStreak(self._run, final_status)
 
     # Alert if the Pre-CQ has infra failures.
@@ -709,7 +851,6 @@ class ReportStage(generic_stages.BuilderStage,
 
     # Iterate through each builder run, whether there is just the main one
     # or multiple child builder runs.
-    archive_urls = {}
     for builder_run in self._run.GetUngroupedBuilderRuns():
       if db is not None:
         timeline = self._UploadBuildStagesTimeline(builder_run, build_id, db)
@@ -719,33 +860,35 @@ class ReportStage(generic_stages.BuilderStage,
         if timeline is not None:
           logging.PrintBuildbotLink('Slaves timeline', timeline)
 
+      if build_id is not None:
+        details_link = self._MakeViceroyBuildDetailsLink(build_id)
+        logging.PrintBuildbotLink('Build details', details_link)
+
       # Generate links to archived artifacts if there are any.  All the
       # archived artifacts for one run/config are in one location, so the link
       # is only specific to each run/config.  In theory multiple boards could
       # share that archive, but in practice it is usually one board.  A
       # run/config without a board will also usually not have artifacts to
       # archive, but that restriction is not assumed here.
-      run_archive_urls = self._GenerateArchiveLinks(builder_run)
-      if run_archive_urls:
-        archive_urls.update(run_archive_urls)
-        # Check if the builder_run is tied to any boards and if so get all
-        # upload urls.
-        if final_status == constants.FINAL_STATUS_PASSED:
-          # Update the LATEST files if the build passed.
-          try:
-            upload_urls = self._GetUploadUrls(
-                'LATEST-*', builder_run=builder_run)
-          except portage_util.MissingOverlayException as e:
-            # If the build failed prematurely, some overlays might be
-            # missing. Ignore them in this stage.
-            logging.warning(e)
-          else:
+      self._LinkArtifacts(builder_run)
+
+      # Check if the builder_run is tied to any boards and if so get all
+      # upload urls.
+      if final_status == constants.FINAL_STATUS_PASSED:
+        # Update the LATEST files if the build passed.
+        try:
+          upload_urls = self._GetUploadUrls(
+              'LATEST-*', builder_run=builder_run)
+        except portage_util.MissingOverlayException as e:
+          # If the build failed prematurely, some overlays might be
+          # missing. Ignore them in this stage.
+          logging.warning(e)
+        else:
+          if upload_urls:
             archive = builder_run.GetArchive()
             archive.UpdateLatestMarkers(builder_run.manifest_branch,
                                         builder_run.debug,
                                         upload_urls=upload_urls)
-
-    return archive_urls
 
   def CollectComparativeBuildTimings(self, output, build_id, db):
     """Create a report comparing this build to recent history.
@@ -803,20 +946,45 @@ class ReportStage(generic_stages.BuilderStage,
         self.GetReportMetadata(final_status=final_status,
                                completion_instance=self._completion_instance))
 
+    # Add tags for the arches and statuses of the build.
+    # arches requires crossdev which isn't available at the early part of the
+    # build.
+    arches = []
+    for board in self._run.config['boards']:
+      toolchains = toolchain.GetToolchainsForBoard(
+          board, buildroot=self._build_root)
+      default = toolchain.FilterToolchains(toolchains, 'default', True).keys()
+      if len(default):
+        try:
+          arches.append(toolchain.GetArchForTarget(default[0]))
+        except cros_build_lib.RunCommandError as e:
+          logging.warning(
+              'Unable to retrieve arch for board %s default toolchain %s: %s' %
+              (board, default, e))
+    tags = {
+        'arches': arches,
+        'status': final_status,
+    }
+    results = self._run.attrs.metadata.GetValue('results')
+    for stage in results:
+      tags['stage_status:%s' % stage['name']] = stage['status']
+      tags['stage_summary:%s' % stage['name']] = stage['summary']
+    self._run.attrs.metadata.UpdateKeyDictWithDict(constants.METADATA_TAGS,
+                                                   tags)
+
     # Some operations can only be performed if a valid version is available.
     try:
       self._run.GetVersionInfo()
-      archive_urls = self.ArchiveResults(final_status, build_id, db)
+      self.ArchiveResults(final_status, build_id, db)
       metadata_url = os.path.join(self.upload_url, constants.METADATA_JSON)
     except cbuildbot_run.VersionNotSetError:
       logging.error('A valid version was never set for this run. '
                     'Can not archive results.')
-      archive_urls = ''
       metadata_url = ''
 
     results_lib.Results.Report(
-        sys.stdout, archive_urls=archive_urls,
-        current_version=(self._run.attrs.release_tag or ''))
+        sys.stdout, current_version=(self._run.attrs.release_tag or ''))
+
 
     if db:
       # TODO(akeshet): Eliminate this status string translate once
@@ -849,7 +1017,8 @@ class ReportStage(generic_stages.BuilderStage,
       duration = self._GetBuildDuration()
 
       mon_fields = {'status': status_for_db,
-                    'build_config': self._run.config.name}
+                    'build_config': self._run.config.name,
+                    'important': self._run.config.important}
       metrics.Counter(constants.MON_BUILD_COMP_COUNT).increment(
           fields=mon_fields)
       metrics.SecondsDistribution(constants.MON_BUILD_DURATION).add(

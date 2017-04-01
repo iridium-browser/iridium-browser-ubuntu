@@ -13,12 +13,12 @@
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/linked_ptr.h"
 #include "base/scoped_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/common/extension_id.h"
 
 namespace content {
 class BrowserContext;
@@ -73,11 +73,10 @@ class LazyBackgroundTaskQueue : public KeyedService,
 
   // A map between a BrowserContext/extension_id pair and the queue of tasks
   // pending the load of its background page.
-  typedef std::string ExtensionID;
-  typedef std::pair<content::BrowserContext*, ExtensionID> PendingTasksKey;
+  typedef std::pair<content::BrowserContext*, ExtensionId> PendingTasksKey;
   typedef std::vector<PendingTask> PendingTasksList;
-  typedef std::map<PendingTasksKey,
-                   linked_ptr<PendingTasksList> > PendingTasksMap;
+  using PendingTasksMap =
+      std::map<PendingTasksKey, std::unique_ptr<PendingTasksList>>;
 
   // content::NotificationObserver interface.
   void Observe(int type,

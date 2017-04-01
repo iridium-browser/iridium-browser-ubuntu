@@ -29,10 +29,10 @@
 #include "chrome/browser/browsing_data/browsing_data_service_worker_helper.h"
 #include "chrome/browser/browsing_data/local_data_container.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "extensions/features/features.h"
 #include "net/ssl/channel_id_store.h"
 #include "ui/base/models/tree_node_model.h"
 
-class BrowsingDataChannelIDHelper;
 class BrowsingDataCookieHelper;
 class CookiesTreeModel;
 class CookieTreeAppCacheNode;
@@ -53,6 +53,8 @@ class CookieTreeIndexedDBNode;
 class CookieTreeIndexedDBsNode;
 class CookieTreeLocalStorageNode;
 class CookieTreeLocalStoragesNode;
+class CookieTreeMediaLicenseNode;
+class CookieTreeMediaLicensesNode;
 class CookieTreeQuotaNode;
 class CookieTreeServiceWorkerNode;
 class CookieTreeServiceWorkersNode;
@@ -109,6 +111,8 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
       TYPE_CACHE_STORAGES,    // This is used for CookieTreeCacheStoragesNode.
       TYPE_CACHE_STORAGE,     // This is used for CookieTreeCacheStorageNode.
       TYPE_FLASH_LSO,         // This is used for CookieTreeFlashLSONode.
+      TYPE_MEDIA_LICENSES,    // This is used for CookieTreeMediaLicensesNode.
+      TYPE_MEDIA_LICENSE,     // This is used for CookieTreeMediaLicenseNode.
     };
 
     DetailedInfo();
@@ -141,6 +145,9 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
     DetailedInfo& InitCacheStorage(
         const content::CacheStorageUsageInfo* cache_storage_info);
     DetailedInfo& InitFlashLSO(const std::string& flash_lso_domain);
+    DetailedInfo& InitMediaLicense(
+        const BrowsingDataMediaLicenseHelper::MediaLicenseInfo*
+            media_license_info);
 
     NodeType node_type;
     GURL origin;
@@ -159,6 +166,8 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
     const content::ServiceWorkerUsageInfo* service_worker_info = nullptr;
     const content::CacheStorageUsageInfo* cache_storage_info = nullptr;
     std::string flash_lso_domain;
+    const BrowsingDataMediaLicenseHelper::MediaLicenseInfo* media_license_info =
+        nullptr;
   };
 
   CookieTreeNode() {}
@@ -178,7 +187,7 @@ class CookieTreeNode : public ui::TreeNode<CookieTreeNode> {
   virtual DetailedInfo GetDetailedInfo() const = 0;
 
  protected:
-  void AddChildSortedByTitle(CookieTreeNode* new_child);
+  void AddChildSortedByTitle(std::unique_ptr<CookieTreeNode> new_child);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CookieTreeNode);
@@ -229,6 +238,7 @@ class CookieTreeHostNode : public CookieTreeNode {
   CookieTreeQuotaNode* UpdateOrCreateQuotaNode(
       std::list<BrowsingDataQuotaHelper::QuotaInfo>::iterator quota_info);
   CookieTreeFlashLSONode* GetOrCreateFlashLSONode(const std::string& domain);
+  CookieTreeMediaLicensesNode* GetOrCreateMediaLicensesNode();
 
   std::string canonicalized_host() const { return canonicalized_host_; }
 
@@ -260,6 +270,7 @@ class CookieTreeHostNode : public CookieTreeNode {
   CookieTreeServiceWorkersNode* service_workers_child_ = nullptr;
   CookieTreeCacheStoragesNode* cache_storages_child_ = nullptr;
   CookieTreeFlashLSONode* flash_lso_child_ = nullptr;
+  CookieTreeMediaLicensesNode* media_licenses_child_ = nullptr;
 
   // The URL for which this node was initially created.
   GURL url_;
@@ -299,8 +310,8 @@ class CookieTreeCookiesNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddCookieNode(CookieTreeCookieNode* child) {
-    AddChildSortedByTitle(child);
+  void AddCookieNode(std::unique_ptr<CookieTreeCookieNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -335,8 +346,8 @@ class CookieTreeAppCachesNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddAppCacheNode(CookieTreeAppCacheNode* child) {
-    AddChildSortedByTitle(child);
+  void AddAppCacheNode(std::unique_ptr<CookieTreeAppCacheNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -374,8 +385,8 @@ class CookieTreeDatabasesNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddDatabaseNode(CookieTreeDatabaseNode* child) {
-    AddChildSortedByTitle(child);
+  void AddDatabaseNode(std::unique_ptr<CookieTreeDatabaseNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -413,8 +424,8 @@ class CookieTreeFileSystemsNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddFileSystemNode(CookieTreeFileSystemNode* child) {
-    AddChildSortedByTitle(child);
+  void AddFileSystemNode(std::unique_ptr<CookieTreeFileSystemNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -451,8 +462,8 @@ class CookieTreeLocalStoragesNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddLocalStorageNode(CookieTreeLocalStorageNode* child) {
-    AddChildSortedByTitle(child);
+  void AddLocalStorageNode(std::unique_ptr<CookieTreeLocalStorageNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -490,8 +501,9 @@ class CookieTreeSessionStoragesNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddSessionStorageNode(CookieTreeSessionStorageNode* child) {
-    AddChildSortedByTitle(child);
+  void AddSessionStorageNode(
+      std::unique_ptr<CookieTreeSessionStorageNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -528,8 +540,8 @@ class CookieTreeIndexedDBsNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddIndexedDBNode(CookieTreeIndexedDBNode* child) {
-    AddChildSortedByTitle(child);
+  void AddIndexedDBNode(std::unique_ptr<CookieTreeIndexedDBNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -586,8 +598,8 @@ class CookieTreeChannelIDsNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddChannelIDNode(CookieTreeChannelIDNode* child) {
-    AddChildSortedByTitle(child);
+  void AddChannelIDNode(std::unique_ptr<CookieTreeChannelIDNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -622,8 +634,9 @@ class CookieTreeServiceWorkersNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddServiceWorkerNode(CookieTreeServiceWorkerNode* child) {
-    AddChildSortedByTitle(child);
+  void AddServiceWorkerNode(
+      std::unique_ptr<CookieTreeServiceWorkerNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -658,8 +671,8 @@ class CookieTreeCacheStoragesNode : public CookieTreeNode {
 
   DetailedInfo GetDetailedInfo() const override;
 
-  void AddCacheStorageNode(CookieTreeCacheStorageNode* child) {
-    AddChildSortedByTitle(child);
+  void AddCacheStorageNode(std::unique_ptr<CookieTreeCacheStorageNode> child) {
+    AddChildSortedByTitle(std::move(child));
   }
 
  private:
@@ -680,6 +693,45 @@ class CookieTreeFlashLSONode : public CookieTreeNode {
   std::string domain_;
 
   DISALLOW_COPY_AND_ASSIGN(CookieTreeFlashLSONode);
+};
+
+// CookieTreeMediaLicenseNode -----------------------------------------------
+class CookieTreeMediaLicenseNode : public CookieTreeNode {
+ public:
+  friend class CookieTreeMediaLicensesNode;
+
+  // |media_license_info| is expected to remain valid as long as the
+  // CookieTreeMediaLicenseNode is valid.
+  explicit CookieTreeMediaLicenseNode(
+      const std::list<BrowsingDataMediaLicenseHelper::MediaLicenseInfo>::
+          iterator media_license_info);
+  ~CookieTreeMediaLicenseNode() override;
+
+  void DeleteStoredObjects() override;
+  DetailedInfo GetDetailedInfo() const override;
+
+ private:
+  // |media_license_info_| is expected to remain valid as long as the
+  // CookieTreeMediaLicenseNode is valid.
+  std::list<BrowsingDataMediaLicenseHelper::MediaLicenseInfo>::iterator
+      media_license_info_;
+
+  DISALLOW_COPY_AND_ASSIGN(CookieTreeMediaLicenseNode);
+};
+
+class CookieTreeMediaLicensesNode : public CookieTreeNode {
+ public:
+  CookieTreeMediaLicensesNode();
+  ~CookieTreeMediaLicensesNode() override;
+
+  DetailedInfo GetDetailedInfo() const override;
+
+  void AddMediaLicenseNode(std::unique_ptr<CookieTreeMediaLicenseNode> child) {
+    AddChildSortedByTitle(std::move(child));
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(CookieTreeMediaLicensesNode);
 };
 
 // CookiesTreeModel -----------------------------------------------------------
@@ -741,7 +793,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   // Filter the origins to only display matched results.
   void UpdateSearchResults(const base::string16& filter);
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Returns the set of extensions which protect the data item represented by
   // this node from deletion.
   // Returns nullptr if the node doesn't represent a protected data item or the
@@ -771,6 +823,7 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   void PopulateServiceWorkerUsageInfo(LocalDataContainer* container);
   void PopulateCacheStorageUsageInfo(LocalDataContainer* container);
   void PopulateFlashLSOInfo(LocalDataContainer* container);
+  void PopulateMediaLicenseInfo(LocalDataContainer* container);
 
   BrowsingDataCookieHelper* GetCookieHelper(const std::string& app_id);
   LocalDataContainer* data_container() {
@@ -847,8 +900,11 @@ class CookiesTreeModel : public ui::TreeNodeModel<CookieTreeNode> {
   void PopulateFlashLSOInfoWithFilter(LocalDataContainer* container,
                                       ScopedBatchUpdateNotifier* notifier,
                                       const base::string16& filter);
+  void PopulateMediaLicenseInfoWithFilter(LocalDataContainer* container,
+                                          ScopedBatchUpdateNotifier* notifier,
+                                          const base::string16& filter);
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // The extension special storage policy; see ExtensionsProtectingNode() above.
   scoped_refptr<ExtensionSpecialStoragePolicy> special_storage_policy_;
 #endif

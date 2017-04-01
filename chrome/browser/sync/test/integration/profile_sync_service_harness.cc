@@ -8,9 +8,7 @@
 #include <iterator>
 #include <ostream>
 #include <sstream>
-#include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
@@ -24,7 +22,7 @@
 #include "chrome/browser/ui/webui/signin/login_ui_test_utils.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/invalidation/impl/p2p_invalidation_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager_base.h"
@@ -33,6 +31,7 @@
 #include "components/sync/engine/sync_string_conversions.h"
 #include "google_apis/gaia/gaia_constants.h"
 
+using browser_sync::ProfileSyncService;
 using syncer::SyncCycleSnapshot;
 
 namespace {
@@ -50,25 +49,25 @@ bool HasAuthError(ProfileSyncService* service) {
              GoogleServiceAuthError::REQUEST_CANCELED;
 }
 
-class BackendInitializeChecker : public SingleClientStatusChangeChecker {
+class EngineInitializeChecker : public SingleClientStatusChangeChecker {
  public:
-  explicit BackendInitializeChecker(ProfileSyncService* service)
+  explicit EngineInitializeChecker(ProfileSyncService* service)
       : SingleClientStatusChangeChecker(service) {}
 
   bool IsExitConditionSatisfied() override {
-    if (service()->IsBackendInitialized())
+    if (service()->IsEngineInitialized())
       return true;
-    // Backend initialization is blocked by an auth error.
+    // Engine initialization is blocked by an auth error.
     if (HasAuthError(service()))
       return true;
-    // Backend initialization is blocked by a failure to fetch Oauth2 tokens.
+    // Engine initialization is blocked by a failure to fetch Oauth2 tokens.
     if (service()->IsRetryingAccessTokenFetchForTest())
       return true;
-    // Still waiting on backend initialization.
+    // Still waiting on engine initialization.
     return false;
   }
 
-  std::string GetDebugMessage() const override { return "Backend Initialize"; }
+  std::string GetDebugMessage() const override { return "Engine Initialize"; }
 };
 
 class SyncSetupChecker : public SingleClientStatusChangeChecker {
@@ -148,7 +147,7 @@ bool ProfileSyncServiceHarness::SetupSync(
       << "SetupSync should not be used for legacy supervised users.";
 
   // Initialize the sync client's profile sync service object.
-  if (service() == NULL) {
+  if (service() == nullptr) {
     LOG(ERROR) << "SetupSync(): service() is null.";
     return false;
   }
@@ -180,7 +179,7 @@ bool ProfileSyncServiceHarness::SetupSync(
   // Now that auth is completed, request that sync actually start.
   service()->RequestStart();
 
-  if (!AwaitBackendInitialization()) {
+  if (!AwaitEngineInitialization()) {
     return false;
   }
 
@@ -229,38 +228,32 @@ bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
 }
 
 bool ProfileSyncServiceHarness::AwaitGroupSyncCycleCompletion(
-    std::vector<ProfileSyncServiceHarness*>& partners) {
+    const std::vector<ProfileSyncServiceHarness*>& partners) {
   return AwaitQuiescence(partners);
 }
 
 // static
 bool ProfileSyncServiceHarness::AwaitQuiescence(
-    std::vector<ProfileSyncServiceHarness*>& clients) {
+    const std::vector<ProfileSyncServiceHarness*>& clients) {
   std::vector<ProfileSyncService*> services;
   if (clients.empty()) {
     return true;
   }
 
-  for (std::vector<ProfileSyncServiceHarness*>::iterator it = clients.begin();
-       it != clients.end(); ++it) {
-    services.push_back((*it)->service());
+  for (const ProfileSyncServiceHarness* harness : clients) {
+    services.push_back(harness->service());
   }
-  QuiesceStatusChangeChecker checker(services);
-  checker.Wait();
-  return !checker.TimedOut();
+  return QuiesceStatusChangeChecker(services).Wait();
 }
 
-bool ProfileSyncServiceHarness::AwaitBackendInitialization() {
-  BackendInitializeChecker checker(service());
-  checker.Wait();
-
-  if (checker.TimedOut()) {
-    LOG(ERROR) << "BackendInitializeChecker timed out.";
+bool ProfileSyncServiceHarness::AwaitEngineInitialization() {
+  if (!EngineInitializeChecker(service()).Wait()) {
+    LOG(ERROR) << "EngineInitializeChecker timed out.";
     return false;
   }
 
-  if (!service()->IsBackendInitialized()) {
-    LOG(ERROR) << "Service backend not initialized.";
+  if (!service()->IsEngineInitialized()) {
+    LOG(ERROR) << "Service engine not initialized.";
     return false;
   }
 
@@ -280,10 +273,7 @@ bool ProfileSyncServiceHarness::AwaitBackendInitialization() {
 }
 
 bool ProfileSyncServiceHarness::AwaitSyncSetupCompletion() {
-  SyncSetupChecker checker(service());
-  checker.Wait();
-
-  if (checker.TimedOut()) {
+  if (!SyncSetupChecker(service()).Wait()) {
     LOG(ERROR) << "SyncSetupChecker timed out.";
     return false;
   }
@@ -318,7 +308,7 @@ void ProfileSyncServiceHarness::FinishSyncSetup() {
 }
 
 SyncCycleSnapshot ProfileSyncServiceHarness::GetLastCycleSnapshot() const {
-  DCHECK(service() != NULL) << "Sync service has not yet been set up.";
+  DCHECK(service() != nullptr) << "Sync service has not yet been set up.";
   if (service()->IsSyncActive()) {
     return service()->GetLastCycleSnapshot();
   }
@@ -334,7 +324,7 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
   if (IsSyncDisabled())
     return SetupSync(syncer::ModelTypeSet(datatype));
 
-  if (service() == NULL) {
+  if (service() == nullptr) {
     LOG(ERROR) << "EnableSyncForDatatype(): service() is null.";
     return false;
   }
@@ -367,7 +357,7 @@ bool ProfileSyncServiceHarness::DisableSyncForDatatype(
       "DisableSyncForDatatype("
       + std::string(syncer::ModelTypeToString(datatype)) + ")");
 
-  if (service() == NULL) {
+  if (service() == nullptr) {
     LOG(ERROR) << "DisableSyncForDatatype(): service() is null.";
     return false;
   }
@@ -400,7 +390,7 @@ bool ProfileSyncServiceHarness::EnableSyncForAllDatatypes() {
   if (IsSyncDisabled())
     return SetupSync();
 
-  if (service() == NULL) {
+  if (service() == nullptr) {
     LOG(ERROR) << "EnableSyncForAllDatatypes(): service() is null.";
     return false;
   }
@@ -419,7 +409,7 @@ bool ProfileSyncServiceHarness::EnableSyncForAllDatatypes() {
 bool ProfileSyncServiceHarness::DisableSyncForAllDatatypes() {
   DVLOG(1) << GetClientInfoString("DisableSyncForAllDatatypes");
 
-  if (service() == NULL) {
+  if (service() == nullptr) {
     LOG(ERROR) << "DisableSyncForAllDatatypes(): service() is null.";
     return false;
   }
@@ -474,7 +464,7 @@ bool ProfileSyncServiceHarness::IsTypePreferred(syncer::ModelType type) {
 
 std::string ProfileSyncServiceHarness::GetServiceStatus() {
   std::unique_ptr<base::DictionaryValue> value(
-      sync_driver::sync_ui_util::ConstructAboutInformation(
+      syncer::sync_ui_util::ConstructAboutInformation(
           service(), service()->signin(), chrome::GetChannel()));
   std::string service_status;
   base::JSONWriter::WriteWithOptions(

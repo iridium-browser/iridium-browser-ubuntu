@@ -22,6 +22,7 @@
 #include "ui/display/util/display_util.h"
 #include "ui/display/util/x11/edid_parser_x11.h"
 #include "ui/events/platform/platform_event_source.h"
+#include "ui/events/platform/x11/x11_event_source.h"
 #include "ui/gfx/font_render_params.h"
 #include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -72,7 +73,7 @@ std::vector<display::Display> GetFallbackDisplayList() {
   gfx::Rect bounds_in_pixels(0, 0, width, height);
   display::Display gfx_display(0, bounds_in_pixels);
   if (!display::Display::HasForceDeviceScaleFactor() &&
-      !ui::IsDisplaySizeBlackListed(physical_size)) {
+      !display::IsDisplaySizeBlackListed(physical_size)) {
     const float device_scale_factor = GetDeviceScaleFactor();
     DCHECK_LE(1.0f, device_scale_factor);
     gfx_display.SetScaleAndBounds(device_scale_factor, bounds_in_pixels);
@@ -133,20 +134,18 @@ DesktopScreenX11::~DesktopScreenX11() {
 gfx::Point DesktopScreenX11::GetCursorScreenPoint() {
   TRACE_EVENT0("views", "DesktopScreenX11::GetCursorScreenPoint()");
 
-  XDisplay* display = gfx::GetXDisplay();
+  if (ui::X11EventSource::HasInstance()) {
+    auto point = ui::X11EventSource::GetInstance()
+                     ->GetRootCursorLocationFromCurrentEvent();
+    if (point)
+      return PixelToDIPPoint(point.value());
+  }
 
   ::Window root, child;
   int root_x, root_y, win_x, win_y;
   unsigned int mask;
-  XQueryPointer(display,
-                DefaultRootWindow(display),
-                &root,
-                &child,
-                &root_x,
-                &root_y,
-                &win_x,
-                &win_y,
-                &mask);
+  XQueryPointer(xdisplay_, x_root_window_, &root, &child, &root_x, &root_y,
+                &win_x, &win_y, &mask);
 
   return PixelToDIPPoint(gfx::Point(root_x, root_y));
 }
@@ -166,7 +165,7 @@ int DesktopScreenX11::GetNumDisplays() const {
   return displays_.size();
 }
 
-std::vector<display::Display> DesktopScreenX11::GetAllDisplays() const {
+const std::vector<display::Display>& DesktopScreenX11::GetAllDisplays() const {
   return displays_;
 }
 
@@ -335,8 +334,8 @@ std::vector<display::Display> DesktopScreenX11::BuildDisplaysFromXRandRInfo() {
           crtc(XRRGetCrtcInfo(xdisplay_, resources.get(), output_info->crtc));
 
       int64_t display_id = -1;
-      if (!ui::EDIDParserX11(output_id).GetDisplayId(static_cast<uint8_t>(i),
-                                                     &display_id)) {
+      if (!display::EDIDParserX11(output_id).GetDisplayId(
+              static_cast<uint8_t>(i), &display_id)) {
         // It isn't ideal, but if we can't parse the EDID data, fallback on the
         // display number.
         display_id = i;

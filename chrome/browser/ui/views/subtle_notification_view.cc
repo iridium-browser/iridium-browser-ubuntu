@@ -129,7 +129,7 @@ void SubtleNotificationView::InstructionView::AddTextSegment(
   key->SetLayoutManager(key_name_layout);
   key->AddChildView(label);
   // The key name has a border around it.
-  std::unique_ptr<views::Border> border(views::Border::CreateRoundedRectBorder(
+  std::unique_ptr<views::Border> border(views::CreateRoundedRectBorder(
       kKeyNameBorderPx, kKeyNameCornerRadius, foreground_color_));
   key->SetBorder(std::move(border));
   AddChildView(key);
@@ -157,7 +157,6 @@ SubtleNotificationView::SubtleNotificationView(
   link_->SetFocusBehavior(FocusBehavior::NEVER);
   link_->set_listener(link_listener);
   link_->SetFontList(font_list);
-  link_->SetPressedColor(kForegroundColor);
   link_->SetEnabledColor(kForegroundColor);
   link_->SetBackgroundColor(kBackgroundColor);
   link_->SetVisible(false);

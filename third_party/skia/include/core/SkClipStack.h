@@ -1,19 +1,25 @@
-
 /*
  * Copyright 2011 Google Inc.
  *
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
 #ifndef SkClipStack_DEFINED
 #define SkClipStack_DEFINED
 
+#include "../private/SkMessageBus.h"
+#include "SkCanvas.h"
 #include "SkDeque.h"
 #include "SkPath.h"
-#include "SkRect.h"
 #include "SkRRect.h"
+#include "SkRect.h"
 #include "SkRegion.h"
 #include "SkTLazy.h"
+
+#if SK_SUPPORT_GPU
+#include "GrResourceKey.h"
+#endif
 
 class SkCanvasClipVisitor;
 
@@ -53,22 +59,30 @@ public:
         static const int kTypeCnt = kLastType + 1;
 
         Element() {
-            this->initCommon(0, SkRegion::kReplace_Op, false);
+            this->initCommon(0, SkClipOp::kReplace_deprecated, false);
             this->setEmpty();
         }
 
         Element(const Element&);
 
-        Element(const SkRect& rect, SkRegion::Op op, bool doAA) {
+        Element(const SkRect& rect, SkClipOp op, bool doAA) {
             this->initRect(0, rect, op, doAA);
         }
 
-        Element(const SkRRect& rrect, SkRegion::Op op, bool doAA) {
+        Element(const SkRRect& rrect, SkClipOp op, bool doAA) {
             this->initRRect(0, rrect, op, doAA);
         }
 
-        Element(const SkPath& path, SkRegion::Op op, bool doAA) {
+        Element(const SkPath& path, SkClipOp op, bool doAA) {
             this->initPath(0, path, op, doAA);
+        }
+
+        ~Element() {
+#if SK_SUPPORT_GPU
+            for (int i = 0; i < fMessages.count(); ++i) {
+                SkMessageBus<GrUniqueKeyInvalidatedMessage>::Post(*fMessages[i]);
+            }
+#endif
         }
 
         bool operator== (const Element& element) const;
@@ -93,7 +107,7 @@ public:
         }
 
         //!< Call if getType() is not kEmpty to get the set operation used to combine this element.
-        SkRegion::Op getOp() const { return fOp; }
+        SkClipOp getOp() const { return fOp; }
 
         //!< Call to get the element as a path, regardless of its type.
         void asPath(SkPath* path) const;
@@ -109,7 +123,7 @@ public:
         void invertShapeFillType();
 
         //!< Sets the set operation represented by the element.
-        void setOp(SkRegion::Op op) { fOp = op; }
+        void setOp(SkClipOp op) { fOp = op; }
 
         /** The GenID can be used by clip stack clients to cache representations of the clip. The
             ID corresponds to the set of clip elements up to and including this element within the
@@ -195,15 +209,26 @@ public:
         void dump() const;
 #endif
 
+#if SK_SUPPORT_GPU
+        /**
+         * This is used to purge any GPU resource cache items that become unreachable when
+         * the element is destroyed because their key is based on this element's gen ID.
+         */
+        void addResourceInvalidationMessage(
+                std::unique_ptr<GrUniqueKeyInvalidatedMessage> msg) const {
+            fMessages.emplace_back(std::move(msg));
+        }
+#endif
+
     private:
         friend class SkClipStack;
 
         SkTLazy<SkPath> fPath;
-        SkRRect         fRRect;
-        int             fSaveCount; // save count of stack when this element was added.
-        SkRegion::Op    fOp;
-        Type            fType;
-        bool            fDoAA;
+        SkRRect fRRect;
+        int fSaveCount;  // save count of stack when this element was added.
+        SkClipOp fOp;
+        Type fType;
+        bool fDoAA;
 
         /* fFiniteBoundType and fFiniteBound are used to incrementally update the clip stack's
            bound. When fFiniteBoundType is kNormal_BoundsType, fFiniteBound represents the
@@ -216,32 +241,34 @@ public:
            can capture the cancelling out of the extensions to infinity when two inverse filled
            clips are Booleaned together. */
         SkClipStack::BoundsType fFiniteBoundType;
-        SkRect                  fFiniteBound;
+        SkRect fFiniteBound;
 
         // When element is applied to the previous elements in the stack is the result known to be
         // equivalent to a single rect intersection? IIOW, is the clip effectively a rectangle.
-        bool                    fIsIntersectionOfRects;
+        bool fIsIntersectionOfRects;
 
-        int                     fGenID;
-
+        int fGenID;
+#if SK_SUPPORT_GPU
+        mutable SkTArray<std::unique_ptr<GrUniqueKeyInvalidatedMessage>> fMessages;
+#endif
         Element(int saveCount) {
-            this->initCommon(saveCount, SkRegion::kReplace_Op, false);
+            this->initCommon(saveCount, SkClipOp::kReplace_deprecated, false);
             this->setEmpty();
         }
 
-        Element(int saveCount, const SkRRect& rrect, SkRegion::Op op, bool doAA) {
+        Element(int saveCount, const SkRRect& rrect, SkClipOp op, bool doAA) {
             this->initRRect(saveCount, rrect, op, doAA);
         }
 
-        Element(int saveCount, const SkRect& rect, SkRegion::Op op, bool doAA) {
+        Element(int saveCount, const SkRect& rect, SkClipOp op, bool doAA) {
             this->initRect(saveCount, rect, op, doAA);
         }
 
-        Element(int saveCount, const SkPath& path, SkRegion::Op op, bool doAA) {
+        Element(int saveCount, const SkPath& path, SkClipOp op, bool doAA) {
             this->initPath(saveCount, path, op, doAA);
         }
 
-        void initCommon(int saveCount, SkRegion::Op op, bool doAA) {
+        void initCommon(int saveCount, SkClipOp op, bool doAA) {
             fSaveCount = saveCount;
             fOp = op;
             fDoAA = doAA;
@@ -253,13 +280,13 @@ public:
             fGenID = kInvalidGenID;
         }
 
-        void initRect(int saveCount, const SkRect& rect, SkRegion::Op op, bool doAA) {
+        void initRect(int saveCount, const SkRect& rect, SkClipOp op, bool doAA) {
             fRRect.setRect(rect);
             fType = kRect_Type;
             this->initCommon(saveCount, op, doAA);
         }
 
-        void initRRect(int saveCount, const SkRRect& rrect, SkRegion::Op op, bool doAA) {
+        void initRRect(int saveCount, const SkRRect& rrect, SkClipOp op, bool doAA) {
             SkRRect::Type type = rrect.getType();
             fRRect = rrect;
             if (SkRRect::kRect_Type == type || SkRRect::kEmpty_Type == type) {
@@ -270,13 +297,13 @@ public:
             this->initCommon(saveCount, op, doAA);
         }
 
-        void initPath(int saveCount, const SkPath& path, SkRegion::Op op, bool doAA);
+        void initPath(int saveCount, const SkPath& path, SkClipOp op, bool doAA);
 
         void setEmpty();
 
         // All Element methods below are only used within SkClipStack.cpp
         inline void checkEmpty() const;
-        inline bool canBeIntersectedInPlace(int saveCount, SkRegion::Op op) const;
+        inline bool canBeIntersectedInPlace(int saveCount, SkClipOp op) const;
         /* This method checks to see if two rect clips can be safely merged into one. The issue here
           is that to be strictly correct all the edges of the resulting rect must have the same
           anti-aliasing. */
@@ -301,8 +328,6 @@ public:
 
     SkClipStack();
     SkClipStack(const SkClipStack& b);
-    explicit SkClipStack(const SkRect& r);
-    explicit SkClipStack(const SkIRect& r);
     ~SkClipStack();
 
     SkClipStack& operator=(const SkClipStack& b);
@@ -347,22 +372,40 @@ public:
      */
     bool asPath(SkPath* path) const;
 
-    void clipDevRect(const SkIRect& ir, SkRegion::Op op) {
+    void clipDevRect(const SkIRect& ir, SkClipOp op) {
         SkRect r;
         r.set(ir);
-        this->clipDevRect(r, op, false);
+        this->clipRect(r, SkMatrix::I(), op, false);
     }
-    void clipDevRect(const SkRect&, SkRegion::Op, bool doAA);
-    void clipDevRRect(const SkRRect&, SkRegion::Op, bool doAA);
-    void clipDevPath(const SkPath&, SkRegion::Op, bool doAA);
+    void clipRect(const SkRect&, const SkMatrix& matrix, SkClipOp, bool doAA);
+    void clipRRect(const SkRRect&, const SkMatrix& matrix, SkClipOp, bool doAA);
+    void clipPath(const SkPath&, const SkMatrix& matrix, SkClipOp, bool doAA);
     // An optimized version of clipDevRect(emptyRect, kIntersect, ...)
     void clipEmpty();
+    void setDeviceClipRestriction(const SkIRect& rect) {
+        fClipRestrictionRect = SkRect::Make(rect);
+    }
 
     /**
      * isWideOpen returns true if the clip state corresponds to the infinite
      * plane (i.e., draws are not limited at all)
      */
     bool isWideOpen() const { return this->getTopmostGenID() == kWideOpenGenID; }
+
+    /**
+     * This method quickly and conservatively determines whether the entire stack is equivalent to
+     * intersection with a rrect given a bounds, where the rrect must not contain the entire bounds.
+     *
+     * @param bounds   A bounds on what will be drawn through the clip. The clip only need be
+     *                 equivalent to a intersection with a rrect for draws within the bounds. The
+     *                 returned rrect must intersect the bounds but need not be contained by the
+     *                 bounds.
+     * @param rrect    If return is true rrect will contain the rrect equivalent to the stack.
+     * @param aa       If return is true aa will indicate whether the equivalent rrect clip is
+     *                 antialiased.
+     * @return true if the stack is equivalent to a single rrect intersect clip, false otherwise.
+     */
+    bool isRRect(const SkRect& bounds, SkRRect* rrect, bool* aa) const;
 
     /**
      * The generation ID has three reserved values to indicate special
@@ -410,7 +453,7 @@ public:
          * Moves the iterator to the topmost element with the specified RegionOp and returns that
          * element. If no clip element with that op is found, the first element is returned.
          */
-        const Element* skipToTopmost(SkRegion::Op op);
+        const Element* skipToTopmost(SkClipOp op);
 
         /**
          * Restarts the iterator on a clip stack.
@@ -483,6 +526,7 @@ private:
     // clipDevRect and clipDevPath call. 0 is reserved to indicate an
     // invalid ID.
     static int32_t     gGenID;
+    SkRect fClipRestrictionRect = SkRect::MakeEmpty();
 
     bool internalQuickContains(const SkRect& devRect) const;
     bool internalQuickContains(const SkRRect& devRRect) const;
@@ -496,6 +540,10 @@ private:
      * Restore the stack back to the specified save count.
      */
     void restoreTo(int saveCount);
+
+    inline bool hasClipRestriction(SkClipOp op) {
+        return op >= SkClipOp::kUnion_deprecated && !fClipRestrictionRect.isEmpty();
+    }
 
     /**
      * Return the next unique generation ID.

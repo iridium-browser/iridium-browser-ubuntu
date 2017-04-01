@@ -39,6 +39,8 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/common/content_features.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
 #include "extensions/browser/extension_system.h"
@@ -118,9 +120,13 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
     command_line->AppendSwitch(switches::kDisableDeviceDiscoveryNotifications);
   }
 
-  void TearDownOnMainThread() override { model_.reset(); }
+  void TearDownOnMainThread() override {
+    model_.reset();
+    ExtensionBrowserTest::TearDownOnMainThread();
+  }
 
   void SetUpOnMainThread() override {
+    ExtensionBrowserTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
 
     // Add content/test/data so we can use cross_site_iframe_factory.html
@@ -128,8 +134,9 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
     ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
     embedded_test_server()->ServeFilesFromDirectory(
         test_data_dir.AppendASCII("content/test/data/"));
-    ASSERT_TRUE(embedded_test_server()->Start());
+    ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
     content::SetupCrossSiteRedirector(embedded_test_server());
+    embedded_test_server()->StartAcceptingConnections();
   }
 
  private:
@@ -159,9 +166,8 @@ class TaskManagerUtilityProcessBrowserTest : public TaskManagerBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     TaskManagerBrowserTest::SetUpCommandLine(command_line);
 
-    // Enable out-of-process proxy resolver. Use a trivial PAC script to ensure
-    // that some javascript is being executed.
-    command_line->AppendSwitch(switches::kV8PacMojoOutOfProcess);
+    // Use a trivial PAC script to ensure that some javascript is being
+    // executed.
     command_line->AppendSwitchASCII(
         switches::kProxyPacUrl,
         "data:,function FindProxyForURL(url, host){return \"DIRECT;\";}");
@@ -169,6 +175,21 @@ class TaskManagerUtilityProcessBrowserTest : public TaskManagerBrowserTest {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TaskManagerUtilityProcessBrowserTest);
+};
+
+class TaskManagerMemoryCoordinatorBrowserTest : public TaskManagerBrowserTest {
+ public:
+  TaskManagerMemoryCoordinatorBrowserTest() {}
+  ~TaskManagerMemoryCoordinatorBrowserTest() override {}
+
+ protected:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitchASCII(switches::kEnableFeatures,
+                                    features::kMemoryCoordinator.name);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TaskManagerMemoryCoordinatorBrowserTest);
 };
 
 // Parameterized variant of TaskManagerBrowserTest which runs with/without
@@ -246,7 +267,7 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, KillTab) {
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchAnyTab()));
 
   // Tab should reappear in task manager upon reload.
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("title1.html")));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(2, MatchAnyTab()));
 }
@@ -299,7 +320,8 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NavigateAwayFromHungRenderer) {
   // Now navigate this tab to a different site. This should wind up in a
   // different renderer process, so it should complete and show up in the task
   // manager.
-  tab2->OpenURL(content::OpenURLParams(url3, content::Referrer(), CURRENT_TAB,
+  tab2->OpenURL(content::OpenURLParams(url3, content::Referrer(),
+                                       WindowOpenDisposition::CURRENT_TAB,
                                        ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("iframe test")));
@@ -699,6 +721,32 @@ IN_PROC_BROWSER_TEST_F(TaskManagerUtilityProcessBrowserTest,
       WaitForTaskManagerRows(1, MatchUtility(proxy_resolver_name)));
 }
 
+// Memory coordinator is not available on macos. crbug.com/617492
+#if defined(OS_MACOSX)
+#define MAYBE_MemoryState DISABLED_MemoryState
+#else
+#define MAYBE_MemoryState MemoryState
+#endif  // defined(OS_MACOSX)
+IN_PROC_BROWSER_TEST_F(TaskManagerMemoryCoordinatorBrowserTest,
+                       MAYBE_MemoryState) {
+  ShowTaskManager();
+  model()->ToggleColumnVisibility(ColumnSpecifier::MEMORY_STATE);
+  model()->ToggleColumnVisibility(ColumnSpecifier::V8_MEMORY_USED);
+
+  ui_test_utils::NavigateToURL(browser(), GetTestURL());
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("title1.html")));
+
+  // Wait until the tab consumes some memory so that memory state is refreshed.
+  size_t minimal_heap_size = 1024;
+  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerStatToExceed(
+      MatchTab("title1.html"), ColumnSpecifier::V8_MEMORY_USED,
+      minimal_heap_size));
+
+  int row = FindResourceIndex(MatchTab("title1.html"));
+  ASSERT_NE(-1, row);
+  ASSERT_NE(base::MemoryState::UNKNOWN, model()->GetMemoryState(row));
+}
+
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, DevToolsNewDockedWindow) {
   ShowTaskManager();  // Task manager shown BEFORE dev tools window.
 
@@ -744,7 +792,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, KillSubframe) {
   GURL main_url(embedded_test_server()->GetURL(
       "/cross-site/a.com/iframe_cross_site.html"));
   browser()->OpenURL(content::OpenURLParams(main_url, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -800,7 +848,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, NavigateToSubframeProcess) {
   GURL a_dotcom(embedded_test_server()->GetURL(
       "/cross-site/a.com/iframe_cross_site.html"));
   browser()->OpenURL(content::OpenURLParams(a_dotcom, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -823,7 +871,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, NavigateToSubframeProcess) {
       embedded_test_server()->GetURL("/cross-site/b.com/iframe.html"));
 
   browser()->OpenURL(content::OpenURLParams(b_dotcom, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("iframe test")));
@@ -846,7 +894,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
       embedded_test_server()->GetURL("/cross-site/b.com/iframe.html"));
 
   browser()->OpenURL(content::OpenURLParams(b_dotcom, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("iframe test")));
@@ -858,7 +906,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
   GURL a_dotcom(embedded_test_server()->GetURL(
       "/cross-site/a.com/iframe_cross_site.html"));
   browser()->OpenURL(content::OpenURLParams(a_dotcom, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -900,7 +948,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
   GURL a_dotcom(embedded_test_server()->GetURL(
       "/cross-site/a.com/iframe_cross_site.html"));
   browser()->OpenURL(content::OpenURLParams(a_dotcom, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(
@@ -959,9 +1007,9 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
   // Navigate the tab to a page on a.com with cross-process subframes.
   GURL a_dotcom_with_iframes(embedded_test_server()->GetURL(
       "/cross-site/a.com/iframe_cross_site.html"));
-  browser()->OpenURL(content::OpenURLParams(a_dotcom_with_iframes,
-                                            content::Referrer(), CURRENT_TAB,
-                                            ui::PAGE_TRANSITION_TYPED, false));
+  browser()->OpenURL(content::OpenURLParams(
+      a_dotcom_with_iframes, content::Referrer(),
+      WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(
       WaitForTaskManagerRows(1, MatchTab("cross-site iframe test")));
@@ -981,9 +1029,9 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest,
   // the subframe processes should disappear.
   GURL a_dotcom_simple(
       embedded_test_server()->GetURL("/cross-site/a.com/title2.html"));
-  browser()->OpenURL(content::OpenURLParams(a_dotcom_simple,
-                                            content::Referrer(), CURRENT_TAB,
-                                            ui::PAGE_TRANSITION_TYPED, false));
+  browser()->OpenURL(content::OpenURLParams(
+      a_dotcom_simple, content::Referrer(), WindowOpenDisposition::CURRENT_TAB,
+      ui::PAGE_TRANSITION_TYPED, false));
   ASSERT_NO_FATAL_FAILURE(
       WaitForTaskManagerRows(1, MatchTab("Title Of Awesomeness")));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(0, MatchAnySubframe()));
@@ -1002,7 +1050,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, OrderingOfDependentRows) {
   GURL a_with_frames(embedded_test_server()->GetURL(
       "a.com", "/cross_site_iframe_factory.html?a(b,b,c(d,a,b,c))"));
   browser()->OpenURL(content::OpenURLParams(a_with_frames, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
 
   if (ShouldExpectSubframes()) {
@@ -1030,9 +1078,10 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, OrderingOfDependentRows) {
   // Opening a new tab should appear below the existing tab.
   GURL other_tab_url(embedded_test_server()->GetURL(
       "d.com", "/cross_site_iframe_factory.html?d(a(c(b)))"));
-  browser()->OpenURL(content::OpenURLParams(other_tab_url, content::Referrer(),
-                                            NEW_FOREGROUND_TAB,
-                                            ui::PAGE_TRANSITION_TYPED, false));
+  browser()->OpenURL(
+      content::OpenURLParams(other_tab_url, content::Referrer(),
+                             WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                             ui::PAGE_TRANSITION_TYPED, false));
 
   ASSERT_NO_FATAL_FAILURE(
       WaitForTaskManagerRows(2, MatchTab("Cross-site iframe factory")));

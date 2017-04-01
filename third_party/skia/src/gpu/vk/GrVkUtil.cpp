@@ -7,6 +7,9 @@
 
 #include "GrVkUtil.h"
 
+#include "vk/GrVkGpu.h"
+#include "SkSLCompiler.h"
+
 bool GrPixelConfigToVkFormat(GrPixelConfig config, VkFormat* format) {
     VkFormat dontCare;
     if (!format) {
@@ -14,58 +17,62 @@ bool GrPixelConfigToVkFormat(GrPixelConfig config, VkFormat* format) {
     }
 
     switch (config) {
+        case kUnknown_GrPixelConfig:
+            return false;
         case kRGBA_8888_GrPixelConfig:
             *format = VK_FORMAT_R8G8B8A8_UNORM;
-            break;
+            return true;
         case kBGRA_8888_GrPixelConfig:
             *format = VK_FORMAT_B8G8R8A8_UNORM;
-            break;
+            return true;
         case kSRGBA_8888_GrPixelConfig:
             *format = VK_FORMAT_R8G8B8A8_SRGB;
-            break;
+            return true;
         case kSBGRA_8888_GrPixelConfig:
             *format = VK_FORMAT_B8G8R8A8_SRGB;
-            break;
+            return true;
+        case kRGBA_8888_sint_GrPixelConfig:
+            *format = VK_FORMAT_R8G8B8A8_SINT;
+            return true;
         case kRGB_565_GrPixelConfig:
             *format = VK_FORMAT_R5G6B5_UNORM_PACK16;
-            break;
+            return true;
         case kRGBA_4444_GrPixelConfig:
             // R4G4B4A4 is not required to be supported so we actually
             // store the data is if it was B4G4R4A4 and swizzle in shaders
             *format = VK_FORMAT_B4G4R4A4_UNORM_PACK16;
-            break;
-        case kIndex_8_GrPixelConfig:
-            // No current vulkan support for this config
-            return false;
+            return true;
         case kAlpha_8_GrPixelConfig:
             *format = VK_FORMAT_R8_UNORM;
-            break;
+            return true;
+        case kGray_8_GrPixelConfig:
+            *format = VK_FORMAT_R8_UNORM;
+            return true;
         case kETC1_GrPixelConfig:
             // converting to ETC2 which is a superset of ETC1
             *format = VK_FORMAT_ETC2_R8G8B8_UNORM_BLOCK;
-            break;
+            return true;
         case kLATC_GrPixelConfig:
             // No current vulkan support for this config
             return false;
         case kR11_EAC_GrPixelConfig:
             *format = VK_FORMAT_EAC_R11_UNORM_BLOCK;
-            break;
+            return true;
         case kASTC_12x12_GrPixelConfig:
             *format = VK_FORMAT_ASTC_12x12_UNORM_BLOCK;
-            break;
+            return true;
         case kRGBA_float_GrPixelConfig:
             *format = VK_FORMAT_R32G32B32A32_SFLOAT;
-            break;
+            return true;
         case kRGBA_half_GrPixelConfig:
             *format = VK_FORMAT_R16G16B16A16_SFLOAT;
-            break;
+            return true;
         case kAlpha_half_GrPixelConfig:
             *format = VK_FORMAT_R16_SFLOAT;
-            break;
-        default:
-            return false;
+            return true;
     }
-    return true;
+    SkFAIL("Unexpected config");
+    return false;
 }
 
 bool GrVkFormatToPixelConfig(VkFormat format, GrPixelConfig* config) {
@@ -86,6 +93,9 @@ bool GrVkFormatToPixelConfig(VkFormat format, GrPixelConfig* config) {
             break;
         case VK_FORMAT_B8G8R8A8_SRGB:
             *config = kSBGRA_8888_GrPixelConfig;
+            break;
+        case VK_FORMAT_R8G8B8A8_SINT:
+            *config = kRGBA_8888_sint_GrPixelConfig;
             break;
         case VK_FORMAT_R5G6B5_UNORM_PACK16:
             *config = kRGB_565_GrPixelConfig;
@@ -248,4 +258,70 @@ bool GrSampleCountToVkSampleCount(uint32_t samples, VkSampleCountFlagBits* vkSam
         default:
             return false;
     }
+}
+
+SkSL::Program::Kind vk_shader_stage_to_skiasl_kind(VkShaderStageFlagBits stage) {
+    if (VK_SHADER_STAGE_VERTEX_BIT == stage) {
+        return SkSL::Program::kVertex_Kind;
+    }
+    SkASSERT(VK_SHADER_STAGE_FRAGMENT_BIT == stage);
+    return SkSL::Program::kFragment_Kind;
+}
+
+VkShaderStageFlagBits skiasl_kind_to_vk_shader_stage(SkSL::Program::Kind kind) {
+    if (SkSL::Program::kVertex_Kind == kind) {
+        return VK_SHADER_STAGE_VERTEX_BIT;
+    }
+    SkASSERT(SkSL::Program::kFragment_Kind == kind);
+    return VK_SHADER_STAGE_FRAGMENT_BIT;
+}
+
+bool GrCompileVkShaderModule(const GrVkGpu* gpu,
+                             const char* shaderString,
+                             VkShaderStageFlagBits stage,
+                             VkShaderModule* shaderModule,
+                             VkPipelineShaderStageCreateInfo* stageInfo,
+                             const SkSL::Program::Settings& settings,
+                             SkSL::Program::Inputs* outInputs) {
+    std::unique_ptr<SkSL::Program> program = gpu->shaderCompiler()->convertProgram(
+                                                              vk_shader_stage_to_skiasl_kind(stage),
+                                                              SkString(shaderString),
+                                                              settings);
+    if (!program) {
+        SkDebugf("SkSL error:\n%s\n", gpu->shaderCompiler()->errorText().c_str());
+        SkASSERT(false);
+    }
+    *outInputs = program->fInputs;
+    SkString code;
+    if (!gpu->shaderCompiler()->toSPIRV(*program, &code)) {
+        SkDebugf("%s\n", gpu->shaderCompiler()->errorText().c_str());
+        return false;
+    }
+
+    VkShaderModuleCreateInfo moduleCreateInfo;
+    memset(&moduleCreateInfo, 0, sizeof(VkShaderModuleCreateInfo));
+    moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    moduleCreateInfo.pNext = nullptr;
+    moduleCreateInfo.flags = 0;
+    moduleCreateInfo.codeSize = code.size();
+    moduleCreateInfo.pCode = (const uint32_t*)code.c_str();
+
+    VkResult err = GR_VK_CALL(gpu->vkInterface(), CreateShaderModule(gpu->device(),
+                                                                     &moduleCreateInfo,
+                                                                     nullptr,
+                                                                     shaderModule));
+    if (err) {
+        return false;
+    }
+
+    memset(stageInfo, 0, sizeof(VkPipelineShaderStageCreateInfo));
+    stageInfo->sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stageInfo->pNext = nullptr;
+    stageInfo->flags = 0;
+    stageInfo->stage = skiasl_kind_to_vk_shader_stage(program->fKind);
+    stageInfo->module = *shaderModule;
+    stageInfo->pName = "main";
+    stageInfo->pSpecializationInfo = nullptr;
+
+    return true;
 }

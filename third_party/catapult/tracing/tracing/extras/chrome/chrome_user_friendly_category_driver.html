@@ -68,7 +68,8 @@ tr.exportTo('tr.e.chrome', function() {
     parseHTML: [
       'ParseHTML',
       'HTMLDocumentParser::didReceiveParsedChunkFromBackgroundParser',
-      'HTMLDocumentParser::processParsedChunkFromBackgroundParser'
+      'HTMLDocumentParser::processParsedChunkFromBackgroundParser',
+      'HTMLDocumentParser::processTokenizedChunkFromBackgroundParser',
     ],
 
     raster: [
@@ -165,7 +166,7 @@ tr.exportTo('tr.e.chrome', function() {
     var userFriendlyCategory =
         USER_FRIENDLY_CATEGORY_FOR_TITLE.get(event.title);
     if (userFriendlyCategory) {
-      if (userFriendlyCategory == SAME_AS_PARENT) {
+      if (userFriendlyCategory === SAME_AS_PARENT) {
         if (event.parentSlice)
           return ChromeUserFriendlyCategoryDriver.fromEvent(event.parentSlice);
       } else {
@@ -207,7 +208,7 @@ tr.exportTo('tr.e.chrome', function() {
     ChromeUserFriendlyCategoryDriver.getColor(category);
 
   return {
-    ChromeUserFriendlyCategoryDriver: ChromeUserFriendlyCategoryDriver
+    ChromeUserFriendlyCategoryDriver,
   };
 });
 </script>

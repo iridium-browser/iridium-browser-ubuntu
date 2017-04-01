@@ -16,6 +16,7 @@
 #include "base/environment.h"
 #include "base/i18n/time_formatting.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringize_macros.h"
 #include "base/strings/stringprintf.h"
@@ -64,21 +65,23 @@ WebUIDataSource* CreateGpuHTMLSource() {
   source->SetJsonPath("strings.js");
   source->AddResourcePath("gpu_internals.js", IDR_GPU_INTERNALS_JS);
   source->SetDefaultResource(IDR_GPU_INTERNALS_HTML);
-  source->DisableI18nAndUseGzipForAllPaths();
+  source->UseGzip(std::unordered_set<std::string>());
   return source;
 }
 
-base::DictionaryValue* NewDescriptionValuePair(const std::string& desc,
+std::unique_ptr<base::DictionaryValue> NewDescriptionValuePair(
+    const std::string& desc,
     const std::string& value) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("description", desc);
   dict->SetString("value", value);
   return dict;
 }
 
-base::DictionaryValue* NewDescriptionValuePair(const std::string& desc,
+std::unique_ptr<base::DictionaryValue> NewDescriptionValuePair(
+    const std::string& desc,
     base::Value* value) {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+  std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("description", desc);
   dict->Set("value", value);
   return dict;
@@ -125,6 +128,9 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
       base::Int64ToString(gpu_info.initialization_time.InMilliseconds())));
   basic_info->Append(NewDescriptionValuePair(
       "In-process GPU", new base::FundamentalValue(gpu_info.in_process_gpu)));
+  basic_info->Append(NewDescriptionValuePair(
+      "Passthrough Command Decoder",
+      new base::FundamentalValue(gpu_info.passthrough_cmd_decoder)));
   basic_info->Append(NewDescriptionValuePair(
       "Sandboxed", new base::FundamentalValue(gpu_info.sandboxed)));
   basic_info->Append(NewDescriptionValuePair(
@@ -251,6 +257,13 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
   info->Set("diagnostics", std::move(dx_info));
 #endif
 
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+  basic_info->Append(NewDescriptionValuePair(
+      "System visual ID", base::Uint64ToString(gpu_info.system_visual)));
+  basic_info->Append(NewDescriptionValuePair(
+      "RGBA visual ID", base::Uint64ToString(gpu_info.rgba_visual)));
+#endif
+
   return info;
 }
 
@@ -268,6 +281,8 @@ const char* BufferFormatToString(gfx::BufferFormat format) {
       return "ETC1";
     case gfx::BufferFormat::R_8:
       return "R_8";
+    case gfx::BufferFormat::RG_88:
+      return "RG_88";
     case gfx::BufferFormat::BGR_565:
       return "BGR_565";
     case gfx::BufferFormat::RGBA_4444:
@@ -429,8 +444,7 @@ void GpuMessageHandler::OnCallAsync(const base::ListValue* args) {
     ok = args->Get(i, &arg);
     DCHECK(ok);
 
-    base::Value* argCopy = arg->DeepCopy();
-    submessageArgs->Append(argCopy);
+    submessageArgs->Append(arg->CreateDeepCopy());
   }
 
   // call the submessage handler
@@ -544,7 +558,7 @@ void GpuMessageHandler::OnGpuSwitched() {
 
 GpuInternalsUI::GpuInternalsUI(WebUI* web_ui)
     : WebUIController(web_ui) {
-  web_ui->AddMessageHandler(new GpuMessageHandler());
+  web_ui->AddMessageHandler(base::MakeUnique<GpuMessageHandler>());
 
   // Set up the chrome://gpu/ source.
   BrowserContext* browser_context =

@@ -50,9 +50,13 @@ int ShelfViewTestAPI::GetButtonCount() {
 ShelfButton* ShelfViewTestAPI::GetButton(int index) {
   // App list button is not a ShelfButton.
   if (shelf_view_->model_->items()[index].type == ash::TYPE_APP_LIST)
-    return NULL;
+    return nullptr;
 
-  return static_cast<ShelfButton*>(shelf_view_->view_model_->view_at(index));
+  return static_cast<ShelfButton*>(GetViewAt(index));
+}
+
+views::View* ShelfViewTestAPI::GetViewAt(int index) {
+  return shelf_view_->view_model_->view_at(index);
 }
 
 int ShelfViewTestAPI::GetFirstVisibleIndex() {
@@ -68,8 +72,17 @@ bool ShelfViewTestAPI::IsOverflowButtonVisible() {
 }
 
 void ShelfViewTestAPI::ShowOverflowBubble() {
-  if (!shelf_view_->IsShowingOverflowBubble())
-    shelf_view_->ToggleOverflowBubble();
+  DCHECK(!shelf_view_->IsShowingOverflowBubble());
+  shelf_view_->ToggleOverflowBubble();
+}
+
+void ShelfViewTestAPI::HideOverflowBubble() {
+  DCHECK(shelf_view_->IsShowingOverflowBubble());
+  shelf_view_->ToggleOverflowBubble();
+}
+
+bool ShelfViewTestAPI::IsShowingOverflowBubble() const {
+  return shelf_view_->IsShowingOverflowBubble();
 }
 
 const gfx::Rect& ShelfViewTestAPI::GetBoundsByIndex(int index) {
@@ -108,6 +121,10 @@ void ShelfViewTestAPI::CloseMenu() {
 
 OverflowBubble* ShelfViewTestAPI::overflow_bubble() {
   return shelf_view_->overflow_bubble_.get();
+}
+
+OverflowButton* ShelfViewTestAPI::overflow_button() const {
+  return shelf_view_->overflow_button_;
 }
 
 ShelfTooltipManager* ShelfViewTestAPI::tooltip_manager() {

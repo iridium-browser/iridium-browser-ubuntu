@@ -17,6 +17,7 @@
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/extensions/chrome_extension_test_notification_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -30,7 +31,7 @@
 #include "chromeos/login/auth/user_context.h"
 #include "components/app_modal/javascript_app_modal_dialog.h"
 #include "components/app_modal/native_app_modal_dialog.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -722,9 +723,8 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, PageThrottle) {
   Browser* browser =
       FindOrCreateVisibleBrowser(profile());
   ui_test_utils::NavigateToURLWithDisposition(
-      browser,
-      fake_google_page_url_,
-      CURRENT_TAB, ui_test_utils::BROWSER_TEST_NONE);
+      browser, fake_google_page_url_, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
 
   // Wait until we get send merge session request.
   WaitForMergeSessionToStart();
@@ -766,7 +766,8 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, XHRThrottle) {
 
   // Reset ExtensionBrowserTest::observer_ to the right browser object.
   Browser* browser = FindOrCreateVisibleBrowser(profile());
-  observer_.reset(new ExtensionTestNotificationObserver(browser));
+  observer_.reset(
+      new extensions::ChromeExtensionTestNotificationObserver(browser));
 
   // Run background page tests. The tests will just wait for XHR request
   // to complete.

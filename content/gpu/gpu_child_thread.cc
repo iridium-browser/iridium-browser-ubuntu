@@ -12,18 +12,17 @@
 #include "base/lazy_instance.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread_local.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
 #include "content/child/thread_safe_sender.h"
 #include "content/common/establish_channel_params.h"
 #include "content/common/gpu_host_messages.h"
-#include "content/common/mojo/constants.h"
 #include "content/gpu/gpu_service_factory.h"
-#include "content/gpu/gpu_watchdog_thread.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/mojo_shell_connection.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/gpu/content_gpu_client.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
@@ -32,13 +31,14 @@
 #include "gpu/config/gpu_util.h"
 #include "gpu/ipc/common/memory_stats.h"
 #include "gpu/ipc/service/gpu_memory_buffer_factory.h"
+#include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "media/gpu/ipc/service/gpu_jpeg_decode_accelerator.h"
 #include "media/gpu/ipc/service/gpu_video_decode_accelerator.h"
 #include "media/gpu/ipc/service/gpu_video_encode_accelerator.h"
-#include "media/gpu/ipc/service/media_service.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "media/gpu/ipc/service/media_gpu_channel_manager.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/gpu_switching_manager.h"
@@ -46,13 +46,12 @@
 #include "url/gurl.h"
 
 #if defined(USE_OZONE)
-#include "ui/ozone/public/gpu_platform_support.h"
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
 #if defined(OS_ANDROID)
 #include "media/base/android/media_client_android.h"
-#include "media/gpu/avda_surface_tracker.h"
+#include "media/gpu/avda_codec_allocator.h"
 #endif
 
 namespace content {
@@ -85,9 +84,9 @@ class GpuMemoryBufferMessageFilter : public IPC::MessageFilter {
         sender_(nullptr) {}
 
   // Overridden from IPC::MessageFilter:
-  void OnFilterAdded(IPC::Sender* sender) override {
+  void OnFilterAdded(IPC::Channel* channel) override {
     DCHECK(!sender_);
-    sender_ = sender;
+    sender_ = channel;
   }
   void OnFilterRemoved() override {
     DCHECK(sender_);
@@ -130,9 +129,8 @@ ChildThreadImpl::Options GetOptions(
       new GpuMemoryBufferMessageFilter(gpu_memory_buffer_factory));
 
 #if defined(USE_OZONE)
-  IPC::MessageFilter* message_filter = ui::OzonePlatform::GetInstance()
-                                           ->GetGpuPlatformSupport()
-                                           ->GetMessageFilter();
+  IPC::MessageFilter* message_filter =
+      ui::OzonePlatform::GetInstance()->GetGpuMessageFilter();
   if (message_filter)
     builder.AddStartupFilter(message_filter);
 #endif
@@ -145,18 +143,18 @@ ChildThreadImpl::Options GetOptions(
 }  // namespace
 
 GpuChildThread::GpuChildThread(
-    GpuWatchdogThread* watchdog_thread,
+    std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread,
     bool dead_on_arrival,
     const gpu::GPUInfo& gpu_info,
     const DeferredMessages& deferred_messages,
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory)
     : ChildThreadImpl(GetOptions(gpu_memory_buffer_factory)),
       dead_on_arrival_(dead_on_arrival),
+      watchdog_thread_(std::move(watchdog_thread)),
       gpu_info_(gpu_info),
       deferred_messages_(deferred_messages),
       in_browser_process_(false),
       gpu_memory_buffer_factory_(gpu_memory_buffer_factory) {
-  watchdog_thread_ = watchdog_thread;
 #if defined(OS_WIN)
   target_services_ = NULL;
 #endif
@@ -164,18 +162,17 @@ GpuChildThread::GpuChildThread(
 }
 
 GpuChildThread::GpuChildThread(
-    const gpu::GpuPreferences& gpu_preferences,
     const InProcessChildThreadParams& params,
+    const gpu::GPUInfo& gpu_info,
     gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory)
     : ChildThreadImpl(ChildThreadImpl::Options::Builder()
                           .InBrowserProcess(params)
-                          .UseMojoChannel(true)
                           .AddStartupFilter(new GpuMemoryBufferMessageFilter(
                               gpu_memory_buffer_factory))
                           .ConnectToBrowser(true)
                           .Build()),
-      gpu_preferences_(gpu_preferences),
       dead_on_arrival_(false),
+      gpu_info_(gpu_info),
       in_browser_process_(true),
       gpu_memory_buffer_factory_(gpu_memory_buffer_factory) {
 #if defined(OS_WIN)
@@ -186,17 +183,10 @@ GpuChildThread::GpuChildThread(
          base::CommandLine::ForCurrentProcess()->HasSwitch(
              switches::kInProcessGPU));
 
-  if (!gl::init::InitializeGLOneOff())
-    VLOG(1) << "gl::init::InitializeGLOneOff failed";
-
   g_thread_safe_sender.Get() = thread_safe_sender();
 }
 
 GpuChildThread::~GpuChildThread() {
-  while (!deferred_messages_.empty()) {
-    delete deferred_messages_.front();
-    deferred_messages_.pop();
-  }
 }
 
 void GpuChildThread::Shutdown() {
@@ -226,6 +216,11 @@ void GpuChildThread::OnFieldTrialGroupFinalized(const std::string& trial_name,
   Send(new GpuHostMsg_FieldTrialActivated(trial_name));
 }
 
+void GpuChildThread::CreateGpuMainService(
+    ui::mojom::GpuMainAssociatedRequest request) {
+  // TODO(sad): Implement.
+}
+
 bool GpuChildThread::Send(IPC::Message* msg) {
   // The GPU process must never send a synchronous IPC message to the browser
   // process. This could result in deadlock.
@@ -245,22 +240,11 @@ bool GpuChildThread::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_Clean, OnClean)
     IPC_MESSAGE_HANDLER(GpuMsg_Crash, OnCrash)
     IPC_MESSAGE_HANDLER(GpuMsg_Hang, OnHang)
-    IPC_MESSAGE_HANDLER(GpuMsg_DisableWatchdog, OnDisableWatchdog)
     IPC_MESSAGE_HANDLER(GpuMsg_GpuSwitched, OnGpuSwitched)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
-  if (handled)
-    return true;
-
-#if defined(USE_OZONE)
-  if (ui::OzonePlatform::GetInstance()
-          ->GetGpuPlatformSupport()
-          ->OnMessageReceived(msg))
-    return true;
-#endif
-
-  return false;
+  return handled;
 }
 
 bool GpuChildThread::OnMessageReceived(const IPC::Message& msg) {
@@ -295,7 +279,7 @@ void GpuChildThread::DidCreateOffscreenContext(const GURL& active_url) {
 }
 
 void GpuChildThread::DidDestroyChannel(int client_id) {
-  media_service_->RemoveChannel(client_id);
+  media_gpu_channel_manager_->RemoveChannel(client_id);
   Send(new GpuHostMsg_DestroyChannel(client_id));
 }
 
@@ -307,10 +291,6 @@ void GpuChildThread::DidLoseContext(bool offscreen,
                                     gpu::error::ContextLostReason reason,
                                     const GURL& active_url) {
   Send(new GpuHostMsg_DidLoseContext(offscreen, reason, active_url));
-}
-
-void GpuChildThread::GpuMemoryUmaStats(const gpu::GPUMemoryUmaStats& params) {
-  Send(new GpuHostMsg_GpuMemoryUmaStats(params));
 }
 
 #if defined(OS_WIN)
@@ -329,13 +309,10 @@ void GpuChildThread::StoreShaderToDisk(int32_t client_id,
 }
 
 void GpuChildThread::OnInitialize(const gpu::GpuPreferences& gpu_preferences) {
-  gpu_preferences_ = gpu_preferences;
-
   gpu_info_.video_decode_accelerator_capabilities =
-      media::GpuVideoDecodeAccelerator::GetCapabilities(gpu_preferences_);
+      media::GpuVideoDecodeAccelerator::GetCapabilities(gpu_preferences);
   gpu_info_.video_encode_accelerator_supported_profiles =
-      media::GpuVideoEncodeAccelerator::GetSupportedProfiles(
-          gpu_preferences_);
+      media::GpuVideoEncodeAccelerator::GetSupportedProfiles(gpu_preferences);
   gpu_info_.jpeg_decode_accelerator_supported =
       media::GpuJpegDecodeAccelerator::IsSupported();
 
@@ -344,7 +321,8 @@ void GpuChildThread::OnInitialize(const gpu::GpuPreferences& gpu_preferences) {
   gpu_info_.initialization_time = base::Time::Now() - process_start_time_;
   Send(new GpuHostMsg_Initialized(!dead_on_arrival_, gpu_info_));
   while (!deferred_messages_.empty()) {
-    Send(deferred_messages_.front());
+    const LogMessage& log = deferred_messages_.front();
+    Send(new GpuHostMsg_OnLogMessage(log.severity, log.header, log.message));
     deferred_messages_.pop();
   }
 
@@ -373,30 +351,26 @@ void GpuChildThread::OnInitialize(const gpu::GpuPreferences& gpu_preferences) {
   // Defer creation of the render thread. This is to prevent it from handling
   // IPC messages before the sandbox has been enabled and all other necessary
   // initialization has succeeded.
-  gpu_channel_manager_.reset(
-      new gpu::GpuChannelManager(gpu_preferences_, this, watchdog_thread_.get(),
-                            base::ThreadTaskRunnerHandle::Get().get(),
-                            ChildProcess::current()->io_task_runner(),
-                            ChildProcess::current()->GetShutDownEvent(),
-                            sync_point_manager, gpu_memory_buffer_factory_));
+  gpu_channel_manager_.reset(new gpu::GpuChannelManager(
+      gpu_preferences, this, watchdog_thread_.get(),
+      base::ThreadTaskRunnerHandle::Get().get(),
+      ChildProcess::current()->io_task_runner(),
+      ChildProcess::current()->GetShutDownEvent(), sync_point_manager,
+      gpu_memory_buffer_factory_));
 
-  media_service_.reset(new media::MediaService(gpu_channel_manager_.get()));
-
-#if defined(USE_OZONE)
-  ui::OzonePlatform::GetInstance()
-      ->GetGpuPlatformSupport()
-      ->OnChannelEstablished(this);
-#endif
+  media_gpu_channel_manager_.reset(
+      new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
 
   // Only set once per process instance.
-  service_factory_.reset(new GpuServiceFactory);
+  service_factory_.reset(
+      new GpuServiceFactory(media_gpu_channel_manager_->AsWeakPtr()));
 
   GetInterfaceRegistry()->AddInterface(base::Bind(
       &GpuChildThread::BindServiceFactoryRequest, base::Unretained(this)));
 
   if (GetContentClient()->gpu()) {  // NULL in tests.
-    GetContentClient()->gpu()->ExposeInterfacesToBrowser(
-        GetInterfaceRegistry(), gpu_preferences_);
+    GetContentClient()->gpu()->ExposeInterfacesToBrowser(GetInterfaceRegistry(),
+                                                         gpu_preferences);
     GetContentClient()->gpu()->ConsumeInterfacesFromBrowser(
         GetRemoteInterfaces());
   }
@@ -407,12 +381,6 @@ void GpuChildThread::OnInitialize(const gpu::GpuPreferences& gpu_preferences) {
 void GpuChildThread::OnFinalize() {
   // Quit the GPU process
   base::MessageLoop::current()->QuitWhenIdle();
-}
-
-void GpuChildThread::StopWatchdog() {
-  if (watchdog_thread_.get()) {
-    watchdog_thread_->Stop();
-  }
 }
 
 void GpuChildThread::OnCollectGraphicsInfo() {
@@ -427,23 +395,32 @@ void GpuChildThread::OnCollectGraphicsInfo() {
          in_browser_process_);
 #endif  // OS_WIN
 
-  gpu::CollectInfoResult result =
-      gpu::CollectContextGraphicsInfo(&gpu_info_);
-  switch (result) {
-    case gpu::kCollectInfoFatalFailure:
-      LOG(ERROR) << "gpu::CollectGraphicsInfo failed (fatal).";
-      // TODO(piman): can we signal overall failure?
-      break;
-    case gpu::kCollectInfoNonFatalFailure:
-      DVLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
-      break;
-    case gpu::kCollectInfoNone:
-      NOTREACHED();
-      break;
-    case gpu::kCollectInfoSuccess:
-      break;
+  // gpu::CollectContextGraphicsInfo() is already called during gpu process
+  // initialization on non-mac platforms (see GpuMain()). So it is necessary to
+  // call it here only when running in the browser process on these platforms.
+  bool should_collect_info = in_browser_process_;
+#if defined(OS_MACOSX)
+  should_collect_info = true;
+#endif
+  if (should_collect_info) {
+    DCHECK_EQ(gpu::kCollectInfoNone, gpu_info_.context_info_state);
+    gpu::CollectInfoResult result = gpu::CollectContextGraphicsInfo(&gpu_info_);
+    switch (result) {
+      case gpu::kCollectInfoFatalFailure:
+        LOG(ERROR) << "gpu::CollectGraphicsInfo failed (fatal).";
+        // TODO(piman): can we signal overall failure?
+        break;
+      case gpu::kCollectInfoNonFatalFailure:
+        DVLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
+        break;
+      case gpu::kCollectInfoNone:
+        NOTREACHED();
+        break;
+      case gpu::kCollectInfoSuccess:
+        break;
+    }
+    GetContentClient()->SetGpuInfo(gpu_info_);
   }
-  GetContentClient()->SetGpuInfo(gpu_info_);
 
 #if defined(OS_WIN)
   // This is slow, but it's the only thing the unsandboxed GPU process does,
@@ -493,18 +470,6 @@ void GpuChildThread::OnHang() {
   }
 }
 
-void GpuChildThread::OnDisableWatchdog() {
-  DVLOG(1) << "GPU: Disabling watchdog thread";
-  if (watchdog_thread_.get()) {
-    // Disarm the watchdog before shutting down the message loop. This prevents
-    // the future posting of tasks to the message loop.
-    if (watchdog_thread_->message_loop())
-      watchdog_thread_->PostAcknowledge();
-    // Prevent rearming.
-    watchdog_thread_->Stop();
-  }
-}
-
 void GpuChildThread::OnGpuSwitched() {
   DVLOG(1) << "GPU: GPU has switched";
   // Notify observers in the GPU process.
@@ -519,7 +484,7 @@ void GpuChildThread::OnEstablishChannel(const EstablishChannelParams& params) {
   IPC::ChannelHandle channel_handle = gpu_channel_manager_->EstablishChannel(
       params.client_id, params.client_tracing_id, params.preempts,
       params.allow_view_command_buffers, params.allow_real_time_streams);
-  media_service_->AddChannel(params.client_id);
+  media_gpu_channel_manager_->AddChannel(params.client_id);
   Send(new GpuHostMsg_ChannelEstablished(channel_handle));
 }
 
@@ -548,7 +513,7 @@ void GpuChildThread::OnWakeUpGpu() {
 }
 
 void GpuChildThread::OnDestroyingVideoSurface(int surface_id) {
-  media::AVDASurfaceTracker::GetInstance()->NotifyDestroyingSurface(surface_id);
+  media::AVDACodecAllocator::Instance()->OnSurfaceDestroyed(surface_id);
   Send(new GpuHostMsg_DestroyingVideoSurfaceAck(surface_id));
 }
 #endif
@@ -556,13 +521,13 @@ void GpuChildThread::OnDestroyingVideoSurface(int surface_id) {
 void GpuChildThread::OnLoseAllContexts() {
   if (gpu_channel_manager_) {
     gpu_channel_manager_->DestroyAllChannels();
-    media_service_->DestroyAllChannels();
+    media_gpu_channel_manager_->DestroyAllChannels();
   }
 }
 
 void GpuChildThread::BindServiceFactoryRequest(
-    shell::mojom::ServiceFactoryRequest request) {
-  DVLOG(1) << "GPU: Binding shell::mojom::ServiceFactoryRequest";
+    service_manager::mojom::ServiceFactoryRequest request) {
+  DVLOG(1) << "GPU: Binding service_manager::mojom::ServiceFactoryRequest";
   DCHECK(service_factory_);
   service_factory_bindings_.AddBinding(service_factory_.get(),
                                        std::move(request));

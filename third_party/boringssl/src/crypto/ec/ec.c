@@ -350,7 +350,7 @@ EC_GROUP *ec_group_new(const EC_METHOD *meth) {
     OPENSSL_PUT_ERROR(EC, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
-  memset(ret, 0, sizeof(EC_GROUP));
+  OPENSSL_memset(ret, 0, sizeof(EC_GROUP));
 
   ret->meth = meth;
   BN_init(&ret->order);
@@ -709,9 +709,7 @@ int EC_POINT_make_affine(const EC_GROUP *group, EC_POINT *point, BN_CTX *ctx) {
 
 int EC_POINTs_make_affine(const EC_GROUP *group, size_t num, EC_POINT *points[],
                           BN_CTX *ctx) {
-  size_t i;
-
-  for (i = 0; i < num; i++) {
+  for (size_t i = 0; i < num; i++) {
     if (group->meth != points[i]->meth) {
       OPENSSL_PUT_ERROR(EC, EC_R_INCOMPATIBLE_OBJECTS);
       return 0;

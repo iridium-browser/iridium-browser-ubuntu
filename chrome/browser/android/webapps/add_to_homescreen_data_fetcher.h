@@ -43,6 +43,10 @@ class AddToHomescreenDataFetcher
  public:
   class Observer {
    public:
+    // Callded when the installable check is compelte.
+    virtual void OnDidDetermineWebApkCompatibility(
+        bool is_webapk_compatible) = 0;
+
     // Called when the title of the page is available.
     virtual void OnUserTitleAvailable(const base::string16& title) = 0;
 
@@ -56,16 +60,20 @@ class AddToHomescreenDataFetcher
     // Called when all the data needed to create a shortcut is available.
     virtual void OnDataAvailable(const ShortcutInfo& info,
                                  const SkBitmap& icon) = 0;
+
+    protected:
+     virtual ~Observer() {}
   };
 
   // Initialize the fetcher by requesting the information about the page from
   // the renderer process. The initialization is asynchronous and
   // OnDidGetWebApplicationInfo is expected to be called when finished.
   AddToHomescreenDataFetcher(content::WebContents* web_contents,
-                             int ideal_icon_size_in_dp,
-                             int minimum_icon_size_in_dp,
-                             int ideal_splash_image_size_in_dp,
-                             int minimum_splash_image_size_in_dp,
+                             int ideal_icon_size_in_px,
+                             int minimum_icon_size_in_px,
+                             int ideal_splash_image_size_in_px,
+                             int minimum_splash_image_size_in_px,
+                             bool check_webapk_compatible,
                              Observer* observer);
 
   // Returns a callback which fetches the splash screen image to be stored for
@@ -81,13 +89,19 @@ class AddToHomescreenDataFetcher
   ShortcutInfo& shortcut_info() { return shortcut_info_; }
   const SkBitmap& shortcut_icon() const { return shortcut_icon_; }
 
-  // WebContentsObserver
-  bool OnMessageReceived(const IPC::Message& message) override;
-
  private:
   friend class base::RefCounted<AddToHomescreenDataFetcher>;
 
   ~AddToHomescreenDataFetcher() override;
+
+  // WebContentsObserver:
+  bool OnMessageReceived(const IPC::Message& message) override;
+
+  // Called if either InstallableManager or the favicon fetch takes too long.
+  void OnDataTimedout();
+
+  // Called when InstallableManager finishes looking for a manifest and icon.
+  void OnDidPerformInstallableCheck(const InstallableData& data);
 
   // Grabs the favicon for the current URL.
   void FetchFavicon();
@@ -100,11 +114,9 @@ class AddToHomescreenDataFetcher
   void CreateLauncherIconFromFaviconInBackground(
       const favicon_base::FaviconRawBitmapResult& bitmap_result);
 
-  // Called when InstallableManager finishes looking for a manifest and icon.
-  void OnDidPerformInstallableCheck(const InstallableData& data);
-
-  // Creates the launcher icon from the given |icon|.
-  void CreateLauncherIconInBackground(const SkBitmap& raw__icon);
+  // Creates the launcher icon from the given |raw_icon|.
+  void CreateLauncherIcon(const SkBitmap& raw_icon);
+  void CreateLauncherIconInBackground(const SkBitmap& raw_icon);
 
   // Notifies the observer that the shortcut data is all available.
   void NotifyObserver(const SkBitmap& icon);
@@ -119,11 +131,15 @@ class AddToHomescreenDataFetcher
   base::CancelableTaskTracker favicon_task_tracker_;
   base::Timer data_timeout_timer_;
 
-  const int ideal_icon_size_in_dp_;
-  const int minimum_icon_size_in_dp_;
-  const int ideal_splash_image_size_in_dp_;
-  const int minimum_splash_image_size_in_dp_;
+  const int ideal_icon_size_in_px_;
+  const int minimum_icon_size_in_px_;
+  const int ideal_splash_image_size_in_px_;
+  const int minimum_splash_image_size_in_px_;
+
+  // Indicates whether to check WebAPK compatibility.
+  bool check_webapk_compatibility_;
   bool is_waiting_for_web_application_info_;
+  bool is_installable_check_complete_;
   bool is_icon_saved_;
   bool is_ready_;
 

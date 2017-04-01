@@ -5,16 +5,20 @@
 #ifndef CONTENT_RENDERER_GPU_RENDER_WIDGET_COMPOSITOR_DELEGATE_H_
 #define CONTENT_RENDERER_GPU_RENDER_WIDGET_COMPOSITOR_DELEGATE_H_
 
-namespace blink {
-class WebWidget;
-struct WebScreenInfo;
-}
+#include <memory>
+#include <vector>
+
+#include "content/common/content_export.h"
 
 namespace cc {
-class BeginFrameSource;
 class CopyOutputRequest;
-class OutputSurface;
+class CompositorFrameSink;
+class FrameSinkId;
 class SwapPromise;
+}
+
+namespace gfx {
+class Vector2dF;
 }
 
 namespace content {
@@ -35,13 +39,10 @@ class CONTENT_EXPORT RenderWidgetCompositorDelegate {
   // Notifies that the compositor has issed a BeginMainFrame.
   virtual void BeginMainFrame(double frame_time_sec) = 0;
 
-  // Requests an OutputSurface to render into.
-  virtual std::unique_ptr<cc::OutputSurface> CreateOutputSurface(
+  // Requests a CompositorFrameSink to submit to.
+  virtual std::unique_ptr<cc::CompositorFrameSink> CreateCompositorFrameSink(
+      const cc::FrameSinkId& frame_sink_id,
       bool fallback) = 0;
-
-  // Requests an external BeginFrameSource from the delegate.
-  virtual std::unique_ptr<cc::BeginFrameSource>
-  CreateExternalBeginFrameSource() = 0;
 
   // Notifies that the draw commands for a committed frame have been issued.
   virtual void DidCommitAndDrawCompositorFrame() = 0;
@@ -52,25 +53,12 @@ class CONTENT_EXPORT RenderWidgetCompositorDelegate {
   // Called by the compositor when page scale animation completed.
   virtual void DidCompletePageScaleAnimation() = 0;
 
-  // Notifies that the compositor has posted a swapbuffers operation to the GPU
-  // process.
-  virtual void DidCompleteSwapBuffers() = 0;
-
-  // Called by the compositor to forward a proto that represents serialized
-  // compositor state.
-  virtual void ForwardCompositorProto(const std::vector<uint8_t>& proto) = 0;
+  // Notifies that the last submitted CompositorFrame has been processed and
+  // will be displayed.
+  virtual void DidReceiveCompositorFrameAck() = 0;
 
   // Indicates whether the RenderWidgetCompositor is about to close.
   virtual bool IsClosing() const = 0;
-
-  // Called by the compositor in single-threaded mode when a swap is aborted.
-  virtual void OnSwapBuffersAborted() = 0;
-
-  // Called by the compositor in single-threaded mode when a swap completes.
-  virtual void OnSwapBuffersComplete() = 0;
-
-  // Called by the compositor in single-threaded mode when a swap is posted.
-  virtual void OnSwapBuffersPosted() = 0;
 
   // Requests that the client schedule a composite now, and calculate
   // appropriate delay for potential future frame.

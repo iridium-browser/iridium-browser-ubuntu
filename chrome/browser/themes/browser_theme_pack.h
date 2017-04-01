@@ -26,10 +26,6 @@ class FilePath;
 class RefCountedMemory;
 }
 
-namespace extensions {
-class Extensions;
-}
-
 namespace gfx {
 class Image;
 }
@@ -164,11 +160,6 @@ class BrowserThemePack : public CustomThemeSupplier {
   // Creates tinted and composited frame images. Source and destination is
   // |images|.
   void CreateFrameImages(ImageCache* images) const;
-
-  // Creates button images tinted with |button_tint| and places them in
-  // processed_images.
-  void CreateTintedButtons(const color_utils::HSL& button_tint,
-                           ImageCache* processed_images) const;
 
   // Creates the semi-transparent tab background images, putting the results
   // in |images|. Must be called after GenerateFrameImages().

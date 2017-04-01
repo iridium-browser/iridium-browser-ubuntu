@@ -307,10 +307,11 @@ extern "C" {
 // This function is used in chrome_metrics_services_manager_client.cc to trigger
 // changes to the upload-enabled state. This is done when the metrics services
 // are initialized, and when the user changes their consent for uploads. See
-// crash_reporter::SetUploadConsent for effects.
+// crash_reporter::SetUploadConsent for effects. The given consent value should
+// be consistent with
+// crash_reporter::GetCrashReporterClient()->GetCollectStatsConsent(), but it's
+// not enforced to avoid blocking startup code on synchronizing them.
 void __declspec(dllexport) __cdecl SetUploadConsentImpl(bool consent) {
-  DCHECK_EQ(consent,
-            crash_reporter::GetCrashReporterClient()->GetCollectStatsConsent());
   crash_reporter::SetUploadConsent(consent);
 }
 
@@ -334,6 +335,13 @@ void __declspec(dllexport)
     RequestSingleCrashUploadImpl(const std::string& local_id) {
   crash_reporter::RequestSingleCrashUpload(local_id);
 }
+
+// This helper is invoked by code in chrome.dll to wait for the handler start to
+// complete.
+void __declspec(dllexport) BlockUntilHandlerStartedImpl() {
+  crash_reporter::BlockUntilHandlerStarted();
+}
+
 }  // extern "C"
 
 #endif  // OS_WIN

@@ -4,32 +4,40 @@
 
 #include "device/vr/android/gvr/gvr_device_provider.h"
 
+#include <jni.h>
+
 #include "base/android/context_utils.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_utils.h"
 #include "base/android/scoped_java_ref.h"
+#include "device/vr/android/gvr/gvr_delegate.h"
 #include "device/vr/android/gvr/gvr_device.h"
-#include "jni/GvrDeviceProvider_jni.h"
+#include "device/vr/android/gvr/gvr_gamepad_data_fetcher.h"
+#include "device/vr/vr_device.h"
+#include "device/vr/vr_device_manager.h"
+#include "device/vr/vr_service.mojom.h"
+#include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr.h"
+#include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_controller.h"
+#include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
 
 using base::android::AttachCurrentThread;
 using base::android::GetApplicationContext;
 
 namespace device {
 
-GvrDeviceProvider::GvrDeviceProvider() : VRDeviceProvider() {
-  GvrApiManager::GetInstance()->AddClient(this);
-}
+GvrDeviceProvider::GvrDeviceProvider() {}
 
 GvrDeviceProvider::~GvrDeviceProvider() {
-  // TODO: This should eventually be handled by an actual GvrLayout instance in
-  // the view tree.
-  GvrApiManager::GetInstance()->Shutdown();
-  if (!j_device_.is_null()) {
-    JNIEnv* env = AttachCurrentThread();
-    Java_GvrDeviceProvider_shutdown(env, j_device_.obj());
-  }
+  GamepadDataFetcherManager::GetInstance()->RemoveSourceFactory(
+      GAMEPAD_SOURCE_GVR);
 
-  GvrApiManager::GetInstance()->RemoveClient(this);
+  device::GvrDelegateProvider* delegate_provider =
+      device::GvrDelegateProvider::GetInstance();
+  if (delegate_provider) {
+    delegate_provider->ExitWebVRPresent();
+    delegate_provider->DestroyNonPresentingDelegate();
+    delegate_provider->SetDeviceProvider(nullptr);
+  }
 }
 
 void GvrDeviceProvider::GetDevices(std::vector<VRDevice*>* devices) {
@@ -40,33 +48,99 @@ void GvrDeviceProvider::GetDevices(std::vector<VRDevice*>* devices) {
 }
 
 void GvrDeviceProvider::Initialize() {
-  // TODO: This should eventually be handled by an actual GvrLayout instance in
-  // the view tree.
-  if (j_device_.is_null()) {
-    JNIEnv* env = AttachCurrentThread();
-
-    j_device_.Reset(
-        Java_GvrDeviceProvider_create(env, GetApplicationContext()));
-    jlong gvr_api =
-        Java_GvrDeviceProvider_getNativeContext(env, j_device_.obj());
-
-    if (!gvr_api)
-      return;
-
-    GvrApiManager::GetInstance()->Initialize(
-        reinterpret_cast<gvr_context*>(gvr_api));
+  device::GvrDelegateProvider* delegate_provider =
+      device::GvrDelegateProvider::GetInstance();
+  if (!delegate_provider)
+    return;
+  delegate_provider->SetDeviceProvider(this);
+  if (!vr_device_) {
+    vr_device_.reset(
+        new GvrDevice(this, delegate_provider->GetNonPresentingDelegate()));
   }
 }
 
-void GvrDeviceProvider::OnGvrApiInitialized(gvr::GvrApi* gvr_api) {
-  if (!vr_device_)
-    vr_device_.reset(new GvrDevice(this, gvr_api));
+void GvrDeviceProvider::RequestPresent(
+    const base::Callback<void(bool)>& callback) {
+  device::GvrDelegateProvider* delegate_provider =
+      device::GvrDelegateProvider::GetInstance();
+  if (!delegate_provider)
+    return callback.Run(false);
 
-  // Should fire a vrdisplayconnected event here.
+  // RequestWebVRPresent is async as a render thread may be created.
+  delegate_provider->RequestWebVRPresent(callback);
 }
 
-void GvrDeviceProvider::OnGvrApiShutdown() {
-  // Nothing to do here just yet. Eventually want to shut down the VRDevice
+// VR presentation exit requested by the API.
+void GvrDeviceProvider::ExitPresent() {
+  SwitchToNonPresentingDelegate();
+  // If we're presenting currently stop.
+  GvrDelegateProvider* delegate_provider = GvrDelegateProvider::GetInstance();
+  if (delegate_provider)
+    delegate_provider->ExitWebVRPresent();
+}
+
+void GvrDeviceProvider::OnGvrDelegateReady(GvrDelegate* delegate) {
+  if (!vr_device_)
+    return;
+  VLOG(1) << "Switching to presenting delegate";
+  vr_device_->SetDelegate(delegate);
+  GamepadDataFetcherManager::GetInstance()->AddFactory(
+      new GvrGamepadDataFetcher::Factory(delegate, vr_device_->id()));
+}
+
+// VR presentation exit requested by the delegate (probably via UI).
+void GvrDeviceProvider::OnGvrDelegateRemoved() {
+  if (!vr_device_)
+    return;
+
+  SwitchToNonPresentingDelegate();
+  vr_device_->OnExitPresent();
+}
+
+void GvrDeviceProvider::OnNonPresentingDelegateRemoved() {
+  if (!vr_device_)
+    return;
+  vr_device_->SetDelegate(nullptr);
+}
+
+void GvrDeviceProvider::OnDisplayBlur() {
+  if (!vr_device_)
+    return;
+  vr_device_->OnBlur();
+}
+
+void GvrDeviceProvider::OnDisplayFocus() {
+  if (!vr_device_)
+    return;
+  vr_device_->OnFocus();
+}
+
+void GvrDeviceProvider::OnDisplayActivate() {
+  if (!vr_device_)
+    return;
+  vr_device_->OnActivate(mojom::VRDisplayEventReason::MOUNTED);
+}
+
+void GvrDeviceProvider::SwitchToNonPresentingDelegate() {
+  GvrDelegateProvider* delegate_provider = GvrDelegateProvider::GetInstance();
+  if (!vr_device_ || !delegate_provider)
+    return;
+
+  VLOG(1) << "Switching to non-presenting delegate";
+  vr_device_->SetDelegate(delegate_provider->GetNonPresentingDelegate());
+
+  // Remove GVR gamepad polling.
+  GamepadDataFetcherManager::GetInstance()->RemoveSourceFactory(
+      GAMEPAD_SOURCE_GVR);
+}
+
+void GvrDeviceProvider::SetListeningForActivate(bool listening) {
+  device::GvrDelegateProvider* delegate_provider =
+      device::GvrDelegateProvider::GetInstance();
+  if (!delegate_provider)
+    return;
+
+  delegate_provider->SetListeningForActivate(listening);
 }
 
 }  // namespace device

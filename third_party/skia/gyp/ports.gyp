@@ -53,8 +53,6 @@
 
         '../src/ports/SkGlobalInitialization_default.cpp',
         '../src/ports/SkMemory_malloc.cpp',
-        '../src/ports/SkOSEnvironment.h',
-        '../src/ports/SkOSEnvironment.cpp',
         '../src/ports/SkOSFile_posix.cpp',
         '../src/ports/SkOSFile_stdio.cpp',
         '../src/ports/SkOSFile_win.cpp',
@@ -70,6 +68,7 @@
         '../include/ports/SkFontMgr_android.h',
         '../include/ports/SkFontMgr_custom.h',
         '../include/ports/SkFontMgr_fontconfig.h',
+        '../include/ports/SkFontMgr_FontConfigInterface.h',
         '../include/ports/SkFontMgr_indirect.h',
         '../include/ports/SkRemotableFontMgr.h',
       ],
@@ -77,10 +76,6 @@
         ['exclude', 'SkFontMgr_.+_factory\\.cpp$'],
       ],
       'conditions': [
-        [ 'skia_android_framework == 0', {
-          'dependencies': [ 'qcms.gyp:qcms', ],
-          'export_dependent_settings': [ 'qcms.gyp:qcms', ],
-        }],
         [ 'skia_os in ["linux", "freebsd", "openbsd", "solaris", "android"]', {
           'sources': [
             '../src/ports/SkFontHost_FreeType.cpp',
@@ -139,6 +134,7 @@
               },
               'sources': [
                 '../src/ports/SkFontMgr_fontconfig.cpp',
+                '../src/ports/SkFontConfigInterface.cpp',
                 '../src/ports/SkFontConfigInterface_direct.cpp',
                 '../src/ports/SkFontConfigInterface_direct_factory.cpp',
               ],

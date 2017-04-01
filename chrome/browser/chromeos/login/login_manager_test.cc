@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
@@ -155,7 +156,7 @@ void LoginManagerTest::SetUpOnMainThread() {
 
 void LoginManagerTest::RegisterUser(const std::string& user_id) {
   ListPrefUpdate users_pref(g_browser_process->local_state(), "LoggedInUsers");
-  users_pref->AppendIfNotPresent(new base::StringValue(user_id));
+  users_pref->AppendIfNotPresent(base::MakeUnique<base::StringValue>(user_id));
 }
 
 void LoginManagerTest::SetExpectedCredentials(const UserContext& user_context) {

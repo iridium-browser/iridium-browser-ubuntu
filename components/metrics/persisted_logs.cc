@@ -4,13 +4,17 @@
 
 #include "components/metrics/persisted_logs.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "base/base64.h"
 #include "base/md5.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sha1.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/timer/elapsed_timer.h"
+#include "components/metrics/persisted_logs_metrics.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "third_party/zlib/google/compression_utils.h"
@@ -19,34 +23,27 @@ namespace metrics {
 
 namespace {
 
-PersistedLogs::LogReadStatus MakeRecallStatusHistogram(
-    PersistedLogs::LogReadStatus status) {
-  UMA_HISTOGRAM_ENUMERATION("PrefService.PersistentLogRecallProtobufs",
-                            status, PersistedLogs::END_RECALL_STATUS);
-  return status;
-}
+const char kLogHashKey[] = "hash";
+const char kLogTimestampKey[] = "timestamp";
+const char kLogDataKey[] = "data";
 
-// Reads the value at |index| from |list_value| as a string and Base64-decodes
-// it into |result|. Returns true on success.
-bool ReadBase64String(const base::ListValue& list_value,
-                      size_t index,
-                      std::string* result) {
+std::string EncodeToBase64(const std::string& to_convert) {
   std::string base64_result;
-  if (!list_value.GetString(index, &base64_result))
-    return false;
-  return base::Base64Decode(base64_result, result);
+  base::Base64Encode(to_convert, &base64_result);
+  return base64_result;
 }
 
-// Base64-encodes |str| and appends the result to |list_value|.
-void AppendBase64String(const std::string& str, base::ListValue* list_value) {
-  std::string base64_str;
-  base::Base64Encode(str, &base64_str);
-  list_value->AppendString(base64_str);
+std::string DecodeFromBase64(const std::string& to_convert) {
+  std::string result;
+  base::Base64Decode(to_convert, &result);
+  return result;
 }
 
 }  // namespace
 
-void PersistedLogs::LogHashPair::Init(const std::string& log_data) {
+void PersistedLogs::LogInfo::Init(PersistedLogsMetrics* metrics,
+                                  const std::string& log_data,
+                                  const std::string& log_timestamp) {
   DCHECK(!log_data.empty());
 
   if (!compression::GzipCompress(log_data, &compressed_log_data)) {
@@ -54,19 +51,20 @@ void PersistedLogs::LogHashPair::Init(const std::string& log_data) {
     return;
   }
 
-  UMA_HISTOGRAM_PERCENTAGE(
-      "UMA.ProtoCompressionRatio",
-      static_cast<int>(100 * compressed_log_data.size() / log_data.size()));
+  metrics->RecordCompressionRatio(compressed_log_data.size(), log_data.size());
 
   hash = base::SHA1HashString(log_data);
+  timestamp = log_timestamp;
 }
 
-PersistedLogs::PersistedLogs(PrefService* local_state,
+PersistedLogs::PersistedLogs(std::unique_ptr<PersistedLogsMetrics> metrics,
+                             PrefService* local_state,
                              const char* pref_name,
                              size_t min_log_count,
                              size_t min_log_bytes,
                              size_t max_log_size)
-    : local_state_(local_state),
+    : metrics_(std::move(metrics)),
+      local_state_(local_state),
       pref_name_(pref_name),
       min_log_count_(min_log_count),
       min_log_bytes_(min_log_bytes),
@@ -89,8 +87,10 @@ PersistedLogs::LogReadStatus PersistedLogs::DeserializeLogs() {
 }
 
 void PersistedLogs::StoreLog(const std::string& log_data) {
-  list_.push_back(LogHashPair());
-  list_.back().Init(log_data);
+  list_.push_back(LogInfo());
+  list_.back().Init(metrics_.get(),
+                    log_data,
+                    base::Int64ToString(base::Time::Now().ToTimeT()));
 }
 
 void PersistedLogs::StageLog() {
@@ -107,6 +107,38 @@ void PersistedLogs::DiscardStagedLog() {
   DCHECK_LT(static_cast<size_t>(staged_log_index_), list_.size());
   list_.erase(list_.begin() + staged_log_index_);
   staged_log_index_ = -1;
+}
+
+PersistedLogs::LogReadStatus PersistedLogs::ReadLogsFromPrefList(
+    const base::ListValue& list_value) {
+  if (list_value.empty())
+    return metrics_->RecordLogReadStatus(LIST_EMPTY);
+
+  const size_t log_count = list_value.GetSize();
+
+  DCHECK(list_.empty());
+  list_.resize(log_count);
+
+  for (size_t i = 0; i < log_count; ++i) {
+    const base::DictionaryValue* dict;
+    if (!list_value.GetDictionary(i, &dict) ||
+        !dict->GetString(kLogDataKey, &list_[i].compressed_log_data) ||
+        !dict->GetString(kLogHashKey, &list_[i].hash)) {
+      list_.clear();
+      return metrics_->RecordLogReadStatus(LOG_STRING_CORRUPTION);
+    }
+
+    list_[i].compressed_log_data =
+        DecodeFromBase64(list_[i].compressed_log_data);
+    list_[i].hash = DecodeFromBase64(list_[i].hash);
+    // Ignoring the success of this step as timestamp might not be there for
+    // older logs.
+    // NOTE: Should be added to the check with other fields once migration is
+    // over.
+    dict->GetString(kLogTimestampKey, &list_[i].timestamp);
+  }
+
+  return metrics_->RecordLogReadStatus(RECALL_SUCCESS);
 }
 
 void PersistedLogs::WriteLogsToPrefList(base::ListValue* list_value) const {
@@ -135,41 +167,20 @@ void PersistedLogs::WriteLogsToPrefList(base::ListValue* list_value) const {
   for (size_t i = start; i < list_.size(); ++i) {
     size_t log_size = list_[i].compressed_log_data.length();
     if (log_size > max_log_size_) {
-      UMA_HISTOGRAM_COUNTS("UMA.Large Accumulated Log Not Persisted",
-                           static_cast<int>(log_size));
+      metrics_->RecordDroppedLogSize(log_size);
       dropped_logs_num++;
       continue;
     }
-    AppendBase64String(list_[i].compressed_log_data, list_value);
-    AppendBase64String(list_[i].hash, list_value);
+    std::unique_ptr<base::DictionaryValue> dict_value(
+        new base::DictionaryValue);
+    dict_value->SetString(kLogHashKey, EncodeToBase64(list_[i].hash));
+    dict_value->SetString(kLogDataKey,
+                          EncodeToBase64(list_[i].compressed_log_data));
+    dict_value->SetString(kLogTimestampKey, list_[i].timestamp);
+    list_value->Append(std::move(dict_value));
   }
   if (dropped_logs_num > 0)
-    UMA_HISTOGRAM_COUNTS("UMA.UnsentLogs.Dropped", dropped_logs_num);
-}
-
-PersistedLogs::LogReadStatus PersistedLogs::ReadLogsFromPrefList(
-    const base::ListValue& list_value) {
-  if (list_value.empty())
-    return MakeRecallStatusHistogram(LIST_EMPTY);
-
-  // For each log, there's two entries in the list (the data and the hash).
-  DCHECK_EQ(0U, list_value.GetSize() % 2);
-  const size_t log_count = list_value.GetSize() / 2;
-
-  // Resize |list_| ahead of time, so that values can be decoded directly into
-  // the elements of the list.
-  DCHECK(list_.empty());
-  list_.resize(log_count);
-
-  for (size_t i = 0; i < log_count; ++i) {
-    if (!ReadBase64String(list_value, i * 2, &list_[i].compressed_log_data) ||
-        !ReadBase64String(list_value, i * 2 + 1, &list_[i].hash)) {
-      list_.clear();
-      return MakeRecallStatusHistogram(LOG_STRING_CORRUPTION);
-    }
-  }
-
-  return MakeRecallStatusHistogram(RECALL_SUCCESS);
+    metrics_->RecordDroppedLogsNum(dropped_logs_num);
 }
 
 }  // namespace metrics

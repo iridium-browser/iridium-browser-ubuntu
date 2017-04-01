@@ -10,7 +10,7 @@
 
 #include "SkBitmap.h"
 #include "SkBRDAllocator.h"
-#include "SkEncodedFormat.h"
+#include "SkEncodedImageFormat.h"
 #include "SkStream.h"
 
 /*
@@ -29,8 +29,7 @@ public:
      * @param strategy Strategy used for scaling and subsetting
      * @return         Tries to create an SkBitmapRegionDecoder, returns NULL on failure
      */
-    static SkBitmapRegionDecoder* Create(
-            SkData* data, Strategy strategy);
+    static SkBitmapRegionDecoder* Create(sk_sp<SkData>, Strategy strategy);
 
     /*
      * @param stream   Takes ownership of the stream
@@ -67,7 +66,7 @@ public:
      */
     virtual bool conversionSupported(SkColorType colorType) = 0;
 
-    virtual SkEncodedFormat getEncodedFormat() = 0;
+    virtual SkEncodedImageFormat getEncodedFormat() = 0;
 
     int width() const { return fWidth; }
     int height() const { return fHeight; }

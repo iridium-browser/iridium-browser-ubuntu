@@ -16,20 +16,18 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 
 class LoginUIService;
-class ProfileSyncService;
-class SigninManagerBase;
 
-namespace content {
-class WebContents;
-}
+namespace browser_sync {
+class ProfileSyncService;
+}  // namespace browser_sync
 
 namespace signin_metrics {
 enum class AccessPoint;
-}
+}  // namespace signin_metrics
 
-namespace sync_driver {
+namespace syncer {
 class SyncSetupInProgressHandle;
-}
+}  // namespace syncer
 
 class SyncSetupHandler : public options::OptionsPageUIHandler,
                          public SyncStartupTracker::Observer,
@@ -57,7 +55,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   void OpenSyncSetup(bool creating_supervised_user);
 
   // Shows advanced configuration dialog without going through sign in dialog.
-  // Kicks the sync backend if necessary with showing spinner dialog until it
+  // Kicks the sync engine if necessary with showing spinner dialog until it
   // gets ready.
   void OpenConfigureSync();
 
@@ -67,7 +65,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
  protected:
   friend class SyncSetupHandlerTest;
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest,
-                           DisplayConfigureWithBackendDisabledAndCancel);
+                           DisplayConfigureWithEngineDisabledAndCancel);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, HandleSetupUIWhenSyncDisabled);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, SelectCustomEncryption);
   FRIEND_TEST_ALL_PREFIXES(SyncSetupHandlerTest, ShowSyncSetupWhenNotSignedIn);
@@ -97,7 +95,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
 
   // Helper routine that gets the ProfileSyncService associated with the parent
   // profile.
-  ProfileSyncService* GetSyncService() const;
+  browser_sync::ProfileSyncService* GetSyncService() const;
 
   // Returns the LoginUIService for the parent profile.
   LoginUIService* GetLoginUIService() const;
@@ -109,7 +107,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   void HandlePassphraseEntry(const base::ListValue* args);
   void HandlePassphraseCancel(const base::ListValue* args);
   void HandleShowSetupUI(const base::ListValue* args);
-  void HandleDoSignOutOnAuthError(const base::ListValue* args);
+  void HandleAttemptUserExit(const base::ListValue* args);
   void HandleStartSignin(const base::ListValue* args);
   void HandleStopSyncing(const base::ListValue* args);
   void HandleCloseTimeout(const base::ListValue* args);
@@ -137,7 +135,7 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   // is running in the background.
   void DisplaySpinner();
 
-  // Displays an error dialog which shows timeout of starting the sync backend.
+  // Displays an error dialog which shows timeout of starting the sync engine.
   void DisplayTimeout();
 
   // Closes the associated sync settings page.
@@ -156,20 +154,20 @@ class SyncSetupHandler : public options::OptionsPageUIHandler,
   // requires a passphrase and one hasn't been provided or it was invalid.
   void DisplayConfigureSync(bool passphrase_failed);
 
-  // Helper object used to wait for the sync backend to startup.
+  // Helper object used to wait for the sync engine to startup.
   std::unique_ptr<SyncStartupTracker> sync_startup_tracker_;
 
   // Prevents Sync from running until configuration is complete.
-  std::unique_ptr<sync_driver::SyncSetupInProgressHandle> sync_blocker_;
+  std::unique_ptr<syncer::SyncSetupInProgressHandle> sync_blocker_;
 
   // Set to true whenever the sync configure UI is visible. This is used to tell
   // what stage of the setup wizard the user was in and to update the UMA
   // histograms in the case that the user cancels out.
   bool configuring_sync_;
 
-  // The OneShotTimer object used to timeout of starting the sync backend
+  // The OneShotTimer object used to timeout of starting the sync engine
   // service.
-  std::unique_ptr<base::OneShotTimer> backend_start_timer_;
+  std::unique_ptr<base::OneShotTimer> engine_start_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupHandler);
 };

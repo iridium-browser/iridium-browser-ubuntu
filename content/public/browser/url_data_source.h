@@ -9,10 +9,11 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/resource_request_info.h"
 
 namespace base {
-class MessageLoop;
 class RefCountedMemory;
 }
 
@@ -53,10 +54,13 @@ class CONTENT_EXPORT URLDataSource {
   // the path of the request. The child class should run |callback| when the
   // data is available or if the request could not be satisfied. This can be
   // called either in this callback or asynchronously with the response.
-  virtual void StartDataRequest(const std::string& path,
-                                int render_process_id,
-                                int render_frame_id,
-                                const GotDataCallback& callback) = 0;
+  // |wc_getter| can be called on the UI thread to return the WebContents for
+  // this request if it originates from a render frame. If it originated from a
+  // worker or if the frame has destructed it will return null.
+  virtual void StartDataRequest(
+      const std::string& path,
+      const ResourceRequestInfo::WebContentsGetter& wc_getter,
+      const GotDataCallback& callback) = 0;
 
   // Return the mimetype that should be sent with this response, or empty
   // string to specify no mime type.
@@ -64,15 +68,15 @@ class CONTENT_EXPORT URLDataSource {
 
   // The following methods are all called on the IO thread.
 
-  // Returns the MessageLoop on which the delegate wishes to have
+  // Returns the TaskRunner on which the delegate wishes to have
   // StartDataRequest called to handle the request for |path|. The default
   // implementation returns BrowserThread::UI. If the delegate does not care
   // which thread StartDataRequest is called on, this should return nullptr.
   // It may be beneficial to return nullptr for requests that are safe to handle
   // directly on the IO thread.  This can improve performance by satisfying such
   // requests more rapidly when there is a large amount of UI thread contention.
-  // Or the delegate can return a specific thread's Messageloop if they wish.
-  virtual base::MessageLoop* MessageLoopForRequestPath(
+  // Or the delegate can return a specific thread's TaskRunner if they wish.
+  virtual scoped_refptr<base::SingleThreadTaskRunner> TaskRunnerForRequestPath(
       const std::string& path) const;
 
   // Returns true if the URLDataSource should replace an existing URLDataSource

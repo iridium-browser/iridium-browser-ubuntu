@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "base/memory/ptr_util.h"
-#include "device/core/device_client.h"
+#include "device/base/device_client.h"
 #include "device/hid/hid_connection.h"
 #include "device/hid/hid_device_filter.h"
 #include "device/hid/hid_device_info.h"
@@ -35,7 +35,7 @@
 #define EXTENSION_FUNCTION_VALIDATE_RETURN_FALSE_ON_ERROR(test) \
   do {                                                          \
     if (!(test)) {                                              \
-      this->bad_message_ = true;                                \
+      this->set_bad_message(true);                              \
       return false;                                             \
     }                                                           \
   } while (0)
@@ -250,9 +250,7 @@ HidConnectionIoFunction::~HidConnectionIoFunction() {
 }
 
 ExtensionFunction::ResponseAction HidConnectionIoFunction::Run() {
-  if (!ValidateParameters()) {
-    return RespondNow(Error(error_));
-  }
+  EXTENSION_FUNCTION_VALIDATE(ValidateParameters());
 
   ApiResourceManager<HidConnectionResource>* connection_manager =
       ApiResourceManager<HidConnectionResource>::Get(browser_context());

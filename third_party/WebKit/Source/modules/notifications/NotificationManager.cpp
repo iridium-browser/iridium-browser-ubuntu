@@ -4,64 +4,111 @@
 
 #include "modules/notifications/NotificationManager.h"
 
+#include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "bindings/core/v8/ScriptState.h"
+#include "modules/notifications/Notification.h"
+#include "modules/notifications/NotificationPermissionCallback.h"
+#include "modules/permissions/PermissionUtils.h"
+#include "platform/UserGestureIndicator.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/InterfaceProvider.h"
 #include "public/platform/Platform.h"
+#include "public/platform/modules/permissions/permission.mojom-blink.h"
 #include "public/platform/modules/permissions/permission_status.mojom-blink.h"
+#include "wtf/Functional.h"
 
 namespace blink {
 
 // static
-NotificationManager* NotificationManager::from(ExecutionContext* executionContext)
-{
-    DCHECK(executionContext);
-    DCHECK(executionContext->isContextThread());
+NotificationManager* NotificationManager::from(
+    ExecutionContext* executionContext) {
+  DCHECK(executionContext);
+  DCHECK(executionContext->isContextThread());
 
-    NotificationManager* manager = static_cast<NotificationManager*>(Supplement<ExecutionContext>::from(executionContext, supplementName()));
-    if (!manager) {
-        manager = new NotificationManager(executionContext);
-        Supplement<ExecutionContext>::provideTo(*executionContext, supplementName(), manager);
-    }
+  NotificationManager* manager = static_cast<NotificationManager*>(
+      Supplement<ExecutionContext>::from(executionContext, supplementName()));
+  if (!manager) {
+    manager = new NotificationManager();
+    Supplement<ExecutionContext>::provideTo(*executionContext, supplementName(),
+                                            manager);
+  }
 
-    return manager;
+  return manager;
 }
 
 // static
-const char* NotificationManager::supplementName()
-{
-    return "NotificationManager";
+const char* NotificationManager::supplementName() {
+  return "NotificationManager";
 }
 
-NotificationManager::NotificationManager(ExecutionContext* executionContext)
-    : ContextLifecycleObserver(executionContext)
-{
-    Platform::current()->interfaceProvider()->getInterface(mojo::GetProxy(&m_service));
+NotificationManager::NotificationManager() {}
+
+NotificationManager::~NotificationManager() {}
+
+mojom::blink::PermissionStatus NotificationManager::permissionStatus(
+    ExecutionContext* executionContext) {
+  if (!m_notificationService) {
+    Platform::current()->interfaceProvider()->getInterface(
+        mojo::MakeRequest(&m_notificationService));
+  }
+
+  mojom::blink::PermissionStatus permissionStatus;
+  const bool result = m_notificationService->GetPermissionStatus(
+      executionContext->getSecurityOrigin()->toString(), &permissionStatus);
+  DCHECK(result);
+
+  return permissionStatus;
 }
 
-NotificationManager::~NotificationManager()
-{
+ScriptPromise NotificationManager::requestPermission(
+    ScriptState* scriptState,
+    NotificationPermissionCallback* deprecatedCallback) {
+  ExecutionContext* context = scriptState->getExecutionContext();
+
+  if (!m_permissionService) {
+    connectToPermissionService(context,
+                               mojo::MakeRequest(&m_permissionService));
+    m_permissionService.set_connection_error_handler(convertToBaseCallback(
+        WTF::bind(&NotificationManager::onPermissionServiceConnectionError,
+                  wrapWeakPersistent(this))));
+  }
+
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::create(scriptState);
+  ScriptPromise promise = resolver->promise();
+
+  m_permissionService->RequestPermission(
+      createPermissionDescriptor(mojom::blink::PermissionName::NOTIFICATIONS),
+      context->getSecurityOrigin(),
+      UserGestureIndicator::processingUserGesture(),
+      convertToBaseCallback(
+          WTF::bind(&NotificationManager::onPermissionRequestComplete,
+                    wrapPersistent(this), wrapPersistent(resolver),
+                    wrapPersistent(deprecatedCallback))));
+
+  return promise;
 }
 
-mojom::blink::PermissionStatus NotificationManager::permissionStatus() const
-{
-    mojom::blink::PermissionStatus permissionStatus;
+void NotificationManager::onPermissionRequestComplete(
+    ScriptPromiseResolver* resolver,
+    NotificationPermissionCallback* deprecatedCallback,
+    mojom::blink::PermissionStatus status) {
+  String statusString = Notification::permissionString(status);
+  if (deprecatedCallback)
+    deprecatedCallback->handleEvent(statusString);
 
-    const bool result =
-        m_service->GetPermissionStatus(getExecutionContext()->getSecurityOrigin()->toString(), &permissionStatus);
-    DCHECK(result);
-
-    return permissionStatus;
+  resolver->resolve(statusString);
 }
 
-void NotificationManager::contextDestroyed()
-{
-    m_service.reset();
+void NotificationManager::onPermissionServiceConnectionError() {
+  if (!Platform::current()) {
+    // TODO(rockot): Clean this up once renderer shutdown sequence is fixed.
+    return;
+  }
+  m_permissionService.reset();
 }
 
-DEFINE_TRACE(NotificationManager)
-{
-    ContextLifecycleObserver::trace(visitor);
-    Supplement<ExecutionContext>::trace(visitor);
+DEFINE_TRACE(NotificationManager) {
+  Supplement<ExecutionContext>::trace(visitor);
 }
 
-} // namespace blink
+}  // namespace blink

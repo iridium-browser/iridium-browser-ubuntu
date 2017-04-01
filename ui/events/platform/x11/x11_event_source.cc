@@ -10,6 +10,7 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "ui/base/x/x11_window_event_manager.h"
 #include "ui/events/devices/x11/device_data_manager_x11.h"
 #include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_utils.h"
@@ -95,7 +96,7 @@ X11EventSource::X11EventSource(X11EventSourceDelegate* delegate,
                                XDisplay* display)
     : delegate_(delegate),
       display_(display),
-      last_seen_server_time_(CurrentTime),
+      dispatching_event_(nullptr),
       dummy_initialized_(false),
       continue_stream_(true) {
   DCHECK(!instance_);
@@ -152,9 +153,7 @@ void X11EventSource::BlockUntilWindowUnmapped(XID window) {
   BlockOnWindowStructureEvent(window, UnmapNotify);
 }
 
-Time X11EventSource::UpdateLastSeenServerTime() {
-  base::TimeTicks start = base::TimeTicks::Now();
-
+Time X11EventSource::GetCurrentServerTime() {
   DCHECK(display_);
 
   if (!dummy_initialized_) {
@@ -162,9 +161,12 @@ Time X11EventSource::UpdateLastSeenServerTime() {
     dummy_window_ = XCreateSimpleWindow(display_, DefaultRootWindow(display_),
                                         0, 0, 1, 1, 0, 0, 0);
     dummy_atom_ = XInternAtom(display_, "CHROMIUM_TIMESTAMP", False);
-    XSelectInput(display_, dummy_window_, PropertyChangeMask);
+    dummy_window_events_.reset(
+        new XScopedEventSelector(dummy_window_, PropertyChangeMask));
     dummy_initialized_ = true;
   }
+
+  base::TimeTicks start = base::TimeTicks::Now();
 
   // Make a no-op property change on |dummy_window_|.
   XChangeProperty(display_, dummy_window_, dummy_atom_, XA_STRING, 8,
@@ -175,13 +177,56 @@ Time X11EventSource::UpdateLastSeenServerTime() {
   XIfEvent(display_, &event, IsPropertyNotifyForTimestamp,
            reinterpret_cast<XPointer>(&dummy_window_));
 
-  last_seen_server_time_ = event.xproperty.time;
-
   UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "Event.Latency.X11EventSource.UpdateServerTime",
-      (base::TimeTicks::Now() - start).InMicroseconds(), 1,
-      base::TimeDelta::FromMilliseconds(1).InMicroseconds(), 50);
-  return last_seen_server_time_;
+      "Linux.X11.ServerRTT", (base::TimeTicks::Now() - start).InMicroseconds(),
+      1, base::TimeDelta::FromMilliseconds(50).InMicroseconds(), 50);
+  return event.xproperty.time;
+}
+
+Time X11EventSource::GetTimestamp() {
+  if (dispatching_event_) {
+    Time timestamp = ExtractTimeFromXEvent(*dispatching_event_);
+    if (timestamp != CurrentTime)
+      return timestamp;
+  }
+  DVLOG(1) << "Making a round trip to get a recent server timestamp.";
+  return GetCurrentServerTime();
+}
+
+base::Optional<gfx::Point>
+X11EventSource::GetRootCursorLocationFromCurrentEvent() const {
+  if (!dispatching_event_)
+    return base::nullopt;
+
+  XEvent* event = dispatching_event_;
+  DCHECK(event);
+
+  bool is_xi2_event = event->type == GenericEvent;
+  int event_type = is_xi2_event
+                       ? reinterpret_cast<XIDeviceEvent*>(event)->evtype
+                       : event->type;
+
+  bool is_valid_event = false;
+  static_assert(XI_ButtonPress == ButtonPress, "");
+  static_assert(XI_ButtonRelease == ButtonRelease, "");
+  static_assert(XI_Motion == MotionNotify, "");
+  static_assert(XI_Enter == EnterNotify, "");
+  static_assert(XI_Leave == LeaveNotify, "");
+  switch (event_type) {
+    case ButtonPress:
+    case ButtonRelease:
+    case MotionNotify:
+    case EnterNotify:
+    case LeaveNotify:
+      is_valid_event =
+          is_xi2_event
+              ? ui::TouchFactory::GetInstance()->ShouldProcessXI2Event(event)
+              : true;
+  }
+
+  if (is_valid_event)
+    return ui::EventSystemLocationFromNative(event);
+  return base::nullopt;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -193,18 +238,14 @@ void X11EventSource::ExtractCookieDataDispatchEvent(XEvent* xevent) {
       XGetEventData(xevent->xgeneric.display, &xevent->xcookie)) {
     have_cookie = true;
   }
-  Time event_time = ExtractTimeFromXEvent(*xevent);
-  if (event_time != CurrentTime) {
-    int64_t event_time_64 = event_time;
-    int64_t time_difference = last_seen_server_time_ - event_time_64;
-    // Ignore timestamps that go backwards. However, X server time is a 32-bit
-    // millisecond counter, so if the time goes backwards by more than half the
-    // range of the 32-bit counter, treat it as a rollover.
-    if (time_difference < 0 || time_difference > (UINT32_MAX >> 1))
-      last_seen_server_time_ = event_time;
-  }
+
+  dispatching_event_ = xevent;
+
   delegate_->ProcessXEvent(xevent);
   PostDispatchEvent(xevent);
+
+  dispatching_event_ = nullptr;
+
   if (have_cookie)
     XFreeEventData(xevent->xgeneric.display, &xevent->xcookie);
 }

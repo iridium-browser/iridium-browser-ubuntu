@@ -14,7 +14,6 @@
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/network/managed_state.h"
@@ -66,7 +65,7 @@ class NetworkStateHandlerTest;
 class CHROMEOS_EXPORT NetworkStateHandler
     : public internal::ShillPropertyHandler::Listener {
  public:
-  typedef std::vector<ManagedState*> ManagedStateList;
+  typedef std::vector<std::unique_ptr<ManagedState>> ManagedStateList;
   typedef std::vector<const NetworkState*> NetworkStateList;
   typedef std::vector<const DeviceState*> DeviceStateList;
 
@@ -216,6 +215,11 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // properties actually changed.
   void RequestUpdateForNetwork(const std::string& service_path);
 
+  // Informs NetworkStateHandler to notify observers that the properties for
+  // the network may have changed. Called e.g. when the proxy properties may
+  // have changed.
+  void SendUpdateNotificationForNetwork(const std::string& service_path);
+
   // Clears the last_error value for the NetworkState for |service_path|.
   void ClearLastErrorForNetwork(const std::string& service_path);
 
@@ -225,6 +229,14 @@ class CHROMEOS_EXPORT NetworkStateHandler
   // Sets the Manager.WakeOnLan property. Note: we do not track this state, we
   // only set it.
   void SetWakeOnLanEnabled(bool enabled);
+
+  // Enable or disable network bandwidth throttling, on all interfaces on the
+  // system. If |enabled| is true, |upload_rate_kbits| and |download_rate_kbits|
+  // are the desired rates (in kbits/s) to throttle to. If |enabled| is false,
+  // throttling is off, and the rates are ignored.
+  void SetNetworkThrottlingStatus(bool enabled,
+                                  uint32_t upload_rate_kbits,
+                                  uint32_t download_rate_kbits);
 
   const std::string& GetCheckPortalListForTest() const {
     return check_portal_list_;
@@ -245,7 +257,7 @@ class CHROMEOS_EXPORT NetworkStateHandler
                            const std::string& error);
 
   // Constructs and initializes an instance for testing.
-  static NetworkStateHandler* InitializeForTest();
+  static std::unique_ptr<NetworkStateHandler> InitializeForTest();
 
   // Default set of comma separated interfaces on which to enable
   // portal checking.
@@ -371,7 +383,7 @@ class CHROMEOS_EXPORT NetworkStateHandler
   std::string GetTechnologyForType(const NetworkTypePattern& type) const;
 
   // Returns all the technology types for |type|.
-  ScopedVector<std::string> GetTechnologiesForType(
+  std::vector<std::string> GetTechnologiesForType(
       const NetworkTypePattern& type) const;
 
   // Shill property handler instance, owned by this class.

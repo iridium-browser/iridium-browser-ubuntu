@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Utilities to verify the state of items in unit tests.
-
 #include "components/sync/test/engine/test_syncable_utils.h"
 
 #include "components/sync/syncable/directory.h"
@@ -68,7 +66,11 @@ Id GetOnlyEntryWithName(BaseTransaction* rtrans,
 void CreateTypeRoot(WriteTransaction* trans,
                     syncable::Directory* dir,
                     ModelType type) {
-  std::string tag_name = syncer::ModelTypeToRootTag(type);
+  // Root node for this type shouldn't exist yet.
+  Entry same_type_root(trans, GET_TYPE_ROOT, type);
+  DCHECK(!same_type_root.good());
+
+  std::string tag_name = ModelTypeToRootTag(type);
   syncable::MutableEntry node(trans, syncable::CREATE, type,
                               TestIdFactory::root(), tag_name);
   DCHECK(node.good());
@@ -80,9 +82,9 @@ void CreateTypeRoot(WriteTransaction* trans,
   node.PutServerVersion(20);
   node.PutBaseVersion(20);
   node.PutIsDel(false);
-  node.PutId(syncer::TestIdFactory::MakeServer(tag_name));
+  node.PutId(TestIdFactory::MakeServer(tag_name));
   sync_pb::EntitySpecifics specifics;
-  syncer::AddDefaultFieldValue(type, &specifics);
+  AddDefaultFieldValue(type, &specifics);
   node.PutServerSpecifics(specifics);
   node.PutSpecifics(specifics);
 }

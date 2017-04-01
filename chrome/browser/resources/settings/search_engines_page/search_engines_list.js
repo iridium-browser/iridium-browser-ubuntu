@@ -9,11 +9,16 @@
 Polymer({
   is: 'settings-search-engines-list',
 
+  behaviors: [settings.GlobalScrollTargetBehavior],
+
   properties: {
     /** @type {!Array<!SearchEngine>} */
-    engines: {
-      type: Array,
-      value: function() { return []; }
-    }
+    engines: Array,
+
+    /** @override */
+    subpageRoute: {
+      type: Object,
+      value: settings.Route.SEARCH_ENGINES,
+    },
   },
 });

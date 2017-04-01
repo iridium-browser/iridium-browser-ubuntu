@@ -28,7 +28,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/autofill/core/common/password_form.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/import/password_importer.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
@@ -53,6 +53,11 @@ namespace {
 
 const char kSortKeyPartsSeparator = ' ';
 
+// The character that is added to a sort key if there is no federation.
+// Note: to separate the entries w/ federation and the entries w/o federation,
+// this character should be alphabetically smaller than real federations.
+const char kSortKeyNoFederationSymbol = '-';
+
 // Helper function that returns the type of the entry (non-Android credentials,
 // Android w/ affiliated web realm (i.e. clickable) or w/o web realm).
 std::string GetEntryTypeCode(bool is_android_uri, bool is_clickable) {
@@ -63,12 +68,12 @@ std::string GetEntryTypeCode(bool is_android_uri, bool is_clickable) {
   return "2";
 }
 
-// Creates key for sorting password or password exception entries.
-// The key is eTLD+1 followed by subdomains
-// (e.g. secure.accounts.example.com => example.com.accounts.secure).
-// If |entry_type == SAVED|, username, password and federation are appended to
-// the key. The entry type code (non-Android, Android w/ or w/o affiliated web
-// realm) is also appended to the key.
+// Creates key for sorting password or password exception entries. The key is
+// eTLD+1 followed by the reversed list of domains (e.g.
+// secure.accounts.example.com => example.com.com.example.accounts.secure) and
+// the scheme. If |entry_type == SAVED|, username, password and federation are
+// appended to the key. The entry type code (non-Android, Android w/ or w/o
+// affiliated web realm) is also appended to the key.
 std::string CreateSortKey(const autofill::PasswordForm& form,
                           PasswordEntryType entry_type) {
   bool is_android_uri = false;
@@ -77,26 +82,29 @@ std::string CreateSortKey(const autofill::PasswordForm& form,
   std::string origin = password_manager::GetShownOriginAndLinkUrl(
       form, &is_android_uri, &link_url, &is_clickable);
 
-  if (!is_clickable) {  // e.g. android://com.example.r => r.example.com.
+  if (!is_clickable)  // e.g. android://com.example.r => r.example.com.
     origin = password_manager::StripAndroidAndReverse(origin);
-  }
 
   std::string site_name =
       net::registry_controlled_domains::GetDomainAndRegistry(
           origin, net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES);
   if (site_name.empty())  // e.g. localhost.
     site_name = origin;
-  std::string key =
-      site_name + password_manager::SplitByDotAndReverse(StringPiece(
-                      &origin[0], origin.length() - site_name.length()));
+  std::string key = site_name + password_manager::SplitByDotAndReverse(origin);
 
   if (entry_type == PasswordEntryType::SAVED) {
-    key = key + kSortKeyPartsSeparator +
-          base::UTF16ToUTF8(form.username_value) + kSortKeyPartsSeparator +
-          base::UTF16ToUTF8(form.password_value);
+    key += kSortKeyPartsSeparator + base::UTF16ToUTF8(form.username_value) +
+           kSortKeyPartsSeparator + base::UTF16ToUTF8(form.password_value);
+
+    key += kSortKeyPartsSeparator;
     if (!form.federation_origin.unique())
-      key = key + kSortKeyPartsSeparator + form.federation_origin.host();
+      key += form.federation_origin.host();
+    else
+      key += kSortKeyNoFederationSymbol;
   }
+
+  // To separate HTTP/HTTPS credentials, add the scheme to the key.
+  key += kSortKeyPartsSeparator + link_url.scheme();
 
   // Since Android and non-Android entries shouldn't be merged into one entry,
   // add the entry type code to the sort key.
@@ -219,7 +227,7 @@ void PasswordManagerPresenter::RequestShowPassword(size_t index) {
     return;
   }
 
-  sync_driver::SyncService* sync_service = nullptr;
+  syncer::SyncService* sync_service = nullptr;
   if (ProfileSyncServiceFactory::HasProfileSyncService(
           password_view_->GetProfile())) {
     sync_service =
@@ -248,7 +256,7 @@ PasswordManagerPresenter::GetAllPasswords() {
   std::vector<std::unique_ptr<autofill::PasswordForm>> ret_val;
 
   for (const auto& form : password_list_) {
-    ret_val.push_back(base::WrapUnique(new autofill::PasswordForm(*form)));
+    ret_val.push_back(base::MakeUnique<autofill::PasswordForm>(*form));
   }
 
   return ret_val;

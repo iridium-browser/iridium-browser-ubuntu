@@ -18,6 +18,8 @@
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "mojo/edk/embedder/embedder_internal.h"
+#include "mojo/edk/embedder/named_platform_channel_pair.h"
+#include "mojo/edk/embedder/named_platform_handle.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/system/broker.h"
 #include "mojo/edk/system/broker_host.h"
@@ -227,11 +229,16 @@ void NodeController::CloseChildPorts(const std::string& child_token) {
   AcceptIncomingMessages();
 }
 
+void NodeController::ClosePeerConnection(const std::string& peer_token) {
+  io_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&NodeController::ClosePeerConnectionOnIOThread,
+                            base::Unretained(this), peer_token));
+}
+
 void NodeController::ConnectToParent(ScopedPlatformHandle platform_handle) {
-// TODO(amistry): Consider the need for a broker on Windows.
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_NACL_SFI)
-  // On posix, use the bootstrap channel for the broker and receive the node's
-  // channel synchronously as the first message from the broker.
+#if !defined(OS_MACOSX) && !defined(OS_NACL_SFI)
+  // Use the bootstrap channel for the broker and receive the node's channel
+  // synchronously as the first message from the broker.
   base::ElapsedTimer timer;
   broker_.reset(new Broker(std::move(platform_handle)));
   platform_handle = broker_->GetParentPlatformHandle();
@@ -256,13 +263,14 @@ void NodeController::ConnectToParent(ScopedPlatformHandle platform_handle) {
 }
 
 void NodeController::ConnectToPeer(ScopedPlatformHandle handle,
-                                   const ports::PortRef& port) {
+                                   const ports::PortRef& port,
+                                   const std::string& peer_token) {
   ports::NodeName node_name;
   GenerateRandomName(&node_name);
   io_task_runner_->PostTask(
       FROM_HERE, base::Bind(&NodeController::ConnectToPeerOnIOThread,
                             base::Unretained(this), base::Passed(&handle),
-                            node_name, port));
+                            node_name, port, peer_token));
 }
 
 void NodeController::SetPortObserver(
@@ -356,7 +364,7 @@ int NodeController::MergeLocalPorts(const ports::PortRef& port0,
 
 scoped_refptr<PlatformSharedBuffer> NodeController::CreateSharedBuffer(
     size_t num_bytes) {
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_NACL_SFI)
+#if !defined(OS_MACOSX) && !defined(OS_NACL_SFI)
   // Shared buffer creation failure is fatal, so always use the broker when we
   // have one. This does mean that a non-root process that has children will use
   // the broker for shared buffer creation even though that process is
@@ -392,19 +400,34 @@ void NodeController::ConnectToChildOnIOThread(
     const ProcessErrorCallback& process_error_callback) {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_NACL)
+#if !defined(OS_MACOSX) && !defined(OS_NACL)
   PlatformChannelPair node_channel;
+  ScopedPlatformHandle server_handle = node_channel.PassServerHandle();
   // BrokerHost owns itself.
-  BrokerHost* broker_host = new BrokerHost(std::move(platform_handle));
-  broker_host->SendChannel(node_channel.PassClientHandle());
-  scoped_refptr<NodeChannel> channel = NodeChannel::Create(
-      this, node_channel.PassServerHandle(), io_task_runner_,
-      process_error_callback);
+  BrokerHost* broker_host =
+      new BrokerHost(process_handle, std::move(platform_handle));
+  bool channel_ok = broker_host->SendChannel(node_channel.PassClientHandle());
+
+#if defined(OS_WIN)
+  if (!channel_ok) {
+    // On Windows the above operation may fail if the channel is crossing a
+    // session boundary. In that case we fall back to a named pipe.
+    NamedPlatformChannelPair named_channel;
+    server_handle = named_channel.PassServerHandle();
+    broker_host->SendNamedChannel(named_channel.handle().name);
+  }
 #else
+  CHECK(channel_ok);
+#endif  // defined(OS_WIN)
+
+  scoped_refptr<NodeChannel> channel = NodeChannel::Create(
+      this, std::move(server_handle), io_task_runner_, process_error_callback);
+
+#else  // !defined(OS_MACOSX) && !defined(OS_NACL)
   scoped_refptr<NodeChannel> channel =
       NodeChannel::Create(this, std::move(platform_handle), io_task_runner_,
                           process_error_callback);
-#endif
+#endif  // !defined(OS_MACOSX) && !defined(OS_NACL)
 
   // We set up the child channel with a temporary name so it can be identified
   // as a pending child if it writes any messages to the channel. We may start
@@ -447,17 +470,33 @@ void NodeController::ConnectToParentOnIOThread(
 
 void NodeController::ConnectToPeerOnIOThread(ScopedPlatformHandle handle,
                                              ports::NodeName token,
-                                             ports::PortRef port) {
+                                             ports::PortRef port,
+                                             const std::string& peer_token) {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
 
   scoped_refptr<NodeChannel> channel =
       NodeChannel::Create(this, std::move(handle), io_task_runner_, {});
-  pending_peers_.insert({token, {channel, port}});
+  peer_connections_.insert(
+      {token, PeerConnection{channel, port, peer_token}});
+  peers_by_token_.insert({peer_token, token});
 
   channel->SetRemoteNodeName(token);
   channel->Start();
 
   channel->AcceptPeer(name_, token, port.name());
+}
+
+void NodeController::ClosePeerConnectionOnIOThread(
+    const std::string& peer_token) {
+  RequestContext request_context(RequestContext::Source::SYSTEM);
+  auto peer = peers_by_token_.find(peer_token);
+  // The connection may already be closed.
+  if (peer == peers_by_token_.end())
+    return;
+
+  // |peer| may be removed so make a copy of |name|.
+  ports::NodeName name = peer->second;
+  DropPeer(name, nullptr);
 }
 
 scoped_refptr<NodeChannel> NodeController::GetPeerChannel(
@@ -592,6 +631,13 @@ void NodeController::DropPeer(const ports::NodeName& name,
   if (is_parent)
     CancelPendingPortMerges();
 
+  auto peer = peer_connections_.find(name);
+  if (peer != peer_connections_.end()) {
+    peers_by_token_.erase(peer->second.peer_token);
+    ports_to_close.push_back(peer->second.local_port);
+    peer_connections_.erase(peer);
+  }
+
   for (const auto& port : ports_to_close)
     node_->ClosePort(port);
 
@@ -673,6 +719,11 @@ void NodeController::SendPeerMessage(const ports::NodeName& name,
 }
 
 void NodeController::AcceptIncomingMessages() {
+  // This is an impactically large value which should never be reached in
+  // practice. See the CHECK below for usage.
+  constexpr size_t kMaxAcceptedMessages = 1000000;
+
+  size_t num_messages_accepted = 0;
   while (incoming_messages_flag_) {
     // TODO: We may need to be more careful to avoid starving the rest of the
     // thread here. Revisit this if it turns out to be a problem. One
@@ -692,11 +743,23 @@ void NodeController::AcceptIncomingMessages() {
     incoming_messages_flag_.Set(false);
     messages_lock_.Release();
 
+    num_messages_accepted += messages.size();
     while (!messages.empty()) {
       node_->AcceptMessage(std::move(messages.front()));
       messages.pop();
     }
+
+    // This is effectively a safeguard against potential bugs which might lead
+    // to runaway message cycles. If any such cycles arise, we'll start seeing
+    // crash reports from this location.
+    CHECK_LE(num_messages_accepted, kMaxAcceptedMessages);
   }
+
+  UMA_HISTOGRAM_CUSTOM_COUNTS("Mojo.System.MessagesAcceptedPerEvent",
+                              static_cast<int32_t>(num_messages_accepted),
+                              1 /* min */,
+                              500 /* max */,
+                              50 /* bucket count */);
 
   AttemptShutdownIfRequested();
 }
@@ -742,7 +805,7 @@ void NodeController::DropAllPeers() {
     peers_.clear();
     pending_children_.clear();
     pending_peer_messages_.clear();
-    pending_peers_.clear();
+    peer_connections_.clear();
   }
 
   for (const auto& peer : all_peers)
@@ -1257,21 +1320,31 @@ void NodeController::OnAcceptPeer(const ports::NodeName& from_node,
                                   const ports::PortName& port_name) {
   DCHECK(io_task_runner_->RunsTasksOnCurrentThread());
 
-  auto it = pending_peers_.find(from_node);
-  if (it == pending_peers_.end()) {
+  auto it = peer_connections_.find(from_node);
+  if (it == peer_connections_.end()) {
     DLOG(ERROR) << "Received unexpected AcceptPeer message from " << from_node;
     DropPeer(from_node, nullptr);
     return;
   }
 
-  scoped_refptr<NodeChannel> channel = it->second.first;
-  ports::PortRef local_port = it->second.second;
-  pending_peers_.erase(it);
+  scoped_refptr<NodeChannel> channel = std::move(it->second.channel);
+  ports::PortRef local_port = it->second.local_port;
+  std::string peer_token = std::move(it->second.peer_token);
+  peer_connections_.erase(it);
   DCHECK(channel);
 
-  DVLOG(1) << "Node " << name_ << " accepted peer " << peer_name;
+  // If the peer connection is a self connection (which is used in tests),
+  // drop the channel to it and skip straight to merging the ports.
+  if (name_ == peer_name) {
+    peers_by_token_.erase(peer_token);
+  } else {
+    peers_by_token_[peer_token] = peer_name;
+    peer_connections_.insert(
+        {peer_name, PeerConnection{nullptr, local_port, peer_token}});
+    DVLOG(1) << "Node " << name_ << " accepted peer " << peer_name;
 
-  AddPeer(peer_name, channel, false /* start_channel */);
+    AddPeer(peer_name, channel, false /* start_channel */);
+  }
 
   // We need to choose one side to initiate the port merge. It doesn't matter
   // who does it as long as they don't both try. Simple solution: pick the one
@@ -1353,6 +1426,28 @@ void NodeController::AttemptShutdownIfRequested() {
 
   callback.Run();
 }
+
+NodeController::PeerConnection::PeerConnection() = default;
+
+NodeController::PeerConnection::PeerConnection(
+    const PeerConnection& other) = default;
+
+NodeController::PeerConnection::PeerConnection(
+    PeerConnection&& other) = default;
+
+NodeController::PeerConnection::PeerConnection(
+    const scoped_refptr<NodeChannel>& channel,
+    const ports::PortRef& local_port,
+    const std::string& peer_token)
+    : channel(channel), local_port(local_port), peer_token(peer_token) {}
+
+NodeController::PeerConnection::~PeerConnection() = default;
+
+NodeController::PeerConnection& NodeController::PeerConnection::
+operator=(const PeerConnection& other) = default;
+
+NodeController::PeerConnection& NodeController::PeerConnection::
+operator=(PeerConnection&& other) = default;
 
 }  // namespace edk
 }  // namespace mojo

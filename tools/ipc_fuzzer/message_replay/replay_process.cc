@@ -19,7 +19,6 @@
 #include "content/public/common/mojo_channel_switches.h"
 #include "ipc/ipc_channel_mojo.h"
 #include "ipc/ipc_descriptors.h"
-#include "ipc/ipc_switches.h"
 #include "mojo/edk/embedder/embedder.h"
 #include "mojo/edk/embedder/platform_channel_pair.h"
 #include "mojo/edk/embedder/scoped_ipc_support.h"
@@ -89,45 +88,26 @@ bool ReplayProcess::Initialize(int argc, const char** argv) {
 
 #if defined(OS_POSIX)
   base::GlobalDescriptors* g_fds = base::GlobalDescriptors::GetInstance();
-  g_fds->Set(kPrimaryIPCChannel,
-             kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
   g_fds->Set(kMojoIPCChannel,
              kMojoIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
 #endif
 
-  mojo_ipc_support_.reset(
-      new mojo::edk::ScopedIPCSupport(io_thread_.task_runner()));
+  mojo_ipc_support_.reset(new mojo::edk::ScopedIPCSupport(
+      io_thread_.task_runner(),
+      mojo::edk::ScopedIPCSupport::ShutdownPolicy::FAST));
   InitializeMojoIPCChannel();
 
   return true;
 }
 
 void ReplayProcess::OpenChannel() {
-  // TODO(morrita): As the adoption of ChannelMojo spreads, this
-  // criteria has to be updated.
-  std::string process_type =
-      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kProcessType);
-  bool should_use_mojo = process_type == switches::kRendererProcess;
-  if (should_use_mojo) {
-    std::string token =
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kMojoChannelToken);
-    channel_ = IPC::ChannelProxy::Create(
-        IPC::ChannelMojo::CreateClientFactory(
-            mojo::edk::CreateChildMessagePipe(
-                base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-                    switches::kMojoChannelToken)),
-            io_thread_.task_runner()),
-        this, io_thread_.task_runner());
-  } else {
-    std::string channel_name =
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kProcessChannelID);
-    channel_ =
-        IPC::ChannelProxy::Create(channel_name, IPC::Channel::MODE_CLIENT, this,
-                                  io_thread_.task_runner());
-  }
+  channel_ = IPC::ChannelProxy::Create(
+      IPC::ChannelMojo::CreateClientFactory(
+          mojo::edk::CreateChildMessagePipe(
+              base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+                  switches::kMojoChannelToken)),
+          io_thread_.task_runner()),
+      this, io_thread_.task_runner());
 }
 
 bool ReplayProcess::OpenTestcase() {

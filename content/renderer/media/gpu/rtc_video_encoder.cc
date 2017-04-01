@@ -11,7 +11,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
 #include "base/single_thread_task_runner.h"
@@ -41,14 +41,10 @@ media::VideoCodecProfile WebRTCVideoCodecToVideoCodecProfile(
   switch (type) {
     case webrtc::kVideoCodecVP8:
       return media::VP8PROFILE_ANY;
-    case webrtc::kVideoCodecH264: {
-      switch (codec_settings->codecSpecific.H264.profile) {
-        case webrtc::kProfileBase:
-          return media::H264PROFILE_BASELINE;
-        case webrtc::kProfileMain:
-          return media::H264PROFILE_MAIN;
-      }
-    }
+    case webrtc::kVideoCodecH264:
+      // TODO(magjed): WebRTC is only using Baseline profile for now. Update
+      // once http://crbug/webrtc/6337 is fixed.
+      return media::H264PROFILE_BASELINE;
     default:
       NOTREACHED() << "Unrecognized video codec type";
       return media::VIDEO_CODEC_PROFILE_UNKNOWN;
@@ -565,7 +561,8 @@ void RTCVideoEncoder::Impl::EncodeOneFrame() {
   if (next_frame->video_frame_buffer()->native_handle()) {
     frame = static_cast<media::VideoFrame*>(
         next_frame->video_frame_buffer()->native_handle());
-    requires_copy = RequiresSizeChange(frame);
+    requires_copy = RequiresSizeChange(frame) ||
+                    frame->storage_type() != media::VideoFrame::STORAGE_SHMEM;
   } else {
     requires_copy = true;
   }
@@ -718,11 +715,12 @@ void RTCVideoEncoder::Impl::ReturnEncodedImage(
     info.codecSpecific.VP8.keyIdx = -1;
   }
 
-  const int32_t retval =
-      encoded_image_callback_->Encoded(image, &info, &header);
-  if (retval < 0) {
-    DVLOG(2) << "ReturnEncodedImage(): encoded_image_callback_ returned "
-             << retval;
+  const auto result =
+      encoded_image_callback_->OnEncodedImage(image, &info, &header);
+  if (result.error != webrtc::EncodedImageCallback::Result::OK) {
+    DVLOG(2)
+        << "ReturnEncodedImage(): webrtc::EncodedImageCallback::Result.error = "
+        << result.error;
   }
 
   UseOutputBitstreamBufferId(bitstream_buffer_id);
@@ -750,7 +748,10 @@ int32_t RTCVideoEncoder::InitEncode(const webrtc::VideoCodec* codec_settings,
            << ", width=" << codec_settings->width
            << ", height=" << codec_settings->height
            << ", startBitrate=" << codec_settings->startBitrate;
-  DCHECK(!impl_.get());
+  if (impl_) {
+    DVLOG(1) << "Release because of reinitialization";
+    Release();
+  }
 
   impl_ = new Impl(gpu_factories_, video_codec_type_);
   const media::VideoCodecProfile profile = WebRTCVideoCodecToVideoCodecProfile(

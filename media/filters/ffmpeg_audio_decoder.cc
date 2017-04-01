@@ -87,12 +87,9 @@ static int GetAudioBuffer(struct AVCodecContext* s, AVFrame* frame, int flags) {
   // Determine how big the buffer should be and allocate it. FFmpeg may adjust
   // how big each channel data is in order to meet the alignment policy, so
   // we need to take this into consideration.
-  int buffer_size_in_bytes =
-      av_samples_get_buffer_size(&frame->linesize[0],
-                                 channels,
-                                 frame->nb_samples,
-                                 format,
-                                 AudioBuffer::kChannelAlignment);
+  int buffer_size_in_bytes = av_samples_get_buffer_size(
+      &frame->linesize[0], channels, frame->nb_samples, format,
+      0 /* align, use ffmpeg default */);
   // Check for errors from av_samples_get_buffer_size().
   if (buffer_size_in_bytes < 0)
     return buffer_size_in_bytes;
@@ -403,6 +400,9 @@ bool FFmpegAudioDecoder::ConfigureDecoder() {
   codec_context_->get_buffer2 = GetAudioBuffer;
   codec_context_->refcounted_frames = 1;
 
+  if (config_.codec() == kCodecOpus)
+    codec_context_->request_sample_fmt = AV_SAMPLE_FMT_FLT;
+
   AVCodec* codec = avcodec_find_decoder(codec_context_->codec_id);
   if (!codec || avcodec_open2(codec_context_.get(), codec, NULL) < 0) {
     DLOG(ERROR) << "Could not initialize audio decoder: "
@@ -432,9 +432,13 @@ bool FFmpegAudioDecoder::ConfigureDecoder() {
 }
 
 void FFmpegAudioDecoder::ResetTimestampState() {
-  discard_helper_.reset(new AudioDiscardHelper(config_.samples_per_second(),
-                                               config_.codec_delay()));
-  discard_helper_->Reset(config_.codec_delay());
+  // Opus codec delay is handled by ffmpeg.
+  const int codec_delay =
+      config_.codec() == kCodecOpus ? 0 : config_.codec_delay();
+  discard_helper_.reset(
+      new AudioDiscardHelper(config_.samples_per_second(), codec_delay,
+                             config_.codec() == kCodecVorbis));
+  discard_helper_->Reset(codec_delay);
 }
 
 }  // namespace media

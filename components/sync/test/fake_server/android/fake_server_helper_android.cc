@@ -4,10 +4,8 @@
 
 #include "components/sync/test/fake_server/android/fake_server_helper_android.h"
 
-#include <jni.h>
 #include <stddef.h>
 
-#include <memory>
 #include <set>
 #include <vector>
 
@@ -15,10 +13,9 @@
 #include "base/android/jni_string.h"
 #include "base/logging.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/core/network_resources.h"
+#include "components/sync/engine/net/network_resources.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/fake_server/bookmark_entity_builder.h"
-#include "components/sync/test/fake_server/entity_builder_factory.h"
 #include "components/sync/test/fake_server/fake_server.h"
 #include "components/sync/test/fake_server/fake_server_network_resources.h"
 #include "components/sync/test/fake_server/fake_server_verifier.h"
@@ -176,7 +173,7 @@ void FakeServerHelperAndroid::DeserializeEntitySpecifics(
     sync_pb::EntitySpecifics* entity_specifics) {
   int specifics_bytes_length = env->GetArrayLength(serialized_entity_specifics);
   jbyte* specifics_bytes =
-      env->GetByteArrayElements(serialized_entity_specifics, NULL);
+      env->GetByteArrayElements(serialized_entity_specifics, nullptr);
   std::string specifics_string(reinterpret_cast<char*>(specifics_bytes),
                                specifics_bytes_length);
 
@@ -301,7 +298,7 @@ void FakeServerHelperAndroid::DeleteEntity(JNIEnv* env,
       reinterpret_cast<fake_server::FakeServer*>(fake_server);
   std::string native_id = base::android::ConvertJavaStringToUTF8(env, id);
   fake_server_ptr->InjectEntity(
-      fake_server::TombstoneEntity::Create(native_id));
+      fake_server::TombstoneEntity::Create(native_id, std::string()));
 }
 
 void FakeServerHelperAndroid::ClearServerData(JNIEnv* env,

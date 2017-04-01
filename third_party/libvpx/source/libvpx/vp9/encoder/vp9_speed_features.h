@@ -67,8 +67,10 @@ typedef enum {
   ALLOW_RECODE_KFMAXBW = 1,
   // Allow recode only for KF/ARF/GF frames.
   ALLOW_RECODE_KFARFGF = 2,
+  // Allow recode for ARF/GF/KF and first normal frame in each group.
+  ALLOW_RECODE_FIRST = 3,
   // Allow recode for all frames based on bitrate constraints.
-  ALLOW_RECODE = 3,
+  ALLOW_RECODE = 4,
 } RECODE_LOOP_TYPE;
 
 typedef enum {
@@ -239,11 +241,17 @@ typedef struct SPEED_FEATURES {
   int coeff_prob_appx_step;
 
   // Enable uniform quantizer followed by trellis coefficient optimization
-  int quant_coeff_opt;
+  int allow_quant_coeff_opt;
+  double quant_opt_thresh;
+
+  // Enable asymptotic closed-loop encoding decision for key frame and
+  // alternate reference frames.
+  int allow_acl;
 
   // Use transform domain distortion. Use pixel domain distortion in speed 0
   // and certain situations in higher speed to improve the RD model precision.
-  int txfm_domain_distortion;
+  int allow_txfm_domain_distortion;
+  double tx_domain_thresh;
 
   // The threshold is to determine how slow the motino is, it is used when
   // use_lastframe_partitioning is set to LAST_FRAME_PARTITION_LOW_MOTION
@@ -399,7 +407,8 @@ typedef struct SPEED_FEATURES {
 
   // This feature controls the tolerence vs target used in deciding whether to
   // recode a frame. It has no meaning if recode is disabled.
-  int recode_tolerance;
+  int recode_tolerance_low;
+  int recode_tolerance_high;
 
   // This variable controls the maximum block size where intra blocks can be
   // used in inter frames.
@@ -447,11 +456,13 @@ typedef struct SPEED_FEATURES {
   int short_circuit_flat_blocks;
 
   // Skip a number of expensive mode evaluations for blocks with very low
-  // temporal variance.
-  // 1: Skip golden non-zeromv and ALL INTRA for bsize >= 32x32.
+  // temporal variance. If the low temporal variance flag is set for a block,
+  // do the following:
+  // 1: Skip all golden modes and ALL INTRA for bsize >= 32x32.
   // 2: Skip golden non-zeromv and newmv-last for bsize >= 16x16, skip ALL
   // INTRA for bsize >= 32x32 and vert/horz INTRA for bsize 16x16, 16x32 and
   // 32x16.
+  // 3: Same as (2), but also skip golden zeromv.
   int short_circuit_low_temp_var;
 
   // Limits the rd-threshold update for early exit for the newmv-last mode,
@@ -464,6 +475,9 @@ typedef struct SPEED_FEATURES {
   // Bias to use base mv and skip 1/4 subpel search when use base mv in
   // enhancement layer.
   int base_mv_aggressive;
+
+  // Global flag to enable partition copy from the previous frame.
+  int copy_partition_flag;
 } SPEED_FEATURES;
 
 struct VP9_COMP;

@@ -30,6 +30,7 @@
 #include <algorithm>
 #include <limits>
 #include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -649,20 +650,17 @@ bool GenerateAlternateVersion(const base::FilePath& original_installer_path,
 
   // Unpack chrome.packed.7z (static build only).
   if (!chrome_packed_7z.empty()) {
-    base::string16 chrome_7z_name;
-    if (LzmaUtil::UnPackArchive(chrome_packed_7z.value(),
-                                work_dir.directory().value(),
-                                &chrome_7z_name) != NO_ERROR) {
+    if (UnPackArchive(chrome_packed_7z, work_dir.directory(), &chrome_7z,
+                      nullptr, nullptr) != ERROR_SUCCESS) {
       LOG(DFATAL) << "Failed unpacking \"" << chrome_packed_7z.value() << "\"";
       return false;
     }
-    chrome_7z = base::FilePath(chrome_7z_name);
   }
   DCHECK(!chrome_7z.empty());
 
   // Unpack chrome.7z
-  if (LzmaUtil::UnPackArchive(chrome_7z.value(), work_dir.directory().value(),
-                              NULL) != NO_ERROR) {
+  if (UnPackArchive(chrome_7z, work_dir.directory(), nullptr, nullptr,
+                    nullptr) != ERROR_SUCCESS) {
     LOG(DFATAL) << "Failed unpacking \"" << chrome_7z.value() << "\"";
     return false;
   }
@@ -743,33 +741,18 @@ base::string16 GenerateAlternatePEFileVersion(
     return base::string16();
   }
 
-  base::Version new_version(base::UTF16ToASCII(ctx.new_version_str));
-  GenerateSpecificPEFileVersion(original_file, target_file, new_version);
+  DCHECK_EQ(ctx.current_version_str.size(), ctx.new_version_str.size());
 
-  return ctx.new_version_str;
-}
-
-bool GenerateSpecificPEFileVersion(const base::FilePath& original_file,
-                                   const base::FilePath& target_file,
-                                   const base::Version& version) {
-  // First copy original_file to target_file.
   if (!base::CopyFile(original_file, target_file)) {
     LOG(DFATAL) << "Failed copying \"" << original_file.value()
                 << "\" to \"" << target_file.value() << "\"";
-    return false;
+    return base::string16();
   }
 
-  VisitResourceContext ctx;
-  if (!GetFileVersion(target_file, &ctx.current_version)) {
-    LOG(DFATAL) << "Failed reading version from \"" << target_file.value()
-                << "\"";
-    return false;
-  }
-  ctx.current_version_str = ctx.current_version.ToString();
-  ctx.new_version = ChromeVersion::FromString(version.GetString());
-  ctx.new_version_str = ctx.new_version.ToString();
+  if (!UpdateVersionIfMatch(target_file, &ctx))
+    return base::string16();
 
-  return UpdateVersionIfMatch(target_file, &ctx);
+  return ctx.new_version_str;
 }
 
 }  // namespace upgrade_test

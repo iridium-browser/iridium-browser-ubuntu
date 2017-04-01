@@ -43,7 +43,7 @@ class CHROMEOS_EXPORT ShillPropertyHandler
     : public ShillPropertyChangedObserver,
       public base::SupportsWeakPtr<ShillPropertyHandler> {
  public:
-  typedef std::map<std::string, ShillPropertyObserver*>
+  typedef std::map<std::string, std::unique_ptr<ShillPropertyObserver>>
       ShillPropertyObserverMap;
 
   class CHROMEOS_EXPORT Listener {
@@ -138,6 +138,14 @@ class CHROMEOS_EXPORT ShillPropertyHandler
   // Sets the Manager.WakeOnLan property. Note: we do not track this state, we
   // only set it.
   void SetWakeOnLanEnabled(bool enabled);
+
+  // Calls shill to enable/disable network bandwidth throttling. If |enabled|
+  // is true, |upload_rate_kbits| and |download_rate_kbits| specify the rate
+  // in kbits/s to throttle to. If |enabled| is false, throttling is disabled
+  // and the rates are ignored.
+  void SetNetworkThrottlingStatus(bool enabled,
+                                  uint32_t upload_rate_kbits,
+                                  uint32_t download_rate_kbits);
 
   // Requests an immediate network scan.
   void RequestScan() const;

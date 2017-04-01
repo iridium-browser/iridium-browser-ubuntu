@@ -120,12 +120,9 @@ class SuggestionsSource : public content::URLDataSource {
   std::string GetSource() const override;
   void StartDataRequest(
       const std::string& path,
-      int render_process_id,
-      int render_frame_id,
+      const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const content::URLDataSource::GotDataCallback& callback) override;
   std::string GetMimeType(const std::string& path) const override;
-  base::MessageLoop* MessageLoopForRequestPath(
-      const std::string& path) const override;
 
  private:
   ~SuggestionsSource() override;
@@ -182,7 +179,8 @@ std::string SuggestionsSource::GetSource() const {
 }
 
 void SuggestionsSource::StartDataRequest(
-    const std::string& path, int render_process_id, int render_frame_id,
+    const std::string& path,
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
     const content::URLDataSource::GotDataCallback& callback) {
   // If this was called as "chrome://suggestions/refresh", we also trigger an
   // async update of the suggestions.
@@ -202,7 +200,8 @@ void SuggestionsSource::StartDataRequest(
     suggestions_service->FetchSuggestionsData();
 
   SuggestionsProfile suggestions_profile =
-      suggestions_service->GetSuggestionsDataFromCache();
+      suggestions_service->GetSuggestionsDataFromCache().value_or(
+          SuggestionsProfile());
   size_t size = suggestions_profile.suggestions_size();
   if (!size) {
     std::string output = RenderOutputHtmlNoSuggestions(is_refresh);
@@ -230,12 +229,6 @@ void SuggestionsSource::StartDataRequest(
 
 std::string SuggestionsSource::GetMimeType(const std::string& path) const {
   return "text/html";
-}
-
-base::MessageLoop* SuggestionsSource::MessageLoopForRequestPath(
-    const std::string& path) const {
-  // This can be accessed from the IO thread.
-  return content::URLDataSource::MessageLoopForRequestPath(path);
 }
 
 void SuggestionsSource::OnThumbnailsFetched(RequestContext* context) {

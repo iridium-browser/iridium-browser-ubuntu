@@ -4,10 +4,11 @@
 
 package org.chromium.chrome.browser.snackbar;
 
-import android.test.suitebuilder.annotation.MediumTest;
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.MediumTest;
+import android.support.test.filters.SmallTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.test.ChromeTabbedActivityTestBase;
 import org.chromium.content.browser.test.util.Criteria;
@@ -17,8 +18,8 @@ import org.chromium.content.browser.test.util.CriteriaHelper;
  * Tests for {@link SnackbarManager}.
  */
 public class SnackbarTest extends ChromeTabbedActivityTestBase {
-    SnackbarManager mManager;
-    SnackbarController mDefaultController = new SnackbarController() {
+    private SnackbarManager mManager;
+    private SnackbarController mDefaultController = new SnackbarController() {
         @Override
         public void onDismissNoAction(Object actionData) {
         }
@@ -28,6 +29,18 @@ public class SnackbarTest extends ChromeTabbedActivityTestBase {
         }
     };
 
+    private SnackbarController mDismissController = new SnackbarController() {
+        @Override
+        public void onDismissNoAction(Object actionData) {
+            mDismissed = true;
+        }
+
+        @Override
+        public void onAction(Object actionData) { }
+    };
+
+    private boolean mDismissed;
+
     @Override
     public void startMainActivity() throws InterruptedException {
         SnackbarManager.setDurationForTesting(1000);
@@ -36,7 +49,8 @@ public class SnackbarTest extends ChromeTabbedActivityTestBase {
     }
 
     @MediumTest
-    public void testStackQueueOrder() throws InterruptedException {
+    @RetryOnFailure
+    public void testStackQueueOrder() {
         final Snackbar stackbar = Snackbar.make("stack", mDefaultController,
                 Snackbar.TYPE_ACTION, Snackbar.UMA_TEST_SNACKBAR);
         final Snackbar queuebar = Snackbar.make("queue", mDefaultController,
@@ -77,7 +91,8 @@ public class SnackbarTest extends ChromeTabbedActivityTestBase {
     }
 
     @SmallTest
-    public void testQueueStackOrder() throws InterruptedException {
+    @RetryOnFailure
+    public void testQueueStackOrder() {
         final Snackbar stackbar = Snackbar.make("stack", mDefaultController,
                 Snackbar.TYPE_ACTION, Snackbar.UMA_TEST_SNACKBAR);
         final Snackbar queuebar = Snackbar.make("queue", mDefaultController,
@@ -112,6 +127,39 @@ public class SnackbarTest extends ChromeTabbedActivityTestBase {
             @Override
             public boolean isSatisfied() {
                 return !mManager.isShowing();
+            }
+        });
+    }
+
+    @SmallTest
+    public void testDismissSnackbar() {
+        final Snackbar snackbar = Snackbar.make("stack", mDismissController,
+                Snackbar.TYPE_ACTION, Snackbar.UMA_TEST_SNACKBAR);
+        mDismissed = false;
+        ThreadUtils.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mManager.showSnackbar(snackbar);
+            }
+        });
+        CriteriaHelper.pollUiThread(
+                new Criteria("Snackbar on queue was not cleared by snackbar stack.") {
+                    @Override
+                    public boolean isSatisfied() {
+                        return mManager.isShowing()
+                                && mManager.getCurrentSnackbarForTesting() == snackbar;
+                    }
+                });
+        ThreadUtils.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mManager.dismissSnackbars(mDismissController);
+            }
+        });
+        CriteriaHelper.pollUiThread(new Criteria("Snackbar did not time out") {
+            @Override
+            public boolean isSatisfied() {
+                return !mManager.isShowing() && mDismissed;
             }
         });
     }

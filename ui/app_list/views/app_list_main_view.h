@@ -18,10 +18,6 @@
 #include "ui/app_list/views/search_result_list_view_delegate.h"
 #include "ui/views/view.h"
 
-namespace views {
-class Widget;
-}
-
 namespace app_list {
 
 class AppListItem;
@@ -65,9 +61,6 @@ class APP_LIST_EXPORT AppListMainView : public views::View,
   ContentsView* contents_view() const { return contents_view_; }
   AppListModel* model() { return model_; }
   AppListViewDelegate* view_delegate() { return delegate_; }
-
-  // Returns true if the app list should be centered and in landscape mode.
-  bool ShouldCenterWindow() const;
 
   // Called when the search box's visibility is changed.
   void NotifySearchBoxVisibilityChanged();

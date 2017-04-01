@@ -146,7 +146,8 @@ void EnterpriseEnrollmentHelperImpl::DoEnroll(const std::string& token) {
   oauth_token_ = token;
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  if (connector->IsEnterpriseManaged() &&
+  // Re-enrollment is not implemented for Active Directory.
+  if (connector->IsCloudManaged() &&
       connector->GetEnterpriseDomain() != enrolling_user_domain_) {
     LOG(ERROR) << "Trying to re-enroll to a different domain than "
                << connector->GetEnterpriseDomain();
@@ -157,21 +158,23 @@ void EnterpriseEnrollmentHelperImpl::DoEnroll(const std::string& token) {
     return;
   }
 
-  policy::DeviceCloudPolicyInitializer::AllowedDeviceModes device_modes;
-  device_modes[policy::DEVICE_MODE_ENTERPRISE] = true;
   connector->ScheduleServiceInitialization(0);
-
   policy::DeviceCloudPolicyInitializer* dcp_initializer =
       connector->GetDeviceCloudPolicyInitializer();
   CHECK(dcp_initializer);
   dcp_initializer->StartEnrollment(
       connector->device_management_service(), enrollment_config_, token,
-      device_modes,
       base::Bind(&EnterpriseEnrollmentHelperImpl::OnEnrollmentFinished,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
+  // Don't update device attributes for Active Directory management.
+  if (!enrollment_config_.management_realm.empty()) {
+    OnDeviceAttributeUpdatePermission(false);
+    return;
+  }
+
   // TODO(pbond): remove this LOG once http://crbug.com/586961 is fixed.
   LOG(WARNING) << "Get device attribute update permission";
   policy::BrowserPolicyConnectorChromeOS* connector =
@@ -236,7 +239,7 @@ void EnterpriseEnrollmentHelperImpl::OnEnrollmentFinished(
   ReportEnrollmentStatus(status);
   if (oauth_status_ != OAUTH_NOT_STARTED)
     oauth_status_ = OAUTH_FINISHED;
-  if (status.status() == policy::EnrollmentStatus::STATUS_SUCCESS) {
+  if (status.status() == policy::EnrollmentStatus::SUCCESS) {
     success_ = true;
     StartupUtils::MarkOobeCompleted();
     status_consumer()->OnDeviceEnrolled(additional_token_);
@@ -263,7 +266,6 @@ void EnterpriseEnrollmentHelperImpl::ReportAuthStatus(
     case GoogleServiceAuthError::NONE:
     case GoogleServiceAuthError::CAPTCHA_REQUIRED:
     case GoogleServiceAuthError::TWO_FACTOR:
-    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
     case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS:
     case GoogleServiceAuthError::REQUEST_CANCELED:
     case GoogleServiceAuthError::UNEXPECTED_SERVICE_RESPONSE:
@@ -289,6 +291,7 @@ void EnterpriseEnrollmentHelperImpl::ReportAuthStatus(
       UMA(policy::kMetricEnrollmentNetworkFailed);
       LOG(WARNING) << "Network error " << error.state();
       break;
+    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED_DEPRECATED:
     case GoogleServiceAuthError::NUM_STATES:
       NOTREACHED();
       break;
@@ -298,11 +301,11 @@ void EnterpriseEnrollmentHelperImpl::ReportAuthStatus(
 void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
     policy::EnrollmentStatus status) {
   switch (status.status()) {
-    case policy::EnrollmentStatus::STATUS_SUCCESS:
+    case policy::EnrollmentStatus::SUCCESS:
       UMA(policy::kMetricEnrollmentOK);
       return;
-    case policy::EnrollmentStatus::STATUS_REGISTRATION_FAILED:
-    case policy::EnrollmentStatus::STATUS_POLICY_FETCH_FAILED:
+    case policy::EnrollmentStatus::REGISTRATION_FAILED:
+    case policy::EnrollmentStatus::POLICY_FETCH_FAILED:
       switch (status.client_status()) {
         case policy::DM_STATUS_SUCCESS:
           NOTREACHED();
@@ -356,70 +359,73 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
           UMA(policy::kMetricEnrollmentRegisterCannotSignRequest);
       }
       break;
-    case policy::EnrollmentStatus::STATUS_REGISTRATION_BAD_MODE:
+    case policy::EnrollmentStatus::REGISTRATION_BAD_MODE:
       UMA(policy::kMetricEnrollmentInvalidEnrollmentMode);
       break;
-    case policy::EnrollmentStatus::STATUS_NO_STATE_KEYS:
+    case policy::EnrollmentStatus::NO_STATE_KEYS:
       UMA(policy::kMetricEnrollmentNoStateKeys);
       break;
-    case policy::EnrollmentStatus::STATUS_VALIDATION_FAILED:
+    case policy::EnrollmentStatus::VALIDATION_FAILED:
       UMA(policy::kMetricEnrollmentPolicyValidationFailed);
       break;
-    case policy::EnrollmentStatus::STATUS_STORE_ERROR:
+    case policy::EnrollmentStatus::STORE_ERROR:
       UMA(policy::kMetricEnrollmentCloudPolicyStoreError);
       break;
-    case policy::EnrollmentStatus::STATUS_LOCK_ERROR:
+    case policy::EnrollmentStatus::LOCK_ERROR:
       switch (status.lock_status()) {
-        case policy::EnterpriseInstallAttributes::LOCK_SUCCESS:
-        case policy::EnterpriseInstallAttributes::LOCK_NOT_READY:
+        case InstallAttributes::LOCK_SUCCESS:
+        case InstallAttributes::LOCK_NOT_READY:
           NOTREACHED();
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_TIMEOUT:
+        case InstallAttributes::LOCK_TIMEOUT:
           UMA(policy::kMetricEnrollmentLockboxTimeoutError);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_BACKEND_INVALID:
+        case InstallAttributes::LOCK_BACKEND_INVALID:
           UMA(policy::kMetricEnrollmentLockBackendInvalid);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_ALREADY_LOCKED:
+        case InstallAttributes::LOCK_ALREADY_LOCKED:
           UMA(policy::kMetricEnrollmentLockAlreadyLocked);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_SET_ERROR:
+        case InstallAttributes::LOCK_SET_ERROR:
           UMA(policy::kMetricEnrollmentLockSetError);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_FINALIZE_ERROR:
+        case InstallAttributes::LOCK_FINALIZE_ERROR:
           UMA(policy::kMetricEnrollmentLockFinalizeError);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_READBACK_ERROR:
+        case InstallAttributes::LOCK_READBACK_ERROR:
           UMA(policy::kMetricEnrollmentLockReadbackError);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_WRONG_DOMAIN:
+        case InstallAttributes::LOCK_WRONG_DOMAIN:
           UMA(policy::kMetricEnrollmentLockDomainMismatch);
           break;
-        case policy::EnterpriseInstallAttributes::LOCK_WRONG_MODE:
+        case InstallAttributes::LOCK_WRONG_MODE:
           UMA(policy::kMetricEnrollmentLockModeMismatch);
           break;
       }
       break;
-    case policy::EnrollmentStatus::STATUS_ROBOT_AUTH_FETCH_FAILED:
+    case policy::EnrollmentStatus::ROBOT_AUTH_FETCH_FAILED:
       UMA(policy::kMetricEnrollmentRobotAuthCodeFetchFailed);
       break;
-    case policy::EnrollmentStatus::STATUS_ROBOT_REFRESH_FETCH_FAILED:
+    case policy::EnrollmentStatus::ROBOT_REFRESH_FETCH_FAILED:
       UMA(policy::kMetricEnrollmentRobotRefreshTokenFetchFailed);
       break;
-    case policy::EnrollmentStatus::STATUS_ROBOT_REFRESH_STORE_FAILED:
+    case policy::EnrollmentStatus::ROBOT_REFRESH_STORE_FAILED:
       UMA(policy::kMetricEnrollmentRobotRefreshTokenStoreFailed);
       break;
-    case policy::EnrollmentStatus::STATUS_STORE_TOKEN_AND_ID_FAILED:
-      // This error should not happen for enterprise enrollment, it only affects
-      // consumer enrollment.
-      UMA(policy::kMetricEnrollmentStoreTokenAndIdFailed);
-      NOTREACHED();
-      break;
-    case policy::EnrollmentStatus::STATUS_ATTRIBUTE_UPDATE_FAILED:
+    case policy::EnrollmentStatus::ATTRIBUTE_UPDATE_FAILED:
       UMA(policy::kMetricEnrollmentAttributeUpdateFailed);
       break;
-    case policy::EnrollmentStatus::STATUS_REGISTRATION_CERTIFICATE_FETCH_FAILED:
+    case policy::EnrollmentStatus::REGISTRATION_CERT_FETCH_FAILED:
       UMA(policy::kMetricEnrollmentRegistrationCertificateFetchFailed);
+      break;
+    case policy::EnrollmentStatus::NO_MACHINE_IDENTIFICATION:
+      UMA(policy::kMetricEnrollmentNoDeviceIdentification);
+      break;
+    case policy::EnrollmentStatus::ACTIVE_DIRECTORY_POLICY_FETCH_FAILED:
+      UMA(policy::kMetricEnrollmentActiveDirectoryPolicyFetchFailed);
+      break;
+    case policy::EnrollmentStatus::DM_TOKEN_STORE_FAILED:
+      UMA(policy::kMetricEnrollmentStoreDMTokenFailed);
       break;
   }
 }

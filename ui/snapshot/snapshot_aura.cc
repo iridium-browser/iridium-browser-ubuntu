@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/memory/ptr_util.h"
 #include "base/task_runner_util.h"
 #include "cc/output/copy_output_request.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -53,8 +54,14 @@ static void FinishedAsyncCopyRequest(
   // Retry the copy request if the previous one failed for some reason.
   if (!tracker->windows().empty() && (retry_count < kMaxRetries) &&
       result->IsEmpty()) {
+    // Look up window before calling MakeAsyncRequest. Otherwise, due
+    // to undefined (favorably right to left) argument evaluation
+    // order, the tracker might have been passed and set to NULL
+    // before the window is looked up which results in a NULL pointer
+    // dereference.
+    gfx::NativeWindow window = tracker->windows()[0];
     MakeAsyncCopyRequest(
-        tracker->windows()[0], source_rect,
+        window, source_rect,
         base::Bind(&FinishedAsyncCopyRequest, base::Passed(&tracker),
                    source_rect, callback, retry_count + 1));
     return;

@@ -7,6 +7,7 @@
 #include "base/android/context_utils.h"
 #include "base/android/jni_string.h"
 #include "base/callback.h"
+#include "base/memory/ptr_util.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
@@ -43,8 +44,10 @@ void ServiceTabLauncher::LaunchTab(content::BrowserContext* browser_context,
                                    const content::OpenURLParams& params,
                                    const TabLaunchedCallback& callback) {
   WindowOpenDisposition disposition = params.disposition;
-  if (disposition != NEW_WINDOW && disposition != NEW_POPUP &&
-      disposition != NEW_FOREGROUND_TAB && disposition != NEW_BACKGROUND_TAB) {
+  if (disposition != WindowOpenDisposition::NEW_WINDOW &&
+      disposition != WindowOpenDisposition::NEW_POPUP &&
+      disposition != WindowOpenDisposition::NEW_FOREGROUND_TAB &&
+      disposition != WindowOpenDisposition::NEW_BACKGROUND_TAB) {
     // ServiceTabLauncher can currently only launch new tabs.
     NOTIMPLEMENTED();
     return;
@@ -61,12 +64,12 @@ void ServiceTabLauncher::LaunchTab(content::BrowserContext* browser_context,
   ScopedJavaLocalRef<jobject> post_data;
 
   int request_id = tab_launched_callbacks_.Add(
-      new TabLaunchedCallback(callback));
+      base::MakeUnique<TabLaunchedCallback>(callback));
   DCHECK_GE(request_id, 1);
 
   Java_ServiceTabLauncher_launchTab(env, GetApplicationContext(), request_id,
                                     browser_context->IsOffTheRecord(), url,
-                                    disposition, referrer_url,
+                                    static_cast<int>(disposition), referrer_url,
                                     params.referrer.policy, headers, post_data);
 }
 

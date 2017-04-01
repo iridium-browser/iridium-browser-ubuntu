@@ -41,6 +41,7 @@ class TestOptions(object):
     self.cpp = 'cpp'
     self.javap = 'javap'
     self.native_exports_optional = True
+    self.enable_profiling = False
 
 class TestGenerator(unittest.TestCase):
   def assertObjEquals(self, first, second):
@@ -402,6 +403,10 @@ class TestGenerator(unittest.TestCase):
           return
       }
     }
+    @CalledByNative
+    public static @Status int updateStatus(@Status int status) {
+        return getAndUpdateStatus(status);
+    }
     @CalledByNativeUnchecked
     private void uncheckedCall(int iParam);
 
@@ -522,6 +527,17 @@ class TestGenerator(unittest.TestCase):
                    ],
             env_call=('Void', ''),
             unchecked=False,
+        ),
+        CalledByNative(
+          return_type='int',
+          system_class=False,
+          static=True,
+          name='updateStatus',
+          method_id_var_name='updateStatus',
+          java_class_name='',
+          params=[Param(datatype='int', name='status')],
+          env_call=('Integer', ''),
+          unchecked=False,
         ),
         CalledByNative(
             return_type='void',
@@ -818,7 +834,7 @@ public class java.util.HashSet {
     content = file(os.path.join(script_dir,
         'java/src/org/chromium/example/jni_generator/SampleForTests.java')
         ).read()
-    golden_file = os.path.join(script_dir, 'golden_sample_for_tests_jni.h')
+    golden_file = os.path.join(script_dir, 'SampleForTests_jni.golden')
     golden_content = file(golden_file).read()
     jni_from_java = jni_generator.JNIFromJavaSource(
         content, 'org/chromium/example/jni_generator/SampleForTests',

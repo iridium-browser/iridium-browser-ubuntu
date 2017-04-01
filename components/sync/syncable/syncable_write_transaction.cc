@@ -4,8 +4,6 @@
 
 #include "components/sync/syncable/syncable_write_transaction.h"
 
-#include <stdint.h>
-
 #include <string>
 
 #include "components/sync/syncable/directory.h"
@@ -23,7 +21,7 @@ WriteTransaction::WriteTransaction(const tracked_objects::Location& location,
                                    WriterTag writer,
                                    Directory* directory)
     : BaseWriteTransaction(location, "WriteTransaction", writer, directory),
-      transaction_version_(NULL) {
+      transaction_version_(nullptr) {
   Lock();
 }
 
@@ -128,7 +126,7 @@ void WriteTransaction::NotifyTransactionComplete(
 
 void WriteTransaction::UpdateTransactionVersion(
     const std::vector<int64_t>& entry_changed) {
-  syncer::ModelTypeSet type_seen;
+  ModelTypeSet type_seen;
   for (uint32_t i = 0; i < entry_changed.size(); ++i) {
     MutableEntry entry(this, GET_BY_HANDLE, entry_changed[i]);
     if (entry.good()) {

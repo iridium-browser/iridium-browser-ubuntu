@@ -159,15 +159,9 @@ CastMetricsServiceClient::LoadClientInfo() {
   return std::unique_ptr<::metrics::ClientInfo>();
 }
 
-bool CastMetricsServiceClient::IsOffTheRecordSessionActive() {
-  // Chromecast behaves as "off the record" w/r/t recording browsing state,
-  // but this value is about not disabling metrics because of it.
-  return false;
-}
-
 int32_t CastMetricsServiceClient::GetProduct() {
   // Chromecast currently uses the same product identifier as Chrome.
-  return ::metrics::ChromeUserMetricsExtension::CHROME;
+  return ::metrics::ChromeUserMetricsExtension::CAST;
 }
 
 std::string CastMetricsServiceClient::GetApplicationLocale() {
@@ -225,9 +219,6 @@ std::string CastMetricsServiceClient::GetVersionString() {
   return version_string;
 }
 
-void CastMetricsServiceClient::OnLogUploadComplete() {
-}
-
 void CastMetricsServiceClient::InitializeSystemProfileMetrics(
     const base::Closure& done_callback) {
   done_callback.Run();
@@ -238,9 +229,7 @@ void CastMetricsServiceClient::CollectFinalMetricsForLog(
   done_callback.Run();
 }
 
-std::unique_ptr<::metrics::MetricsLogUploader>
-CastMetricsServiceClient::CreateUploader(
-    const base::Callback<void(int)>& on_upload_complete) {
+std::string CastMetricsServiceClient::GetMetricsServerUrl() {
   std::string uma_server_url(::metrics::kDefaultMetricsServerUrl);
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kOverrideMetricsUploadUrl)) {
@@ -248,10 +237,17 @@ CastMetricsServiceClient::CreateUploader(
         command_line->GetSwitchValueASCII(switches::kOverrideMetricsUploadUrl));
   }
   DCHECK(!uma_server_url.empty());
+  return uma_server_url;
+}
+
+std::unique_ptr<::metrics::MetricsLogUploader>
+CastMetricsServiceClient::CreateUploader(
+    const std::string& server_url,
+    const std::string& mime_type,
+    const base::Callback<void(int)>& on_upload_complete) {
   return std::unique_ptr<::metrics::MetricsLogUploader>(
-      new ::metrics::NetMetricsLogUploader(request_context_, uma_server_url,
-                                           ::metrics::kDefaultMetricsMimeType,
-                                           on_upload_complete));
+      new ::metrics::NetMetricsLogUploader(request_context_, server_url,
+                                           mime_type, on_upload_complete));
 }
 
 base::TimeDelta CastMetricsServiceClient::GetStandardUploadInterval() {

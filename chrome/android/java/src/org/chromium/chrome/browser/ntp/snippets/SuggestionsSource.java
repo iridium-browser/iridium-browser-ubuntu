@@ -23,6 +23,9 @@ public interface SuggestionsSource {
         /** Called when a category has a new list of content suggestions. */
         void onNewSuggestions(@CategoryInt int category);
 
+        /** Called when a request for additional suggestions completed. */
+        void onMoreSuggestions(@CategoryInt int category, List<SnippetArticle> suggestions);
+
         /** Called when a category changed its status. */
         void onCategoryStatusChanged(@CategoryInt int category, @CategoryStatusEnum int newStatus);
 
@@ -31,8 +34,16 @@ public interface SuggestionsSource {
          * immediately. This event may be fired for a category or suggestion that does not
          * currently exist or has never existed and should be ignored in that case.
          */
-        void onSuggestionInvalidated(@CategoryInt int category, String suggestionId);
+        void onSuggestionInvalidated(@CategoryInt int category, String idWithinCategory);
+
+        /** Called when the observer should discard the suggestions it has and pull new ones. */
+        void onFullRefreshRequired();
     }
+
+    /**
+     * Fetches new snippets for all remote categories.
+     */
+    void fetchRemoteSuggestions();
 
     /**
      * Gets the categories in the order in which they should be displayed.
@@ -65,15 +76,26 @@ public interface SuggestionsSource {
     void fetchSuggestionImage(SnippetArticle suggestion, Callback<Bitmap> callback);
 
     /**
+     * Fetches new suggestions.
+     * @param category the category to fetch new suggestions for.
+     * @param displayedSuggestionIds ids of suggestions already known and that we want to keep.
+     */
+    void fetchSuggestions(@CategoryInt int category, String[] displayedSuggestionIds);
+
+    /**
      * Tells the source to dismiss the content suggestion.
      */
     void dismissSuggestion(SnippetArticle suggestion);
 
     /**
-     * Checks whether a content suggestion has been visited. The callback is never called
-     * synchronously.
+     * Tells the source to dismiss the category.
      */
-    void getSuggestionVisited(SnippetArticle suggestion, Callback<Boolean> callback);
+    void dismissCategory(@CategoryInt int category);
+
+    /**
+     * Restores all categories previously dismissed with {@link #dismissCategory}.
+     */
+    void restoreDismissedCategories();
 
     /**
      * Sets the recipient for update events from the source.

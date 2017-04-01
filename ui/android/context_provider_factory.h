@@ -7,13 +7,12 @@
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
+#include "cc/surfaces/frame_sink_id.h"
 #include "ui/android/ui_android_export.h"
 
 namespace cc {
 class ContextProvider;
-class GpuMemoryBufferManager;
 class VulkanContextProvider;
-class SharedBitmapManager;
 class SurfaceManager;
 }
 
@@ -80,9 +79,7 @@ class UI_ANDROID_EXPORT ContextProviderFactory {
 
   virtual cc::SurfaceManager* GetSurfaceManager() = 0;
 
-  virtual uint32_t AllocateSurfaceClientId() = 0;
-
-  virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
+  virtual cc::FrameSinkId AllocateFrameSinkId() = 0;
 
   virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
 };

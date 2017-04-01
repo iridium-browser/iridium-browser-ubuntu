@@ -19,10 +19,13 @@
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/gcm_driver/instance_id/fake_gcm_driver_for_instance_id.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/permission_type.h"
+#include "content/public/browser/service_worker_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/origin_util.h"
@@ -51,7 +54,7 @@ void DoNothingWithBool(bool b) {}
 content::WebContents* AddTab(Browser* browser, const GURL& url) {
   int starting_tab_count = browser->tab_strip_model()->count();
   ui_test_utils::NavigateToURLWithDisposition(
-      browser, url, NEW_FOREGROUND_TAB,
+      browser, url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   int tab_count = browser->tab_strip_model()->count();
   EXPECT_EQ(starting_tab_count + 1, tab_count);
@@ -129,7 +132,7 @@ class ServiceWorkerTest : public ExtensionApiTest {
   // returns it.
   content::WebContents* Navigate(const GURL& url) {
     ui_test_utils::NavigateToURLWithDisposition(
-        browser(), url, NEW_FOREGROUND_TAB,
+        browser(), url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
@@ -159,6 +162,24 @@ class ServiceWorkerTest : public ExtensionApiTest {
   // tab's WebContents' main frame.
   std::string NavigateAndExtractInnerText(const GURL& url) {
     return ExtractInnerText(Navigate(url));
+  }
+
+  size_t GetWorkerRefCount(const GURL& origin) {
+    content::ServiceWorkerContext* sw_context =
+        content::BrowserContext::GetDefaultStoragePartition(
+            browser()->profile())
+            ->GetServiceWorkerContext();
+    base::RunLoop run_loop;
+    size_t ref_count = 0;
+    auto set_ref_count = [](size_t* ref_count, base::RunLoop* run_loop,
+                            size_t external_request_count) {
+      *ref_count = external_request_count;
+      run_loop->Quit();
+    };
+    sw_context->CountExternalRequestsForTest(
+        origin, base::Bind(set_ref_count, &ref_count, &run_loop));
+    run_loop.Run();
+    return ref_count;
   }
 
  private:
@@ -196,7 +217,7 @@ class ServiceWorkerBackgroundSyncTest : public ServiceWorkerTest {
 class ServiceWorkerPushMessagingTest : public ServiceWorkerTest {
  public:
   ServiceWorkerPushMessagingTest()
-      : gcm_service_(nullptr), push_service_(nullptr) {}
+      : gcm_driver_(nullptr), push_service_(nullptr) {}
   ~ServiceWorkerPushMessagingTest() override {}
 
   void GrantNotificationPermissionForTest(const GURL& url) {
@@ -225,20 +246,25 @@ class ServiceWorkerPushMessagingTest : public ServiceWorkerTest {
     ServiceWorkerTest::SetUpCommandLine(command_line);
   }
   void SetUpOnMainThread() override {
-    gcm_service_ = static_cast<gcm::FakeGCMProfileService*>(
-        gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-            profile(), &gcm::FakeGCMProfileService::Build));
-    gcm_service_->set_collect(true);
+    gcm::FakeGCMProfileService* gcm_service =
+        static_cast<gcm::FakeGCMProfileService*>(
+            gcm::GCMProfileServiceFactory::GetInstance()
+                ->SetTestingFactoryAndUse(profile(),
+                                          &gcm::FakeGCMProfileService::Build));
+    gcm_driver_ = static_cast<instance_id::FakeGCMDriverForInstanceID*>(
+        gcm_service->driver());
     push_service_ = PushMessagingServiceFactory::GetForProfile(profile());
 
     ServiceWorkerTest::SetUpOnMainThread();
   }
 
-  gcm::FakeGCMProfileService* gcm_service() const { return gcm_service_; }
+  instance_id::FakeGCMDriverForInstanceID* gcm_driver() const {
+    return gcm_driver_;
+  }
   PushMessagingServiceImpl* push_service() const { return push_service_; }
 
  private:
-  gcm::FakeGCMProfileService* gcm_service_;
+  instance_id::FakeGCMDriverForInstanceID* gcm_driver_;
   PushMessagingServiceImpl* push_service_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerPushMessagingTest);
@@ -254,16 +280,18 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, UpdateRefreshesServiceWorker) {
   base::FilePath pem_path = test_data_dir_.AppendASCII("service_worker")
                                 .AppendASCII("update")
                                 .AppendASCII("service_worker.pem");
-  base::FilePath path_v1 = PackExtensionWithOptions(
-      test_data_dir_.AppendASCII("service_worker")
-          .AppendASCII("update")
-          .AppendASCII("v1"),
-      scoped_temp_dir.path().AppendASCII("v1.crx"), pem_path, base::FilePath());
-  base::FilePath path_v2 = PackExtensionWithOptions(
-      test_data_dir_.AppendASCII("service_worker")
-          .AppendASCII("update")
-          .AppendASCII("v2"),
-      scoped_temp_dir.path().AppendASCII("v2.crx"), pem_path, base::FilePath());
+  base::FilePath path_v1 =
+      PackExtensionWithOptions(test_data_dir_.AppendASCII("service_worker")
+                                   .AppendASCII("update")
+                                   .AppendASCII("v1"),
+                               scoped_temp_dir.GetPath().AppendASCII("v1.crx"),
+                               pem_path, base::FilePath());
+  base::FilePath path_v2 =
+      PackExtensionWithOptions(test_data_dir_.AppendASCII("service_worker")
+                                   .AppendASCII("update")
+                                   .AppendASCII("v2"),
+                               scoped_temp_dir.GetPath().AppendASCII("v2.crx"),
+                               pem_path, base::FilePath());
   const char* kId = "hfaanndiiilofhfokeanhddpkfffchdi";
 
   ExtensionTestMessageListener listener_v1("Pong from version 1", false);
@@ -292,16 +320,18 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, UpdateWithoutSkipWaiting) {
   base::FilePath pem_path = test_data_dir_.AppendASCII("service_worker")
                                 .AppendASCII("update_without_skip_waiting")
                                 .AppendASCII("update_without_skip_waiting.pem");
-  base::FilePath path_v1 = PackExtensionWithOptions(
-      test_data_dir_.AppendASCII("service_worker")
-          .AppendASCII("update_without_skip_waiting")
-          .AppendASCII("v1"),
-      scoped_temp_dir.path().AppendASCII("v1.crx"), pem_path, base::FilePath());
-  base::FilePath path_v2 = PackExtensionWithOptions(
-      test_data_dir_.AppendASCII("service_worker")
-          .AppendASCII("update_without_skip_waiting")
-          .AppendASCII("v2"),
-      scoped_temp_dir.path().AppendASCII("v2.crx"), pem_path, base::FilePath());
+  base::FilePath path_v1 =
+      PackExtensionWithOptions(test_data_dir_.AppendASCII("service_worker")
+                                   .AppendASCII("update_without_skip_waiting")
+                                   .AppendASCII("v1"),
+                               scoped_temp_dir.GetPath().AppendASCII("v1.crx"),
+                               pem_path, base::FilePath());
+  base::FilePath path_v2 =
+      PackExtensionWithOptions(test_data_dir_.AppendASCII("service_worker")
+                                   .AppendASCII("update_without_skip_waiting")
+                                   .AppendASCII("v2"),
+                               scoped_temp_dir.GetPath().AppendASCII("v2.crx"),
+                               pem_path, base::FilePath());
   const char* kId = "mhnnnflgagdakldgjpfcofkiocpdmogl";
 
   // Install version 1.0 of the extension.
@@ -620,6 +650,63 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, TabsCreate) {
   EXPECT_EQ(starting_tab_count, browser()->tab_strip_model()->count());
 }
 
+// Tests that worker ref count increments while extension API function is
+// active.
+IN_PROC_BROWSER_TEST_F(ServiceWorkerTest, WorkerRefCount) {
+  // Extensions APIs from SW are only enabled on trunk.
+  ScopedCurrentChannel current_channel_override(version_info::Channel::UNKNOWN);
+  const Extension* extension = LoadExtensionWithFlags(
+      test_data_dir_.AppendASCII("service_worker/api_worker_ref_count"),
+      kFlagNone);
+  ASSERT_TRUE(extension);
+  ui_test_utils::NavigateToURL(browser(),
+                               extension->GetResourceURL("page.html"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  ExtensionTestMessageListener worker_start_listener("WORKER STARTED", false);
+  worker_start_listener.set_failure_message("FAILURE");
+  ASSERT_TRUE(
+      content::ExecuteScript(web_contents, "window.runServiceWorker()"));
+  ASSERT_TRUE(worker_start_listener.WaitUntilSatisfied());
+
+  // Service worker should have no pending requests because it hasn't peformed
+  // any extension API request yet.
+  EXPECT_EQ(0u, GetWorkerRefCount(extension->url()));
+
+  ExtensionTestMessageListener worker_listener("CHECK_REF_COUNT", true);
+  worker_listener.set_failure_message("FAILURE");
+  ASSERT_TRUE(content::ExecuteScript(web_contents, "window.testSendMessage()"));
+  ASSERT_TRUE(worker_listener.WaitUntilSatisfied());
+
+  // Service worker should have exactly one pending request because
+  // chrome.test.sendMessage() API call is in-flight.
+  EXPECT_EQ(1u, GetWorkerRefCount(extension->url()));
+
+  // Peform another extension API request while one is ongoing.
+  {
+    ExtensionTestMessageListener listener("CHECK_REF_COUNT", true);
+    listener.set_failure_message("FAILURE");
+    ASSERT_TRUE(
+        content::ExecuteScript(web_contents, "window.testSendMessage()"));
+    ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+    // Service worker currently has two extension API requests in-flight.
+    EXPECT_EQ(2u, GetWorkerRefCount(extension->url()));
+    // Finish executing the nested chrome.test.sendMessage() first.
+    listener.Reply("Hello world");
+  }
+
+  ExtensionTestMessageListener extension_listener("SUCCESS", false);
+  extension_listener.set_failure_message("FAILURE");
+  // Finish executing chrome.test.sendMessage().
+  worker_listener.Reply("Hello world");
+  ASSERT_TRUE(extension_listener.WaitUntilSatisfied());
+
+  // The ref count should drop to 0.
+  EXPECT_EQ(0u, GetWorkerRefCount(extension->url()));
+}
+
 // This test loads a web page that has an iframe pointing to a
 // chrome-extension:// URL. The URL is listed in the extension's
 // web_accessible_resources. Initially the iframe is served from the extension's
@@ -762,8 +849,8 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerPushMessagingTest, OnPush) {
 
   PushMessagingAppIdentifier app_identifier =
       GetAppIdentifierForServiceWorkerRegistration(0LL, extension_url);
-  ASSERT_EQ(app_identifier.app_id(), gcm_service()->last_registered_app_id());
-  EXPECT_EQ("1234567890", gcm_service()->last_registered_sender_ids()[0]);
+  ASSERT_EQ(app_identifier.app_id(), gcm_driver()->last_gettoken_app_id());
+  EXPECT_EQ("1234567890", gcm_driver()->last_gettoken_authorized_entity());
 
   base::RunLoop run_loop;
   // Send a push message via gcm and expect the ServiceWorker to receive it.

@@ -7,10 +7,12 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "components/contextual_search/renderer/contextual_search_wrapper.h"
 #include "components/contextual_search/renderer/overlay_page_notifier_service_impl.h"
 #include "content/public/renderer/render_frame.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "v8/include/v8.h"
 
 namespace contextual_search {
@@ -35,8 +37,10 @@ void OverlayJsRenderFrameObserver::RegisterMojoInterface() {
 
 void OverlayJsRenderFrameObserver::CreateOverlayPageNotifierService(
     mojo::InterfaceRequest<mojom::OverlayPageNotifierService> request) {
-  new OverlayPageNotifierServiceImpl(weak_factory_.GetWeakPtr(),
-                                     std::move(request));
+  mojo::MakeStrongBinding(
+      base::MakeUnique<OverlayPageNotifierServiceImpl>(
+          weak_factory_.GetWeakPtr()),
+      std::move(request));
 }
 
 void OverlayJsRenderFrameObserver::SetIsContextualSearchOverlay() {

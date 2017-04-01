@@ -28,7 +28,6 @@
 
 namespace base {
 class SequencedTaskRunner;
-class TimeTicks;
 }
 
 namespace content {
@@ -327,8 +326,7 @@ class STORAGE_EXPORT ObfuscatedFileUtil : public FileSystemFileUtil {
 
   bool HasIsolatedStorage(const GURL& origin);
 
-  typedef std::map<std::string, SandboxDirectoryDatabase*> DirectoryMap;
-  DirectoryMap directories_;
+  std::map<std::string, std::unique_ptr<SandboxDirectoryDatabase>> directories_;
   std::unique_ptr<SandboxOriginDatabaseInterface> origin_database_;
   scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy_;
   base::FilePath file_system_directory_;

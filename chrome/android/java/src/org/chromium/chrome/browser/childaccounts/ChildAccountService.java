@@ -9,7 +9,7 @@ import android.content.Context;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ThreadUtils;
-import org.chromium.components.sync.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerHelper;
 
 /**
  * This class serves as a simple interface for querying the child account information.
@@ -34,10 +34,6 @@ public class ChildAccountService {
      */
     public static void checkHasChildAccount(Context context, final Callback<Boolean> callback) {
         ThreadUtils.assertOnUiThread();
-        if (!nativeIsChildAccountDetectionEnabled()) {
-            callback.onResult(false);
-            return;
-        }
         final AccountManagerHelper helper = AccountManagerHelper.get(context);
         helper.getGoogleAccounts(new Callback<Account[]>() {
             @Override
@@ -62,10 +58,4 @@ public class ChildAccountService {
     }
 
     private static native boolean nativeIsChildAccount();
-
-    /**
-     * If this returns false, Chrome will assume there are no child accounts on the device,
-     * and no further checks will be made, which has the effect of a kill switch.
-     */
-    private static native boolean nativeIsChildAccountDetectionEnabled();
 }

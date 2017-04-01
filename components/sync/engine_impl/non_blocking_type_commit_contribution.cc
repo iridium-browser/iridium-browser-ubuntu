@@ -4,26 +4,25 @@
 
 #include "components/sync/engine_impl/non_blocking_type_commit_contribution.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
 #include <algorithm>
 
 #include "base/values.h"
-#include "components/sync/core/non_blocking_sync_common.h"
+#include "components/sync/engine/non_blocking_sync_common.h"
 #include "components/sync/engine_impl/model_type_worker.h"
 #include "components/sync/protocol/proto_value_conversions.h"
 
-namespace syncer_v2 {
+namespace syncer {
 
 NonBlockingTypeCommitContribution::NonBlockingTypeCommitContribution(
     const sync_pb::DataTypeContext& context,
     const google::protobuf::RepeatedPtrField<sync_pb::SyncEntity>& entities,
-    ModelTypeWorker* worker)
+    ModelTypeWorker* worker,
+    DataTypeDebugInfoEmitter* debug_info_emitter)
     : worker_(worker),
       context_(context),
       entities_(entities),
-      cleaned_up_(false) {}
+      cleaned_up_(false),
+      debug_info_emitter_(debug_info_emitter) {}
 
 NonBlockingTypeCommitContribution::~NonBlockingTypeCommitContribution() {
   DCHECK(cleaned_up_);
@@ -38,16 +37,20 @@ void NonBlockingTypeCommitContribution::AddToCommitMessage(
             RepeatedPtrFieldBackInserter(commit_message->mutable_entries()));
   if (!context_.context().empty())
     commit_message->add_client_contexts()->CopyFrom(context_);
+
+  CommitCounters* counters = debug_info_emitter_->GetMutableCommitCounters();
+  counters->num_commits_attempted += entities_.size();
 }
 
-syncer::SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
+SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
     const sync_pb::ClientToServerResponse& response,
-    syncer::StatusController* status) {
+    StatusController* status) {
   const sync_pb::CommitResponse& commit_response = response.commit();
 
-  bool transient_error = false;
-  bool commit_conflict = false;
   bool unknown_error = false;
+  int transient_error_commits = 0;
+  int conflicting_commits = 0;
+  int successes = 0;
 
   CommitResponseDataList response_list;
 
@@ -59,16 +62,17 @@ syncer::SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
       case sync_pb::CommitResponse::INVALID_MESSAGE:
         LOG(ERROR) << "Server reports commit message is invalid.";
         DLOG(ERROR) << "Message was: "
-                    << syncer::SyncEntityToValue(entities_.Get(i), false).get();
+                    << SyncEntityToValue(entities_.Get(i), false).get();
         unknown_error = true;
         break;
       case sync_pb::CommitResponse::CONFLICT:
         DVLOG(1) << "Server reports conflict for commit message.";
         DVLOG(1) << "Message was: "
-                 << syncer::SyncEntityToValue(entities_.Get(i), false).get();
-        commit_conflict = true;
+                 << SyncEntityToValue(entities_.Get(i), false).get();
+        ++conflicting_commits;
         break;
       case sync_pb::CommitResponse::SUCCESS: {
+        ++successes;
         CommitResponseData response_data;
         response_data.id = entry_response.id_string();
         response_data.client_tag_hash =
@@ -81,7 +85,7 @@ syncer::SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
       case sync_pb::CommitResponse::RETRY:
       case sync_pb::CommitResponse::TRANSIENT_ERROR:
         DLOG(WARNING) << "Entity commit blocked by transient error.";
-        transient_error = true;
+        ++transient_error_commits;
         break;
       default:
         LOG(ERROR) << "Bad return from ProcessSingleCommitResponse.";
@@ -89,24 +93,32 @@ syncer::SyncerError NonBlockingTypeCommitContribution::ProcessCommitResponse(
     }
   }
 
+  CommitCounters* counters = debug_info_emitter_->GetMutableCommitCounters();
+  counters->num_commits_success += successes;
+  counters->num_commits_conflict += transient_error_commits;
+  counters->num_commits_error += transient_error_commits;
+
   // Send whatever successful responses we did get back to our parent.
   // It's the schedulers job to handle the failures.
   worker_->OnCommitResponse(&response_list);
 
   // Let the scheduler know about the failures.
   if (unknown_error) {
-    return syncer::SERVER_RETURN_UNKNOWN_ERROR;
-  } else if (transient_error) {
-    return syncer::SERVER_RETURN_TRANSIENT_ERROR;
-  } else if (commit_conflict) {
-    return syncer::SERVER_RETURN_CONFLICT;
+    return SERVER_RETURN_UNKNOWN_ERROR;
+  } else if (transient_error_commits > 0) {
+    return SERVER_RETURN_TRANSIENT_ERROR;
+  } else if (conflicting_commits > 0) {
+    return SERVER_RETURN_CONFLICT;
   } else {
-    return syncer::SYNCER_OK;
+    return SYNCER_OK;
   }
 }
 
 void NonBlockingTypeCommitContribution::CleanUp() {
   cleaned_up_ = true;
+
+  debug_info_emitter_->EmitCommitCountersUpdate();
+  debug_info_emitter_->EmitStatusCountersUpdate();
 
   // We could inform our parent NonBlockingCommitContributor that a commit is
   // no longer in progress.  The current implementation doesn't really care
@@ -117,4 +129,4 @@ size_t NonBlockingTypeCommitContribution::GetNumEntries() const {
   return entities_.size();
 }
 
-}  // namespace syncer_v2
+}  // namespace syncer

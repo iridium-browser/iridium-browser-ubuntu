@@ -294,10 +294,6 @@ BASE_EXPORT bool DevicePathToDriveLetterPath(const FilePath& device_path,
 // be resolved with this function.
 BASE_EXPORT bool NormalizeToNativeFilePath(const FilePath& path,
                                            FilePath* nt_path);
-
-// Given an existing file in |path|, returns whether this file is on a network
-// drive or not. If |path| does not exist, this function returns false.
-BASE_EXPORT bool IsOnNetworkDrive(const base::FilePath& path);
 #endif
 
 // This function will return if the given file is a symlink or not.
@@ -365,6 +361,17 @@ BASE_EXPORT int GetUniquePathNumber(const FilePath& path,
 BASE_EXPORT bool SetNonBlocking(int fd);
 
 #if defined(OS_POSIX)
+// Creates a non-blocking, close-on-exec pipe.
+// This creates a non-blocking pipe that is not intended to be shared with any
+// child process. This will be done atomically if the operating system supports
+// it. Returns true if it was able to create the pipe, otherwise false.
+BASE_EXPORT bool CreateLocalNonBlockingPipe(int fds[2]);
+
+// Sets the given |fd| to close-on-exec mode.
+// Returns true if it was able to set it in the close-on-exec mode, otherwise
+// false.
+BASE_EXPORT bool SetCloseOnExec(int fd);
+
 // Test that |path| can only be changed by a given user and members of
 // a given set of groups.
 // Specifically, test that all parts of |path| under (and including) |base|:

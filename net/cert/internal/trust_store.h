@@ -117,9 +117,10 @@ class NET_EXPORT TrustStore {
   TrustStore();
   virtual ~TrustStore();
 
-  // Returns the trust anchors that match |name| in |*matches|, if any.
-  virtual void FindTrustAnchorsByNormalizedName(
-      const der::Input& normalized_name,
+  // Appends the trust anchors that match |cert|'s issuer name to |*matches|.
+  // |cert| and |matches| must not be null.
+  virtual void FindTrustAnchorsForCert(
+      const scoped_refptr<ParsedCertificate>& cert,
       TrustAnchors* matches) const = 0;
 
  private:

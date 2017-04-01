@@ -23,6 +23,8 @@ class DataSaverBrowserTest : public InProcessBrowserTest {
   void EnableDataSaver(bool enabled) {
     PrefService* prefs = browser()->profile()->GetPrefs();
     prefs->SetBoolean(prefs::kDataSaverEnabled, enabled);
+    // Give the setting notification a chance to propagate.
+    content::RunAllPendingInMessageLoop();
   }
 
   void VerifySaveDataHeader(const std::string& expected_header_value) {
@@ -61,6 +63,8 @@ class DataSaverWithServerBrowserTest : public InProcessBrowserTest {
   void EnableDataSaver(bool enabled) {
     PrefService* prefs = browser()->profile()->GetPrefs();
     prefs->SetBoolean(prefs::kDataSaverEnabled, enabled);
+    // Give the setting notification a chance to propagate.
+    content::RunAllPendingInMessageLoop();
   }
 
   std::unique_ptr<net::test_server::HttpResponse> VerifySaveDataHeader(
@@ -100,7 +104,7 @@ IN_PROC_BROWSER_TEST_F(DataSaverWithServerBrowserTest, ReloadPage) {
   // Reload the webpage and expect the main and the subresources will get the
   // correct save-data header.
   expected_save_data_header_ = "on";
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   content::WaitForLoadStop(
       browser()->tab_strip_model()->GetActiveWebContents());
 
@@ -108,7 +112,7 @@ IN_PROC_BROWSER_TEST_F(DataSaverWithServerBrowserTest, ReloadPage) {
   // will get no save-data header.
   EnableDataSaver(false);
   expected_save_data_header_ = "";
-  chrome::Reload(browser(), CURRENT_TAB);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
   content::WaitForLoadStop(
       browser()->tab_strip_model()->GetActiveWebContents());
 }

@@ -7,7 +7,7 @@
 #ifndef SkPictureFlat_DEFINED
 #define SkPictureFlat_DEFINED
 
-
+#include "SkCanvas.h"
 #include "SkChecksum.h"
 #include "SkChunkAlloc.h"
 #include "SkReadBuffer.h"
@@ -93,8 +93,9 @@ enum DrawType {
     DRAW_SHADOWED_PICTURE_LIGHTS,
     DRAW_IMAGE_LATTICE,
     DRAW_ARC,
+    DRAW_REGION,
 
-    LAST_DRAWTYPE_ENUM = DRAW_ARC
+    LAST_DRAWTYPE_ENUM = DRAW_REGION
 };
 
 // In the 'match' method, this constant will match any flavor of DRAW_BITMAP*
@@ -125,15 +126,24 @@ enum SaveLayerRecFlatFlags {
 
 ///////////////////////////////////////////////////////////////////////////////
 // clipparams are packed in 5 bits
-//  doAA:1 | regionOp:4
+//  doAA:1 | clipOp:4
 
-static inline uint32_t ClipParams_pack(SkRegion::Op op, bool doAA) {
+static inline uint32_t ClipParams_pack(SkClipOp op, bool doAA) {
     unsigned doAABit = doAA ? 1 : 0;
-    return (doAABit << 4) | op;
+    return (doAABit << 4) | static_cast<int>(op);
 }
 
-static inline SkRegion::Op ClipParams_unpackRegionOp(uint32_t packed) {
-    return (SkRegion::Op)(packed & 0xF);
+template <typename T> T asValidEnum(SkReadBuffer* buffer, uint32_t candidate) {
+
+    if (buffer->validate(candidate <= static_cast<uint32_t>(T::kMax_EnumValue))) {
+        return static_cast<T>(candidate);
+    }
+
+    return T::kMax_EnumValue;
+}
+
+static inline SkClipOp ClipParams_unpackRegionOp(SkReadBuffer* buffer, uint32_t packed) {
+    return asValidEnum<SkClipOp>(buffer, packed & 0xF);
 }
 
 static inline bool ClipParams_unpackDoAA(uint32_t packed) {

@@ -5,6 +5,8 @@
 #ifndef ASH_COMMON_SHELF_SHELF_WINDOW_WATCHER_H_
 #define ASH_COMMON_SHELF_SHELF_WINDOW_WATCHER_H_
 
+#include <set>
+
 #include "ash/common/wm_activation_observer.h"
 #include "ash/common/wm_window_observer.h"
 #include "base/macros.h"
@@ -17,10 +19,11 @@ class ShelfModel;
 class WmWindow;
 
 // ShelfWindowWatcher creates and handles a ShelfItem for windows in the default
-// container that have a ShelfItemDetails property (e.g. the task manager
-// dialog or the OS settings window). It adds the ShelfItem when the window is
-// added to the default container and maintains it until the window is closed,
-// even if the window is transiently reparented (e.g. during a drag).
+// container and panels in the panel container that have a valid ShelfItemType
+// property (e.g. the task manager dialog or the OS settings window). It adds
+// the ShelfItem when the window is added to the default container and maintains
+// it until the window is closed, even if the window is transiently reparented
+// (e.g. during a drag).
 class ShelfWindowWatcher : public WmActivationObserver,
                            public display::DisplayObserver {
  public:
@@ -46,7 +49,7 @@ class ShelfWindowWatcher : public WmActivationObserver,
   };
 
   // Observes individual user windows to detect when they are closed or when
-  // they have ShelfItemDetails changed.
+  // their shelf item properties have changed.
   class UserWindowObserver : public WmWindowObserver {
    public:
     explicit UserWindowObserver(ShelfWindowWatcher* window_watcher);
@@ -57,33 +60,32 @@ class ShelfWindowWatcher : public WmActivationObserver,
     void OnWindowPropertyChanged(WmWindow* window,
                                  WmWindowProperty property) override;
     void OnWindowDestroying(WmWindow* window) override;
+    void OnWindowVisibilityChanged(WmWindow* window, bool visible) override;
+    void OnWindowTitleChanged(WmWindow* window) override;
 
     ShelfWindowWatcher* window_watcher_;
 
     DISALLOW_COPY_AND_ASSIGN(UserWindowObserver);
   };
 
-  // Creates a ShelfItem for |window| that has ShelfItemDetails.
+  // Creates a ShelfItem for |window|.
   void AddShelfItem(WmWindow* window);
 
   // Removes a ShelfItem for |window|.
   void RemoveShelfItem(WmWindow* window);
 
-  // Updates the status of ShelfItem for |window|.
-  void UpdateShelfItemStatus(WmWindow* window, bool is_active);
-
-  // Returns the index of ShelfItem associated with |window|.
+  // Returns the index of ShelfItem associated with |window|, or -1 if none.
   int GetShelfItemIndexForWindow(WmWindow* window) const;
 
   // Cleans up observers on |container|.
   void OnContainerWindowDestroying(WmWindow* container);
 
   // Adds a shelf item for new windows added to the default container that have
-  // a ShelfItemDetails property.
+  // a valid ShelfItemType property value.
   void OnUserWindowAdded(WmWindow* window);
 
   // Adds, updates or removes the shelf item based on a property change.
-  void OnUserWindowShelfItemDetailsChanged(WmWindow* window);
+  void OnUserWindowPropertyChanged(WmWindow* window);
 
   // Removes the shelf item when a window closes.
   void OnUserWindowDestroying(WmWindow* window);
@@ -105,6 +107,9 @@ class ShelfWindowWatcher : public WmActivationObserver,
 
   ScopedObserver<WmWindow, ContainerWindowObserver> observed_container_windows_;
   ScopedObserver<WmWindow, UserWindowObserver> observed_user_windows_;
+
+  // The set of windows with shelf items managed by this ShelfWindowWatcher.
+  std::set<WmWindow*> user_windows_with_items_;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfWindowWatcher);
 };

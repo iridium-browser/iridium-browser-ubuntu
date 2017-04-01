@@ -4,8 +4,7 @@
 
 #include "components/sync/engine_impl/commit_processor.h"
 
-#include <stddef.h>
-
+#include <memory>
 #include <utility>
 
 #include "base/metrics/histogram_macros.h"
@@ -33,8 +32,8 @@ void CommitProcessor::GatherCommitContributions(
     CommitContributorMap::iterator cm_it =
         commit_contributor_map_->find(it.Get());
     if (cm_it == commit_contributor_map_->end()) {
-      NOTREACHED() << "Could not find requested type "
-                   << ModelTypeToString(it.Get()) << " in contributor map.";
+      DLOG(ERROR) << "Could not find requested type "
+                  << ModelTypeToString(it.Get()) << " in contributor map.";
       continue;
     }
     size_t spaces_remaining = max_entries - num_entries;

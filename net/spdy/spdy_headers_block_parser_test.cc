@@ -6,13 +6,17 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
+#include "net/spdy/spdy_flags.h"
 #include "net/spdy/spdy_test_utils.h"
 #include "net/test/gtest_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using testing::_;
 
 namespace net {
 
@@ -27,20 +31,18 @@ class MockSpdyHeadersHandler : public SpdyHeadersHandlerInterface {
  public:
   MOCK_METHOD0(OnHeaderBlockStart, void());
   MOCK_METHOD1(OnHeaderBlockEnd, void(size_t bytes));
+  MOCK_METHOD2(OnHeaderBlockEnd, void(size_t bytes, size_t compressed_bytes));
   MOCK_METHOD2(OnHeader, void(StringPiece key, StringPiece value));
 };
 
-class SpdyHeadersBlockParserTest :
-    public ::testing::TestWithParam<SpdyMajorVersion> {
+class SpdyHeadersBlockParserTest : public ::testing::Test {
  public:
   ~SpdyHeadersBlockParserTest() override {}
 
  protected:
   void SetUp() override {
     // Create a parser using the mock handler.
-    spdy_version_ = GetParam();
-
-    parser_.reset(new SpdyHeadersBlockParser(spdy_version_, &handler_));
+    parser_.reset(new SpdyHeadersBlockParser(&handler_));
   }
 
   // Create a header block with a specified number of headers.
@@ -84,8 +86,6 @@ class SpdyHeadersBlockParserTest :
     return string(buffer, sizeof(uint32_t));
   }
 
-  SpdyMajorVersion spdy_version_;
-
   MockSpdyHeadersHandler handler_;
   std::unique_ptr<SpdyHeadersBlockParser> parser_;
 
@@ -100,16 +100,10 @@ class SpdyHeadersBlockParserTest :
 const char *const SpdyHeadersBlockParserTest::kBaseKey = "test_key";
 const char *const SpdyHeadersBlockParserTest::kBaseValue = "test_value";
 
-// All tests are run with SPDY/3 and HTTP/2.
-INSTANTIATE_TEST_CASE_P(SpdyHeadersBlockParserTests,
-                        SpdyHeadersBlockParserTest,
-                        ::testing::Values(SPDY3, HTTP2));
-
-TEST_P(SpdyHeadersBlockParserTest, BasicTest) {
+TEST_F(SpdyHeadersBlockParserTest, BasicTest) {
   // Sanity test, verify that we parse out correctly a block with
   // a single key-value pair and that we notify when we start and finish
   // handling a headers block.
-  EXPECT_EQ(spdy_version_, parser_->spdy_version());
 
   EXPECT_CALL(handler_, OnHeaderBlockStart()).Times(1);
   string expect_key = kBaseKey + IntToString(0);
@@ -118,14 +112,17 @@ TEST_P(SpdyHeadersBlockParserTest, BasicTest) {
                                  StringPiece(expect_value))).Times(1);
 
   string headers(CreateHeaders(1, false));
-  EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
-
+  if (FLAGS_chromium_http2_flag_log_compressed_size) {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length(), _)).Times(1);
+  } else {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  }
   EXPECT_TRUE(parser_->
       HandleControlFrameHeadersData(1, headers.c_str(), headers.length()));
   EXPECT_EQ(SpdyHeadersBlockParser::NO_PARSER_ERROR, parser_->get_error());
 }
 
-TEST_P(SpdyHeadersBlockParserTest, NullsSupportedTest) {
+TEST_F(SpdyHeadersBlockParserTest, NullsSupportedTest) {
   // Sanity test, verify that we parse out correctly a block with
   // a single key-value pair when the key and value contain null charecters.
   EXPECT_CALL(handler_, OnHeaderBlockStart()).Times(1);
@@ -136,14 +133,18 @@ TEST_P(SpdyHeadersBlockParserTest, NullsSupportedTest) {
                                  StringPiece(expect_value))).Times(1);
 
   string headers(CreateHeaders(1, true));
-  EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  if (FLAGS_chromium_http2_flag_log_compressed_size) {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length(), _)).Times(1);
+  } else {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  }
 
   EXPECT_TRUE(parser_->
       HandleControlFrameHeadersData(1, headers.c_str(), headers.length()));
   EXPECT_EQ(SpdyHeadersBlockParser::NO_PARSER_ERROR, parser_->get_error());
 }
 
-TEST_P(SpdyHeadersBlockParserTest, MultipleBlocksAndHeadersWithPartialData) {
+TEST_F(SpdyHeadersBlockParserTest, MultipleBlocksAndHeadersWithPartialData) {
   testing::InSequence s;
 
   // CreateHeaders is deterministic; we can call it once for the whole test.
@@ -163,7 +164,11 @@ TEST_P(SpdyHeadersBlockParserTest, MultipleBlocksAndHeadersWithPartialData) {
           StringPiece(retained_arguments[2 * j]),
           StringPiece(retained_arguments[2 * j + 1]))).Times(1);
     }
-    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+    if (FLAGS_chromium_http2_flag_log_compressed_size) {
+      EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length(), _)).Times(1);
+    } else {
+      EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+    }
   }
   // Parse the header blocks, feeding the parser one byte at a time.
   for (int i = 1; i <= kNumHeaderBlocks; i++) {
@@ -181,7 +186,7 @@ TEST_P(SpdyHeadersBlockParserTest, MultipleBlocksAndHeadersWithPartialData) {
   }
 }
 
-TEST_P(SpdyHeadersBlockParserTest, HandlesEmptyCallsTest) {
+TEST_F(SpdyHeadersBlockParserTest, HandlesEmptyCallsTest) {
   EXPECT_CALL(handler_, OnHeaderBlockStart()).Times(1);
 
   string expect_key = kBaseKey + IntToString(0);
@@ -190,7 +195,11 @@ TEST_P(SpdyHeadersBlockParserTest, HandlesEmptyCallsTest) {
                                  StringPiece(expect_value))).Times(1);
 
   string headers(CreateHeaders(1, false));
-  EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  if (FLAGS_chromium_http2_flag_log_compressed_size) {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length(), _)).Times(1);
+  } else {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  }
 
   // Send a header in pieces with intermediate empty calls.
   for (string::iterator it = headers.begin(); it != headers.end(); ++it) {
@@ -206,7 +215,7 @@ TEST_P(SpdyHeadersBlockParserTest, HandlesEmptyCallsTest) {
   }
 }
 
-TEST_P(SpdyHeadersBlockParserTest, LargeBlocksDiscardedTest) {
+TEST_F(SpdyHeadersBlockParserTest, LargeBlocksDiscardedTest) {
   // Header block with too many headers.
   {
     string headers = EncodeLength(parser_->MaxNumberOfHeaders() + 1);
@@ -215,7 +224,7 @@ TEST_P(SpdyHeadersBlockParserTest, LargeBlocksDiscardedTest) {
     EXPECT_EQ(SpdyHeadersBlockParser::HEADER_BLOCK_TOO_LARGE,
               parser_->get_error());
   }
-  parser_.reset(new SpdyHeadersBlockParser(spdy_version_, &handler_));
+  parser_.reset(new SpdyHeadersBlockParser(&handler_));
   // Header block with one header, which has a too-long key.
   {
     string headers = EncodeLength(1) + EncodeLength(
@@ -227,7 +236,7 @@ TEST_P(SpdyHeadersBlockParserTest, LargeBlocksDiscardedTest) {
   }
 }
 
-TEST_P(SpdyHeadersBlockParserTest, ExtraDataTest) {
+TEST_F(SpdyHeadersBlockParserTest, ExtraDataTest) {
   EXPECT_CALL(handler_, OnHeaderBlockStart()).Times(1);
 
   string expect_key = kBaseKey + IntToString(0);
@@ -236,14 +245,18 @@ TEST_P(SpdyHeadersBlockParserTest, ExtraDataTest) {
                                  StringPiece(expect_value))).Times(1);
 
   string headers = CreateHeaders(1, false) + "foobar";
-  EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  if (FLAGS_chromium_http2_flag_log_compressed_size) {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length(), _)).Times(1);
+  } else {
+    EXPECT_CALL(handler_, OnHeaderBlockEnd(headers.length())).Times(1);
+  }
 
   EXPECT_FALSE(parser_->HandleControlFrameHeadersData(1, headers.c_str(),
                                                       headers.length()));
   EXPECT_EQ(SpdyHeadersBlockParser::TOO_MUCH_DATA, parser_->get_error());
 }
 
-TEST_P(SpdyHeadersBlockParserTest, WrongStreamIdTest) {
+TEST_F(SpdyHeadersBlockParserTest, WrongStreamIdTest) {
   string headers(CreateHeaders(kNumHeadersInBlock, false));
   EXPECT_FALSE(parser_->HandleControlFrameHeadersData(1, headers.data(), 1));
   EXPECT_EQ(SpdyHeadersBlockParser::NEED_MORE_DATA, parser_->get_error());
@@ -255,7 +268,7 @@ TEST_P(SpdyHeadersBlockParserTest, WrongStreamIdTest) {
   EXPECT_EQ(SpdyHeadersBlockParser::UNEXPECTED_STREAM_ID, parser_->get_error());
 }
 
-TEST_P(SpdyHeadersBlockParserTest, InvalidStreamIdTest) {
+TEST_F(SpdyHeadersBlockParserTest, InvalidStreamIdTest) {
   string headers(CreateHeaders(kNumHeadersInBlock, false));
   bool result;
   EXPECT_SPDY_BUG(

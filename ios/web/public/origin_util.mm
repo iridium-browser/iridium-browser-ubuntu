@@ -12,6 +12,10 @@
 #include "url/gurl.h"
 #include "url/scheme_host_port.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace web {
 
 bool IsOriginSecure(const GURL& url) {
@@ -37,7 +41,7 @@ GURL GURLOriginWithWKSecurityOrigin(WKSecurityOrigin* origin) {
   url::SchemeHostPort origin_tuple(base::SysNSStringToUTF8(origin.protocol),
                                    base::SysNSStringToUTF8(origin.host),
                                    base::checked_cast<uint16_t>(origin.port));
-  return GURL(origin_tuple.Serialize());
+  return origin_tuple.GetURL();
 }
 
 }  // namespace web

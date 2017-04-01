@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/views/outdated_upgrade_bubble_view.h"
 
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -17,9 +17,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/user_metrics.h"
-#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/layout_constants.h"
@@ -100,15 +98,6 @@ base::string16 OutdatedUpgradeBubbleView::GetWindowTitle() const {
   return l10n_util::GetStringUTF16(IDS_UPGRADE_BUBBLE_TITLE);
 }
 
-gfx::ImageSkia OutdatedUpgradeBubbleView::GetWindowIcon() {
-  return *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-      IDR_UPDATE_MENU_SEVERITY_HIGH);
-}
-
-bool OutdatedUpgradeBubbleView::ShouldShowWindowIcon() const {
-  return true;
-}
-
 bool OutdatedUpgradeBubbleView::Cancel() {
   content::RecordAction(base::UserMetricsAction("OutdatedUpgradeBubble.Later"));
   return true;
@@ -125,9 +114,10 @@ bool OutdatedUpgradeBubbleView::Accept() {
                                 kNumIgnoredBuckets);
     content::RecordAction(
         base::UserMetricsAction("OutdatedUpgradeBubble.Reinstall"));
-    navigator_->OpenURL(content::OpenURLParams(
-        GURL(kDownloadChromeUrl), content::Referrer(), NEW_FOREGROUND_TAB,
-        ui::PAGE_TRANSITION_LINK, false));
+    navigator_->OpenURL(
+        content::OpenURLParams(GURL(kDownloadChromeUrl), content::Referrer(),
+                               WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                               ui::PAGE_TRANSITION_LINK, false));
 #if defined(OS_WIN)
   } else {
     DCHECK(UpgradeDetector::GetInstance()->is_outdated_install_no_au());

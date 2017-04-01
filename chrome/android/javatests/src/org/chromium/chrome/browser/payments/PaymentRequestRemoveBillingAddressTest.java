@@ -5,8 +5,9 @@
 package org.chromium.chrome.browser.payments;
 
 import android.content.DialogInterface;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
+import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
@@ -19,10 +20,6 @@ import java.util.concurrent.TimeoutException;
  * A payment integration test for removing a billing address that is associated with a credit card.
  */
 public class PaymentRequestRemoveBillingAddressTest extends PaymentRequestTestBase {
-    private static final int DECEMBER = 11;
-    private static final int NEXT_YEAR = 1;
-    private static final int FIRST_BILLING_ADDRESS = 1;
-
     public PaymentRequestRemoveBillingAddressTest() {
         super("payment_request_no_shipping_test.html");
     }
@@ -48,6 +45,7 @@ public class PaymentRequestRemoveBillingAddressTest extends PaymentRequestTestBa
      * editor that requires selecting a new billing address.
      */
     @MediumTest
+    @Feature({"Payments"})
     public void testPayWithCard()
             throws InterruptedException, ExecutionException, TimeoutException {
         triggerUIAndWait(mReadyForInput);

@@ -9,7 +9,7 @@
 #include "SkBitmap.h"
 #include "SkGradientShader.h"
 #include "SkSurface.h"
-#include "SkXfermode.h"
+#include "SkBlendModePriv.h"
 #include "SkColorPriv.h"
 
 #if SK_SUPPORT_GPU
@@ -48,13 +48,13 @@ protected:
         labelP.setAntiAlias(true);
         sk_tool_utils::set_portable_typeface(&labelP);
 
-        static const SkColor kSolidColors[] = {
+        constexpr SkColor kSolidColors[] = {
             SK_ColorTRANSPARENT,
             SK_ColorBLUE,
             0x80808000
         };
 
-        static const SkColor kBmpAlphas[] = {
+        constexpr SkColor kBmpAlphas[] = {
             0xff,
             0x80,
         };
@@ -63,21 +63,21 @@ protected:
 
         int test = 0;
         int x = 0, y = 0;
-        static const struct { SkPaint::Style fStyle; SkScalar fWidth; } kStrokes[] = {
+        constexpr struct { SkPaint::Style fStyle; SkScalar fWidth; } kStrokes[] = {
             {SkPaint::kFill_Style, 0},
             {SkPaint::kStroke_Style, SkIntToScalar(kSize) / 2},
         };
         for (size_t s = 0; s < SK_ARRAY_COUNT(kStrokes); ++s) {
-            for (size_t m = 0; m <= SkXfermode::kLastMode; ++m) {
-                SkXfermode::Mode mode = static_cast<SkXfermode::Mode>(m);
-                canvas->drawText(SkXfermode::ModeName(mode),
-                                 strlen(SkXfermode::ModeName(mode)),
+            for (size_t m = 0; m <= (size_t)SkBlendMode::kLastMode; ++m) {
+                SkBlendMode mode = static_cast<SkBlendMode>(m);
+                canvas->drawText(SkBlendMode_Name(mode),
+                                 strlen(SkBlendMode_Name(mode)),
                                  SkIntToScalar(x),
                                  SkIntToScalar(y + kSize + 3) + labelP.getTextSize(),
                                  labelP);
                 for (size_t c = 0; c < SK_ARRAY_COUNT(kSolidColors); ++c) {
                     SkPaint modePaint;
-                    modePaint.setXfermodeMode(mode);
+                    modePaint.setBlendMode(mode);
                     modePaint.setColor(kSolidColors[c]);
                     modePaint.setStyle(kStrokes[s].fStyle);
                     modePaint.setStrokeWidth(kStrokes[s].fWidth);
@@ -93,7 +93,7 @@ protected:
                 }
                 for (size_t a = 0; a < SK_ARRAY_COUNT(kBmpAlphas); ++a) {
                     SkPaint modePaint;
-                    modePaint.setXfermodeMode(mode);
+                    modePaint.setBlendMode(mode);
                     modePaint.setAlpha(kBmpAlphas[a]);
                     modePaint.setShader(fBmpShader);
                     modePaint.setStyle(kStrokes[s].fStyle);
@@ -126,7 +126,7 @@ private:
         GrContext* context = baseCanvas->getGrContext();
         SkImageInfo baseInfo = baseCanvas->imageInfo();
         SkImageInfo info = SkImageInfo::Make(w, h, baseInfo.colorType(), baseInfo.alphaType(),
-                                             sk_ref_sp(baseInfo.colorSpace()));
+                                             baseInfo.refColorSpace());
         SkSurfaceProps canvasProps(SkSurfaceProps::kLegacyFontHost_InitType);
         baseCanvas->getProps(&canvasProps);
         return SkSurface::MakeRenderTarget(context, SkBudgeted::kNo, info, 0, &canvasProps);
@@ -173,7 +173,7 @@ private:
     }
 
     void onOnceBeforeDraw() override {
-        static const uint32_t kCheckData[] = {
+        const uint32_t kCheckData[] = {
             SkPackARGB32(0xFF, 0x42, 0x41, 0x42),
             SkPackARGB32(0xFF, 0xD6, 0xD3, 0xD6),
             SkPackARGB32(0xFF, 0xD6, 0xD3, 0xD6),

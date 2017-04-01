@@ -4,7 +4,8 @@
 
 package org.chromium.android_webview.test;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.annotation.SuppressLint;
+import android.support.test.filters.SmallTest;
 import android.util.Pair;
 
 import org.chromium.android_webview.AwContents;
@@ -12,10 +13,11 @@ import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.test.util.CallbackHelper;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageStartedHelper;
@@ -116,6 +118,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest extends AwTestBase {
                 "<div>Meta refresh redirect</div>");
     }
 
+    @SuppressLint("DefaultLocale")
     private String getHtmlForPageWithJsRedirectTo(String url, String method, int timeout) {
         return makeHtmlPageFrom(""
                 + "<script>"
@@ -775,6 +778,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Navigation"})
+    @RetryOnFailure
     public void testCalledOnJavaScriptLocationDelayedAssignRedirect()
             throws Throwable {
         final String redirectTargetUrl = createRedirectTargetPage();
@@ -785,6 +789,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView", "Navigation"})
+    @RetryOnFailure
     public void testCalledOnJavaScriptLocationDelayedReplaceRedirect()
             throws Throwable {
         final String redirectTargetUrl = createRedirectTargetPage();
@@ -1010,19 +1015,22 @@ public class AwContentsClientShouldOverrideUrlLoadingTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testNullContentsClientClickableEmail() throws Throwable {
         doTestNullContentsClientClickableContent(TEST_EMAIL, TEST_EMAIL_URI);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
-    @CommandLineFlags.Add({ContentSwitches.NETWORK_COUNTRY_ISO + "=us"})
+    @CommandLineFlags.Add({ContentSwitches.NETWORK_COUNTRY_ISO + "=us",
+            ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testNullContentsClientClickablePhone() throws Throwable {
         doTestNullContentsClientClickableContent(TEST_PHONE, TEST_PHONE_URI);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testNullContentsClientClickableAddress() throws Throwable {
         doTestNullContentsClientClickableContent(TEST_ADDRESS, TEST_ADDRESS_URI);
     }
@@ -1044,38 +1052,44 @@ public class AwContentsClientShouldOverrideUrlLoadingTest extends AwTestBase {
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testClickableEmail() throws Throwable {
         doTestClickableContent(TEST_EMAIL, TEST_EMAIL_URI, true);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
-    @CommandLineFlags.Add({ContentSwitches.NETWORK_COUNTRY_ISO + "=us"})
+    @CommandLineFlags.Add({ContentSwitches.NETWORK_COUNTRY_ISO + "=us",
+            ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testClickablePhone() throws Throwable {
         doTestClickableContent(TEST_PHONE, TEST_PHONE_URI, true);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testClickableAddress() throws Throwable {
         doTestClickableContent(TEST_ADDRESS, TEST_ADDRESS_URI, true);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testClickableEmailInIframe() throws Throwable {
         doTestClickableContent(TEST_EMAIL, TEST_EMAIL_URI, false);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
-    @CommandLineFlags.Add({ContentSwitches.NETWORK_COUNTRY_ISO + "=us"})
+    @CommandLineFlags.Add({ContentSwitches.NETWORK_COUNTRY_ISO + "=us",
+            ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testClickablePhoneInIframe() throws Throwable {
         doTestClickableContent(TEST_PHONE, TEST_PHONE_URI, false);
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({ContentSwitches.ENABLE_CONTENT_INTENT_DETECTION})
     public void testClickableAddressInIframe() throws Throwable {
         doTestClickableContent(TEST_ADDRESS, TEST_ADDRESS_URI, false);
     }

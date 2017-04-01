@@ -5,9 +5,8 @@
 package org.chromium.chrome.browser;
 
 import android.content.Context;
-import android.os.Environment;
+import android.support.test.filters.LargeTest;
 import android.test.MoreAsserts;
-import android.test.suitebuilder.annotation.LargeTest;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 
@@ -16,6 +15,7 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Restriction;
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabCreatorManager.TabCreator;
@@ -42,6 +42,7 @@ import java.util.concurrent.Callable;
  * Integration tests for the BindingManager API. This test plants a mock BindingManager
  * implementation and verifies that the signals it relies on are correctly delivered.
  */
+@RetryOnFailure
 public class BindingManagerIntegrationTest extends ChromeActivityTestCaseBase<ChromeActivity> {
 
     private static class MockBindingManager implements BindingManager {
@@ -52,55 +53,39 @@ public class BindingManagerIntegrationTest extends ChromeActivityTestCaseBase<Ch
         private boolean mIsReleaseAllModerateBindingsCalled;
 
         void assertIsInForeground(final int pid) {
-            try {
-                CriteriaHelper.pollInstrumentationThread(new Criteria() {
-                    @Override
-                    public boolean isSatisfied() {
-                        return mProcessInForegroundMap.get(pid);
-                    }
-                });
-            } catch (InterruptedException ie) {
-                fail();
-            }
+            CriteriaHelper.pollInstrumentationThread(new Criteria() {
+                @Override
+                public boolean isSatisfied() {
+                    return mProcessInForegroundMap.get(pid);
+                }
+            });
         }
 
         void assertIsInBackground(final int pid) {
-            try {
-                CriteriaHelper.pollInstrumentationThread(new Criteria() {
-                    @Override
-                    public boolean isSatisfied() {
-                        return !mProcessInForegroundMap.get(pid);
-                    }
-                });
-            } catch (InterruptedException ie) {
-                fail();
-            }
+            CriteriaHelper.pollInstrumentationThread(new Criteria() {
+                @Override
+                public boolean isSatisfied() {
+                    return !mProcessInForegroundMap.get(pid);
+                }
+            });
         }
 
         void assertSetInForegroundWasCalled(String message, final int pid) {
-            try {
-                CriteriaHelper.pollInstrumentationThread(new Criteria(message) {
-                    @Override
-                    public boolean isSatisfied() {
-                        return mProcessInForegroundMap.indexOfKey(pid) >= 0;
-                    }
-                });
-            } catch (InterruptedException ie) {
-                fail();
-            }
+            CriteriaHelper.pollInstrumentationThread(new Criteria(message) {
+                @Override
+                public boolean isSatisfied() {
+                    return mProcessInForegroundMap.indexOfKey(pid) >= 0;
+                }
+            });
         }
 
         void assertIsReleaseAllModerateBindingsCalled() {
-            try {
-                CriteriaHelper.pollInstrumentationThread(new Criteria() {
-                    @Override
-                    public boolean isSatisfied() {
-                        return mIsReleaseAllModerateBindingsCalled;
-                    }
-                });
-            } catch (InterruptedException ie) {
-                fail();
-            }
+            CriteriaHelper.pollInstrumentationThread(new Criteria() {
+                @Override
+                public boolean isSatisfied() {
+                    return mIsReleaseAllModerateBindingsCalled;
+                }
+            });
         }
 
         String getVisibilityCalls(int pid) {
@@ -647,8 +632,7 @@ public class BindingManagerIntegrationTest extends ChromeActivityTestCaseBase<Ch
 
         super.setUp();
 
-        mTestServer = EmbeddedTestServer.createAndStartFileServer(
-                getInstrumentation().getContext(), Environment.getExternalStorageDirectory());
+        mTestServer = EmbeddedTestServer.createAndStartServer(getInstrumentation().getContext());
     }
 
     @Override

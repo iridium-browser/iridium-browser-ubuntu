@@ -4,17 +4,15 @@
 
 #include "components/sync/driver/proxy_data_type_controller.h"
 
-#include "components/sync/api/sync_merge_result.h"
+#include "base/memory/ptr_util.h"
+#include "base/values.h"
+#include "components/sync/model/sync_merge_result.h"
 
-namespace sync_driver {
+namespace syncer {
 
-ProxyDataTypeController::ProxyDataTypeController(
-    const scoped_refptr<base::SingleThreadTaskRunner>& ui_thread,
-    syncer::ModelType type)
-    : DataTypeController(ui_thread, base::Closure()),
-      state_(NOT_RUNNING),
-      type_(type) {
-  DCHECK(syncer::ProxyTypes().Has(type_));
+ProxyDataTypeController::ProxyDataTypeController(ModelType type)
+    : DataTypeController(type), state_(NOT_RUNNING) {
+  DCHECK(ProxyTypes().Has(type));
 }
 
 ProxyDataTypeController::~ProxyDataTypeController() {}
@@ -25,17 +23,20 @@ bool ProxyDataTypeController::ShouldLoadModelBeforeConfigure() const {
 
 void ProxyDataTypeController::LoadModels(
     const ModelLoadCallback& model_load_callback) {
+  DCHECK(CalledOnValidThread());
   state_ = MODEL_LOADED;
-  model_load_callback.Run(type(), syncer::SyncError());
+  model_load_callback.Run(type(), SyncError());
 }
 
 void ProxyDataTypeController::RegisterWithBackend(
-    BackendDataTypeConfigurer* configurer) {}
+    base::Callback<void(bool)> set_downloaded,
+    ModelTypeConfigurer* configurer) {}
 
 void ProxyDataTypeController::StartAssociating(
     const StartCallback& start_callback) {
-  syncer::SyncMergeResult local_merge_result(type_);
-  syncer::SyncMergeResult syncer_merge_result(type_);
+  DCHECK(CalledOnValidThread());
+  SyncMergeResult local_merge_result(type());
+  SyncMergeResult syncer_merge_result(type());
   state_ = RUNNING;
   start_callback.Run(DataTypeController::OK, local_merge_result,
                      syncer_merge_result);
@@ -45,29 +46,29 @@ void ProxyDataTypeController::Stop() {
   state_ = NOT_RUNNING;
 }
 
-syncer::ModelType ProxyDataTypeController::type() const {
-  DCHECK(syncer::ProxyTypes().Has(type_));
-  return type_;
-}
-
 std::string ProxyDataTypeController::name() const {
   // For logging only.
-  return syncer::ModelTypeToString(type());
+  return ModelTypeToString(type());
 }
 
 DataTypeController::State ProxyDataTypeController::state() const {
   return state_;
 }
 
-void ProxyDataTypeController::OnSingleDataTypeUnrecoverableError(
-    const syncer::SyncError& error) {
-  NOTIMPLEMENTED();
-}
-
 void ProxyDataTypeController::ActivateDataType(
-    BackendDataTypeConfigurer* configurer) {}
+    ModelTypeConfigurer* configurer) {}
 
 void ProxyDataTypeController::DeactivateDataType(
-    BackendDataTypeConfigurer* configurer) {}
+    ModelTypeConfigurer* configurer) {}
 
-}  // namespace sync_driver
+void ProxyDataTypeController::GetAllNodes(const AllNodesCallback& callback) {
+  callback.Run(type(), base::MakeUnique<base::ListValue>());
+}
+
+void ProxyDataTypeController::GetStatusCounters(
+    const StatusCountersCallback& callback) {
+  syncer::StatusCounters counters;
+  callback.Run(type(), counters);
+}
+
+}  // namespace syncer

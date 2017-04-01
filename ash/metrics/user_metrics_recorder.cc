@@ -4,21 +4,22 @@
 
 #include "ash/metrics/user_metrics_recorder.h"
 
+#include "ash/common/metrics/pointer_metrics_recorder.h"
 #include "ash/common/session/session_state_delegate.h"
 #include "ash/common/shelf/shelf_delegate.h"
 #include "ash/common/shelf/shelf_item_types.h"
 #include "ash/common/shelf/shelf_model.h"
 #include "ash/common/shelf/shelf_view.h"
 #include "ash/common/shelf/wm_shelf.h"
-#include "ash/common/shell_window_ids.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
 #include "ash/common/wm/window_state.h"
-#include "ash/common/wm_root_window_controller.h"
 #include "ash/common/wm_shell.h"
 #include "ash/common/wm_window.h"
 #include "ash/metrics/desktop_task_switch_metric_recorder.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/window_state_aura.h"
+#include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/user_metrics.h"
 #include "ui/aura/window.h"
@@ -37,7 +38,9 @@ enum ActiveWindowStateType {
   ACTIVE_WINDOW_STATE_TYPE_FULLSCREEN,
   ACTIVE_WINDOW_STATE_TYPE_SNAPPED,
   ACTIVE_WINDOW_STATE_TYPE_DOCKED,
-  ACTIVE_WINDOW_STATE_TYPE_COUNT
+  ACTIVE_WINDOW_STATE_TYPE_PINNED,
+  ACTIVE_WINDOW_STATE_TYPE_TRUSTED_PINNED,
+  ACTIVE_WINDOW_STATE_TYPE_COUNT,
 };
 
 ActiveWindowStateType GetActiveWindowState() {
@@ -60,13 +63,18 @@ ActiveWindowStateType GetActiveWindowState() {
       case wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED:
         active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_DOCKED;
         break;
+      case wm::WINDOW_STATE_TYPE_PINNED:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_PINNED;
+        break;
+      case wm::WINDOW_STATE_TYPE_TRUSTED_PINNED:
+        active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_TRUSTED_PINNED;
+        break;
       case wm::WINDOW_STATE_TYPE_DEFAULT:
       case wm::WINDOW_STATE_TYPE_NORMAL:
       case wm::WINDOW_STATE_TYPE_MINIMIZED:
       case wm::WINDOW_STATE_TYPE_INACTIVE:
       case wm::WINDOW_STATE_TYPE_END:
       case wm::WINDOW_STATE_TYPE_AUTO_POSITIONED:
-      case wm::WINDOW_STATE_TYPE_PINNED:
         // TODO: We probably want to recorde PINNED state.
         active_window_state_type = ACTIVE_WINDOW_STATE_TYPE_OTHER;
         break;
@@ -79,6 +87,12 @@ ActiveWindowStateType GetActiveWindowState() {
 bool IsKioskModeActive() {
   return WmShell::Get()->system_tray_delegate()->GetUserLoginStatus() ==
          LoginStatus::KIOSK_APP;
+}
+
+// Returns true if ARC kiosk mode is active.
+bool IsArcKioskModeActive() {
+  return WmShell::Get()->system_tray_delegate()->GetUserLoginStatus() ==
+         LoginStatus::ARC_KIOSK_APP;
 }
 
 // Returns true if there is an active user and their session isn't currently
@@ -94,6 +108,7 @@ bool IsUserActive() {
     case LoginStatus::PUBLIC:
     case LoginStatus::SUPERVISED:
     case LoginStatus::KIOSK_APP:
+    case LoginStatus::ARC_KIOSK_APP:
       return true;
   }
   NOTREACHED();
@@ -314,12 +329,6 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_BRIGHTNESS_CHANGED:
       RecordAction(UserMetricsAction("StatusArea_BrightnessChanged"));
       break;
-    case UMA_STATUS_AREA_BLUETOOTH_CONNECT_KNOWN_DEVICE:
-      RecordAction(UserMetricsAction("StatusArea_Bluetooth_Connect_Known"));
-      break;
-    case UMA_STATUS_AREA_BLUETOOTH_CONNECT_UNKNOWN_DEVICE:
-      RecordAction(UserMetricsAction("StatusArea_Bluetooth_Connect_Unknown"));
-      break;
     case UMA_STATUS_AREA_BLUETOOTH_DISABLED:
       RecordAction(UserMetricsAction("StatusArea_Bluetooth_Disabled"));
       break;
@@ -465,7 +474,7 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_NETWORK_JOIN_OTHER_CLICKED:
       RecordAction(UserMetricsAction("StatusArea_Network_JoinOther"));
       break;
-    case UMA_STATUS_AREA_NETWORK_SETTINGS_CLICKED:
+    case UMA_STATUS_AREA_NETWORK_SETTINGS_OPENED:
       RecordAction(UserMetricsAction("StatusArea_Network_Settings"));
     case UMA_STATUS_AREA_OS_UPDATE_DEFAULT_SELECTED:
       RecordAction(UserMetricsAction("StatusArea_OS_Update_Default_Selected"));
@@ -504,7 +513,7 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case UMA_STATUS_AREA_VPN_DISCONNECT_CLICKED:
       RecordAction(UserMetricsAction("StatusArea_VPN_Disconnect"));
       break;
-    case UMA_STATUS_AREA_VPN_SETTINGS_CLICKED:
+    case UMA_STATUS_AREA_VPN_SETTINGS_OPENED:
       RecordAction(UserMetricsAction("StatusArea_VPN_Settings"));
       break;
     case UMA_TOGGLE_MAXIMIZE_CAPTION_CLICK:
@@ -531,6 +540,9 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       break;
     case UMA_TRAY_OVERVIEW:
       RecordAction(UserMetricsAction("Tray_Overview"));
+      break;
+    case UMA_TRAY_SETTINGS:
+      RecordAction(UserMetricsAction("Tray_Settings"));
       break;
     case UMA_TRAY_SHUT_DOWN:
       RecordAction(UserMetricsAction("Tray_ShutDown"));
@@ -589,17 +601,20 @@ void UserMetricsRecorder::OnShellInitialized() {
     desktop_task_switch_metric_recorder_.reset(
         new DesktopTaskSwitchMetricRecorder());
   }
+  pointer_metrics_recorder_ = base::MakeUnique<PointerMetricsRecorder>();
 }
 
 void UserMetricsRecorder::OnShellShuttingDown() {
   desktop_task_switch_metric_recorder_.reset();
+
+  // To clean up pointer_metrics_recorder_ properly, a valid shell instance is
+  // required, so explicitly delete it before the shell instance becomes
+  // invalid.
+  pointer_metrics_recorder_.reset();
 }
 
 void UserMetricsRecorder::RecordPeriodicMetrics() {
-  WmShelf* shelf = WmShell::Get()
-                       ->GetPrimaryRootWindow()
-                       ->GetRootWindowController()
-                       ->GetShelf();
+  WmShelf* shelf = WmShelf::ForWindow(WmShell::Get()->GetPrimaryRootWindow());
   // TODO(bruthig): Investigating whether the check for |manager| is necessary
   // and add tests if it is.
   if (shelf) {
@@ -628,7 +643,7 @@ void UserMetricsRecorder::RecordPeriodicMetrics() {
 }
 
 bool UserMetricsRecorder::IsUserInActiveDesktopEnvironment() const {
-  return IsUserActive() && !IsKioskModeActive();
+  return IsUserActive() && !IsKioskModeActive() && !IsArcKioskModeActive();
 }
 
 void UserMetricsRecorder::StartTimer() {

@@ -24,6 +24,10 @@
 #include "net/base/sockaddr_storage.h"
 #include "net/base/winsock_init.h"
 #include "net/base/winsock_util.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_event_type.h"
+#include "net/log/net_log_source.h"
+#include "net/log/net_log_source_type.h"
 #include "net/socket/socket_descriptor.h"
 #include "net/socket/socket_net_log_params.h"
 
@@ -36,7 +40,8 @@ const int kTCPKeepAliveSeconds = 45;
 int SetSocketReceiveBufferSize(SOCKET socket, int32_t size) {
   int rv = setsockopt(socket, SOL_SOCKET, SO_RCVBUF,
                       reinterpret_cast<const char*>(&size), sizeof(size));
-  int net_error = (rv == 0) ? OK : MapSystemError(WSAGetLastError());
+  int os_error = WSAGetLastError();
+  int net_error = (rv == 0) ? OK : MapSystemError(os_error);
   DCHECK(!rv) << "Could not set socket receive buffer size: " << net_error;
   return net_error;
 }
@@ -44,7 +49,8 @@ int SetSocketReceiveBufferSize(SOCKET socket, int32_t size) {
 int SetSocketSendBufferSize(SOCKET socket, int32_t size) {
   int rv = setsockopt(socket, SOL_SOCKET, SO_SNDBUF,
                       reinterpret_cast<const char*>(&size), sizeof(size));
-  int net_error = (rv == 0) ? OK : MapSystemError(WSAGetLastError());
+  int os_error = WSAGetLastError();
+  int net_error = (rv == 0) ? OK : MapSystemError(os_error);
   DCHECK(!rv) << "Could not set socket send buffer size: " << net_error;
   return net_error;
 }
@@ -63,8 +69,9 @@ bool SetTCPKeepAlive(SOCKET socket, BOOL enable, int delay_secs) {
   int rv = WSAIoctl(socket, SIO_KEEPALIVE_VALS, &keepalive_vals,
                     sizeof(keepalive_vals), NULL, 0,
                     &bytes_returned, NULL, NULL);
+  int os_error = WSAGetLastError();
   DCHECK(!rv) << "Could not enable TCP Keep-Alive for socket: " << socket
-              << " [error: " << WSAGetLastError() << "].";
+              << " [error: " << os_error << "].";
 
   // Disregard any failure in disabling nagle or enabling TCP Keep-Alive.
   return rv == 0;
@@ -92,6 +99,13 @@ int MapConnectError(int os_error) {
       return net_error;
     }
   }
+}
+
+bool SetNonBlockingAndGetError(int fd, int* os_error) {
+  bool ret = base::SetNonBlocking(fd);
+  *os_error = WSAGetLastError();
+
+  return ret;
 }
 
 }  // namespace
@@ -244,7 +258,7 @@ void TCPSocketWin::Core::WriteDelegate::OnObjectSignaled(
 TCPSocketWin::TCPSocketWin(
     std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
     net::NetLog* net_log,
-    const net::NetLog::Source& source)
+    const net::NetLogSource& source)
     : socket_(INVALID_SOCKET),
       socket_performance_watcher_(std::move(socket_performance_watcher)),
       accept_event_(WSA_INVALID_EVENT),
@@ -255,15 +269,15 @@ TCPSocketWin::TCPSocketWin(
       waiting_write_(false),
       connect_os_error_(0),
       logging_multiple_connect_attempts_(false),
-      net_log_(BoundNetLog::Make(net_log, NetLog::SOURCE_SOCKET)) {
-  net_log_.BeginEvent(NetLog::TYPE_SOCKET_ALIVE,
+      net_log_(NetLogWithSource::Make(net_log, NetLogSourceType::SOCKET)) {
+  net_log_.BeginEvent(NetLogEventType::SOCKET_ALIVE,
                       source.ToEventParametersCallback());
   EnsureWinsockInit();
 }
 
 TCPSocketWin::~TCPSocketWin() {
   Close();
-  net_log_.EndEvent(NetLog::TYPE_SOCKET_ALIVE);
+  net_log_.EndEvent(NetLogEventType::SOCKET_ALIVE);
 }
 
 int TCPSocketWin::Open(AddressFamily family) {
@@ -272,13 +286,14 @@ int TCPSocketWin::Open(AddressFamily family) {
 
   socket_ = CreatePlatformSocket(ConvertAddressFamily(family), SOCK_STREAM,
                                  IPPROTO_TCP);
+  int os_error = WSAGetLastError();
   if (socket_ == INVALID_SOCKET) {
     PLOG(ERROR) << "CreatePlatformSocket() returned an error";
-    return MapSystemError(WSAGetLastError());
+    return MapSystemError(os_error);
   }
 
-  if (!base::SetNonBlocking(socket_)) {
-    int result = MapSystemError(WSAGetLastError());
+  if (!SetNonBlockingAndGetError(socket_, &os_error)) {
+    int result = MapSystemError(os_error);
     Close();
     return result;
   }
@@ -294,8 +309,9 @@ int TCPSocketWin::AdoptConnectedSocket(SOCKET socket,
 
   socket_ = socket;
 
-  if (!base::SetNonBlocking(socket_)) {
-    int result = MapSystemError(WSAGetLastError());
+  int os_error;
+  if (!SetNonBlockingAndGetError(socket_, &os_error)) {
+    int result = MapSystemError(os_error);
     Close();
     return result;
   }
@@ -312,8 +328,9 @@ int TCPSocketWin::AdoptListenSocket(SOCKET socket) {
 
   socket_ = socket;
 
-  if (!base::SetNonBlocking(socket_)) {
-    int result = MapSystemError(WSAGetLastError());
+  int os_error;
+  if (!SetNonBlockingAndGetError(socket_, &os_error)) {
+    int result = MapSystemError(os_error);
     Close();
     return result;
   }
@@ -333,9 +350,10 @@ int TCPSocketWin::Bind(const IPEndPoint& address) {
     return ERR_ADDRESS_INVALID;
 
   int result = bind(socket_, storage.addr, storage.addr_len);
+  int os_error = WSAGetLastError();
   if (result < 0) {
     PLOG(ERROR) << "bind() returned an error";
-    return MapSystemError(WSAGetLastError());
+    return MapSystemError(os_error);
   }
 
   return OK;
@@ -348,15 +366,17 @@ int TCPSocketWin::Listen(int backlog) {
   DCHECK_EQ(accept_event_, WSA_INVALID_EVENT);
 
   accept_event_ = WSACreateEvent();
+  int os_error = WSAGetLastError();
   if (accept_event_ == WSA_INVALID_EVENT) {
     PLOG(ERROR) << "WSACreateEvent()";
-    return MapSystemError(WSAGetLastError());
+    return MapSystemError(os_error);
   }
 
   int result = listen(socket_, backlog);
+  os_error = WSAGetLastError();
   if (result < 0) {
     PLOG(ERROR) << "listen() returned an error";
-    return MapSystemError(WSAGetLastError());
+    return MapSystemError(os_error);
   }
 
   return OK;
@@ -371,7 +391,7 @@ int TCPSocketWin::Accept(std::unique_ptr<TCPSocketWin>* socket,
   DCHECK(!callback.is_null());
   DCHECK(accept_callback_.is_null());
 
-  net_log_.BeginEvent(NetLog::TYPE_TCP_ACCEPT);
+  net_log_.BeginEvent(NetLogEventType::TCP_ACCEPT);
 
   int result = AcceptInternal(socket, address);
 
@@ -434,9 +454,10 @@ bool TCPSocketWin::IsConnected() const {
   // Check if connection is alive.
   char c;
   int rv = recv(socket_, &c, 1, MSG_PEEK);
+  int os_error = WSAGetLastError();
   if (rv == 0)
     return false;
-  if (rv == SOCKET_ERROR && WSAGetLastError() != WSAEWOULDBLOCK)
+  if (rv == SOCKET_ERROR && os_error != WSAEWOULDBLOCK)
     return false;
 
   return true;
@@ -455,9 +476,10 @@ bool TCPSocketWin::IsConnectedAndIdle() const {
   // unexpectedly.
   char c;
   int rv = recv(socket_, &c, 1, MSG_PEEK);
+  int os_error = WSAGetLastError();
   if (rv >= 0)
     return false;
-  if (WSAGetLastError() != WSAEWOULDBLOCK)
+  if (os_error != WSAEWOULDBLOCK)
     return false;
 
   return true;
@@ -494,6 +516,7 @@ int TCPSocketWin::Write(IOBuffer* buf,
   DWORD num;
   int rv = WSASend(socket_, &write_buffer, 1, &num, 0,
                    &core_->write_overlapped_, NULL);
+  int os_error = WSAGetLastError();
   if (rv == 0) {
     if (ResetEventIfSignaled(core_->write_overlapped_.hEvent)) {
       rv = static_cast<int>(num);
@@ -504,16 +527,15 @@ int TCPSocketWin::Write(IOBuffer* buf,
                    << " bytes, but " << rv << " bytes reported.";
         return ERR_WINSOCK_UNEXPECTED_WRITTEN_BYTES;
       }
-      net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_SENT, rv,
+      net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_SENT, rv,
                                     buf->data());
       NetworkActivityMonitor::GetInstance()->IncrementBytesSent(rv);
       return rv;
     }
   } else {
-    int os_error = WSAGetLastError();
     if (os_error != WSA_IO_PENDING) {
       int net_error = MapSystemError(os_error);
-      net_log_.AddEvent(NetLog::TYPE_SOCKET_WRITE_ERROR,
+      net_log_.AddEvent(NetLogEventType::SOCKET_WRITE_ERROR,
                         CreateNetLogSocketErrorCallback(net_error, os_error));
       return net_error;
     }
@@ -531,8 +553,10 @@ int TCPSocketWin::GetLocalAddress(IPEndPoint* address) const {
   DCHECK(address);
 
   SockaddrStorage storage;
-  if (getsockname(socket_, storage.addr, &storage.addr_len))
-    return MapSystemError(WSAGetLastError());
+  if (getsockname(socket_, storage.addr, &storage.addr_len)) {
+    int os_error = WSAGetLastError();
+    return MapSystemError(os_error);
+  }
   if (!address->FromSockAddr(storage.addr, storage.addr_len))
     return ERR_ADDRESS_INVALID;
 
@@ -606,7 +630,7 @@ void TCPSocketWin::Close() {
 
   if (socket_ != INVALID_SOCKET) {
     // Only log the close event if there's actually a socket to close.
-    net_log_.AddEvent(NetLog::EventType::TYPE_SOCKET_CLOSED);
+    net_log_.AddEvent(NetLogEventType::SOCKET_CLOSED);
 
     // Note: don't use CancelIo to cancel pending IO because it doesn't work
     // when there is a Winsock layered service provider.
@@ -685,10 +709,11 @@ int TCPSocketWin::AcceptInternal(std::unique_ptr<TCPSocketWin>* socket,
                                  IPEndPoint* address) {
   SockaddrStorage storage;
   int new_socket = accept(socket_, storage.addr, &storage.addr_len);
+  int os_error = WSAGetLastError();
   if (new_socket < 0) {
-    int net_error = MapSystemError(WSAGetLastError());
+    int net_error = MapSystemError(os_error);
     if (net_error != ERR_IO_PENDING)
-      net_log_.EndEventWithNetErrorCode(NetLog::TYPE_TCP_ACCEPT, net_error);
+      net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT, net_error);
     return net_error;
   }
 
@@ -698,19 +723,20 @@ int TCPSocketWin::AcceptInternal(std::unique_ptr<TCPSocketWin>* socket,
     if (closesocket(new_socket) < 0)
       PLOG(ERROR) << "closesocket";
     int net_error = ERR_ADDRESS_INVALID;
-    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_TCP_ACCEPT, net_error);
+    net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT, net_error);
     return net_error;
   }
   std::unique_ptr<TCPSocketWin> tcp_socket(
       new TCPSocketWin(NULL, net_log_.net_log(), net_log_.source()));
   int adopt_result = tcp_socket->AdoptConnectedSocket(new_socket, ip_end_point);
   if (adopt_result != OK) {
-    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_TCP_ACCEPT, adopt_result);
+    net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_ACCEPT,
+                                      adopt_result);
     return adopt_result;
   }
   *socket = std::move(tcp_socket);
   *address = ip_end_point;
-  net_log_.EndEvent(NetLog::TYPE_TCP_ACCEPT,
+  net_log_.EndEvent(NetLogEventType::TCP_ACCEPT,
                     CreateNetLogIPEndPointCallback(&ip_end_point));
   return OK;
 }
@@ -744,7 +770,7 @@ int TCPSocketWin::DoConnect() {
   DCHECK_EQ(connect_os_error_, 0);
   DCHECK(!core_.get());
 
-  net_log_.BeginEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT,
+  net_log_.BeginEvent(NetLogEventType::TCP_CONNECT_ATTEMPT,
                       CreateNetLogIPEndPointCallback(peer_address_.get()));
 
   core_ = new Core(this);
@@ -758,11 +784,13 @@ int TCPSocketWin::DoConnect() {
     return ERR_ADDRESS_INVALID;
 
   int result;
+  int os_error;
   {
     // TODO(ricea): Remove ScopedTracker below once crbug.com/436634 is fixed.
     tracked_objects::ScopedTracker tracking_profile(
         FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 connect()"));
     result = connect(socket_, storage.addr, storage.addr_len);
+    os_error = WSAGetLastError();
   }
 
   if (!result) {
@@ -781,7 +809,6 @@ int TCPSocketWin::DoConnect() {
     if (ResetEventIfSignaled(core_->read_overlapped_.hEvent))
       return OK;
   } else {
-    int os_error = WSAGetLastError();
     if (os_error != WSAEWOULDBLOCK) {
       LOG(ERROR) << "connect failed: " << os_error;
       connect_os_error_ = os_error;
@@ -804,10 +831,10 @@ void TCPSocketWin::DoConnectComplete(int result) {
   int os_error = connect_os_error_;
   connect_os_error_ = 0;
   if (result != OK) {
-    net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT,
+    net_log_.EndEvent(NetLogEventType::TCP_CONNECT_ATTEMPT,
                       NetLog::IntCallback("os_error", os_error));
   } else {
-    net_log_.EndEvent(NetLog::TYPE_TCP_CONNECT_ATTEMPT);
+    net_log_.EndEvent(NetLogEventType::TCP_CONNECT_ATTEMPT);
   }
 
   if (!logging_multiple_connect_attempts_)
@@ -815,13 +842,13 @@ void TCPSocketWin::DoConnectComplete(int result) {
 }
 
 void TCPSocketWin::LogConnectBegin(const AddressList& addresses) {
-  net_log_.BeginEvent(NetLog::TYPE_TCP_CONNECT,
+  net_log_.BeginEvent(NetLogEventType::TCP_CONNECT,
                       addresses.CreateNetLogCallback());
 }
 
 void TCPSocketWin::LogConnectEnd(int net_error) {
   if (net_error != OK) {
-    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_TCP_CONNECT, net_error);
+    net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_CONNECT, net_error);
     return;
   }
 
@@ -829,16 +856,16 @@ void TCPSocketWin::LogConnectEnd(int net_error) {
   socklen_t addrlen = sizeof(source_address);
   int rv = getsockname(
       socket_, reinterpret_cast<struct sockaddr*>(&source_address), &addrlen);
+  int os_error = WSAGetLastError();
   if (rv != 0) {
-    LOG(ERROR) << "getsockname() [rv: " << rv
-               << "] error: " << WSAGetLastError();
+    LOG(ERROR) << "getsockname() [rv: " << rv << "] error: " << os_error;
     NOTREACHED();
-    net_log_.EndEventWithNetErrorCode(NetLog::TYPE_TCP_CONNECT, rv);
+    net_log_.EndEventWithNetErrorCode(NetLogEventType::TCP_CONNECT, rv);
     return;
   }
 
   net_log_.EndEvent(
-      NetLog::TYPE_TCP_CONNECT,
+      NetLogEventType::TCP_CONNECT,
       CreateNetLogSourceAddressCallback(
           reinterpret_cast<const struct sockaddr*>(&source_address),
           sizeof(source_address)));
@@ -852,17 +879,16 @@ int TCPSocketWin::DoRead(IOBuffer* buf, int buf_len,
     core_->non_blocking_reads_initialized_ = true;
   }
   int rv = recv(socket_, buf->data(), buf_len, 0);
+  int os_error = WSAGetLastError();
   if (rv == SOCKET_ERROR) {
-    int os_error = WSAGetLastError();
     if (os_error != WSAEWOULDBLOCK) {
       int net_error = MapSystemError(os_error);
-      net_log_.AddEvent(
-          NetLog::TYPE_SOCKET_READ_ERROR,
-          CreateNetLogSocketErrorCallback(net_error, os_error));
+      net_log_.AddEvent(NetLogEventType::SOCKET_READ_ERROR,
+                        CreateNetLogSocketErrorCallback(net_error, os_error));
       return net_error;
     }
   } else {
-    net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_RECEIVED, rv,
+    net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_RECEIVED, rv,
                                   buf->data());
     NetworkActivityMonitor::GetInstance()->IncrementBytesReceived(rv);
     return rv;
@@ -883,6 +909,7 @@ void TCPSocketWin::DidCompleteConnect() {
 
   WSANETWORKEVENTS events;
   int rv;
+  int os_error = 0;
   {
     // TODO(pkasting): Remove ScopedTracker below once crbug.com/462784 is
     // fixed.
@@ -890,11 +917,10 @@ void TCPSocketWin::DidCompleteConnect() {
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "462784 TCPSocketWin::DidCompleteConnect -> WSAEnumNetworkEvents"));
     rv = WSAEnumNetworkEvents(socket_, core_->read_overlapped_.hEvent, &events);
+    os_error = WSAGetLastError();
   }
-  int os_error = 0;
   if (rv == SOCKET_ERROR) {
     NOTREACHED();
-    os_error = WSAGetLastError();
     result = MapSystemError(os_error);
   } else if (events.lNetworkEvents & FD_CONNECT) {
     os_error = events.iErrorCode[FD_CONNECT_BIT];
@@ -923,13 +949,13 @@ void TCPSocketWin::DidCompleteWrite() {
   DWORD num_bytes, flags;
   BOOL ok = WSAGetOverlappedResult(socket_, &core_->write_overlapped_,
                                    &num_bytes, FALSE, &flags);
+  int os_error = WSAGetLastError();
   WSAResetEvent(core_->write_overlapped_.hEvent);
   waiting_write_ = false;
   int rv;
   if (!ok) {
-    int os_error = WSAGetLastError();
     rv = MapSystemError(os_error);
-    net_log_.AddEvent(NetLog::TYPE_SOCKET_WRITE_ERROR,
+    net_log_.AddEvent(NetLogEventType::SOCKET_WRITE_ERROR,
                       CreateNetLogSocketErrorCallback(rv, os_error));
   } else {
     rv = static_cast<int>(num_bytes);
@@ -941,8 +967,8 @@ void TCPSocketWin::DidCompleteWrite() {
                  << " bytes reported.";
       rv = ERR_WINSOCK_UNEXPECTED_WRITTEN_BYTES;
     } else {
-      net_log_.AddByteTransferEvent(NetLog::TYPE_SOCKET_BYTES_SENT, num_bytes,
-                                    core_->write_iobuffer_->data());
+      net_log_.AddByteTransferEvent(NetLogEventType::SOCKET_BYTES_SENT,
+                                    num_bytes, core_->write_iobuffer_->data());
       NetworkActivityMonitor::GetInstance()->IncrementBytesSent(num_bytes);
     }
   }
@@ -961,8 +987,9 @@ void TCPSocketWin::DidSignalRead() {
   WSANETWORKEVENTS network_events;
   int rv = WSAEnumNetworkEvents(socket_, core_->read_overlapped_.hEvent,
                                 &network_events);
+  os_error = WSAGetLastError();
+
   if (rv == SOCKET_ERROR) {
-    os_error = WSAGetLastError();
     rv = MapSystemError(os_error);
   } else if (network_events.lNetworkEvents) {
     // TODO(pkasting): Remove ScopedTracker below once crbug.com/462778 is

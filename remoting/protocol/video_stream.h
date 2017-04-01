@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "base/callback_forward.h"
+#include "remoting/protocol/input_event_timestamps.h"
 
 namespace webrtc {
 class DesktopSize;
@@ -28,24 +29,18 @@ class VideoStream {
     virtual void OnVideoSizeChanged(VideoStream* stream,
                                     const webrtc::DesktopSize& size,
                                     const webrtc::DesktopVector& dpi) = 0;
-
-    // Called to notify about an outgoing video frame. |input_event_timestamp|
-    // corresponds to the last input event that was injected before the frame
-    // was captured.
-    virtual void OnVideoFrameSent(VideoStream* stream,
-                                  uint32_t frame_id,
-                                  int64_t event_timestamp) = 0;
   };
 
   VideoStream() {}
   virtual ~VideoStream() {}
 
+  // Sets event timestamps source to be used for the video stream.
+  virtual void SetEventTimestampsSource(
+      scoped_refptr<InputEventTimestampsSource> event_timestamps_source) = 0;
+
   // Pauses or resumes scheduling of frame captures. Pausing/resuming captures
   // only affects capture scheduling and does not stop/start the capturer.
   virtual void Pause(bool pause) = 0;
-
-  // Should be called whenever an input event is received.
-  virtual void OnInputEventReceived(int64_t event_timestamp) = 0;
 
   // Sets whether the video encoder should be requested to encode losslessly,
   // or to use a lossless color space (typically requiring higher bandwidth).

@@ -10,13 +10,7 @@
 
 class GURL;
 
-namespace IPC {
-struct ChannelHandle;
-}
-
 namespace gpu {
-
-struct GPUMemoryUmaStats;
 
 class GpuChannelManagerDelegate {
  public:
@@ -35,9 +29,6 @@ class GpuChannelManagerDelegate {
   virtual void DidLoseContext(bool offscreen,
                               error::ContextLostReason reason,
                               const GURL& active_url) = 0;
-
-  // Tells the delegate about GPU memory usage statistics for UMA logging.
-  virtual void GpuMemoryUmaStats(const GPUMemoryUmaStats& params) = 0;
 
   // Tells the delegate to cache the given shader information in persistent
   // storage. The embedder is expected to repopulate the in-memory cache through

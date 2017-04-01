@@ -76,12 +76,19 @@ GPUInfo::GPUInfo()
       sandboxed(false),
       process_crash_count(0),
       in_process_gpu(true),
+      passthrough_cmd_decoder(false),
       basic_info_state(kCollectInfoNone),
       context_info_state(kCollectInfoNone),
 #if defined(OS_WIN)
       dx_diagnostics_info_state(kCollectInfoNone),
 #endif
-      jpeg_decode_accelerator_supported(false) {
+      jpeg_decode_accelerator_supported(false)
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+      ,
+      system_visual(0),
+      rgba_visual(0)
+#endif
+{
 }
 
 GPUInfo::GPUInfo(const GPUInfo& other) = default;
@@ -119,6 +126,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     bool sandboxed;
     int process_crash_count;
     bool in_process_gpu;
+    bool passthrough_cmd_decoder;
     CollectInfoResult basic_info_state;
     CollectInfoResult context_info_state;
 #if defined(OS_WIN)
@@ -129,6 +137,10 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     VideoEncodeAcceleratorSupportedProfiles
         video_encode_accelerator_supported_profiles;
     bool jpeg_decode_accelerator_supported;
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+    VisualID system_visual;
+    VisualID rgba_visual;
+#endif
   };
 
   // If this assert fails then most likely something below needs to be updated.
@@ -178,6 +190,7 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
   enumerator->AddBool("sandboxed", sandboxed);
   enumerator->AddInt("processCrashCount", process_crash_count);
   enumerator->AddBool("inProcessGpu", in_process_gpu);
+  enumerator->AddBool("passthroughCmdDecoder", passthrough_cmd_decoder);
   enumerator->AddInt("basicInfoState", basic_info_state);
   enumerator->AddInt("contextInfoState", context_info_state);
 #if defined(OS_WIN)
@@ -193,6 +206,10 @@ void GPUInfo::EnumerateFields(Enumerator* enumerator) const {
     EnumerateVideoEncodeAcceleratorSupportedProfile(profile, enumerator);
   enumerator->AddBool("jpegDecodeAcceleratorSupported",
       jpeg_decode_accelerator_supported);
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+  enumerator->AddInt64("systemVisual", system_visual);
+  enumerator->AddInt64("rgbaVisual", rgba_visual);
+#endif
   enumerator->EndAuxAttributes();
 }
 

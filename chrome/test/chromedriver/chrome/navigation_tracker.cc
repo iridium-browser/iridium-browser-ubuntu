@@ -281,15 +281,24 @@ Status NavigationTracker::OnEvent(DevToolsClient* client,
         pending_frame_set_.clear();
         scheduled_frame_set_.clear();
       } else {
+        // Discard pending and scheduled frames, except for the root frame,
+        // which just navigated (and which we should consider pending until we
+        // receive a Page.frameStoppedLoading event for it).
+        std::string frame_id;
+        if (!params.GetString("frame.id", &frame_id))
+          return Status(kUnknownError, "missing or invalid 'frame.id'");
+        bool frame_was_pending = pending_frame_set_.count(frame_id) > 0;
+        pending_frame_set_.clear();
+        scheduled_frame_set_.clear();
+        if (frame_was_pending)
+          pending_frame_set_.insert(frame_id);
         // If the URL indicates that the web page is unreachable (the sad tab
-        // page) then discard any pending or scheduled navigations.
+        // page) then discard all pending navigations.
         std::string frame_url;
         if (!params.GetString("frame.url", &frame_url))
           return Status(kUnknownError, "missing or invalid 'frame.url'");
-        if (frame_url == kUnreachableWebDataURL) {
+        if (frame_url == kUnreachableWebDataURL)
           pending_frame_set_.clear();
-          scheduled_frame_set_.clear();
-        }
       }
     } else {
       // If a child frame just navigated, check if it is the dummy frame that
@@ -424,10 +433,10 @@ bool NavigationTracker::IsExpectingFrameLoadingEvents() {
   // PageLoadingTest.testShouldTimeoutIfAPageTakesTooLongToLoadAfterClick from
   // the Selenium test suite.
   // TODO(samuong): Remove this once we stop supporting M43.
-  if (browser_info_->browser_name == "chrome")
-    return browser_info_->build_no < 2358;
-  else
+  if (browser_info_->browser_name == "webview")
     return browser_info_->major_version < 44;
+  else
+    return browser_info_->build_no < 2358;
 }
 
 bool NavigationTracker::IsEventLoopPausedByDialogs() {
@@ -437,8 +446,8 @@ bool NavigationTracker::IsEventLoopPausedByDialogs() {
   // will block and timeout. For details refer to
   // https://bugs.chromium.org/p/chromedriver/issues/detail?id=1381.
   // TODO(samuong): Remove this once we stop supporting M51.
-  if (browser_info_->browser_name == "chrome")
-    return browser_info_->build_no >= 2743;
-  else
+  if (browser_info_->browser_name == "webview")
     return browser_info_->major_version >= 52;
+  else
+    return browser_info_->build_no >= 2743;
 }

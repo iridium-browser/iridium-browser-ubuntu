@@ -11,58 +11,65 @@
 
 namespace blink {
 
-class PointerEvent final : public MouseEvent {
-    DEFINE_WRAPPERTYPEINFO();
+class CORE_EXPORT PointerEvent final : public MouseEvent {
+  DEFINE_WRAPPERTYPEINFO();
 
-public:
-    static PointerEvent* create(const AtomicString& type, const PointerEventInit& initializer)
-    {
-        return new PointerEvent(type, initializer);
-    }
+ public:
+  static PointerEvent* create(const AtomicString& type,
+                              const PointerEventInit& initializer) {
+    return new PointerEvent(type, initializer);
+  }
 
-    int pointerId() const { return m_pointerId; }
-    double width() const { return m_width; }
-    double height() const { return m_height; }
-    float pressure() const { return m_pressure; }
-    long tiltX() const { return m_tiltX; }
-    long tiltY() const { return m_tiltY; }
-    const String& pointerType() const { return m_pointerType; }
-    bool isPrimary() const { return m_isPrimary; }
+  int pointerId() const { return m_pointerId; }
+  double width() const { return m_width; }
+  double height() const { return m_height; }
+  float pressure() const { return m_pressure; }
+  long tiltX() const { return m_tiltX; }
+  long tiltY() const { return m_tiltY; }
+  float tangentialPressure() const { return m_tangentialPressure; }
+  long twist() const { return m_twist; }
+  const String& pointerType() const { return m_pointerType; }
+  bool isPrimary() const { return m_isPrimary; }
 
-    short button() const override { return rawButton(); }
-    bool isMouseEvent() const override;
-    bool isPointerEvent() const override;
+  short button() const override { return rawButton(); }
+  bool isMouseEvent() const override;
+  bool isPointerEvent() const override;
 
-    EventDispatchMediator* createMediator() override;
+  EventDispatchMediator* createMediator() override;
 
-    DECLARE_VIRTUAL_TRACE();
+  HeapVector<Member<PointerEvent>> getCoalescedEvents() const;
 
-private:
-    PointerEvent(const AtomicString&, const PointerEventInit&);
+  DECLARE_VIRTUAL_TRACE();
 
-    int m_pointerId;
-    double m_width;
-    double m_height;
-    float m_pressure;
-    long m_tiltX;
-    long m_tiltY;
-    String m_pointerType;
-    bool m_isPrimary;
+ private:
+  PointerEvent(const AtomicString&, const PointerEventInit&);
+
+  int m_pointerId;
+  double m_width;
+  double m_height;
+  float m_pressure;
+  long m_tiltX;
+  long m_tiltY;
+  float m_tangentialPressure;
+  long m_twist;
+  String m_pointerType;
+  bool m_isPrimary;
+
+  HeapVector<Member<PointerEvent>> m_coalescedEvents;
 };
 
-
 class PointerEventDispatchMediator final : public EventDispatchMediator {
-public:
-    static PointerEventDispatchMediator* create(PointerEvent*);
+ public:
+  static PointerEventDispatchMediator* create(PointerEvent*);
 
-private:
-    explicit PointerEventDispatchMediator(PointerEvent*);
-    PointerEvent& event() const;
-    DispatchEventResult dispatchEvent(EventDispatcher&) const override;
+ private:
+  explicit PointerEventDispatchMediator(PointerEvent*);
+  PointerEvent& event() const;
+  DispatchEventResult dispatchEvent(EventDispatcher&) const override;
 };
 
 DEFINE_EVENT_TYPE_CASTS(PointerEvent);
 
-} // namespace blink
+}  // namespace blink
 
-#endif // PointerEvent_h
+#endif  // PointerEvent_h

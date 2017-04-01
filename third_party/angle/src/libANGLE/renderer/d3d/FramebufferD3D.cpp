@@ -207,7 +207,7 @@ GLenum FramebufferD3D::getImplementationColorReadFormat() const
     GLenum implementationFormat = getRenderTargetImplementationFormat(attachmentRenderTarget);
     const gl::InternalFormat &implementationFormatInfo = gl::GetInternalFormatInfo(implementationFormat);
 
-    return implementationFormatInfo.format;
+    return implementationFormatInfo.getReadPixelsFormat();
 }
 
 GLenum FramebufferD3D::getImplementationColorReadType() const
@@ -229,7 +229,7 @@ GLenum FramebufferD3D::getImplementationColorReadType() const
     GLenum implementationFormat = getRenderTargetImplementationFormat(attachmentRenderTarget);
     const gl::InternalFormat &implementationFormatInfo = gl::GetInternalFormatInfo(implementationFormat);
 
-    return implementationFormatInfo.type;
+    return implementationFormatInfo.getReadPixelsType();
 }
 
 gl::Error FramebufferD3D::readPixels(ContextImpl *context,
@@ -242,13 +242,13 @@ gl::Error FramebufferD3D::readPixels(ContextImpl *context,
 
     GLenum sizedInternalFormat = gl::GetSizedInternalFormat(format, type);
     const gl::InternalFormat &sizedFormatInfo = gl::GetInternalFormatInfo(sizedInternalFormat);
-    GLuint outputPitch                        = 0;
+
+    GLuint outputPitch = 0;
     ANGLE_TRY_RESULT(
         sizedFormatInfo.computeRowPitch(type, area.width, packState.alignment, packState.rowLength),
         outputPitch);
     GLuint outputSkipBytes = 0;
-    ANGLE_TRY_RESULT(sizedFormatInfo.computeSkipBytes(outputPitch, 0, 0, packState.skipRows,
-                                                      packState.skipPixels, false),
+    ANGLE_TRY_RESULT(sizedFormatInfo.computeSkipBytes(outputPitch, 0, packState, false),
                      outputSkipBytes);
 
     return readPixelsImpl(area, format, type, outputPitch, packState,
@@ -263,40 +263,12 @@ gl::Error FramebufferD3D::blit(ContextImpl *context,
 {
     const auto &glState                      = context->getGLState();
     const gl::Framebuffer *sourceFramebuffer = glState.getReadFramebuffer();
-    bool blitRenderTarget = false;
-    if ((mask & GL_COLOR_BUFFER_BIT) && sourceFramebuffer->getReadColorbuffer() != nullptr &&
-        mState.getFirstColorAttachment() != nullptr)
-    {
-        blitRenderTarget = true;
-    }
+    const gl::Rectangle *scissor = glState.isScissorTestEnabled() ? &glState.getScissor() : nullptr;
+    ANGLE_TRY(blitImpl(sourceArea, destArea, scissor, (mask & GL_COLOR_BUFFER_BIT) != 0,
+                       (mask & GL_DEPTH_BUFFER_BIT) != 0, (mask & GL_STENCIL_BUFFER_BIT) != 0,
+                       filter, sourceFramebuffer));
 
-    bool blitStencil = false;
-    if ((mask & GL_STENCIL_BUFFER_BIT) && sourceFramebuffer->getStencilbuffer() != nullptr &&
-        mState.getStencilAttachment() != nullptr)
-    {
-        blitStencil = true;
-    }
-
-    bool blitDepth = false;
-    if ((mask & GL_DEPTH_BUFFER_BIT) && sourceFramebuffer->getDepthbuffer() != nullptr &&
-        mState.getDepthAttachment() != nullptr)
-    {
-        blitDepth = true;
-    }
-
-    if (blitRenderTarget || blitDepth || blitStencil)
-    {
-        const gl::Rectangle *scissor =
-            glState.isScissorTestEnabled() ? &glState.getScissor() : nullptr;
-        gl::Error error = blitImpl(sourceArea, destArea, scissor, blitRenderTarget, blitDepth,
-                                   blitStencil, filter, sourceFramebuffer);
-        if (error.isError())
-        {
-            return error;
-        }
-    }
-
-    return gl::Error(GL_NO_ERROR);
+    return gl::NoError();
 }
 
 bool FramebufferD3D::checkStatus() const
@@ -378,6 +350,11 @@ const gl::AttachmentList &FramebufferD3D::getColorAttachmentsForRender() const
 {
     ASSERT(mColorAttachmentsForRender.valid());
     return mColorAttachmentsForRender.value();
+}
+
+gl::Error FramebufferD3D::getSamplePosition(size_t index, GLfloat *xy) const
+{
+    return gl::InternalError() << "getSamplePosition is unimplemented.";
 }
 
 }  // namespace rx

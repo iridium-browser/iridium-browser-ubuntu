@@ -24,6 +24,7 @@ using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::AppendJavaStringArrayToStringVector;
 using base::android::JavaParamRef;
+using base::android::JavaRef;
 
 namespace {
 // The poll interval in ms when there is no active discovery. This
@@ -42,12 +43,13 @@ namespace device {
 base::WeakPtr<BluetoothAdapter> BluetoothAdapter::CreateAdapter(
     const InitCallback& init_callback) {
   return BluetoothAdapterAndroid::Create(
-      BluetoothAdapterWrapper_CreateWithDefaultAdapter().obj());
+      BluetoothAdapterWrapper_CreateWithDefaultAdapter());
 }
 
 // static
 base::WeakPtr<BluetoothAdapterAndroid> BluetoothAdapterAndroid::Create(
-    jobject bluetooth_adapter_wrapper) {  // Java Type: bluetoothAdapterWrapper
+    const JavaRef<jobject>&
+        bluetooth_adapter_wrapper) {  // Java Type: bluetoothAdapterWrapper
   BluetoothAdapterAndroid* adapter = new BluetoothAdapterAndroid();
 
   adapter->j_adapter_.Reset(Java_ChromeBluetoothAdapter_create(
@@ -145,17 +147,10 @@ void BluetoothAdapterAndroid::CreateL2capService(
   error_callback.Run("Not Implemented");
 }
 
-void BluetoothAdapterAndroid::RegisterAudioSink(
-    const BluetoothAudioSink::Options& options,
-    const AcquiredCallback& callback,
-    const BluetoothAudioSink::ErrorCallback& error_callback) {
-  error_callback.Run(BluetoothAudioSink::ERROR_UNSUPPORTED_PLATFORM);
-}
-
 void BluetoothAdapterAndroid::RegisterAdvertisement(
     std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
     const CreateAdvertisementCallback& callback,
-    const CreateAdvertisementErrorCallback& error_callback) {
+    const AdvertisementErrorCallback& error_callback) {
   error_callback.Run(BluetoothAdvertisement::ERROR_UNSUPPORTED_PLATFORM);
 }
 
@@ -188,7 +183,7 @@ void BluetoothAdapterAndroid::CreateOrUpdateDeviceOnScan(
     const JavaParamRef<jobjectArray>& advertised_uuids,  // Java Type: String[]
     int32_t tx_power) {
   std::string device_address = ConvertJavaStringToUTF8(env, address);
-  DevicesMap::const_iterator iter = devices_.find(device_address);
+  auto iter = devices_.find(device_address);
 
   bool is_new_device = false;
   std::unique_ptr<BluetoothDeviceAndroid> device_android_owner;
@@ -202,7 +197,7 @@ void BluetoothAdapterAndroid::CreateOrUpdateDeviceOnScan(
     device_android = device_android_owner.get();
   } else {
     // Existing device.
-    device_android = static_cast<BluetoothDeviceAndroid*>(iter->second);
+    device_android = static_cast<BluetoothDeviceAndroid*>(iter->second.get());
   }
   DCHECK(device_android);
 
@@ -224,12 +219,12 @@ void BluetoothAdapterAndroid::CreateOrUpdateDeviceOnScan(
       tx_power == INT32_MIN ? nullptr : &clamped_tx_power);
 
   if (is_new_device) {
-    devices_.add(device_address, std::move(device_android_owner));
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceAdded(this, device_android));
+    devices_[device_address] = std::move(device_android_owner);
+    for (auto& observer : observers_)
+      observer.DeviceAdded(this, device_android);
   } else {
-    FOR_EACH_OBSERVER(BluetoothAdapter::Observer, observers_,
-                      DeviceChanged(this, device_android));
+    for (auto& observer : observers_)
+      observer.DeviceChanged(this, device_android);
   }
 }
 

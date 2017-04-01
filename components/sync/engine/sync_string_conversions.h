@@ -5,10 +5,12 @@
 #ifndef COMPONENTS_SYNC_ENGINE_SYNC_STRING_CONVERSIONS_H_
 #define COMPONENTS_SYNC_ENGINE_SYNC_STRING_CONVERSIONS_H_
 
-#include "components/sync/core/connection_status.h"
-#include "components/sync/core/sync_encryption_handler.h"
+#include "components/sync/engine/connection_status.h"
+#include "components/sync/engine/sync_encryption_handler.h"
 
 namespace syncer {
+
+enum class PassphraseType;
 
 const char* ConnectionStatusToString(ConnectionStatus status);
 

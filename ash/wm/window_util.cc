@@ -6,15 +6,12 @@
 
 #include <vector>
 
-#include "ash/aura/wm_window_aura.h"
 #include "ash/common/ash_constants.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm/wm_screen_util.h"
-#include "ash/common/wm_window.h"
-#include "ash/screen_util.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
-#include "ash/snap_to_pixel_layout_manager.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state_aura.h"
 #include "ui/aura/client/aura_constants.h"
@@ -62,8 +59,8 @@ bool IsWindowUserPositionable(aura::Window* window) {
   return GetWindowState(window)->IsUserPositionable();
 }
 
-void PinWindow(aura::Window* window) {
-  wm::WMEvent event(wm::WM_EVENT_PIN);
+void PinWindow(aura::Window* window, bool trusted) {
+  wm::WMEvent event(trusted ? wm::WM_EVENT_TRUSTED_PIN : wm::WM_EVENT_PIN);
   wm::GetWindowState(window)->OnWMEvent(&event);
 }
 
@@ -75,14 +72,15 @@ bool MoveWindowToEventRoot(aura::Window* window, const ui::Event& event) {
       target->GetWidget()->GetNativeView()->GetRootWindow();
   if (!target_root || target_root == window->GetRootWindow())
     return false;
-  aura::Window* window_container =
-      ash::Shell::GetContainer(target_root, window->parent()->id());
+  aura::Window* window_container = RootWindowController::ForWindow(target_root)
+                                       ->GetContainer(window->parent()->id());
   // Move the window to the target launcher.
   window_container->AddChild(window);
   return true;
 }
 
 void SnapWindowToPixelBoundary(aura::Window* window) {
+  window->SetProperty(kSnapChildrenToPixelBoundary, true);
   aura::Window* snapped_ancestor = window->parent();
   while (snapped_ancestor) {
     if (snapped_ancestor->GetProperty(kSnapChildrenToPixelBoundary)) {
@@ -96,24 +94,8 @@ void SnapWindowToPixelBoundary(aura::Window* window) {
 
 void SetSnapsChildrenToPhysicalPixelBoundary(aura::Window* container) {
   DCHECK(!container->GetProperty(kSnapChildrenToPixelBoundary))
-      << container->name();
+      << container->GetName();
   container->SetProperty(kSnapChildrenToPixelBoundary, true);
-}
-
-void InstallSnapLayoutManagerToContainers(aura::Window* parent) {
-  aura::Window::Windows children = parent->children();
-  for (aura::Window::Windows::iterator iter = children.begin();
-       iter != children.end(); ++iter) {
-    aura::Window* container = *iter;
-    if (container->id() < 0)  // not a container
-      continue;
-    if (container->GetProperty(kSnapChildrenToPixelBoundary)) {
-      if (!container->layout_manager())
-        container->SetLayoutManager(new SnapToPixelLayoutManager(container));
-    } else {
-      InstallSnapLayoutManagerToContainers(container);
-    }
-  }
 }
 
 }  // namespace wm

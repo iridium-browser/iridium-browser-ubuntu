@@ -22,16 +22,17 @@ typedef void* GLeglImageOES;
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
-#include "gpu/ipc/common/gpu_messages.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
 #include "ui/accelerated_widget_mac/ca_layer_tree_coordinator.h"
 #include "ui/accelerated_widget_mac/io_surface_context.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/base/cocoa/remote_layer_api.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/swap_result.h"
 #include "ui/gfx/transform.h"
@@ -59,46 +60,39 @@ void IOSurfaceContextNoOp(scoped_refptr<ui::IOSurfaceContext>) {
 
 namespace gpu {
 
-scoped_refptr<gl::GLSurface> ImageTransportSurfaceCreateNativeSurface(
-    GpuChannelManager* manager,
-    GpuCommandBufferStub* stub,
-    SurfaceHandle handle) {
-  return new ImageTransportSurfaceOverlayMac(stub, handle);
-}
-
 ImageTransportSurfaceOverlayMac::ImageTransportSurfaceOverlayMac(
-    GpuCommandBufferStub* stub,
-    SurfaceHandle handle)
-    : stub_(stub->AsWeakPtr()),
-      handle_(handle),
+    base::WeakPtr<ImageTransportSurfaceDelegate> delegate)
+    : delegate_(delegate),
       use_remote_layer_api_(ui::RemoteLayerAPISupported()),
       scale_factor_(1),
       gl_renderer_id_(0) {
   ui::GpuSwitchingManager::GetInstance()->AddObserver(this);
 
-  bool disable_av_sample_buffer_display_layer =
-      stub_->GetFeatureInfo()
-          ->workarounds()
-          .disable_av_sample_buffer_display_layer;
+  static bool av_disabled_at_command_line =
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableAVFoundationOverlays);
+
+  bool allow_av_sample_buffer_display_layer =
+      !av_disabled_at_command_line &&
+      !delegate_->GetFeatureInfo()
+           ->workarounds()
+           .disable_av_sample_buffer_display_layer;
 
   ca_layer_tree_coordinator_.reset(new ui::CALayerTreeCoordinator(
-      use_remote_layer_api_, !disable_av_sample_buffer_display_layer));
+      use_remote_layer_api_, allow_av_sample_buffer_display_layer));
 }
 
 ImageTransportSurfaceOverlayMac::~ImageTransportSurfaceOverlayMac() {
   ui::GpuSwitchingManager::GetInstance()->RemoveObserver(this);
-  if (stub_.get()) {
-    stub_->SetLatencyInfoCallback(
+  if (delegate_.get()) {
+    delegate_->SetLatencyInfoCallback(
         base::Callback<void(const std::vector<ui::LatencyInfo>&)>());
   }
   Destroy();
 }
 
-bool ImageTransportSurfaceOverlayMac::Initialize(gl::GLSurface::Format format) {
-  if (!stub_.get() || !stub_->decoder())
-    return false;
-
-  stub_->SetLatencyInfoCallback(
+bool ImageTransportSurfaceOverlayMac::Initialize(gl::GLSurfaceFormat format) {
+  delegate_->SetLatencyInfoCallback(
       base::Bind(&ImageTransportSurfaceOverlayMac::SetLatencyInfo,
                  base::Unretained(this)));
 
@@ -141,7 +135,6 @@ void ImageTransportSurfaceOverlayMac::SetLatencyInfo(
 }
 
 void ImageTransportSurfaceOverlayMac::SendAcceleratedSurfaceBuffersSwapped(
-    gpu::SurfaceHandle surface_handle,
     CAContextID ca_context_id,
     bool fullscreen_low_power_ca_context_valid,
     CAContextID fullscreen_low_power_ca_context_id,
@@ -154,8 +147,7 @@ void ImageTransportSurfaceOverlayMac::SendAcceleratedSurfaceBuffersSwapped(
                        "GLImpl", static_cast<int>(gl::GetGLImplementation()),
                        "width", size.width());
 
-  GpuCommandBufferMsg_SwapBuffersCompleted_Params params;
-  params.surface_handle = surface_handle;
+  SwapBuffersCompleteParams params;
   params.ca_context_id = ca_context_id;
   params.fullscreen_low_power_ca_context_valid =
       fullscreen_low_power_ca_context_valid;
@@ -182,7 +174,7 @@ void ImageTransportSurfaceOverlayMac::SendAcceleratedSurfaceBuffersSwapped(
   }
   ca_layer_in_use_queries_.clear();
 
-  stub_->SendSwapBuffersCompleted(params);
+  delegate_->DidSwapBuffersComplete(std::move(params));
 }
 
 gfx::SwapResult ImageTransportSurfaceOverlayMac::SwapBuffersInternal(
@@ -283,7 +275,7 @@ gfx::SwapResult ImageTransportSurfaceOverlayMac::SwapBuffersInternal(
       io_surface_mach_port.reset(IOSurfaceCreateMachPort(io_surface));
   }
   SendAcceleratedSurfaceBuffersSwapped(
-      handle_, ca_context_id, fullscreen_low_power_layer_valid,
+      ca_context_id, fullscreen_low_power_layer_valid,
       fullscreen_low_power_ca_context_id, io_surface_mach_port, pixel_size_,
       scale_factor_, std::move(latency_info_));
 

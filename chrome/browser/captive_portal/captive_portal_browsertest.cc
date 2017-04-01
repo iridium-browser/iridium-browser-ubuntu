@@ -25,7 +25,6 @@
 #include "chrome/browser/captive_portal/captive_portal_tab_helper.h"
 #include "chrome/browser/captive_portal/captive_portal_tab_reloader.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/interstitials/security_interstitial_page.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/captive_portal_blocking_page.h"
@@ -42,6 +41,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
+#include "components/security_interstitials/content/security_interstitial_page.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
@@ -53,6 +53,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/browser_side_navigation_policy.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "net/base/net_errors.h"
@@ -484,8 +485,8 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
   base::FilePath root_http;
   PathService::Get(chrome::DIR_TEST_DATA, &root_http);
 
-  if (request->url() == GURL(kMockHttpsUrl) ||
-      request->url() == GURL(kMockHttpsUrl2)) {
+  if (request->url() == kMockHttpsUrl ||
+      request->url() == kMockHttpsUrl2) {
     if (behind_captive_portal_)
       return new URLRequestTimeoutOnDemandJob(request, network_delegate);
     // Once logged in to the portal, HTTPS requests return the page that was
@@ -496,7 +497,7 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
         root_http.Append(FILE_PATH_LITERAL("title2.html")),
         BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
             base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
-  } else if (request->url() == GURL(kMockHttpsQuickTimeoutUrl)) {
+  } else if (request->url() == kMockHttpsQuickTimeoutUrl) {
     if (behind_captive_portal_)
       return new URLRequestFailedJob(
           request, network_delegate, net::ERR_CONNECTION_TIMED_OUT);
@@ -510,13 +511,13 @@ URLRequestMockCaptivePortalJobFactory::Interceptor::MaybeInterceptRequest(
             base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
   } else {
     // The URL should be the captive portal test URL.
-    EXPECT_TRUE(GURL(kMockCaptivePortalTestUrl) == request->url() ||
-                GURL(kMockCaptivePortal511Url) == request->url());
+    EXPECT_TRUE(request->url() == kMockCaptivePortalTestUrl ||
+                request->url() == kMockCaptivePortal511Url);
 
     if (behind_captive_portal_) {
       // Prior to logging in to the portal, the HTTP test URLs are intercepted
       // by the captive portal.
-      if (GURL(kMockCaptivePortal511Url) == request->url()) {
+      if (request->url() == kMockCaptivePortal511Url) {
         return new URLRequestMockHTTPJob(
             request,
             network_delegate,
@@ -870,11 +871,11 @@ SSLInterstitialTimerObserver::SSLInterstitialTimerObserver(
       message_loop_runner_(new content::MessageLoopRunner) {
   callback_ = base::Bind(&SSLInterstitialTimerObserver::OnTimerStarted,
                          base::Unretained(this));
-  SSLErrorHandler::SetInterstitialTimerStartedCallbackForTest(&callback_);
+  SSLErrorHandler::SetInterstitialTimerStartedCallbackForTesting(&callback_);
 }
 
 SSLInterstitialTimerObserver::~SSLInterstitialTimerObserver() {
-  SSLErrorHandler::SetInterstitialTimerStartedCallbackForTest(nullptr);
+  SSLErrorHandler::SetInterstitialTimerStartedCallbackForTesting(nullptr);
 }
 
 void SSLInterstitialTimerObserver::WaitForTimerStarted() {
@@ -1124,7 +1125,8 @@ void CaptivePortalBrowserTest::SetUpOnMainThread() {
   // Set SSL interstitial delay long enough so that a captive portal result
   // is guaranteed to arrive during this window, and a captive portal
   // error page is displayed instead of an SSL interstitial.
-  SSLErrorHandler::SetInterstitialDelayForTest(base::TimeDelta::FromHours(1));
+  SSLErrorHandler::SetInterstitialDelayForTesting(
+      base::TimeDelta::FromHours(1));
 }
 
 void CaptivePortalBrowserTest::TearDownOnMainThread() {
@@ -1250,10 +1252,9 @@ void CaptivePortalBrowserTest::SlowLoadNoCaptivePortal(
 
   MultiNavigationObserver navigation_observer;
   CaptivePortalObserver portal_observer(browser->profile());
-  ui_test_utils::NavigateToURLWithDisposition(browser,
-                                              GURL(kMockHttpsUrl),
-                                              CURRENT_TAB,
-                                              ui_test_utils::BROWSER_TEST_NONE);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser, GURL(kMockHttpsUrl), WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
 
   portal_observer.WaitForResults(1);
 
@@ -1371,10 +1372,9 @@ void CaptivePortalBrowserTest::SlowLoadBehindCaptivePortal(
 
   MultiNavigationObserver navigation_observer;
   CaptivePortalObserver portal_observer(browser->profile());
-  ui_test_utils::NavigateToURLWithDisposition(browser,
-                                              hanging_url,
-                                              CURRENT_TAB,
-                                              ui_test_utils::BROWSER_TEST_NONE);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser, hanging_url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
   portal_observer.WaitForResults(expected_portal_checks);
 
   if (expect_open_login_tab) {
@@ -1460,10 +1460,9 @@ void CaptivePortalBrowserTest::FastErrorBehindCaptivePortal(
 
   MultiNavigationObserver navigation_observer;
   CaptivePortalObserver portal_observer(browser->profile());
-  ui_test_utils::NavigateToURLWithDisposition(browser,
-                                              error_url,
-                                              CURRENT_TAB,
-                                              ui_test_utils::BROWSER_TEST_NONE);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser, error_url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
 
   if (delay_portal_response_until_interstital) {
     EXPECT_EQ(CaptivePortalTabReloader::STATE_NONE,
@@ -1519,10 +1518,9 @@ void CaptivePortalBrowserTest::FastErrorWithInterstitialTimer(
   RespondToProbeRequests(false);
 
   SSLInterstitialTimerObserver interstitial_timer_observer(broken_tab_contents);
-  ui_test_utils::NavigateToURLWithDisposition(browser,
-                                              cert_error_url,
-                                              CURRENT_TAB,
-                                              ui_test_utils::BROWSER_TEST_NONE);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser, cert_error_url, WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_NONE);
   interstitial_timer_observer.WaitForTimerStarted();
 
   // The tab should be in loading state, waiting for the interstitial timer to
@@ -1775,11 +1773,9 @@ void CaptivePortalBrowserTest::RunNavigateLoadingTabToTimeoutTest(
   // so waiting for PortalObserver to see that request prevents it from
   // confusing the MultiNavigationObservers used later.
   tab_strip_model->ActivateTabAt(0, true);
-  browser->OpenURL(content::OpenURLParams(timeout_url,
-                                          content::Referrer(),
-                                          CURRENT_TAB,
-                                          ui::PAGE_TRANSITION_TYPED,
-                                          false));
+  browser->OpenURL(content::OpenURLParams(timeout_url, content::Referrer(),
+                                          WindowOpenDisposition::CURRENT_TAB,
+                                          ui::PAGE_TRANSITION_TYPED, false));
   portal_observer.WaitForResults(1);
   EXPECT_FALSE(CheckPending(browser));
   EXPECT_EQ(1, NumLoadingTabs());
@@ -2120,8 +2116,9 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
   // Page appears loading. Reloading it cancels the page load. Since the load is
   // stopped, no cert error occurs and SSLErrorHandler isn't instantiated.
   MultiNavigationObserver test_navigation_observer;
-  chrome::Reload(browser(), CURRENT_TAB);
-  test_navigation_observer.WaitForNavigations(2);
+  chrome::Reload(browser(), WindowOpenDisposition::CURRENT_TAB);
+  test_navigation_observer.WaitForNavigations(
+      content::IsBrowserSideNavigationEnabled() ? 1 : 2);
 
   // Make sure that the |ssl_error_handler| is deleted.
   EXPECT_TRUE(nullptr == SSLErrorHandler::FromWebContents(broken_tab_contents));
@@ -2129,7 +2126,6 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
   EXPECT_FALSE(broken_tab_contents->ShowingInterstitialPage());
   EXPECT_FALSE(broken_tab_contents->IsLoading());
   EXPECT_EQ(0, portal_observer.num_results_received());
-  EXPECT_EQ(2, test_navigation_observer.num_navigations());
   EXPECT_EQ(0, NumLoadingTabs());
   EXPECT_FALSE(CheckPending(browser()));
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
@@ -2179,13 +2175,13 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
   // a load stop notification before starting a new navigation.
   MultiNavigationObserver test_navigation_observer;
   browser()->OpenURL(content::OpenURLParams(
-      URLRequestMockHTTPJob::GetMockUrl("title2.html"),
-      content::Referrer(),
-      CURRENT_TAB,
-      ui::PAGE_TRANSITION_TYPED, false));
-  // Expect two navigations: First one for stopping the hanging page, second one
-  // for completing the load of the above navigation.
-  test_navigation_observer.WaitForNavigations(2);
+      URLRequestMockHTTPJob::GetMockUrl("title2.html"), content::Referrer(),
+      WindowOpenDisposition::CURRENT_TAB, ui::PAGE_TRANSITION_TYPED, false));
+  // With PlzNavigate: expect one navigation.
+  // Without PlzNavigate: expect two navigations: First one for stopping the
+  // hanging page, second one for completing the load of the above navigation.
+  test_navigation_observer.WaitForNavigations(
+      content::IsBrowserSideNavigationEnabled() ? 1 : 2);
 
   // Make sure that the |ssl_error_handler| is deleted.
   EXPECT_TRUE(nullptr == SSLErrorHandler::FromWebContents(broken_tab_contents));
@@ -2193,7 +2189,6 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest,
   EXPECT_FALSE(broken_tab_contents->ShowingInterstitialPage());
   EXPECT_FALSE(broken_tab_contents->IsLoading());
   EXPECT_EQ(0, portal_observer.num_results_received());
-  EXPECT_EQ(2, test_navigation_observer.num_navigations());
   EXPECT_EQ(0, NumLoadingTabs());
   EXPECT_FALSE(CheckPending(browser()));
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
@@ -2249,11 +2244,13 @@ IN_PROC_BROWSER_TEST_F(
   CaptivePortalObserver portal_observer(browser()->profile());
   MultiNavigationObserver test_navigation_observer;
   browser()->OpenURL(content::OpenURLParams(cert_error_url, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
-  // Expect two navigations: First one for stopping the hanging page, second one
-  // for completing the load of the above navigation.
-  test_navigation_observer.WaitForNavigations(2);
+  // With PlzNavigate: expect one navigation.
+  // Without PlzNavigate: expect two navigations: First one for stopping the
+  // hanging page, second one for completing the load of the above navigation.
+  test_navigation_observer.WaitForNavigations(
+      content::IsBrowserSideNavigationEnabled() ? 1 : 2);
   // Should end up with an SSL interstitial.
   WaitForInterstitialAttach(broken_tab_contents);
   ASSERT_TRUE(broken_tab_contents->ShowingInterstitialPage());
@@ -2298,13 +2295,15 @@ IN_PROC_BROWSER_TEST_F(
   CaptivePortalObserver portal_observer(browser()->profile());
   MultiNavigationObserver test_navigation_observer;
   browser()->OpenURL(content::OpenURLParams(cert_error_url, content::Referrer(),
-                                            CURRENT_TAB,
+                                            WindowOpenDisposition::CURRENT_TAB,
                                             ui::PAGE_TRANSITION_TYPED, false));
   // Expect three navigations:
   // 1- For stopping the hanging page.
   // 2- For completing the load of the above navigation.
   // 3- For completing the load of the login tab.
-  test_navigation_observer.WaitForNavigations(3);
+  // NOTE: for PlzNaviate the first one doesn't show up.
+  test_navigation_observer.WaitForNavigations(
+      content::IsBrowserSideNavigationEnabled() ? 2 : 3);
   // Should end up with a captive portal interstitial and a new login tab.
   WaitForInterstitialAttach(broken_tab_contents);
   ASSERT_TRUE(broken_tab_contents->ShowingInterstitialPage());
@@ -2341,7 +2340,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SSLCertErrorLogin) {
   // Set SSL interstitial delay to zero so that a captive portal result can not
   // arrive during this window, so an SSL interstitial is displayed instead
   // of a captive portal error page.
-  SSLErrorHandler::SetInterstitialDelayForTest(base::TimeDelta());
+  SSLErrorHandler::SetInterstitialDelayForTesting(base::TimeDelta());
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
   WebContents* broken_tab_contents = tab_strip_model->GetActiveWebContents();
 
@@ -2350,7 +2349,11 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, SSLCertErrorLogin) {
   // display timer is fired, even though it's set to zero.
   // To avoid this, disable captive portal checks until the SSL interstitial is
   // displayed. Once it's displayed, enable portal checks and fire one.
-  bool delay_portal_response_until_interstital = true;
+  // NOTE: this doesn't occur with PlzNavigate, since the SSL interstitial timer
+  // is fired synchronously due to different timings when
+  // CaptivePortalTabReloader gets the load start callback.
+  bool delay_portal_response_until_interstital =
+      !content::IsBrowserSideNavigationEnabled();
 
   // The path does not matter.
   GURL cert_error_url = https_server.GetURL(kTestServerLoginPath);
@@ -2413,9 +2416,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, TwoBrokenTabs) {
   MultiNavigationObserver navigation_observer;
   CaptivePortalObserver portal_observer(browser()->profile());
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(),
-      URLRequestMockHTTPJob::GetMockUrl("title2.html"),
-      NEW_FOREGROUND_TAB,
+      browser(), URLRequestMockHTTPJob::GetMockUrl("title2.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
@@ -2546,7 +2548,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, GoBack) {
   // Activate the error page tab again and go back.
   TabStripModel* tab_strip_model = browser()->tab_strip_model();
   tab_strip_model->ActivateTabAt(0, true);
-  chrome::GoBack(browser(), CURRENT_TAB);
+  chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);
   navigation_observer.WaitForNavigations(1);
 
   EXPECT_EQ(1, navigation_observer.NumNavigationsForTab(
@@ -2581,7 +2583,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, GoBackToTimeout) {
   // Go to the error page.
   MultiNavigationObserver navigation_observer;
   CaptivePortalObserver portal_observer(browser()->profile());
-  chrome::GoBack(browser(), CURRENT_TAB);
+  chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);
 
   // Wait for the check triggered by the broken tab and for the login tab to
   // stop loading.
@@ -2634,7 +2636,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, ReloadTimeout) {
   SetSlowSSLLoadTime(tab_reloader, base::TimeDelta());
 
   MultiNavigationObserver navigation_observer;
-  tab_strip_model->GetActiveWebContents()->GetController().Reload(true);
+  tab_strip_model->GetActiveWebContents()->GetController().Reload(
+      content::ReloadType::NORMAL, true);
 
   // Wait for the check triggered by the broken tab and for the login tab to
   // stop loading.
@@ -2700,7 +2703,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBrowserTest, DISABLED_TwoWindows) {
   chrome::NavigateParams params(inactive_browser,
                                 GURL(kMockHttpsQuickTimeoutUrl),
                                 ui::PAGE_TRANSITION_TYPED);
-  params.disposition = NEW_BACKGROUND_TAB;
+  params.disposition = WindowOpenDisposition::NEW_BACKGROUND_TAB;
   params.window_action = chrome::NavigateParams::NO_ACTION;
   ui_test_utils::NavigateToURL(&params);
   navigation_observer.WaitForNavigations(2);

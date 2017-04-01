@@ -5,6 +5,7 @@
 #include "chrome/browser/extensions/api/dial/dial_registry.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
@@ -25,6 +26,8 @@ using content::BrowserThread;
 using net::NetworkChangeNotifier;
 
 namespace extensions {
+namespace api {
+namespace dial {
 
 DialRegistry::DialRegistry(Observer* dial_api,
                            const base::TimeDelta& refresh_interval,
@@ -50,7 +53,7 @@ DialRegistry::~DialRegistry() {
 
 std::unique_ptr<DialService> DialRegistry::CreateDialService() {
   DCHECK(g_browser_process->net_log());
-  return base::WrapUnique(new DialServiceImpl(g_browser_process->net_log()));
+  return base::MakeUnique<DialServiceImpl>(g_browser_process->net_log());
 }
 
 void DialRegistry::ClearDialService() {
@@ -80,6 +83,23 @@ void DialRegistry::OnListenerRemoved() {
     VLOG(2) << "Listeners removed; stopping periodic discovery.";
     StopPeriodicDiscovery();
   }
+}
+
+GURL DialRegistry::GetDeviceDescriptionURL(const std::string& label) const {
+  const auto device_it = device_by_label_map_.find(label);
+  if (device_it != device_by_label_map_.end())
+    return device_it->second->device_description_url();
+
+  return GURL();
+}
+
+void DialRegistry::AddDeviceForTest(const DialDeviceData& device_data) {
+  std::unique_ptr<DialDeviceData> test_data =
+      base::MakeUnique<DialDeviceData>(device_data);
+  device_by_label_map_.insert(
+      std::make_pair(device_data.label(), test_data.get()));
+  device_by_id_map_.insert(
+      std::make_pair(device_data.device_id(), std::move(test_data)));
 }
 
 bool DialRegistry::ReadyToDiscover() {
@@ -160,8 +180,11 @@ bool DialRegistry::PruneExpiredDevices() {
     auto* device = it->second;
     if (IsDeviceExpired(*device)) {
       VLOG(2) << "Device " << device->label() << " expired, removing";
-      const size_t num_erased_by_id =
-          device_by_id_map_.erase(device->device_id());
+
+      // Make a copy of the device ID here since |device| will be destroyed
+      // during erase().
+      std::string device_id = device->device_id();
+      const size_t num_erased_by_id = device_by_id_map_.erase(device_id);
       DCHECK_EQ(1U, num_erased_by_id);
       device_by_label_map_.erase(it++);
       pruned_device = true;
@@ -331,4 +354,6 @@ void DialRegistry::OnNetworkChanged(
   }
 }
 
+}  // namespace dial
+}  // namespace api
 }  // namespace extensions

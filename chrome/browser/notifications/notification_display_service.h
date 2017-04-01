@@ -13,7 +13,6 @@
 #include "components/keyed_service/core/keyed_service.h"
 
 class Notification;
-class NotificationPlatformBridge;
 class Profile;
 
 // Profile-bound service that enables notifications to be displayed and
@@ -40,10 +39,6 @@ class NotificationDisplayService : public KeyedService {
   // Returns whether the implementation can retrieve a list of currently visible
   // notifications and stores them in |*notification_ids| when possible.
   virtual bool GetDisplayed(std::set<std::string>* notifications) const = 0;
-
-  // Temporary method while we finish the refactor. Returns whether there is
-  // a native notification center backing up notifications.
-  virtual bool SupportsNotificationCenter() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NotificationDisplayService);

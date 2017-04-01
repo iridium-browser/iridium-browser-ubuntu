@@ -20,7 +20,6 @@ class PrefService;
 
 namespace base {
 class Clock;
-class DictionaryValue;
 }
 
 namespace user_prefs {
@@ -89,7 +88,7 @@ class PrefProvider : public ObservableProvider {
   // Can be set for testing.
   std::unique_ptr<base::Clock> clock_;
 
-  bool is_incognito_;
+  const bool is_incognito_;
 
   PrefChangeRegistrar pref_change_registrar_;
 

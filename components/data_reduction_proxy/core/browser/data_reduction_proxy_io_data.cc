@@ -4,6 +4,7 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
@@ -29,7 +30,6 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "net/base/load_flags.h"
-#include "net/log/net_log.h"
 #include "net/url_request/http_user_agent_settings.h"
 #include "net/url_request/static_http_user_agent_settings.h"
 #include "net/url_request/url_request_context.h"
@@ -157,16 +157,18 @@ DataReductionProxyIOData::DataReductionProxyIOData(
   proxy_delegate_.reset(new DataReductionProxyDelegate(
       config_.get(), configurator_.get(), event_creator_.get(),
       bypass_stats_.get(), net_log_));
- }
-
- DataReductionProxyIOData::DataReductionProxyIOData()
-     : client_(Client::UNKNOWN),
-       net_log_(nullptr),
-       url_request_context_getter_(nullptr),
-       weak_factory_(this) {
 }
 
+DataReductionProxyIOData::DataReductionProxyIOData()
+    : client_(Client::UNKNOWN),
+      net_log_(nullptr),
+      url_request_context_getter_(nullptr),
+      weak_factory_(this) {}
+
 DataReductionProxyIOData::~DataReductionProxyIOData() {
+  // Guaranteed to be destroyed on IO thread if the IO thread is still
+  // available at the time of destruction. If the IO thread is unavailable,
+  // then the destruction will happen on the UI thread.
 }
 
 void DataReductionProxyIOData::ShutdownOnUIThread() {
@@ -193,7 +195,10 @@ void DataReductionProxyIOData::SetDataReductionProxyService(
 
 void DataReductionProxyIOData::InitializeOnIOThread() {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
-  config_->InitializeOnIOThread(basic_url_request_context_getter_.get());
+  config_->InitializeOnIOThread(basic_url_request_context_getter_.get(),
+                                url_request_context_getter_);
+  bypass_stats_->InitializeOnIOThread();
+  proxy_delegate_->InitializeOnIOThread(this);
   if (config_client_.get())
     config_client_->InitializeOnIOThread(url_request_context_getter_);
   if (ui_task_runner_->BelongsToCurrentThread()) {
@@ -287,7 +292,7 @@ void DataReductionProxyIOData::SetDataReductionProxyConfiguration(
 
 bool DataReductionProxyIOData::ShouldEnableLoFiMode(
     const net::URLRequest& request) {
-  DCHECK((request.load_flags() & net::LOAD_MAIN_FRAME) != 0);
+  DCHECK((request.load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED) != 0);
   if (!config_ || (config_->IsBypassedByDataReductionProxyLocalRules(
                       request, configurator_->GetProxyConfig()))) {
     return false;

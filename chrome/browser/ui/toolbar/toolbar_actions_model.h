@@ -9,7 +9,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
@@ -31,7 +30,6 @@ namespace extensions {
 class ExtensionActionManager;
 class ExtensionMessageBubbleController;
 class ExtensionRegistry;
-class ExtensionSet;
 }
 
 // Model for the browser actions toolbar. This is a per-profile instance, and
@@ -50,7 +48,6 @@ class ToolbarActionsModel
   // The different options for highlighting.
   enum HighlightType {
     HIGHLIGHT_NONE,
-    HIGHLIGHT_INFO,
     HIGHLIGHT_WARNING,
   };
 
@@ -154,7 +151,7 @@ class ToolbarActionsModel
 
   bool actions_initialized() const { return actions_initialized_; }
 
-  ScopedVector<ToolbarActionViewController> CreateActions(
+  std::vector<std::unique_ptr<ToolbarActionViewController>> CreateActions(
       Browser* browser,
       ToolbarActionsBar* bar);
   std::unique_ptr<ToolbarActionViewController> CreateActionForItem(
@@ -181,6 +178,7 @@ class ToolbarActionsModel
   void SetActionVisibility(const std::string& action_id, bool visible);
 
   // ComponentMigrationHelper::ComponentActionDelegate:
+  // AddComponentAction() is a no-op if |actions_initialized_| is false.
   void AddComponentAction(const std::string& action_id) override;
   void RemoveComponentAction(const std::string& action_id) override;
   bool HasComponentAction(const std::string& action_id) const override;
@@ -258,12 +256,11 @@ class ToolbarActionsModel
   bool HasItem(const ToolbarItem& item) const;
 
   // Adds |item| to the toolbar.  If the item has an existing preference for
-  // toolbar position, that will be used to determine its location.  If
-  // |is_component| is true, the item will be given a default postion of 0,
-  // otherwise the default is at the end of the visible items. If the toolbar is
-  // in highlighting mode, the item will not be visible until highlighting mode
-  // is exited.
-  void AddItem(const ToolbarItem& item, bool is_component);
+  // toolbar position, that will be used to determine its location. Otherwise
+  // it will be placed at the end of the visible items. If the toolbar is in
+  // highlighting mode, the item will not be visible until highlighting mode is
+  // exited.
+  void AddItem(const ToolbarItem& item);
 
   // Removes |item| from the toolbar.  If the toolbar is in highlighting mode,
   // the item is also removed from the highlighted list (if present).
@@ -272,6 +269,9 @@ class ToolbarActionsModel
   // Looks up and returns the extension with the given |id| in the set of
   // enabled extensions.
   const extensions::Extension* GetExtensionById(const std::string& id) const;
+
+  // Returns true if the action is visible on the toolbar.
+  bool IsActionVisible(const std::string& action_id) const;
 
   // Our observers.
   base::ObserverList<Observer> observers_;

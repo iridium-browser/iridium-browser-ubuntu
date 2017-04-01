@@ -207,13 +207,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorTestIncognito) {
              true /* incognito */);
 }
 
-// crbug.com/513787
-#if defined(ANDROID)
-#define MAYBE_CursorPrefetch DISABLED_CursorPrefetch
-#else
-#define MAYBE_CursorPrefetch CursorPrefetch
-#endif
-IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, MAYBE_CursorPrefetch) {
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, CursorPrefetch) {
   SimpleTest(GetTestUrl("indexeddb", "cursor_prefetch.html"));
 }
 
@@ -714,11 +708,12 @@ static std::unique_ptr<net::test_server::HttpResponse> CorruptDBRequestHandler(
 
 IN_PROC_BROWSER_TEST_P(IndexedDBBrowserTest, OperationOnCorruptedOpenDatabase) {
   ASSERT_TRUE(embedded_test_server()->Started() ||
-              embedded_test_server()->Start());
+              embedded_test_server()->InitializeAndListen());
   const Origin origin(embedded_test_server()->base_url());
   embedded_test_server()->RegisterRequestHandler(
       base::Bind(&CorruptDBRequestHandler, base::Unretained(GetContext()),
                  origin, s_corrupt_db_test_prefix, this));
+  embedded_test_server()->StartAcceptingConnections();
 
   std::string test_file = s_corrupt_db_test_prefix +
                           "corrupted_open_db_detection.html#" + GetParam();

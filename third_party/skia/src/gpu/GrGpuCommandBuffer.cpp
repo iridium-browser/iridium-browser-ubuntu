@@ -8,39 +8,42 @@
 #include "GrGpuCommandBuffer.h"
 
 #include "GrCaps.h"
+#include "GrFixedClip.h"
 #include "GrGpu.h"
 #include "GrPrimitiveProcessor.h"
 #include "GrRenderTarget.h"
 #include "SkRect.h"
 
-void GrGpuCommandBuffer::submit(const SkIRect& bounds) {
+void GrGpuCommandBuffer::submit() {
     this->gpu()->handleDirtyContext();
-    this->onSubmit(bounds);
+    this->onSubmit();
 }
 
-void GrGpuCommandBuffer::clear(const SkIRect& rect, GrColor color, GrRenderTarget* renderTarget) {
-    SkASSERT(renderTarget);
-    SkASSERT(SkIRect::MakeWH(renderTarget->width(), renderTarget->height()).contains(rect));
-    this->onClear(renderTarget, rect, color);
+void GrGpuCommandBuffer::clear(GrRenderTarget* rt, const GrFixedClip& clip, GrColor color) {
+#ifdef SK_DEBUG
+    SkASSERT(rt);
+    SkASSERT(!clip.scissorEnabled() ||
+             (SkIRect::MakeWH(rt->width(), rt->height()).contains(clip.scissorRect()) &&
+              SkIRect::MakeWH(rt->width(), rt->height()) != clip.scissorRect()));
+#endif
+    this->onClear(rt, clip, color);
 }
 
-void GrGpuCommandBuffer::clearStencilClip(const SkIRect& rect,
-                                          bool insideClip,
-                                          GrRenderTarget* renderTarget) {
-    SkASSERT(renderTarget);
-    this->onClearStencilClip(renderTarget, rect, insideClip);
+void GrGpuCommandBuffer::clearStencilClip(GrRenderTarget* rt, const GrFixedClip& clip,
+                                          bool insideStencilMask) {
+    this->onClearStencilClip(rt, clip, insideStencilMask);
 }
-
 
 bool GrGpuCommandBuffer::draw(const GrPipeline& pipeline,
                               const GrPrimitiveProcessor& primProc,
                               const GrMesh* mesh,
-                              int meshCount) {
+                              int meshCount,
+                              const SkRect& bounds) {
     if (primProc.numAttribs() > this->gpu()->caps()->maxVertexAttributes()) {
         this->gpu()->stats()->incNumFailedDraws();
         return false;
     }
-    this->onDraw(pipeline, primProc, mesh, meshCount);
+    this->onDraw(pipeline, primProc, mesh, meshCount, bounds);
     return true;
 }
 

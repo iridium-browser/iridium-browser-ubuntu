@@ -7,33 +7,33 @@
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "components/sync/base/extensions_activity.h"
+#include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/fake_sync_service.h"
-#include "components/sync/driver/sync_prefs.h"
 
-namespace sync_driver {
+namespace syncer {
 
 namespace {
 
 void DummyRegisterPlatformTypesCallback(SyncService* sync_service,
-                                        syncer::ModelTypeSet,
-                                        syncer::ModelTypeSet) {}
+                                        ModelTypeSet,
+                                        ModelTypeSet) {}
 
 }  // namespace
 
 FakeSyncClient::FakeSyncClient()
-    : model_type_service_(nullptr),
+    : bridge_(nullptr),
       factory_(nullptr),
       sync_service_(base::MakeUnique<FakeSyncService>()) {
   // Register sync preferences and set them to "Sync everything" state.
-  sync_driver::SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
-  sync_driver::SyncPrefs sync_prefs(GetPrefService());
+  SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
+  SyncPrefs sync_prefs(GetPrefService());
   sync_prefs.SetFirstSetupComplete();
   sync_prefs.SetKeepEverythingSynced(true);
 }
 
 FakeSyncClient::FakeSyncClient(SyncApiComponentFactory* factory)
     : factory_(factory), sync_service_(base::MakeUnique<FakeSyncService>()) {
-  sync_driver::SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
+  SyncPrefs::RegisterProfilePrefs(pref_service_.registry());
 }
 
 FakeSyncClient::~FakeSyncClient() {}
@@ -60,11 +60,15 @@ history::HistoryService* FakeSyncClient::GetHistoryService() {
   return nullptr;
 }
 
+bool FakeSyncClient::HasPasswordStore() {
+  return false;
+}
+
 base::Closure FakeSyncClient::GetPasswordStateChangedCallback() {
   return base::Bind(&base::DoNothing);
 }
 
-sync_driver::SyncApiComponentFactory::RegisterDataTypesMethod
+SyncApiComponentFactory::RegisterDataTypesMethod
 FakeSyncClient::GetRegisterPlatformTypesCallback() {
   return base::Bind(&DummyRegisterPlatformTypesCallback);
 }
@@ -81,39 +85,35 @@ invalidation::InvalidationService* FakeSyncClient::GetInvalidationService() {
   return nullptr;
 }
 
-scoped_refptr<syncer::ExtensionsActivity>
-FakeSyncClient::GetExtensionsActivity() {
-  return scoped_refptr<syncer::ExtensionsActivity>();
+scoped_refptr<ExtensionsActivity> FakeSyncClient::GetExtensionsActivity() {
+  return scoped_refptr<ExtensionsActivity>();
 }
 
 sync_sessions::SyncSessionsClient* FakeSyncClient::GetSyncSessionsClient() {
   return nullptr;
 }
 
-base::WeakPtr<syncer::SyncableService>
-FakeSyncClient::GetSyncableServiceForType(syncer::ModelType type) {
-  return base::WeakPtr<syncer::SyncableService>();
+base::WeakPtr<SyncableService> FakeSyncClient::GetSyncableServiceForType(
+    ModelType type) {
+  return base::WeakPtr<SyncableService>();
 }
 
-base::WeakPtr<syncer_v2::ModelTypeService>
-FakeSyncClient::GetModelTypeServiceForType(syncer::ModelType type) {
-  return model_type_service_->AsWeakPtr();
+base::WeakPtr<ModelTypeSyncBridge> FakeSyncClient::GetSyncBridgeForModelType(
+    ModelType type) {
+  return bridge_->AsWeakPtr();
 }
 
-scoped_refptr<syncer::ModelSafeWorker>
-FakeSyncClient::CreateModelWorkerForGroup(
-    syncer::ModelSafeGroup group,
-    syncer::WorkerLoopDestructionObserver* observer) {
-  return scoped_refptr<syncer::ModelSafeWorker>();
+scoped_refptr<ModelSafeWorker> FakeSyncClient::CreateModelWorkerForGroup(
+    ModelSafeGroup group) {
+  return scoped_refptr<ModelSafeWorker>();
 }
 
 SyncApiComponentFactory* FakeSyncClient::GetSyncApiComponentFactory() {
   return factory_;
 }
 
-void FakeSyncClient::SetModelTypeService(
-    syncer_v2::ModelTypeService* model_type_service) {
-  model_type_service_ = model_type_service;
+void FakeSyncClient::SetModelTypeSyncBridge(ModelTypeSyncBridge* bridge) {
+  bridge_ = bridge;
 }
 
-}  // namespace sync_driver
+}  // namespace syncer

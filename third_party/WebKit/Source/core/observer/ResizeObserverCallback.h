@@ -9,17 +9,19 @@
 
 namespace blink {
 
-class ExecutionContext;
 class ResizeObserver;
 class ResizeObserverEntry;
 
-class ResizeObserverCallback : public GarbageCollectedFinalized<ResizeObserverCallback> {
-public:
-    virtual ~ResizeObserverCallback() {}
-    virtual void handleEvent(const HeapVector<Member<ResizeObserverEntry>>& entries, ResizeObserver*) = 0;
-    DEFINE_INLINE_VIRTUAL_TRACE() { }
+class ResizeObserverCallback
+    : public GarbageCollectedFinalized<ResizeObserverCallback> {
+ public:
+  virtual ~ResizeObserverCallback() {}
+  virtual void handleEvent(
+      const HeapVector<Member<ResizeObserverEntry>>& entries,
+      ResizeObserver*) = 0;
+  DEFINE_INLINE_VIRTUAL_TRACE() {}
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // ResizeObserverCallback_h
+#endif  // ResizeObserverCallback_h

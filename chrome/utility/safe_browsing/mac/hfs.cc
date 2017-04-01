@@ -310,8 +310,8 @@ std::unique_ptr<ReadStream> HFSIterator::GetReadStream() {
     return nullptr;
 
   DCHECK_EQ(kHFSPlusFileRecord, catalog_->current_record()->record_type);
-  return base::WrapUnique(
-      new HFSForkReadStream(this, catalog_->current_record()->file->dataFork));
+  return base::MakeUnique<HFSForkReadStream>(
+      this, catalog_->current_record()->file->dataFork);
 }
 
 bool HFSIterator::SeekToBlock(uint64_t block) {
@@ -383,12 +383,12 @@ bool HFSForkReadStream::Read(uint8_t* buffer,
       read_current_extent_ = true;
     }
 
-    size_t extent_offset = fork_logical_offset_ % extent_size.ValueOrDie();
-    size_t bytes_to_copy =
-        std::min(std::min(static_cast<size_t>(fork_.logicalSize) -
-                              fork_logical_offset_,
-                          extent_size.ValueOrDie() - extent_offset),
-                 buffer_space_remaining);
+    size_t extent_offset = (fork_logical_offset_ % extent_size).ValueOrDie();
+    size_t bytes_to_copy = std::min(
+        std::min(
+            static_cast<size_t>(fork_.logicalSize) - fork_logical_offset_,
+            static_cast<size_t>((extent_size - extent_offset).ValueOrDie())),
+        buffer_space_remaining);
 
     memcpy(&buffer[buffer_size - buffer_space_remaining],
            &current_extent_data_[extent_offset],

@@ -5,8 +5,9 @@
 package org.chromium.chrome.browser.payments;
 
 import android.content.DialogInterface;
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
+import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
@@ -19,7 +20,7 @@ import java.util.concurrent.TimeoutException;
  * A test for paying with an incomplete server card.
  */
 public class PaymentRequestIncompleteServerCardTest extends PaymentRequestTestBase {
-    private static final int FIRST_BILLING_ADDRESS = 1;
+    private static final int FIRST_BILLING_ADDRESS = 0;
 
     public PaymentRequestIncompleteServerCardTest() {
         super("payment_request_no_shipping_test.html");
@@ -39,6 +40,7 @@ public class PaymentRequestIncompleteServerCardTest extends PaymentRequestTestBa
 
     /** Click [PAY] and dismiss the card unmask dialog. */
     @MediumTest
+    @Feature({"Payments"})
     public void testPayAndDontUnmask() throws InterruptedException, ExecutionException,
            TimeoutException {
         triggerUIAndWait(mReadyForInput);

@@ -7,7 +7,10 @@
 
 #include "glsl/GrGLSLProgramBuilder.h"
 
+#include "GrCaps.h"
 #include "GrPipeline.h"
+#include "GrShaderCaps.h"
+#include "GrTexturePriv.h"
 #include "glsl/GrGLSLFragmentProcessor.h"
 #include "glsl/GrGLSLGeometryProcessor.h"
 #include "glsl/GrGLSLVarying.h"
@@ -29,7 +32,10 @@ GrGLSLProgramBuilder::GrGLSLProgramBuilder(const GrPipeline& pipeline,
     , fXferProcessor(nullptr)
     , fNumVertexSamplers(0)
     , fNumGeometrySamplers(0)
-    , fNumFragmentSamplers(0) {
+    , fNumFragmentSamplers(0)
+    , fNumVertexImageStorages(0)
+    , fNumGeometryImageStorages(0)
+    , fNumFragmentImageStorages(0) {
 }
 
 void GrGLSLProgramBuilder::addFeature(GrShaderFlags shaders,
@@ -39,7 +45,7 @@ void GrGLSLProgramBuilder::addFeature(GrShaderFlags shaders,
         fVS.addFeature(featureBit, extensionName);
     }
     if (shaders & kGeometry_GrShaderFlag) {
-        SkASSERT(this->glslCaps()->geometryShaderSupport());
+        SkASSERT(this->primitiveProcessor().willUseGeoShader());
         fGS.addFeature(featureBit, extensionName);
     }
     if (shaders & kFragment_GrShaderFlag) {
@@ -53,30 +59,17 @@ bool GrGLSLProgramBuilder::emitAndInstallProcs(GrGLSLExpr4* inputColor,
     // be sent to the GrGLSLPrimitiveProcessor in its emitCode function
     const GrPrimitiveProcessor& primProc = this->primitiveProcessor();
 
-    for (int i = 0; i < this->pipeline().numFragmentProcessors(); i++) {
-        const GrFragmentProcessor& processor = this->pipeline().getFragmentProcessor(i);
-
-        if (!primProc.hasTransformedLocalCoords()) {
-            SkTArray<const GrCoordTransform*, true>& procCoords = fCoordTransforms.push_back();
-            processor.gatherCoordTransforms(&procCoords);
-        }
-    }
-
     this->emitAndInstallPrimProc(primProc, inputColor, inputCoverage);
 
-    int numProcs = this->pipeline().numFragmentProcessors();
-    this->emitAndInstallFragProcs(0, this->pipeline().numColorFragmentProcessors(), inputColor);
-    this->emitAndInstallFragProcs(this->pipeline().numColorFragmentProcessors(), numProcs,
-                                  inputCoverage);
+    this->emitAndInstallFragProcs(inputColor, inputCoverage);
     if (primProc.getPixelLocalStorageState() !=
         GrPixelLocalStorageState::kDraw_GrPixelLocalStorageState) {
         this->emitAndInstallXferProc(this->pipeline().getXferProcessor(), *inputColor,
-                                     *inputCoverage, this->pipeline().ignoresCoverage(),
-                                     primProc.getPixelLocalStorageState());
+                                     *inputCoverage, primProc.getPixelLocalStorageState());
         this->emitFSOutputSwizzle(this->pipeline().getXferProcessor().hasSecondaryOutput());
     }
 
-    return this->checkSamplerCounts();
+    return this->checkSamplerCounts() && this->checkImageStorageCounts();
 }
 
 void GrGLSLProgramBuilder::emitAndInstallPrimProc(const GrPrimitiveProcessor& proc,
@@ -89,6 +82,9 @@ void GrGLSLProgramBuilder::emitAndInstallPrimProc(const GrPrimitiveProcessor& pr
 
     const char* distanceVectorName = nullptr;
     if (this->fPipeline.usesDistanceVectorField() && proc.implementsDistanceVector()) {
+        // Each individual user (FP) of the distance vector must be able to handle having this
+        // variable be undeclared. There is no single default value that will yield a reasonable
+        // result for all users.
         distanceVectorName = fFS.distanceVectorName();
         fFS.codeAppend( "// Normalized vector to the closest geometric edge (in device space)\n");
         fFS.codeAppend( "// Distance to the edge encoded in the z-component\n");
@@ -102,25 +98,29 @@ void GrGLSLProgramBuilder::emitAndInstallPrimProc(const GrPrimitiveProcessor& pr
     fVS.codeAppendf("// Primitive Processor %s\n", proc.name());
 
     SkASSERT(!fGeometryProcessor);
-    fGeometryProcessor = proc.createGLSLInstance(*this->glslCaps());
+    fGeometryProcessor = proc.createGLSLInstance(*this->shaderCaps());
 
-    SkSTArray<4, SamplerHandle> texSamplers(proc.numTextures());
-    SkSTArray<2, SamplerHandle> bufferSamplers(proc.numBuffers());
-    this->emitSamplers(proc, &texSamplers, &bufferSamplers);
+    SkSTArray<4, SamplerHandle>      texSamplers(proc.numTextureSamplers());
+    SkSTArray<2, SamplerHandle>      bufferSamplers(proc.numBuffers());
+    SkSTArray<2, ImageStorageHandle> imageStorages(proc.numImageStorages());
+    this->emitSamplersAndImageStorages(proc, &texSamplers, &bufferSamplers, &imageStorages);
 
+    GrGLSLPrimitiveProcessor::FPCoordTransformHandler transformHandler(fPipeline,
+                                                                       &fTransformedCoordVars);
     GrGLSLGeometryProcessor::EmitArgs args(&fVS,
+                                           proc.willUseGeoShader() ? &fGS : nullptr,
                                            &fFS,
                                            this->varyingHandler(),
                                            this->uniformHandler(),
-                                           this->glslCaps(),
+                                           this->shaderCaps(),
                                            proc,
                                            outputColor->c_str(),
                                            outputCoverage->c_str(),
                                            distanceVectorName,
                                            texSamplers.begin(),
                                            bufferSamplers.begin(),
-                                           fCoordTransforms,
-                                           &fOutCoords);
+                                           imageStorages.begin(),
+                                           &transformHandler);
     fGeometryProcessor->emitCode(args);
 
     // We have to check that effects and the code they emit are consistent, ie if an effect
@@ -130,14 +130,21 @@ void GrGLSLProgramBuilder::emitAndInstallPrimProc(const GrPrimitiveProcessor& pr
     fFS.codeAppend("}");
 }
 
-void GrGLSLProgramBuilder::emitAndInstallFragProcs(int procOffset,
-                                                   int numProcs,
-                                                   GrGLSLExpr4* inOut) {
-    for (int i = procOffset; i < numProcs; ++i) {
+void GrGLSLProgramBuilder::emitAndInstallFragProcs(GrGLSLExpr4* color, GrGLSLExpr4* coverage) {
+    int transformedCoordVarsIdx = 0;
+    GrGLSLExpr4** inOut = &color;
+    for (int i = 0; i < this->pipeline().numFragmentProcessors(); ++i) {
+        if (i == this->pipeline().numColorFragmentProcessors()) {
+            inOut = &coverage;
+        }
         GrGLSLExpr4 output;
         const GrFragmentProcessor& fp = this->pipeline().getFragmentProcessor(i);
-        this->emitAndInstallFragProc(fp, i, *inOut, &output);
-        *inOut = output;
+        this->emitAndInstallFragProc(fp, i, transformedCoordVarsIdx, **inOut, &output);
+        GrFragmentProcessor::Iter iter(&fp);
+        while (const GrFragmentProcessor* fp = iter.next()) {
+            transformedCoordVarsIdx += fp->numCoordTransforms();
+        }
+        **inOut = output;
     }
 }
 
@@ -145,6 +152,7 @@ void GrGLSLProgramBuilder::emitAndInstallFragProcs(int procOffset,
 // the fix is to allow effects to take the GrGLSLExpr4 directly
 void GrGLSLProgramBuilder::emitAndInstallFragProc(const GrFragmentProcessor& fp,
                                                   int index,
+                                                  int transformedCoordVarsIdx,
                                                   const GrGLSLExpr4& input,
                                                   GrGLSLExpr4* output) {
     // Program builders have a bit of state we need to clear with each effect
@@ -158,19 +166,30 @@ void GrGLSLProgramBuilder::emitAndInstallFragProc(const GrFragmentProcessor& fp,
 
     GrGLSLFragmentProcessor* fragProc = fp.createGLSLInstance();
 
-    SkSTArray<4, SamplerHandle> texSamplers(fp.numTextures());
-    SkSTArray<2, SamplerHandle> bufferSamplers(fp.numBuffers());
-    this->emitSamplers(fp, &texSamplers, &bufferSamplers);
+    SkSTArray<4, SamplerHandle> textureSamplerArray(fp.numTextureSamplers());
+    SkSTArray<2, SamplerHandle> bufferSamplerArray(fp.numBuffers());
+    SkSTArray<2, ImageStorageHandle> imageStorageArray(fp.numImageStorages());
+    GrFragmentProcessor::Iter iter(&fp);
+    while (const GrFragmentProcessor* subFP = iter.next()) {
+        this->emitSamplersAndImageStorages(*subFP, &textureSamplerArray, &bufferSamplerArray,
+                                           &imageStorageArray);
+    }
 
+    const GrShaderVar* coordVars = fTransformedCoordVars.begin() + transformedCoordVarsIdx;
+    GrGLSLFragmentProcessor::TransformedCoordVars coords(&fp, coordVars);
+    GrGLSLFragmentProcessor::TextureSamplers textureSamplers(&fp, textureSamplerArray.begin());
+    GrGLSLFragmentProcessor::BufferSamplers bufferSamplers(&fp, bufferSamplerArray.begin());
+    GrGLSLFragmentProcessor::ImageStorages imageStorages(&fp, imageStorageArray.begin());
     GrGLSLFragmentProcessor::EmitArgs args(&fFS,
                                            this->uniformHandler(),
-                                           this->glslCaps(),
+                                           this->shaderCaps(),
                                            fp,
                                            output->c_str(),
                                            input.isOnes() ? nullptr : input.c_str(),
-                                           fOutCoords[index],
-                                           texSamplers.begin(),
-                                           bufferSamplers.begin(),
+                                           coords,
+                                           textureSamplers,
+                                           bufferSamplers,
+                                           imageStorages,
                                            this->primitiveProcessor().implementsDistanceVector());
 
     fragProc->emitCode(args);
@@ -186,7 +205,6 @@ void GrGLSLProgramBuilder::emitAndInstallFragProc(const GrFragmentProcessor& fp,
 void GrGLSLProgramBuilder::emitAndInstallXferProc(const GrXferProcessor& xp,
                                                   const GrGLSLExpr4& colorIn,
                                                   const GrGLSLExpr4& coverageIn,
-                                                  bool ignoresCoverage,
                                                   GrPixelLocalStorageState plsState) {
     // Program builders have a bit of state we need to clear with each effect
     AutoStageAdvance adv(this);
@@ -199,7 +217,7 @@ void GrGLSLProgramBuilder::emitAndInstallXferProc(const GrXferProcessor& xp,
         fFS.enableSecondaryOutput();
     }
 
-    if (this->glslCaps()->mustDeclareFragmentShaderOutput()) {
+    if (this->shaderCaps()->mustDeclareFragmentShaderOutput()) {
         fFS.enableCustomOutput();
     }
 
@@ -207,20 +225,22 @@ void GrGLSLProgramBuilder::emitAndInstallXferProc(const GrXferProcessor& xp,
     openBrace.printf("{ // Xfer Processor: %s\n", xp.name());
     fFS.codeAppend(openBrace.c_str());
 
-    SkSTArray<4, SamplerHandle> texSamplers(xp.numTextures());
-    SkSTArray<2, SamplerHandle> bufferSamplers(xp.numBuffers());
-    this->emitSamplers(xp, &texSamplers, &bufferSamplers);
+    SkSTArray<4, SamplerHandle>      texSamplers(xp.numTextureSamplers());
+    SkSTArray<2, SamplerHandle>      bufferSamplers(xp.numBuffers());
+    SkSTArray<2, ImageStorageHandle> imageStorageArray(xp.numImageStorages());
+    this->emitSamplersAndImageStorages(xp, &texSamplers, &bufferSamplers, &imageStorageArray);
 
     bool usePLSDstRead = (plsState == GrPixelLocalStorageState::kFinish_GrPixelLocalStorageState);
     GrGLSLXferProcessor::EmitArgs args(&fFS,
                                        this->uniformHandler(),
-                                       this->glslCaps(),
+                                       this->shaderCaps(),
                                        xp, colorIn.c_str(),
-                                       ignoresCoverage ? nullptr : coverageIn.c_str(),
+                                       coverageIn.c_str(),
                                        fFS.getPrimaryColorOutputName(),
                                        fFS.getSecondaryColorOutputName(),
                                        texSamplers.begin(),
                                        bufferSamplers.begin(),
+                                       imageStorageArray.begin(),
                                        usePLSDstRead);
     fXferProcessor->emitCode(args);
 
@@ -230,44 +250,54 @@ void GrGLSLProgramBuilder::emitAndInstallXferProc(const GrXferProcessor& xp,
     fFS.codeAppend("}");
 }
 
-void GrGLSLProgramBuilder::emitSamplers(const GrProcessor& processor,
-                                        SkTArray<SamplerHandle>* outTexSamplers,
-                                        SkTArray<SamplerHandle>* outBufferSamplers) {
+void GrGLSLProgramBuilder::emitSamplersAndImageStorages(
+        const GrProcessor& processor,
+        SkTArray<SamplerHandle>* outTexSamplerHandles,
+        SkTArray<SamplerHandle>* outBufferSamplerHandles,
+        SkTArray<ImageStorageHandle>* outImageStorageHandles) {
     SkString name;
-    int numTextures = processor.numTextures();
-    for (int t = 0; t < numTextures; ++t) {
-        const GrTextureAccess& access = processor.textureAccess(t);
-        GrSLType samplerType = access.getTexture()->samplerType();
+    int numTextureSamplers = processor.numTextureSamplers();
+    for (int t = 0; t < numTextureSamplers; ++t) {
+        const GrProcessor::TextureSampler& sampler = processor.textureSampler(t);
+        name.printf("TextureSampler_%d", outTexSamplerHandles->count());
+        GrSLType samplerType = sampler.texture()->texturePriv().samplerType();
         if (kTextureExternalSampler_GrSLType == samplerType) {
-            const char* externalFeatureString = this->glslCaps()->externalTextureExtensionString();
+            const char* externalFeatureString =
+                    this->shaderCaps()->externalTextureExtensionString();
             // We shouldn't ever create a GrGLTexture that requires external sampler type
             SkASSERT(externalFeatureString);
-            this->addFeature(access.getVisibility(),
+            this->addFeature(sampler.visibility(),
                              1 << GrGLSLShaderBuilder::kExternalTexture_GLSLPrivateFeature,
                              externalFeatureString);
         }
-        name.printf("TextureSampler%d", t);
-        this->emitSampler(samplerType, access.getTexture()->config(),
-                          name.c_str(), access.getVisibility(), outTexSamplers);
+        this->emitSampler(samplerType, sampler.texture()->config(), name.c_str(),
+                          sampler.visibility(), outTexSamplerHandles);
+
     }
 
     if (int numBuffers = processor.numBuffers()) {
-        SkASSERT(this->glslCaps()->texelBufferSupport());
+        SkASSERT(this->shaderCaps()->texelBufferSupport());
         GrShaderFlags texelBufferVisibility = kNone_GrShaderFlags;
 
         for (int b = 0; b < numBuffers; ++b) {
-            const GrBufferAccess& access = processor.bufferAccess(b);
-            name.printf("BufferSampler%d", b);
-            this->emitSampler(kTextureBufferSampler_GrSLType, access.texelConfig(), name.c_str(),
-                              access.visibility(), outBufferSamplers);
+            const GrProcessor::BufferAccess& access = processor.bufferAccess(b);
+            name.printf("BufferSampler_%d", outBufferSamplerHandles->count());
+            this->emitSampler(kBufferSampler_GrSLType, access.texelConfig(), name.c_str(),
+                              access.visibility(), outBufferSamplerHandles);
             texelBufferVisibility |= access.visibility();
         }
 
-        if (const char* extension = this->glslCaps()->texelBufferExtensionString()) {
+        if (const char* extension = this->shaderCaps()->texelBufferExtensionString()) {
             this->addFeature(texelBufferVisibility,
                              1 << GrGLSLShaderBuilder::kTexelBuffer_GLSLPrivateFeature,
                              extension);
         }
+    }
+    int numImageStorages = processor.numImageStorages();
+    for (int i = 0; i < numImageStorages; ++i) {
+        const GrProcessor::ImageStorageAccess& imageStorageAccess = processor.imageStorageAccess(i);
+        name.printf("Image_%d", outImageStorageHandles->count());
+        this->emitImageStorage(imageStorageAccess, name.c_str(), outImageStorageHandles);
     }
 }
 
@@ -275,7 +305,7 @@ void GrGLSLProgramBuilder::emitSampler(GrSLType samplerType,
                                        GrPixelConfig config,
                                        const char* name,
                                        GrShaderFlags visibility,
-                                       SkTArray<SamplerHandle>* outSamplers) {
+                                       SkTArray<SamplerHandle>* outSamplerHandles) {
     if (visibility & kVertex_GrShaderFlag) {
         ++fNumVertexSamplers;
     }
@@ -286,13 +316,33 @@ void GrGLSLProgramBuilder::emitSampler(GrSLType samplerType,
     if (visibility & kFragment_GrShaderFlag) {
         ++fNumFragmentSamplers;
     }
-    GrSLPrecision precision = this->glslCaps()->samplerPrecision(config, visibility);
-    SamplerHandle handle = this->uniformHandler()->addSampler(visibility,
-                                                              config,
-                                                              samplerType,
-                                                              precision,
-                                                              name);
-    outSamplers->emplace_back(handle);
+    GrSLPrecision precision = this->shaderCaps()->samplerPrecision(config, visibility);
+    GrSwizzle swizzle = this->shaderCaps()->configTextureSwizzle(config);
+    outSamplerHandles->emplace_back(this->uniformHandler()->addSampler(visibility,
+                                                                       swizzle,
+                                                                       samplerType,
+                                                                       precision,
+                                                                       name));
+}
+
+void GrGLSLProgramBuilder::emitImageStorage(const GrProcessor::ImageStorageAccess& access,
+                                            const char* name,
+                                            SkTArray<ImageStorageHandle>* outImageStorageHandles) {
+    if (access.visibility() & kVertex_GrShaderFlag) {
+        ++fNumVertexImageStorages;
+    }
+    if (access.visibility() & kGeometry_GrShaderFlag) {
+        SkASSERT(this->primitiveProcessor().willUseGeoShader());
+        ++fNumGeometryImageStorages;
+    }
+    if (access.visibility() & kFragment_GrShaderFlag) {
+        ++fNumFragmentImageStorages;
+    }
+    GrSLType uniformType = access.texture()->texturePriv().imageStorageType();
+    ImageStorageHandle handle = this->uniformHandler()->addImageStorage(access.visibility(),
+         uniformType, access.format(), access.memoryModel(), access.restrict(), access.ioType(),
+         name);
+    outImageStorageHandles->emplace_back(handle);
 }
 
 void GrGLSLProgramBuilder::emitFSOutputSwizzle(bool hasSecondaryOutput) {
@@ -312,23 +362,47 @@ void GrGLSLProgramBuilder::emitFSOutputSwizzle(bool hasSecondaryOutput) {
 }
 
 bool GrGLSLProgramBuilder::checkSamplerCounts() {
-    const GrGLSLCaps& glslCaps = *this->glslCaps();
-    if (fNumVertexSamplers > glslCaps.maxVertexSamplers()) {
+    const GrShaderCaps& shaderCaps = *this->shaderCaps();
+    if (fNumVertexSamplers > shaderCaps.maxVertexSamplers()) {
         GrCapsDebugf(this->caps(), "Program would use too many vertex samplers\n");
         return false;
     }
-    if (fNumGeometrySamplers > glslCaps.maxGeometrySamplers()) {
+    if (fNumGeometrySamplers > shaderCaps.maxGeometrySamplers()) {
         GrCapsDebugf(this->caps(), "Program would use too many geometry samplers\n");
         return false;
     }
-    if (fNumFragmentSamplers > glslCaps.maxFragmentSamplers()) {
+    if (fNumFragmentSamplers > shaderCaps.maxFragmentSamplers()) {
         GrCapsDebugf(this->caps(), "Program would use too many fragment samplers\n");
         return false;
     }
     // If the same sampler is used in two different shaders, it counts as two combined samplers.
     int numCombinedSamplers = fNumVertexSamplers + fNumGeometrySamplers + fNumFragmentSamplers;
-    if (numCombinedSamplers > glslCaps.maxCombinedSamplers()) {
+    if (numCombinedSamplers > shaderCaps.maxCombinedSamplers()) {
         GrCapsDebugf(this->caps(), "Program would use too many combined samplers\n");
+        return false;
+    }
+    return true;
+}
+
+bool GrGLSLProgramBuilder::checkImageStorageCounts() {
+    const GrShaderCaps& shaderCaps = *this->shaderCaps();
+    if (fNumVertexImageStorages > shaderCaps.maxVertexImageStorages()) {
+        GrCapsDebugf(this->caps(), "Program would use too many vertex images\n");
+        return false;
+    }
+    if (fNumGeometryImageStorages > shaderCaps.maxGeometryImageStorages()) {
+        GrCapsDebugf(this->caps(), "Program would use too many geometry images\n");
+        return false;
+    }
+    if (fNumFragmentImageStorages > shaderCaps.maxFragmentImageStorages()) {
+        GrCapsDebugf(this->caps(), "Program would use too many fragment images\n");
+        return false;
+    }
+    // If the same image is used in two different shaders, it counts as two combined images.
+    int numCombinedImages = fNumVertexImageStorages + fNumGeometryImageStorages +
+        fNumFragmentImageStorages;
+    if (numCombinedImages > shaderCaps.maxCombinedImageStorages()) {
+        GrCapsDebugf(this->caps(), "Program would use too many combined images\n");
         return false;
     }
     return true;
@@ -382,10 +456,6 @@ void GrGLSLProgramBuilder::appendUniformDecls(GrShaderFlags visibility, SkString
     this->uniformHandler()->appendUniformDecls(visibility, out);
 }
 
-const GrGLSLSampler& GrGLSLProgramBuilder::getSampler(SamplerHandle handle) const {
-    return this->uniformHandler()->getSampler(handle);
-}
-
 void GrGLSLProgramBuilder::addRTAdjustmentUniform(GrSLPrecision precision,
                                                   const char* name,
                                                   const char** outName) {
@@ -398,13 +468,13 @@ void GrGLSLProgramBuilder::addRTAdjustmentUniform(GrSLPrecision precision,
                                                outName);
 }
 
-void GrGLSLProgramBuilder::addRTHeightUniform(const char* name, const char** outName) {
+void GrGLSLProgramBuilder::addRTHeightUniform(const char* name) {
         SkASSERT(!fUniformHandles.fRTHeightUni.isValid());
         GrGLSLUniformHandler* uniformHandler = this->uniformHandler();
         fUniformHandles.fRTHeightUni =
             uniformHandler->internalAddUniformArray(kFragment_GrShaderFlag,
                                                     kFloat_GrSLType, kDefault_GrSLPrecision,
-                                                    name, false, 0, outName);
+                                                    name, false, 0, nullptr);
 }
 
 void GrGLSLProgramBuilder::cleanupFragmentProcessors() {
@@ -416,6 +486,9 @@ void GrGLSLProgramBuilder::cleanupFragmentProcessors() {
 void GrGLSLProgramBuilder::finalizeShaders() {
     this->varyingHandler()->finalize();
     fVS.finalize(kVertex_GrShaderFlag);
+    if (this->primitiveProcessor().willUseGeoShader()) {
+        SkASSERT(this->shaderCaps()->geometryShaderSupport());
+        fGS.finalize(kGeometry_GrShaderFlag);
+    }
     fFS.finalize(kFragment_GrShaderFlag);
-
 }

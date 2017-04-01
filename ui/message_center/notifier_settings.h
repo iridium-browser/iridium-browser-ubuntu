@@ -30,6 +30,7 @@ class MessagePopupCollectionTest;
 }
 
 class MessageCenterNotificationManagerTest;
+class Notification;
 class NotifierSettingsDelegate;
 class NotifierSettingsProvider;
 
@@ -42,11 +43,14 @@ MESSAGE_CENTER_EXPORT NotifierSettingsDelegate* ShowSettings(
 
 // The struct to distinguish the notifiers.
 struct MESSAGE_CENTER_EXPORT NotifierId {
-  enum NotifierType {
-    APPLICATION,
-    ARC_APPLICATION,
-    WEB_PAGE,
-    SYSTEM_COMPONENT,
+  // This enum is being used for histogram reporting and the elements should not
+  // be re-ordered.
+  enum NotifierType : int {
+    APPLICATION = 0,
+    ARC_APPLICATION = 1,
+    WEB_PAGE = 2,
+    SYSTEM_COMPONENT = 3,
+    SIZE,
   };
 
   // Constructor for non WEB_PAGE type.
@@ -76,6 +80,7 @@ struct MESSAGE_CENTER_EXPORT NotifierId {
  private:
   friend class MessageCenterNotificationManagerTest;
   friend class MessageCenterTrayTest;
+  friend class Notification;
   friend class NotificationControllerTest;
   friend class PopupCollectionTest;
   friend class TrayViewControllerTest;
@@ -116,13 +121,8 @@ struct MESSAGE_CENTER_EXPORT Notifier {
 };
 
 struct MESSAGE_CENTER_EXPORT NotifierGroup {
-  NotifierGroup(const gfx::Image& icon,
-                const base::string16& name,
-                const base::string16& login_info);
+  NotifierGroup(const base::string16& name, const base::string16& login_info);
   ~NotifierGroup();
-
-  // Icon of a notifier group.
-  const gfx::Image icon;
 
   // Display name of a notifier group.
   const base::string16 name;
@@ -178,9 +178,9 @@ class MESSAGE_CENTER_EXPORT NotifierSettingsProvider {
   virtual const message_center::NotifierGroup& GetActiveNotifierGroup()
       const = 0;
 
-  // Collects the current notifier list and fills to |notifiers|. Caller takes
-  // the ownership of the elements of |notifiers|.
-  virtual void GetNotifierList(std::vector<Notifier*>* notifiers) = 0;
+  // Provides the current notifier list in |notifiers|.
+  virtual void GetNotifierList(
+      std::vector<std::unique_ptr<Notifier>>* notifiers) = 0;
 
   // Called when the |enabled| for the |notifier| has been changed by user
   // operation.

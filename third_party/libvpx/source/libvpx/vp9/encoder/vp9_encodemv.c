@@ -21,12 +21,10 @@
 static struct vp9_token mv_joint_encodings[MV_JOINTS];
 static struct vp9_token mv_class_encodings[MV_CLASSES];
 static struct vp9_token mv_fp_encodings[MV_FP_SIZE];
-static struct vp9_token mv_class0_encodings[CLASS0_SIZE];
 
 void vp9_entropy_mv_init(void) {
   vp9_tokens_from_tree(mv_joint_encodings, vp9_mv_joint_tree);
   vp9_tokens_from_tree(mv_class_encodings, vp9_mv_class_tree);
-  vp9_tokens_from_tree(mv_class0_encodings, vp9_mv_class0_tree);
   vp9_tokens_from_tree(mv_fp_encodings, vp9_mv_fp_tree);
 }
 
@@ -51,8 +49,7 @@ static void encode_mv_component(vpx_writer *w, int comp,
 
   // Integer bits
   if (mv_class == MV_CLASS_0) {
-    vp9_write_token(w, vp9_mv_class0_tree, mvcomp->class0,
-                    &mv_class0_encodings[d]);
+    vpx_write(w, d, mvcomp->class0[0]);
   } else {
     int i;
     const int n = mv_class + CLASS0_BITS - 1;  // number of bits
@@ -211,7 +208,8 @@ void vp9_write_nmv_probs(VP9_COMMON *cm, int usehp, vpx_writer *w,
 }
 
 void vp9_encode_mv(VP9_COMP *cpi, vpx_writer *w, const MV *mv, const MV *ref,
-                   const nmv_context *mvctx, int usehp) {
+                   const nmv_context *mvctx, int usehp,
+                   unsigned int *const max_mv_magnitude) {
   const MV diff = { mv->row - ref->row, mv->col - ref->col };
   const MV_JOINT_TYPE j = vp9_get_mv_joint(&diff);
   usehp = usehp && use_mv_hp(ref);
@@ -226,8 +224,8 @@ void vp9_encode_mv(VP9_COMP *cpi, vpx_writer *w, const MV *mv, const MV *ref,
   // If auto_mv_step_size is enabled then keep track of the largest
   // motion vector component used.
   if (cpi->sf.mv.auto_mv_step_size) {
-    unsigned int maxv = VPXMAX(abs(mv->row), abs(mv->col)) >> 3;
-    cpi->max_mv_magnitude = VPXMAX(maxv, cpi->max_mv_magnitude);
+    const unsigned int maxv = VPXMAX(abs(mv->row), abs(mv->col)) >> 3;
+    *max_mv_magnitude = VPXMAX(maxv, *max_mv_magnitude);
   }
 }
 

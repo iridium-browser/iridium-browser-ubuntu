@@ -3,14 +3,14 @@
 # found in the LICENSE file.
 
 import("//build/config/chrome_build.gni")
+import("//chrome/common/features.gni")
 import("//tools/grit/grit_rule.gni")
 
-# GYP version: chrome/chrome_resources.gyp:chrome_strings
-#              (generate_locale_settings action)
 grit("locale_settings") {
   source = "locale_settings.grd"
-  output_dir = "$root_gen_dir/chrome"
   use_qualified_include = true
+  defines = chrome_grit_defines
+  output_dir = "$root_gen_dir/chrome"
   outputs = [
     "grit/locale_settings.h",
     "locale_settings_am.pak",
@@ -70,7 +70,6 @@ grit("locale_settings") {
   ]
 }
 
-# GYP version: chrome/chrome_resources.gyp:platform_locale_settings
 grit("platform_locale_settings") {
   if (is_win) {
     source = "locale_settings_win.grd"
@@ -87,6 +86,8 @@ grit("platform_locale_settings") {
     source = "locale_settings_linux.grd"
   }
 
+  defines = chrome_grit_defines
+  use_qualified_include = true
   outputs = [
     "grit/platform_locale_settings.h",
     "platform_locale_settings_am.pak",

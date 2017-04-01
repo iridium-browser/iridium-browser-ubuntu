@@ -14,8 +14,6 @@ class TapSuppression extends ContextualSearchHeuristic {
     private static final int TAP_RADIUS_DPS = 30;
 
     private final boolean mIsTapSuppressionEnabled;
-    private final int mExperimentThresholdTaps;
-    private final int mTapsSinceOpen;
     private final float mPxToDp;
     private final boolean mIsSecondTap;
     private final boolean mIsConditionSatisfied; // whether to suppress or not.
@@ -32,31 +30,25 @@ class TapSuppression extends ContextualSearchHeuristic {
      */
     TapSuppression(ContextualSearchSelectionController controller,
             ContextualSearchTapState previousTapState, int x, int y, int tapsSinceOpen) {
-        mIsTapSuppressionEnabled = ContextualSearchFieldTrial.isTapSuppressionEnabled();
-        mExperimentThresholdTaps = ContextualSearchFieldTrial.getSuppressionTaps();
+        mIsTapSuppressionEnabled = false;
         mPxToDp = controller.getPxToDp();
-        mTapsSinceOpen = tapsSinceOpen;
         mIsSecondTap = previousTapState != null && previousTapState.wasSuppressed()
                 && !shouldHandleFirstTap();
 
-        boolean doSuppressTap = false;
-        if (mIsTapSuppressionEnabled) {
-            if (mIsSecondTap) {
-                boolean shouldHandle = shouldHandleSecondTap(previousTapState, x, y);
-                doSuppressTap = !shouldHandle;
-            } else {
-                doSuppressTap = !shouldHandleFirstTap();
-                if (doSuppressTap) {
-                    RecordUserAction.record("ContextualSearch.TapSuppressed.TapThresholdExceeded");
-                }
+        if (mIsSecondTap) {
+            boolean shouldHandle = shouldHandleSecondTap(previousTapState, x, y);
+            mIsConditionSatisfied = !shouldHandle;
+        } else {
+            mIsConditionSatisfied = !shouldHandleFirstTap();
+            if (mIsConditionSatisfied && mIsTapSuppressionEnabled) {
+                RecordUserAction.record("ContextualSearch.TapSuppressed.TapThresholdExceeded");
             }
         }
-        mIsConditionSatisfied = doSuppressTap;
     }
 
     @Override
-    protected boolean isConditionSatisfied() {
-        return mIsConditionSatisfied;
+    protected boolean isConditionSatisfiedAndEnabled() {
+        return mIsTapSuppressionEnabled && mIsConditionSatisfied;
     }
 
     @Override
@@ -69,10 +61,11 @@ class TapSuppression extends ContextualSearchHeuristic {
     }
 
     /**
-     * @return whether a first tap should be handled or not.
+     * @return Whether a first tap should be handled or not.
      */
     private boolean shouldHandleFirstTap() {
-        return mTapsSinceOpen < mExperimentThresholdTaps;
+        // TODO(donnd): enable with better logic.
+        return true;
     }
 
     /**

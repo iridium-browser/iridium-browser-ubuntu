@@ -20,9 +20,9 @@
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/login/user_names.h"
 #include "components/policy/policy_constants.h"
 #include "components/signin/core/account_id/account_id.h"
+#include "components/user_manager/user_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "crypto/nss_util_internal.h"
@@ -65,7 +65,7 @@ class PlatformKeysTest : public ExtensionApiTest {
 
     command_line->AppendSwitchASCII(
         chromeos::switches::kLoginUser,
-        chromeos::login::StubAccountId().GetUserEmail());
+        user_manager::StubAccountId().GetUserEmail());
   }
 
   void SetUpInProcessBrowserTestFixture() override {
@@ -74,7 +74,7 @@ class PlatformKeysTest : public ExtensionApiTest {
     if (device_status_ == DEVICE_STATUS_ENROLLED) {
       device_policy_test_helper_.device_policy()->policy_data().set_username(
           user_status_ == USER_STATUS_MANAGED_AFFILIATED_DOMAIN
-              ? chromeos::login::StubAccountId().GetUserEmail()
+              ? user_manager::StubAccountId().GetUserEmail()
               : "someuser@anydomain.com");
 
       device_policy_test_helper_.device_policy()->Build();
@@ -181,7 +181,7 @@ class PlatformKeysTest : public ExtensionApiTest {
  private:
   void SetupInitialEmptyPolicy() {
     policy_helper_.reset(new policy::UserPolicyTestHelper(
-        chromeos::login::StubAccountId().GetUserEmail()));
+        user_manager::StubAccountId().GetUserEmail()));
     policy_helper_->Init(
         base::DictionaryValue() /* empty mandatory policy */,
         base::DictionaryValue() /* empty recommended policy */);
@@ -396,7 +396,7 @@ IN_PROC_BROWSER_TEST_P(ManagedWithoutPermissionPlatformKeysTest,
   // To verify that the user is not prompted for any certificate selection,
   // set up a delegate that fails on any invocation.
   GetPlatformKeysService()->SetSelectDelegate(
-      base::WrapUnique(new TestSelectDelegate(net::CertificateList())));
+      base::MakeUnique<TestSelectDelegate>(net::CertificateList()));
 
   ASSERT_TRUE(RunExtensionTest("managedProfile")) << message_;
 }
@@ -433,7 +433,7 @@ IN_PROC_BROWSER_TEST_P(ManagedWithPermissionPlatformKeysTest,
   certs.push_back(client_cert1_);
 
   GetPlatformKeysService()->SetSelectDelegate(
-      base::WrapUnique(new TestSelectDelegate(certs)));
+      base::MakeUnique<TestSelectDelegate>(certs));
 
   ASSERT_TRUE(RunExtensionTest("corporateKeyWithPermissionTests")) << message_;
 }
@@ -444,7 +444,7 @@ IN_PROC_BROWSER_TEST_P(ManagedWithPermissionPlatformKeysTest,
   // As the profile is managed, the user must not be able to grant any
   // certificate permission. Set up a delegate that fails on any invocation.
   GetPlatformKeysService()->SetSelectDelegate(
-      base::WrapUnique(new TestSelectDelegate(net::CertificateList())));
+      base::MakeUnique<TestSelectDelegate>(net::CertificateList()));
 
   ASSERT_TRUE(RunExtensionTest("policyDoesGrantAccessToNonCorporateKey"))
       << message_;

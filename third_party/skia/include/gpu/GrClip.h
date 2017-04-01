@@ -8,12 +8,13 @@
 #ifndef GrClip_DEFINED
 #define GrClip_DEFINED
 
+#include "GrTypes.h"
 #include "SkRect.h"
 #include "SkRRect.h"
 
 class GrAppliedClip;
 class GrContext;
-class GrDrawContext;
+class GrRenderTargetContext;
 
 /**
  * GrClip is an abstract base class for applying a clip. It constructs a clip mask if necessary, and
@@ -27,10 +28,25 @@ public:
     }
     virtual void getConservativeBounds(int width, int height, SkIRect* devResult,
                                        bool* isIntersectionOfRects = nullptr) const = 0;
-    virtual bool apply(GrContext*, GrDrawContext*, bool useHWAA, bool hasUserStencilSettings,
-                       GrAppliedClip* out) const = 0;
+    virtual bool apply(GrContext*, GrRenderTargetContext*, bool useHWAA,
+                       bool hasUserStencilSettings, GrAppliedClip* out) const = 0;
 
     virtual ~GrClip() {}
+
+    /**
+     * This method quickly and conservatively determines whether the entire clip is equivalent to
+     * intersection with a rrect. This will only return true if the rrect does not fully contain
+     * the render target bounds. Moreover, the returned rrect need not be contained by the render
+     * target bounds. We assume all draws will be implicitly clipped by the render target bounds.
+     *
+     * @param rtBounds The bounds of the render target that the clip will be applied to.
+     * @param rrect    If return is true rrect will contain the rrect equivalent to the clip within
+     *                 rtBounds.
+     * @param aa       If return is true aa will indicate whether the rrect clip is antialiased.
+     * @return true if the clip is equivalent to a single rrect, false otherwise.
+     *
+     */
+    virtual bool isRRect(const SkRect& rtBounds, SkRRect* rrect, GrAA* aa) const = 0;
 
     /**
      * This is the maximum distance that a draw may extend beyond a clip's boundary and still count
@@ -112,6 +128,9 @@ private:
     bool quickContains(const SkRect&) const final {
         return true;
     }
+    bool quickContains(const SkRRect&) const final {
+        return true;
+    }
     void getConservativeBounds(int width, int height, SkIRect* devResult,
                                bool* isIntersectionOfRects) const final {
         devResult->setXYWH(0, 0, width, height);
@@ -119,9 +138,10 @@ private:
             *isIntersectionOfRects = true;
         }
     }
-    bool apply(GrContext*, GrDrawContext*, bool, bool, GrAppliedClip*) const final {
+    bool apply(GrContext*, GrRenderTargetContext*, bool, bool, GrAppliedClip*) const final {
         return true;
     }
+    bool isRRect(const SkRect&, SkRRect*, GrAA*) const override { return false; }
 };
 
 #endif

@@ -14,9 +14,6 @@
         'core.gyp:*',
         'etc1.gyp:libetc1',
       ],
-      'includes': [
-        'utils.gypi',
-      ],
       'include_dirs': [
         '../include/effects',
         '../include/gpu',
@@ -33,7 +30,7 @@
         '../src/utils/win',
       ],
       'sources': [
-        'utils.gypi', # Makes the gypi appear in IDEs (but does not modify the build).
+        '<!@(python read_gni.py ../gn/utils.gni skia_utils_sources)',
       ],
       'conditions': [
         [ 'skia_os == "mac"', {

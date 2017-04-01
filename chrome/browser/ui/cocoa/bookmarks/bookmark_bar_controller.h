@@ -47,17 +47,17 @@ class ManagedBookmarkService;
 // Used as a maximum width for buttons on the bar.
 const CGFloat kDefaultBookmarkWidth = 150.0;
 
-// Horizontal frame inset for buttons in the bookmark bar.
-CGFloat BookmarkHorizontalPadding();
-
-// Vertical frame inset for buttons in the bookmark bar.
-CGFloat BookmarkVerticalPadding();
+// Right margin before the last button in the bookmark bar.
+const CGFloat kBookmarkRightMargin = 8.0;
 
 // Left margin before the first button in the bookmark bar.
-CGFloat BookmarkLeftMargin();
+const CGFloat kBookmarkLeftMargin = 8.0;
 
-// Right margin before the last button in the bookmark bar.
-CGFloat BookmarkRightMargin();
+// Vertical frame inset for buttons in the bookmark bar.
+const CGFloat kBookmarkVerticalPadding = 4.0;
+
+// Horizontal frame inset for buttons in the bookmark bar.
+const CGFloat kBookmarkHorizontalPadding = 4.0;
 
 // Used as a min/max width for buttons on menus (not on the bar).
 const CGFloat kBookmarkMenuButtonMinimumWidth = 100.0;
@@ -294,10 +294,10 @@ willAnimateFromState:(BookmarkBar::State)oldState
   base::scoped_nsobject<BookmarkContextMenuCocoaController>
       contextMenuController_;
 
-  // Weak pointer to the pulsed button for the currently pulsing node. We need
-  // to store this as it may not be possible to determine the pulsing button if
-  // the pulsing node is deleted. Nil if there is no pulsing node.
-  BookmarkButton* pulsingButton_;
+  // The pulsed button for the currently pulsing node. We need to store this as
+  // it may not be possible to determine the pulsing button if the pulsing node
+  // is deleted. Nil if there is no pulsing node.
+  base::scoped_nsobject<BookmarkButton> pulsingButton_;
 
   // Specifically watch the currently pulsing node. This lets us stop pulsing
   // when anything happens to the node. Null if there is no pulsing node.
@@ -362,10 +362,8 @@ willAnimateFromState:(BookmarkBar::State)oldState
 // shouldn't be shown.
 - (CGFloat)toolbarDividerOpacity;
 
-// Updates the sizes and positions of the subviews.
-// TODO(viettrungluu): I'm not convinced this should be public, but I currently
-// need it for animations. Try not to propagate its use.
-- (void)layoutSubviews;
+// Set the size of the view and perform layout.
+- (void)layoutToFrame:(NSRect)frame;
 
 // Called by our view when it is moved to a window.
 - (void)viewDidMoveToWindow;

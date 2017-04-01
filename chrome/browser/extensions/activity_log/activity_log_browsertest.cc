@@ -4,11 +4,11 @@
 
 #include <stdint.h>
 
+#include "base/callback.h"
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "net/dns/mock_host_resolver.h"
@@ -35,17 +36,20 @@ class ActivityLogPrerenderTest : public ExtensionApiTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableExtensionActivityLogging);
-    command_line->AppendSwitchASCII(switches::kPrerenderMode,
-                                    switches::kPrerenderModeSwitchValueEnabled);
+  }
+
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    prerender::PrerenderManager::SetMode(
+        prerender::PrerenderManager::PRERENDER_MODE_ENABLED);
   }
 
   static void Prerender_Arguments(
       const std::string& extension_id,
       uint16_t port,
+      const base::Closure& quit_when_idle_closure,
       std::unique_ptr<std::vector<scoped_refptr<Action>>> i) {
-    // This is to exit RunLoop (base::MessageLoop::current()->Run()) below
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+    quit_when_idle_closure.Run();
 
     ASSERT_TRUE(i->size());
     scoped_refptr<Action> last = i->front();
@@ -82,7 +86,7 @@ IN_PROC_BROWSER_TEST_F(ActivityLogPrerenderTest, TestScriptInjected) {
 
   // Disable rate limiting in PrerenderManager
   prerender::PrerenderManager* prerender_manager =
-      prerender::PrerenderManagerFactory::GetForProfile(profile());
+      prerender::PrerenderManagerFactory::GetForBrowserContext(profile());
   ASSERT_TRUE(prerender_manager);
   prerender_manager->mutable_config().rate_limit_enabled = false;
   // Increase prerenderer limits, otherwise this test fails
@@ -112,18 +116,14 @@ IN_PROC_BROWSER_TEST_F(ActivityLogPrerenderTest, TestScriptInjected) {
 
   page_observer.Wait();
 
+  base::RunLoop run_loop;
   activity_log->GetFilteredActions(
-      ext->id(),
-      Action::ACTION_ANY,
-      "",
-      "",
-      "",
-      -1,
-      base::Bind(
-          ActivityLogPrerenderTest::Prerender_Arguments, ext->id(), port));
+      ext->id(), Action::ACTION_ANY, "", "", "", -1,
+      base::Bind(ActivityLogPrerenderTest::Prerender_Arguments, ext->id(), port,
+                 run_loop.QuitWhenIdleClosure()));
 
   // Allow invocation of Prerender_Arguments
-  base::RunLoop().Run();
+  run_loop.Run();
 }
 
 }  // namespace extensions

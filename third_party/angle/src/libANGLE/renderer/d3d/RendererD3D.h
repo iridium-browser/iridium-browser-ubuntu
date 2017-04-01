@@ -9,6 +9,8 @@
 #ifndef LIBANGLE_RENDERER_D3D_RENDERERD3D_H_
 #define LIBANGLE_RENDERER_D3D_RENDERERD3D_H_
 
+#include <array>
+
 #include "common/debug.h"
 #include "common/MemoryBuffer.h"
 #include "libANGLE/ContextState.h"
@@ -16,10 +18,9 @@
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/d3d/VertexDataManager.h"
 #include "libANGLE/renderer/d3d/formatutilsD3D.h"
-#include "libANGLE/renderer/d3d/WorkaroundsD3D.h"
-
-//FIXME(jmadill): std::array is currently prohibited by Chromium style guide
-#include <array>
+#include "libANGLE/Version.h"
+#include "libANGLE/WorkerThread.h"
+#include "platform/WorkaroundsD3D.h"
 
 namespace egl
 {
@@ -54,14 +55,6 @@ struct TranslatedIndexData;
 class UniformStorageD3D;
 class VertexBuffer;
 
-enum ShaderType
-{
-    SHADER_VERTEX,
-    SHADER_PIXEL,
-    SHADER_GEOMETRY,
-    SHADER_TYPE_MAX
-};
-
 struct DeviceIdentifier
 {
     UINT VendorId;
@@ -75,6 +68,15 @@ enum RendererClass
 {
     RENDERER_D3D11,
     RENDERER_D3D9
+};
+
+enum ShaderType
+{
+    SHADER_VERTEX,
+    SHADER_PIXEL,
+    SHADER_GEOMETRY,
+    SHADER_COMPUTE,
+    SHADER_TYPE_MAX
 };
 
 // Useful for unit testing
@@ -111,8 +113,6 @@ class RendererD3D : public BufferFactoryD3D
 
     virtual ContextImpl *createContext(const gl::ContextState &state) = 0;
 
-    bool isDeviceLost() const;
-    virtual bool testDeviceLost() = 0;
     std::string getVendorString() const;
 
     virtual int getMinorShaderModel() const = 0;
@@ -128,9 +128,17 @@ class RendererD3D : public BufferFactoryD3D
 
     virtual SwapChainD3D *createSwapChain(NativeWindowD3D *nativeWindow,
                                           HANDLE shareHandle,
+                                          IUnknown *d3dTexture,
                                           GLenum backBufferFormat,
                                           GLenum depthBufferFormat,
                                           EGLint orientation) = 0;
+    virtual egl::Error getD3DTextureInfo(IUnknown *d3dTexture,
+                                         EGLint *width,
+                                         EGLint *height,
+                                         GLenum *fboFormat) const = 0;
+    virtual egl::Error validateShareHandle(const egl::Config *config,
+                                           HANDLE shareHandle,
+                                           const egl::AttributeMap &attribs) const = 0;
 
     virtual gl::Error setSamplerState(gl::SamplerType type, int index, gl::Texture *texture, const gl::SamplerState &sampler) = 0;
     virtual gl::Error setTexture(gl::SamplerType type, int index, gl::Texture *texture) = 0;
@@ -148,7 +156,7 @@ class RendererD3D : public BufferFactoryD3D
 
     virtual int getMajorShaderModel() const = 0;
 
-    const WorkaroundsD3D &getWorkarounds() const;
+    const angle::WorkaroundsD3D &getWorkarounds() const;
 
     // Pixel operations
     virtual gl::Error copyImage2D(const gl::Framebuffer *framebuffer, const gl::Rectangle &sourceRect, GLenum destFormat,
@@ -170,6 +178,10 @@ class RendererD3D : public BufferFactoryD3D
                                   bool unpackFlipY,
                                   bool unpackPremultiplyAlpha,
                                   bool unpackUnmultiplyAlpha) = 0;
+    virtual gl::Error copyCompressedTexture(const gl::Texture *source,
+                                            GLint sourceLevel,
+                                            TextureStorage *storage,
+                                            GLint destLevel) = 0;
 
     // RenderTarget creation
     virtual gl::Error createRenderTarget(int width, int height, GLenum format, GLsizei samples, RenderTargetD3D **outRT) = 0;
@@ -187,8 +199,10 @@ class RendererD3D : public BufferFactoryD3D
                                           ShaderType type,
                                           const std::vector<D3DVarying> &streamOutVaryings,
                                           bool separatedOutputBuffers,
-                                          const D3DCompilerWorkarounds &workarounds,
+                                          const angle::CompilerWorkaroundsD3D &workarounds,
                                           ShaderExecutableD3D **outExectuable) = 0;
+    virtual gl::Error ensureHLSLCompilerInitialized()                          = 0;
+
     virtual UniformStorageD3D *createUniformStorage(size_t storageSize) = 0;
 
     // Image operations
@@ -213,8 +227,12 @@ class RendererD3D : public BufferFactoryD3D
                                               GLenum destinationFormat, GLenum sourcePixelsType, const gl::Box &destArea) = 0;
 
     // Device lost
+    GLenum getResetStatus();
     void notifyDeviceLost();
     virtual bool resetDevice() = 0;
+    virtual bool testDeviceLost()       = 0;
+    virtual bool testDeviceResettable() = 0;
+
     virtual RendererClass getRendererClass() const = 0;
     virtual void *getD3DDevice() = 0;
 
@@ -243,6 +261,10 @@ class RendererD3D : public BufferFactoryD3D
     // Necessary hack for default framebuffers in D3D.
     virtual FramebufferImpl *createDefaultFramebuffer(const gl::FramebufferState &state) = 0;
 
+    virtual gl::Version getMaxSupportedESVersion() const = 0;
+
+    angle::WorkerThreadPool *getWorkerThreadPool();
+
   protected:
     virtual bool getLUID(LUID *adapterLuid) const = 0;
     virtual void generateCaps(gl::Caps *outCaps,
@@ -260,7 +282,6 @@ class RendererD3D : public BufferFactoryD3D
     gl::Error markTransformFeedbackUsage(const gl::ContextState &data);
 
     egl::Display *mDisplay;
-    bool mDeviceLost;
 
     bool mPresentPathFastEnabled;
 
@@ -279,7 +300,7 @@ class RendererD3D : public BufferFactoryD3D
                                        FramebufferTextureArray *outTextureArray);
     gl::Texture *getIncompleteTexture(GLImplFactory *implFactory, GLenum type);
 
-    virtual WorkaroundsD3D generateWorkarounds() const = 0;
+    virtual angle::WorkaroundsD3D generateWorkarounds() const = 0;
 
     mutable bool mCapsInitialized;
     mutable gl::Caps mNativeCaps;
@@ -290,9 +311,12 @@ class RendererD3D : public BufferFactoryD3D
     gl::TextureMap mIncompleteTextures;
 
     mutable bool mWorkaroundsInitialized;
-    mutable WorkaroundsD3D mWorkarounds;
+    mutable angle::WorkaroundsD3D mWorkarounds;
 
     bool mDisjoint;
+    bool mDeviceLost;
+
+    angle::WorkerThreadPool mWorkerThreadPool;
 };
 
 }  // namespace rx

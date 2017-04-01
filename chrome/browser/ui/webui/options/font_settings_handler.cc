@@ -19,7 +19,6 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/character_encoding.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -39,25 +38,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
-#if defined(OS_WIN)
-#include "ui/gfx/font.h"
-#include "ui/gfx/platform_font_win.h"
-#endif
-
 namespace {
-
-// Returns the localized name of a font so that settings can find it within the
-// list of system fonts. On Windows, the list of system fonts has names only
-// for the system locale, but the pref value may be in the English name.
-std::string MaybeGetLocalizedFontName(const std::string& font_name) {
-#if defined(OS_WIN)
-  gfx::Font font(font_name, 12);  // dummy font size
-  return static_cast<gfx::PlatformFontWin*>(font.platform_font())->
-      GetLocalizedFontName();
-#else
-  return font_name;
-#endif
-}
 
 const char kAdvancedFontSettingsExtensionId[] =
     "caclkomlalccbpcdllchkeecicepbmbm";
@@ -90,8 +71,8 @@ void FontSettingsHandler::GetLocalizedValues(
       IDS_FONT_LANGUAGE_SETTING_FONT_SELECTOR_FIXED_WIDTH_LABEL },
     { "fontSettingsMinimumSize",
       IDS_FONT_LANGUAGE_SETTING_MINIMUM_FONT_SIZE_TITLE },
-    { "fontSettingsEncoding",
-      IDS_FONT_LANGUAGE_SETTING_FONT_SUB_DIALOG_ENCODING_TITLE },
+    { "fontSettings",
+      IDS_FONT_LANGUAGE_SETTING_FONT_SUB_DIALOG_TITLE },
     { "fontSettingsSizeTiny",
       IDS_FONT_LANGUAGE_SETTING_FONT_SIZE_TINY },
     { "fontSettingsSizeHuge",
@@ -138,8 +119,6 @@ void FontSettingsHandler::RegisterMessages() {
   FontSettingsUtilities::ValidateSavedFonts(pref_service);
 
   // Register for preferences that we need to observe manually.
-  font_encoding_.Init(prefs::kDefaultCharset, pref_service);
-
   standard_font_.Init(prefs::kWebKitStandardFontFamily,
                       pref_service,
                       base::Bind(&FontSettingsHandler::SetUpStandardFontSample,
@@ -212,74 +191,47 @@ void FontSettingsHandler::FontsListHasLoaded(
     font->AppendString(has_rtl_chars ? "rtl" : "ltr");
   }
 
-  base::ListValue encoding_list;
-  const std::vector<CharacterEncoding::EncodingInfo>* encodings;
-  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
-  encodings = CharacterEncoding::GetCurrentDisplayEncodings(
-      g_browser_process->GetApplicationLocale(),
-      pref_service->GetString(prefs::kStaticEncodings),
-      pref_service->GetString(prefs::kRecentlySelectedEncoding));
-  DCHECK(encodings);
-  DCHECK(!encodings->empty());
-
-  std::vector<CharacterEncoding::EncodingInfo>::const_iterator it;
-  for (it = encodings->begin(); it != encodings->end(); ++it) {
-    std::unique_ptr<base::ListValue> option(new base::ListValue());
-    if (it->encoding_id) {
-      int cmd_id = it->encoding_id;
-      std::string encoding =
-      CharacterEncoding::GetCanonicalEncodingNameByCommandId(cmd_id);
-      base::string16 name = it->encoding_display_name;
-      bool has_rtl_chars = base::i18n::StringContainsStrongRTLChars(name);
-      option->AppendString(encoding);
-      option->AppendString(name);
-      option->AppendString(has_rtl_chars ? "rtl" : "ltr");
-    } else {
-      // Add empty name/value to indicate a separator item.
-      option->AppendString(std::string());
-      option->AppendString(std::string());
-    }
-    encoding_list.Append(std::move(option));
-  }
-
   base::ListValue selected_values;
+  selected_values.AppendString(FontSettingsUtilities::MaybeGetLocalizedFontName(
+      standard_font_.GetValue()));
   selected_values.AppendString(
-      MaybeGetLocalizedFontName(standard_font_.GetValue()));
+      FontSettingsUtilities::MaybeGetLocalizedFontName(serif_font_.GetValue()));
+  selected_values.AppendString(FontSettingsUtilities::MaybeGetLocalizedFontName(
+      sans_serif_font_.GetValue()));
   selected_values.AppendString(
-      MaybeGetLocalizedFontName(serif_font_.GetValue()));
-  selected_values.AppendString(
-      MaybeGetLocalizedFontName(sans_serif_font_.GetValue()));
-  selected_values.AppendString(
-      MaybeGetLocalizedFontName(fixed_font_.GetValue()));
-  selected_values.AppendString(font_encoding_.GetValue());
+      FontSettingsUtilities::MaybeGetLocalizedFontName(fixed_font_.GetValue()));
 
   web_ui()->CallJavascriptFunctionUnsafe(
-      "FontSettings.setFontsData", *list.get(), encoding_list, selected_values);
+      "FontSettings.setFontsData", *list.get(), selected_values);
 }
 
 void FontSettingsHandler::SetUpStandardFontSample() {
-  base::StringValue font_value(standard_font_.GetValue());
+  base::StringValue font_value(
+      FontSettingsUtilities::ResolveFontList(standard_font_.GetValue()));
   base::FundamentalValue size_value(default_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe("FontSettings.setUpStandardFontSample",
                                          font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpSerifFontSample() {
-  base::StringValue font_value(serif_font_.GetValue());
+  base::StringValue font_value(
+      FontSettingsUtilities::ResolveFontList(serif_font_.GetValue()));
   base::FundamentalValue size_value(default_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe("FontSettings.setUpSerifFontSample",
                                          font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpSansSerifFontSample() {
-  base::StringValue font_value(sans_serif_font_.GetValue());
+  base::StringValue font_value(
+      FontSettingsUtilities::ResolveFontList(sans_serif_font_.GetValue()));
   base::FundamentalValue size_value(default_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe(
       "FontSettings.setUpSansSerifFontSample", font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpFixedFontSample() {
-  base::StringValue font_value(fixed_font_.GetValue());
+  base::StringValue font_value(
+      FontSettingsUtilities::ResolveFontList(fixed_font_.GetValue()));
   base::FundamentalValue size_value(default_fixed_font_size_.GetValue());
   web_ui()->CallJavascriptFunctionUnsafe("FontSettings.setUpFixedFontSample",
                                          font_value, size_value);

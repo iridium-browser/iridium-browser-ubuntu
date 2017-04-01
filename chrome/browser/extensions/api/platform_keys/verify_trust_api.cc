@@ -5,10 +5,10 @@
 #include "chrome/browser/extensions/api/platform_keys/verify_trust_api.h"
 
 #include <algorithm>
+#include <memory>
 
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/api/platform_keys/platform_keys_api.h"
 #include "chrome/common/extensions/api/platform_keys_internal.h"
@@ -17,7 +17,7 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/x509_certificate.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/ssl/ssl_config_service.h"
 
 namespace extensions {
@@ -71,7 +71,8 @@ class VerifyTrustAPI::IOPart {
   // One CertVerifier per extension to verify trust. Each verifier is created on
   // first usage and deleted when this IOPart is destructed or the respective
   // extension is unloaded.
-  std::map<std::string, linked_ptr<net::CertVerifier>> extension_to_verifier_;
+  std::map<std::string, std::unique_ptr<net::CertVerifier>>
+      extension_to_verifier_;
 };
 
 // static
@@ -177,14 +178,13 @@ void VerifyTrustAPI::IOPart::Verify(std::unique_ptr<Params> params,
   }
 
   if (!base::ContainsKey(extension_to_verifier_, extension_id)) {
-    extension_to_verifier_[extension_id] =
-        make_linked_ptr(net::CertVerifier::CreateDefault().release());
+    extension_to_verifier_[extension_id] = net::CertVerifier::CreateDefault();
   }
   net::CertVerifier* verifier = extension_to_verifier_[extension_id].get();
 
   std::unique_ptr<net::CertVerifyResult> verify_result(
       new net::CertVerifyResult);
-  std::unique_ptr<net::BoundNetLog> net_log(new net::BoundNetLog);
+  std::unique_ptr<net::NetLogWithSource> net_log(new net::NetLogWithSource);
   const int flags = 0;
 
   std::string ocsp_response;

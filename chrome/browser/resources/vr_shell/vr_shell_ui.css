@@ -1,0 +1,191 @@
+/* Copyright 2016 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file. */
+
+html {
+  background-color: rgba(255, 255, 255, 0);
+}
+
+#ui {
+  left: 0;
+  max-width: 1920px;
+  position: absolute;
+  top: 0;
+  transform-origin: left top;
+}
+
+/* This class manages the position of elements on the texture page.
+ * Each UI element should have a bounding div of this class. */
+.ui-element {
+  float: left;
+  margin: 2px;
+}
+
+.webvr-message-box {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+#webvr-not-secure-permanent .webvr-not-secure-icon {
+  display: inline-block;
+  margin: 20px 0;
+  vertical-align: middle;
+}
+
+#webvr-not-secure-permanent .webvr-string {
+  display: inline-block;
+  margin: 20px 10.5px;
+  vertical-align: middle;
+}
+
+/* This is a single-line (nowrap) short message. The width is elastic for
+ * translations, and the underlying string had a request to translators
+ * to keep it short. */
+#webvr-not-secure-permanent .webvr-box {
+  background-color: white;
+  border-radius: 6px;
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  box-sizing: border-box;
+  color: #444;
+  font-size: 26px;
+  height: 78px;
+  min-width: 226px;
+  overflow: hidden;
+  padding: 0 20px;
+  white-space: nowrap;
+}
+
+/* This uses fixed width but the height is elastic for translations. */
+#webvr-not-secure-transient > div {
+  background-color: rgba(26, 26, 26, 0.8);
+  border-radius: 6px;
+  box-sizing: border-box;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  font-size: 26px;
+  justify-content: center;
+  line-height: 1.4;
+  min-height: 160px;
+  overflow: hidden;
+  padding: 20px;
+  text-align: center;
+  width: 512px;
+}
+
+.round-button .button {
+  background-color: #eee;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  border-radius: 50%;
+  height: 96px;
+  margin: auto auto;
+  opacity: 0.8;
+  transition: opacity 150ms ease-in-out;
+  width: 96px;
+}
+
+.round-button .caption {
+  color: white;
+  font-size: 24px;
+  max-width: 192px;
+  opacity: 0;
+  overflow: hidden;
+  text-align: center;
+  transition: opacity 150ms ease-in-out;
+  white-space: nowrap;
+}
+
+#back .button,
+#forward .button {
+  background-image: url(../../../../ui/webui/resources/images/vr_back.svg);
+}
+
+#reload .button {
+  background-image: url(../../../../ui/webui/resources/images/vr_reload.svg);
+}
+
+#forward .button {
+  transform: scaleX(-1);
+}
+
+#reload-ui-button {
+  background-color: #555;
+  color: white;
+  font-size: 24px;
+  padding: 12px;
+}
+
+#omnibox-container {
+  --tranX: 0;
+  --tranY: -0.65;
+  --tranZ: -1.2;
+}
+
+#omnibox-border {
+  --fadeTimeMs: 500;
+  --fadeYOffset: -0.1;
+  --opacity: 0.9;
+  --statusBarColor: rgb(66, 133, 244);
+  background-color: #ececec;
+  border-radius: 200px;
+  padding: 6px;
+}
+
+#omnibox {
+  align-items: center;
+  background-color: #ececec;
+  border-radius: 200px;
+  box-sizing: border-box;
+  display: flex;
+  height: 104px;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  width: 512px;
+}
+
+#omnibox-content {
+  align-items: center;
+  display: flex;
+  max-width: 448px;
+}
+
+.omnibox-icon {
+  -webkit-mask-size: 50px;
+  display: none;
+  flex: none;
+  height: 50px;
+  margin-right: 10px;
+  width: 50px;
+}
+
+#omnibox-info-icon {
+  -webkit-mask-image: url(../../../../ui/webui/resources/images/i_circle.svg);
+  background-color: rgb(90, 90, 90);
+}
+
+#omnibox-lock-icon {
+  -webkit-mask-image: url(../../../../ui/webui/resources/images/lock.svg);
+  background-color: rgb(11, 128, 67);
+}
+
+#omnibox-warning-icon {
+  -webkit-mask-image: url(../../../../ui/webui/resources/images/warning.svg);
+  background-color: rgb(199, 56, 33);
+}
+
+#omnibox #url {
+  color: #252525;
+  font-size: 34px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+#omnibox #path {
+  color: #868686;
+}
+

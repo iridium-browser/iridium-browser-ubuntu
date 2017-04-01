@@ -6,8 +6,10 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "media/audio/android/audio_manager_android.h"
+#include "media/base/audio_timestamp_helper.h"
 
 #define LOG_ON_FAILURE_AND_RETURN(op, ...)      \
   do {                                          \
@@ -35,13 +37,14 @@ OpenSLESOutputStream::OpenSLESOutputStream(AudioManagerAndroid* manager,
       started_(false),
       muted_(false),
       volume_(1.0),
-      delay_calculator_(params.sample_rate()) {
+      samples_per_second_(params.sample_rate()),
+      delay_calculator_(samples_per_second_) {
   DVLOG(2) << "OpenSLESOutputStream::OpenSLESOutputStream("
            << "stream_type=" << stream_type << ")";
   format_.formatType = SL_DATAFORMAT_PCM;
   format_.numChannels = static_cast<SLuint32>(params.channels());
-  // Provides sampling rate in milliHertz to OpenSLES.
-  format_.samplesPerSec = static_cast<SLuint32>(params.sample_rate() * 1000);
+  // Despite the name, this field is actually the sampling rate in millihertz :|
+  format_.samplesPerSec = static_cast<SLuint32>(samples_per_second_ * 1000);
   format_.bitsPerSample = params.bits_per_sample();
   format_.containerSize = params.bits_per_sample();
   format_.endianness = SL_BYTEORDER_LITTLEENDIAN;
@@ -340,16 +343,27 @@ void OpenSLESOutputStream::FillBufferQueueNoLock() {
   // Calculate the position relative to the number of frames written.
   uint32_t position_in_ms = 0;
   SLresult err = (*player_)->GetPosition(player_, &position_in_ms);
-  const int delay =
+  // Given the position of the playback head, compute the approximate number of
+  // frames that have been queued to the buffer but not yet played out.
+  // Note that the value returned by GetFramesToTarget() is negative because
+  // more frames have been added to |delay_calculator_| than have been played
+  // out and thus the target timestamp is earlier than the current timestamp of
+  // |delay_calculator_|.
+  const int delay_frames =
       err == SL_RESULT_SUCCESS
           ? -delay_calculator_.GetFramesToTarget(
-                base::TimeDelta::FromMilliseconds(position_in_ms)) *
-                bytes_per_frame_
+                base::TimeDelta::FromMilliseconds(position_in_ms))
           : 0;
-  DCHECK_GE(delay, 0);
+  DCHECK_GE(delay_frames, 0);
+
+  // Note: *DO NOT* use format_.samplesPerSecond in any calculations, it is not
+  // actually the sample rate! See constructor comments. :|
+  const base::TimeDelta delay =
+      AudioTimestampHelper::FramesToTime(delay_frames, samples_per_second_);
 
   // Read data from the registered client source.
-  const int frames_filled = callback_->OnMoreData(audio_bus_.get(), delay, 0);
+  const int frames_filled =
+      callback_->OnMoreData(delay, base::TimeTicks::Now(), 0, audio_bus_.get());
   if (frames_filled <= 0) {
     // Audio source is shutting down, or halted on error.
     return;

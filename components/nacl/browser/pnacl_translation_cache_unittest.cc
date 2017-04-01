@@ -60,7 +60,7 @@ void PnaclTranslationCacheTest::InitBackend(bool in_mem) {
   }
   // Use the private init method so we can control the size
   int rv = cache_->Init(in_mem ? net::MEMORY_CACHE : net::PNACL_CACHE,
-                        temp_dir_.path(),
+                        in_mem ? base::FilePath() : temp_dir_.GetPath(),
                         in_mem ? kMaxMemCacheSize : kTestDiskCacheSize,
                         init_cb.callback());
   if (in_mem)
@@ -135,7 +135,7 @@ TEST(PnaclTranslationCacheKeyTest, CacheKeyTest) {
   info.opt_level = 0;
   info.sandbox_isa = "x86-32";
   std::string test_time("Wed, 15 Nov 1995 06:25:24 GMT");
-  base::Time::FromString(test_time.c_str(), &info.last_modified);
+  EXPECT_TRUE(base::Time::FromString(test_time.c_str(), &info.last_modified));
   // Basic check for URL and time components
   EXPECT_EQ("ABI:0;opt:0;URL:http://www.google.com/;"
             "modified:1995:11:15:6:25:24:0:UTC;etag:;"
@@ -204,7 +204,7 @@ TEST(PnaclTranslationCacheKeyTest, CacheKeyTest) {
             "sandbox:x86-32;extra_flags:-mavx-neon;",
             PnaclTranslationCache::GetKey(info));
   test_time.assign("Fri, 29 Feb 2008 13:04:12 GMT");
-  base::Time::FromString(test_time.c_str(), &info.last_modified);
+  EXPECT_TRUE(base::Time::FromString(test_time.c_str(), &info.last_modified));
   EXPECT_EQ("ABI:2;opt:2;URL:http://www.google.com/;"
             "modified:2008:2:29:13:4:12:0:UTC;etag:etag;"
             "sandbox:x86-32;extra_flags:-mavx-neon;",

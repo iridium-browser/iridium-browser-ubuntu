@@ -16,7 +16,6 @@
 #include "ui/gfx/animation/animation_delegate.h"
 
 namespace gfx {
-class ImageSkia;
 class Rect;
 class SlideAnimation;
 }
@@ -55,6 +54,8 @@ class ASH_EXPORT DefaultHeaderPainter : public HeaderPainter,
   // Sets the active and inactive frame colors. Note the inactive frame color
   // will have some transparency added when the frame is drawn.
   void SetFrameColors(SkColor active_frame_color, SkColor inactive_frame_color);
+  SkColor GetActiveFrameColor() const;
+  SkColor GetInactiveFrameColor() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(DefaultHeaderPainterTest, TitleIconAlignment);

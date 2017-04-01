@@ -11,30 +11,28 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 #include "base/callback.h"
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
 #include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_export.h"
+#include "device/bluetooth/bluetooth_remote_gatt_service.h"
 #include "device/bluetooth/bluetooth_uuid.h"
-#include "net/log/net_log.h"
-
-namespace base {
-class BinaryValue;
-}
 
 namespace device {
 
 class BluetoothAdapter;
 class BluetoothGattConnection;
-class BluetoothRemoteGattService;
+class BluetoothRemoteGattCharacteristic;
+class BluetoothRemoteGattDescriptor;
 class BluetoothSocket;
 class BluetoothUUID;
 
@@ -59,26 +57,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
     VENDOR_ID_BLUETOOTH,
     VENDOR_ID_USB,
     VENDOR_ID_MAX_VALUE = VENDOR_ID_USB
-  };
-
-  // Possible values that may be returned by GetDeviceType(), representing
-  // different types of bluetooth device that we support or are aware of
-  // decoded from the bluetooth class information.
-  enum DeviceType {
-    DEVICE_UNKNOWN,
-    DEVICE_COMPUTER,
-    DEVICE_PHONE,
-    DEVICE_MODEM,
-    DEVICE_AUDIO,
-    DEVICE_CAR_AUDIO,
-    DEVICE_VIDEO,
-    DEVICE_PERIPHERAL,
-    DEVICE_JOYSTICK,
-    DEVICE_GAMEPAD,
-    DEVICE_KEYBOARD,
-    DEVICE_MOUSE,
-    DEVICE_TABLET,
-    DEVICE_KEYBOARD_MOUSE_COMBO
   };
 
   // The value returned if the RSSI or transmit power cannot be read.
@@ -123,11 +101,15 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
                              std::vector<uint8_t>,
                              BluetoothUUIDHash>
       ServiceDataMap;
+  typedef uint16_t ManufacturerId;
+  typedef std::unordered_map<ManufacturerId, std::vector<uint8_t>>
+      ManufacturerDataMap;
+  typedef std::unordered_set<ManufacturerId> ManufacturerIDSet;
 
   // Mapping from the platform-specific GATT service identifiers to
   // BluetoothRemoteGattService objects.
-  typedef base::ScopedPtrHashMap<std::string,
-                                 std::unique_ptr<BluetoothRemoteGattService>>
+  typedef std::unordered_map<std::string,
+                             std::unique_ptr<BluetoothRemoteGattService>>
       GattServiceMap;
 
   // Interface for negotiating pairing of bluetooth devices.
@@ -270,13 +252,17 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // of, by decoding the bluetooth class information for Classic devices or
   // by decoding the device's appearance for LE devices. For example,
   // Microsoft Universal Foldable Keyboard only advertises the appearance.
-  DeviceType GetDeviceType() const;
+  BluetoothDeviceType GetDeviceType() const;
 
   // Indicates whether the device is known to support pairing based on its
   // device class and address.
   bool IsPairable() const;
 
   // Indicates whether the device is paired with the adapter.
+  // On Chrome OS this function also returns true if the user has connected
+  // to the device in the past.
+  // TODO(crbug.com/649651): Change Chrome OS to only return true if the
+  // device is actually paired.
   virtual bool IsPaired() const = 0;
 
   // Indicates whether the device is currently connected to the adapter.
@@ -314,13 +300,17 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   //    returns the UUIDs of the device's services.
   //  * For dual mode devices this may be collected from both.
   //
-  // Note: On ChromeOS and Linux, Bluez persists all services meaning if
+  // Note: On ChromeOS and Linux, BlueZ persists all services meaning if
   // a device stops advertising a service this function will still return
   // its UUID.
   virtual UUIDSet GetUUIDs() const;
 
   // Returns the last advertised Service Data. Returns an empty map if the
   // adapter is not discovering.
+  //
+  // Note: On ChromeOS and Linux, BlueZ persists all service data meaning if
+  // a device stops advertising service data for a UUID, this function will
+  // still return the cached value for that UUID.
   const ServiceDataMap& GetServiceData() const;
 
   // Returns the UUIDs of services for which the device advertises Service Data.
@@ -331,6 +321,31 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // nullptr if |uuid| has no Service Data.
   const std::vector<uint8_t>* GetServiceDataForUUID(
       const BluetoothUUID& uuid) const;
+
+  // Returns advertised Manufacturer Data. Keys are 16 bits Manufacturer IDs
+  // followed by its byte array value. Returns an empty map if the device
+  // does not advertise any Manufacturer Data.
+  // Returns cached value if the adapter is not discovering.
+  //
+  // Note: On ChromeOS and Linux, BlueZ persists all manufacturer data meaning
+  // if a device stops advertising manufacturer data for a Manufacturer Id, this
+  // function will still return the cached value for that Id.
+  //
+  // TODO(crbug.com/661814) Support this on platforms that don't use BlueZ.
+  // Only BlueZ supports this now. This method returns an empty map on platforms
+  // that don't use BlueZ.
+  const ManufacturerDataMap& GetManufacturerData() const;
+
+  // Returns the Manufacturer Data IDs of Manufacturers for which the device
+  // advertises Manufacturer Data.
+  // Returns cached value if the adapter is not discovering.
+  ManufacturerIDSet GetManufacturerDataIDs() const;
+
+  // Returns a pointer to the Manufacturer Data for Manufacturer with
+  // |manufacturerID|. Returns nullptr if |manufacturerID| has no Manufacturer
+  // Data. Returns cached value if the adapter is not discovering.
+  const std::vector<uint8_t>* GetManufacturerDataForID(
+      const ManufacturerId manufacturerID) const;
 
   // The received signal strength, in dBm. This field is avaliable and valid
   // only during discovery.
@@ -343,6 +358,15 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // TODO(http://crbug.com/580406): Devirtualize once BlueZ sets
   // inquiry_tx_power_.
   virtual base::Optional<int8_t> GetInquiryTxPower() const;
+
+  // Returns Advertising Data Flags.
+  // Returns cached value if the adapter is not discovering.
+  //
+  // TODO(crbug.com/661814) Support this on platforms that don't use BlueZ.
+  // Only Chrome OS supports this now. Upstream BlueZ has this feature
+  // as experimental. This method returns base::nullopt on platforms that don't
+  // support this feature.
+  base::Optional<uint8_t> GetAdvertisingDataFlags() const;
 
   // The ErrorCallback is used for methods that can fail in which case it
   // is called, in the success case the callback is simply not called.
@@ -513,8 +537,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // empty string.
   static std::string CanonicalizeAddress(const std::string& address);
 
-  // Return the timestamp for when this device was last seen.
-  base::Time GetLastUpdateTime() const { return last_update_time_; }
+  // Update the last time this device was seen.
+  void UpdateTimestamp();
+
+  // Returns the time of the last call to UpdateTimestamp(), or base::Time() if
+  // it hasn't been called yet.
+  virtual base::Time GetLastUpdateTime() const;
 
   // Called by BluetoothAdapter when a new Advertisement is seen for this
   // device. This replaces previously seen Advertisement Data.
@@ -528,6 +556,19 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
 
   // Return associated BluetoothAdapter.
   BluetoothAdapter* GetAdapter() { return adapter_; }
+
+  std::vector<BluetoothRemoteGattService*> GetPrimaryServices();
+
+  std::vector<BluetoothRemoteGattService*> GetPrimaryServicesByUUID(
+      const BluetoothUUID& service_uuid);
+
+  std::vector<BluetoothRemoteGattCharacteristic*> GetCharacteristicsByUUID(
+      const std::string& service_instance_id,
+      const BluetoothUUID& characteristic_uuid);
+
+  std::vector<device::BluetoothRemoteGattDescriptor*> GetDescriptorsByUUID(
+      device::BluetoothRemoteGattCharacteristic* characteristic,
+      const BluetoothUUID& descriptor_uuid);
 
  protected:
   // BluetoothGattConnection is a friend to call Add/RemoveGattConnection.
@@ -553,6 +594,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
     DeviceUUIDs();
     ~DeviceUUIDs();
 
+    DeviceUUIDs(const DeviceUUIDs& other);
+    DeviceUUIDs& operator=(const DeviceUUIDs& other);
+
     // Advertised Service UUIDs functions
     void ReplaceAdvertisedUUIDs(UUIDList new_advertised_uuids);
 
@@ -575,10 +619,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
     BluetoothDevice::UUIDSet device_uuids_;
   };
 
-  BluetoothDevice(BluetoothAdapter* adapter);
-
-  // Update the last time this device was seen.
-  void UpdateTimestamp();
+  explicit BluetoothDevice(BluetoothAdapter* adapter);
 
   // Implements platform specific operations to initiate a GATT connection.
   // Subclasses must also call DidConnectGatt, DidFailToConnectGatt, or
@@ -600,7 +641,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // DidDisconnectGatt.
   void DidConnectGatt();
   void DidFailToConnectGatt(ConnectErrorCode);
-  void DidDisconnectGatt();
+  void DidDisconnectGatt(bool notifyDeviceChanged);
 
   // Tracks BluetoothGattConnection instances that act as a reference count
   // keeping the GATT connection open. Instances call Add/RemoveGattConnection
@@ -631,11 +672,17 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // Tx Power advertised by the device.
   base::Optional<int8_t> inquiry_tx_power_;
 
+  // Advertising Data flags of the device.
+  base::Optional<uint8_t> advertising_data_flags_;
+
   // Class that holds the union of Advertised UUIDs and Service UUIDs.
   DeviceUUIDs device_uuids_;
 
   // Map of BluetoothUUIDs to their advertised Service Data.
   ServiceDataMap service_data_;
+
+  // Map of Manufacturer IDs to their advertised Manufacturer Data.
+  ManufacturerDataMap manufacturer_data_;
 
   // Timestamp for when an advertisement was last seen.
   base::Time last_update_time_;
@@ -644,6 +691,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // Returns a localized string containing the device's bluetooth address and
   // a device type for display when |name_| is empty.
   base::string16 GetAddressWithLocalizedDeviceTypeName() const;
+
+  DISALLOW_COPY_AND_ASSIGN(BluetoothDevice);
 };
 
 }  // namespace device

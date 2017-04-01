@@ -21,7 +21,6 @@ class Rect;
 
 namespace ui {
 class InputMethod;
-class NativeTheme;
 class OSExchangeData;
 }
 
@@ -177,7 +176,6 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
   virtual void SetSize(const gfx::Size& size) = 0;
   virtual void StackAbove(gfx::NativeView native_view) = 0;
   virtual void StackAtTop() = 0;
-  virtual void StackBelow(gfx::NativeView native_view) = 0;
   virtual void SetShape(std::unique_ptr<SkRegion> shape) = 0;
   virtual void Close() = 0;
   virtual void CloseNow() = 0;
@@ -224,8 +222,6 @@ class VIEWS_EXPORT NativeWidgetPrivate : public NativeWidget {
       const base::TimeDelta& duration) = 0;
   virtual void SetVisibilityAnimationTransition(
       Widget::VisibilityTransition transition) = 0;
-  virtual ui::NativeTheme* GetNativeTheme() const = 0;
-  virtual void OnRootViewLayout() = 0;
   virtual bool IsTranslucentWindowOpacitySupported() const = 0;
   virtual void OnSizeConstraintsChanged() = 0;
 

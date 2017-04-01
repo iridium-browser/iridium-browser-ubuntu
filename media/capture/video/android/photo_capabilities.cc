@@ -34,6 +34,11 @@ int PhotoCapabilities::getCurrentIso() const {
   return Java_PhotoCapabilities_getCurrentIso(AttachCurrentThread(), object_);
 }
 
+int PhotoCapabilities::getStepIso() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getStepIso(AttachCurrentThread(), object_);
+}
+
 int PhotoCapabilities::getMinHeight() const {
   DCHECK(!object_.is_null());
   return Java_PhotoCapabilities_getMinHeight(AttachCurrentThread(), object_);
@@ -48,6 +53,11 @@ int PhotoCapabilities::getCurrentHeight() const {
   DCHECK(!object_.is_null());
   return Java_PhotoCapabilities_getCurrentHeight(AttachCurrentThread(),
                                                  object_);
+}
+
+int PhotoCapabilities::getStepHeight() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getStepHeight(AttachCurrentThread(), object_);
 }
 
 int PhotoCapabilities::getMinWidth() const {
@@ -65,19 +75,29 @@ int PhotoCapabilities::getCurrentWidth() const {
   return Java_PhotoCapabilities_getCurrentWidth(AttachCurrentThread(), object_);
 }
 
-int PhotoCapabilities::getMinZoom() const {
+int PhotoCapabilities::getStepWidth() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getStepWidth(AttachCurrentThread(), object_);
+}
+
+double PhotoCapabilities::getMinZoom() const {
   DCHECK(!object_.is_null());
   return Java_PhotoCapabilities_getMinZoom(AttachCurrentThread(), object_);
 }
 
-int PhotoCapabilities::getMaxZoom() const {
+double PhotoCapabilities::getMaxZoom() const {
   DCHECK(!object_.is_null());
   return Java_PhotoCapabilities_getMaxZoom(AttachCurrentThread(), object_);
 }
 
-int PhotoCapabilities::getCurrentZoom() const {
+double PhotoCapabilities::getCurrentZoom() const {
   DCHECK(!object_.is_null());
   return Java_PhotoCapabilities_getCurrentZoom(AttachCurrentThread(), object_);
+}
+
+double PhotoCapabilities::getStepZoom() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getStepZoom(AttachCurrentThread(), object_);
 }
 
 PhotoCapabilities::AndroidMeteringMode PhotoCapabilities::getFocusMode() const {
@@ -92,4 +112,74 @@ PhotoCapabilities::AndroidMeteringMode PhotoCapabilities::getExposureMode()
   return static_cast<AndroidMeteringMode>(
       Java_PhotoCapabilities_getExposureMode(AttachCurrentThread(), object_));
 }
+
+double PhotoCapabilities::getMinExposureCompensation() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getMinExposureCompensation(
+      AttachCurrentThread(), object_);
+}
+
+double PhotoCapabilities::getMaxExposureCompensation() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getMaxExposureCompensation(
+      AttachCurrentThread(), object_);
+}
+
+double PhotoCapabilities::getCurrentExposureCompensation() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getCurrentExposureCompensation(
+      AttachCurrentThread(), object_);
+}
+
+double PhotoCapabilities::getStepExposureCompensation() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getStepExposureCompensation(
+      AttachCurrentThread(), object_);
+}
+
+PhotoCapabilities::AndroidMeteringMode PhotoCapabilities::getWhiteBalanceMode()
+    const {
+  DCHECK(!object_.is_null());
+  return static_cast<AndroidMeteringMode>(
+      Java_PhotoCapabilities_getWhiteBalanceMode(AttachCurrentThread(),
+                                                 object_));
+}
+
+PhotoCapabilities::AndroidFillLightMode PhotoCapabilities::getFillLightMode()
+    const {
+  DCHECK(!object_.is_null());
+  return static_cast<AndroidFillLightMode>(
+      Java_PhotoCapabilities_getFillLightMode(AttachCurrentThread(), object_));
+}
+
+bool PhotoCapabilities::getRedEyeReduction() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getRedEyeReduction(AttachCurrentThread(),
+                                                   object_);
+}
+
+int PhotoCapabilities::getMinColorTemperature() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getMinColorTemperature(AttachCurrentThread(),
+                                                       object_);
+}
+
+int PhotoCapabilities::getMaxColorTemperature() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getMaxColorTemperature(AttachCurrentThread(),
+                                                       object_);
+}
+
+int PhotoCapabilities::getCurrentColorTemperature() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getCurrentColorTemperature(
+      AttachCurrentThread(), object_);
+}
+
+int PhotoCapabilities::getStepColorTemperature() const {
+  DCHECK(!object_.is_null());
+  return Java_PhotoCapabilities_getStepColorTemperature(AttachCurrentThread(),
+                                                        object_);
+}
+
 }  // namespace media

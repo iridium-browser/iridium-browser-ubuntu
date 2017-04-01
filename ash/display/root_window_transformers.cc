@@ -7,8 +7,6 @@
 #include <cmath>
 
 #include "ash/common/ash_switches.h"
-#include "ash/common/display/display_info.h"
-#include "ash/display/display_manager.h"
 #include "ash/host/root_window_transformer.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/shell.h"
@@ -18,6 +16,8 @@
 #include "ui/aura/window_property.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/display/display.h"
+#include "ui/display/manager/display_manager.h"
+#include "ui/display/manager/managed_display_info.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -53,7 +53,7 @@ void RoundNearZero(gfx::Transform* transform) {
 
 gfx::Transform CreateRotationTransform(aura::Window* root_window,
                                        const display::Display& display) {
-  DisplayInfo info =
+  display::ManagedDisplayInfo info =
       Shell::GetInstance()->display_manager()->GetDisplayInfo(display.id());
 
 // TODO(oshima): Add animation. (crossfade+rotation, or just cross-fade)
@@ -138,8 +138,10 @@ class AshRootWindowTransformer : public RootWindowTransformer {
  public:
   AshRootWindowTransformer(aura::Window* root, const display::Display& display)
       : root_window_(root) {
-    DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-    DisplayInfo info = display_manager->GetDisplayInfo(display.id());
+    display::DisplayManager* display_manager =
+        Shell::GetInstance()->display_manager();
+    display::ManagedDisplayInfo info =
+        display_manager->GetDisplayInfo(display.id());
     host_insets_ = info.GetOverscanInsetsInPixel();
     root_window_ui_scale_ = info.GetEffectiveUIScale();
     root_window_bounds_transform_ =
@@ -215,8 +217,9 @@ class AshRootWindowTransformer : public RootWindowTransformer {
 // pixel size (excluding overscan insets).
 class MirrorRootWindowTransformer : public RootWindowTransformer {
  public:
-  MirrorRootWindowTransformer(const DisplayInfo& source_display_info,
-                              const DisplayInfo& mirror_display_info) {
+  MirrorRootWindowTransformer(
+      const display::ManagedDisplayInfo& source_display_info,
+      const display::ManagedDisplayInfo& mirror_display_info) {
     root_bounds_ = gfx::Rect(source_display_info.bounds_in_native().size());
     gfx::Rect mirror_display_rect =
         gfx::Rect(mirror_display_info.bounds_in_native().size());
@@ -278,7 +281,7 @@ class PartialBoundsRootWindowTransformer : public RootWindowTransformer {
                                      const display::Display& display) {
     display::Display unified_display =
         display::Screen::GetScreen()->GetPrimaryDisplay();
-    DisplayInfo display_info =
+    display::ManagedDisplayInfo display_info =
         Shell::GetInstance()->display_manager()->GetDisplayInfo(display.id());
     root_bounds_ = gfx::Rect(display_info.bounds_in_native().size());
     float scale = root_bounds_.height() /
@@ -317,8 +320,8 @@ RootWindowTransformer* CreateRootWindowTransformerForDisplay(
 }
 
 RootWindowTransformer* CreateRootWindowTransformerForMirroredDisplay(
-    const DisplayInfo& source_display_info,
-    const DisplayInfo& mirror_display_info) {
+    const display::ManagedDisplayInfo& source_display_info,
+    const display::ManagedDisplayInfo& mirror_display_info) {
   return new MirrorRootWindowTransformer(source_display_info,
                                          mirror_display_info);
 }

@@ -8,10 +8,11 @@
 namespace blink {
 
 enum class WebRemotePlaybackState {
-    Connected = 0,
-    Disconnected,
+  Connecting = 0,
+  Connected,
+  Disconnected,
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebRemotePlaybackState_h
+#endif  // WebRemotePlaybackState_h

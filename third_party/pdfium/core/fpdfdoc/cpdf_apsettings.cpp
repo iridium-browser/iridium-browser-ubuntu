@@ -6,9 +6,11 @@
 
 #include "core/fpdfdoc/cpdf_apsettings.h"
 
-#include "core/fpdfapi/fpdf_parser/include/cpdf_array.h"
-#include "core/fpdfapi/fpdf_parser/include/cpdf_dictionary.h"
-#include "core/fpdfdoc/include/cpdf_formcontrol.h"
+#include <algorithm>
+
+#include "core/fpdfapi/parser/cpdf_array.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
+#include "core/fpdfdoc/cpdf_formcontrol.h"
 
 CPDF_ApSettings::CPDF_ApSettings(CPDF_Dictionary* pDict) : m_pDict(pDict) {}
 
@@ -17,7 +19,7 @@ bool CPDF_ApSettings::HasMKEntry(const CFX_ByteString& csEntry) const {
 }
 
 int CPDF_ApSettings::GetRotation() const {
-  return m_pDict ? m_pDict->GetIntegerBy("R") : 0;
+  return m_pDict ? m_pDict->GetIntegerFor("R") : 0;
 }
 
 FX_ARGB CPDF_ApSettings::GetColor(int& iColorType,
@@ -26,7 +28,7 @@ FX_ARGB CPDF_ApSettings::GetColor(int& iColorType,
   if (!m_pDict)
     return 0;
 
-  CPDF_Array* pEntry = m_pDict->GetArrayBy(csEntry);
+  CPDF_Array* pEntry = m_pDict->GetArrayFor(csEntry);
   if (!pEntry)
     return 0;
 
@@ -64,7 +66,7 @@ FX_FLOAT CPDF_ApSettings::GetOriginalColor(
   if (!m_pDict)
     return 0;
 
-  CPDF_Array* pEntry = m_pDict->GetArrayBy(csEntry);
+  CPDF_Array* pEntry = m_pDict->GetArrayFor(csEntry);
   return pEntry ? pEntry->GetNumberAt(index) : 0;
 }
 
@@ -78,7 +80,7 @@ void CPDF_ApSettings::GetOriginalColor(int& iColorType,
   if (!m_pDict)
     return;
 
-  CPDF_Array* pEntry = m_pDict->GetArrayBy(csEntry);
+  CPDF_Array* pEntry = m_pDict->GetArrayFor(csEntry);
   if (!pEntry)
     return;
 
@@ -102,18 +104,18 @@ void CPDF_ApSettings::GetOriginalColor(int& iColorType,
 
 CFX_WideString CPDF_ApSettings::GetCaption(
     const CFX_ByteString& csEntry) const {
-  return m_pDict ? m_pDict->GetUnicodeTextBy(csEntry) : CFX_WideString();
+  return m_pDict ? m_pDict->GetUnicodeTextFor(csEntry) : CFX_WideString();
 }
 
 CPDF_Stream* CPDF_ApSettings::GetIcon(const CFX_ByteString& csEntry) const {
-  return m_pDict ? m_pDict->GetStreamBy(csEntry) : nullptr;
+  return m_pDict ? m_pDict->GetStreamFor(csEntry) : nullptr;
 }
 
 CPDF_IconFit CPDF_ApSettings::GetIconFit() const {
-  return CPDF_IconFit(m_pDict ? m_pDict->GetDictBy("IF") : nullptr);
+  return CPDF_IconFit(m_pDict ? m_pDict->GetDictFor("IF") : nullptr);
 }
 
 int CPDF_ApSettings::GetTextPosition() const {
-  return m_pDict ? m_pDict->GetIntegerBy("TP", TEXTPOS_CAPTION)
+  return m_pDict ? m_pDict->GetIntegerFor("TP", TEXTPOS_CAPTION)
                  : TEXTPOS_CAPTION;
 }

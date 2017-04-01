@@ -9,6 +9,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/ptr_util.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
@@ -167,20 +168,20 @@ AccountTrackerService::GetMigrationState(const PrefService* pref_service) {
 
 void AccountTrackerService::NotifyAccountUpdated(const AccountState& state) {
   DCHECK(!state.info.gaia.empty());
-  FOR_EACH_OBSERVER(
-      Observer, observer_list_, OnAccountUpdated(state.info));
+  for (auto& observer : observer_list_)
+    observer.OnAccountUpdated(state.info);
 }
 
 void AccountTrackerService::NotifyAccountUpdateFailed(
     const std::string& account_id) {
-  FOR_EACH_OBSERVER(
-      Observer, observer_list_, OnAccountUpdateFailed(account_id));
+  for (auto& observer : observer_list_)
+    observer.OnAccountUpdateFailed(account_id);
 }
 
 void AccountTrackerService::NotifyAccountRemoved(const AccountState& state) {
   DCHECK(!state.info.gaia.empty());
-  FOR_EACH_OBSERVER(
-      Observer, observer_list_, OnAccountRemoved(state.info));
+  for (auto& observer : observer_list_)
+    observer.OnAccountRemoved(state.info);
 }
 
 void AccountTrackerService::StartTrackingAccount(
@@ -405,7 +406,7 @@ void AccountTrackerService::SaveToPrefs(const AccountState& state) {
 
   if (!dict) {
     dict = new base::DictionaryValue();
-    update->Append(dict);  // |update| takes ownership.
+    update->Append(base::WrapUnique(dict));
     dict->SetString(kAccountKeyPath, account_id_16);
   }
 

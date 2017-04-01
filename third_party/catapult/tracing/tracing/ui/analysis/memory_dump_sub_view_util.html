@@ -135,6 +135,7 @@ tr.exportTo('tr.ui.analysis', function() {
   function MemoryColumn(name, cellPath, aggregationMode) {
     this.name = name;
     this.cellPath = cellPath;
+    this.shouldSetContextGroup = false;
 
     // See MemoryColumn.AggregationMode enum in this file.
     this.aggregationMode = aggregationMode;
@@ -193,21 +194,33 @@ tr.exportTo('tr.ui.analysis', function() {
    *      [least important, right in the resulting table]
    *
    * where columns will be sorted alphabetically within each group.
+   *
+   * @param {!Array.<!Object>} rows
+   * @param {!Object} config
+   * @param {string} config.cellKey
+   * @param {!MemoryColumn.AggregationMode=} config.aggregationMode
+   * @param {!Array.<!{
+   *            condition: (string|!RegExp)=,
+   *            importance: number,
+   *            columnConstructor: !function(new: MemoryColumn, ...)=,
+   *            shouldSetContextGroup: boolean=
+   *        }>} config.rules
    */
-  MemoryColumn.fromRows = function(rows, cellKey, aggregationMode, rules) {
+  MemoryColumn.fromRows = function(rows, config) {
     // Recursively find the names of all cells of the rows (and their sub-rows).
     var cellNames = new Set();
     function gatherCellNames(rows) {
       rows.forEach(function(row) {
         if (row === undefined)
           return;
-        var fieldCells = row[cellKey];
+        var fieldCells = row[config.cellKey];
         if (fieldCells !== undefined) {
-          tr.b.iterItems(fieldCells, function(fieldName, fieldCell) {
-            if (fieldCell === undefined || fieldCell.fields === undefined)
-              return;
+          for (var [fieldName, fieldCell] of Object.entries(fieldCells)) {
+            if (fieldCell === undefined || fieldCell.fields === undefined) {
+              continue;
+            }
             cellNames.add(fieldName);
-          });
+          }
         }
         var subRows = row.subRows;
         if (subRows !== undefined)
@@ -220,10 +233,11 @@ tr.exportTo('tr.ui.analysis', function() {
     // their importance.
     var positions = [];
     cellNames.forEach(function(cellName) {
-      var cellPath = [cellKey, cellName];
-      var matchingRule = MemoryColumn.findMatchingRule(cellName, rules);
+      var cellPath = [config.cellKey, cellName];
+      var matchingRule = MemoryColumn.findMatchingRule(cellName, config.rules);
       var constructor = matchingRule.columnConstructor;
-      var column = new constructor(cellName, cellPath, aggregationMode);
+      var column = new constructor(cellName, cellPath, config.aggregationMode);
+      column.shouldSetContextGroup = !!config.shouldSetContextGroup;
       positions.push({
         importance: matchingRule.importance,
         column: column
@@ -239,7 +253,7 @@ tr.exportTo('tr.ui.analysis', function() {
       return b.importance - a.importance;
     });
 
-    return positions.map(function(position) { return position.column });
+    return positions.map(function(position) { return position.column; });
   };
 
   MemoryColumn.spaceEqually = function(columns) {
@@ -726,10 +740,11 @@ tr.exportTo('tr.ui.analysis', function() {
     },
 
     formatSingleField: function(numeric) {
-      var formattingContext = this.getFormattingContext(numeric.unit);
-      var config = formattingContext !== undefined ?
-          { context: formattingContext } : undefined;
-      return tr.v.ui.createScalarSpan(numeric, config);
+      return tr.v.ui.createScalarSpan(numeric, {
+        context: this.getFormattingContext(numeric.unit),
+        contextGroup: this.shouldSetContextGroup ? this.name : undefined,
+        inline: true,
+      });
     },
 
     getFormattingContext: function(unit) {
@@ -869,24 +884,24 @@ tr.exportTo('tr.ui.analysis', function() {
     __proto__: NumericMemoryColumn.prototype,
 
     getFormattingContext: function(unit) {
-      if (unit.baseUnit === tr.v.Unit.byName.sizeInBytes)
-        return { unitPrefix: tr.v.UnitScale.Binary.KIBI };
+      if (unit.baseUnit === tr.b.Unit.byName.sizeInBytes)
+        return { unitPrefix: tr.b.UnitPrefixScale.BINARY.KIBI };
       return undefined;
     }
   };
 
   return {
-    TitleColumn: TitleColumn,
-    MemoryColumn: MemoryColumn,
-    StringMemoryColumn: StringMemoryColumn,
-    NumericMemoryColumn: NumericMemoryColumn,
-    MemoryCell: MemoryCell,
-    expandTableRowsRecursively: expandTableRowsRecursively,
-    aggregateTableRowCellsRecursively: aggregateTableRowCellsRecursively,
-    aggregateTableRowCells: aggregateTableRowCells,
-    createCells: createCells,
-    createWarningInfo: createWarningInfo,
-    DetailsNumericMemoryColumn: DetailsNumericMemoryColumn
+    TitleColumn,
+    MemoryColumn,
+    StringMemoryColumn,
+    NumericMemoryColumn,
+    MemoryCell,
+    expandTableRowsRecursively,
+    aggregateTableRowCellsRecursively,
+    aggregateTableRowCells,
+    createCells,
+    createWarningInfo,
+    DetailsNumericMemoryColumn,
   };
 });
 </script>

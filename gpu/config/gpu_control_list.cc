@@ -1336,8 +1336,10 @@ bool GpuControlList::GpuControlListEntry::NeedsMoreInfo(
     return true;
   if (driver_version_info_.get() && gpu_info.driver_version.empty())
     return true;
-  if (!gl_version_string_info_.empty() && gpu_info.gl_version.empty())
+  if ((gl_version_info_.get() || !gl_version_string_info_.empty()) &&
+      gpu_info.gl_version.empty()) {
     return true;
+  }
   if (!gl_vendor_info_.empty() && gpu_info.gl_vendor.empty())
     return true;
   if (!gl_renderer_info_.empty() && gpu_info.gl_renderer.empty())
@@ -1576,6 +1578,17 @@ void GpuControlList::GetReasons(base::ListValue* problem_list,
 
 size_t GpuControlList::num_entries() const {
   return entries_.size();
+}
+
+bool GpuControlList::has_duplicated_entry_id() const {
+  std::set<int> ids;
+  for (size_t i = 0; i < entries_.size(); ++i) {
+    if (ids.count(entries_[i]->id()) == 0)
+      ids.insert(entries_[i]->id());
+    else
+      return true;
+  }
+  return false;
 }
 
 uint32_t GpuControlList::max_entry_id() const {

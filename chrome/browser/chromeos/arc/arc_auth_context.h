@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
 #include "google_apis/gaia/ubertoken_fetcher.h"
@@ -19,18 +20,29 @@ namespace content {
 class StoragePartition;
 }
 
-namespace arc {
+namespace net {
+class URLRequestContextGetter;
+}
 
-class ArcAuthContextDelegate;
+namespace arc {
 
 class ArcAuthContext : public UbertokenConsumer,
                        public GaiaAuthConsumer,
                        public OAuth2TokenService::Observer {
  public:
-  ArcAuthContext(ArcAuthContextDelegate* delegate, Profile* profile);
+  explicit ArcAuthContext(Profile* profile);
   ~ArcAuthContext() override;
 
-  void PrepareContext();
+  ProfileOAuth2TokenService* token_service() { return token_service_; }
+  const std::string& account_id() const { return account_id_; }
+
+  // Prepares the context. Calling while an inflight operation exists will
+  // cancel the inflight operation.
+  // On completion, |context| is passed to the callback. On error, |context|
+  // is nullptr.
+  using PrepareCallback =
+      base::Callback<void(net::URLRequestContextGetter* context)>;
+  void Prepare(const PrepareCallback& callback);
 
   // OAuth2TokenService::Observer:
   void OnRefreshTokenAvailable(const std::string& account_id) override;
@@ -44,28 +56,26 @@ class ArcAuthContext : public UbertokenConsumer,
   void OnMergeSessionSuccess(const std::string& data) override;
   void OnMergeSessionFailure(const GoogleServiceAuthError& error) override;
 
-  const std::string& account_id() const { return account_id_; }
-
-  ProfileOAuth2TokenService* token_service() { return token_service_; }
-
  private:
-  void StartFetchers();
   void OnRefreshTokenTimeout();
 
-  // Unowned pointers.
-  ArcAuthContextDelegate* const delegate_;
-  ProfileOAuth2TokenService* token_service_;
+  void StartFetchers();
+  void ResetFetchers();
 
-  bool context_prepared_ = false;
+  // Unowned pointer.
+  ProfileOAuth2TokenService* token_service_;
+  std::string account_id_;
 
   // Owned by content::BrowserContent. Used to isolate cookies for auth server
   // communication and shared with Arc OptIn UI platform app.
   content::StoragePartition* storage_partition_ = nullptr;
 
-  std::string account_id_;
+  PrepareCallback callback_;
+  bool context_prepared_ = false;
+
+  base::OneShotTimer refresh_token_timeout_;
   std::unique_ptr<GaiaAuthFetcher> merger_fetcher_;
   std::unique_ptr<UbertokenFetcher> ubertoken_fetcher_;
-  base::OneShotTimer refresh_token_timeout_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcAuthContext);
 };

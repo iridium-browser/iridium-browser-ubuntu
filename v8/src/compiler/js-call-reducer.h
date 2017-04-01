@@ -20,7 +20,7 @@ class SimplifiedOperatorBuilder;
 
 // Performs strength reduction on {JSCallConstruct} and {JSCallFunction} nodes,
 // which might allow inlining or other optimizations to be performed afterwards.
-class JSCallReducer final : public Reducer {
+class JSCallReducer final : public AdvancedReducer {
  public:
   // Flags that control the mode of operation.
   enum Flag {
@@ -29,34 +29,46 @@ class JSCallReducer final : public Reducer {
   };
   typedef base::Flags<Flag> Flags;
 
-  JSCallReducer(JSGraph* jsgraph, Flags flags,
-                MaybeHandle<Context> native_context)
-      : jsgraph_(jsgraph), flags_(flags), native_context_(native_context) {}
+  JSCallReducer(Editor* editor, JSGraph* jsgraph, Flags flags,
+                Handle<Context> native_context)
+      : AdvancedReducer(editor),
+        jsgraph_(jsgraph),
+        flags_(flags),
+        native_context_(native_context) {}
 
   Reduction Reduce(Node* node) final;
 
  private:
   Reduction ReduceArrayConstructor(Node* node);
+  Reduction ReduceCallApiFunction(
+      Node* node, Node* target,
+      Handle<FunctionTemplateInfo> function_template_info);
   Reduction ReduceNumberConstructor(Node* node);
   Reduction ReduceFunctionPrototypeApply(Node* node);
   Reduction ReduceFunctionPrototypeCall(Node* node);
+  Reduction ReduceFunctionPrototypeHasInstance(Node* node);
+  Reduction ReduceObjectPrototypeGetProto(Node* node);
   Reduction ReduceJSCallConstruct(Node* node);
   Reduction ReduceJSCallFunction(Node* node);
 
-  MaybeHandle<Context> GetNativeContext(Node* node);
+  enum HolderLookup { kHolderNotFound, kHolderIsReceiver, kHolderFound };
+
+  HolderLookup LookupHolder(Handle<JSObject> object,
+                            Handle<FunctionTemplateInfo> function_template_info,
+                            Handle<JSObject>* holder);
 
   Graph* graph() const;
   Flags flags() const { return flags_; }
   JSGraph* jsgraph() const { return jsgraph_; }
   Isolate* isolate() const;
-  MaybeHandle<Context> native_context() const { return native_context_; }
+  Handle<Context> native_context() const { return native_context_; }
   CommonOperatorBuilder* common() const;
   JSOperatorBuilder* javascript() const;
   SimplifiedOperatorBuilder* simplified() const;
 
   JSGraph* const jsgraph_;
   Flags const flags_;
-  MaybeHandle<Context> const native_context_;
+  Handle<Context> const native_context_;
 };
 
 DEFINE_OPERATORS_FOR_FLAGS(JSCallReducer::Flags)

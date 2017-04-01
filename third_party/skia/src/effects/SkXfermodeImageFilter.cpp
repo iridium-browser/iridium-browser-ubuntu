@@ -6,52 +6,121 @@
  */
 
 #include "SkXfermodeImageFilter.h"
-
+#include "SkArithmeticImageFilter.h"
+#include "SkArithmeticModePriv.h"
 #include "SkCanvas.h"
 #include "SkColorPriv.h"
 #include "SkReadBuffer.h"
 #include "SkSpecialImage.h"
 #include "SkSpecialSurface.h"
 #include "SkWriteBuffer.h"
-#include "SkXfermode.h"
 #if SK_SUPPORT_GPU
 #include "GrContext.h"
-#include "GrDrawContext.h"
+#include "GrRenderTargetContext.h"
+#include "GrTextureProxy.h"
+
 #include "effects/GrConstColorProcessor.h"
 #include "effects/GrTextureDomain.h"
 #include "effects/GrSimpleTextureEffect.h"
 #include "SkGr.h"
+#include "SkGrPriv.h"
 #endif
+#include "SkClipOpPriv.h"
+
+class SkXfermodeImageFilter_Base : public SkImageFilter {
+public:
+    SkXfermodeImageFilter_Base(SkBlendMode mode, sk_sp<SkImageFilter> inputs[2],
+                               const CropRect* cropRect);
+
+    SK_TO_STRING_OVERRIDE()
+    SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkXfermodeImageFilter_Base)
+
+protected:
+    sk_sp<SkSpecialImage> onFilterImage(SkSpecialImage* source, const Context&,
+                                        SkIPoint* offset) const override;
+
+#if SK_SUPPORT_GPU
+    sk_sp<SkSpecialImage> filterImageGPU(SkSpecialImage* source,
+                                         sk_sp<SkSpecialImage> background,
+                                         const SkIPoint& backgroundOffset,
+                                         sk_sp<SkSpecialImage> foreground,
+                                         const SkIPoint& foregroundOffset,
+                                         const SkIRect& bounds,
+                                         const OutputProperties& outputProperties) const;
+#endif
+
+    void flatten(SkWriteBuffer&) const override;
+
+    void drawForeground(SkCanvas* canvas, SkSpecialImage*, const SkIRect&) const;
+#if SK_SUPPORT_GPU
+    sk_sp<GrFragmentProcessor> makeFGFrag(sk_sp<GrFragmentProcessor> bgFP) const;
+#endif
+
+private:
+    static sk_sp<SkFlattenable> LegacyArithmeticCreateProc(SkReadBuffer& buffer);
+
+    SkBlendMode fMode;
+
+    friend class SkXfermodeImageFilter;
+
+    typedef SkImageFilter INHERITED;
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 
-sk_sp<SkImageFilter> SkXfermodeImageFilter::Make(sk_sp<SkXfermode> mode,
+sk_sp<SkImageFilter> SkXfermodeImageFilter::Make(SkBlendMode mode,
                                                  sk_sp<SkImageFilter> background,
                                                  sk_sp<SkImageFilter> foreground,
-                                                 const CropRect* cropRect) {
+                                                 const SkImageFilter::CropRect* cropRect) {
     sk_sp<SkImageFilter> inputs[2] = { std::move(background), std::move(foreground) };
-    return sk_sp<SkImageFilter>(new SkXfermodeImageFilter(mode, inputs, cropRect));
+    return sk_sp<SkImageFilter>(new SkXfermodeImageFilter_Base(mode, inputs, cropRect));
 }
 
-SkXfermodeImageFilter::SkXfermodeImageFilter(sk_sp<SkXfermode> mode,
-                                             sk_sp<SkImageFilter> inputs[2],
-                                             const CropRect* cropRect)
+SkXfermodeImageFilter_Base::SkXfermodeImageFilter_Base(SkBlendMode mode,
+                                                       sk_sp<SkImageFilter> inputs[2],
+                                                       const CropRect* cropRect)
     : INHERITED(inputs, 2, cropRect)
-    , fMode(std::move(mode)) {
+    , fMode(mode)
+{}
+
+static int unflatten_blendmode(SkReadBuffer& buffer, SkArithmeticParams* arith) {
+    if (buffer.isVersionLT(SkReadBuffer::kXfermodeToBlendMode_Version)) {
+        sk_sp<SkXfermode> xfer = buffer.readXfermode();
+        if (xfer) {
+            if (xfer->isArithmetic(arith)) {
+                return -1;
+            }
+            return (int)xfer->blend();
+        } else {
+            return (int)SkBlendMode::kSrcOver;
+        }
+    } else {
+        uint32_t mode = buffer.read32();
+        (void)buffer.validate(mode <= (unsigned)SkBlendMode::kLastMode);
+        return mode;
+    }
 }
 
-sk_sp<SkFlattenable> SkXfermodeImageFilter::CreateProc(SkReadBuffer& buffer) {
+sk_sp<SkFlattenable> SkXfermodeImageFilter_Base::CreateProc(SkReadBuffer& buffer) {
     SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 2);
-    sk_sp<SkXfermode> mode(buffer.readXfermode());
-    return Make(std::move(mode), common.getInput(0), common.getInput(1), &common.cropRect());
+    SkArithmeticParams arith;
+    int mode = unflatten_blendmode(buffer, &arith);
+    if (mode >= 0) {
+        return SkXfermodeImageFilter::Make((SkBlendMode)mode, common.getInput(0),
+                                           common.getInput(1), &common.cropRect());
+    } else {
+        return SkArithmeticImageFilter::Make(arith.fK[0], arith.fK[1], arith.fK[2], arith.fK[3],
+                                             arith.fEnforcePMColor, common.getInput(0),
+                                             common.getInput(1), &common.cropRect());
+    }
 }
 
-void SkXfermodeImageFilter::flatten(SkWriteBuffer& buffer) const {
+void SkXfermodeImageFilter_Base::flatten(SkWriteBuffer& buffer) const {
     this->INHERITED::flatten(buffer);
-    buffer.writeFlattenable(fMode.get());
+    buffer.write32((unsigned)fMode);
 }
 
-sk_sp<SkSpecialImage> SkXfermodeImageFilter::onFilterImage(SkSpecialImage* source,
+sk_sp<SkSpecialImage> SkXfermodeImageFilter_Base::onFilterImage(SkSpecialImage* source,
                                                            const Context& ctx,
                                                            SkIPoint* offset) const {
     SkIPoint backgroundOffset = SkIPoint::Make(0, 0);
@@ -90,13 +159,11 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter::onFilterImage(SkSpecialImage* sourc
         return this->filterImageGPU(source,
                                     background, backgroundOffset, 
                                     foreground, foregroundOffset,
-                                    bounds);
+                                    bounds, ctx.outputProperties());
     }
 #endif
 
-    const SkImageInfo info = SkImageInfo::MakeN32(bounds.width(), bounds.height(),
-                                                  kPremul_SkAlphaType);
-    sk_sp<SkSpecialSurface> surf(source->makeSurface(info));
+    sk_sp<SkSpecialSurface> surf(source->makeSurface(ctx.outputProperties(), bounds.size()));
     if (!surf) {
         return nullptr;
     }
@@ -105,41 +172,39 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter::onFilterImage(SkSpecialImage* sourc
     SkASSERT(canvas);
 
     canvas->clear(0x0); // can't count on background to fully clear the background
-
     canvas->translate(SkIntToScalar(-bounds.left()), SkIntToScalar(-bounds.top()));
 
-    SkPaint paint;
-    paint.setXfermodeMode(SkXfermode::kSrc_Mode);
-
     if (background) {
+        SkPaint paint;
+        paint.setBlendMode(SkBlendMode::kSrc);
         background->draw(canvas,
                          SkIntToScalar(backgroundOffset.fX), SkIntToScalar(backgroundOffset.fY),
                          &paint);
     }
 
-    paint.setXfermode(fMode);
-
-    if (foreground) {
-        foreground->draw(canvas,
-                         SkIntToScalar(foregroundOffset.fX), SkIntToScalar(foregroundOffset.fY),
-                         &paint);
-    }
-
-    canvas->clipRect(SkRect::Make(foregroundBounds), SkRegion::kDifference_Op);
-    paint.setColor(SK_ColorTRANSPARENT);
-    canvas->drawPaint(paint);
+    this->drawForeground(canvas, foreground.get(), foregroundBounds);
 
     return surf->makeImageSnapshot();
 }
 
-#ifndef SK_IGNORE_TO_STRING
-void SkXfermodeImageFilter::toString(SkString* str) const {
-    str->appendf("SkXfermodeImageFilter: (");
-    str->appendf("xfermode: (");
-    if (fMode) {
-        fMode->toString(str);
+void SkXfermodeImageFilter_Base::drawForeground(SkCanvas* canvas, SkSpecialImage* img,
+                                                const SkIRect& fgBounds) const {
+    SkPaint paint;
+    paint.setBlendMode(fMode);
+    if (img) {
+        img->draw(canvas, SkIntToScalar(fgBounds.fLeft), SkIntToScalar(fgBounds.fTop), &paint);
     }
-    str->append(")");
+
+    SkAutoCanvasRestore acr(canvas, true);
+    canvas->clipRect(SkRect::Make(fgBounds), kDifference_SkClipOp);
+    paint.setColor(0);
+    canvas->drawPaint(paint);
+}
+
+#ifndef SK_IGNORE_TO_STRING
+void SkXfermodeImageFilter_Base::toString(SkString* str) const {
+    str->appendf("SkXfermodeImageFilter: (");
+    str->appendf("blendmode: (%d)", (int)fMode);
     if (this->getInput(0)) {
         str->appendf("foreground: (");
         this->getInput(0)->toString(str);
@@ -158,12 +223,14 @@ void SkXfermodeImageFilter::toString(SkString* str) const {
 
 #include "SkXfermode_proccoeff.h"
 
-sk_sp<SkSpecialImage> SkXfermodeImageFilter::filterImageGPU(SkSpecialImage* source,
-                                                            sk_sp<SkSpecialImage> background,
-                                                            const SkIPoint& backgroundOffset,
-                                                            sk_sp<SkSpecialImage> foreground,
-                                                            const SkIPoint& foregroundOffset,
-                                                            const SkIRect& bounds) const {
+sk_sp<SkSpecialImage> SkXfermodeImageFilter_Base::filterImageGPU(
+                                                   SkSpecialImage* source,
+                                                   sk_sp<SkSpecialImage> background,
+                                                   const SkIPoint& backgroundOffset,
+                                                   sk_sp<SkSpecialImage> foreground,
+                                                   const SkIPoint& foregroundOffset,
+                                                   const SkIRect& bounds,
+                                                   const OutputProperties& outputProperties) const {
     SkASSERT(source->isTextureBacked());
 
     GrContext* context = source->getContext();
@@ -179,7 +246,6 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter::filterImageGPU(SkSpecialImage* sour
     }
 
     GrPaint paint;
-    // SRGBTODO: AllowSRGBInputs?
     sk_sp<GrFragmentProcessor> bgFP;
 
     if (backgroundTex) {
@@ -187,15 +253,16 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter::filterImageGPU(SkSpecialImage* sour
         backgroundMatrix.setIDiv(backgroundTex->width(), backgroundTex->height());
         backgroundMatrix.preTranslate(-SkIntToScalar(backgroundOffset.fX),
                                       -SkIntToScalar(backgroundOffset.fY));
+        sk_sp<GrColorSpaceXform> bgXform = GrColorSpaceXform::Make(background->getColorSpace(),
+                                                                   outputProperties.colorSpace());
         bgFP = GrTextureDomainEffect::Make(
-                            backgroundTex.get(), nullptr, backgroundMatrix,
-                            GrTextureDomain::MakeTexelDomain(backgroundTex.get(),
-                                                             background->subset()),
+                            backgroundTex.get(), std::move(bgXform), backgroundMatrix,
+                            GrTextureDomain::MakeTexelDomain(background->subset()),
                             GrTextureDomain::kDecal_Mode,
-                            GrTextureParams::kNone_FilterMode);
+                            GrSamplerParams::kNone_FilterMode);
     } else {
-        bgFP = GrConstColorProcessor::Make(GrColor_TRANSPARENT_BLACK,
-                                             GrConstColorProcessor::kIgnore_InputMode);
+        bgFP = GrConstColorProcessor::Make(GrColor4f::TransparentBlack(),
+                                           GrConstColorProcessor::kIgnore_InputMode);
     }
 
     if (foregroundTex) {
@@ -203,33 +270,19 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter::filterImageGPU(SkSpecialImage* sour
         foregroundMatrix.setIDiv(foregroundTex->width(), foregroundTex->height());
         foregroundMatrix.preTranslate(-SkIntToScalar(foregroundOffset.fX),
                                       -SkIntToScalar(foregroundOffset.fY));
-
+        sk_sp<GrColorSpaceXform> fgXform = GrColorSpaceXform::Make(foreground->getColorSpace(),
+                                                                   outputProperties.colorSpace());
         sk_sp<GrFragmentProcessor> foregroundFP;
 
         foregroundFP = GrTextureDomainEffect::Make(
-                            foregroundTex.get(), nullptr, foregroundMatrix,
-                            GrTextureDomain::MakeTexelDomain(foregroundTex.get(), 
-                                                             foreground->subset()),
+                            foregroundTex.get(), std::move(fgXform), foregroundMatrix,
+                            GrTextureDomain::MakeTexelDomain(foreground->subset()),
                             GrTextureDomain::kDecal_Mode,
-                            GrTextureParams::kNone_FilterMode);
+                            GrSamplerParams::kNone_FilterMode);
 
         paint.addColorFragmentProcessor(std::move(foregroundFP));
 
-        // A null fMode is interpreted to mean kSrcOver_Mode (to match raster).
-        SkAutoTUnref<SkXfermode> mode(SkSafeRef(fMode.get()));
-        if (!mode) {
-            // It would be awesome to use SkXfermode::Create here but it knows better
-            // than us and won't return a kSrcOver_Mode SkXfermode. That means we
-            // have to get one the hard way.
-            struct ProcCoeff rec;
-            rec.fProc = SkXfermode::GetProc(SkXfermode::kSrcOver_Mode);
-            SkXfermode::ModeAsCoeff(SkXfermode::kSrcOver_Mode, &rec.fSC, &rec.fDC);
-
-            mode.reset(new SkProcCoeffXfermode(rec, SkXfermode::kSrcOver_Mode));
-        }
-
-        sk_sp<GrFragmentProcessor> xferFP(
-            mode->makeFragmentProcessorForImageFilter(std::move(bgFP)));
+        sk_sp<GrFragmentProcessor> xferFP = this->makeFGFrag(bgFP);
 
         // A null 'xferFP' here means kSrc_Mode was used in which case we can just proceed
         if (xferFP) {
@@ -239,24 +292,79 @@ sk_sp<SkSpecialImage> SkXfermodeImageFilter::filterImageGPU(SkSpecialImage* sour
         paint.addColorFragmentProcessor(std::move(bgFP));
     }
 
-    paint.setPorterDuffXPFactory(SkXfermode::kSrc_Mode);
+    paint.setPorterDuffXPFactory(SkBlendMode::kSrc);
 
-    sk_sp<GrDrawContext> drawContext(context->makeDrawContext(SkBackingFit::kApprox,
-                                                              bounds.width(), bounds.height(),
-                                                              kSkia8888_GrPixelConfig,
-                                                              sk_ref_sp(source->getColorSpace())));
-    if (!drawContext) {
+    sk_sp<GrRenderTargetContext> renderTargetContext(context->makeDeferredRenderTargetContext(
+                                    SkBackingFit::kApprox, bounds.width(), bounds.height(),
+                                    GrRenderableConfigForColorSpace(outputProperties.colorSpace()),
+                                    sk_ref_sp(outputProperties.colorSpace())));
+    if (!renderTargetContext) {
         return nullptr;
     }
+    paint.setGammaCorrect(renderTargetContext->isGammaCorrect());
 
     SkMatrix matrix;
     matrix.setTranslate(SkIntToScalar(-bounds.left()), SkIntToScalar(-bounds.top()));
-    drawContext->drawRect(GrNoClip(), paint, matrix, SkRect::Make(bounds));
+    renderTargetContext->drawRect(GrNoClip(), std::move(paint), GrAA::kNo, matrix,
+                                  SkRect::Make(bounds));
 
-    return SkSpecialImage::MakeFromGpu(SkIRect::MakeWH(bounds.width(), bounds.height()),
-                                       kNeedNewImageUniqueID_SpecialImage,
-                                       drawContext->asTexture(),
-                                       sk_ref_sp(drawContext->getColorSpace()));
+    return SkSpecialImage::MakeDeferredFromGpu(context,
+                                               SkIRect::MakeWH(bounds.width(), bounds.height()),
+                                               kNeedNewImageUniqueID_SpecialImage,
+                                               sk_ref_sp(renderTargetContext->asDeferredTexture()),
+                                               renderTargetContext->refColorSpace());
+}
+
+sk_sp<GrFragmentProcessor>
+SkXfermodeImageFilter_Base::makeFGFrag(sk_sp<GrFragmentProcessor> bgFP) const {
+    // A null fMode is interpreted to mean kSrcOver_Mode (to match raster).
+    SkXfermode* xfer = SkXfermode::Peek(fMode);
+    sk_sp<SkXfermode> srcover;
+    if (!xfer) {
+        // It would be awesome to use SkXfermode::Create here but it knows better
+        // than us and won't return a kSrcOver_Mode SkXfermode. That means we
+        // have to get one the hard way.
+        struct ProcCoeff rec;
+        rec.fProc = SkXfermode::GetProc(SkBlendMode::kSrcOver);
+        SkXfermode::ModeAsCoeff(SkBlendMode::kSrcOver, &rec.fSC, &rec.fDC);
+
+        srcover.reset(new SkProcCoeffXfermode(rec, SkBlendMode::kSrcOver));
+        xfer = srcover.get();
+
+    }
+    return xfer->makeFragmentProcessorForImageFilter(std::move(bgFP));
 }
 
 #endif
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+sk_sp<SkFlattenable> SkXfermodeImageFilter_Base::LegacyArithmeticCreateProc(SkReadBuffer& buffer) {
+    SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 2);
+    // skip the unused mode (srcover) field
+    SkDEBUGCODE(int mode =) unflatten_blendmode(buffer, nullptr);
+    if (!buffer.isValid()) {
+        return nullptr;
+    }
+    SkASSERT(SkBlendMode::kSrcOver == (SkBlendMode)mode);
+    float k[4];
+    for (int i = 0; i < 4; ++i) {
+        k[i] = buffer.readScalar();
+    }
+    const bool enforcePMColor = buffer.readBool();
+    return SkArithmeticImageFilter::Make(k[0], k[1], k[2], k[3], enforcePMColor, common.getInput(0),
+                                         common.getInput(1), &common.cropRect());
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+SK_DEFINE_FLATTENABLE_REGISTRAR_GROUP_START(SkXfermodeImageFilter)
+    SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkXfermodeImageFilter_Base)
+    // manually register the legacy serialized name "SkXfermodeImageFilter"
+    SkFlattenable::Register("SkXfermodeImageFilter", SkXfermodeImageFilter_Base::CreateProc,
+                            SkFlattenable::kSkImageFilter_Type);
+    // manually register the legacy serialized name "SkArithmeticImageFilter" from when that filter
+    // was implemented as a xfermode image filter.
+    SkFlattenable::Register("SkArithmeticImageFilter",
+                            SkXfermodeImageFilter_Base::LegacyArithmeticCreateProc,
+                            SkFlattenable::kSkImageFilter_Type);
+SK_DEFINE_FLATTENABLE_REGISTRAR_GROUP_END

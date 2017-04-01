@@ -8,7 +8,7 @@
 
 #include <algorithm>
 
-#include "fpdfsdk/include/fsdk_mgr.h"
+#include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 #include "fpdfsdk/javascript/Annot.h"
 #include "fpdfsdk/javascript/Consts.h"
 #include "fpdfsdk/javascript/Document.h"
@@ -28,11 +28,11 @@
 #include "fpdfsdk/javascript/global.h"
 #include "fpdfsdk/javascript/report.h"
 #include "fpdfsdk/javascript/util.h"
+#include "public/fpdf_formfill.h"
 #include "third_party/base/stl_util.h"
 
 #ifdef PDF_ENABLE_XFA
-#include "fpdfsdk/fpdfxfa/include/fpdfxfa_app.h"
-#include "fxjs/include/cfxjse_value.h"
+#include "fxjs/cfxjse_value.h"
 #endif  // PDF_ENABLE_XFA
 
 // static
@@ -46,8 +46,8 @@ void IJS_Runtime::Destroy() {
 }
 
 // static
-IJS_Runtime* IJS_Runtime::Create(CPDFDoc_Environment* pEnv) {
-  return new CJS_Runtime(pEnv);
+IJS_Runtime* IJS_Runtime::Create(CPDFSDK_FormFillEnvironment* pFormFillEnv) {
+  return new CJS_Runtime(pFormFillEnv);
 }
 
 // static
@@ -62,14 +62,13 @@ CJS_Runtime* CJS_Runtime::CurrentRuntimeFromIsolate(v8::Isolate* pIsolate) {
       CFXJS_Engine::CurrentEngineFromIsolate(pIsolate));
 }
 
-CJS_Runtime::CJS_Runtime(CPDFDoc_Environment* pApp)
-    : m_pApp(pApp),
-      m_pDocument(nullptr),
+CJS_Runtime::CJS_Runtime(CPDFSDK_FormFillEnvironment* pFormFillEnv)
+    : m_pFormFillEnv(pFormFillEnv),
       m_bBlocking(false),
       m_isolateManaged(false) {
   v8::Isolate* pIsolate = nullptr;
-#ifndef PDF_ENABLE_XFA
-  IPDF_JSPLATFORM* pPlatform = m_pApp->GetFormFillInfo()->m_pJsPlatform;
+
+  IPDF_JSPLATFORM* pPlatform = m_pFormFillEnv->GetFormFillInfo()->m_pJsPlatform;
   if (pPlatform->version <= 2) {
     unsigned int embedderDataSlot = 0;
     v8::Isolate* pExternalIsolate = nullptr;
@@ -81,52 +80,24 @@ CJS_Runtime::CJS_Runtime(CPDFDoc_Environment* pApp)
   }
   m_isolateManaged = FXJS_GetIsolate(&pIsolate);
   SetIsolate(pIsolate);
-#else
-  if (CPDFXFA_App::GetInstance()->GetJSERuntime()) {
-    // TODO(tsepez): CPDFXFA_App should also use the embedder provided isolate.
-    pIsolate = CPDFXFA_App::GetInstance()->GetJSERuntime();
-    SetIsolate(pIsolate);
-  } else {
-    IPDF_JSPLATFORM* pPlatform = m_pApp->GetFormFillInfo()->m_pJsPlatform;
-    if (pPlatform->version <= 2) {
-      unsigned int embedderDataSlot = 0;
-      v8::Isolate* pExternalIsolate = nullptr;
-      if (pPlatform->version == 2) {
-        pExternalIsolate = reinterpret_cast<v8::Isolate*>(pPlatform->m_isolate);
-        embedderDataSlot = pPlatform->m_v8EmbedderSlot;
-      }
-      FXJS_Initialize(embedderDataSlot, pExternalIsolate);
-    }
-    m_isolateManaged = FXJS_GetIsolate(&pIsolate);
-    SetIsolate(pIsolate);
-  }
 
+#ifdef PDF_ENABLE_XFA
   v8::Isolate::Scope isolate_scope(pIsolate);
   v8::HandleScope handle_scope(pIsolate);
-  if (CPDFXFA_App::GetInstance()->IsJavaScriptInitialized()) {
-    CJS_Context* pContext = (CJS_Context*)NewContext();
-    InitializeEngine();
-    ReleaseContext(pContext);
-    return;
-  }
 #endif
 
   if (m_isolateManaged || FXJS_GlobalIsolateRefCount() == 0)
     DefineJSObjects();
 
-#ifdef PDF_ENABLE_XFA
-  CPDFXFA_App::GetInstance()->SetJavaScriptInitialized(TRUE);
-#endif
-
   CJS_Context* pContext = (CJS_Context*)NewContext();
   InitializeEngine();
   ReleaseContext(pContext);
+
+  SetFormFillEnvToDocument();
 }
 
 CJS_Runtime::~CJS_Runtime() {
-  for (auto* obs : m_observers)
-    obs->OnDestroyed();
-
+  NotifyObservedPtrs();
   ReleaseEngine();
   if (m_isolateManaged) {
     GetIsolate()->Dispose();
@@ -200,18 +171,11 @@ IJS_Context* CJS_Runtime::GetCurrentContext() {
   return m_ContextArray.empty() ? nullptr : m_ContextArray.back().get();
 }
 
-void CJS_Runtime::SetReaderDocument(CPDFSDK_Document* pReaderDoc) {
-  if (m_pDocument == pReaderDoc)
-    return;
-
+void CJS_Runtime::SetFormFillEnvToDocument() {
   v8::Isolate::Scope isolate_scope(GetIsolate());
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Context> context = NewLocalContext();
   v8::Context::Scope context_scope(context);
-
-  m_pDocument = pReaderDoc;
-  if (!pReaderDoc)
-    return;
 
   v8::Local<v8::Object> pThis = GetThisObj();
   if (pThis.IsEmpty())
@@ -229,11 +193,11 @@ void CJS_Runtime::SetReaderDocument(CPDFSDK_Document* pReaderDoc) {
   if (!pDocument)
     return;
 
-  pDocument->AttachDoc(pReaderDoc);
+  pDocument->SetFormFillEnv(m_pFormFillEnv);
 }
 
-CPDFSDK_Document* CJS_Runtime::GetReaderDocument() {
-  return m_pDocument;
+CPDFSDK_FormFillEnvironment* CJS_Runtime::GetFormFillEnv() const {
+  return m_pFormFillEnv;
 }
 
 int CJS_Runtime::ExecuteScript(const CFX_WideString& script,
@@ -255,40 +219,20 @@ void CJS_Runtime::RemoveEventFromSet(const FieldEvent& event) {
   m_FieldEventSet.erase(event);
 }
 
-void CJS_Runtime::AddObserver(Observer* observer) {
-  ASSERT(!pdfium::ContainsKey(m_observers, observer));
-  m_observers.insert(observer);
-}
-
-void CJS_Runtime::RemoveObserver(Observer* observer) {
-  ASSERT(pdfium::ContainsKey(m_observers, observer));
-  m_observers.erase(observer);
-}
-
 #ifdef PDF_ENABLE_XFA
 CFX_WideString ChangeObjName(const CFX_WideString& str) {
   CFX_WideString sRet = str;
   sRet.Replace(L"_", L".");
   return sRet;
 }
-FX_BOOL CJS_Runtime::GetValueByName(const CFX_ByteStringC& utf8Name,
-                                    CFXJSE_Value* pValue) {
+bool CJS_Runtime::GetValueByName(const CFX_ByteStringC& utf8Name,
+                                 CFXJSE_Value* pValue) {
   const FX_CHAR* name = utf8Name.c_str();
 
   v8::Isolate::Scope isolate_scope(GetIsolate());
   v8::HandleScope handle_scope(GetIsolate());
-  v8::Local<v8::Context> old_context = GetIsolate()->GetCurrentContext();
   v8::Local<v8::Context> context = NewLocalContext();
   v8::Context::Scope context_scope(context);
-
-  // Caution: We're about to hand to XFA an object that in order to invoke
-  // methods will require that the current v8::Context always has a pointer
-  // to a CJS_Runtime in its embedder data slot. Unfortunately, XFA creates
-  // its own v8::Context which has not initialized the embedder data slot.
-  // Do so now.
-  // TODO(tsepez): redesign PDF-side objects to not rely on v8::Context's
-  // embedder data slots, and/or to always use the right context.
-  CFXJS_Engine::SetForV8Context(old_context, this);
 
   v8::Local<v8::Value> propvalue =
       context->Global()->Get(v8::String::NewFromUtf8(
@@ -296,15 +240,15 @@ FX_BOOL CJS_Runtime::GetValueByName(const CFX_ByteStringC& utf8Name,
 
   if (propvalue.IsEmpty()) {
     pValue->SetUndefined();
-    return FALSE;
+    return false;
   }
   pValue->ForceSetValue(propvalue);
-  return TRUE;
+  return true;
 }
-FX_BOOL CJS_Runtime::SetValueByName(const CFX_ByteStringC& utf8Name,
-                                    CFXJSE_Value* pValue) {
+bool CJS_Runtime::SetValueByName(const CFX_ByteStringC& utf8Name,
+                                 CFXJSE_Value* pValue) {
   if (utf8Name.IsEmpty() || !pValue)
-    return FALSE;
+    return false;
   const FX_CHAR* name = utf8Name.c_str();
   v8::Isolate* pIsolate = GetIsolate();
   v8::Isolate::Scope isolate_scope(pIsolate);
@@ -320,6 +264,6 @@ FX_BOOL CJS_Runtime::SetValueByName(const CFX_ByteStringC& utf8Name,
       v8::String::NewFromUtf8(pIsolate, name, v8::String::kNormalString,
                               utf8Name.GetLength()),
       propvalue);
-  return TRUE;
+  return true;
 }
 #endif

@@ -23,6 +23,7 @@
 #include "chrome/browser/extensions/chrome_extension_api_frame_id_map_helper.h"
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
+#include "chrome/browser/extensions/chrome_kiosk_delegate.h"
 #include "chrome/browser/extensions/chrome_mojo_service_registration.h"
 #include "chrome/browser/extensions/chrome_process_manager_delegate.h"
 #include "chrome/browser/extensions/chrome_url_request_util.h"
@@ -35,6 +36,7 @@
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
 #include "chrome/browser/ui/bluetooth/chrome_extension_bluetooth_chooser.h"
@@ -46,6 +48,7 @@
 #include "components/update_client/update_client.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/resource_request_info.h"
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/api/generated_api_registration.h"
 #include "extensions/browser/extension_function_registry.h"
@@ -86,8 +89,8 @@ bool ChromeExtensionsBrowserClient::AreExtensionsDisabled(
     const base::CommandLine& command_line,
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return command_line.HasSwitch(switches::kDisableExtensions) ||
-      profile->GetPrefs()->GetBoolean(prefs::kDisableExtensions);
+  return switches::ExtensionsDisabled(command_line) ||
+         profile->GetPrefs()->GetBoolean(prefs::kDisableExtensions);
 }
 
 bool ChromeExtensionsBrowserClient::IsValidContext(
@@ -308,7 +311,7 @@ ExtensionCache* ChromeExtensionsBrowserClient::GetExtensionCache() {
   if (!extension_cache_.get()) {
 #if defined(OS_CHROMEOS)
     extension_cache_.reset(new ExtensionCacheImpl(
-        base::WrapUnique(new ChromeOSExtensionCacheDelegate())));
+        base::MakeUnique<ChromeOSExtensionCacheDelegate>()));
 #else
     extension_cache_.reset(new NullExtensionCache());
 #endif
@@ -400,21 +403,41 @@ ChromeExtensionsBrowserClient::CreateUpdateClient(
 std::unique_ptr<ExtensionApiFrameIdMapHelper>
 ChromeExtensionsBrowserClient::CreateExtensionApiFrameIdMapHelper(
     ExtensionApiFrameIdMap* map) {
-  return base::WrapUnique(new ChromeExtensionApiFrameIdMapHelper(map));
+  return base::MakeUnique<ChromeExtensionApiFrameIdMapHelper>(map);
 }
 
 std::unique_ptr<content::BluetoothChooser>
 ChromeExtensionsBrowserClient::CreateBluetoothChooser(
     content::RenderFrameHost* frame,
     const content::BluetoothChooser::EventHandler& event_handler) {
-  return base::WrapUnique(
-      new ChromeExtensionBluetoothChooser(frame, event_handler));
+  return base::MakeUnique<ChromeExtensionBluetoothChooser>(frame,
+                                                           event_handler);
 }
 
 bool ChromeExtensionsBrowserClient::IsActivityLoggingEnabled(
     content::BrowserContext* context) {
   ActivityLog* activity_log = ActivityLog::GetInstance(context);
   return activity_log && activity_log->is_active();
+}
+
+ExtensionNavigationUIData*
+ChromeExtensionsBrowserClient::GetExtensionNavigationUIData(
+    net::URLRequest* request) {
+  const content::ResourceRequestInfo* info =
+      content::ResourceRequestInfo::ForRequest(request);
+  if (!info)
+    return nullptr;
+  ChromeNavigationUIData* navigation_data =
+      static_cast<ChromeNavigationUIData*>(info->GetNavigationUIData());
+  if (!navigation_data)
+    return nullptr;
+  return navigation_data->GetExtensionNavigationUIData();
+}
+
+KioskDelegate* ChromeExtensionsBrowserClient::GetKioskDelegate() {
+  if (!kiosk_delegate_)
+    kiosk_delegate_.reset(new ChromeKioskDelegate());
+  return kiosk_delegate_.get();
 }
 
 }  // namespace extensions

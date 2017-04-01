@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef COMPONENTS_SYNC_ENGINE_IMPL_SYNC_ENGINE_IMPL_EVENT_LISTENER_H_
-#define COMPONENTS_SYNC_ENGINE_IMPL_SYNC_ENGINE_IMPL_EVENT_LISTENER_H_
+#ifndef COMPONENTS_SYNC_ENGINE_IMPL_SYNC_ENGINE_EVENT_LISTENER_H_
+#define COMPONENTS_SYNC_ENGINE_IMPL_SYNC_ENGINE_EVENT_LISTENER_H_
 
 #include "base/time/time.h"
 #include "components/sync/base/model_type.h"
@@ -33,6 +33,9 @@ class SyncEngineEventListener {
   // This event is sent when types are throttled or unthrottled.
   virtual void OnThrottledTypesChanged(ModelTypeSet throttled_types) = 0;
 
+  // This event is sent when types are backed off or unbacked off.
+  virtual void OnBackedOffTypesChanged(ModelTypeSet backed_off_types) = 0;
+
   // This event is sent when the server requests a migration.
   virtual void OnMigrationRequested(ModelTypeSet migration_types) = 0;
 
@@ -45,4 +48,4 @@ class SyncEngineEventListener {
 
 }  // namespace syncer
 
-#endif  // COMPONENTS_SYNC_ENGINE_IMPL_SYNC_ENGINE_IMPL_EVENT_LISTENER_H_
+#endif  // COMPONENTS_SYNC_ENGINE_IMPL_SYNC_ENGINE_EVENT_LISTENER_H_

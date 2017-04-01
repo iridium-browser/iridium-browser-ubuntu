@@ -17,10 +17,8 @@
 
 namespace cc {
 class Layer;
-class SolidColorLayer;
 }
 
-namespace chrome {
 namespace android {
 
 class ToolbarLayer;
@@ -39,9 +37,11 @@ class ToolbarSceneLayer : public SceneLayer {
       jint toolbar_background_color,
       jint url_bar_resource_id,
       jfloat url_bar_alpha,
-      jfloat top_offset,
+      jfloat y_offset,
+      jfloat view_height,
       bool visible,
-      bool show_shadow);
+      bool show_shadow,
+      bool browser_controls_at_bottom);
 
   // Update the progress bar.
   void UpdateProgressBar(
@@ -79,6 +79,5 @@ class ToolbarSceneLayer : public SceneLayer {
 bool RegisterToolbarSceneLayer(JNIEnv* env);
 
 }  // namespace android
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_ANDROID_COMPOSITOR_SCENE_LAYER_TOOLBAR_SCENE_LAYER_H_

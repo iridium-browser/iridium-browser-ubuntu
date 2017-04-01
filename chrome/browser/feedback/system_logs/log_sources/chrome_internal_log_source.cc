@@ -8,11 +8,12 @@
 #include "base/sys_info.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/about_sync_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,6 +24,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/metrics/chromeos_metrics_provider.h"
 #include "chromeos/system/statistics_provider.h"
+#include "chromeos/system/version_loader.h"
 #endif
 
 #if defined(OS_WIN)
@@ -38,6 +40,7 @@ constexpr char kExtensionsListKey[] = "extensions";
 constexpr char kDataReductionProxyKey[] = "data_reduction_proxy";
 constexpr char kChromeVersionTag[] = "CHROME VERSION";
 #if defined(OS_CHROMEOS)
+constexpr char kChromeOsFirmwareVersion[] = "CHROMEOS_FIRMWARE_VERSION";
 constexpr char kChromeEnrollmentTag[] = "ENTERPRISE_ENROLLED";
 constexpr char kHWIDKey[] = "HWID";
 constexpr char kSettingsKey[] = "settings";
@@ -47,6 +50,8 @@ constexpr char kOsVersionTag[] = "OS VERSION";
 #endif
 #if defined(OS_WIN)
 constexpr char kUsbKeyboardDetected[] = "usb_keyboard_detected";
+constexpr char kIsEnrolledToDomain[] = "enrolled_to_domain";
+constexpr char kInstallerBrandCode[] = "installer_brand_code";
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -66,20 +71,23 @@ std::string GetEnrollmentStatusString() {
   return std::string();
 }
 
-void GetHWID(SystemLogsResponse* response) {
+void GetEntriesOnBlockingPool(SystemLogsResponse* response) {
   DCHECK(response);
 
   chromeos::system::StatisticsProvider* stats =
       chromeos::system::StatisticsProvider::GetInstance();
   DCHECK(stats);
 
+  // Get the HWID.
   std::string hwid;
-  if (!stats->GetMachineStatistic(chromeos::system::kHardwareClassKey, &hwid)) {
+  if (!stats->GetMachineStatistic(chromeos::system::kHardwareClassKey, &hwid))
     VLOG(1) << "Couldn't get machine statistic 'hardware_class'.";
-    return;
-  }
+  else
+    (*response)[kHWIDKey] = hwid;
 
-  (*response)[kHWIDKey] = hwid;
+  // Get the firmware version.
+  (*response)[kChromeOsFirmwareVersion] =
+      chromeos::version_loader::GetFirmware();
 }
 #endif
 
@@ -114,6 +122,8 @@ void ChromeInternalLogSource::Fetch(const SysLogsSourceCallback& callback) {
   PopulateDataReductionProxyLogs(response.get());
 #if defined(OS_WIN)
   PopulateUsbKeyboardDetected(response.get());
+  PopulateEnrolledToDomain(response.get());
+  PopulateInstallerBrandCode(response.get());
 #endif
 
   if (ProfileManager::GetLastUsedProfile()->IsChild())
@@ -122,10 +132,11 @@ void ChromeInternalLogSource::Fetch(const SysLogsSourceCallback& callback) {
 #if defined(OS_CHROMEOS)
   PopulateLocalStateSettings(response.get());
 
-  // Get the HWID on the blocking pool and invoke the callback later when done.
+  // Get the entries that should be retrieved on the blocking pool and invoke
+  // the callback later when done.
   SystemLogsResponse* response_ptr = response.release();
   content::BrowserThread::PostBlockingPoolTaskAndReply(
-      FROM_HERE, base::Bind(&GetHWID, response_ptr),
+      FROM_HERE, base::Bind(&GetEntriesOnBlockingPool, response_ptr),
       base::Bind(callback, base::Owned(response_ptr)));
 #else
   // On other platforms, we're done. Invoke the callback.
@@ -140,15 +151,15 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
       !ProfileSyncServiceFactory::GetInstance()->HasProfileSyncService(profile))
     return;
 
-  ProfileSyncService* service =
+  browser_sync::ProfileSyncService* service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   std::unique_ptr<base::DictionaryValue> sync_logs(
-      sync_driver::sync_ui_util::ConstructAboutInformation(
+      syncer::sync_ui_util::ConstructAboutInformation(
           service, service->signin(), chrome::GetChannel()));
 
   // Remove identity section.
   base::ListValue* details = NULL;
-  sync_logs->GetList(sync_driver::sync_ui_util::kDetailsKey, &details);
+  sync_logs->GetList(syncer::sync_ui_util::kDetailsKey, &details);
   if (!details)
     return;
   for (base::ListValue::iterator it = details->begin();
@@ -157,7 +168,7 @@ void ChromeInternalLogSource::PopulateSyncLogs(SystemLogsResponse* response) {
     if ((*it)->GetAsDictionary(&dict)) {
       std::string title;
       dict->GetString("title", &title);
-      if (title == sync_driver::sync_ui_util::kIdentityTitle) {
+      if (title == syncer::sync_ui_util::kIdentityTitle) {
         details->Erase(it, NULL);
         break;
       }
@@ -236,6 +247,21 @@ void ChromeInternalLogSource::PopulateUsbKeyboardDetected(
   (*response)[kUsbKeyboardDetected] = result ? "Keyboard Detected:\n" :
                                                "No Keyboard:\n";
   (*response)[kUsbKeyboardDetected] += reason;
+}
+
+void ChromeInternalLogSource::PopulateEnrolledToDomain(
+    SystemLogsResponse* response) {
+  (*response)[kIsEnrolledToDomain] = base::win::IsEnrolledToDomain()
+                                         ? "Enrolled to domain"
+                                         : "Not enrolled to domain";
+}
+
+void ChromeInternalLogSource::PopulateInstallerBrandCode(
+    SystemLogsResponse* response) {
+  std::string brand;
+  google_brand::GetBrand(&brand);
+  (*response)[kInstallerBrandCode] =
+      brand.empty() ? "Unknown brand code" : brand;
 }
 #endif
 

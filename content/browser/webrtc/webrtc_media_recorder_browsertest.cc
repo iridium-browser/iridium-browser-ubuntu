@@ -18,10 +18,15 @@ static const char kMediaRecorderHtmlFile[] = "/media/mediarecorder_test.html";
 
 static struct EncodingParameters {
   bool disable_accelerator;
-  std::string video_codec;
+  std::string mime_type;
 } const kEncodingParameters[] = {
-    {true, "VP8"},  {true, "VP9"},  {true, "H264"},
-    {false, "VP8"}, {false, "VP9"}, {false, "H264"},
+    {true, "video/webm;codecs=VP8"},
+    {true, "video/webm;codecs=VP9"},
+    {true, "video/x-matroska;codecs=AVC1"},
+    {false, ""},  // Instructs the platform to choose any accelerated codec.
+    {false, "video/webm;codecs=VP8"},
+    {false, "video/webm;codecs=VP9"},
+    {false, "video/x-matroska;codecs=AVC1"},
 };
 
 }  // namespace
@@ -60,98 +65,91 @@ class WebRtcMediaRecorderTest
   DISALLOW_COPY_AND_ASSIGN(WebRtcMediaRecorderTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, MediaRecorderStart) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, Start) {
   MakeTypicalCall("testStartAndRecorderState();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, MediaRecorderStartAndStop) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, StartAndStop) {
   MakeTypicalCall("testStartStopAndRecorderState();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest,
-                       MediaRecorderStartAndDataAvailable) {
+IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest, StartAndDataAvailable) {
   MaybeForceDisableEncodeAccelerator(GetParam().disable_accelerator);
   MakeTypicalCall(base::StringPrintf("testStartAndDataAvailable(\"%s\");",
-                                     GetParam().video_codec.c_str()),
+                                     GetParam().mime_type.c_str()),
                   kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest,
-                       MediaRecorderStartWithTimeSlice) {
+IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest, StartWithTimeSlice) {
   MaybeForceDisableEncodeAccelerator(GetParam().disable_accelerator);
   MakeTypicalCall(base::StringPrintf("testStartWithTimeSlice(\"%s\");",
-                                     GetParam().video_codec.c_str()),
+                                     GetParam().mime_type.c_str()),
                   kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, MediaRecorderResume) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, Resume) {
   MakeTypicalCall("testResumeAndRecorderState();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderNoResumeWhenRecorderInactive) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, NoResumeWhenRecorderInactive) {
   MakeTypicalCall("testIllegalResumeThrowsDOMError();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest,
-                       MediaRecorderResumeAndDataAvailable) {
+IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest, ResumeAndDataAvailable) {
   MaybeForceDisableEncodeAccelerator(GetParam().disable_accelerator);
   MakeTypicalCall(base::StringPrintf("testResumeAndDataAvailable(\"%s\");",
-                                     GetParam().video_codec.c_str()),
+                                     GetParam().mime_type.c_str()),
                   kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, MediaRecorderPause) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, Pause) {
   MakeTypicalCall("testPauseAndRecorderState();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, MediaRecorderPauseStop) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, PauseStop) {
   MakeTypicalCall("testPauseStopAndRecorderState();", kMediaRecorderHtmlFile);
 }
 
 IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderPausePreventsDataavailableFromBeingFired) {
+                       PausePreventsDataavailableFromBeingFired) {
   MakeTypicalCall("testPausePreventsDataavailableFromBeingFired();",
                   kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderIllegalPauseThrowsDOMError) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, IllegalPauseThrowsDOMError) {
   MakeTypicalCall("testIllegalPauseThrowsDOMError();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderTwoChannelAudioRecording) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, TwoChannelAudioRecording) {
   MakeTypicalCall("testTwoChannelAudio();", kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderIllegalStopThrowsDOMError) {
+IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest, IllegalStopThrowsDOMError) {
   MakeTypicalCall("testIllegalStopThrowsDOMError();", kMediaRecorderHtmlFile);
 }
 
 IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderIllegalStartWhileRecordingThrowsDOMError) {
+                       IllegalStartWhileRecordingThrowsDOMError) {
   MakeTypicalCall("testIllegalStartInRecordingStateThrowsDOMError();",
                   kMediaRecorderHtmlFile);
 }
 
 IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderIllegalStartWhilePausedThrowsDOMError) {
+                       IllegalStartWhilePausedThrowsDOMError) {
   MakeTypicalCall("testIllegalStartInPausedStateThrowsDOMError();",
                   kMediaRecorderHtmlFile);
 }
 
 IN_PROC_BROWSER_TEST_F(WebRtcMediaRecorderTest,
-                       MediaRecorderIllegalRequestDataThrowsDOMError) {
+                       IllegalRequestDataThrowsDOMError) {
   MakeTypicalCall("testIllegalRequestDataThrowsDOMError();",
                   kMediaRecorderHtmlFile);
 }
 
-IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest, MediaRecorderPeerConnection) {
+IN_PROC_BROWSER_TEST_P(WebRtcMediaRecorderTest, PeerConnection) {
   MaybeForceDisableEncodeAccelerator(GetParam().disable_accelerator);
   MakeTypicalCall(base::StringPrintf("testRecordRemotePeerConnection(\"%s\");",
-                                     GetParam().video_codec.c_str()),
+                                     GetParam().mime_type.c_str()),
                   kMediaRecorderHtmlFile);
 }
 

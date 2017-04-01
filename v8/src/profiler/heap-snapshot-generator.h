@@ -5,6 +5,7 @@
 #ifndef V8_PROFILER_HEAP_SNAPSHOT_GENERATOR_H_
 #define V8_PROFILER_HEAP_SNAPSHOT_GENERATOR_H_
 
+#include <deque>
 #include <unordered_map>
 
 #include "include/v8-profiler.h"
@@ -115,10 +116,9 @@ class HeapEntry BASE_EMBEDDED {
   int children_count() const { return children_count_; }
   INLINE(int set_children_index(int index));
   void add_child(HeapGraphEdge* edge) {
-    children_arr()[children_count_++] = edge;
+    *(children_begin() + children_count_++) = edge;
   }
-  Vector<HeapGraphEdge*> children() {
-    return Vector<HeapGraphEdge*>(children_arr(), children_count_); }
+  HeapGraphEdge* child(int i) { return *(children_begin() + i); }
   INLINE(Isolate* isolate() const);
 
   void SetIndexedReference(
@@ -130,7 +130,8 @@ class HeapEntry BASE_EMBEDDED {
       const char* prefix, const char* edge_name, int max_depth, int indent);
 
  private:
-  INLINE(HeapGraphEdge** children_arr());
+  INLINE(std::deque<HeapGraphEdge*>::iterator children_begin());
+  INLINE(std::deque<HeapGraphEdge*>::iterator children_end());
   const char* TypeAsString();
 
   unsigned type_: 4;
@@ -163,8 +164,8 @@ class HeapSnapshot {
     return &entries_[gc_subroot_indexes_[index]];
   }
   List<HeapEntry>& entries() { return entries_; }
-  List<HeapGraphEdge>& edges() { return edges_; }
-  List<HeapGraphEdge*>& children() { return children_; }
+  std::deque<HeapGraphEdge>& edges() { return edges_; }
+  std::deque<HeapGraphEdge*>& children() { return children_; }
   void RememberLastJSObjectId();
   SnapshotObjectId max_snapshot_js_object_id() const {
     return max_snapshot_js_object_id_;
@@ -192,8 +193,8 @@ class HeapSnapshot {
   int gc_roots_index_;
   int gc_subroot_indexes_[VisitorSynchronization::kNumberOfSyncTags];
   List<HeapEntry> entries_;
-  List<HeapGraphEdge> edges_;
-  List<HeapGraphEdge*> children_;
+  std::deque<HeapGraphEdge> edges_;
+  std::deque<HeapGraphEdge*> children_;
   List<HeapEntry*> sorted_entries_;
   SnapshotObjectId max_snapshot_js_object_id_;
 
@@ -525,8 +526,8 @@ class NativeObjectsExplorer {
   bool embedder_queried_;
   HeapObjectsSet in_groups_;
   // RetainedObjectInfo* -> List<HeapObject*>*
-  base::HashMap objects_by_info_;
-  base::HashMap native_groups_;
+  base::CustomMatcherHashMap objects_by_info_;
+  base::CustomMatcherHashMap native_groups_;
   HeapEntriesAllocator* synthetic_entries_allocator_;
   HeapEntriesAllocator* native_entries_allocator_;
   // Used during references extraction.
@@ -613,7 +614,7 @@ class HeapSnapshotJSONSerializer {
   static const int kNodeFieldsCount;
 
   HeapSnapshot* snapshot_;
-  base::HashMap strings_;
+  base::CustomMatcherHashMap strings_;
   int next_node_id_;
   int next_string_id_;
   OutputStreamWriter* writer_;

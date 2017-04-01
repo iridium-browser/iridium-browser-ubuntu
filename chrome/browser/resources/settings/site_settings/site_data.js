@@ -10,121 +10,118 @@
 Polymer({
   is: 'site-data',
 
-  behaviors: [SiteSettingsBehavior, WebUIListenerBehavior],
+  behaviors: [CookieTreeBehavior],
 
   properties: {
     /**
-     * A summary list of all sites and how many entities each contain.
-     * @type {Array<CookieDataSummaryItem>}
+     * The current filter applied to the cookie data list.
+     * @private
      */
-    sites: Array,
+    filterString_: {
+      type: String,
+      value: '',
+    },
 
-    /**
-     * The cookie tree with the details needed to display individual sites and
-     * their contained data.
-     * @type {!settings.CookieTreeNode}
-     */
-    treeNodes_: Object,
+    /** @private */
+    confirmationDeleteMsg_: String,
 
-    /**
-     * Keeps track of how many outstanding requests for more data there are.
-     */
-    requests_: Number,
+    /** @private */
+    idToDelete_: String,
   },
 
+  /** @override */
   ready: function() {
-    this.addWebUIListener('onTreeItemRemoved',
-        this.onTreeItemRemoved_.bind(this));
-    this.treeNodes_ = new settings.CookieTreeNode(null);
-    // Start the initial request.
-    this.reloadCookies_();
+    this.loadCookies();
   },
 
   /**
-   * Reloads the whole cookie list.
+   * A filter function for the list.
+   * @param {!CookieDataSummaryItem} item The item to possibly filter out.
+   * @return {boolean} Whether to show the item.
    * @private
    */
-  reloadCookies_: function() {
-    this.browserProxy.reloadCookies().then(function(list) {
-      this.loadChildren_(list);
-    }.bind(this));
+  showItem_: function(item) {
+    if (this.filterString_.length == 0)
+      return true;
+    return item.site.indexOf(this.filterString_) > -1;
+  },
+
+  /** @private */
+  onSearchChanged_: function(e) {
+    this.filterString_ = e.detail;
+    this.$.list.render();
+  },
+
+  /** @private */
+  isRemoveButtonVisible_: function(sites, renderedItemCount) {
+    return renderedItemCount != 0;
   },
 
   /**
-   * Returns whether remove all should be shown.
-   * @param {Array<CookieDataSummaryItem>} sites The sites list to use to
-   *     determine whether the button should be visible.
+   * Returns the string to use for the Remove label.
+   * @return {string} filterString The current filter string.
    * @private
    */
-  removeAllIsVisible_: function(sites) {
-    return sites.length > 0;
+  computeRemoveLabel_: function(filterString) {
+    if (filterString.length == 0)
+      return loadTimeData.getString('siteSettingsCookieRemoveAll');
+    return loadTimeData.getString('siteSettingsCookieRemoveAllShown');
+  },
+
+  /** @private */
+  onCloseDialog_: function() {
+    this.$.confirmDeleteDialog.close();
   },
 
   /**
-   * Called when the cookie list is ready to be shown.
-   * @param {!CookieList} list The cookie list to show.
+   * Shows a dialog to confirm the deletion of multiple sites.
+   * @param {!Event} e
    * @private
    */
-  loadChildren_: function(list) {
-    var parentId = list.id;
-    var data = list.children;
-
-    if (parentId == null) {
-      // New root being added, clear the list and add the nodes.
-      this.sites = [];
-      this.requests_ = 0;
-      this.treeNodes_.addChildNodes(this.treeNodes_, data);
-    } else {
-      this.treeNodes_.populateChildNodes(parentId, this.treeNodes_, data);
-    }
-
-    for (var i = 0; i < data.length; ++i) {
-      var prefix = parentId == null ? '' : parentId + ', ';
-      if (data[i].hasChildren) {
-        ++this.requests_;
-        this.browserProxy.loadCookieChildren(
-            prefix + data[i].id).then(function(list) {
-          --this.requests_;
-          this.loadChildren_(list);
-        }.bind(this));
-      }
-    }
-
-    if (this.requests_ == 0)
-      this.sites = this.treeNodes_.getSummaryList();
-
-    // If this reaches below zero then we're forgetting to increase the
-    // outstanding request count and the summary list won't be updated at the
-    // end.
-    assert(this.requests_ >= 0);
+  onConfirmDeleteMultipleSites_: function(e) {
+    e.preventDefault();
+    this.idToDelete_ = '';  // Delete all.
+    this.confirmationDeleteMsg_ = loadTimeData.getString(
+        'siteSettingsCookieRemoveMultipleConfirmation');
+    this.$.confirmDeleteDialog.showModal();
   },
 
   /**
-   * Called when a single item has been removed (not during delete all).
-   * @param {!CookieRemovePacket} args The details about what to remove.
+   * Called when deletion for a single/multiple sites has been confirmed.
+   * @private
    */
-  onTreeItemRemoved_: function(args) {
-    this.treeNodes_.removeByParentId(args.id, args.start, args.count);
-    this.sites = this.treeNodes_.getSummaryList();
+  onConfirmDelete_: function() {
+    if (this.idToDelete_ != '')
+      this.onDeleteSite_();
+    else
+      this.onDeleteMultipleSites_();
+    this.$.confirmDeleteDialog.close();
   },
 
   /**
    * Deletes all site data for a given site.
-   * @param {!{model: !{item: CookieDataSummaryItem}}} event
    * @private
    */
-  onDeleteSite_: function(event) {
-    this.browserProxy.removeCookie(event.model.item.id);
+  onDeleteSite_: function() {
+    this.browserProxy.removeCookie(this.idToDelete_);
   },
 
   /**
-   * Deletes site data for all sites.
+   * Deletes site data for multiple sites.
    * @private
    */
-  onDeleteAllSites_: function() {
-    this.browserProxy.removeAllCookies().then(function(list) {
-      this.loadChildren_(list);
-    }.bind(this));
+  onDeleteMultipleSites_: function() {
+    if (this.filterString_.length == 0) {
+      this.removeAllCookies();
+    } else {
+      var items = this.$.list.items;
+      for (var i = 0; i < items.length; ++i) {
+        if (this.showItem_(items[i]))
+          this.browserProxy.removeCookie(items[i].id);
+      }
+      // We just deleted all items found by the filter, let's reset the filter.
+      /** @type {SettingsSubpageSearchElement} */(this.$.filter).setValue('');
+    }
   },
 
   /**
@@ -132,15 +129,7 @@ Polymer({
    * @private
    */
   onSiteTap_: function(event) {
-    var dialog = document.createElement('site-data-details-dialog');
-    dialog.category = this.category;
-    this.shadowRoot.appendChild(dialog);
-
-    var node = this.treeNodes_.fetchNodeById(event.model.item.id, false);
-    dialog.open(node);
-
-    dialog.addEventListener('close', function(event) {
-      dialog.remove();
-    });
+    settings.navigateTo(settings.Route.SITE_SETTINGS_DATA_DETAILS,
+        new URLSearchParams('site=' + event.model.item.site));
   },
 });

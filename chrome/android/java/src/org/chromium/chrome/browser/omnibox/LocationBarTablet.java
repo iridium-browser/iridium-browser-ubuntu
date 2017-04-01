@@ -18,7 +18,6 @@ import android.view.WindowManager;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.download.DownloadUtils;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.Tab;
@@ -562,37 +561,26 @@ public class LocationBarTablet extends LocationBarLayout {
         if (tab == null) return false;
         // The save offline button should not be shown on native pages. Currently, trying to
         // save an offline page in incognito crashes, so don't show it on incognito either.
-        return DownloadUtils.isDownloadHomeEnabled() && shouldShowPageActionButtons()
-                && !tab.isIncognito();
+        return shouldShowPageActionButtons() && !tab.isIncognito();
     }
 
     private boolean isSaveOfflineButtonEnabled() {
         if (mToolbarDataProvider == null) return false;
-        Tab tab = mToolbarDataProvider.getTab();
-        if (tab == null) return false;
-        boolean isChromeScheme = tab.getUrl().startsWith(UrlConstants.CHROME_SCHEME)
-                || tab.getUrl().startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
-        boolean isValidTab = !tab.isOfflinePage() && !tab.isShowingErrorPage()
-                             && !tab.isShowingInterstitialPage();
-        return !isChromeScheme && isValidTab;
+        return DownloadUtils.isAllowedToDownloadPage(mToolbarDataProvider.getTab());
     }
 
     private boolean shouldShowPageActionButtons() {
         if (!mNativeInitialized) return true;
 
-        // If the new downloads UI isn't enabled, the only page action is the bookmark button. It
-        // should be shown if the delete button isn't showing. If the download UI is enabled, there
-        // are two actions, bookmark and save offline, and they should be shown if the omnibox isn't
-        // focused.
-        return (!shouldShowDeleteButton() && !DownloadUtils.isDownloadHomeEnabled())
-                || !(mUrlBar.hasFocus() || mUrlFocusChangeInProgress);
+        // There are two actions, bookmark and save offline, and they should be shown if the
+        // omnibox isn't focused.
+        return !(mUrlBar.hasFocus() || mUrlFocusChangeInProgress);
     }
 
     private boolean shouldShowMicButton() {
         // If the download UI is enabled, the mic button should be only be shown when the url bar
         // is focused.
         return isVoiceSearchEnabled() && mNativeInitialized
-                && (!DownloadUtils.isDownloadHomeEnabled()
-                        || (mUrlBar.hasFocus() || mUrlFocusChangeInProgress));
+                && (mUrlBar.hasFocus() || mUrlFocusChangeInProgress);
     }
 }

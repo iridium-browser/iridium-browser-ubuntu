@@ -7,7 +7,7 @@
 #ifndef XFA_FXBARCODE_PDF417_BC_PDF417BARCODEMATRIX_H_
 #define XFA_FXBARCODE_PDF417_BC_PDF417BARCODEMATRIX_H_
 
-#include "core/fxcrt/include/fx_basic.h"
+#include "core/fxcrt/fx_basic.h"
 
 class CBC_BarcodeRow;
 
@@ -18,7 +18,7 @@ class CBC_BarcodeMatrix {
   virtual ~CBC_BarcodeMatrix();
 
   void set(int32_t x, int32_t y, uint8_t value);
-  void setMatrix(int32_t x, int32_t y, FX_BOOL black);
+  void setMatrix(int32_t x, int32_t y, bool black);
   void startRow();
   CBC_BarcodeRow* getCurrentRow();
   CFX_ByteArray& getMatrix();

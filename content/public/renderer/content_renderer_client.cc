@@ -6,7 +6,7 @@
 
 #include "content/public/renderer/media_stream_renderer_factory.h"
 #include "media/base/renderer_factory.h"
-#include "third_party/WebKit/public/platform/modules/app_banner/WebAppBannerClient.h"
+#include "ui/gfx/icc_profile.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -103,7 +103,7 @@ bool ContentRendererClient::AllowPopup() {
 bool ContentRendererClient::HandleNavigation(
     RenderFrame* render_frame,
     bool is_content_initiated,
-    int opener_id,
+    bool render_view_was_created_by_renderer,
     blink::WebFrame* frame,
     const blink::WebURLRequest& request,
     blink::WebNavigationType type,
@@ -126,12 +126,16 @@ bool ContentRendererClient::ShouldFork(blink::WebLocalFrame* frame,
   return false;
 }
 
-bool ContentRendererClient::WillSendRequest(
-    blink::WebFrame* frame,
-    ui::PageTransition transition_type,
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    GURL* new_url) {
+bool ContentRendererClient::WillSendRequest(blink::WebLocalFrame* frame,
+                                            ui::PageTransition transition_type,
+                                            const blink::WebURL& url,
+                                            GURL* new_url) {
+  return false;
+}
+
+bool ContentRendererClient::IsPrefetchOnly(
+    RenderFrame* render_frame,
+    const blink::WebURLRequest& request) {
   return false;
 }
 
@@ -167,21 +171,13 @@ bool ContentRendererClient::AllowPepperMediaStreamAPI(const GURL& url) {
 void ContentRendererClient::AddSupportedKeySystems(
     std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems) {}
 
-std::unique_ptr<media::RendererFactory>
-ContentRendererClient::CreateMediaRendererFactory(
-    RenderFrame* render_frame,
-    media::GpuVideoAcceleratorFactories* gpu_factories,
-    const scoped_refptr<media::MediaLog>& media_log) {
-  return nullptr;
-}
-
 std::unique_ptr<MediaStreamRendererFactory>
 ContentRendererClient::CreateMediaStreamRendererFactory() {
   return nullptr;
 }
 
-cc::ImageSerializationProcessor*
-ContentRendererClient::GetImageSerializationProcessor() {
+std::unique_ptr<gfx::ICCProfile>
+ContentRendererClient::GetImageDecodeColorProfile() {
   return nullptr;
 }
 
@@ -217,11 +213,6 @@ BrowserPluginDelegate* ContentRendererClient::CreateBrowserPluginDelegate(
     RenderFrame* render_frame,
     const std::string& mime_type,
     const GURL& original_url) {
-  return nullptr;
-}
-
-std::unique_ptr<blink::WebAppBannerClient>
-ContentRendererClient::CreateAppBannerClient(RenderFrame* render_frame) {
   return nullptr;
 }
 

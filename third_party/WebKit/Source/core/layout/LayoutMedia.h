@@ -33,61 +33,61 @@ namespace blink {
 class HTMLMediaElement;
 
 class LayoutMedia : public LayoutImage {
-public:
-    explicit LayoutMedia(HTMLMediaElement*);
-    ~LayoutMedia() override;
+ public:
+  explicit LayoutMedia(HTMLMediaElement*);
+  ~LayoutMedia() override;
 
-    LayoutObject* firstChild() const { ASSERT(children() == virtualChildren()); return children()->firstChild(); }
-    LayoutObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
+  LayoutObject* firstChild() const {
+    ASSERT(children() == virtualChildren());
+    return children()->firstChild();
+  }
+  LayoutObject* lastChild() const {
+    ASSERT(children() == virtualChildren());
+    return children()->lastChild();
+  }
 
-    // If you have a LayoutMedia, use firstChild or lastChild instead.
-    void slowFirstChild() const = delete;
-    void slowLastChild() const = delete;
+  // If you have a LayoutMedia, use firstChild or lastChild instead.
+  void slowFirstChild() const = delete;
+  void slowLastChild() const = delete;
 
-    const LayoutObjectChildList* children() const { return &m_children; }
-    LayoutObjectChildList* children() { return &m_children; }
+  const LayoutObjectChildList* children() const { return &m_children; }
+  LayoutObjectChildList* children() { return &m_children; }
 
-    HTMLMediaElement* mediaElement() const;
+  HTMLMediaElement* mediaElement() const;
 
-    const char* name() const override { return "LayoutMedia"; }
+  const char* name() const override { return "LayoutMedia"; }
 
-    // Temporary callback for crbug.com/587345,402044
-    void notifyPositionMayHaveChanged(const IntRect&);
+ protected:
+  void layout() override;
 
-    // Change whether we want or don't want to receive position change
-    // notifications.  This will cause us to start / stop receiving change
-    // notifications if possible.
-    // Temporary method for crbug.com/587345,402044
-    void setRequestPositionUpdates(bool);
+  bool isOfType(LayoutObjectType type) const override {
+    return type == LayoutObjectMedia || LayoutImage::isOfType(type);
+  }
 
-protected:
-    // Temporary overrides for crbug.com/587345,402044
-    void willBeDestroyed() override;
-    void insertedIntoTree() override;
+ private:
+  LayoutObjectChildList* virtualChildren() final { return children(); }
+  const LayoutObjectChildList* virtualChildren() const final {
+    return children();
+  }
 
-    void layout() override;
+  PaintLayerType layerTypeRequired() const override { return NormalPaintLayer; }
 
-    bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectMedia || LayoutImage::isOfType(type); }
+  bool canHaveChildren() const final { return true; }
+  bool isChildAllowed(LayoutObject*, const ComputedStyle&) const final;
 
-private:
-    LayoutObjectChildList* virtualChildren() final { return children(); }
-    const LayoutObjectChildList* virtualChildren() const final { return children(); }
+  bool isImage() const final { return false; }
+  void paintReplaced(const PaintInfo&, const LayoutPoint&) const override;
 
-    PaintLayerType layerTypeRequired() const override { return NormalPaintLayer; }
+  bool backgroundShouldAlwaysBeClipped() const final { return false; }
 
-    bool canHaveChildren() const final { return true; }
-    bool isChildAllowed(LayoutObject*, const ComputedStyle&) const final;
+  LayoutUnit computePanelWidth(const LayoutRect& mediaWidth) const;
 
-    bool isImage() const final { return false; }
-    void paintReplaced(const PaintInfo&, const LayoutPoint&) const override;
-
-    bool backgroundShouldAlwaysBeClipped() const final { return false; }
-
-    LayoutObjectChildList m_children;
+  Optional<LayoutUnit> m_lastReportedPanelWidth;
+  LayoutObjectChildList m_children;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutMedia, isMedia());
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutMedia_h
+#endif  // LayoutMedia_h

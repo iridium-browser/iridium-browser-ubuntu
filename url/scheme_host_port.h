@@ -16,6 +16,8 @@ class GURL;
 
 namespace url {
 
+struct Parsed;
+
 // This class represents a (scheme, host, port) tuple extracted from a URL.
 //
 // The primary purpose of this class is to represent relevant network-authority
@@ -86,6 +88,19 @@ class URL_EXPORT SchemeHostPort {
                  base::StringPiece host,
                  uint16_t port);
 
+  // Metadata influencing whether or not the constructor should sanity check
+  // host canonicalization.
+  enum ConstructPolicy { CHECK_CANONICALIZATION, ALREADY_CANONICALIZED };
+
+  // Creates a (scheme, host, port) tuple without performing sanity checking
+  // that the host and port are canonicalized. This should only be used when
+  // converting between already normalized types, and should NOT be used for
+  // IPC.
+  SchemeHostPort(std::string scheme,
+                 std::string host,
+                 uint16_t port,
+                 ConstructPolicy policy);
+
   // Creates a (scheme, host, port) tuple from |url|, as described at
   // https://tools.ietf.org/html/rfc6454#section-4
   //
@@ -111,6 +126,10 @@ class URL_EXPORT SchemeHostPort {
   // serialized as a unique Origin.
   std::string Serialize() const;
 
+  // Efficiently returns what GURL(Serialize()) would return, without needing to
+  // re-parse the URL.
+  GURL GetURL() const;
+
   // Two SchemeHostPort objects are "equal" iff their schemes, hosts, and ports
   // are exact matches.
   //
@@ -124,6 +143,8 @@ class URL_EXPORT SchemeHostPort {
   bool operator<(const SchemeHostPort& other) const;
 
  private:
+  std::string SerializeInternal(url::Parsed* parsed) const;
+
   std::string scheme_;
   std::string host_;
   uint16_t port_;

@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/terminal_private.h"
 #include "chromeos/process_proxy/process_proxy_registry.h"
 #include "content/public/browser/browser_context.h"
@@ -40,18 +42,22 @@ const char kCroshCommand[] = "/usr/bin/crosh";
 // We make stubbed crosh just echo back input.
 const char kStubbedCroshCommand[] = "cat";
 
-const char* GetCroshPath() {
+std::string GetCroshPath() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kCroshCommand))
+    return command_line->GetSwitchValueASCII(switches::kCroshCommand);
+
   if (base::SysInfo::IsRunningOnChromeOS())
-    return kCroshCommand;
-  else
-    return kStubbedCroshCommand;
+    return std::string(kCroshCommand);
+
+  return std::string(kStubbedCroshCommand);
 }
 
-const char* GetProcessCommandForName(const std::string& name) {
+std::string GetProcessCommandForName(const std::string& name) {
   if (name == kCroshName)
     return GetCroshPath();
   else
-    return NULL;
+    return std::string();
 }
 
 void NotifyProcessOutput(content::BrowserContext* browser_context,
@@ -69,10 +75,10 @@ void NotifyProcessOutput(content::BrowserContext* browser_context,
   }
 
   std::unique_ptr<base::ListValue> args(new base::ListValue());
-  args->Append(new base::FundamentalValue(tab_id));
-  args->Append(new base::FundamentalValue(terminal_id));
-  args->Append(new base::StringValue(output_type));
-  args->Append(new base::StringValue(output));
+  args->AppendInteger(tab_id);
+  args->AppendInteger(terminal_id);
+  args->AppendString(output_type);
+  args->AppendString(output);
 
   extensions::EventRouter* event_router =
       extensions::EventRouter::Get(browser_context);
@@ -101,7 +107,7 @@ int GetTabOrWindowSessionId(content::BrowserContext* browser_context,
 namespace extensions {
 
 TerminalPrivateOpenTerminalProcessFunction::
-    TerminalPrivateOpenTerminalProcessFunction() : command_(NULL) {}
+    TerminalPrivateOpenTerminalProcessFunction() {}
 
 TerminalPrivateOpenTerminalProcessFunction::
     ~TerminalPrivateOpenTerminalProcessFunction() {}
@@ -113,7 +119,7 @@ TerminalPrivateOpenTerminalProcessFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   command_ = GetProcessCommandForName(params->process_name);
-  if (!command_)
+  if (command_.empty())
     return RespondNow(Error("Invalid process name."));
 
   content::WebContents* caller_contents = GetSenderWebContents();
@@ -150,12 +156,12 @@ TerminalPrivateOpenTerminalProcessFunction::Run() {
 void TerminalPrivateOpenTerminalProcessFunction::OpenOnFileThread(
     const ProcessOutputCallback& output_callback,
     const OpenProcessCallback& callback) {
-  DCHECK(command_);
+  DCHECK(!command_.empty());
 
   chromeos::ProcessProxyRegistry* registry =
       chromeos::ProcessProxyRegistry::Get();
 
-  int terminal_id = registry->OpenProcess(command_, output_callback);
+  int terminal_id = registry->OpenProcess(command_.c_str(), output_callback);
 
   content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
                                    base::Bind(callback, terminal_id));
@@ -166,12 +172,10 @@ TerminalPrivateSendInputFunction::~TerminalPrivateSendInputFunction() {}
 void TerminalPrivateOpenTerminalProcessFunction::RespondOnUIThread(
     int terminal_id) {
   if (terminal_id < 0) {
-    SetError("Failed to open process.");
-    SendResponse(false);
+    Respond(Error("Failed to open process."));
     return;
   }
-  SetResult(base::MakeUnique<base::FundamentalValue>(terminal_id));
-  SendResponse(true);
+  Respond(OneArgument(base::MakeUnique<base::FundamentalValue>(terminal_id)));
 }
 
 ExtensionFunction::ResponseAction TerminalPrivateSendInputFunction::Run() {
@@ -198,8 +202,7 @@ void TerminalPrivateSendInputFunction::SendInputOnFileThread(
 }
 
 void TerminalPrivateSendInputFunction::RespondOnUIThread(bool success) {
-  SetResult(base::MakeUnique<base::FundamentalValue>(success));
-  SendResponse(true);
+  Respond(OneArgument(base::MakeUnique<base::FundamentalValue>(success)));
 }
 
 TerminalPrivateCloseTerminalProcessFunction::
@@ -233,8 +236,7 @@ void TerminalPrivateCloseTerminalProcessFunction::CloseOnFileThread(
 
 void TerminalPrivateCloseTerminalProcessFunction::RespondOnUIThread(
     bool success) {
-  SetResult(base::MakeUnique<base::FundamentalValue>(success));
-  SendResponse(true);
+  Respond(OneArgument(base::MakeUnique<base::FundamentalValue>(success)));
 }
 
 TerminalPrivateOnTerminalResizeFunction::
@@ -267,8 +269,7 @@ void TerminalPrivateOnTerminalResizeFunction::OnResizeOnFileThread(
 }
 
 void TerminalPrivateOnTerminalResizeFunction::RespondOnUIThread(bool success) {
-  SetResult(base::MakeUnique<base::FundamentalValue>(success));
-  SendResponse(true);
+  Respond(OneArgument(base::MakeUnique<base::FundamentalValue>(success)));
 }
 
 TerminalPrivateAckOutputFunction::~TerminalPrivateAckOutputFunction() {}

@@ -9,6 +9,7 @@
 #include "ipc/ipc_param_traits.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
+#include "remoting/host/desktop_environment_options.h"
 #include "remoting/host/screen_resolution.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_frame.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
@@ -70,8 +71,8 @@ struct ParamTraits<remoting::ScreenResolution> {
 };
 
 template <>
-struct ParamTraits<net::IPAddress> {
-  typedef net::IPAddress param_type;
+struct ParamTraits<net::IPEndPoint> {
+  typedef net::IPEndPoint param_type;
   static void GetSize(base::PickleSizer* s, const param_type& p);
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
@@ -81,9 +82,8 @@ struct ParamTraits<net::IPAddress> {
 };
 
 template <>
-struct ParamTraits<net::IPEndPoint> {
-  typedef net::IPEndPoint param_type;
-  static void GetSize(base::PickleSizer* s, const param_type& p);
+struct ParamTraits<remoting::DesktopEnvironmentOptions> {
+  typedef remoting::DesktopEnvironmentOptions param_type;
   static void Write(base::Pickle* m, const param_type& p);
   static bool Read(const base::Pickle* m,
                    base::PickleIterator* iter,

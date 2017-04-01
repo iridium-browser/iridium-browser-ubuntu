@@ -84,6 +84,8 @@ BASE_SRCS_ALL = struct(
         # Third Party
         "third_party/etc1/*.cpp",
         "third_party/etc1/*.h",
+        "third_party/gif/*.cpp",
+        "third_party/gif/*.h",
         "third_party/ktx/*.cpp",
         "third_party/ktx/*.h",
     ],
@@ -106,6 +108,7 @@ BASE_SRCS_ALL = struct(
         "src/images/*",
         "src/opts/**/*",
         "src/ports/**/*",
+        "src/splicer/*",
         "src/utils/android/**/*",
         "src/utils/mac/**/*",
         "src/utils/SkThreadUtils_win.cpp",  # Windows-only. Move to ports?
@@ -134,7 +137,9 @@ BASE_SRCS_ALL = struct(
 
         # Currently exclude all vulkan specific files
         "src/gpu/vk/*",
-        "src/sksl/**/*",
+
+        # Defines main.
+        "src/sksl/SkSLMain.cpp",
     ],
 )
 
@@ -161,8 +166,9 @@ BASE_SRCS_UNIX = struct(
         # Included in :opts_sse4 library.
         "src/opts/*SSE4*",
         "src/opts/*sse4*",
-        # Included in :opts_avx or :opts_avx2
+        # Included in :opts_avx or :opts_hsw
         "src/opts/*avx*",
+        "src/opts/*hsw*",
         "src/opts/SkBitmapProcState_opts_none.cpp",
         "src/opts/SkBlitMask_opts_none.cpp",
         "src/opts/SkBlitRow_opts_none.cpp",
@@ -174,7 +180,6 @@ BASE_SRCS_UNIX = struct(
         "src/ports/*mozalloc*",
         "src/ports/*nacl*",
         "src/ports/*win*",
-        "src/ports/SkFontConfigInterface_direct_factory.cpp",
         "src/ports/SkFontMgr_custom_directory_factory.cpp",
         "src/ports/SkFontMgr_custom_embedded_factory.cpp",
         "src/ports/SkFontMgr_custom_empty_factory.cpp",
@@ -209,7 +214,6 @@ BASE_SRCS_ANDROID = struct(
         "src/opts/*sse4*",
         "src/opts/*avx*",
         "src/opts/*x86*",
-        "src/opts/SkBitmapProcState_opts_none.cpp",
         "src/opts/SkBlitMask_opts_none.cpp",
         "src/opts/SkBlitRow_opts_none.cpp",
         "src/ports/*CG*",
@@ -246,7 +250,6 @@ BASE_SRCS_IOS = struct(
         "src/utils/mac/*.cpp",
     ],
     exclude = [
-        "src/codec/*Gif*.cpp",
         "src/codec/*Ico*.cpp",
         "src/codec/*Jpeg*.cpp",
         "src/codec/*Webp*.cpp",
@@ -262,7 +265,6 @@ BASE_SRCS_IOS = struct(
         "src/opts/*sse4*",
         "src/opts/*avx*",
         "src/opts/*x86*",
-        "src/opts/SkBitmapProcState_opts_none.cpp",
         "src/opts/SkBlitMask_opts_arm*.cpp",
         "src/opts/SkBlitRow_opts_arm*.cpp",
         "src/ports/*CG*",
@@ -286,7 +288,7 @@ BASE_SRCS_IOS = struct(
 )
 
 ################################################################################
-## SSSE3/SSE4/AVX/AVX2 SRCS
+## SSSE3/SSE4/AVX/HSW SRCS
 ################################################################################
 
 SSSE3_SRCS = struct(
@@ -309,9 +311,9 @@ AVX_SRCS = struct(
     ],
 )
 
-AVX2_SRCS = struct(
+HSW_SRCS = struct(
     include = [
-        "src/opts/*_avx2.cpp",
+        "src/opts/*_hsw.cpp",
     ],
 )
 
@@ -325,7 +327,6 @@ BASE_HDRS = struct(
     ],
     exclude = PRIVATE_HDRS_INCLUDE_LIST + [
         # Not used.
-        "include/animator/**/*",
         "include/views/**/*",
     ],
 )
@@ -340,7 +341,7 @@ BASE_DEPS_UNIX = [
     ":opts_ssse3",
     ":opts_sse4",
     ":opts_avx",
-    ":opts_avx2",
+    ":opts_hsw",
 ]
 
 BASE_DEPS_ANDROID = []
@@ -380,8 +381,10 @@ INCLUDES = [
     "src/ports",
     "src/pdf",
     "src/sfnt",
+    "src/sksl",
     "src/utils",
     "third_party/etc1",
+    "third_party/gif",
     "third_party/ktx",
 ]
 
@@ -430,15 +433,11 @@ DM_SRCS_ALL = struct(
         "tools/timer/*.h",
     ],
     exclude = [
-        "dm/DMSrcSinkAndroid.cpp",  # Android-only.
         "tests/FontMgrAndroidParserTest.cpp",  # Android-only.
-        "tests/PathOpsSkpClipTest.cpp",  # Alternate main.
         "tests/skia_test.cpp",  # Old main.
         "tests/SkpSkGrTest.cpp",  # Alternate main.
-        "tests/SkSL*.cpp",  # Excluded along with Vulkan.
         "tests/SVGDeviceTest.cpp",
         "tools/gpu/gl/angle/*",
-        "tools/gpu/gl/command_buffer/*",
         "tools/gpu/gl/egl/*",
         "tools/gpu/gl/glx/*",
         "tools/gpu/gl/iOS/*",
@@ -458,8 +457,6 @@ DM_SRCS_UNIX = struct(
 
 DM_SRCS_ANDROID = struct(
     include = [
-        # Depends on Android HWUI library that is not available in google3.
-        #"dm/DMSrcSinkAndroid.cpp",
         "tests/FontMgrAndroidParserTest.cpp",
         # TODO(benjaminwagner): Figure out how to compile with EGL.
         "tools/gpu/gl/CreatePlatformGLContext_none.cpp",
@@ -483,6 +480,7 @@ DM_INCLUDES = [
     "src/effects",
     "src/effects/gradients",
     "src/fonts",
+    "src/images",
     "src/pathops",
     "src/pipe/utils",
     "src/ports",
@@ -498,7 +496,7 @@ DM_INCLUDES = [
 ## DM_ARGS
 ################################################################################
 
-def DM_ARGS(base_dir, asan):
+def DM_ARGS(asan):
   source = ["tests", "gm", "image"]
   # TODO(benjaminwagner): f16 and serialize-8888 fail.
   config = ["565", "8888", "pdf", "srgb", "tiles_rt", "pic"]
@@ -516,14 +514,12 @@ def DM_ARGS(base_dir, asan):
       "~Stream",
   ]
   if asan:
-    # Running all sources and configs under ASAN causes the test to exceed
-    # "large" size and time out.
-    source = ["tests", "gm"]
-    config = ["8888"]
+    # The ASAN we use with Bazel has some strict checks, so omit tests that
+    # trigger them.
     match += [
         "~clippedcubic2",
         "~conicpaths",
-        "~gradients_2pt_conical",
+        "~^gradients",
         "~Math",
         "~Matrix",
         "~PathOpsCubic",
@@ -534,15 +530,9 @@ def DM_ARGS(base_dir, asan):
         "~PathOpsTightBoundsQuads",
         "~Point",
         "~sk_linear_to_srgb",
+        "~small_color_stop",
     ]
-  return [
-      "--src %s" % " ".join(source),
-      "--config %s" % " ".join(config),
-      "--verbose",
-      "--match %s" % " ".join(match),
-      "--resourcePath %s/resources" % base_dir,
-      "--images %s/resources" % base_dir,
-  ]
+  return ["--src"] + source + ["--config"] + config + ["--match"] + match
 
 ################################################################################
 ## COPTS
@@ -567,9 +557,8 @@ DEFINES_UNIX = [
     "PNG_SKIP_SETJMP_CHECK",
     "SK_BUILD_FOR_UNIX",
     "SK_SAMPLES_FOR_X",
-    "SK_SFNTLY_SUBSETTER",
+    "SK_PDF_USE_SFNTLY",
     "SK_CODEC_DECODES_RAW",
-    "SK_HAS_GIF_LIBRARY",
     "SK_HAS_JPEG_LIBRARY",
     "SK_HAS_PNG_LIBRARY",
     "SK_HAS_WEBP_LIBRARY",
@@ -578,7 +567,6 @@ DEFINES_UNIX = [
 DEFINES_ANDROID = [
     "SK_BUILD_FOR_ANDROID",
     "SK_CODEC_DECODES_RAW",
-    "SK_HAS_GIF_LIBRARY",
     "SK_HAS_JPEG_LIBRARY",
     "SK_HAS_PNG_LIBRARY",
     "SK_HAS_WEBP_LIBRARY",
@@ -598,20 +586,11 @@ DEFINES_ALL = [
     # Turn on a few Google3-specific build fixes.
     "GOOGLE3",
     # Staging flags for API changes
-    "SK_SUPPORT_LEGACY_ACCESSBITMAP",
-    "SK_SUPPORT_LEGACY_BITMAP_GETTEXTURE",
-    "SK_SUPPORT_LEGACY_COLORFILTER_PTR",
-    "SK_SUPPORT_LEGACY_CREATESHADER_PTR",
-    "SK_SUPPORT_LEGACY_IMAGEFACTORY",
-    "SK_SUPPORT_LEGACY_IMAGEFILTER_PTR",
-    "SK_SUPPORT_LEGACY_MASKFILTER_PTR",
-    "SK_SUPPORT_LEGACY_MINOR_EFFECT_PTR",
-    "SK_SUPPORT_LEGACY_NEW_SURFACE_API",
-    "SK_SUPPORT_LEGACY_PATHEFFECT_PTR",
-    "SK_SUPPORT_LEGACY_PICTURE_PTR",
-    "SK_SUPPORT_LEGACY_TYPEFACE_PTR",
-    "SK_SUPPORT_LEGACY_XFERMODE_PTR",
-    "SK_SUPPORT_LEGACY_PICTUREINSTALLPIXELREF",
+    # Temporarily Disable analytic AA for Google3
+    "SK_NO_ANALYTIC_AA",
+    "SK_SUPPORT_LEGACY_BITMAP_SETPIXELREF",
+    "SK_SUPPORT_LEGACY_CLIPOP_EXOTIC_NAMES",
+    "SK_SUPPORT_LEGACY_CANVAS_GETCLIPSTACK",
 ]
 
 ################################################################################

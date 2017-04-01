@@ -8,17 +8,20 @@
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/ssl/chrome_security_state_model_client.h"
+#include "chrome/browser/ssl/security_state_tab_helper.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/prefs/pref_service.h"
-#include "content/public/browser/cert_store.h"
+#include "components/security_state/core/security_state.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/ssl_status.h"
+#include "content/public/common/url_constants.h"
+#include "extensions/common/constants.h"
+#include "ui/gfx/vector_icons_public.h"
 
 ChromeToolbarModelDelegate::ChromeToolbarModelDelegate() {}
 
@@ -69,26 +72,53 @@ bool ChromeToolbarModelDelegate::ShouldDisplayURL() const {
   return !search::IsInstantNTP(GetActiveWebContents());
 }
 
-security_state::SecurityStateModel::SecurityLevel
-ChromeToolbarModelDelegate::GetSecurityLevel() const {
+security_state::SecurityLevel ChromeToolbarModelDelegate::GetSecurityLevel()
+    const {
   content::WebContents* web_contents = GetActiveWebContents();
   // If there is no active WebContents (which can happen during toolbar
   // initialization), assume no security style.
   if (!web_contents)
-    return security_state::SecurityStateModel::NONE;
-  auto* client = ChromeSecurityStateModelClient::FromWebContents(web_contents);
-  return client->GetSecurityInfo().security_level;
+    return security_state::NONE;
+  auto* helper = SecurityStateTabHelper::FromWebContents(web_contents);
+  security_state::SecurityInfo security_info;
+  helper->GetSecurityInfo(&security_info);
+  return security_info.security_level;
 }
 
 scoped_refptr<net::X509Certificate> ChromeToolbarModelDelegate::GetCertificate()
     const {
-  scoped_refptr<net::X509Certificate> cert;
   content::NavigationEntry* entry = GetNavigationEntry();
-  if (entry) {
-    content::CertStore::GetInstance()->RetrieveCert(entry->GetSSL().cert_id,
-                                                    &cert);
-  }
-  return cert;
+  if (!entry)
+    return scoped_refptr<net::X509Certificate>();
+  return entry->GetSSL().certificate;
+}
+
+bool ChromeToolbarModelDelegate::FailsMalwareCheck() const {
+  content::WebContents* web_contents = GetActiveWebContents();
+  // If there is no active WebContents (which can happen during toolbar
+  // initialization), so nothing can fail.
+  if (!web_contents)
+    return false;
+  security_state::SecurityInfo security_info;
+  SecurityStateTabHelper::FromWebContents(web_contents)
+      ->GetSecurityInfo(&security_info);
+  return security_info.malicious_content_status !=
+         security_state::MALICIOUS_CONTENT_STATUS_NONE;
+}
+
+gfx::VectorIconId ChromeToolbarModelDelegate::GetVectorIconOverride() const {
+#if !defined(OS_ANDROID)
+  GURL url;
+  GetURL(&url);
+
+  if (url.SchemeIs(content::kChromeUIScheme))
+    return gfx::VectorIconId::LOCATION_BAR_PRODUCT;
+
+  if (url.SchemeIs(extensions::kExtensionScheme))
+    return gfx::VectorIconId::OMNIBOX_EXTENSION_APP;
+#endif
+
+  return gfx::VectorIconId::VECTOR_ICON_NONE;
 }
 
 content::NavigationController*

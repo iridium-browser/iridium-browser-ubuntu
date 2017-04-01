@@ -14,8 +14,8 @@
 #include "extensions/renderer/scoped_web_frame.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/script_context_set.h"
+#include "extensions/renderer/test_extensions_renderer_client.h"
 #include "gin/function_template.h"
-#include "gin/public/context_holder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "v8/include/v8.h"
@@ -43,11 +43,10 @@ class GCCallbackTest : public testing::Test {
   }
 
   ScriptContext* RegisterScriptContext() {
-    // No extension group or world ID.
+    // No world ID.
     return script_context_set_.Register(
         web_frame_.frame(),
-        v8::Local<v8::Context>::New(v8::Isolate::GetCurrent(), v8_context_), 0,
-        0);
+        v8::Local<v8::Context>::New(v8::Isolate::GetCurrent(), v8_context_), 0);
   }
 
   void RequestGarbageCollection() {
@@ -59,25 +58,26 @@ class GCCallbackTest : public testing::Test {
   void SetUp() override {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     v8::HandleScope handle_scope(isolate);
-    v8::Local<v8::Context> local_v8_context = v8::Context::New(isolate);
+    // We need a context that has been initialized by blink; grab the main world
+    // context from the web frame.
+    v8::Local<v8::Context> local_v8_context =
+        web_frame_.frame()->mainWorldScriptContext();
+    DCHECK(!local_v8_context.IsEmpty());
     v8_context_.Reset(isolate, local_v8_context);
-    // ScriptContexts rely on gin.
-    gin_context_holder_.reset(new gin::ContextHolder(isolate));
-    gin_context_holder_->SetContext(local_v8_context);
   }
 
   void TearDown() override {
-    gin_context_holder_.reset();
     v8_context_.Reset();
     RequestGarbageCollection();
   }
 
   base::MessageLoop message_loop_;
   ScopedWebFrame web_frame_;  // (this will construct the v8::Isolate)
+  // ExtensionsRendererClient is a dependency of ScriptContextSet.
+  TestExtensionsRendererClient extensions_renderer_client_;
   ExtensionIdSet active_extensions_;
   ScriptContextSet script_context_set_;
   v8::Global<v8::Context> v8_context_;
-  std::unique_ptr<gin::ContextHolder> gin_context_holder_;
 
   DISALLOW_COPY_AND_ASSIGN(GCCallbackTest);
 };

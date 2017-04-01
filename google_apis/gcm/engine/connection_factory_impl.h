@@ -12,10 +12,12 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "google_apis/gcm/engine/connection_event_tracker.h"
 #include "google_apis/gcm/engine/connection_handler.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "net/base/backoff_entry.h"
 #include "net/base/network_change_notifier.h"
+#include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/client_socket_handle.h"
@@ -28,7 +30,6 @@ class NetLog;
 
 namespace gcm {
 
-class ConnectionHandlerImpl;
 class GCMStatsRecorder;
 
 class GCM_EXPORT ConnectionFactoryImpl :
@@ -78,11 +79,9 @@ class GCM_EXPORT ConnectionFactoryImpl :
   net::IPEndPoint GetPeerIP();
 
  protected:
-  // Implementation of Connect(..). If not in backoff, uses |login_request_|
-  // in attempting a connection/handshake. On connection/handshake failure, goes
-  // into backoff.
+  // Initiate the connection to the GCM server.
   // Virtual for testing.
-  virtual void ConnectImpl();
+  virtual void StartConnection();
 
   // Helper method for initalizing the connection hander.
   // Virtual for testing.
@@ -112,9 +111,17 @@ class GCM_EXPORT ConnectionFactoryImpl :
   void ConnectionHandlerCallback(int result);
 
  private:
+  friend class ConnectionFactoryImplTest;
+
+  ConnectionEventTracker* GetEventTrackerForTesting();
+
   // Helper method for checking backoff and triggering a connection as
   // necessary.
   void ConnectWithBackoff();
+
+  // Implementation of Connect(..). If not in backoff attempts a connection and
+  // handshake. On connection/handshake failure, goes into backoff.
+  void ConnectImpl();
 
   // Proxy resolution and connection functions.
   void OnProxyResolveDone(int status);
@@ -125,9 +132,14 @@ class GCM_EXPORT ConnectionFactoryImpl :
   // Closes the local socket if one is present, and resets connection handler.
   void CloseSocket();
 
-  // Updates the GCM Network Session's HttpAuthCache with the HTTP Network
-  // Session's cache, if available.
-  void RebuildNetworkSessionAuthCache();
+  // Updates the GCM Network Session's with current data from HTTP Network
+  // Session's, if available.
+  // Specifically, HttpAuthCache and IsQuicEnabled are updated.
+  void UpdateFromHttpNetworkSession();
+
+  // The tracker will maintain a list of all connection attempts with GCM,
+  // whether they succeeded, and their duration.
+  ConnectionEventTracker event_tracker_;
 
   // The MCS endpoints to make connections to, sorted in order of priority.
   const std::vector<GURL> mcs_endpoints_;
@@ -146,7 +158,7 @@ class GCM_EXPORT ConnectionFactoryImpl :
   // credentials. If nullptr, is ignored.
   net::HttpNetworkSession* http_network_session_;
   // Net log to use in connection attempts.
-  net::BoundNetLog bound_net_log_;
+  net::NetLogWithSource net_log_;
   // The current PAC request, if one exists. Owned by the proxy service.
   net::ProxyService::PacRequest* pac_request_;
   // The current proxy info.
@@ -172,10 +184,10 @@ class GCM_EXPORT ConnectionFactoryImpl :
   // client is informed of a valid connection type.
   bool waiting_for_network_online_;
 
-  // Whether login successfully completed after the connection was established.
-  // If a connection reset happens while attempting to log in, the current
-  // backoff entry is reused (after incrementing with a new failure).
-  bool logging_in_;
+  // Whether handshake is in progress after the connection was established. If
+  // a connection reset happens while attempting to complete the handshake, the
+  // current backoff entry is reused (after incrementing with a new failure).
+  bool handshake_in_progress_;
 
   // The time of the last login completion. Used for calculating whether to
   // restore a previous backoff entry and for measuring uptime.

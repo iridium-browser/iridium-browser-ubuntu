@@ -13,8 +13,10 @@
 #endif
 
 #include "base/numerics/safe_math.h"
+#include "base/numerics/saturated_arithmetic.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
+#include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 namespace gfx {
@@ -56,7 +58,8 @@ base::CheckedNumeric<int> Size::GetCheckedArea() const {
 }
 
 void Size::Enlarge(int grow_width, int grow_height) {
-  SetSize(width() + grow_width, height() + grow_height);
+  SetSize(base::SaturatedAddition(width(), grow_width),
+          base::SaturatedAddition(height(), grow_height));
 }
 
 void Size::SetToMin(const Size& other) {

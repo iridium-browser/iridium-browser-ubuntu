@@ -5,15 +5,13 @@
 #ifndef COMPONENTS_DOMAIN_RELIABILITY_DISPATCHER_H_
 #define COMPONENTS_DOMAIN_RELIABILITY_DISPATCHER_H_
 
+#include <memory>
 #include <set>
 
 #include "base/callback_forward.h"
+#include "base/macros.h"
 #include "base/time/time.h"
 #include "components/domain_reliability/domain_reliability_export.h"
-
-namespace tracked_objects {
-class Location;
-}  // namespace tracked_objects
 
 namespace domain_reliability {
 
@@ -37,8 +35,14 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityDispatcher {
                     base::TimeDelta min_delay,
                     base::TimeDelta max_delay);
 
-  // Runs all tasks whose minimum delay has already passed.
+  // Runs all existing tasks whose minimum delay has already passed. Does not
+  // run tasks added by those existing tasks, even if their minimum delay has
+  // already passed.
   void RunEligibleTasks();
+
+  // Runs all waiting or eligible tasks, regardless of whether their minimum
+  // delay has passed.
+  void RunAllTasksForTesting();
 
  private:
   struct Task;
@@ -54,8 +58,10 @@ class DOMAIN_RELIABILITY_EXPORT DomainReliabilityDispatcher {
   void RunAndDeleteTask(Task* task);
 
   MockableTime* time_;
-  std::set<Task*> tasks_;
+  std::set<std::unique_ptr<Task>> tasks_;
   std::set<Task*> eligible_tasks_;
+
+  DISALLOW_COPY_AND_ASSIGN(DomainReliabilityDispatcher);
 };
 
 }  // namespace domain_reliability

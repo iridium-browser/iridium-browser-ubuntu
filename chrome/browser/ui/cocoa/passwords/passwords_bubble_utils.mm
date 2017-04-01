@@ -6,12 +6,11 @@
 
 #include "base/mac/scoped_nsobject.h"
 #include "base/strings/sys_string_conversions.h"
-#include "chrome/browser/ui/chrome_style.h"
+#include "chrome/browser/ui/cocoa/chrome_style.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/cocoa/controls/hyperlink_text_view.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/resources/grit/ui_resources.h"
 
 namespace {
 
@@ -74,6 +73,7 @@ void InitLabel(NSTextField* textField, const base::string16& text) {
 std::pair<CGFloat, CGFloat> GetResizedColumns(
     CGFloat maxWidth,
     std::pair<CGFloat, CGFloat> columnsWidth) {
+  DCHECK_GE(maxWidth, kItemLabelSpacing + kMinUsernameSize);
   // Free space can be negative.
   CGFloat freeSpace =
       maxWidth - (columnsWidth.first + columnsWidth.second + kItemLabelSpacing);
@@ -84,9 +84,11 @@ std::pair<CGFloat, CGFloat> GetResizedColumns(
   // Make sure that the sizes are nonnegative.
   CGFloat firstColumnPercent =
       columnsWidth.first / (columnsWidth.first + columnsWidth.second);
+  CGFloat firstColumnSize = std::max(
+      kMinUsernameSize, columnsWidth.first + freeSpace * firstColumnPercent);
   return std::make_pair(
-      columnsWidth.first + freeSpace * firstColumnPercent,
-      columnsWidth.second + freeSpace * (1 - firstColumnPercent));
+      firstColumnSize,
+      maxWidth - kItemLabelSpacing - firstColumnSize);
 }
 
 NSSecureTextField* PasswordLabel(const base::string16& text) {

@@ -62,9 +62,10 @@
 namespace {
 
 const char* const kCommonSwitches[] = {
+  "disable-infobars",
   "disable-popup-blocking",
   "ignore-certificate-errors",
-  "metrics-recording-only"
+  "metrics-recording-only",
 };
 
 const char* const kDesktopSwitches[] = {
@@ -76,18 +77,17 @@ const char* const kDesktopSwitches[] = {
   "disable-web-resources",
   "safebrowsing-disable-auto-update",
   "disable-client-side-phishing-detection",
-  "disable-component-update",
   "disable-default-apps",
   "enable-logging",
   "log-level=0",
   "password-store=basic",
   "use-mock-keychain",
-  "test-type=webdriver"
+  "test-type=webdriver",
 };
 
 const char* const kAndroidSwitches[] = {
   "disable-fre",
-  "enable-remote-debugging"
+  "enable-remote-debugging",
 };
 
 #if defined(OS_LINUX)
@@ -151,8 +151,8 @@ Status PrepareCommandLine(uint16_t port,
     command.AppendArg("data:,");
     if (!user_data_dir->CreateUniqueTempDir())
       return Status(kUnknownError, "cannot create temp dir for user data dir");
-    switches.SetSwitch("user-data-dir", user_data_dir->path().value());
-    user_data_dir_path = user_data_dir->path();
+    switches.SetSwitch("user-data-dir", user_data_dir->GetPath().value());
+    user_data_dir_path = user_data_dir->GetPath();
   }
 
   Status status = internal::PrepareUserDataDir(user_data_dir_path,
@@ -166,10 +166,8 @@ Status PrepareCommandLine(uint16_t port,
                   "cannot create temp dir for unpacking extensions");
   }
   status = internal::ProcessExtensions(capabilities.extensions,
-                                       extension_dir->path(),
-                                       true,
-                                       &switches,
-                                       extension_bg_pages);
+                                       extension_dir->GetPath(), true,
+                                       &switches, extension_bg_pages);
   if (status.IsError())
     return status;
   switches.AppendToCommandLine(&command);
@@ -307,7 +305,8 @@ Status LaunchRemoteChromeSession(
 
   chrome->reset(new ChromeRemoteImpl(std::move(devtools_http_client),
                                      std::move(devtools_websocket_client),
-                                     *devtools_event_listeners));
+                                     *devtools_event_listeners,
+                                     capabilities.page_load_strategy));
   return Status(kOk);
 }
 
@@ -318,7 +317,8 @@ Status LaunchDesktopChrome(
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
     ScopedVector<DevToolsEventListener>* devtools_event_listeners,
-    std::unique_ptr<Chrome>* chrome) {
+    std::unique_ptr<Chrome>* chrome,
+    bool w3c_compliant) {
   base::CommandLine command(base::CommandLine::NO_PROGRAM);
   base::ScopedTempDir user_data_dir;
   base::ScopedTempDir extension_dir;
@@ -372,7 +372,7 @@ Status LaunchDesktopChrome(
   }
 #elif defined(OS_WIN)
   if (!SwitchToUSKeyboardLayout())
-    VLOG(0) << "Can not set to US keyboard layout - Some keycodes may be"
+    VLOG(0) << "Cannot switch to US keyboard layout - some keys may be "
         "interpreted incorrectly";
 #endif
 
@@ -441,16 +441,23 @@ Status LaunchDesktopChrome(
                  << status.message();
   }
 
-  std::unique_ptr<ChromeDesktopImpl> chrome_desktop(new ChromeDesktopImpl(
-      std::move(devtools_http_client), std::move(devtools_websocket_client),
-      *devtools_event_listeners, std::move(port_reservation),
-      std::move(process), command, &user_data_dir, &extension_dir,
-      capabilities.network_emulation_enabled));
+  std::unique_ptr<ChromeDesktopImpl> chrome_desktop(
+      new ChromeDesktopImpl(std::move(devtools_http_client),
+                            std::move(devtools_websocket_client),
+                            *devtools_event_listeners,
+                            std::move(port_reservation),
+                            capabilities.page_load_strategy,
+                            std::move(process),
+                            command,
+                            &user_data_dir,
+                            &extension_dir,
+                            capabilities.network_emulation_enabled));
   for (size_t i = 0; i < extension_bg_pages.size(); ++i) {
     VLOG(0) << "Waiting for extension bg page load: " << extension_bg_pages[i];
     std::unique_ptr<WebView> web_view;
     Status status = chrome_desktop->WaitForPageToLoad(
-        extension_bg_pages[i], base::TimeDelta::FromSeconds(10), &web_view);
+        extension_bg_pages[i], base::TimeDelta::FromSeconds(10),
+        &web_view, w3c_compliant);
     if (status.IsError()) {
       return Status(kUnknownError,
                     "failed to wait for extension background page to load: " +
@@ -520,10 +527,12 @@ Status LaunchAndroidChrome(
                  << status.message();
   }
 
-  chrome->reset(new ChromeAndroidImpl(
-      std::move(devtools_http_client), std::move(devtools_websocket_client),
-      *devtools_event_listeners, std::move(port_reservation),
-      std::move(device)));
+  chrome->reset(new ChromeAndroidImpl(std::move(devtools_http_client),
+                                      std::move(devtools_websocket_client),
+                                      *devtools_event_listeners,
+                                      std::move(port_reservation),
+                                      capabilities.page_load_strategy,
+                                      std::move(device)));
   return Status(kOk);
 }
 
@@ -537,7 +546,8 @@ Status LaunchChrome(
     PortManager* port_manager,
     const Capabilities& capabilities,
     ScopedVector<DevToolsEventListener>* devtools_event_listeners,
-    std::unique_ptr<Chrome>* chrome) {
+    std::unique_ptr<Chrome>* chrome,
+    bool w3c_compliant) {
   if (capabilities.IsRemoteBrowser()) {
     return LaunchRemoteChromeSession(
         context_getter, socket_factory,
@@ -569,7 +579,8 @@ Status LaunchChrome(
                     port_status);
     return LaunchDesktopChrome(context_getter, port,
                                std::move(port_reservation), socket_factory,
-                               capabilities, devtools_event_listeners, chrome);
+                               capabilities, devtools_event_listeners, chrome,
+                               w3c_compliant);
   }
 }
 
@@ -666,7 +677,7 @@ Status ProcessExtension(const std::string& extension,
   base::ScopedTempDir temp_crx_dir;
   if (!temp_crx_dir.CreateUniqueTempDir())
     return Status(kUnknownError, "cannot create temp dir");
-  base::FilePath extension_crx = temp_crx_dir.path().AppendASCII("temp.crx");
+  base::FilePath extension_crx = temp_crx_dir.GetPath().AppendASCII("temp.crx");
   int size = static_cast<int>(decoded_extension.length());
   if (base::WriteFile(extension_crx, decoded_extension.c_str(), size) !=
       size) {
@@ -767,10 +778,10 @@ Status ProcessExtensions(const std::vector<std::string>& extensions,
     Status status = UnpackAutomationExtension(temp_dir, &automation_extension);
     if (status.IsError())
       return status;
-#if defined(OS_WIN)
-    // On stable channel Chrome for Windows, a "Disable developer mode
-    // extensions" dialog appears for the automation extension. Suppress this by
-    // loading it as a component extension.
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    // On Chrome for Windows and Mac, a "Disable developer mode extensions"
+    // dialog appears for the automation extension. Suppress this by loading
+    // it as a component extension.
     UpdateExtensionSwitch(switches, "load-component-extension",
                           automation_extension.value());
 #else

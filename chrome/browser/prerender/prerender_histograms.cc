@@ -7,17 +7,59 @@
 #include <string>
 
 #include "base/format_macros.h"
+#include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_util.h"
-
-using predictors::AutocompleteActionPredictor;
+#include "net/http/http_cache.h"
 
 namespace prerender {
 
 namespace {
+
+// This enum is used to define the buckets for the
+// "Prerender.NoStatePrefetchResourceCount" histogram family.
+// Hence, existing enumerated constants should never be deleted or reordered,
+// and new constants should only be appended at the end of the enumeration.
+enum NoStatePrefetchResponseType {
+  NO_STORE = 1 << 0,
+  REDIRECT = 1 << 1,
+  MAIN_RESOURCE = 1 << 2,
+  NO_STATE_PREFETCH_RESPONSE_TYPE_COUNT = 1 << 3
+};
+
+int GetResourceType(bool is_main_resource, bool is_redirect, bool is_no_store) {
+  return (is_no_store * NO_STORE) + (is_redirect * REDIRECT) +
+         (is_main_resource * MAIN_RESOURCE);
+}
+
+// Similar to UMA_HISTOGRAM_ENUMERATION but allows a dynamic histogram name.
+// Records a sample such as 0 <= sample < bucket_count, in a histogram with
+// |bucket_count| buckets of width 1 each.
+void RecordHistogramEnum(const std::string& histogram_name,
+                         base::HistogramBase::Sample sample,
+                         base::HistogramBase::Sample bucket_count) {
+  DCHECK_LT(sample, bucket_count);
+  base::HistogramBase* histogram_pointer = base::LinearHistogram::FactoryGet(
+      histogram_name, 1, bucket_count, bucket_count + 1,
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+  histogram_pointer->Add(sample);
+}
+
+// Similar to UMA_HISTOGRAM_CUSTOM_TIMES but allows a dynamic histogram name.
+void RecordHistogramTime(const std::string& histogram_name,
+                         base::TimeDelta time_min,
+                         base::TimeDelta time_max,
+                         base::TimeDelta sample,
+                         base::HistogramBase::Sample bucket_count) {
+  base::HistogramBase* histogram_pointer = base::Histogram::FactoryTimeGet(
+      histogram_name, time_min, time_max, bucket_count,
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+  histogram_pointer->AddTime(sample);
+}
 
 // Time window for which we will record windowed PLTs from the last observed
 // link rel=prefetch tag. This is not intended to be the same as the prerender
@@ -70,6 +112,10 @@ std::string GetHistogramName(Origin origin, bool is_wash,
 
 bool OriginIsOmnibox(Origin origin) {
   return origin == ORIGIN_OMNIBOX;
+}
+
+const char* FirstContentfulPaintHiddenName(bool was_hidden) {
+  return was_hidden ? ".Hidden" : ".Visible";
 }
 
 }  // namespace
@@ -153,8 +199,7 @@ void PrerenderHistograms::RecordPrerender(Origin origin, const GURL& url) {
 void PrerenderHistograms::RecordPrerenderStarted(Origin origin) const {
   if (OriginIsOmnibox(origin)) {
     UMA_HISTOGRAM_ENUMERATION(
-        base::StringPrintf("Prerender.OmniboxPrerenderCount%s",
-                           PrerenderManager::GetModeString()), 1, 2);
+        "Prerender.OmniboxPrerenderCount", 1, 2);
   }
 }
 
@@ -170,8 +215,7 @@ void PrerenderHistograms::RecordConcurrency(size_t prerender_count) const {
 void PrerenderHistograms::RecordUsedPrerender(Origin origin) const {
   if (OriginIsOmnibox(origin)) {
     UMA_HISTOGRAM_ENUMERATION(
-        base::StringPrintf("Prerender.OmniboxNavigationsUsedPrerenderCount%s",
-                           PrerenderManager::GetModeString()), 1, 2);
+        "Prerender.OmniboxNavigationsUsedPrerenderCount", 1, 2);
   }
 }
 
@@ -202,10 +246,6 @@ base::TimeTicks PrerenderHistograms::GetCurrentTimeTicks() const {
 // (all prefixed PerceivedPLT)
 // PerceivedPLT -- Perceived Pageloadtimes (PPLT) for all pages in the group.
 // ...Windowed -- PPLT for pages in the 30s after a prerender is created.
-// ...Matched -- A prerendered page that was swapped in.  In the NoUse
-// and Control group cases, while nothing ever gets swapped in, we do keep
-// track of what would be prerendered and would be swapped in -- and those
-// cases are what is classified as Match for these groups.
 // ...FirstAfterMiss -- First page to finish loading after a prerender, which
 // is different from the page that was prerendered.
 // ...FirstAfterMissNonOverlapping -- Same as FirstAfterMiss, but only
@@ -231,15 +271,10 @@ void PrerenderHistograms::RecordPerceivedPageLoadTime(
   if (within_window)
     RECORD_PLT("PerceivedPLTWindowed", perceived_page_load_time);
   if (navigation_type != NAVIGATION_TYPE_NORMAL) {
-    DCHECK(navigation_type == NAVIGATION_TYPE_WOULD_HAVE_BEEN_PRERENDERED ||
-           navigation_type == NAVIGATION_TYPE_PRERENDERED);
-    RECORD_PLT("PerceivedPLTMatchedComplete", perceived_page_load_time);
-    if (navigation_type == NAVIGATION_TYPE_PRERENDERED)
-      RECORD_PLT("PerceivedPLTMatched", perceived_page_load_time);
+    DCHECK(navigation_type == NAVIGATION_TYPE_PRERENDERED);
     seen_any_pageload_ = true;
     seen_pageload_started_after_prerender_ = true;
   } else if (within_window) {
-    RECORD_PLT("PerceivedPLTWindowNotMatched", perceived_page_load_time);
     if (!is_google_url) {
       bool recorded_any = false;
       bool recorded_non_overlapping = false;
@@ -269,6 +304,16 @@ void PrerenderHistograms::RecordPerceivedPageLoadTime(
       }
     }
   }
+}
+
+void PrerenderHistograms::RecordPerceivedFirstContentfulPaintStatus(
+    Origin origin,
+    bool successful,
+    bool was_hidden) {
+  base::UmaHistogramBoolean(
+      GetHistogramName(origin, IsOriginWash(), "PerceivedTTFCPRecorded") +
+          FirstContentfulPaintHiddenName(was_hidden),
+      successful);
 }
 
 void PrerenderHistograms::RecordPageLoadTimeNotSwappedIn(
@@ -356,7 +401,7 @@ void PrerenderHistograms::RecordFinalStatus(
 void PrerenderHistograms::RecordNetworkBytes(Origin origin,
                                              bool used,
                                              int64_t prerender_bytes,
-                                             int64_t profile_bytes) {
+                                             int64_t profile_bytes) const {
   const int kHistogramMin = 1;
   const int kHistogramMax = 100000000;  // 100M.
   const int kBucketCount = 50;
@@ -383,6 +428,68 @@ void PrerenderHistograms::RecordNetworkBytes(Origin origin,
         UMA_HISTOGRAM_CUSTOM_COUNTS(
             name, prerender_bytes, kHistogramMin, kHistogramMax, kBucketCount));
   }
+}
+
+void PrerenderHistograms::RecordPrefetchResponseReceived(
+    Origin origin,
+    bool is_main_resource,
+    bool is_redirect,
+    bool is_no_store) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  int sample = GetResourceType(is_main_resource, is_redirect, is_no_store);
+  std::string histogram_name =
+      GetHistogramName(origin, IsOriginWash(), "NoStatePrefetchResponseTypes");
+  RecordHistogramEnum(histogram_name, sample,
+                      NO_STATE_PREFETCH_RESPONSE_TYPE_COUNT);
+}
+
+void PrerenderHistograms::RecordPrefetchRedirectCount(
+    Origin origin,
+    bool is_main_resource,
+    int redirect_count) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  const int kMaxRedirectCount = 10;
+  std::string histogram_base_name = base::StringPrintf(
+      "NoStatePrefetch%sResourceRedirects", is_main_resource ? "Main" : "Sub");
+  std::string histogram_name =
+      GetHistogramName(origin, IsOriginWash(), histogram_base_name);
+  RecordHistogramEnum(histogram_name, redirect_count, kMaxRedirectCount);
+}
+
+void PrerenderHistograms::RecordPrefetchFirstContentfulPaintTime(
+    Origin origin,
+    bool is_no_store,
+    bool was_hidden,
+    base::TimeDelta time,
+    base::TimeDelta prefetch_age) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (!prefetch_age.is_zero()) {
+    DCHECK_NE(origin, ORIGIN_NONE);
+    RecordHistogramTime(GetHistogramName(origin, IsOriginWash(), "PrefetchAge"),
+                        base::TimeDelta::FromMilliseconds(10),
+                        base::TimeDelta::FromMinutes(30), prefetch_age, 50);
+  }
+
+  std::string histogram_base_name;
+  if (prefetch_age.is_zero()) {
+    histogram_base_name = "PrefetchTTFCP.Reference";
+  } else {
+    histogram_base_name = prefetch_age < base::TimeDelta::FromMinutes(
+                                             net::HttpCache::kPrefetchReuseMins)
+                              ? "PrefetchTTFCP.Warm"
+                              : "PrefetchTTFCP.Cold";
+  }
+
+  histogram_base_name += is_no_store ? ".NoStore" : ".Cacheable";
+  histogram_base_name += FirstContentfulPaintHiddenName(was_hidden);
+  std::string histogram_name =
+      GetHistogramName(origin, IsOriginWash(), histogram_base_name);
+
+  RecordHistogramTime(histogram_name, base::TimeDelta::FromMilliseconds(10),
+                      base::TimeDelta::FromMinutes(2), time, 50);
 }
 
 bool PrerenderHistograms::IsOriginWash() const {

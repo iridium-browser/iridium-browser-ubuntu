@@ -14,6 +14,7 @@
 
 #include "vpx/vpx_encoder.h"
 #include "vpx/vp8cx.h"
+#include "vp9/common/vp9_common.h"
 
 #include "../tools_common.h"
 #include "../video_writer.h"
@@ -62,10 +63,12 @@ int main(int argc, char **argv) {
   int frame_count = 0;
   vpx_image_t raw;
   vpx_codec_err_t res;
-  VpxVideoInfo info = { 0 };
+  VpxVideoInfo info;
   VpxVideoWriter *writer = NULL;
   const VpxInterface *encoder = NULL;
   const int fps = 30;
+
+  vp9_zero(info);
 
   exec_name = argv[0];
 
@@ -75,8 +78,8 @@ int main(int argc, char **argv) {
   if (!encoder) die("Unsupported codec.");
 
   info.codec_fourcc = encoder->fourcc;
-  info.frame_width = strtol(argv[1], NULL, 0);
-  info.frame_height = strtol(argv[2], NULL, 0);
+  info.frame_width = (int)strtol(argv[1], NULL, 0);
+  info.frame_height = (int)strtol(argv[2], NULL, 0);
   info.time_base.numerator = 1;
   info.time_base.denominator = fps;
 

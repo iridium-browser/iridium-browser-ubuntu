@@ -20,12 +20,15 @@
 #include "third_party/WebKit/public/platform/WebDragOperation.h"
 #include "third_party/WebKit/public/platform/WebInputEvent.h"
 #include "third_party/WebKit/public/platform/WebInputEventResult.h"
+#include "third_party/WebKit/public/platform/WebMouseWheelEvent.h"
 #include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/platform/WebTouchPoint.h"
 
 namespace blink {
+class WebFrameWidget;
 class WebLocalFrame;
 class WebView;
+class WebWidget;
 struct WebContextMenuData;
 }
 
@@ -36,8 +39,8 @@ class Arguments;
 namespace test_runner {
 
 class TestInterfaces;
+class WebWidgetTestProxyBase;
 class WebTestDelegate;
-class WebViewTestProxyBase;
 
 // Key event location code introduced in DOM Level 3.
 // See also: http://www.w3.org/TR/DOM-Level-3-Events/#events-keyboardevents
@@ -50,7 +53,7 @@ enum KeyLocationCode {
 
 class EventSender {
  public:
-  explicit EventSender(WebViewTestProxyBase*);
+  explicit EventSender(WebWidgetTestProxyBase*);
   virtual ~EventSender();
 
   void Reset();
@@ -185,10 +188,9 @@ class EventSender {
 
   void UpdateClickCountForButton(blink::WebMouseEvent::Button);
 
-  void InitMouseWheelEvent(gin::Arguments* args,
-                           MouseScrollType scroll_type,
-                           blink::WebMouseWheelEvent* event,
-                           bool* send_gestures);
+  blink::WebMouseWheelEvent GetMouseWheelEvent(gin::Arguments* args,
+                                               MouseScrollType scroll_type,
+                                               bool* send_gestures);
   void InitPointerProperties(gin::Arguments* args,
                              blink::WebPointerProperties* e,
                              float* radius_x,
@@ -196,16 +198,17 @@ class EventSender {
 
   void FinishDragAndDrop(const blink::WebMouseEvent&, blink::WebDragOperation);
 
+  int ModifiersForPointer(int pointer_id);
   void DoDragAfterMouseUp(const blink::WebMouseEvent&);
   void DoDragAfterMouseMove(const blink::WebMouseEvent&);
   void ReplaySavedEvents();
   blink::WebInputEventResult HandleInputEventOnViewOrPopup(
-      const blink::WebInputEvent&);
+      const blink::WebInputEvent& event);
 
   void SendGesturesForMouseWheelEvent(
       const blink::WebMouseWheelEvent wheel_event);
 
-  std::unique_ptr<blink::WebInputEvent> ScaleEvent(
+  std::unique_ptr<blink::WebInputEvent> TransformScreenToWidgetCoordinates(
       const blink::WebInputEvent& event);
 
   double last_event_timestamp() { return last_event_timestamp_; }
@@ -214,6 +217,7 @@ class EventSender {
   void set_force_layout_on_events(bool force) {
     force_layout_on_events_ = force;
   }
+  void DoLayoutIfForceLayoutOnEventsRequested();
 
   bool is_drag_mode() const { return is_drag_mode_; }
   void set_is_drag_mode(bool drag_mode) { is_drag_mode_ = drag_mode; }
@@ -257,11 +261,13 @@ class EventSender {
   int wm_sys_dead_char_;
 #endif
 
-  WebViewTestProxyBase* web_view_test_proxy_base_;
+  WebWidgetTestProxyBase* web_widget_test_proxy_base_;
   TestInterfaces* interfaces();
   WebTestDelegate* delegate();
   const blink::WebView* view() const;
   blink::WebView* view();
+  blink::WebWidget* widget();
+  blink::WebFrameWidget* mainFrameWidget();
 
   bool force_layout_on_events_;
 
@@ -279,7 +285,6 @@ class EventSender {
 
   // Location of the touch point that initiated a gesture.
   blink::WebPoint current_gesture_location_;
-
 
   // Mouse-like pointer properties.
   struct PointerState {

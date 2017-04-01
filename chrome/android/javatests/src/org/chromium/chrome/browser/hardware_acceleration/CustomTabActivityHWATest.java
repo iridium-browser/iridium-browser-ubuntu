@@ -4,8 +4,9 @@
 
 package org.chromium.chrome.browser.hardware_acceleration;
 
-import android.test.suitebuilder.annotation.SmallTest;
+import android.support.test.filters.SmallTest;
 
+import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.customtabs.CustomTabActivityTestBase;
 import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 
@@ -15,6 +16,7 @@ import org.chromium.chrome.browser.customtabs.CustomTabsTestUtils;
 public class CustomTabActivityHWATest extends CustomTabActivityTestBase {
 
     @SmallTest
+    @RetryOnFailure
     public void testHardwareAcceleration() throws Exception {
         startCustomTabActivityWithIntent(CustomTabsTestUtils.createMinimalCustomTabIntent(
                 getInstrumentation().getTargetContext(), "about:blank"));

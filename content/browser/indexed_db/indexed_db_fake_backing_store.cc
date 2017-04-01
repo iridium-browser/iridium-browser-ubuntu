@@ -47,11 +47,9 @@ leveldb::Status IndexedDBFakeBackingStore::CreateIDBDatabaseMetaData(
     int64_t* row_id) {
   return leveldb::Status::OK();
 }
-bool IndexedDBFakeBackingStore::UpdateIDBDatabaseIntVersion(Transaction*,
+void IndexedDBFakeBackingStore::UpdateIDBDatabaseIntVersion(Transaction*,
                                                             int64_t row_id,
-                                                            int64_t version) {
-  return false;
-}
+                                                            int64_t version) {}
 leveldb::Status IndexedDBFakeBackingStore::DeleteDatabase(
     const base::string16& name) {
   return leveldb::Status::OK();
@@ -71,6 +69,14 @@ leveldb::Status IndexedDBFakeBackingStore::DeleteObjectStore(
     Transaction* transaction,
     int64_t database_id,
     int64_t object_store_id) {
+  return leveldb::Status::OK();
+}
+
+leveldb::Status IndexedDBFakeBackingStore::RenameObjectStore(
+    Transaction* transaction,
+    int64_t database_id,
+    int64_t object_store_id,
+    const base::string16& new_name) {
   return leveldb::Status::OK();
 }
 
@@ -141,6 +147,14 @@ leveldb::Status IndexedDBFakeBackingStore::DeleteIndex(Transaction*,
                                                        int64_t index_id) {
   return leveldb::Status::OK();
 }
+leveldb::Status IndexedDBFakeBackingStore::RenameIndex(
+    Transaction*,
+    int64_t database_id,
+    int64_t object_store_id,
+    int64_t index_id,
+    const base::string16& new_name) {
+  return leveldb::Status::OK();
+}
 leveldb::Status IndexedDBFakeBackingStore::PutIndexDataForRecord(
     Transaction*,
     int64_t database_id,
@@ -204,7 +218,7 @@ IndexedDBFakeBackingStore::FakeTransaction::FakeTransaction(
 void IndexedDBFakeBackingStore::FakeTransaction::Begin() {}
 leveldb::Status IndexedDBFakeBackingStore::FakeTransaction::CommitPhaseOne(
     scoped_refptr<BlobWriteCallback> callback) {
-  callback->Run(true);
+  callback->Run(IndexedDBBackingStore::BlobWriteResult::SUCCESS_SYNC);
   return leveldb::Status::OK();
 }
 leveldb::Status IndexedDBFakeBackingStore::FakeTransaction::CommitPhaseTwo() {

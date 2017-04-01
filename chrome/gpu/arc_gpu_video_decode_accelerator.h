@@ -45,7 +45,8 @@ class ArcGpuVideoDecodeAccelerator
   void BindDmabuf(PortType port,
                   uint32_t index,
                   base::ScopedFD dmabuf_fd,
-                  const std::vector<DmabufPlane>& dmabuf_planes) override;
+                  const std::vector<::arc::ArcVideoAcceleratorDmabufPlane>&
+                      dmabuf_planes) override;
   void UseBuffer(PortType port,
                  uint32_t index,
                  const BufferMetadata& metadata) override;
@@ -98,19 +99,25 @@ class ArcGpuVideoDecodeAccelerator
   // The information about the dmabuf used as an output buffer.
   struct OutputBufferInfo {
     base::ScopedFD handle;
-    std::vector<DmabufPlane> planes;
+    std::vector<::arc::ArcVideoAcceleratorDmabufPlane> planes;
 
     OutputBufferInfo();
     OutputBufferInfo(OutputBufferInfo&& other);
     ~OutputBufferInfo();
   };
 
+  // The helper method to simplify reporting of the status returned to UMA.
+  ArcVideoAccelerator::Result InitializeTask(
+      const Config& config,
+      ArcVideoAccelerator::Client* client);
+
   // Helper function to validate |port| and |index|.
   bool ValidatePortAndIndex(PortType port, uint32_t index) const;
 
   // Return true if |dmabuf_planes| is valid for a dmabuf |fd|.
   bool VerifyDmabuf(const base::ScopedFD& fd,
-                    const std::vector<DmabufPlane>& dmabuf_planes) const;
+                    const std::vector<::arc::ArcVideoAcceleratorDmabufPlane>&
+                        dmabuf_planes) const;
 
   // Creates an InputRecord for the given |bitstream_buffer_id|. The
   // |buffer_index| is the index of the associated input buffer. The |timestamp|
@@ -122,6 +129,9 @@ class ArcGpuVideoDecodeAccelerator
   // Finds the InputRecord which matches to given |bitstream_buffer_id|.
   // Returns |nullptr| if it cannot be found.
   InputRecord* FindInputRecord(int32_t bitstream_buffer_id);
+
+  // Notify the client when output format changes.
+  void NotifyOutputFormatChanged();
 
   // Global counter that keeps track the number of active clients (i.e., how
   // many VDAs in use by this class).
@@ -139,6 +149,7 @@ class ArcGpuVideoDecodeAccelerator
   int32_t next_bitstream_buffer_id_;
 
   gfx::Size coded_size_;
+  gfx::Rect visible_rect_;
   media::VideoPixelFormat output_pixel_format_;
 
   // A list of most recent |kMaxNumberOfInputRecord| InputRecords.
@@ -155,6 +166,9 @@ class ArcGpuVideoDecodeAccelerator
 
   base::ThreadChecker thread_checker_;
   size_t output_buffer_size_;
+
+  // The minimal number of requested output buffers.
+  uint32_t requested_num_of_output_buffers_;
 
   gpu::GpuPreferences gpu_preferences_;
 

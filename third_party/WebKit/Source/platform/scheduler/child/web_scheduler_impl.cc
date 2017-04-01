@@ -23,8 +23,8 @@ WebSchedulerImpl::WebSchedulerImpl(
     : child_scheduler_(child_scheduler),
       idle_task_runner_(idle_task_runner),
       timer_task_runner_(timer_task_runner),
-      loading_web_task_runner_(new WebTaskRunnerImpl(loading_task_runner)),
-      timer_web_task_runner_(new WebTaskRunnerImpl(timer_task_runner)) {}
+      loading_web_task_runner_(WebTaskRunnerImpl::create(loading_task_runner)),
+      timer_web_task_runner_(WebTaskRunnerImpl::create(timer_task_runner)) {}
 
 WebSchedulerImpl::~WebSchedulerImpl() {}
 
@@ -63,15 +63,6 @@ void WebSchedulerImpl::postNonNestableIdleTask(
                            base::Passed(base::WrapUnique(task))));
 }
 
-void WebSchedulerImpl::postIdleTaskAfterWakeup(
-    const blink::WebTraceLocation& location,
-    blink::WebThread::IdleTask* task) {
-  DCHECK(idle_task_runner_);
-  idle_task_runner_->PostIdleTaskAfterWakeup(
-      location, base::Bind(&WebSchedulerImpl::runIdleTask,
-                           base::Passed(base::WrapUnique(task))));
-}
-
 blink::WebTaskRunner* WebSchedulerImpl::loadingTaskRunner() {
   return loading_web_task_runner_.get();
 }
@@ -81,7 +72,9 @@ blink::WebTaskRunner* WebSchedulerImpl::timerTaskRunner() {
 }
 
 std::unique_ptr<blink::WebViewScheduler>
-WebSchedulerImpl::createWebViewScheduler(InterventionReporter*) {
+WebSchedulerImpl::createWebViewScheduler(
+    InterventionReporter*,
+    WebViewScheduler::WebViewSchedulerSettings*) {
   NOTREACHED();
   return nullptr;
 }

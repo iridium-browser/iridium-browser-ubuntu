@@ -18,6 +18,7 @@
 #include <cstring>
 
 #include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "ui/events/base_event_utils.h"
@@ -42,39 +43,6 @@
 #if defined(OS_WIN)
 #include "ui/events/keycodes/platform_key_map_win.h"
 #endif
-
-// Support a collection of histograms, perhaps one for each entry in an
-// enumeration. This macro manages a block of pointers, adding to a specific
-// one by its index.
-//
-// A typical instantiation looks something like this:
-//  STATIC_HISTOGRAM_POINTER_GROUP(
-//      GetHistogramNameForIndex(histogram_index),
-//      histogram_index, MAXIMUM_HISTOGRAM_INDEX, Add(some_delta),
-//      base::Histogram::FactoryGet(
-//          GetHistogramNameForType(histogram_index),
-//          MINIMUM_SAMPLE, MAXIMUM_SAMPLE, BUCKET_COUNT,
-//          base::HistogramBase::kUmaTargetedHistogramFlag));
-//
-// Though it seems inefficient to generate the name twice, the first
-// instance will be used only for DCHECK builds and the second will
-// execute only during the first access to the given index, after which
-// the pointer is cached and the name never needed again.
-//
-// This is defined in this way so that it can be moved unchanged into
-// base/metrics/histogram_macros.h if it is useful in other files.
-#define STATIC_HISTOGRAM_POINTER_GROUP(constant_histogram_name, index,        \
-                                       constant_maximum,                      \
-                                       histogram_add_method_invocation,       \
-                                       histogram_factory_get_invocation)      \
-  do {                                                                        \
-    static base::subtle::AtomicWord atomic_histograms[constant_maximum];      \
-    DCHECK_LE(0, index);                                                      \
-    DCHECK_LT(index, constant_maximum);                                       \
-    HISTOGRAM_POINTER_USE(&atomic_histograms[index], constant_histogram_name, \
-                          histogram_add_method_invocation,                    \
-                          histogram_factory_get_invocation);                  \
-  } while (0)
 
 namespace {
 
@@ -104,6 +72,8 @@ std::string EventTypeName(ui::EventType type) {
     CASE_TYPE(ET_POINTER_CANCELLED);
     CASE_TYPE(ET_POINTER_ENTERED);
     CASE_TYPE(ET_POINTER_EXITED);
+    CASE_TYPE(ET_POINTER_WHEEL_CHANGED);
+    CASE_TYPE(ET_POINTER_CAPTURE_CHANGED);
     CASE_TYPE(ET_GESTURE_SCROLL_BEGIN);
     CASE_TYPE(ET_GESTURE_SCROLL_END);
     CASE_TYPE(ET_GESTURE_SCROLL_UPDATE);
@@ -134,6 +104,74 @@ std::string EventTypeName(ui::EventType type) {
 
   NOTREACHED();
   return std::string();
+}
+
+ui::SourceEventType EventTypeToLatencySourceEventType(ui::EventType type) {
+  switch (type) {
+    case ui::ET_UNKNOWN:
+    // SourceEventType for PointerEvents/GestureEvents can be either TOUCH or
+    // WHEEL. The proper value is assigned in the constructors.
+    case ui::ET_POINTER_DOWN:
+    case ui::ET_POINTER_MOVED:
+    case ui::ET_POINTER_UP:
+    case ui::ET_POINTER_CANCELLED:
+    case ui::ET_POINTER_ENTERED:
+    case ui::ET_POINTER_EXITED:
+    case ui::ET_POINTER_CAPTURE_CHANGED:
+    case ui::ET_GESTURE_SCROLL_BEGIN:
+    case ui::ET_GESTURE_SCROLL_END:
+    case ui::ET_GESTURE_SCROLL_UPDATE:
+    case ui::ET_GESTURE_TAP:
+    case ui::ET_GESTURE_TAP_DOWN:
+    case ui::ET_GESTURE_TAP_CANCEL:
+    case ui::ET_GESTURE_TAP_UNCONFIRMED:
+    case ui::ET_GESTURE_DOUBLE_TAP:
+    case ui::ET_GESTURE_BEGIN:
+    case ui::ET_GESTURE_END:
+    case ui::ET_GESTURE_TWO_FINGER_TAP:
+    case ui::ET_GESTURE_PINCH_BEGIN:
+    case ui::ET_GESTURE_PINCH_END:
+    case ui::ET_GESTURE_PINCH_UPDATE:
+    case ui::ET_GESTURE_LONG_PRESS:
+    case ui::ET_GESTURE_LONG_TAP:
+    case ui::ET_GESTURE_SWIPE:
+    case ui::ET_GESTURE_SHOW_PRESS:
+    // Flings can be GestureEvents too.
+    case ui::ET_SCROLL_FLING_START:
+    case ui::ET_SCROLL_FLING_CANCEL:
+      return ui::SourceEventType::UNKNOWN;
+
+    case ui::ET_MOUSE_PRESSED:
+    case ui::ET_MOUSE_DRAGGED:
+    case ui::ET_MOUSE_RELEASED:
+    case ui::ET_MOUSE_MOVED:
+    case ui::ET_MOUSE_ENTERED:
+    case ui::ET_MOUSE_EXITED:
+    case ui::ET_KEY_PRESSED:
+    case ui::ET_KEY_RELEASED:
+    case ui::ET_MOUSE_CAPTURE_CHANGED:
+    case ui::ET_DROP_TARGET_EVENT:
+    case ui::ET_CANCEL_MODE:
+    case ui::ET_UMA_DATA:
+      return ui::SourceEventType::OTHER;
+
+    case ui::ET_TOUCH_RELEASED:
+    case ui::ET_TOUCH_PRESSED:
+    case ui::ET_TOUCH_MOVED:
+    case ui::ET_TOUCH_CANCELLED:
+      return ui::SourceEventType::TOUCH;
+
+    case ui::ET_MOUSEWHEEL:
+    case ui::ET_POINTER_WHEEL_CHANGED:
+    case ui::ET_SCROLL:
+      return ui::SourceEventType::WHEEL;
+
+    case ui::ET_LAST:
+      NOTREACHED();
+      return ui::SourceEventType::UNKNOWN;
+  }
+  NOTREACHED();
+  return ui::SourceEventType::UNKNOWN;
 }
 
 bool IsX11SendEventTrue(const base::NativeEvent& event) {
@@ -215,6 +253,16 @@ bool Event::IsTouchPointerEvent() const {
   return IsPointerEvent() &&
          AsPointerEvent()->pointer_details().pointer_type ==
              EventPointerType::POINTER_TYPE_TOUCH;
+}
+
+CancelModeEvent* Event::AsCancelModeEvent() {
+  CHECK(IsCancelModeEvent());
+  return static_cast<CancelModeEvent*>(this);
+}
+
+const CancelModeEvent* Event::AsCancelModeEvent() const {
+  CHECK(IsCancelModeEvent());
+  return static_cast<const CancelModeEvent*>(this);
 }
 
 GestureEvent* Event::AsGestureEvent() {
@@ -330,8 +378,10 @@ Event::Event(EventType type, base::TimeTicks time_stamp, int flags)
       phase_(EP_PREDISPATCH),
       result_(ER_UNHANDLED),
       source_device_id_(ED_UNKNOWN_DEVICE) {
-  if (type_ < ET_LAST)
+  if (type_ < ET_LAST) {
+    latency()->set_source_event_type(EventTypeToLatencySourceEventType(type));
     name_ = EventTypeName(type_);
+  }
 }
 
 Event::Event(const base::NativeEvent& native_event,
@@ -348,8 +398,10 @@ Event::Event(const base::NativeEvent& native_event,
       result_(ER_UNHANDLED),
       source_device_id_(ED_UNKNOWN_DEVICE) {
   base::TimeDelta delta = EventTimeForNow() - time_stamp_;
-  if (type_ < ET_LAST)
+  if (type_ < ET_LAST) {
+    latency()->set_source_event_type(EventTypeToLatencySourceEventType(type));
     name_ = EventTypeName(type_);
+  }
   base::HistogramBase::Sample delta_sample =
       static_cast<base::HistogramBase::Sample>(delta.InMicroseconds());
   UMA_HISTOGRAM_CUSTOM_COUNTS("Event.Latency.Browser", delta_sample, 1, 1000000,
@@ -400,8 +452,10 @@ void Event::SetType(EventType type) {
   if (type_ < ET_LAST)
     name_ = std::string();
   type_ = type;
-  if (type_ < ET_LAST)
+  if (type_ < ET_LAST) {
     name_ = EventTypeName(type_);
+    latency()->set_source_event_type(EventTypeToLatencySourceEventType(type));
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -425,9 +479,8 @@ LocatedEvent::LocatedEvent(const base::NativeEvent& native_event)
     : Event(native_event,
             EventTypeFromNative(native_event),
             EventFlagsFromNative(native_event)),
-      location_(EventLocationFromNative(native_event)),
-      root_location_(location_) {
-}
+      location_(EventLocationFromNativeF(native_event)),
+      root_location_(location_) {}
 
 LocatedEvent::LocatedEvent(EventType type,
                            const gfx::PointF& location,
@@ -494,6 +547,15 @@ MouseEvent::MouseEvent(const PointerEvent& pointer_event)
       SetType(ET_MOUSE_RELEASED);
       break;
 
+    case ET_POINTER_WHEEL_CHANGED:
+      // Explicitly not setting a type here. MouseWheelEvent should be converted
+      // from PointerEvent using its own ctor.
+      break;
+
+    case ET_POINTER_CAPTURE_CHANGED:
+      SetType(ET_MOUSE_CAPTURE_CHANGED);
+      break;
+
     default:
       NOTREACHED();
   }
@@ -512,6 +574,7 @@ MouseEvent::MouseEvent(EventType type,
                    flags),
       changed_button_flags_(changed_button_flags),
       pointer_details_(PointerDetails(EventPointerType::POINTER_TYPE_MOUSE)) {
+  DCHECK_NE(ET_MOUSEWHEEL, type);
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT, 0, 0);
   if (this->type() == ET_MOUSE_MOVED && IsAnyButton())
     SetType(ET_MOUSE_DRAGGED);
@@ -614,8 +677,8 @@ void MouseEvent::SetClickCount(int click_count) {
   if (type() != ET_MOUSE_PRESSED && type() != ET_MOUSE_RELEASED)
     return;
 
-  DCHECK(click_count > 0);
-  DCHECK(click_count <= 3);
+  DCHECK_LT(0, click_count);
+  DCHECK_GE(3, click_count);
 
   int f = flags();
   switch (click_count) {
@@ -650,17 +713,24 @@ MouseWheelEvent::MouseWheelEvent(const ScrollEvent& scroll_event)
   SetType(ET_MOUSEWHEEL);
 }
 
+MouseWheelEvent::MouseWheelEvent(const PointerEvent& pointer_event)
+    : MouseEvent(pointer_event),
+      offset_(pointer_event.pointer_details().offset.x(),
+              pointer_event.pointer_details().offset.y()) {
+  SetType(ET_MOUSEWHEEL);
+}
+
 MouseWheelEvent::MouseWheelEvent(const MouseEvent& mouse_event,
                                  int x_offset,
                                  int y_offset)
     : MouseEvent(mouse_event), offset_(x_offset, y_offset) {
-  DCHECK(type() == ET_MOUSEWHEEL);
+  SetType(ET_MOUSEWHEEL);
 }
 
 MouseWheelEvent::MouseWheelEvent(const MouseWheelEvent& mouse_wheel_event)
     : MouseEvent(mouse_wheel_event),
       offset_(mouse_wheel_event.offset()) {
-  DCHECK(type() == ET_MOUSEWHEEL);
+  DCHECK_EQ(ET_MOUSEWHEEL, type());
 }
 
 MouseWheelEvent::MouseWheelEvent(const gfx::Vector2d& offset,
@@ -669,13 +739,18 @@ MouseWheelEvent::MouseWheelEvent(const gfx::Vector2d& offset,
                                  base::TimeTicks time_stamp,
                                  int flags,
                                  int changed_button_flags)
-    : MouseEvent(ui::ET_MOUSEWHEEL,
+    : MouseEvent(ui::ET_UNKNOWN,
                  location,
                  root_location,
                  time_stamp,
                  flags,
                  changed_button_flags),
-      offset_(offset) {}
+      offset_(offset) {
+  // Set event type to ET_UNKNOWN initially in MouseEvent() to pass the
+  // DCHECK for type to enforce that we use MouseWheelEvent() to create
+  // a MouseWheelEvent.
+  SetType(ui::ET_MOUSEWHEEL);
+}
 
 #if defined(OS_WIN)
 // This value matches windows WHEEL_DELTA.
@@ -845,6 +920,8 @@ bool PointerEvent::CanConvertFrom(const Event& event) {
     case ET_MOUSE_ENTERED:
     case ET_MOUSE_EXITED:
     case ET_MOUSE_RELEASED:
+    case ET_MOUSEWHEEL:
+    case ET_MOUSE_CAPTURE_CHANGED:
     case ET_TOUCH_PRESSED:
     case ET_TOUCH_MOVED:
     case ET_TOUCH_RELEASED:
@@ -859,7 +936,14 @@ PointerEvent::PointerEvent(const PointerEvent& pointer_event)
     : LocatedEvent(pointer_event),
       pointer_id_(pointer_event.pointer_id()),
       changed_button_flags_(pointer_event.changed_button_flags()),
-      details_(pointer_event.pointer_details()) {}
+      details_(pointer_event.pointer_details()) {
+  if (details_.pointer_type == EventPointerType::POINTER_TYPE_TOUCH)
+    latency()->set_source_event_type(ui::SourceEventType::TOUCH);
+  else if (pointer_event.type() == ET_POINTER_WHEEL_CHANGED)
+    latency()->set_source_event_type(ui::SourceEventType::WHEEL);
+  else
+    latency()->set_source_event_type(ui::SourceEventType::OTHER);
+}
 
 PointerEvent::PointerEvent(const MouseEvent& mouse_event)
     : LocatedEvent(mouse_event),
@@ -870,23 +954,39 @@ PointerEvent::PointerEvent(const MouseEvent& mouse_event)
   switch (mouse_event.type()) {
     case ET_MOUSE_PRESSED:
       SetType(ET_POINTER_DOWN);
+      latency()->set_source_event_type(ui::SourceEventType::OTHER);
       break;
 
     case ET_MOUSE_DRAGGED:
     case ET_MOUSE_MOVED:
       SetType(ET_POINTER_MOVED);
+      latency()->set_source_event_type(ui::SourceEventType::OTHER);
       break;
 
     case ET_MOUSE_ENTERED:
       SetType(ET_POINTER_ENTERED);
+      latency()->set_source_event_type(ui::SourceEventType::OTHER);
       break;
 
     case ET_MOUSE_EXITED:
       SetType(ET_POINTER_EXITED);
+      latency()->set_source_event_type(ui::SourceEventType::OTHER);
       break;
 
     case ET_MOUSE_RELEASED:
       SetType(ET_POINTER_UP);
+      latency()->set_source_event_type(ui::SourceEventType::OTHER);
+      break;
+
+    case ET_MOUSEWHEEL:
+      SetType(ET_POINTER_WHEEL_CHANGED);
+      details_ = PointerDetails(EventPointerType::POINTER_TYPE_MOUSE,
+                                mouse_event.AsMouseWheelEvent()->offset());
+      latency()->set_source_event_type(ui::SourceEventType::WHEEL);
+      break;
+
+    case ET_MOUSE_CAPTURE_CHANGED:
+      SetType(ET_POINTER_CAPTURE_CHANGED);
       break;
 
     default:
@@ -920,6 +1020,7 @@ PointerEvent::PointerEvent(const TouchEvent& touch_event)
     default:
       NOTREACHED();
   }
+  latency()->set_source_event_type(ui::SourceEventType::TOUCH);
 }
 
 PointerEvent::PointerEvent(EventType type,
@@ -937,7 +1038,14 @@ PointerEvent::PointerEvent(EventType type,
                    flags),
       pointer_id_(pointer_id),
       changed_button_flags_(changed_button_flags),
-      details_(pointer_details) {}
+      details_(pointer_details) {
+  if (details_.pointer_type == EventPointerType::POINTER_TYPE_TOUCH)
+    latency()->set_source_event_type(ui::SourceEventType::TOUCH);
+  else if (type == ET_POINTER_WHEEL_CHANGED)
+    latency()->set_source_event_type(ui::SourceEventType::WHEEL);
+  else
+    latency()->set_source_event_type(ui::SourceEventType::OTHER);
+}
 
 const int PointerEvent::kMousePointerId = std::numeric_limits<int32_t>::max();
 
@@ -1060,6 +1168,7 @@ KeyEvent& KeyEvent::operator=(const KeyEvent& rhs) {
     key_ = rhs.key_;
     is_char_ = rhs.is_char_;
   }
+  latency()->set_source_event_type(ui::SourceEventType::OTHER);
   return *this;
 }
 
@@ -1084,11 +1193,7 @@ void KeyEvent::ApplyLayout() const {
 // so this is a synthetic or native keystroke event.
 // Therefore, perform only the fallback action.
 #elif defined(USE_X11)
-  // When a control key is held, prefer ASCII characters to non ASCII
-  // characters in order to use it for shortcut keys.  GetCharacterFromKeyCode
-  // returns 'a' for VKEY_A even if the key is actually bound to 'à' in X11.
-  // GetCharacterFromXEvent returns 'à' in that case.
-  if (!IsControlDown() && native_event()) {
+  if (native_event()) {
     key_ = GetDomKeyFromXEvent(native_event());
     return;
   }
@@ -1123,7 +1228,7 @@ base::char16 KeyEvent::GetCharacter() const {
     // Until this explicitly changes, require |key_| to hold a BMP character.
     DomKey::Base utf32_character = key_.ToCharacter();
     base::char16 ucs2_character = static_cast<base::char16>(utf32_character);
-    DCHECK(static_cast<DomKey::Base>(ucs2_character) == utf32_character);
+    DCHECK_EQ(static_cast<DomKey::Base>(ucs2_character), utf32_character);
     // Check if the control character is down. Note that ALTGR is represented
     // on Windows as CTRL|ALT, so we need to make sure that is not set.
     if ((flags() & (EF_ALTGR_DOWN | EF_CONTROL_DOWN)) == EF_CONTROL_DOWN) {
@@ -1220,12 +1325,11 @@ ScrollEvent::ScrollEvent(const base::NativeEvent& native_event)
       y_offset_(0.0f),
       x_offset_ordinal_(0.0f),
       y_offset_ordinal_(0.0f),
-      finger_count_(0) {
+      finger_count_(0),
+      momentum_phase_(EventMomentumPhase::NONE) {
   if (type() == ET_SCROLL) {
-    GetScrollOffsets(native_event,
-                     &x_offset_, &y_offset_,
-                     &x_offset_ordinal_, &y_offset_ordinal_,
-                     &finger_count_);
+    GetScrollOffsets(native_event, &x_offset_, &y_offset_, &x_offset_ordinal_,
+                     &y_offset_ordinal_, &finger_count_, &momentum_phase_);
   } else if (type() == ET_SCROLL_FLING_START ||
              type() == ET_SCROLL_FLING_CANCEL) {
     GetFlingData(native_event,
@@ -1236,6 +1340,10 @@ ScrollEvent::ScrollEvent(const base::NativeEvent& native_event)
     NOTREACHED() << "Unexpected event type " << type()
         << " when constructing a ScrollEvent.";
   }
+  if (IsScrollEvent())
+    latency()->set_source_event_type(ui::SourceEventType::WHEEL);
+  else
+    latency()->set_source_event_type(ui::SourceEventType::TOUCH);
 }
 
 ScrollEvent::ScrollEvent(EventType type,
@@ -1246,14 +1354,17 @@ ScrollEvent::ScrollEvent(EventType type,
                          float y_offset,
                          float x_offset_ordinal,
                          float y_offset_ordinal,
-                         int finger_count)
+                         int finger_count,
+                         EventMomentumPhase momentum_phase)
     : MouseEvent(type, location, location, time_stamp, flags, 0),
       x_offset_(x_offset),
       y_offset_(y_offset),
       x_offset_ordinal_(x_offset_ordinal),
       y_offset_ordinal_(y_offset_ordinal),
-      finger_count_(finger_count) {
+      finger_count_(finger_count),
+      momentum_phase_(momentum_phase) {
   CHECK(IsScrollEvent());
+  latency()->set_source_event_type(ui::SourceEventType::WHEEL);
 }
 
 void ScrollEvent::Scale(const float factor) {
@@ -1278,7 +1389,9 @@ GestureEvent::GestureEvent(float x,
                    time_stamp,
                    flags | EF_FROM_TOUCH),
       details_(details),
-      unique_touch_event_id_(unique_touch_event_id) {}
+      unique_touch_event_id_(unique_touch_event_id) {
+  latency()->set_source_event_type(ui::SourceEventType::TOUCH);
+}
 
 GestureEvent::~GestureEvent() {
 }

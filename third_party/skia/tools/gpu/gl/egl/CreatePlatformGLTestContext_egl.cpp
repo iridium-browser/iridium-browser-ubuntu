@@ -20,20 +20,20 @@
 namespace {
 
 // TODO: Share this class with ANGLE if/when it gets support for EGL_KHR_fence_sync.
-class EGLFenceSync : public SkGpuFenceSync {
+class EGLFenceSync : public sk_gpu_test::FenceSync {
 public:
-    static EGLFenceSync* CreateIfSupported(EGLDisplay);
+    static std::unique_ptr<EGLFenceSync> MakeIfSupported(EGLDisplay);
 
-    SkPlatformGpuFence SK_WARN_UNUSED_RESULT insertFence() const override;
-    bool waitFence(SkPlatformGpuFence fence) const override;
-    void deleteFence(SkPlatformGpuFence fence) const override;
+    sk_gpu_test::PlatformFence SK_WARN_UNUSED_RESULT insertFence() const override;
+    bool waitFence(sk_gpu_test::PlatformFence fence) const override;
+    void deleteFence(sk_gpu_test::PlatformFence fence) const override;
 
 private:
     EGLFenceSync(EGLDisplay display) : fDisplay(display) {}
 
     EGLDisplay                    fDisplay;
 
-    typedef SkGpuFenceSync INHERITED;
+    typedef sk_gpu_test::FenceSync INHERITED;
 };
 
 class EGLGLTestContext : public sk_gpu_test::GLTestContext {
@@ -44,7 +44,7 @@ public:
     GrEGLImage texture2DToEGLImage(GrGLuint texID) const override;
     void destroyEGLImage(GrEGLImage) const override;
     GrGLuint eglImageToExternalTexture(GrEGLImage) const override;
-    sk_gpu_test::GLTestContext* createNew() const override;
+    std::unique_ptr<sk_gpu_test::GLTestContext> makeNew() const override;
 
 private:
     void destroyGLContext();
@@ -100,7 +100,7 @@ EGLGLTestContext::EGLGLTestContext(GrGLStandard forcedGpuAPI)
     }
     SkASSERT(forcedGpuAPI == kNone_GrGLStandard || kAPIs[api].fStandard == forcedGpuAPI);
 
-    SkAutoTUnref<const GrGLInterface> gl;
+    sk_sp<const GrGLInterface> gl;
 
     for (; nullptr == gl.get() && api < apiLimit; ++api) {
         fDisplay = eglGetDisplay(EGL_DEFAULT_DISPLAY);
@@ -180,7 +180,7 @@ EGLGLTestContext::EGLGLTestContext(GrGLStandard forcedGpuAPI)
             continue;
         }
 
-        this->init(gl.release(), EGLFenceSync::CreateIfSupported(fDisplay));
+        this->init(gl.release(), EGLFenceSync::MakeIfSupported(fDisplay));
         break;
     }
 }
@@ -255,8 +255,8 @@ GrGLuint EGLGLTestContext::eglImageToExternalTexture(GrEGLImage image) const {
     return texID;
 }
 
-sk_gpu_test::GLTestContext* EGLGLTestContext::createNew() const {
-    sk_gpu_test::GLTestContext* ctx = new EGLGLTestContext(this->gl()->fStandard);
+std::unique_ptr<sk_gpu_test::GLTestContext> EGLGLTestContext::makeNew() const {
+    std::unique_ptr<sk_gpu_test::GLTestContext> ctx(new EGLGLTestContext(this->gl()->fStandard));
     if (ctx) {
         ctx->makeCurrent();
     }
@@ -294,19 +294,20 @@ static bool supports_egl_extension(EGLDisplay display, const char* extension) {
     return false;
 }
 
-EGLFenceSync* EGLFenceSync::CreateIfSupported(EGLDisplay display) {
+std::unique_ptr<EGLFenceSync> EGLFenceSync::MakeIfSupported(EGLDisplay display) {
     if (!display || !supports_egl_extension(display, "EGL_KHR_fence_sync")) {
         return nullptr;
     }
-    return new EGLFenceSync(display);
+    return std::unique_ptr<EGLFenceSync>(new EGLFenceSync(display));
 }
 
-SkPlatformGpuFence EGLFenceSync::insertFence() const {
-    return eglCreateSyncKHR(fDisplay, EGL_SYNC_FENCE_KHR, nullptr);
+sk_gpu_test::PlatformFence EGLFenceSync::insertFence() const {
+    EGLSyncKHR eglsync = eglCreateSyncKHR(fDisplay, EGL_SYNC_FENCE_KHR, nullptr);
+    return reinterpret_cast<sk_gpu_test::PlatformFence>(eglsync);
 }
 
-bool EGLFenceSync::waitFence(SkPlatformGpuFence platformFence) const {
-    EGLSyncKHR eglsync = static_cast<EGLSyncKHR>(platformFence);
+bool EGLFenceSync::waitFence(sk_gpu_test::PlatformFence platformFence) const {
+    EGLSyncKHR eglsync = reinterpret_cast<EGLSyncKHR>(platformFence);
     return EGL_CONDITION_SATISFIED_KHR ==
             eglClientWaitSyncKHR(fDisplay,
                                  eglsync,
@@ -314,10 +315,12 @@ bool EGLFenceSync::waitFence(SkPlatformGpuFence platformFence) const {
                                  EGL_FOREVER_KHR);
 }
 
-void EGLFenceSync::deleteFence(SkPlatformGpuFence platformFence) const {
-    EGLSyncKHR eglsync = static_cast<EGLSyncKHR>(platformFence);
+void EGLFenceSync::deleteFence(sk_gpu_test::PlatformFence platformFence) const {
+    EGLSyncKHR eglsync = reinterpret_cast<EGLSyncKHR>(platformFence);
     eglDestroySyncKHR(fDisplay, eglsync);
 }
+
+GR_STATIC_ASSERT(sizeof(EGLSyncKHR) <= sizeof(sk_gpu_test::PlatformFence));
 
 }  // anonymous namespace
 
@@ -336,4 +339,3 @@ GLTestContext *CreatePlatformGLTestContext(GrGLStandard forcedGpuAPI,
     return ctx;
 }
 }  // namespace sk_gpu_test
-

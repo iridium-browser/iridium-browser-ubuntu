@@ -37,6 +37,11 @@ gfx::Point EventLocationFromNative(const base::NativeEvent& native_event) {
   return gfx::Point();
 }
 
+gfx::PointF EventLocationFromNativeF(const base::NativeEvent& native_event) {
+  NOTIMPLEMENTED();
+  return gfx::PointF();
+}
+
 gfx::Point EventSystemLocationFromNative(
     const base::NativeEvent& native_event) {
   NOTIMPLEMENTED();
@@ -103,7 +108,8 @@ bool GetScrollOffsets(const base::NativeEvent& native_event,
                       float* y_offset,
                       float* x_offset_ordinal,
                       float* y_offset_ordinal,
-                      int* finger_count) {
+                      int* finger_count,
+                      EventMomentumPhase* momentum_phase) {
   NOTIMPLEMENTED();
   return false;
 }

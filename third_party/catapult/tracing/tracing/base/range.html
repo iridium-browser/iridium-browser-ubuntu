@@ -21,7 +21,7 @@ tr.exportTo('tr.b', function() {
     this.isEmpty_ = true;
     this.min_ = undefined;
     this.max_ = undefined;
-  };
+  }
 
   Range.prototype = {
     __proto__: Object.prototype,
@@ -92,6 +92,21 @@ tr.exportTo('tr.b', function() {
       return this.max_ - this.min_;
     },
 
+    /**
+     * Get a new Range spanning the powers (of opt_base || 10) that enclose
+     * |this| Range.
+     * If |this| is empty, returns a new empty Range.
+     *
+     * @param {number=} opt_base Defaults to 10.
+     * @return {!Range}
+     */
+    enclosingPowers(opt_base) {
+      if (this.isEmpty) return new Range();
+      return Range.fromExplicitRange(
+          tr.b.lesserPower(this.min_, opt_base),
+          tr.b.greaterPower(this.max_, opt_base));
+    },
+
     normalize: function(x) {
       return tr.b.normalize(x, this.min, this.max);
     },
@@ -100,10 +115,14 @@ tr.exportTo('tr.b', function() {
       return tr.b.lerp(x, this.min, this.max);
     },
 
+    clamp: function(x) {
+      return tr.b.clamp(x, this.min, this.max);
+    },
+
     equals: function(that) {
       if (this.isEmpty && that.isEmpty)
         return true;
-      if (this.isEmpty != that.isEmpty)
+      if (this.isEmpty !== that.isEmpty)
         return false;
       return (tr.b.approximately(this.min, that.min) &&
           tr.b.approximately(this.max, that.max));
@@ -267,8 +286,11 @@ tr.exportTo('tr.b', function() {
     return 0;
   };
 
+  Range.PERCENT_RANGE = Range.fromExplicitRange(0, 1);
+  Object.freeze(Range.PERCENT_RANGE);
+
   return {
-    Range: Range
+    Range,
   };
 });
 </script>

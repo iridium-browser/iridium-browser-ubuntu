@@ -78,6 +78,9 @@ class StatsCollector {
                              const StatsReport::Id& transport_id,
                              StatsReport::Direction direction);
 
+  // A track is invalid if there is no report data for it.
+  bool IsValidTrack(const std::string& track_id);
+
   // Method used by the unittest to force a update of stats since UpdateStats()
   // that occur less than kMinGatherStatsPeriod number of ms apart will be
   // ignored.
@@ -91,17 +94,13 @@ class StatsCollector {
 
   bool CopySelectedReports(const std::string& selector, StatsReports* reports);
 
-  // Helper method for AddCertificateReports.
-  StatsReport* AddOneCertificateReport(
-      const rtc::SSLCertificate* cert, const StatsReport* issuer);
-
   // Helper method for creating IceCandidate report. |is_local| indicates
   // whether this candidate is local or remote.
   StatsReport* AddCandidateReport(const cricket::Candidate& candidate,
                                   bool local);
 
   // Adds a report for this certificate and every certificate in its chain, and
-  // returns the leaf certificate's report.
+  // returns the leaf certificate's report (|cert|'s report).
   StatsReport* AddCertificateReports(const rtc::SSLCertificate* cert);
 
   StatsReport* AddConnectionInfoReport(const std::string& content_name,

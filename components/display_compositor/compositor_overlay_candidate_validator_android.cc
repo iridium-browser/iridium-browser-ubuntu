@@ -21,8 +21,7 @@ CompositorOverlayCandidateValidatorAndroid::
 
 void CompositorOverlayCandidateValidatorAndroid::GetStrategies(
     cc::OverlayProcessor::StrategyList* strategies) {
-  strategies->push_back(
-      base::WrapUnique(new cc::OverlayStrategyUnderlay(this)));
+  strategies->push_back(base::MakeUnique<cc::OverlayStrategyUnderlay>(this));
 }
 
 void CompositorOverlayCandidateValidatorAndroid::CheckOverlaySupport(
@@ -35,6 +34,17 @@ void CompositorOverlayCandidateValidatorAndroid::CheckOverlaySupport(
 
   if (!candidates->empty()) {
     cc::OverlayCandidate& candidate = candidates->front();
+
+    // This quad either will be promoted, or would be if it were backed by a
+    // SurfaceView.  Record that it should get a promotion hint.
+    candidates->AddPromotionHint(candidate);
+
+    if (candidate.is_backed_by_surface_texture) {
+      // This quad would be promoted if it were backed by a SurfaceView.  Since
+      // it isn't, we can't promote it.
+      return;
+    }
+
     candidate.display_rect =
         gfx::RectF(gfx::ToEnclosingRect(candidate.display_rect));
     candidate.overlay_handled = true;

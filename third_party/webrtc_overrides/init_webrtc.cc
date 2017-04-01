@@ -51,6 +51,13 @@ Histogram* HistogramFactoryGetCounts(
           base::HistogramBase::kUmaTargetedHistogramFlag));
 }
 
+Histogram* HistogramFactoryGetCountsLinear(
+    const std::string& name, int min, int max, int bucket_count) {
+  return reinterpret_cast<Histogram*>(
+      base::LinearHistogram::FactoryGet(name, min, max, bucket_count,
+          base::HistogramBase::kUmaTargetedHistogramFlag));
+}
+
 Histogram* HistogramFactoryGetEnumeration(
     const std::string& name, int boundary) {
   return reinterpret_cast<Histogram*>(
@@ -58,12 +65,15 @@ Histogram* HistogramFactoryGetEnumeration(
           base::HistogramBase::kUmaTargetedHistogramFlag));
 }
 
-void HistogramAdd(
-    Histogram* histogram_pointer, const std::string& name, int sample) {
+const std::string& GetHistogramName(Histogram* histogram_pointer) {
   base::HistogramBase* ptr =
       reinterpret_cast<base::HistogramBase*>(histogram_pointer);
-  // The name should not vary.
-  DCHECK(ptr->histogram_name() == name);
+  return ptr->histogram_name();
+}
+
+void HistogramAdd(Histogram* histogram_pointer, int sample) {
+  base::HistogramBase* ptr =
+      reinterpret_cast<base::HistogramBase*>(histogram_pointer);
   ptr->Add(sample);
 }
 }  // namespace metrics

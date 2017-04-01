@@ -28,11 +28,14 @@
 
 #include "core/CoreExport.h"
 #include "core/dom/Range.h"
+#include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/CompositionUnderline.h"
 #include "core/editing/EphemeralRange.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/PlainTextRange.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebTextInputInfo.h"
+#include "public/platform/WebTextInputType.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -40,79 +43,125 @@ namespace blink {
 class Editor;
 class LocalFrame;
 class Range;
-class Text;
 
-class CORE_EXPORT InputMethodController final : public GarbageCollected<InputMethodController> {
-    WTF_MAKE_NONCOPYABLE(InputMethodController);
-public:
-    enum ConfirmCompositionBehavior {
-        DoNotKeepSelection,
-        KeepSelection,
-    };
+class CORE_EXPORT InputMethodController final
+    : public GarbageCollectedFinalized<InputMethodController>,
+      public SynchronousMutationObserver {
+  WTF_MAKE_NONCOPYABLE(InputMethodController);
+  USING_GARBAGE_COLLECTED_MIXIN(InputMethodController);
 
-    static InputMethodController* create(LocalFrame&);
-    DECLARE_TRACE();
+ public:
+  enum ConfirmCompositionBehavior {
+    DoNotKeepSelection,
+    KeepSelection,
+  };
 
-    // international text input composition
-    bool hasComposition() const;
-    void setComposition(const String&, const Vector<CompositionUnderline>&, int selectionStart, int selectionEnd);
-    void setCompositionFromExistingText(const Vector<CompositionUnderline>&, unsigned compositionStart, unsigned compositionEnd);
-    // Inserts the text that is being composed as a regular text and returns true
-    // if composition exists.
-    bool confirmComposition();
-    // Inserts the given text string in the place of the existing composition
-    // and returns true.
-    bool confirmComposition(const String& text, ConfirmCompositionBehavior confirmBehavior = KeepSelection);
-    // Inserts the text that is being composed or specified non-empty text and
-    // returns true.
-    bool confirmCompositionOrInsertText(const String& text, ConfirmCompositionBehavior);
-    // Deletes the existing composition text.
-    void cancelComposition();
-    void cancelCompositionIfSelectionIsInvalid();
-    EphemeralRange compositionEphemeralRange() const;
-    Range* compositionRange() const;
+  static InputMethodController* create(LocalFrame&);
+  virtual ~InputMethodController();
+  DECLARE_TRACE();
 
-    void clear();
-    void documentDetached();
+  // international text input composition
+  bool hasComposition() const;
+  void setComposition(const String& text,
+                      const Vector<CompositionUnderline>& underlines,
+                      int selectionStart,
+                      int selectionEnd);
+  void setCompositionFromExistingText(const Vector<CompositionUnderline>& text,
+                                      unsigned compositionStart,
+                                      unsigned compositionEnd);
 
-    PlainTextRange getSelectionOffsets() const;
-    // Returns true if setting selection to specified offsets, otherwise false.
-    bool setEditableSelectionOffsets(const PlainTextRange&, FrameSelection::SetSelectionOptions = FrameSelection::CloseTyping);
-    void extendSelectionAndDelete(int before, int after);
-    PlainTextRange createRangeForSelection(int start, int end, size_t textLength) const;
+  // Deletes ongoing composing text if any, inserts specified text, and
+  // changes the selection according to relativeCaretPosition, which is
+  // relative to the end of the inserting text.
+  bool commitText(const String& text,
+                  const Vector<CompositionUnderline>& underlines,
+                  int relativeCaretPosition);
 
-private:
-    class SelectionOffsetsScope {
-        WTF_MAKE_NONCOPYABLE(SelectionOffsetsScope);
-        STACK_ALLOCATED();
-    public:
-        explicit SelectionOffsetsScope(InputMethodController*);
-        ~SelectionOffsetsScope();
-    private:
-        Member<InputMethodController> m_inputMethodController;
-        const PlainTextRange m_offsets;
-    };
-    friend class SelectionOffsetsScope;
+  // Inserts ongoing composing text; changes the selection to the end of
+  // the inserting text if DoNotKeepSelection, or holds the selection if
+  // KeepSelection.
+  bool finishComposingText(ConfirmCompositionBehavior);
 
-    Member<LocalFrame> m_frame;
-    Member<Range> m_compositionRange;
-    bool m_isDirty;
-    bool m_hasComposition;
+  // Deletes the existing composition text.
+  void cancelComposition();
 
-    explicit InputMethodController(LocalFrame&);
+  void cancelCompositionIfSelectionIsInvalid();
+  EphemeralRange compositionEphemeralRange() const;
+  Range* compositionRange() const;
 
-    Editor& editor() const;
-    LocalFrame& frame() const
-    {
-        DCHECK(m_frame);
-        return *m_frame;
-    }
+  void clear();
+  void documentAttached(Document*);
 
-    String composingText() const;
-    void selectComposition() const;
-    bool setSelectionOffsets(const PlainTextRange&, FrameSelection::SetSelectionOptions = FrameSelection::CloseTyping);
+  PlainTextRange getSelectionOffsets() const;
+  // Returns true if setting selection to specified offsets, otherwise false.
+  bool setEditableSelectionOffsets(
+      const PlainTextRange&,
+      FrameSelection::SetSelectionOptions = FrameSelection::CloseTyping);
+  void extendSelectionAndDelete(int before, int after);
+  PlainTextRange createRangeForSelection(int start,
+                                         int end,
+                                         size_t textLength) const;
+  void deleteSurroundingText(int before, int after);
+  WebTextInputInfo textInputInfo() const;
+  WebTextInputType textInputType() const;
+
+  // Call this when we will change focus.
+  void willChangeFocus();
+
+ private:
+  Document& document() const;
+  bool isAvailable() const;
+
+  Member<LocalFrame> m_frame;
+  Member<Range> m_compositionRange;
+  bool m_hasComposition;
+
+  explicit InputMethodController(LocalFrame&);
+
+  Editor& editor() const;
+  LocalFrame& frame() const {
+    DCHECK(m_frame);
+    return *m_frame;
+  }
+
+  String composingText() const;
+  void selectComposition() const;
+  bool setSelectionOffsets(
+      const PlainTextRange&,
+      FrameSelection::SetSelectionOptions = FrameSelection::CloseTyping);
+
+  void addCompositionUnderlines(const Vector<CompositionUnderline>& underlines,
+                                ContainerNode* rootEditableElement,
+                                unsigned offset);
+
+  bool insertText(const String&);
+  bool insertTextAndMoveCaret(const String&,
+                              int relativeCaretPosition,
+                              const Vector<CompositionUnderline>& underlines);
+
+  // Inserts the given text string in the place of the existing composition.
+  // Returns true if did replace.
+  bool replaceComposition(const String& text);
+  // Inserts the given text string in the place of the existing composition
+  // and moves caret. Returns true if did replace and moved caret successfully.
+  bool replaceCompositionAndMoveCaret(
+      const String&,
+      int relativeCaretPosition,
+      const Vector<CompositionUnderline>& underlines);
+
+  // Returns true if moved caret successfully.
+  bool moveCaret(int newCaretPosition);
+
+  PlainTextRange createSelectionRangeForSetComposition(int selectionStart,
+                                                       int selectionEnd,
+                                                       size_t textLength) const;
+  int textInputFlags() const;
+  WebTextInputMode inputModeOfFocusedElement() const;
+
+  // Implements |SynchronousMutationObserver|.
+  void contextDestroyed(Document*) final;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // InputMethodController_h
+#endif  // InputMethodController_h

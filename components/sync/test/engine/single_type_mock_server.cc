@@ -4,17 +4,16 @@
 
 #include "components/sync/test/engine/single_type_mock_server.h"
 
-#include <stddef.h>
-#include <stdint.h>
-
 #include "components/sync/base/time.h"
 
 using google::protobuf::RepeatedPtrField;
 
 namespace syncer {
 
-SingleTypeMockServer::SingleTypeMockServer(syncer::ModelType type)
-    : type_(type), type_root_id_(ModelTypeToRootTag(type)) {}
+SingleTypeMockServer::SingleTypeMockServer(ModelType type)
+    : type_(type),
+      type_root_id_(ModelTypeToRootTag(type)),
+      progress_marker_token_("non_null_progress_token") {}
 
 SingleTypeMockServer::~SingleTypeMockServer() {}
 
@@ -147,12 +146,16 @@ sync_pb::SyncEntity SingleTypeMockServer::GetLastCommittedEntity(
 sync_pb::DataTypeProgressMarker SingleTypeMockServer::GetProgress() const {
   sync_pb::DataTypeProgressMarker progress;
   progress.set_data_type_id(type_);
-  progress.set_token("non_null_progress_token");
+  progress.set_token(progress_marker_token_);
   return progress;
 }
 
 sync_pb::DataTypeContext SingleTypeMockServer::GetContext() const {
   return sync_pb::DataTypeContext();
+}
+
+void SingleTypeMockServer::SetProgressMarkerToken(const std::string& token) {
+  progress_marker_token_ = token;
 }
 
 std::string SingleTypeMockServer::GenerateId(const std::string& tag_hash) {

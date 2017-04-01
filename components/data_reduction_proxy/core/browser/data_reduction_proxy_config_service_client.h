@@ -18,7 +18,7 @@
 #include "base/timer/timer.h"
 #include "net/base/backoff_entry.h"
 #include "net/base/network_change_notifier.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
 
@@ -27,10 +27,11 @@
 #endif  // OS_ANDROID
 
 namespace net {
-class HostPortPair;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
+class NetLog;
 struct LoadTimingInfo;
+class ProxyServer;
 class URLFetcher;
 class URLRequestContextGetter;
 class URLRequestStatus;
@@ -45,7 +46,6 @@ class DataReductionProxyIOData;
 class DataReductionProxyMutableConfigValues;
 class DataReductionProxyParams;
 class DataReductionProxyRequestOptions;
-class DataReductionProxyService;
 
 typedef base::Callback<void(const std::string&)> ConfigStorer;
 
@@ -126,7 +126,7 @@ class DataReductionProxyConfigServiceClient
   bool ShouldRetryDueToAuthFailure(
       const net::HttpRequestHeaders& request_headers,
       const net::HttpResponseHeaders* response_headers,
-      const net::HostPortPair& proxy_server,
+      const net::ProxyServer& proxy_server,
       const net::LoadTimingInfo& load_timing_info);
 
  protected:
@@ -244,7 +244,7 @@ class DataReductionProxyConfigServiceClient
   std::unique_ptr<net::URLFetcher> fetcher_;
 
   // Used to correlate the start and end of requests.
-  net::BoundNetLog bound_net_log_;
+  net::NetLogWithSource net_log_with_source_;
 
   // Used to determine the latency in retrieving the Data Reduction Proxy
   // configuration.
@@ -275,6 +275,9 @@ class DataReductionProxyConfigServiceClient
 
   // Time when the IP address last changed.
   base::TimeTicks last_ip_address_change_;
+
+  // True if a client config fetch is in progress.
+  bool fetch_in_progress_;
 
   // Enforce usage on the IO thread.
   base::ThreadChecker thread_checker_;

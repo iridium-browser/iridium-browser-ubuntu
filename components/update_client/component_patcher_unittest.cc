@@ -11,11 +11,13 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "components/update_client/component_patcher.h"
 #include "components/update_client/component_patcher_operation.h"
 #include "components/update_client/component_patcher_unittest.h"
 #include "components/update_client/test_installer.h"
+#include "components/update_client/update_client_errors.h"
 #include "courgette/courgette.h"
 #include "courgette/third_party/bsdiff/bsdiff.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -26,9 +28,9 @@ class TestCallback {
  public:
   TestCallback();
   virtual ~TestCallback() {}
-  void Set(update_client::ComponentUnpacker::Error error, int extra_code);
+  void Set(update_client::UnpackerError error, int extra_code);
 
-  int error_;
+  update_client::UnpackerError error_;
   int extra_code_;
   bool called_;
 
@@ -36,21 +38,16 @@ class TestCallback {
   DISALLOW_COPY_AND_ASSIGN(TestCallback);
 };
 
-TestCallback::TestCallback() : error_(-1), extra_code_(-1), called_(false) {
-}
+TestCallback::TestCallback()
+    : error_(update_client::UnpackerError::kNone),
+      extra_code_(-1),
+      called_(false) {}
 
-void TestCallback::Set(update_client::ComponentUnpacker::Error error,
-                       int extra_code) {
+void TestCallback::Set(update_client::UnpackerError error, int extra_code) {
   error_ = error;
   extra_code_ = extra_code;
   called_ = true;
 }
-
-}  // namespace
-
-namespace update_client {
-
-namespace {
 
 base::FilePath test_file(const char* file) {
   base::FilePath path;
@@ -64,12 +61,14 @@ base::FilePath test_file(const char* file) {
 
 }  // namespace
 
+namespace update_client {
+
 ComponentPatcherOperationTest::ComponentPatcherOperationTest() {
   EXPECT_TRUE(unpack_dir_.CreateUniqueTempDir());
   EXPECT_TRUE(input_dir_.CreateUniqueTempDir());
   EXPECT_TRUE(installed_dir_.CreateUniqueTempDir());
-  installer_ = new ReadOnlyTestInstaller(installed_dir_.path());
-  task_runner_ = base::MessageLoop::current()->task_runner();
+  installer_ = new ReadOnlyTestInstaller(installed_dir_.GetPath());
+  task_runner_ = base::ThreadTaskRunnerHandle::Get();
 }
 
 ComponentPatcherOperationTest::~ComponentPatcherOperationTest() {
@@ -79,7 +78,7 @@ ComponentPatcherOperationTest::~ComponentPatcherOperationTest() {
 TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_output.bin"),
-      input_dir_.path().Append(FILE_PATH_LITERAL("binary_output.bin"))));
+      input_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_output.bin"))));
 
   std::unique_ptr<base::DictionaryValue> command_args(
       new base::DictionaryValue());
@@ -90,16 +89,16 @@ TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = new DeltaUpdateOpCreate();
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(), NULL,
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(), NULL,
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
-  EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
+  EXPECT_EQ(UnpackerError::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 
@@ -107,7 +106,7 @@ TEST_F(ComponentPatcherOperationTest, CheckCreateOperation) {
 TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_output.bin"),
-      installed_dir_.path().Append(FILE_PATH_LITERAL("binary_output.bin"))));
+      installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_output.bin"))));
 
   std::unique_ptr<base::DictionaryValue> command_args(
       new base::DictionaryValue());
@@ -118,17 +117,17 @@ TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
 
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op = new DeltaUpdateOpCopy();
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(),
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
-  EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
+  EXPECT_EQ(UnpackerError::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 
@@ -136,9 +135,9 @@ TEST_F(ComponentPatcherOperationTest, CheckCopyOperation) {
 TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_input.bin"),
-      installed_dir_.path().Append(FILE_PATH_LITERAL("binary_input.bin"))));
+      installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_input.bin"))));
   EXPECT_TRUE(base::CopyFile(test_file("binary_courgette_patch.bin"),
-                             input_dir_.path().Append(FILE_PATH_LITERAL(
+                             input_dir_.GetPath().Append(FILE_PATH_LITERAL(
                                  "binary_courgette_patch.bin"))));
 
   std::unique_ptr<base::DictionaryValue> command_args(
@@ -152,17 +151,17 @@ TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op =
       CreateDeltaUpdateOp("courgette", NULL /* out_of_process_patcher */);
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(),
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
-  EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
+  EXPECT_EQ(UnpackerError::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 
@@ -170,10 +169,10 @@ TEST_F(ComponentPatcherOperationTest, CheckCourgetteOperation) {
 TEST_F(ComponentPatcherOperationTest, CheckBsdiffOperation) {
   EXPECT_TRUE(base::CopyFile(
       test_file("binary_input.bin"),
-      installed_dir_.path().Append(FILE_PATH_LITERAL("binary_input.bin"))));
-  EXPECT_TRUE(base::CopyFile(
-      test_file("binary_bsdiff_patch.bin"),
-      input_dir_.path().Append(FILE_PATH_LITERAL("binary_bsdiff_patch.bin"))));
+      installed_dir_.GetPath().Append(FILE_PATH_LITERAL("binary_input.bin"))));
+  EXPECT_TRUE(base::CopyFile(test_file("binary_bsdiff_patch.bin"),
+                             input_dir_.GetPath().Append(FILE_PATH_LITERAL(
+                                 "binary_bsdiff_patch.bin"))));
 
   std::unique_ptr<base::DictionaryValue> command_args(
       new base::DictionaryValue());
@@ -186,17 +185,17 @@ TEST_F(ComponentPatcherOperationTest, CheckBsdiffOperation) {
   TestCallback callback;
   scoped_refptr<DeltaUpdateOp> op =
       CreateDeltaUpdateOp("bsdiff", NULL /* out_of_process_patcher */);
-  op->Run(command_args.get(), input_dir_.path(), unpack_dir_.path(),
+  op->Run(command_args.get(), input_dir_.GetPath(), unpack_dir_.GetPath(),
           installer_.get(),
           base::Bind(&TestCallback::Set, base::Unretained(&callback)),
           task_runner_);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(true, callback.called_);
-  EXPECT_EQ(ComponentUnpacker::kNone, callback.error_);
+  EXPECT_EQ(UnpackerError::kNone, callback.error_);
   EXPECT_EQ(0, callback.extra_code_);
   EXPECT_TRUE(base::ContentsEqual(
-      unpack_dir_.path().Append(FILE_PATH_LITERAL("output.bin")),
+      unpack_dir_.GetPath().Append(FILE_PATH_LITERAL("output.bin")),
       test_file("binary_output.bin")));
 }
 

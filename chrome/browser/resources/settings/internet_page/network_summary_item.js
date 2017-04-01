@@ -13,34 +13,12 @@ var DeviceStateProperties;
 Polymer({
   is: 'network-summary-item',
 
+  behaviors: [Polymer.IronA11yKeysBehavior],
+
   properties: {
-    /** The expanded state of the list of networks. */
-    expanded: {
-      type: Boolean,
-      value: false,
-      observer: 'expandedChanged_',
-    },
-
-    /**
-     * Whether the list has been expanded. This is used to ensure the
-     * iron-collapse section animates correctly.
-     */
-    wasExpanded: {
-      type: Boolean,
-      value: false,
-    },
-
-    /**
-     * The maximum height in pixels for the list of networks.
-     */
-    maxHeight: {
-      type: Number,
-      value: 200,
-    },
-
     /**
      * Device state for the network type.
-     * @type {DeviceStateProperties|undefined}
+     * @type {!DeviceStateProperties|undefined}
      */
     deviceState: {
       type: Object,
@@ -51,10 +29,7 @@ Polymer({
      * Network state for the active network.
      * @type {!CrOnc.NetworkStateProperties|undefined}
      */
-    activeNetworkState: {
-      type: Object,
-      observer: 'activeNetworkStateChanged_',
-    },
+    activeNetworkState: Object,
 
     /**
      * List of all network state data for the network type.
@@ -62,49 +37,112 @@ Polymer({
      */
     networkStateList: {
       type: Array,
-      value: function() { return []; },
-      observer: 'networkStateListChanged_',
-    }
+      value: function() {
+        return [];
+      },
+    },
+
+    /**
+     * Interface for networkingPrivate calls, passed from internet_page.
+     * @type {!NetworkingPrivate}
+     */
+    networkingPrivate: Object,
+
+    /**
+     * The expanded state of the list of networks.
+     * @private
+     */
+    expanded_: {
+      type: Boolean,
+      value: false,
+      observer: 'expandedChanged_',
+    },
+
+    /**
+     * Whether the list has been expanded. This is used to ensure the
+     * iron-collapse section animates correctly.
+     * @private
+     */
+    wasExpanded_: {
+      type: Boolean,
+      value: false,
+    },
   },
 
   /** @private */
   expandedChanged_: function() {
     var type = this.deviceState ? this.deviceState.Type : '';
-    this.fire('expanded', {expanded: this.expanded, type: type});
+    this.fire('expanded', {expanded: this.expanded_, type: type});
   },
 
   /** @private */
   deviceStateChanged_: function() {
-    this.updateSelectable_();
-    if (this.expanded && !this.deviceIsEnabled_(this.deviceState))
-      this.expanded = false;
+    if (this.expanded_ && !this.deviceIsEnabled_(this.deviceState))
+      this.expanded_ = false;
   },
-
-  /** @private */
-  activeNetworkStateChanged_: function() {
-    this.updateSelectable_();
-  },
-
-  /** @private */
-  networkStateListChanged_: function() { this.updateSelectable_(); },
 
   /**
-   * @param {DeviceStateProperties} deviceState
-   * @param {boolean} expanded The expanded state.
-   * @return {boolean} Whether or not the scanning spinner should be shown.
+   * @return {boolean} Whether or not the scanning spinner should be visible.
    * @private
    */
-  showScanning_: function(deviceState, expanded) {
-    return !!expanded && !!deviceState.Scanning;
+  scanningIsVisible_: function() {
+    return this.deviceState.Type == CrOnc.Type.WI_FI;
   },
 
   /**
-   * @param {DeviceStateProperties|undefined} deviceState
+   * @return {boolean} Whether or not the scanning spinner should be active.
+   * @private
+   */
+  scanningIsActive_: function() {
+    return !!this.expanded_ && !!this.deviceState.Scanning;
+  },
+
+  /**
+   * Show the <network-siminfo> element if this is a disabled and locked
+   * cellular device.
+   * @return {boolean}
+   * @private
+   */
+  showSimInfo_: function() {
+    let device = this.deviceState;
+    if (device.Type != CrOnc.Type.CELLULAR ||
+        this.deviceIsEnabled_(this.deviceState)) {
+      return false;
+    }
+    return device.SimPresent === false ||
+        device.SimLockType == CrOnc.LockType.PIN ||
+        device.SimLockType == CrOnc.LockType.PUK;
+  },
+
+  /**
+   * Returns a NetworkProperties object for <network-siminfo> built from
+   * the device properties (since there will be no active network).
+   * @param {!DeviceStateProperties} deviceState
+   * @return {!CrOnc.NetworkProperties}
+   * @private
+   */
+  getCellularState_: function(deviceState) {
+    return {
+      GUID: '',
+      Type: CrOnc.Type.CELLULAR,
+      Cellular: {
+        SIMLockStatus: {
+          LockType: deviceState.SimLockType || '',
+          LockEnabled: deviceState.SimLockType != CrOnc.LockType.NONE,
+        },
+        SIMPresent: deviceState.SimPresent,
+      },
+    };
+  },
+
+  /**
+   * @param {!DeviceStateProperties|undefined} deviceState
    * @return {boolean} Whether or not the device state is enabled.
    * @private
    */
   deviceIsEnabled_: function(deviceState) {
-    return !!deviceState && deviceState.State == 'Enabled';
+    return !!deviceState &&
+        deviceState.State == chrome.networkingPrivate.DeviceStateType.ENABLED;
   },
 
   /**
@@ -113,77 +151,110 @@ Polymer({
    *   before it is expanded.
    * @private
    */
-  networksDomIfIsTrue_() {
-    if (this.expanded == this.wasExpanded)
-      return this.expanded;
-    if (this.expanded) {
+  networksDomIfIsTrue_: function() {
+    if (this.expanded_ == this.wasExpanded_)
+      return this.expanded_;
+    if (this.expanded_) {
       Polymer.RenderStatus.afterNextRender(this, function() {
-        this.wasExpanded = true;
+        this.wasExpanded_ = true;
       }.bind(this));
       return true;
     }
-    return this.wasExpanded;
+    return this.wasExpanded_;
   },
 
   /**
+   * @param {boolean} expanded
+   * @param {boolean} wasExpanded
    * @return {boolean} Whether the iron-collapse for the network list should
    *   be opened.
    * @private
    */
-  networksIronCollapseIsOpened_() {
-    return this.expanded && this.wasExpanded;
+  networksIronCollapseIsOpened_: function(expanded, wasExpanded) {
+    return expanded && wasExpanded;
   },
 
   /**
-   * @param {DeviceStateProperties} deviceState
+   * @param {!DeviceStateProperties} deviceState
    * @return {boolean}
    * @private
    */
-  enableIsVisible_: function(deviceState) {
-    return !!deviceState && deviceState.Type != CrOnc.Type.ETHERNET &&
+  enableToggleIsVisible_: function(deviceState) {
+    return deviceState.Type != CrOnc.Type.ETHERNET &&
         deviceState.Type != CrOnc.Type.VPN;
   },
 
   /**
-   * @param {DeviceStateProperties|undefined} deviceState
-   * @param {!Array<!CrOnc.NetworkStateProperties>} networkStateList
+   * @param {!DeviceStateProperties} deviceState
+   * @return {boolean}
+   * @private
+   */
+  enableToggleIsEnabled_: function(deviceState) {
+    return deviceState.State !=
+        chrome.networkingPrivate.DeviceStateType.PROHIBITED;
+  },
+
+  /**
    * @return {boolean} Whether or not to show the UI to expand the list.
    * @private
    */
-  expandIsVisible_: function(deviceState, networkStateList) {
-    if (!this.deviceIsEnabled_(deviceState))
+  expandIsVisible_: function() {
+    if (!this.deviceIsEnabled_(this.deviceState))
       return false;
-    var minLength = (this.deviceState.Type == CrOnc.Type.WI_FI) ? 1 : 2;
-    return networkStateList.length >= minLength;
+    let type = this.deviceState.Type;
+    var minLength =
+        (type == CrOnc.Type.WI_FI || type == CrOnc.Type.VPN) ? 1 : 2;
+    return this.networkStateList.length >= minLength;
   },
 
   /**
-   * @param {!CrOnc.NetworkStateProperties} state
+   * @return {boolean} Whether or not to show the UI to show details.
+   * @private
+   */
+  showDetailsIsVisible_: function() {
+    if (this.expandIsVisible_())
+      return false;
+    return this.deviceIsEnabled_(this.deviceState);
+  },
+
+  /**
+   * @param {!CrOnc.NetworkStateProperties} activeNetworkState
    * @return {boolean} True if the known networks button should be shown.
    * @private
    */
-  knownNetworksIsVisible_: function(state) {
-    return !!state && state.Type == CrOnc.Type.WI_FI;
+  knownNetworksIsVisible_: function(activeNetworkState) {
+    return !!activeNetworkState && activeNetworkState.Type == CrOnc.Type.WI_FI;
   },
 
   /**
-   * Event triggered when the details div is tapped.
-   * @param {Event} event The enable button event.
+   * Event triggered when the details div is tapped or Enter is pressed.
+   * @param {!Event} event The enable button event.
    * @private
    */
   onDetailsTap_: function(event) {
-    if ((event.target.id == 'expandListButton') ||
+    if ((event.target && event.target.id == 'expandListButton') ||
         (this.deviceState && !this.deviceIsEnabled_(this.deviceState))) {
       // Already handled or disabled, do nothing.
       return;
     }
-    if (this.expandIsVisible_(this.deviceState, this.networkStateList)) {
+    if (this.expandIsVisible_()) {
       // Expandable, toggle expand.
-      this.expanded = !this.expanded;
+      this.expanded_ = !this.expanded_;
       return;
     }
     // Not expandable, fire 'selected' with |activeNetworkState|.
     this.fire('selected', this.activeNetworkState);
+  },
+
+  /**
+   * @param {!Event} event The enable button event.
+   * @private
+   */
+  onShowDetailsTap_: function(event) {
+    if (!this.activeNetworkState.GUID)
+      return;
+    this.fire('show-detail', this.activeNetworkState);
+    event.stopPropagation();
   },
 
   /**
@@ -206,14 +277,5 @@ Polymer({
         'device-enabled-toggled', {enabled: !deviceIsEnabled, type: type});
     // Make sure this does not propagate to onDetailsTap_.
     event.stopPropagation();
-  },
-
-  /**
-   * Called whenever the 'selectable' state might change.
-   * @private
-   */
-  updateSelectable_: function() {
-    var selectable = this.deviceIsEnabled_(this.deviceState);
-    this.$.details.classList.toggle('selectable', selectable);
   },
 });

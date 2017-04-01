@@ -6,38 +6,29 @@
 #define SVGResourceClient_h
 
 #include "core/CoreExport.h"
-#include "core/fetch/DocumentResource.h"
-#include "core/svg/SVGFilterElement.h"
+#include "core/loader/resource/DocumentResource.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class Document;
-class FilterOperations;
-class SVGFilterElement;
+class TreeScope;
 
 class CORE_EXPORT SVGResourceClient : public DocumentResourceClient {
-    USING_PRE_FINALIZER(SVGResourceClient, clearFilterReferences);
-public:
-    SVGResourceClient();
-    ~SVGResourceClient() override;
-    void addFilterReferences(const FilterOperations&, const Document&);
-    void clearFilterReferences();
+ public:
+  virtual ~SVGResourceClient() {}
 
-    virtual void filterNeedsInvalidation() = 0;
+  virtual TreeScope* treeScope() = 0;
 
-    void filterWillBeDestroyed(SVGFilterElement*);
+  virtual void resourceContentChanged() = 0;
+  virtual void resourceElementChanged() = 0;
 
-    void notifyFinished(Resource*) override;
-    String debugName() const override { return "SVGResourceClient"; }
+ protected:
+  SVGResourceClient() {}
 
-    DECLARE_TRACE();
-
-private:
-    HeapHashSet<WeakMember<SVGFilterElement>> m_internalFilterReferences;
-    HeapVector<Member<DocumentResource>> m_externalFilterReferences;
+  String debugName() const override { return "SVGResourceClient"; }
+  void notifyFinished(Resource*) override { resourceElementChanged(); }
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // SVGResourceClient_h
+#endif  // SVGResourceClient_h

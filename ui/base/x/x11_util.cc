@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
+#include <X11/cursorfont.h>
 #include <X11/extensions/shape.h>
 #include <X11/extensions/XInput2.h>
 #include <X11/Xcursor/Xcursor.h>
@@ -27,7 +28,7 @@
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -174,44 +175,6 @@ void ReleaseXImage(void* address, void* context) {
     XDestroyImage(static_cast<XImage*>(context));
 }
 
-// A process wide singleton that manages the usage of X cursors.
-class XCursorCache {
- public:
-  XCursorCache() {}
-  ~XCursorCache() {
-    Clear();
-  }
-
-  ::Cursor GetCursor(int cursor_shape) {
-    // Lookup cursor by attempting to insert a null value, which avoids
-    // a second pass through the map after a cache miss.
-    std::pair<std::map<int, ::Cursor>::iterator, bool> it = cache_.insert(
-        std::make_pair(cursor_shape, 0));
-    if (it.second) {
-      XDisplay* display = gfx::GetXDisplay();
-      it.first->second = XCreateFontCursor(display, cursor_shape);
-    }
-    return it.first->second;
-  }
-
-  void Clear() {
-    XDisplay* display = gfx::GetXDisplay();
-    for (std::map<int, ::Cursor>::iterator it =
-        cache_.begin(); it != cache_.end(); ++it) {
-      XFreeCursor(display, it->second);
-    }
-    cache_.clear();
-  }
-
- private:
-  // Maps X11 font cursor shapes to Cursor IDs.
-  std::map<int, ::Cursor> cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(XCursorCache);
-};
-
-XCursorCache* cursor_cache = NULL;
-
 // A process wide singleton cache for custom X cursors.
 class XCustomCursorCache {
  public:
@@ -309,12 +272,6 @@ bool QueryRenderSupport(Display* dpy) {
   static bool render_supported = XRenderQueryExtension(dpy, &dummy, &dummy);
 
   return render_supported;
-}
-
-::Cursor GetXCursor(int cursor_shape) {
-  if (!cursor_cache)
-    cursor_cache = new XCursorCache;
-  return cursor_cache->GetCursor(cursor_shape);
 }
 
 ::Cursor CreateReffedCustomXCursor(XcursorImage* image) {
@@ -1169,52 +1126,54 @@ bool CopyAreaToCanvas(XID drawable,
 
 WindowManagerName GuessWindowManager() {
   std::string name;
-  if (GetWindowManagerName(&name)) {
-    // These names are taken from the WMs' source code.
-    if (name == "awesome")
-      return WM_AWESOME;
-    if (name == "Blackbox")
-      return WM_BLACKBOX;
-    if (name == "Compiz" || name == "compiz")
-      return WM_COMPIZ;
-    if (name == "e16" || name == "Enlightenment")
-      return WM_ENLIGHTENMENT;
-    if (name == "Fluxbox")
-      return WM_FLUXBOX;
-    if (name == "i3")
-      return WM_I3;
-    if (base::StartsWith(name, "IceWM", base::CompareCase::SENSITIVE))
-      return WM_ICE_WM;
-    if (name == "ion3")
-      return WM_ION3;
-    if (name == "KWin")
-      return WM_KWIN;
-    if (name == "matchbox")
-      return WM_MATCHBOX;
-    if (name == "Metacity")
-      return WM_METACITY;
-    if (name == "Mutter (Muffin)")
-      return WM_MUFFIN;
-    if (name == "GNOME Shell")
-      return WM_MUTTER;  // GNOME Shell uses Mutter
-    if (name == "Mutter")
-      return WM_MUTTER;
-    if (name == "notion")
-      return WM_NOTION;
-    if (name == "Openbox")
-      return WM_OPENBOX;
-    if (name == "qtile")
-      return WM_QTILE;
-    if (name == "ratpoison")
-      return WM_RATPOISON;
-    if (name == "stumpwm")
-      return WM_STUMPWM;
-    if (name == "wmii")
-      return WM_WMII;
-    if (name == "Xfwm4")
-      return WM_XFWM4;
-  }
-  return WM_UNKNOWN;
+  if (!GetWindowManagerName(&name))
+    return WM_UNNAMED;
+  // These names are taken from the WMs' source code.
+  if (name == "awesome")
+    return WM_AWESOME;
+  if (name == "Blackbox")
+    return WM_BLACKBOX;
+  if (name == "Compiz" || name == "compiz")
+    return WM_COMPIZ;
+  if (name == "e16" || name == "Enlightenment")
+    return WM_ENLIGHTENMENT;
+  if (name == "Fluxbox")
+    return WM_FLUXBOX;
+  if (name == "i3")
+    return WM_I3;
+  if (base::StartsWith(name, "IceWM", base::CompareCase::SENSITIVE))
+    return WM_ICE_WM;
+  if (name == "ion3")
+    return WM_ION3;
+  if (name == "KWin")
+    return WM_KWIN;
+  if (name == "matchbox")
+    return WM_MATCHBOX;
+  if (name == "Metacity")
+    return WM_METACITY;
+  if (name == "Mutter (Muffin)")
+    return WM_MUFFIN;
+  if (name == "GNOME Shell")
+    return WM_MUTTER;  // GNOME Shell uses Mutter
+  if (name == "Mutter")
+    return WM_MUTTER;
+  if (name == "notion")
+    return WM_NOTION;
+  if (name == "Openbox")
+    return WM_OPENBOX;
+  if (name == "qtile")
+    return WM_QTILE;
+  if (name == "ratpoison")
+    return WM_RATPOISON;
+  if (name == "stumpwm")
+    return WM_STUMPWM;
+  if (name == "wmii")
+    return WM_WMII;
+  if (name == "Xfwm4")
+    return WM_XFWM4;
+  if (name == "xmonad")
+    return WM_XMONAD;
+  return WM_OTHER;
 }
 
 std::string GuessWindowManagerName() {
@@ -1312,11 +1271,6 @@ void XScopedCursor::reset(::Cursor cursor) {
 
 namespace test {
 
-void ResetXCursorCache() {
-  delete cursor_cache;
-  cursor_cache = NULL;
-}
-
 const XcursorImage* GetCachedXcursorImage(::Cursor cursor) {
   return XCustomCursorCache::GetInstance()->GetXcursorImage(cursor);
 }
@@ -1412,56 +1366,115 @@ void LogErrorEventDescription(XDisplay* dpy,
 }
 
 #if !defined(OS_CHROMEOS)
-void ChooseVisualForWindow(bool enable_transparent_visuals,
-                           Visual** visual,
-                           int* depth) {
-  static Visual* s_visual = NULL;
-  static int s_depth = 0;
 
-  if (!s_visual) {
-    XDisplay* display = gfx::GetXDisplay();
-    XAtom NET_WM_CM_S0 = XInternAtom(display, "_NET_WM_CM_S0", False);
+// static
+XVisualManager* XVisualManager::GetInstance() {
+  return base::Singleton<XVisualManager>::get();
+}
 
-    if (enable_transparent_visuals &&
-        XGetSelectionOwner(display, NET_WM_CM_S0) != None) {
-      // Choose the first ARGB8888 visual
-      XVisualInfo visual_template;
-      visual_template.screen = 0;
+XVisualManager::XVisualManager()
+    : display_(gfx::GetXDisplay()),
+      default_visual_id_(0),
+      system_visual_id_(0),
+      transparent_visual_id_(0),
+      using_software_rendering_(false),
+      have_gpu_argb_visual_(false) {
+  int visuals_len;
+  XVisualInfo visual_template;
+  visual_template.screen = DefaultScreen(display_);
+  gfx::XScopedPtr<XVisualInfo[]> visual_list(XGetVisualInfo(
+      display_, VisualScreenMask, &visual_template, &visuals_len));
+  for (int i = 0; i < visuals_len; ++i)
+    visuals_[visual_list[i].visualid].reset(new XVisualData(visual_list[i]));
 
-      int visuals_len;
-      gfx::XScopedPtr<XVisualInfo[]> visual_list(XGetVisualInfo(
-          display, VisualScreenMask, &visual_template, &visuals_len));
-      for (int i = 0; i < visuals_len; ++i) {
-        // Why support only 8888 ARGB? Because it's all that GTK+ supports. In
-        // gdkvisual-x11.cc, they look for this specific visual and use it for
-        // all their alpha channel using needs.
-        const XVisualInfo& info = visual_list[i];
-        if (info.depth == 32 && info.visual->red_mask == 0xff0000 &&
-            info.visual->green_mask == 0x00ff00 &&
-            info.visual->blue_mask == 0x0000ff) {
-          s_visual = info.visual;
-          s_depth = info.depth;
-          break;
-        }
-      }
-    } else {
-      XWindowAttributes windowAttribs;
-      Window root = XDefaultRootWindow(display);
-      Status status = XGetWindowAttributes(display, root, &windowAttribs);
-      DCHECK(status != 0);
-      s_visual = windowAttribs.visual;
-      s_depth = windowAttribs.depth;
+  XAtom NET_WM_CM_S0 = XInternAtom(display_, "_NET_WM_CM_S0", False);
+  using_compositing_wm_ = XGetSelectionOwner(display_, NET_WM_CM_S0) != None;
+
+  // Choose the opaque visual.
+  default_visual_id_ =
+      XVisualIDFromVisual(DefaultVisual(display_, DefaultScreen(display_)));
+  system_visual_id_ = default_visual_id_;
+  DCHECK(system_visual_id_);
+  DCHECK(visuals_.find(system_visual_id_) != visuals_.end());
+
+  // Choose the transparent visual.
+  for (const auto& pair : visuals_) {
+    // Why support only 8888 ARGB? Because it's all that GTK+ supports. In
+    // gdkvisual-x11.cc, they look for this specific visual and use it for
+    // all their alpha channel using needs.
+    const XVisualInfo& info = pair.second->visual_info;
+    if (info.depth == 32 && info.visual->red_mask == 0xff0000 &&
+        info.visual->green_mask == 0x00ff00 &&
+        info.visual->blue_mask == 0x0000ff) {
+      transparent_visual_id_ = info.visualid;
+      break;
     }
-  }  // !s_visual
+  }
+  if (transparent_visual_id_)
+    DCHECK(visuals_.find(transparent_visual_id_) != visuals_.end());
+}
 
-  DCHECK(s_visual);
-  DCHECK(s_depth > 0);
+XVisualManager::~XVisualManager() {}
+
+void XVisualManager::ChooseVisualForWindow(bool want_argb_visual,
+                                           Visual** visual,
+                                           int* depth,
+                                           Colormap* colormap,
+                                           bool* using_argb_visual) {
+  bool use_argb = want_argb_visual && using_compositing_wm_ &&
+                  (using_software_rendering_ || have_gpu_argb_visual_);
+  VisualID visual_id = use_argb && transparent_visual_id_
+                           ? transparent_visual_id_
+                           : system_visual_id_;
+  XVisualData& visual_data = *visuals_[visual_id];
+  const XVisualInfo& visual_info = visual_data.visual_info;
+
+  bool is_default_visual = visual_id == default_visual_id_;
 
   if (visual)
-    *visual = s_visual;
+    *visual = visual_info.visual;
   if (depth)
-    *depth = s_depth;
+    *depth = visual_info.depth;
+  if (colormap)
+    *colormap = is_default_visual ? CopyFromParent : visual_data.GetColormap();
+  if (using_argb_visual)
+    *using_argb_visual = use_argb;
 }
+
+bool XVisualManager::OnGPUInfoChanged(bool software_rendering,
+                                      VisualID system_visual_id,
+                                      VisualID transparent_visual_id) {
+  // TODO(thomasanderson): Cache these visual IDs as a property of the root
+  // window so that newly created browser processes can get them immediately.
+  if ((system_visual_id && !visuals_.count(system_visual_id)) ||
+      (transparent_visual_id && !visuals_.count(transparent_visual_id)))
+    return false;
+  using_software_rendering_ = software_rendering;
+  have_gpu_argb_visual_ = have_gpu_argb_visual_ || transparent_visual_id;
+  if (system_visual_id)
+    system_visual_id_ = system_visual_id;
+  if (transparent_visual_id)
+    transparent_visual_id_ = transparent_visual_id;
+  return true;
+}
+
+XVisualManager::XVisualData::XVisualData(XVisualInfo visual_info)
+    : visual_info(visual_info), colormap_(CopyFromParent) {}
+
+XVisualManager::XVisualData::~XVisualData() {
+  // Do not XFreeColormap as this would uninstall the colormap even for
+  // non-Chromium clients.
+}
+
+Colormap XVisualManager::XVisualData::GetColormap() {
+  XDisplay* display = gfx::GetXDisplay();
+  if (colormap_ == CopyFromParent) {
+    colormap_ = XCreateColormap(display, DefaultRootWindow(display),
+                                visual_info.visual, AllocNone);
+  }
+  return colormap_;
+}
+
 #endif
 
 // ----------------------------------------------------------------------------

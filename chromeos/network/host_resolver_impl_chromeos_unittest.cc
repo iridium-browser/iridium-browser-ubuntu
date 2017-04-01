@@ -22,15 +22,18 @@
 #include "dbus/object_path.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_interfaces.h"
+#include "net/log/net_log_with_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+
+namespace chromeos {
 
 namespace {
 
 const char kTestIPv4Address[] = "1.2.3.4";
 const char kTestIPv6Address[] = "1:2:3:4:5:6:7:8";
 
-void DoNothingWithCallStatus(chromeos::DBusMethodCallStatus call_status) {}
+void DoNothingWithCallStatus(DBusMethodCallStatus call_status) {}
 void ErrorCallbackFunction(const std::string& error_name,
                            const std::string& error_message) {
   LOG(ERROR) << "Shill Error: " << error_name << " : " << error_message;
@@ -46,35 +49,30 @@ class HostResolverImplChromeOSTest : public testing::Test {
   ~HostResolverImplChromeOSTest() override {}
 
   void SetUp() override {
-    chromeos::DBusThreadManager::Initialize();
+    DBusThreadManager::Initialize();
 
-    network_state_handler_.reset(
-        chromeos::NetworkStateHandler::InitializeForTest());
+    network_state_handler_ = NetworkStateHandler::InitializeForTest();
     base::RunLoop().RunUntilIdle();
 
-    const chromeos::NetworkState* default_network =
+    const NetworkState* default_network =
         network_state_handler_->DefaultNetwork();
     ASSERT_TRUE(default_network);
-    const chromeos::DeviceState* default_device =
+    const DeviceState* default_device =
         network_state_handler_->GetDeviceState(default_network->device_path());
     ASSERT_TRUE(default_device);
     SetDefaultIPConfigs(default_device->path());
 
     // Create the host resolver from the IO message loop.
-    io_message_loop_.PostTask(
+    io_message_loop_.task_runner()->PostTask(
         FROM_HERE,
         base::Bind(&HostResolverImplChromeOSTest::InitializeHostResolver,
                    base::Unretained(this)));
-    io_message_loop_.RunUntilIdle();
-
-    // Run the main message loop to create the network observer and initialize
-    // the ip address values.
     base::RunLoop().RunUntilIdle();
   }
 
   void TearDown() override {
     network_state_handler_.reset();
-    chromeos::DBusThreadManager::Shutdown();
+    DBusThreadManager::Shutdown();
   }
 
  protected:
@@ -83,7 +81,7 @@ class HostResolverImplChromeOSTest : public testing::Test {
     io_message_loop_.task_runner()->PostTask(
         FROM_HERE, base::Bind(&HostResolverImplChromeOSTest::Resolve,
                               base::Unretained(this), info));
-    io_message_loop_.RunUntilIdle();
+    base::RunLoop().RunUntilIdle();
     return result_;
   }
 
@@ -94,9 +92,8 @@ class HostResolverImplChromeOSTest : public testing::Test {
   // Run from IO message loop.
   void InitializeHostResolver() {
     net::HostResolver::Options options;
-    host_resolver_ =
-        chromeos::HostResolverImplChromeOS::CreateHostResolverForTest(
-            base::ThreadTaskRunnerHandle::Get(), network_state_handler_.get());
+    host_resolver_ = HostResolverImplChromeOS::CreateHostResolverForTest(
+        base::ThreadTaskRunnerHandle::Get(), network_state_handler_.get());
   }
 
   // Run from IO message loop.
@@ -118,11 +115,9 @@ class HostResolverImplChromeOSTest : public testing::Test {
     ip_configs.AppendString(kTestIPv4ConfigPath);
     ip_configs.AppendString(kTestIPv6ConfigPath);
 
-    chromeos::DBusThreadManager::Get()->GetShillDeviceClient()->SetProperty(
-        dbus::ObjectPath(default_device_path),
-        shill::kIPConfigsProperty,
-        ip_configs,
-        base::Bind(&base::DoNothing),
+    DBusThreadManager::Get()->GetShillDeviceClient()->SetProperty(
+        dbus::ObjectPath(default_device_path), shill::kIPConfigsProperty,
+        ip_configs, base::Bind(&base::DoNothing),
         base::Bind(&ErrorCallbackFunction));
     base::RunLoop().RunUntilIdle();
   }
@@ -130,22 +125,18 @@ class HostResolverImplChromeOSTest : public testing::Test {
   void SetIPConfig(const std::string& path,
                    const std::string& method,
                    const std::string& address) {
-    chromeos::DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
-        dbus::ObjectPath(path),
-        shill::kAddressProperty,
-        base::StringValue(address),
-        base::Bind(&DoNothingWithCallStatus));
-    chromeos::DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
-        dbus::ObjectPath(path),
-        shill::kMethodProperty,
-        base::StringValue(method),
-        base::Bind(&DoNothingWithCallStatus));
+    DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
+        dbus::ObjectPath(path), shill::kAddressProperty,
+        base::StringValue(address), base::Bind(&DoNothingWithCallStatus));
+    DBusThreadManager::Get()->GetShillIPConfigClient()->SetProperty(
+        dbus::ObjectPath(path), shill::kMethodProperty,
+        base::StringValue(method), base::Bind(&DoNothingWithCallStatus));
   }
 
-  std::unique_ptr<chromeos::NetworkStateHandler> network_state_handler_;
+  std::unique_ptr<NetworkStateHandler> network_state_handler_;
   std::unique_ptr<net::HostResolver> host_resolver_;
   base::MessageLoop io_message_loop_;
-  net::BoundNetLog net_log_;
+  net::NetLogWithSource net_log_;
   std::unique_ptr<net::HostResolver::Request> request_;
 
   DISALLOW_COPY_AND_ASSIGN(HostResolverImplChromeOSTest);
@@ -169,3 +160,5 @@ TEST_F(HostResolverImplChromeOSTest, Resolve) {
   expected = base::StringPrintf("%s:%d", kTestIPv4Address, 0);
   EXPECT_EQ(expected, addresses_[1].ToString());
 }
+
+}  // namespace chromeos

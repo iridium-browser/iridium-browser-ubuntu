@@ -20,7 +20,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
-#include "crypto/rsa_private_key.h"
 #include "net/base/address_list.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
@@ -52,9 +51,9 @@ struct HttpRequest;
 //
 // void SetUp() {
 //   test_server_.reset(new EmbeddedTestServer());
-//   ASSERT_TRUE(test_server_.Start());
 //   test_server_->RegisterRequestHandler(
 //       base::Bind(&FooTest::HandleRequest, base::Unretained(this)));
+//   ASSERT_TRUE(test_server_.Start());
 // }
 //
 // std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
@@ -206,16 +205,21 @@ class EmbeddedTestServer {
 
   // The most general purpose method. Any request processing can be added using
   // this method. Takes ownership of the object. The |callback| is called
-  // on UI thread.
+  // on the server's IO thread so all handlers must be registered before the
+  // server is started.
   void RegisterRequestHandler(const HandleRequestCallback& callback);
 
   // Adds request monitors. The |callback| is called before any handlers are
   // called, but can not respond it. This is useful to monitor requests that
-  // will be handled by other request handlers.
+  // will be handled by other request handlers. The |callback| is called
+  // on the server's IO thread so all monitors must be registered before the
+  // server is started.
   void RegisterRequestMonitor(const MonitorRequestCallback& callback);
 
   // Adds default handlers, including those added by AddDefaultHandlers, to be
-  // tried after all other user-specified handlers have been tried.
+  // tried after all other user-specified handlers have been tried. The
+  // |callback| is called on the server's IO thread so all handlers must be
+  // registered before the server is started.
   void RegisterDefaultHandler(const HandleRequestCallback& callback);
 
   bool FlushAllSocketsAndConnectionsOnUIThread();
@@ -278,8 +282,7 @@ class EmbeddedTestServer {
   GURL base_url_;
   IPEndPoint local_endpoint_;
 
-  // Owns the HttpConnection objects.
-  std::map<StreamSocket*, HttpConnection*> connections_;
+  std::map<StreamSocket*, std::unique_ptr<HttpConnection>> connections_;
 
   // Vector of registered and default request handlers and monitors.
   std::vector<HandleRequestCallback> request_handlers_;

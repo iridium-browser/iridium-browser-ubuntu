@@ -12,9 +12,10 @@
 
 #include "base/macros.h"
 #include "components/sync/engine_impl/commit_contribution.h"
+#include "components/sync/engine_impl/cycle/data_type_debug_info_emitter.h"
 #include "components/sync/protocol/sync.pb.h"
 
-namespace syncer_v2 {
+namespace syncer {
 
 class ModelTypeWorker;
 
@@ -22,19 +23,20 @@ class ModelTypeWorker;
 //
 // Helps build a commit message and process its response.  It collaborates
 // closely with the ModelTypeWorker.
-class NonBlockingTypeCommitContribution : public syncer::CommitContribution {
+class NonBlockingTypeCommitContribution : public CommitContribution {
  public:
   NonBlockingTypeCommitContribution(
       const sync_pb::DataTypeContext& context,
       const google::protobuf::RepeatedPtrField<sync_pb::SyncEntity>& entities,
-      ModelTypeWorker* worker);
+      ModelTypeWorker* worker,
+      DataTypeDebugInfoEmitter* debug_info_emitter);
   ~NonBlockingTypeCommitContribution() override;
 
   // Implementation of CommitContribution
   void AddToCommitMessage(sync_pb::ClientToServerMessage* msg) override;
-  syncer::SyncerError ProcessCommitResponse(
+  SyncerError ProcessCommitResponse(
       const sync_pb::ClientToServerResponse& response,
-      syncer::StatusController* status) override;
+      StatusController* status) override;
   void CleanUp() override;
   size_t GetNumEntries() const override;
 
@@ -56,9 +58,11 @@ class NonBlockingTypeCommitContribution : public syncer::CommitContribution {
   // that CleanUp() is called before the object is destructed.
   bool cleaned_up_;
 
+  DataTypeDebugInfoEmitter* debug_info_emitter_;
+
   DISALLOW_COPY_AND_ASSIGN(NonBlockingTypeCommitContribution);
 };
 
-}  // namespace syncer_v2
+}  // namespace syncer
 
 #endif  // COMPONENTS_SYNC_ENGINE_IMPL_NON_BLOCKING_TYPE_COMMIT_CONTRIBUTION_H_

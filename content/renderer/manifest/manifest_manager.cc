@@ -60,14 +60,10 @@ void ManifestManager::OnRequestManifestComplete(int request_id,
       ipc_manifest.name.string().substr(0, Manifest::kMaxIPCStringLength),
       ipc_manifest.name.is_null());
   ipc_manifest.short_name = base::NullableString16(
-        ipc_manifest.short_name.string().substr(0,
-                                                Manifest::kMaxIPCStringLength),
-        ipc_manifest.short_name.is_null());
-  for (auto& icon : ipc_manifest.icons) {
-    icon.type = base::NullableString16(
-        icon.type.string().substr(0, Manifest::kMaxIPCStringLength),
-        icon.type.is_null());
-  }
+      ipc_manifest.short_name.string().substr(0, Manifest::kMaxIPCStringLength),
+      ipc_manifest.short_name.is_null());
+  for (auto& icon : ipc_manifest.icons)
+    icon.type = icon.type.substr(0, Manifest::kMaxIPCStringLength);
   ipc_manifest.gcm_sender_id = base::NullableString16(
         ipc_manifest.gcm_sender_id.string().substr(
             0, Manifest::kMaxIPCStringLength),
@@ -154,7 +150,9 @@ void ManifestManager::OnManifestFetchComplete(
   }
 
   ManifestUmaUtil::FetchSucceeded();
-  ManifestParser parser(data, response.url(), document_url);
+  GURL response_url = response.url();
+  base::StringPiece data_piece(data);
+  ManifestParser parser(data_piece, response_url, document_url);
   parser.Parse();
 
   fetcher_.reset();

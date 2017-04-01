@@ -4,8 +4,6 @@
 
 #import "chrome/browser/ui/cocoa/browser_window_utils.h"
 
-#include <Carbon/Carbon.h>
-
 #include "base/logging.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/global_keyboard_shortcuts_mac.h"
@@ -22,10 +20,6 @@ namespace {
 
 CGFloat GetPatternVerticalOffsetWithTabStrip(bool tabStripVisible) {
   // Without tab strip, offset an extra pixel (determined by experimentation).
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    return tabStripVisible ? 2 : 3;
-  }
-
   return tabStripVisible ? -1 : 0;
 }
 
@@ -34,14 +28,14 @@ CGFloat GetPatternVerticalOffsetWithTabStrip(bool tabStripVisible) {
 
 @implementation BrowserWindowUtils
 + (BOOL)shouldHandleKeyboardEvent:(const NativeWebKeyboardEvent&)event {
-  if (event.skip_in_browser || event.type == NativeWebKeyboardEvent::Char)
+  if (event.skip_in_browser || event.type() == NativeWebKeyboardEvent::Char)
     return NO;
   DCHECK(event.os_event != NULL);
   return YES;
 }
 
 + (BOOL)isTextEditingEvent:(const content::NativeWebKeyboardEvent&)event {
-  return (event.modifiers & blink::WebInputEvent::MetaKey) &&
+  return (event.modifiers() & blink::WebInputEvent::MetaKey) &&
          (event.windowsKeyCode == ui::VKEY_A ||
           event.windowsKeyCode == ui::VKEY_V ||
           event.windowsKeyCode == ui::VKEY_C ||
@@ -149,9 +143,7 @@ const CGFloat kPatternHorizontalOffset = -5;
   // Per http://crbug.com/73779 and http://crbug.com/75223, we need this to
   // properly activate windows if Chrome is not the active application.
   [[controller window] makeKeyAndOrderFront:controller];
-  ProcessSerialNumber psn;
-  GetCurrentProcess(&psn);
-  SetFrontProcessWithOptions(&psn, kSetFrontProcessFrontWindowOnly);
+  [NSApp activateIgnoringOtherApps:YES];
 }
 
 @end

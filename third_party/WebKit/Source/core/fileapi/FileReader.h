@@ -33,7 +33,7 @@
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "core/CoreExport.h"
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
 #include "core/fileapi/FileError.h"
 #include "core/fileapi/FileReaderLoader.h"
@@ -49,92 +49,92 @@ class ExceptionState;
 class ExecutionContext;
 class StringOrArrayBuffer;
 
-class CORE_EXPORT FileReader final : public EventTargetWithInlineData, public ActiveScriptWrappable, public ActiveDOMObject, public FileReaderLoaderClient {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(FileReader);
-public:
-    static FileReader* create(ExecutionContext*);
+class CORE_EXPORT FileReader final : public EventTargetWithInlineData,
+                                     public ActiveScriptWrappable<FileReader>,
+                                     public ContextLifecycleObserver,
+                                     public FileReaderLoaderClient {
+  DEFINE_WRAPPERTYPEINFO();
+  USING_GARBAGE_COLLECTED_MIXIN(FileReader);
 
-    ~FileReader() override;
+ public:
+  static FileReader* create(ExecutionContext*);
 
-    enum ReadyState {
-        kEmpty = 0,
-        kLoading = 1,
-        kDone = 2
-    };
+  ~FileReader() override;
 
-    void readAsArrayBuffer(Blob*, ExceptionState&);
-    void readAsBinaryString(Blob*, ExceptionState&);
-    void readAsText(Blob*, const String& encoding, ExceptionState&);
-    void readAsText(Blob*, ExceptionState&);
-    void readAsDataURL(Blob*, ExceptionState&);
-    void abort();
+  enum ReadyState { kEmpty = 0, kLoading = 1, kDone = 2 };
 
-    void doAbort();
+  void readAsArrayBuffer(Blob*, ExceptionState&);
+  void readAsBinaryString(Blob*, ExceptionState&);
+  void readAsText(Blob*, const String& encoding, ExceptionState&);
+  void readAsText(Blob*, ExceptionState&);
+  void readAsDataURL(Blob*, ExceptionState&);
+  void abort();
 
-    ReadyState getReadyState() const { return m_state; }
-    DOMException* error() { return m_error; }
-    void result(StringOrArrayBuffer& resultAttribute) const;
+  ReadyState getReadyState() const { return m_state; }
+  DOMException* error() { return m_error; }
+  void result(StringOrArrayBuffer& resultAttribute) const;
 
-    // ActiveDOMObject
-    void stop() override;
+  // ContextLifecycleObserver
+  void contextDestroyed(ExecutionContext*) override;
 
-    // ScriptWrappable
-    bool hasPendingActivity() const final;
+  // ScriptWrappable
+  bool hasPendingActivity() const final;
 
-    // EventTarget
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override { return ActiveDOMObject::getExecutionContext(); }
+  // EventTarget
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override {
+    return ContextLifecycleObserver::getExecutionContext();
+  }
 
-    // FileReaderLoaderClient
-    void didStartLoading() override;
-    void didReceiveData() override;
-    void didFinishLoading() override;
-    void didFail(FileError::ErrorCode) override;
+  // FileReaderLoaderClient
+  void didStartLoading() override;
+  void didReceiveData() override;
+  void didFinishLoading() override;
+  void didFail(FileError::ErrorCode) override;
 
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(loadstart);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(load);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(abort);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(loadend);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(loadstart);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(load);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(abort);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(loadend);
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    explicit FileReader(ExecutionContext*);
+ private:
+  class ThrottlingController;
 
-    class ThrottlingController;
+  explicit FileReader(ExecutionContext*);
 
-    void terminate();
-    void readInternal(Blob*, FileReaderLoader::ReadType, ExceptionState&);
-    void fireEvent(const AtomicString& type);
+  void terminate();
+  void readInternal(Blob*, FileReaderLoader::ReadType, ExceptionState&);
+  void fireEvent(const AtomicString& type);
 
-    void executePendingRead();
+  void executePendingRead();
 
-    ReadyState m_state;
+  ReadyState m_state;
 
-    // Internal loading state, which could differ from ReadyState as it's
-    // for script-visible state while this one's for internal state.
-    enum LoadingState {
-        LoadingStateNone,
-        LoadingStatePending,
-        LoadingStateLoading,
-        LoadingStateAborted
-    };
-    LoadingState m_loadingState;
-    bool m_stillFiringEvents;
+  // Internal loading state, which could differ from ReadyState as it's
+  // for script-visible state while this one's for internal state.
+  enum LoadingState {
+    LoadingStateNone,
+    LoadingStatePending,
+    LoadingStateLoading,
+    LoadingStateAborted
+  };
+  LoadingState m_loadingState;
+  bool m_stillFiringEvents;
 
-    String m_blobType;
-    RefPtr<BlobDataHandle> m_blobDataHandle;
-    FileReaderLoader::ReadType m_readType;
-    String m_encoding;
+  String m_blobType;
+  RefPtr<BlobDataHandle> m_blobDataHandle;
+  FileReaderLoader::ReadType m_readType;
+  String m_encoding;
 
-    std::unique_ptr<FileReaderLoader> m_loader;
-    Member<DOMException> m_error;
-    double m_lastProgressNotificationTimeMS;
+  std::unique_ptr<FileReaderLoader> m_loader;
+  Member<DOMException> m_error;
+  double m_lastProgressNotificationTimeMS;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // FileReader_h
+#endif  // FileReader_h

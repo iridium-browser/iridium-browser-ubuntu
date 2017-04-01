@@ -29,16 +29,20 @@
 /** @const */ var SCREEN_FATAL_ERROR = 'fatal-error';
 /** @const */ var SCREEN_KIOSK_ENABLE = 'kiosk-enable';
 /** @const */ var SCREEN_TERMS_OF_SERVICE = 'terms-of-service';
+/** @const */ var SCREEN_ARC_TERMS_OF_SERVICE = 'arc-tos';
 /** @const */ var SCREEN_WRONG_HWID = 'wrong-hwid';
 /** @const */ var SCREEN_DEVICE_DISABLED = 'device-disabled';
 /** @const */ var SCREEN_UNRECOVERABLE_CRYPTOHOME_ERROR =
     'unrecoverable-cryptohome-error';
+/** @const */ var SCREEN_ACTIVE_DIRECTORY_PASSWORD_CHANGE =
+    'ad-password-change';
 
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
 /** @const */ var ACCELERATOR_ENABLE_DEBBUGING = 'debugging';
 /** @const */ var ACCELERATOR_TOGGLE_EASY_BOOTSTRAP = 'toggle_easy_bootstrap';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
+/** @const */ var ACCELERATOR_ENROLLMENT_AD = 'enrollment_ad';
 /** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
 /** @const */ var ACCELERATOR_RESET = 'reset';
@@ -50,6 +54,7 @@
 /** @const */ var ACCELERATOR_APP_LAUNCH_BAILOUT = 'app_launch_bailout';
 /** @const */ var ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG =
     'app_launch_network_config';
+/** @const */ var ACCELERATOR_BOOTSTRAPPING_SLAVE = "bootstrapping_slave";
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -132,6 +137,7 @@ cr.define('cr.ui.login', function() {
     SCREEN_TPM_ERROR,
     SCREEN_PASSWORD_CHANGED,
     SCREEN_TERMS_OF_SERVICE,
+    SCREEN_ARC_TERMS_OF_SERVICE,
     SCREEN_WRONG_HWID,
     SCREEN_CONFIRM_PASSWORD,
     SCREEN_FATAL_ERROR
@@ -262,7 +268,7 @@ cr.define('cr.ui.login', function() {
 
     set pinHidden(hidden) {
       this.virtualKeyboardShown = hidden;
-      $('pod-row').setPinHidden(hidden);
+      $('pod-row').setFocusedPodPinVisibility(!hidden);
     },
 
     /**
@@ -340,7 +346,10 @@ cr.define('cr.ui.login', function() {
                 currentStepId) != -1) {
           chrome.send('toggleEnableDebuggingScreen');
         }
-      } else if (name == ACCELERATOR_ENROLLMENT) {
+      } else if (name == ACCELERATOR_ENROLLMENT ||
+                 name == ACCELERATOR_ENROLLMENT_AD) {
+        if (name == ACCELERATOR_ENROLLMENT_AD)
+          chrome.send('toggleEnrollmentAd');
         if (currentStepId == SCREEN_GAIA_SIGNIN ||
             currentStepId == SCREEN_ACCOUNT_PICKER) {
           chrome.send('toggleEnrollmentScreen');
@@ -384,6 +393,8 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_TOGGLE_EASY_BOOTSTRAP) {
         if (currentStepId == SCREEN_GAIA_SIGNIN)
           chrome.send('toggleEasyBootstrap');
+      } else if (name == ACCELERATOR_BOOTSTRAPPING_SLAVE) {
+          chrome.send('setOobeBootstrappingSlave');
       }
     },
 
@@ -610,7 +621,8 @@ cr.define('cr.ui.login', function() {
 
 
       // Show sign-in screen instead of account picker if pod row is empty.
-      if (screenId == SCREEN_ACCOUNT_PICKER && $('pod-row').pods.length == 0) {
+      if (screenId == SCREEN_ACCOUNT_PICKER && $('pod-row').pods.length == 0 &&
+          cr.isChromeOS) {
         // Manually hide 'add-user' header bar, because of the case when
         // 'Cancel' button is used on the offline login page.
         $('add-user-header-bar-item').hidden = true;
@@ -990,6 +1002,15 @@ cr.define('cr.ui.login', function() {
    */
   DisplayManager.showTpmError = function() {
     login.TPMErrorMessageScreen.show();
+  };
+
+  /**
+   * Shows password change screen for Active Directory users.
+   * @param {string} username Display name of the user whose password is being
+   * changed.
+   */
+  DisplayManager.showActiveDirectoryPasswordChangeScreen = function(username) {
+    login.ActiveDirectoryPasswordChangeScreen.show(username);
   };
 
   /**

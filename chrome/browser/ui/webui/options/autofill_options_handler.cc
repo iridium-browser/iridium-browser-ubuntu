@@ -38,8 +38,8 @@
 #include "components/autofill/core/browser/phone_number_i18n.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_ui.h"
-#include "grit/components_strings.h"
 #include "third_party/libaddressinput/messages.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_ui_component.h"
@@ -171,7 +171,8 @@ void SetCountryData(const PersonalDataManager& manager,
                     base::DictionaryValue* localized_strings) {
   autofill::CountryComboboxModel model;
   model.SetCountries(manager, base::Callback<bool(const std::string&)>());
-  const std::vector<AutofillCountry*>& countries = model.countries();
+  const std::vector<std::unique_ptr<autofill::AutofillCountry>>& countries =
+      model.countries();
   localized_strings->SetString("defaultCountryCode",
                                countries.front()->country_code());
 
@@ -346,8 +347,8 @@ void AutofillOptionsHandler::LoadAutofillData() {
 
     base::string16 separator =
         l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_SUMMARY_SEPARATOR);
-    std::vector<base::string16> label_parts;
-    base::SplitStringUsingSubstr(labels[i], separator, &label_parts);
+    std::vector<base::string16> label_parts = base::SplitStringUsingSubstr(
+        labels[i], separator, base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
     std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue);
     value->SetString("guid", profiles[i]->guid());

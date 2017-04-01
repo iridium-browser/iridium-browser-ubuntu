@@ -5,6 +5,7 @@
 #include "chrome/browser/media_galleries/fileapi/iapps_data_provider.h"
 
 #include <map>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -13,9 +14,7 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/media_galleries/fileapi/file_path_watcher_util.h"
 #include "chrome/browser/media_galleries/fileapi/media_file_system_backend.h"
 #include "chrome/common/media_galleries/itunes_library.h"
 #include "storage/browser/fileapi/native_file_util.h"
@@ -28,7 +27,7 @@ IAppsDataProvider::IAppsDataProvider(const base::FilePath& library_path)
       needs_refresh_(true),
       is_valid_(false),
       weak_factory_(this) {
-  DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
+  MediaFileSystemBackend::AssertCurrentlyOnMediaSequence();
   DCHECK(!library_path_.empty());
 
   StartFilePathWatchOnMediaTaskRunner(
@@ -50,7 +49,7 @@ void IAppsDataProvider::set_valid(bool valid) {
 }
 
 void IAppsDataProvider::RefreshData(const ReadyCallback& ready_callback) {
-  DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
+  MediaFileSystemBackend::AssertCurrentlyOnMediaSequence();
   if (!needs_refresh_) {
     ready_callback.Run(valid());
     return;
@@ -66,14 +65,14 @@ const base::FilePath& IAppsDataProvider::library_path() const {
 }
 
 void IAppsDataProvider::OnLibraryWatchStarted(
-    std::unique_ptr<base::FilePathWatcher> library_watcher) {
-  DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
-  library_watcher_.reset(library_watcher.release());
+    MediaFilePathWatcherUniquePtr library_watcher) {
+  MediaFileSystemBackend::AssertCurrentlyOnMediaSequence();
+  library_watcher_ = std::move(library_watcher);
 }
 
 void IAppsDataProvider::OnLibraryChanged(const base::FilePath& path,
                                          bool error) {
-  DCHECK(MediaFileSystemBackend::CurrentlyOnMediaTaskRunnerThread());
+  MediaFileSystemBackend::AssertCurrentlyOnMediaSequence();
   DCHECK_EQ(library_path_.value(), path.value());
   if (error)
     LOG(ERROR) << "Error watching " << library_path_.value();

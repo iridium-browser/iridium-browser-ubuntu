@@ -23,6 +23,12 @@
 #endif
 
 const char kPythonPathEnv[] = "PYTHONPATH";
+const char kPythonVirtualEnv[] = "VIRTUAL_ENV";
+
+void ClearPythonPath() {
+  std::unique_ptr<base::Environment> env(base::Environment::Create());
+  env->UnSetVar(kPythonPathEnv);
+}
 
 void AppendToPythonPath(const base::FilePath& dir) {
   std::unique_ptr<base::Environment> env(base::Environment::Create());
@@ -97,6 +103,10 @@ struct PythonExePath {
 static base::LazyInstance<PythonExePath>::Leaky g_python_path;
 #endif
 
+bool IsInPythonVirtualEnv() {
+  return base::Environment::Create()->HasVar(kPythonVirtualEnv);
+}
+
 bool GetPythonCommand(base::CommandLine* python_cmd) {
   DCHECK(python_cmd);
 
@@ -115,6 +125,11 @@ bool GetPythonCommand(base::CommandLine* python_cmd) {
   // Launch python in unbuffered mode, so that python output doesn't mix with
   // gtest output in buildbot log files. See http://crbug.com/147368.
   python_cmd->AppendArg("-u");
+
+  if (!IsInPythonVirtualEnv()) {
+    // Prevent using system-installed libraries. Use hermetic versioned copies.
+    python_cmd->AppendArg("-S");
+  }
 
   return true;
 }

@@ -9,8 +9,6 @@
 #include "content/public/browser/web_ui_controller.h"
 #include "ui/base/layout.h"
 
-class Profile;
-
 namespace base {
 class RefCountedMemory;
 }
@@ -24,6 +22,8 @@ class HistoryUI : public content::WebUIController {
       ui::ScaleFactor scale_factor);
 
  private:
+  void UpdateDataSource();
+
   DISALLOW_COPY_AND_ASSIGN(HistoryUI);
 };
 

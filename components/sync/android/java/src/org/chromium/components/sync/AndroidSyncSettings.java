@@ -14,7 +14,8 @@ import android.os.StrictMode;
 import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.components.sync.signin.AccountManagerHelper;
+import org.chromium.components.signin.AccountManagerHelper;
+import org.chromium.components.signin.ChromeSigninController;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -48,13 +49,13 @@ public class AndroidSyncSettings {
 
     private final SyncContentResolverDelegate mSyncContentResolverDelegate;
 
-    private Account mAccount = null;
+    private Account mAccount;
 
-    private boolean mIsSyncable = false;
+    private boolean mIsSyncable;
 
-    private boolean mChromeSyncEnabled = false;
+    private boolean mChromeSyncEnabled;
 
-    private boolean mMasterSyncEnabled = false;
+    private boolean mMasterSyncEnabled;
 
     private final ObserverList<AndroidSyncSettingsObserver> mObservers =
             new ObserverList<AndroidSyncSettingsObserver>();
@@ -92,6 +93,8 @@ public class AndroidSyncSettings {
         mSyncContentResolverDelegate = syncContentResolverDelegate;
         mContractAuthority = getContractAuthority();
 
+        mAccount = ChromeSigninController.get(context).getSignedInUser();
+        updateSyncability();
         updateCachedSettings();
 
         mSyncContentResolverDelegate.addStatusChangeListener(

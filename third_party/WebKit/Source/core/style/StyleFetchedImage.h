@@ -24,55 +24,62 @@
 #ifndef StyleFetchedImage_h
 #define StyleFetchedImage_h
 
-#include "core/fetch/ResourceClient.h"
+#include "core/loader/resource/ImageResourceObserver.h"
 #include "core/style/StyleImage.h"
+#include "platform/weborigin/KURL.h"
 
 namespace blink {
 
 class Document;
-class ImageResource;
 
-class StyleFetchedImage final : public StyleImage, private ResourceClient {
-    USING_PRE_FINALIZER(StyleFetchedImage, dispose);
-public:
-    static StyleFetchedImage* create(ImageResource* image, Document* document, const KURL& url)
-    {
-        return new StyleFetchedImage(image, document, url);
-    }
-    ~StyleFetchedImage() override;
+class StyleFetchedImage final : public StyleImage,
+                                public ImageResourceObserver {
+  USING_PRE_FINALIZER(StyleFetchedImage, dispose);
 
-    WrappedImagePtr data() const override;
+ public:
+  static StyleFetchedImage* create(ImageResourceContent* image,
+                                   const Document& document,
+                                   const KURL& url) {
+    return new StyleFetchedImage(image, document, url);
+  }
+  ~StyleFetchedImage() override;
 
-    CSSValue* cssValue() const override;
-    CSSValue* computedCSSValue() const override;
+  WrappedImagePtr data() const override;
 
-    bool canRender() const override;
-    bool isLoaded() const override;
-    bool errorOccurred() const override;
-    LayoutSize imageSize(const LayoutObject&, float multiplier, const LayoutSize& defaultObjectSize) const override;
-    bool imageHasRelativeSize() const override;
-    bool usesImageContainerSize() const override;
-    void addClient(LayoutObject*) override;
-    void removeClient(LayoutObject*) override;
-    void notifyFinished(Resource*) override;
-    String debugName() const override { return "StyleFetchedImage"; }
-    PassRefPtr<Image> image(const LayoutObject&, const IntSize&, float zoom) const override;
-    bool knownToBeOpaque(const LayoutObject&) const override;
-    ImageResource* cachedImage() const override;
+  CSSValue* cssValue() const override;
+  CSSValue* computedCSSValue() const override;
 
-    DECLARE_VIRTUAL_TRACE();
+  bool canRender() const override;
+  bool isLoaded() const override;
+  bool errorOccurred() const override;
+  LayoutSize imageSize(const LayoutObject&,
+                       float multiplier,
+                       const LayoutSize& defaultObjectSize) const override;
+  bool imageHasRelativeSize() const override;
+  bool usesImageContainerSize() const override;
+  void addClient(LayoutObject*) override;
+  void removeClient(LayoutObject*) override;
+  void imageNotifyFinished(ImageResourceContent*) override;
+  String debugName() const override { return "StyleFetchedImage"; }
+  PassRefPtr<Image> image(const LayoutObject&,
+                          const IntSize&,
+                          float zoom) const override;
+  bool knownToBeOpaque(const LayoutObject&) const override;
+  ImageResourceContent* cachedImage() const override;
 
-private:
-    StyleFetchedImage(ImageResource*, Document*, const KURL&);
+  DECLARE_VIRTUAL_TRACE();
 
-    void dispose();
+ private:
+  StyleFetchedImage(ImageResourceContent*, const Document&, const KURL&);
 
-    Member<ImageResource> m_image;
-    Member<Document> m_document;
-    const KURL m_url;
+  void dispose();
+
+  Member<ImageResourceContent> m_image;
+  Member<const Document> m_document;
+  const KURL m_url;
 };
 
 DEFINE_STYLE_IMAGE_TYPE_CASTS(StyleFetchedImage, isImageResource());
 
-} // namespace blink
+}  // namespace blink
 #endif

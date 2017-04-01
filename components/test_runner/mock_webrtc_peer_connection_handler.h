@@ -50,8 +50,8 @@ class MockWebRTCPeerConnectionHandler
       const blink::WebRTCSessionDescription& remote_description) override;
   blink::WebRTCSessionDescription localDescription() override;
   blink::WebRTCSessionDescription remoteDescription() override;
-  bool updateICE(const blink::WebRTCConfiguration& configuration) override;
-  void logSelectedRtcpMuxPolicy(blink::RtcpMuxPolicy) override;
+  bool setConfiguration(
+      const blink::WebRTCConfiguration& configuration) override;
   bool addICECandidate(const blink::WebRTCICECandidate& ice_candidate) override;
   bool addICECandidate(const blink::WebRTCVoidRequest& request,
                        const blink::WebRTCICECandidate& ice_candidate) override;
@@ -59,6 +59,7 @@ class MockWebRTCPeerConnectionHandler
                  const blink::WebMediaConstraints& constraints) override;
   void removeStream(const blink::WebMediaStream& stream) override;
   void getStats(const blink::WebRTCStatsRequest& request) override;
+  void getStats(std::unique_ptr<blink::WebRTCStatsReportCallback>) override;
   blink::WebRTCDataChannelHandler* createDataChannel(
       const blink::WebString& label,
       const blink::WebRTCDataChannelInit& init) override;

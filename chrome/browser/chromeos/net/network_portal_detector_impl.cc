@@ -10,7 +10,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -549,7 +549,10 @@ void NetworkPortalDetectorImpl::OnAttemptCompleted(
       same_detection_result_count_ >= kMaxOfflineResultsBeforeReport) {
     OnDetectionCompleted(network, state);
   }
-  ScheduleAttempt(results.retry_after_delta);
+
+  // Observers (via OnDetectionCompleted) may already schedule new attempt.
+  if (is_idle())
+    ScheduleAttempt(results.retry_after_delta);
 }
 
 void NetworkPortalDetectorImpl::Observe(
@@ -596,8 +599,8 @@ void NetworkPortalDetectorImpl::OnDetectionCompleted(
 void NetworkPortalDetectorImpl::NotifyDetectionCompleted(
     const NetworkState* network,
     const CaptivePortalState& state) {
-  FOR_EACH_OBSERVER(
-      Observer, observers_, OnPortalDetectionCompleted(network, state));
+  for (auto& observer : observers_)
+    observer.OnPortalDetectionCompleted(network, state);
 }
 
 bool NetworkPortalDetectorImpl::AttemptTimeoutIsCancelledForTesting() const {

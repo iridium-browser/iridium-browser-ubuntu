@@ -22,8 +22,8 @@
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/ssl_status.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/ssl_status.h"
 #include "jni/AwAutofillClient_jni.h"
 #include "ui/android/view_android.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -50,8 +50,8 @@ AwAutofillClient::AwAutofillClient(WebContents* contents)
       Java_AwAutofillClient_create(env, reinterpret_cast<intptr_t>(this)));
 
   AwContents* aw_contents = AwContents::FromWebContents(web_contents_);
-  aw_contents->SetAwAutofillClient(delegate.obj());
-  java_ref_ = JavaObjectWeakGlobalRef(env, delegate.obj());
+  aw_contents->SetAwAutofillClient(delegate);
+  java_ref_ = JavaObjectWeakGlobalRef(env, delegate);
 }
 
 AwAutofillClient::~AwAutofillClient() {
@@ -71,7 +71,7 @@ PrefService* AwAutofillClient::GetPrefs() {
       AwContentBrowserClient::GetAwBrowserContext());
 }
 
-sync_driver::SyncService* AwAutofillClient::GetSyncService() {
+syncer::SyncService* AwAutofillClient::GetSyncService() {
   return nullptr;
 }
 
@@ -79,7 +79,7 @@ IdentityProvider* AwAutofillClient::GetIdentityProvider() {
   return nullptr;
 }
 
-rappor::RapporService* AwAutofillClient::GetRapporService() {
+rappor::RapporServiceImpl* AwAutofillClient::GetRapporServiceImpl() {
   return nullptr;
 }
 
@@ -175,14 +175,11 @@ bool AwAutofillClient::IsAutocompleteEnabled() {
 
 void AwAutofillClient::PropagateAutofillPredictions(
     content::RenderFrameHost* rfh,
-    const std::vector<autofill::FormStructure*>& forms) {
-
-}
+    const std::vector<autofill::FormStructure*>& forms) {}
 
 void AwAutofillClient::DidFillOrPreviewField(
     const base::string16& autofilled_value,
-    const base::string16& profile_full_name) {
-}
+    const base::string16& profile_full_name) {}
 
 void AwAutofillClient::OnFirstUserGestureObserved() {
   NOTIMPLEMENTED();
@@ -199,7 +196,10 @@ bool AwAutofillClient::IsContextSecure(const GURL& form_origin) {
   // Note: The implementation below is a copy of the one in
   // ChromeAutofillClient::IsContextSecure, and should be kept in sync
   // until crbug.com/505388 gets implemented.
-  return ssl_status.security_style == content::SECURITY_STYLE_AUTHENTICATED &&
+  return navigation_entry->GetURL().SchemeIsCryptographic() &&
+         ssl_status.certificate &&
+         (!net::IsCertStatusError(ssl_status.cert_status) ||
+          net::IsCertStatusMinorError(ssl_status.cert_status)) &&
          !(ssl_status.content_status &
            content::SSLStatus::RAN_INSECURE_CONTENT);
 }
@@ -209,6 +209,8 @@ bool AwAutofillClient::ShouldShowSigninPromo() {
 }
 
 void AwAutofillClient::StartSigninFlow() {}
+
+void AwAutofillClient::ShowHttpNotSecureExplanation() {}
 
 void AwAutofillClient::Dismissed(JNIEnv* env,
                                  const JavaParamRef<jobject>& obj) {

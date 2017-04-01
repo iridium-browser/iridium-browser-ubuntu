@@ -26,6 +26,7 @@
 #ifndef WebGLSharedObject_h
 #define WebGLSharedObject_h
 
+#include "bindings/core/v8/TraceWrapperMember.h"
 #include "modules/webgl/WebGLObject.h"
 
 namespace blink {
@@ -33,45 +34,42 @@ namespace blink {
 class WebGLContextGroup;
 class WebGLRenderingContextBase;
 
-// WebGLSharedObject the base class for objects that can be shared by multiple
-// WebGLRenderingContexts.
+// WebGLSharedObject is the base class for objects that can be shared by
+// multiple WebGLRenderingContexts.
 class WebGLSharedObject : public WebGLObject {
-public:
-    ~WebGLSharedObject() override;
+ public:
+  WebGLContextGroup* contextGroup() const { return m_contextGroup; }
 
-    WebGLContextGroup* contextGroup() const { return m_contextGroup; }
+  virtual bool isBuffer() const { return false; }
+  virtual bool isProgram() const { return false; }
+  virtual bool isQuery() const { return false; }
+  virtual bool isRenderbuffer() const { return false; }
+  virtual bool isSampler() const { return false; }
+  virtual bool isShader() const { return false; }
+  virtual bool isSync() const { return false; }
+  virtual bool isTexture() const { return false; }
+  virtual bool isTransformFeedback() const { return false; }
 
-    virtual bool isBuffer() const { return false; }
-    virtual bool isProgram() const { return false; }
-    virtual bool isQuery() const { return false; }
-    virtual bool isRenderbuffer() const { return false; }
-    virtual bool isSampler() const { return false; }
-    virtual bool isShader() const { return false; }
-    virtual bool isSync() const { return false; }
-    virtual bool isTexture() const { return false; }
-    virtual bool isTransformFeedback() const { return false; }
+  bool validate(const WebGLContextGroup* contextGroup,
+                const WebGLRenderingContextBase*) const final;
 
-    bool validate(const WebGLContextGroup* contextGroup, const WebGLRenderingContextBase*) const final
-    {
-        return contextGroup == m_contextGroup;
-    }
+  DECLARE_VIRTUAL_TRACE();
 
-    void detachContextGroup();
+  DECLARE_VIRTUAL_TRACE_WRAPPERS();
 
-protected:
-    explicit WebGLSharedObject(WebGLRenderingContextBase*);
+ protected:
+  explicit WebGLSharedObject(WebGLRenderingContextBase*);
 
-    bool hasGroupOrContext() const final
-    {
-        return m_contextGroup;
-    }
+  bool hasGroupOrContext() const final { return m_contextGroup; }
 
-    gpu::gles2::GLES2Interface* getAGLInterface() const final;
+  uint32_t currentNumberOfContextLosses() const final;
 
-private:
-    WebGLContextGroup* m_contextGroup;
+  gpu::gles2::GLES2Interface* getAGLInterface() const final;
+
+ private:
+  TraceWrapperMember<WebGLContextGroup> m_contextGroup;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // WebGLSharedObject_h
+#endif  // WebGLSharedObject_h

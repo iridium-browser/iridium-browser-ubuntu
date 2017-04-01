@@ -60,8 +60,10 @@ class PasswordStoreDefault : public PasswordStore {
       base::Time delete_end) override;
   PasswordStoreChangeList DisableAutoSignInForOriginsImpl(
       const base::Callback<bool(const GURL&)>& origin_filter) override;
-  bool RemoveStatisticsCreatedBetweenImpl(base::Time delete_begin,
-                                          base::Time delete_end) override;
+  bool RemoveStatisticsByOriginAndTimeImpl(
+      const base::Callback<bool(const GURL&)>& origin_filter,
+      base::Time delete_begin,
+      base::Time delete_end) override;
   std::vector<std::unique_ptr<autofill::PasswordForm>> FillMatchingLogins(
       const FormDigest& form) override;
   bool FillAutofillableLogins(
@@ -70,7 +72,7 @@ class PasswordStoreDefault : public PasswordStore {
       std::vector<std::unique_ptr<autofill::PasswordForm>>* forms) override;
   void AddSiteStatsImpl(const InteractionsStats& stats) override;
   void RemoveSiteStatsImpl(const GURL& origin_domain) override;
-  std::vector<std::unique_ptr<InteractionsStats>> GetSiteStatsImpl(
+  std::vector<InteractionsStats> GetSiteStatsImpl(
       const GURL& origin_domain) override;
 
   inline bool DeleteAndRecreateDatabaseFile() {

@@ -409,7 +409,13 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
    * @private
    * @const
    */
-  this.editBarMode_ = util.createChild(this.container_, 'edit-modal');
+  this.editBarMode_ =
+      /** @type {!HTMLElement} */ (document.createElement('div'));
+  this.editBarMode_.className = 'edit-modal';
+  // Edit modal bar should be inserted before the bottom toolbar to make the tab
+  // order and visual position consistent.
+  this.container_.insertBefore(
+      this.editBarMode_, document.querySelector('#bottom-toolbar'));
 
   /**
    * @type {!HTMLElement}
@@ -474,6 +480,7 @@ function SlideMode(container, content, topToolbar, bottomToolbar, prompt,
 SlideMode.EDITOR_MODES = [
   new ImageEditor.Mode.InstantAutofix(),
   new ImageEditor.Mode.Crop(),
+  new ImageEditor.Mode.Resize(),
   new ImageEditor.Mode.Exposure(),
   new ImageEditor.Mode.OneClick(
       'rotate_left', 'GALLERY_ROTATE_LEFT', new Command.Rotate(-1)),
@@ -1700,6 +1707,7 @@ SlideMode.prototype.setOverwriteBubbleCount_ = function(value) {
  * @private
  */
 SlideMode.prototype.print_ = function() {
+  this.stopEditing_();
   cr.dispatchSimpleEvent(this, 'useraction');
   window.print();
 };

@@ -74,7 +74,7 @@ class FixedInvalidationPictureLayerTilingClient
       const Region invalidation)
       : base_client_(base_client), invalidation_(invalidation) {}
 
-  ScopedTilePtr CreateTile(const Tile::CreateInfo& info) override {
+  std::unique_ptr<Tile> CreateTile(const Tile::CreateInfo& info) override {
     return base_client_->CreateTile(info);
   }
 
@@ -174,7 +174,8 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
       PictureLayerTilingSet::Create(
           layer->GetTree(), &client, settings.tiling_interest_area_padding,
           settings.skewport_target_time_in_seconds,
-          settings.skewport_extrapolation_limit_in_screen_pixels);
+          settings.skewport_extrapolation_limit_in_screen_pixels,
+          settings.max_preraster_distance_in_screen_pixels);
 
   PictureLayerTiling* tiling =
       tiling_set->AddTiling(1.f, layer->GetRasterSource());

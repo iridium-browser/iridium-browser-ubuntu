@@ -7,6 +7,8 @@ found in the LICENSE file.
 
 <link rel="import" href="/tracing/base/color_scheme.html">
 <link rel="import" href="/tracing/base/iteration_helpers.html">
+<link rel="import" href="/tracing/base/unit.html">
+<link rel="import" href="/tracing/base/unit_scale.html">
 <link rel="import" href="/tracing/model/memory_allocator_dump.html">
 <link rel="import"
     href="/tracing/ui/analysis/memory_dump_allocator_details_pane.html">
@@ -19,8 +21,6 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/ui/base/table.html">
 <link rel="import" href="/tracing/ui/view_specific_brushing_state.html">
 <link rel="import" href="/tracing/value/numeric.html">
-<link rel="import" href="/tracing/value/unit.html">
-<link rel="import" href="/tracing/value/unit_scale.html">
 
 <dom-module id='tr-ui-a-memory-dump-overview-pane'>
   <template>
@@ -46,6 +46,7 @@ found in the LICENSE file.
         flex: 1 0 auto;
         align-self: stretch;
         font-size: 12px;
+        overflow: auto;
       }
 
       #info_text {
@@ -59,6 +60,7 @@ found in the LICENSE file.
         display: none;  /* Hide until memory dumps are set. */
         flex: 1 0 auto;
         align-self: stretch;
+        font-size: 12px;
       }
     </style>
     <tr-ui-b-view-specific-brushing-state id="state"
@@ -79,7 +81,7 @@ tr.exportTo('tr.ui.analysis', function() {
   var ColorScheme = tr.b.ColorScheme;
   var ScalarNumeric = tr.v.ScalarNumeric;
   var sizeInBytes_smallerIsBetter =
-      tr.v.Unit.byName.sizeInBytes_smallerIsBetter;
+      tr.b.Unit.byName.sizeInBytes_smallerIsBetter;
 
   var PLATFORM_SPECIFIC_TOTAL_NAME_SUFFIX = '_bytes';
 
@@ -149,7 +151,7 @@ tr.exportTo('tr.ui.analysis', function() {
     },
 
     getFormattingContext: function(unit) {
-      return { unitPrefix: tr.v.UnitScale.Binary.MEBI };
+      return { unitPrefix: tr.b.UnitPrefixScale.BINARY.MEBI };
     },
 
     color: function(numerics, processMemoryDumps) {
@@ -264,8 +266,8 @@ tr.exportTo('tr.ui.analysis', function() {
         return;  // There are no older values.
 
       var infoQuantifier = olderValueCount < numerics.length ?
-          ' ' + SOME_TIMESTAMPS_INFO_QUANTIFIER /* some values are older */ :
-          '' /* all values are older */;
+          ' ' + SOME_TIMESTAMPS_INFO_QUANTIFIER : /* some values are older */
+          ''; /* all values are older */
 
       // Emit an info if there was at least one older value (i.e. at least one
       // defined process memory dump did not have own VM regions).
@@ -340,7 +342,7 @@ tr.exportTo('tr.ui.analysis', function() {
     },
 
     getFormattingContext: function(unit) {
-      return { unitPrefix: tr.v.UnitScale.Binary.MEBI };
+      return { unitPrefix: tr.b.UnitPrefixScale.BINARY.MEBI };
     },
 
     addInfos: function(numerics, processMemoryDumps, infos) {
@@ -601,19 +603,18 @@ tr.exportTo('tr.ui.analysis', function() {
               var totals = dump.totals;
               if (totals !== undefined) {
                 // Common totals.
-                tr.b.iterItems(UsedMemoryColumn.TOTALS_MAP,
-                    function(totalName, cellName) {
-                      var total = totals[totalName];
-                      if (total === undefined)
-                        return;
-                      sizes[cellName] = new ScalarNumeric(
-                          sizeInBytes_smallerIsBetter, total);
-                    });
+                for (var [totalName, cellName] of
+                    Object.entries(UsedMemoryColumn.TOTALS_MAP)) {
+                  var total = totals[totalName];
+                  if (total === undefined) continue;
+                  sizes[cellName] = new ScalarNumeric(
+                      sizeInBytes_smallerIsBetter, total);
+                }
 
                 // Platform-specific totals (e.g. private resident on Mac).
                 var platformSpecific = totals.platformSpecific;
                 if (platformSpecific !== undefined) {
-                  tr.b.iterItems(platformSpecific, function(name, size) {
+                  for (var [name, size] of Object.entries(platformSpecific)) {
                     // Change raw OS-specific total name to a user-friendly
                     // column title (e.g. 'private_bytes' -> 'Private').
                     if (name.endsWith(PLATFORM_SPECIFIC_TOTAL_NAME_SUFFIX)) {
@@ -624,21 +625,20 @@ tr.exportTo('tr.ui.analysis', function() {
                     name = name.charAt(0).toUpperCase() + name.slice(1);
                     sizes[name] = new ScalarNumeric(
                         sizeInBytes_smallerIsBetter, size);
-                  });
+                  }
                 }
               }
 
               // VM regions byte stats.
               var vmRegions = dump.mostRecentVmRegions;
               if (vmRegions !== undefined) {
-                tr.b.iterItems(UsedMemoryColumn.BYTE_STAT_MAP,
-                    function(byteStatName, cellName) {
-                      var byteStat = vmRegions.byteStats[byteStatName];
-                      if (byteStat === undefined)
-                        return;
-                      sizes[cellName] = new ScalarNumeric(
-                          sizeInBytes_smallerIsBetter, byteStat);
-                    });
+                for (var [byteStatName, cellName] of
+                     Object.entries(UsedMemoryColumn.BYTE_STAT_MAP)) {
+                  var byteStat = vmRegions.byteStats[byteStatName];
+                  if (byteStat === undefined) continue;
+                  sizes[cellName] = new ScalarNumeric(
+                      sizeInBytes_smallerIsBetter, byteStat);
+                }
               }
 
               return sizes;
@@ -687,13 +687,17 @@ tr.exportTo('tr.ui.analysis', function() {
       var titleColumn = new ProcessNameColumn();
       titleColumn.width = '200px';
 
-      var usedMemorySizeColumns = tr.ui.analysis.MemoryColumn.fromRows(
-          rows, 'usedMemoryCells', this.aggregationMode_,
-          UsedMemoryColumn.RULES);
+      var usedMemorySizeColumns = tr.ui.analysis.MemoryColumn.fromRows(rows, {
+        cellKey: 'usedMemoryCells',
+        aggregationMode: this.aggregationMode_,
+        rules: UsedMemoryColumn.RULES
+      });
 
-      var allocatorSizeColumns = tr.ui.analysis.MemoryColumn.fromRows(
-          rows, 'allocatorCells', this.aggregationMode_,
-          AllocatorColumn.RULES);
+      var allocatorSizeColumns = tr.ui.analysis.MemoryColumn.fromRows(rows, {
+        cellKey: 'allocatorCells',
+        aggregationMode: this.aggregationMode_,
+        rules: AllocatorColumn.RULES
+      });
 
       var sizeColumns = usedMemorySizeColumns.concat(allocatorSizeColumns);
       tr.ui.analysis.MemoryColumn.spaceEqually(sizeColumns);
@@ -748,12 +752,12 @@ tr.exportTo('tr.ui.analysis', function() {
 
   return {
     // All exports are for testing only.
-    ProcessNameColumn: ProcessNameColumn,
-    UsedMemoryColumn: UsedMemoryColumn,
-    PeakMemoryColumn: PeakMemoryColumn,
-    ByteStatColumn: ByteStatColumn,
-    AllocatorColumn: AllocatorColumn,
-    TracingColumn: TracingColumn
+    ProcessNameColumn,
+    UsedMemoryColumn,
+    PeakMemoryColumn,
+    ByteStatColumn,
+    AllocatorColumn,
+    TracingColumn,
   };
 });
 </script>

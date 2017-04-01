@@ -10,41 +10,48 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "components/cdm/renderer/external_clear_key_key_system_properties.h"
 #include "components/web_cache/renderer/web_cache_impl.h"
-#include "content/public/test/test_mojo_service.mojom.h"
+#include "content/public/test/test_service.mojom.h"
 #include "content/shell/common/shell_switches.h"
 #include "content/shell/renderer/shell_render_view_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/system/message_pipe.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "ppapi/features/features.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 #include "third_party/WebKit/public/web/WebTestingSupport.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
 
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
 #include "ppapi/shared_impl/ppapi_switches.h"
+#endif
+
+#if defined(ENABLE_MOJO_CDM)
+#include "base/feature_list.h"
+#include "media/base/media_switches.h"
 #endif
 
 namespace content {
 
 namespace {
 
-// A test Mojo service which can be driven by browser tests for various reasons.
-class TestMojoServiceImpl : public mojom::TestMojoService {
+// A test service which can be driven by browser tests for various reasons.
+class TestServiceImpl : public mojom::TestService {
  public:
-  explicit TestMojoServiceImpl(mojom::TestMojoServiceRequest request)
+  explicit TestServiceImpl(mojom::TestServiceRequest request)
       : binding_(this, std::move(request)) {
     binding_.set_connection_error_handler(
-        base::Bind(&TestMojoServiceImpl::OnConnectionError,
+        base::Bind(&TestServiceImpl::OnConnectionError,
                    base::Unretained(this)));
   }
 
-  ~TestMojoServiceImpl() override {}
+  ~TestServiceImpl() override {}
 
  private:
   void OnConnectionError() { delete this; }
 
-  // mojom::TestMojoService:
+  // mojom::TestService:
   void DoSomething(const DoSomethingCallback& callback) override {
     // Instead of responding normally, unbind the pipe, write some garbage,
     // and go away.
@@ -71,14 +78,19 @@ class TestMojoServiceImpl : public mojom::TestMojoService {
     callback.Run("Not implemented.");
   }
 
-  mojo::Binding<mojom::TestMojoService> binding_;
+  void CreateSharedBuffer(const std::string& message,
+                          const CreateSharedBufferCallback& callback) override {
+    NOTREACHED();
+  }
 
-  DISALLOW_COPY_AND_ASSIGN(TestMojoServiceImpl);
+  mojo::Binding<mojom::TestService> binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestServiceImpl);
 };
 
-void CreateTestMojoService(mojom::TestMojoServiceRequest request) {
+void CreateTestService(mojom::TestServiceRequest request) {
   // Owns itself.
-  new TestMojoServiceImpl(std::move(request));
+  new TestServiceImpl(std::move(request));
 }
 
 }  // namespace
@@ -98,7 +110,7 @@ void ShellContentRendererClient::RenderViewCreated(RenderView* render_view) {
 
 bool ShellContentRendererClient::IsPluginAllowedToUseCompositorAPI(
     const GURL& url) {
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnablePepperTesting);
 #else
@@ -107,7 +119,7 @@ bool ShellContentRendererClient::IsPluginAllowedToUseCompositorAPI(
 }
 
 bool ShellContentRendererClient::IsPluginAllowedToUseDevChannelAPIs() {
-#if defined(ENABLE_PLUGINS)
+#if BUILDFLAG(ENABLE_PLUGINS)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnablePepperTesting);
 #else
@@ -124,9 +136,22 @@ void ShellContentRendererClient::DidInitializeWorkerContextOnWorkerThread(
 }
 
 void ShellContentRendererClient::ExposeInterfacesToBrowser(
-    shell::InterfaceRegistry* interface_registry) {
-  interface_registry->AddInterface<mojom::TestMojoService>(
-      base::Bind(&CreateTestMojoService));
+    service_manager::InterfaceRegistry* interface_registry) {
+  interface_registry->AddInterface<mojom::TestService>(
+      base::Bind(&CreateTestService));
 }
+
+#if defined(ENABLE_MOJO_CDM)
+void ShellContentRendererClient::AddSupportedKeySystems(
+    std::vector<std::unique_ptr<media::KeySystemProperties>>* key_systems) {
+  if (!base::FeatureList::IsEnabled(media::kExternalClearKeyForTesting))
+    return;
+
+  static const char kExternalClearKeyKeySystem[] =
+      "org.chromium.externalclearkey";
+  key_systems->emplace_back(
+      new cdm::ExternalClearKeyProperties(kExternalClearKeyKeySystem));
+}
+#endif
 
 }  // namespace content

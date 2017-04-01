@@ -9,6 +9,7 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/base/quad.html">
 <link rel="import" href="/tracing/base/raf.html">
 <link rel="import" href="/tracing/base/range.html">
+<link rel="import" href="/tracing/base/unit_scale.html">
 <link rel="import" href="/tracing/extras/chrome/cc/debug_colors.html">
 <link rel="import" href="/tracing/extras/chrome/cc/picture.html">
 <link rel="import" href="/tracing/extras/chrome/cc/render_pass.html">
@@ -18,7 +19,6 @@ found in the LICENSE file.
 <link rel="import" href="/tracing/ui/base/info_bar.html">
 <link rel="import" href="/tracing/ui/base/quad_stack_view.html">
 <link rel="import" href="/tracing/ui/base/utils.html">
-<link rel="import" href="/tracing/value/unit_scale.html">
 
 <style>
 * /deep/ tr-ui-e-chrome-cc-layer-tree-quad-stack-view {
@@ -382,7 +382,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       var selectableQuads = e.quads.filter(function(q) {
         return q.selectionToSetIfClicked !== undefined;
       });
-      if (selectableQuads.length == 0) {
+      if (selectableQuads.length === 0) {
         this.selection = undefined;
         return;
       }
@@ -390,7 +390,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       // Sort the quads low to high on stackingGroupId.
       selectableQuads.sort(function(x, y) {
         var z = x.stackingGroupId - y.stackingGroupId;
-        if (z != 0)
+        if (z !== 0)
           return z;
         return x.selectionToSetIfClicked.specicifity -
             y.selectionToSetIfClicked.specicifity;
@@ -439,20 +439,26 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
         var thisTreeUsageInBytes = this.layerTreeImpl_.gpuMemoryUsageInBytes;
         var otherTreeUsageInBytes = lthi.gpuMemoryUsageInBytes -
             thisTreeUsageInBytes;
-        message += tr.v.convertUnit(thisTreeUsageInBytes,
-            tr.v.UnitScale.Binary.NONE,
-            tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB on this tree';
+        message +=
+            tr.b.convertUnit(thisTreeUsageInBytes,
+                tr.b.UnitPrefixScale.BINARY.NONE,
+                tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) +
+            ' MiB on this tree';
         if (otherTreeUsageInBytes) {
-          message += ', ' + tr.v.convertUnit(otherTreeUsageInBytes,
-              tr.v.UnitScale.Binary.NONE,
-              tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB on the other tree';
+          message += ', ' +
+              tr.b.convertUnit(otherTreeUsageInBytes,
+                  tr.b.UnitPrefixScale.BINARY.NONE,
+                  tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) +
+              ' MiB on the other tree';
         }
       } else {
         if (this.layerTreeImpl_) {
           var thisTreeUsageInBytes = this.layerTreeImpl_.gpuMemoryUsageInBytes;
-          message += tr.v.convertUnit(thisTreeUsageInBytes,
-              tr.v.UnitScale.Binary.NONE,
-              tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB on this tree';
+          message +=
+              tr.b.convertUnit(thisTreeUsageInBytes,
+                  tr.b.UnitPrefixScale.BINARY.NONE,
+                  tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) +
+              ' MiB on this tree';
 
           if (this.layerTreeImpl_.otherTree) {
             // Older Chromes don't report enough data to know how much memory is
@@ -470,12 +476,13 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       if (lthi.args.tileManagerBasicState) {
         var tmgs = lthi.args.tileManagerBasicState.globalState;
         message += ' (softMax=' +
-            tr.v.convertUnit(tmgs.softMemoryLimitInBytes,
-                tr.v.UnitScale.Binary.NONE,
-                tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB, hardMax=' +
-            tr.v.convertUnit(tmgs.hardMemoryLimitInBytes,
-                tr.v.UnitScale.Binary.NONE,
-                tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB, ' +
+            tr.b.convertUnit(tmgs.softMemoryLimitInBytes,
+                tr.b.UnitPrefixScale.BINARY.NONE,
+                tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) +
+            ' MiB, hardMax=' +
+            tr.b.convertUnit(tmgs.hardMemoryLimitInBytes,
+                tr.b.UnitPrefixScale.BINARY.NONE,
+                tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) + ' MiB, ' +
             tmgs.memoryLimitPolicy + ')';
 
       } else {
@@ -499,12 +506,13 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
           var newest = didManageTilesSlices[didManageTilesSlices.length - 1];
           var tmgs = newest.args.state.global_state;
           message += ' (softMax=' +
-            tr.v.convertUnit(tmgs.softMemoryLimitInBytes,
-                tr.v.UnitScale.Binary.NONE,
-                tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB, hardMax=' +
-            tr.v.convertUnit(tmgs.hardMemoryLimitInBytes,
-                tr.v.UnitScale.Binary.NONE,
-                tr.v.UnitScale.Binary.MEBI).toFixed(1) + ' MiB, ' +
+            tr.b.convertUnit(tmgs.softMemoryLimitInBytes,
+                tr.b.UnitPrefixScale.BINARY.NONE,
+                tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) +
+            ' MiB, hardMax=' +
+            tr.b.convertUnit(tmgs.hardMemoryLimitInBytes,
+                tr.b.UnitPrefixScale.BINARY.NONE,
+                tr.b.UnitPrefixScale.BINARY.MEBI).toFixed(1) + ' MiB, ' +
             tmgs.memoryLimitPolicy + ')';
         }
       }
@@ -537,12 +545,12 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       }
 
       // Then create a new selector and replace the old one.
-      var new_selector = tr.ui.b.createSelector(
+      var newSelector = tr.ui.b.createSelector(
           this, 'howToShowTiles',
           'layerView.howToShowTiles', 'none',
           data);
-      this.controls_.replaceChild(new_selector, this.tileRectsSelector_);
-      this.tileRectsSelector_ = new_selector;
+      this.controls_.replaceChild(newSelector, this.tileRectsSelector_);
+      this.tileRectsSelector_ = newSelector;
     },
 
     computePictureLoadingStatus_: function() {
@@ -603,7 +611,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
           if (hasUnresolvedPictureRef) {
             status.messages.push({
               header: 'Missing picture',
-              details: 'Your trace didnt have pictures for every layer. ' +
+              details: 'Your trace didn\'t have pictures for every layer. ' +
                   'Old chrome versions had this problem'});
           }
           if (hasMissingLayerRect) {
@@ -865,11 +873,11 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
     },
 
     getValueForHeatmap_: function(tile, heatmapType) {
-      if (heatmapType == TILE_HEATMAP_TYPE.SCHEDULED_PRIORITY) {
-        return tile.scheduledPriority == 0 ?
+      if (heatmapType === TILE_HEATMAP_TYPE.SCHEDULED_PRIORITY) {
+        return tile.scheduledPriority === 0 ?
             undefined :
             tile.scheduledPriority;
-      } else if (heatmapType == TILE_HEATMAP_TYPE.USING_GPU_MEMORY) {
+      } else if (heatmapType === TILE_HEATMAP_TYPE.USING_GPU_MEMORY) {
         if (tile.isSolidColor)
           return 0.5;
         return tile.isUsingGpuMemory ? 0 : 1;
@@ -878,7 +886,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
 
     getMinMaxForHeatmap_: function(tiles, heatmapType) {
       var range = new tr.b.Range();
-      if (heatmapType == TILE_HEATMAP_TYPE.USING_GPU_MEMORY) {
+      if (heatmapType === TILE_HEATMAP_TYPE.USING_GPU_MEMORY) {
         range.addValue(0);
         range.addValue(1);
         return range;
@@ -933,7 +941,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
 
         // TODO(vmpstr): Make the stiching of tiles and layers a part of
         // tile construction (issue 346)
-        if (layer.layerId != tile.layerId)
+        if (layer.layerId !== tile.layerId)
           continue;
 
         tiles.push(tile);
@@ -1037,7 +1045,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
         // Generate quads back-to-front.
         var layer = layers[layers.length - i];
         alreadyVisitedLayerIds[layer.layerId] = true;
-        if (layer.objectInstance.name == 'cc::NinePatchLayerImpl')
+        if (layer.objectInstance.name === 'cc::NinePatchLayerImpl')
           continue;
 
         var layerQuad = layer.layerQuad.clone();
@@ -1051,7 +1059,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
         layerQuad.stackingGroupId = nextStackingGroupId++;
         layerQuad.selectionToSetIfClicked = new cc.LayerSelection(layer);
         layerQuad.layer = layer;
-        if (this.showOtherLayers && this.selectedLayer == layer)
+        if (this.showOtherLayers && this.selectedLayer === layer)
           layerQuad.upperBorderColor = 'rgb(156,189,45)';
 
         if (this.showAnimationBounds)
@@ -1095,7 +1103,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       }
 
       this.layerTreeImpl.iterLayers(function(layer, depth, isMask, isReplica) {
-        if (!this.showOtherLayers && this.selectedLayer != layer)
+        if (!this.showOtherLayers && this.selectedLayer !== layer)
           return;
         if (alreadyVisitedLayerIds[layer.layerId])
           return;
@@ -1167,7 +1175,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
         if (tile === undefined)
           continue;
 
-        if (tile.containingSnapshot == lthi)
+        if (tile.containingSnapshot === lthi)
           tasks.push(event);
       }
       return tasks;
@@ -1194,7 +1202,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
   };
 
   return {
-    LayerTreeQuadStackView: LayerTreeQuadStackView
+    LayerTreeQuadStackView,
   };
 });
 </script>

@@ -19,7 +19,6 @@
 namespace mojo {
 
 namespace edk {
-class PlatformChannelPair;
 
 namespace test {
 
@@ -33,6 +32,14 @@ class MultiprocessTestHelper {
 
     // Launch the child process as an unrelated peer process in the mojo system.
     PEER,
+
+    // Launch the child process as a child in the mojo system, using a named
+    // pipe.
+    NAMED_CHILD,
+
+    // Launch the child process as an unrelated peer process in the mojo
+    // system, using a named pipe.
+    NAMED_PEER,
   };
 
   MultiprocessTestHelper();
@@ -57,6 +64,8 @@ class MultiprocessTestHelper {
   void set_process_error_callback(const ProcessErrorCallback& callback) {
     process_error_callback_ = callback;
   }
+
+  void ClosePeerConnection();
 
   // Wait for the child process to terminate.
   // Returns the exit code of the child process. Note that, though it's declared
@@ -87,6 +96,8 @@ class MultiprocessTestHelper {
   base::Process test_child_;
 
   ProcessErrorCallback process_error_callback_;
+
+  std::string peer_token_;
 
   DISALLOW_COPY_AND_ASSIGN(MultiprocessTestHelper);
 };

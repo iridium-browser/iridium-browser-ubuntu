@@ -7,8 +7,6 @@
 #include "ash/common/system/toast/toast_manager.h"
 #include "ash/common/wm/wm_screen_util.h"
 #include "ash/common/wm_shell.h"
-#include "ash/display/display_manager.h"
-#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/run_loop.h"
@@ -16,6 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
@@ -55,12 +54,18 @@ class ToastManagerTest : public test::AshTestBase {
     return overlay ? overlay->widget_for_testing() : nullptr;
   }
 
+  ToastOverlayButton* GetDismissButton() {
+    ToastOverlay* overlay = GetCurrentOverlay();
+    DCHECK(overlay);
+    return overlay->dismiss_button_for_testing();
+  }
+
   base::string16 GetCurrentText() {
     ToastOverlay* overlay = GetCurrentOverlay();
     return overlay ? overlay->text_ : base::string16();
   }
 
-  base::string16 GetCurrentDismissText() {
+  base::Optional<base::string16> GetCurrentDismissText() {
     ToastOverlay* overlay = GetCurrentOverlay();
     return overlay ? overlay->dismiss_text_ : base::string16();
   }
@@ -78,12 +83,17 @@ class ToastManagerTest : public test::AshTestBase {
     return id;
   }
 
-  std::string ShowToastWithDismiss(const std::string& text,
-                                   int32_t duration,
-                                   const std::string& dismiss_text) {
+  std::string ShowToastWithDismiss(
+      const std::string& text,
+      int32_t duration,
+      const base::Optional<std::string>& dismiss_text) {
+    base::Optional<base::string16> localized_dismiss;
+    if (dismiss_text.has_value())
+      localized_dismiss = base::ASCIIToUTF16(dismiss_text.value());
+
     std::string id = "TOAST_ID_" + base::UintToString(serial_++);
-    manager()->Show(ToastData(id, base::ASCIIToUTF16(text), duration,
-                              base::ASCIIToUTF16(dismiss_text)));
+    manager()->Show(
+        ToastData(id, base::ASCIIToUTF16(text), duration, localized_dismiss));
     return id;
   }
 
@@ -138,6 +148,12 @@ TEST_F(ToastManagerTest, ShowAndCloseManuallyDuringAnimation) {
   EXPECT_TRUE(GetCurrentOverlay() != nullptr);
 }
 
+TEST_F(ToastManagerTest, NullMessageHasNoDismissButton) {
+  ShowToastWithDismiss("DUMMY", 10, base::Optional<std::string>());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_FALSE(GetDismissButton());
+}
+
 TEST_F(ToastManagerTest, QueueMessage) {
   ShowToast("DUMMY1", 10);
   ShowToast("DUMMY2", 10);
@@ -171,15 +187,11 @@ TEST_F(ToastManagerTest, PositionWithVisibleBottomShelf) {
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
 
-  if (SupportsHostWindowResize()) {
-    // If host resize is not supported, ShelfLayoutManager::GetIdealBounds()
-    // doesn't return correct value.
-    gfx::Rect shelf_bounds = shelf->GetIdealBounds();
-    EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
-    EXPECT_EQ(shelf_bounds.y() - 5, toast_bounds.bottom());
-    EXPECT_EQ(root_bounds.bottom() - shelf_bounds.height() - 5,
-              toast_bounds.bottom());
-  }
+  gfx::Rect shelf_bounds = shelf->GetIdealBounds();
+  EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
+  EXPECT_EQ(shelf_bounds.y() - 5, toast_bounds.bottom());
+  EXPECT_EQ(root_bounds.bottom() - shelf_bounds.height() - 5,
+            toast_bounds.bottom());
 }
 
 TEST_F(ToastManagerTest, PositionWithAutoHiddenBottomShelf) {
@@ -235,23 +247,17 @@ TEST_F(ToastManagerTest, PositionWithVisibleLeftShelf) {
   EXPECT_TRUE(toast_bounds.Intersects(shelf->GetUserWorkAreaBounds()));
   EXPECT_EQ(root_bounds.bottom() - 5, toast_bounds.bottom());
 
-  if (SupportsHostWindowResize()) {
-    // If host resize is not supported then calling WmShelf::GetIdealBounds()
-    // doesn't return correct value.
-    gfx::Rect shelf_bounds = shelf->GetIdealBounds();
-    EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
-    EXPECT_EQ(round(shelf_bounds.right() +
-                    (root_bounds.width() - shelf_bounds.width()) / 2.0),
-              round(precise_toast_bounds.CenterPoint().x()));
-  }
+  gfx::Rect shelf_bounds = shelf->GetIdealBounds();
+  EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
+  EXPECT_NEAR(
+      shelf_bounds.right() + (root_bounds.width() - shelf_bounds.width()) / 2.0,
+      precise_toast_bounds.CenterPoint().x(), 1.f /* accepted error */);
 }
 
 TEST_F(ToastManagerTest, PositionWithUnifiedDesktop) {
   if (!SupportsMultipleDisplays())
     return;
-
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  display_manager->SetUnifiedDesktopEnabled(true);
+  display_manager()->SetUnifiedDesktopEnabled(true);
   UpdateDisplay("1000x500,0+600-100x500");
 
   WmShelf* shelf = GetPrimaryShelf();
@@ -268,15 +274,11 @@ TEST_F(ToastManagerTest, PositionWithUnifiedDesktop) {
   EXPECT_TRUE(root_bounds.Contains(toast_bounds));
   EXPECT_NEAR(root_bounds.CenterPoint().x(), toast_bounds.CenterPoint().x(), 1);
 
-  if (SupportsHostWindowResize()) {
-    // If host resize is not supported then calling WmShelf::GetIdealBounds()
-    // doesn't return correct value.
-    gfx::Rect shelf_bounds = shelf->GetIdealBounds();
-    EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
-    EXPECT_EQ(shelf_bounds.y() - 5, toast_bounds.bottom());
-    EXPECT_EQ(root_bounds.bottom() - shelf_bounds.height() - 5,
-              toast_bounds.bottom());
-  }
+  gfx::Rect shelf_bounds = shelf->GetIdealBounds();
+  EXPECT_FALSE(toast_bounds.Intersects(shelf_bounds));
+  EXPECT_EQ(shelf_bounds.y() - 5, toast_bounds.bottom());
+  EXPECT_EQ(root_bounds.bottom() - shelf_bounds.height() - 5,
+            toast_bounds.bottom());
 }
 
 TEST_F(ToastManagerTest, CancelToast) {

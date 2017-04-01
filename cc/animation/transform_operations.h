@@ -10,8 +10,8 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "cc/animation/animation_export.h"
 #include "cc/animation/transform_operation.h"
-#include "cc/base/cc_export.h"
 #include "ui/gfx/transform.h"
 
 namespace gfx {
@@ -30,7 +30,7 @@ namespace cc {
 // we have two dissimilar sets of transform operations, but the effect may not
 // be what was intended. For more information, see the comments for the blend
 // function below.
-class CC_EXPORT TransformOperations {
+class CC_ANIMATION_EXPORT TransformOperations {
  public:
   TransformOperations();
   TransformOperations(const TransformOperations& other);
@@ -59,9 +59,6 @@ class CC_EXPORT TransformOperations {
                            SkMScalar max_progress,
                            gfx::BoxF* bounds) const;
 
-  // Returns true if these operations affect scale.
-  bool AffectsScale() const;
-
   // Returns true if these operations are only translations.
   bool IsTranslation() const;
 
@@ -77,10 +74,10 @@ class CC_EXPORT TransformOperations {
   // fails (this can happen if either matrix cannot be decomposed).
   bool CanBlendWith(const TransformOperations& other) const;
 
-  // If these operations have no more than one scale operation, and if the only
-  // other operations are translations, sets |scale| to the scale component
-  // of these operations. Otherwise, returns false.
-  bool ScaleComponent(gfx::Vector3dF* scale) const;
+  // If none of these operations have a perspective component, sets |scale| to
+  // be the product of the scale component of every operation. Otherwise,
+  // returns false.
+  bool ScaleComponent(SkMScalar* scale) const;
 
   void AppendTranslate(SkMScalar x, SkMScalar y, SkMScalar z);
   void AppendRotate(SkMScalar x, SkMScalar y, SkMScalar z, SkMScalar degrees);

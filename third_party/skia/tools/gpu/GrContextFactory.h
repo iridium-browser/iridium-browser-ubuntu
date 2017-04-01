@@ -24,7 +24,7 @@ public:
     ContextInfo() = default;
     ContextInfo& operator=(const ContextInfo&) = default;
 
-    GrBackend backend() const { return fBackend; };
+    GrBackend backend() const { return fBackend; }
 
     GrContext* grContext() const { return fGrContext; }
 
@@ -68,15 +68,18 @@ public:
     // The availability of context types is subject to platform and build configuration
     // restrictions.
     enum ContextType {
-        kGL_ContextType,            //! OpenGL context.
-        kGLES_ContextType,          //! OpenGL ES context.
-        kANGLE_ContextType,         //! ANGLE on DirectX OpenGL ES context.
-        kANGLE_GL_ContextType,      //! ANGLE on OpenGL OpenGL ES context.
-        kCommandBuffer_ContextType, //! Chromium command buffer OpenGL ES context.
-        kMESA_ContextType,          //! MESA OpenGL context
-        kNullGL_ContextType,        //! Non-rendering OpenGL mock context.
-        kDebugGL_ContextType,       //! Non-rendering, state verifying OpenGL context.
-        kVulkan_ContextType,        //! Vulkan
+        kGL_ContextType,             //! OpenGL context.
+        kGLES_ContextType,           //! OpenGL ES context.
+        kANGLE_D3D9_ES2_ContextType, //! ANGLE on Direct3D9 OpenGL ES 2 context.
+        kANGLE_D3D11_ES2_ContextType,//! ANGLE on Direct3D11 OpenGL ES 2 context.
+        kANGLE_D3D11_ES3_ContextType,//! ANGLE on Direct3D11 OpenGL ES 3 context.
+        kANGLE_GL_ES2_ContextType,   //! ANGLE on OpenGL OpenGL ES 2 context.
+        kANGLE_GL_ES3_ContextType,   //! ANGLE on OpenGL OpenGL ES 3 context.
+        kCommandBuffer_ContextType,  //! Chromium command buffer OpenGL ES context.
+        kMESA_ContextType,           //! MESA OpenGL context
+        kNullGL_ContextType,         //! Non-rendering OpenGL mock context.
+        kDebugGL_ContextType,        //! Non-rendering, state verifying OpenGL context.
+        kVulkan_ContextType,         //! Vulkan
         kLastContextType = kVulkan_ContextType
     };
 
@@ -89,11 +92,12 @@ public:
      * Options for GL context creation. For historical and testing reasons the options will default
      * to not using GL_NV_path_rendering extension  even when the driver supports it.
      */
-    enum ContextOptions {
-        kNone_ContextOptions                = 0x0,
-        kEnableNVPR_ContextOptions          = 0x1,
-        kUseInstanced_ContextOptions        = 0x2,
-        kRequireSRGBSupport_ContextOptions  = 0x4,
+    enum class ContextOptions {
+        kNone                            = 0x0,
+        kEnableNVPR                      = 0x1,
+        kUseInstanced                    = 0x2,
+        kRequireSRGBSupport              = 0x4,
+        kRequireSRGBDecodeDisableSupport = 0x8,
     };
 
     static ContextType NativeContextTypeForBackend(GrBackend backend) {
@@ -127,29 +131,6 @@ public:
         }
     }
 
-    static const char* ContextTypeName(ContextType type) {
-        switch (type) {
-            case kGL_ContextType:
-                return "gl";
-            case kGLES_ContextType:
-                return "gles";
-            case kANGLE_ContextType:
-                return "angle";
-            case kANGLE_GL_ContextType:
-                return "angle-gl";
-            case kCommandBuffer_ContextType:
-                return "commandbuffer";
-            case kMESA_ContextType:
-                return "mesa";
-            case kNullGL_ContextType:
-                return "nullgl";
-            case kDebugGL_ContextType:
-                return "debuggl";
-            case kVulkan_ContextType:
-                return "vulkan";
-        }
-    }
-
     explicit GrContextFactory(const GrContextOptions& opts);
     GrContextFactory();
 
@@ -163,11 +144,11 @@ public:
      * Get a context initialized with a type of GL context. It also makes the GL context current.
      */
     ContextInfo getContextInfo(ContextType type,
-                               ContextOptions options = kNone_ContextOptions);
+                               ContextOptions options = ContextOptions::kNone);
     /**
      * Get a GrContext initialized with a type of GL context. It also makes the GL context current.
      */
-    GrContext* get(ContextType type, ContextOptions options = kNone_ContextOptions) {
+    GrContext* get(ContextType type, ContextOptions options = ContextOptions::kNone) {
         return this->getContextInfo(type, options).grContext();
     }
     const GrContextOptions& getGlobalOptions() const { return fGlobalOptions; }
@@ -182,8 +163,11 @@ private:
         bool            fAbandoned;
     };
     SkTArray<Context, true>         fContexts;
-    SkAutoTDelete<GLTestContext>    fSentinelGLContext;
+    std::unique_ptr<GLTestContext>  fSentinelGLContext;
     const GrContextOptions          fGlobalOptions;
 };
 }  // namespace sk_gpu_test
+
+GR_MAKE_BITFIELD_CLASS_OPS(sk_gpu_test::GrContextFactory::ContextOptions);
+
 #endif

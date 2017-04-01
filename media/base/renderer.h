@@ -18,7 +18,6 @@ namespace media {
 
 class DemuxerStreamProvider;
 class RendererClient;
-class VideoFrame;
 
 class MEDIA_EXPORT Renderer {
  public:
@@ -49,7 +48,7 @@ class MEDIA_EXPORT Renderer {
   // Starts rendering from |time|.
   virtual void StartPlayingFrom(base::TimeDelta time) = 0;
 
-  // Updates the current playback rate. The default playback rate should be 1.
+  // Updates the current playback rate. The default playback rate should be 0.
   virtual void SetPlaybackRate(double playback_rate) = 0;
 
   // Sets the output volume. The default volume should be 1.
@@ -57,12 +56,6 @@ class MEDIA_EXPORT Renderer {
 
   // Returns the current media time.
   virtual base::TimeDelta GetMediaTime() = 0;
-
-  // Returns whether |this| renders audio.
-  virtual bool HasAudio() = 0;
-
-  // Returns whether |this| renders video.
-  virtual bool HasVideo() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Renderer);

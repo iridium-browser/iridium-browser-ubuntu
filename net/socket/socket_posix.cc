@@ -19,6 +19,7 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/base/sockaddr_storage.h"
+#include "net/base/trace_constants.h"
 
 namespace net {
 
@@ -187,6 +188,25 @@ int SocketPosix::Connect(const SockaddrStorage& address,
     return MapSystemError(errno);
   }
 
+  // There is a race-condition in the above code if the kernel receive a RST
+  // packet for the "connect" call before the registration of the socket file
+  // descriptor to the message loop pump. On most platform it is benign as the
+  // message loop pump is awakened for that socket in an error state, but on
+  // iOS this does not happens. Check the status of the socket at this point
+  // and if in error, consider the connection as failed.
+  int os_error = 0;
+  socklen_t len = sizeof(os_error);
+  if (getsockopt(socket_fd_, SOL_SOCKET, SO_ERROR, &os_error, &len) == 0) {
+    // TCPSocketPosix expects errno to be set.
+    errno = os_error;
+  }
+
+  rv = MapConnectError(errno);
+  if (rv != OK && rv != ERR_IO_PENDING) {
+    write_socket_watcher_.StopWatchingFileDescriptor();
+    return rv;
+  }
+
   write_callback_ = callback;
   waiting_connect_ = true;
   return ERR_IO_PENDING;
@@ -350,7 +370,8 @@ void SocketPosix::DetachFromThread() {
 }
 
 void SocketPosix::OnFileCanReadWithoutBlocking(int fd) {
-  TRACE_EVENT0("net", "SocketPosix::OnFileCanReadWithoutBlocking");
+  TRACE_EVENT0(kNetTracingCategory,
+               "SocketPosix::OnFileCanReadWithoutBlocking");
   DCHECK(!accept_callback_.is_null() || !read_callback_.is_null());
   if (!accept_callback_.is_null()) {
     AcceptCompleted();

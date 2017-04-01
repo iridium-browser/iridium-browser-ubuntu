@@ -31,7 +31,7 @@
 #ifndef RTCVoidRequestImpl_h
 #define RTCVoidRequestImpl_h
 
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/ExceptionCode.h"
 #include "platform/heap/Handle.h"
 #include "platform/peerconnection/RTCVoidRequest.h"
@@ -42,31 +42,39 @@ class RTCPeerConnection;
 class RTCPeerConnectionErrorCallback;
 class VoidCallback;
 
-class RTCVoidRequestImpl final : public RTCVoidRequest, public ActiveDOMObject {
-    USING_GARBAGE_COLLECTED_MIXIN(RTCVoidRequestImpl);
-public:
-    static RTCVoidRequestImpl* create(ExecutionContext*, RTCPeerConnection*, VoidCallback*, RTCPeerConnectionErrorCallback*);
-    ~RTCVoidRequestImpl() override;
+class RTCVoidRequestImpl final : public RTCVoidRequest,
+                                 public ContextLifecycleObserver {
+  USING_GARBAGE_COLLECTED_MIXIN(RTCVoidRequestImpl);
 
-    // RTCVoidRequest
-    void requestSucceeded() override;
-    void requestFailed(const String& error) override;
+ public:
+  static RTCVoidRequestImpl* create(ExecutionContext*,
+                                    RTCPeerConnection*,
+                                    VoidCallback*,
+                                    RTCPeerConnectionErrorCallback*);
+  ~RTCVoidRequestImpl() override;
 
-    // ActiveDOMObject
-    void stop() override;
+  // RTCVoidRequest
+  void requestSucceeded() override;
+  void requestFailed(const String& error) override;
 
-    DECLARE_VIRTUAL_TRACE();
+  // ContextLifecycleObserver
+  void contextDestroyed(ExecutionContext*) override;
 
-private:
-    RTCVoidRequestImpl(ExecutionContext*, RTCPeerConnection*, VoidCallback*, RTCPeerConnectionErrorCallback*);
+  DECLARE_VIRTUAL_TRACE();
 
-    void clear();
+ private:
+  RTCVoidRequestImpl(ExecutionContext*,
+                     RTCPeerConnection*,
+                     VoidCallback*,
+                     RTCPeerConnectionErrorCallback*);
 
-    Member<VoidCallback> m_successCallback;
-    Member<RTCPeerConnectionErrorCallback> m_errorCallback;
-    Member<RTCPeerConnection> m_requester;
+  void clear();
+
+  Member<VoidCallback> m_successCallback;
+  Member<RTCPeerConnectionErrorCallback> m_errorCallback;
+  Member<RTCPeerConnection> m_requester;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // RTCVoidRequestImpl_h
+#endif  // RTCVoidRequestImpl_h

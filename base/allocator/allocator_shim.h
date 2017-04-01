@@ -56,12 +56,19 @@ struct AllocatorDispatch {
                           void* address,
                           size_t size);
   using FreeFn = void(const AllocatorDispatch* self, void* address);
+  // Returns the best available estimate for the actual amount of memory
+  // consumed by the allocation |address|. If possible, this should include
+  // heap overhead or at least a decent estimate of the full cost of the
+  // allocation. If no good estimate is possible, returns zero.
+  using GetSizeEstimateFn = size_t(const AllocatorDispatch* self,
+                                   void* address);
 
   AllocFn* const alloc_function;
   AllocZeroInitializedFn* const alloc_zero_initialized_function;
   AllocAlignedFn* const alloc_aligned_function;
   ReallocFn* const realloc_function;
   FreeFn* const free_function;
+  GetSizeEstimateFn* const get_size_estimate_function;
 
   const AllocatorDispatch* next;
 
@@ -79,10 +86,10 @@ BASE_EXPORT void SetCallNewHandlerOnMallocFailure(bool value);
 // regardless of SetCallNewHandlerOnMallocFailure().
 BASE_EXPORT void* UncheckedAlloc(size_t size);
 
-// Inserts |dispatch| in front of the allocator chain. This method is NOT
+// Inserts |dispatch| in front of the allocator chain. This method is
 // thread-safe w.r.t concurrent invocations of InsertAllocatorDispatch().
-// The callers have the responsibility of linearizing the changes to the chain
-// (or more likely call these always on the same thread).
+// The callers have responsibility for inserting a single dispatch no more
+// than once.
 BASE_EXPORT void InsertAllocatorDispatch(AllocatorDispatch* dispatch);
 
 // Test-only. Rationale: (1) lack of use cases; (2) dealing safely with a

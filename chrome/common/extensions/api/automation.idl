@@ -22,20 +22,30 @@
     childrenChanged,
     clicked,
     documentSelectionChanged,
+    expandedChanged,
     focus,
+    imageFrameUpdated,
     hide,
     hover,
     invalidStatusChanged,
     layoutComplete,
+    liveRegionCreated,
     liveRegionChanged,
     loadComplete,
     locationChanged,
+    mediaStartedPlaying,
+    mediaStoppedPlaying,
     menuEnd,
     menuListItemSelected,
     menuListValueChanged,
     menuPopupEnd,
     menuPopupStart,
     menuStart,
+    mouseCanceled,
+    mouseDragged,
+    mouseMoved,
+    mousePressed,
+    mouseReleased,
     rowCollapsed,
     rowCountChanged,
     rowExpanded,
@@ -60,6 +70,7 @@
     annotation,
     application,
     article,
+    audio,
     banner,
     blockquote,
     busyIndicator,
@@ -90,6 +101,7 @@
     div,
     document,
     embeddedObject,
+    feed,
     figcaption,
     figure,
     footer,
@@ -166,6 +178,7 @@
     tab,
     tableHeaderContainer,
     table,
+    term,
     textField,
     time,
     timer,
@@ -177,6 +190,7 @@
     tree,
     unknown,
     tooltip,
+    video,
     webArea,
     webView,
     window
@@ -258,7 +272,7 @@
 
   // Arguments for the find() and findAll() methods.
   [nocompile, noinline_doc] dictionary FindParams {
-    automation.RoleType? role;
+    RoleType? role;
 
     // A map of $(ref:automation.StateType) to boolean, indicating for each
     // state whether it should be set or not. For example:
@@ -305,6 +319,12 @@
 
     // The type of the event.
     EventType type;
+
+    // The source of this event.
+    DOMString eventFrom;
+
+    long mouseX;
+    long mouseY;
 
     // Stops this event from further processing except for any remaining
     // listeners on $(ref:AutomationEvent.target).
@@ -565,11 +585,20 @@
     // Places focus on this node.
     static void focus();
 
+    // Request a data url for the contents of an image, optionally
+    // resized.  Pass zero for maxWidth and/or maxHeight for the
+    // original size.
+    static void getImageData(long maxWidth, long maxHeight);
+
     // Scrolls this node to make it visible.
     static void makeVisible();
 
     // Sets selection within a text field.
     static void setSelection(long startIndex, long endIndex);
+
+    // Clears focus and sets this node as the starting point for the next
+    // time the user presses Tab or Shift+Tab.
+    static void setSequentialFocusNavigationStartingPoint();
 
     // Adds a listener for the given event type and event phase.
     static void addEventListener(

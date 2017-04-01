@@ -12,7 +12,7 @@ namespace net {
 
 // Simple helper for server sessions which generates a new random
 // connection ID for stateless rejects.
-class QuicSimpleServerSessionHelper : public QuicServerSessionBase::Helper {
+class QuicSimpleServerSessionHelper : public QuicCryptoServerStream::Helper {
  public:
   explicit QuicSimpleServerSessionHelper(QuicRandom* random);
 
@@ -22,7 +22,7 @@ class QuicSimpleServerSessionHelper : public QuicServerSessionBase::Helper {
       QuicConnectionId /*connection_id*/) const override;
 
   bool CanAcceptClientHello(const CryptoHandshakeMessage& message,
-                            const IPEndPoint& self_address,
+                            const QuicSocketAddress& self_address,
                             std::string* error_details) const override;
 
  private:

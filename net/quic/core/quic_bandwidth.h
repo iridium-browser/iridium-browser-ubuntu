@@ -4,22 +4,21 @@
 //
 // QuicBandwidth represents a bandwidth, stored in bits per second resolution.
 
-#ifndef NET_QUIC_QUIC_BANDWIDTH_H_
-#define NET_QUIC_QUIC_BANDWIDTH_H_
+#ifndef NET_QUIC_CORE_QUIC_BANDWIDTH_H_
+#define NET_QUIC_CORE_QUIC_BANDWIDTH_H_
 
-#include <stdint.h>
-
+#include <cmath>
+#include <cstdint>
 #include <ostream>
 
 #include "base/compiler_specific.h"
 #include "net/quic/core/quic_time.h"
+#include "net/quic/core/quic_types.h"
+#include "net/quic/platform/api/quic_export.h"
 
 namespace net {
 
-typedef uint64_t QuicByteCount;
-typedef uint64_t QuicPacketCount;
-
-class NET_EXPORT_PRIVATE QuicBandwidth {
+class QUIC_EXPORT_PRIVATE QuicBandwidth {
  public:
   // Creates a new QuicBandwidth with an internal value of 0.
   static QuicBandwidth Zero();
@@ -98,9 +97,16 @@ inline QuicBandwidth operator-(QuicBandwidth lhs, QuicBandwidth rhs) {
   return QuicBandwidth(lhs.bits_per_second_ - rhs.bits_per_second_);
 }
 inline QuicBandwidth operator*(QuicBandwidth lhs, float rhs) {
-  return QuicBandwidth(static_cast<int64_t>(lhs.bits_per_second_ * rhs));
+  return QuicBandwidth(
+      static_cast<int64_t>(std::llround(lhs.bits_per_second_ * rhs)));
 }
 inline QuicBandwidth operator*(float lhs, QuicBandwidth rhs) {
+  return rhs * lhs;
+}
+inline QuicByteCount operator*(QuicBandwidth lhs, QuicTime::Delta rhs) {
+  return lhs.ToBytesPerPeriod(rhs);
+}
+inline QuicByteCount operator*(QuicTime::Delta lhs, QuicBandwidth rhs) {
   return rhs * lhs;
 }
 
@@ -112,4 +118,4 @@ inline std::ostream& operator<<(std::ostream& output,
 }
 
 }  // namespace net
-#endif  // NET_QUIC_QUIC_BANDWIDTH_H_
+#endif  // NET_QUIC_CORE_QUIC_BANDWIDTH_H_

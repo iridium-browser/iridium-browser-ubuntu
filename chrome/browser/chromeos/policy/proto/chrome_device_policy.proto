@@ -287,6 +287,29 @@ message KioskAppInfoProto {
   optional string update_url = 2;
 }
 
+// Describes which Android application is to be launched.
+message AndroidKioskAppInfoProto {
+  // Package name (must be present).
+  // In the event this is the only field that is specified, runtime may use
+  // PackageManager.getLaunchIntentForPackage() to start the app. See
+  // https://developer.android.com/reference/android/content/pm/PackageManager.html
+  // Example of the package name: "com.android.camera". Do not include "app:"
+  // prefix in the package name.
+  optional string package_name = 1;
+
+  // Class name (optional). If present, class name is to be combined with
+  // package name to form a ComponentName. See
+  // https://developer.android.com/reference/android/content/ComponentName.html
+  optional string class_name = 2;
+
+  // Action (optional). The third parameter required for creating an Intent.
+  // If omitted, runtime may choose a reasonable default action
+  // (e.g. android.intent.action.MAIN).
+  // If package and action are specified, but not the class name, runtime may
+  // use PackageManager.queryIntentActivity() to find out the class name.
+  optional string action = 3;
+}
+
 // Describes a single device-local account.
 message DeviceLocalAccountInfoProto {
   // Deprecated: Account identifier for a public session device-local account.
@@ -306,8 +329,12 @@ message DeviceLocalAccountInfoProto {
   enum AccountType {
     // A login-less, policy-configured browsing session.
     ACCOUNT_TYPE_PUBLIC_SESSION = 0;
-    // An account that serves as a container for a single full-screen app.
+    // An account that serves as a container for a single full-screen
+    // Chrome app.
     ACCOUNT_TYPE_KIOSK_APP = 1;
+    // An account that serves as a container for a single full-screen
+    // Android app.
+    ACCOUNT_TYPE_KIOSK_ANDROID_APP = 2;
   };
 
   // The account type.
@@ -315,6 +342,9 @@ message DeviceLocalAccountInfoProto {
 
   // Kiosk App parameters, relevant if |type| is ACCOUNT_TYPE_KIOSK_APP.
   optional KioskAppInfoProto kiosk_app = 4;
+
+  // Kiosk App parameters, relevant if |type| is ACCOUNT_TYPE_KIOSK_ANDROID_APP
+  optional AndroidKioskAppInfoProto android_kiosk_app = 5;
 }
 
 message DeviceLocalAccountsProto {
@@ -634,7 +664,7 @@ message LoginScreenDomainAutoCompleteProto {
   // no autocomplete option during user sign-in flow will be shown.
   // If this policy is set to a string representing a domain name, an
   // autocomplete option during user sign-in will be shown allowing the user
-  // to type in only his user name without the domain name extension. The user
+  // to type in only their user name without the domain name extension. The user
   // will be able to overwrite this domain name extension.
   optional string login_screen_domain_auto_complete = 1;
 }
@@ -713,9 +743,21 @@ message LoginVideoCaptureAllowedUrlsProto {
   repeated string urls = 1;
 }
 
+message NetworkThrottlingEnabledProto {
+  optional bool enabled = 1 [default = false];
+  optional int32 upload_rate_kbits = 2 [default = 0];
+  optional int32 download_rate_kbits = 3 [default = 0];
+}
+
 // A list of app-ids to install from the webstore on the login page.
 message LoginAppsProto {
   repeated string login_apps = 1;
+}
+
+// The url and hash that specified in JSON format that can be used to set the
+// device-level wallpaper on the login screen before any user logs in.
+message DeviceWallpaperImageProto {
+  optional string device_wallpaper_image = 1;
 }
 
 message ChromeDeviceSettingsProto {
@@ -771,4 +813,6 @@ message ChromeDeviceSettingsProto {
   optional LoginVideoCaptureAllowedUrlsProto login_video_capture_allowed_urls =
       45;
   optional LoginAppsProto login_apps = 46;
+  optional NetworkThrottlingEnabledProto network_throttling = 47;
+  optional DeviceWallpaperImageProto device_wallpaper_image = 48;
 }

@@ -85,7 +85,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
     },
 
     set selection(selection) {
-      if (this.selection_ == selection)
+      if (this.selection_ === selection)
         return;
       this.selection_ = selection;
       this.layerPicker_.selection = selection;
@@ -121,7 +121,7 @@ tr.exportTo('tr.ui.e.chrome.cc', function() {
       LayerTreeHostImplSnapshotView, {typeName: 'cc::LayerTreeHostImpl'});
 
   return {
-    LayerTreeHostImplSnapshotView: LayerTreeHostImplSnapshotView
+    LayerTreeHostImplSnapshotView,
   };
 });
 </script>

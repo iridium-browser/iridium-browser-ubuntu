@@ -35,8 +35,11 @@
 #include "src/assembler.h"
 
 #include <math.h>
+#include <string.h>
 #include <cmath>
+
 #include "src/api.h"
+#include "src/assembler-inl.h"
 #include "src/base/cpu.h"
 #include "src/base/functional.h"
 #include "src/base/ieee754.h"
@@ -61,28 +64,6 @@
 #include "src/simulator.h"  // For flushing instruction cache.
 #include "src/snapshot/serializer-common.h"
 #include "src/wasm/wasm-external-refs.h"
-
-#if V8_TARGET_ARCH_IA32
-#include "src/ia32/assembler-ia32-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_X64
-#include "src/x64/assembler-x64-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_ARM64
-#include "src/arm64/assembler-arm64-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_ARM
-#include "src/arm/assembler-arm-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_PPC
-#include "src/ppc/assembler-ppc-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_MIPS
-#include "src/mips/assembler-mips-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_MIPS64
-#include "src/mips64/assembler-mips64-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/assembler-s390-inl.h"  // NOLINT
-#elif V8_TARGET_ARCH_X87
-#include "src/x87/assembler-x87-inl.h"  // NOLINT
-#else
-#error "Unknown architecture."
-#endif
 
 // Include native regexp-macro-assembler.
 #ifndef V8_INTERPRETED_REGEXP
@@ -120,7 +101,7 @@ double min_int;
 double one_half;
 double minus_one_half;
 double negative_infinity;
-double the_hole_nan;
+uint64_t the_hole_nan;
 double uint32_bias;
 };
 
@@ -190,6 +171,7 @@ void AssemblerBase::FlushICache(Isolate* isolate, void* start, size_t size) {
   if (size == 0) return;
 
 #if defined(USE_SIMULATOR)
+  base::LockGuard<base::Mutex> lock_guard(isolate->simulator_i_cache_mutex());
   Simulator::FlushICache(isolate->simulator_i_cache(), start, size);
 #else
   CpuFeatures::FlushICache(start, size);
@@ -233,21 +215,13 @@ PredictableCodeSizeScope::~PredictableCodeSizeScope() {
 // Implementation of CpuFeatureScope
 
 #ifdef DEBUG
-CpuFeatureScope::CpuFeatureScope(AssemblerBase* assembler, CpuFeature f)
+CpuFeatureScope::CpuFeatureScope(AssemblerBase* assembler, CpuFeature f,
+                                 CheckPolicy check)
     : assembler_(assembler) {
-  DCHECK(CpuFeatures::IsSupported(f));
+  DCHECK_IMPLIES(check == kCheckSupported, CpuFeatures::IsSupported(f));
   old_enabled_ = assembler_->enabled_cpu_features();
-  uint64_t mask = static_cast<uint64_t>(1) << f;
-  // TODO(svenpanne) This special case below doesn't belong here!
-#if V8_TARGET_ARCH_ARM
-  // ARMv7 is implied by VFP3.
-  if (f == VFP3) {
-    mask |= static_cast<uint64_t>(1) << ARMv7;
-  }
-#endif
-  assembler_->set_enabled_cpu_features(old_enabled_ | mask);
+  assembler_->EnableCpuFeature(f);
 }
-
 
 CpuFeatureScope::~CpuFeatureScope() {
   assembler_->set_enabled_cpu_features(old_enabled_);
@@ -350,21 +324,17 @@ void RelocInfo::update_wasm_memory_reference(
   DCHECK(IsWasmMemoryReference(rmode_) || IsWasmMemorySizeReference(rmode_));
   if (IsWasmMemoryReference(rmode_)) {
     Address updated_reference;
-    DCHECK(old_size == 0 || Memory::IsAddressInRange(
-                                old_base, wasm_memory_reference(), old_size));
+    DCHECK_GE(wasm_memory_reference(), old_base);
     updated_reference = new_base + (wasm_memory_reference() - old_base);
-    DCHECK(new_size == 0 ||
-           Memory::IsAddressInRange(new_base, updated_reference, new_size));
+    // The reference is not checked here but at runtime. Validity of references
+    // may change over time.
     unchecked_update_wasm_memory_reference(updated_reference,
                                            icache_flush_mode);
   } else if (IsWasmMemorySizeReference(rmode_)) {
-    uint32_t updated_size_reference;
-    DCHECK(old_size == 0 || wasm_memory_size_reference() <= old_size);
-    updated_size_reference =
-        new_size + (wasm_memory_size_reference() - old_size);
-    DCHECK(updated_size_reference <= new_size);
-    unchecked_update_wasm_memory_size(updated_size_reference,
-                                      icache_flush_mode);
+    uint32_t current_size_reference = wasm_memory_size_reference();
+    uint32_t updated_size_reference =
+        new_size + (current_size_reference - old_size);
+    unchecked_update_wasm_size(updated_size_reference, icache_flush_mode);
   } else {
     UNREACHABLE();
   }
@@ -385,6 +355,18 @@ void RelocInfo::update_wasm_global_reference(
   unchecked_update_wasm_memory_reference(updated_reference, icache_flush_mode);
   if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
     Assembler::FlushICache(isolate_, pc_, sizeof(int32_t));
+  }
+}
+
+void RelocInfo::update_wasm_function_table_size_reference(
+    uint32_t old_size, uint32_t new_size, ICacheFlushMode icache_flush_mode) {
+  DCHECK(IsWasmFunctionTableSizeReference(rmode_));
+  uint32_t current_size_reference = wasm_function_table_size_reference();
+  uint32_t updated_size_reference =
+      new_size + (current_size_reference - old_size);
+  unchecked_update_wasm_size(updated_size_reference, icache_flush_mode);
+  if (icache_flush_mode != SKIP_ICACHE_FLUSH) {
+    Assembler::FlushICache(isolate_, pc_, sizeof(int64_t));
   }
 }
 
@@ -770,8 +752,10 @@ const char* RelocInfo::RelocModeName(RelocInfo::Mode rmode) {
       return "internal reference";
     case INTERNAL_REFERENCE_ENCODED:
       return "encoded internal reference";
-    case DEOPT_POSITION:
-      return "deopt position";
+    case DEOPT_SCRIPT_OFFSET:
+      return "deopt script offset";
+    case DEOPT_INLINING_ID:
+      return "deopt inlining id";
     case DEOPT_REASON:
       return "deopt reason";
     case DEOPT_ID:
@@ -790,14 +774,14 @@ const char* RelocInfo::RelocModeName(RelocInfo::Mode rmode) {
       return "debug break slot at tail call";
     case CODE_AGE_SEQUENCE:
       return "code age sequence";
-    case GENERATOR_CONTINUATION:
-      return "generator continuation";
     case WASM_MEMORY_REFERENCE:
       return "wasm memory reference";
     case WASM_MEMORY_SIZE_REFERENCE:
       return "wasm memory size reference";
     case WASM_GLOBAL_REFERENCE:
       return "wasm global value reference";
+    case WASM_FUNCTION_TABLE_SIZE_REFERENCE:
+      return "wasm function table size reference";
     case NUMBER_OF_MODES:
     case PC_JUMP:
       UNREACHABLE();
@@ -811,7 +795,7 @@ void RelocInfo::Print(Isolate* isolate, std::ostream& os) {  // NOLINT
   os << static_cast<const void*>(pc_) << "  " << RelocModeName(rmode_);
   if (IsComment(rmode_)) {
     os << "  (" << reinterpret_cast<char*>(data_) << ")";
-  } else if (rmode_ == DEOPT_POSITION) {
+  } else if (rmode_ == DEOPT_SCRIPT_OFFSET || rmode_ == DEOPT_INLINING_ID) {
     os << "  (" << data() << ")";
   } else if (rmode_ == DEOPT_REASON) {
     os << "  ("
@@ -882,7 +866,8 @@ void RelocInfo::Verify(Isolate* isolate) {
     case RUNTIME_ENTRY:
     case COMMENT:
     case EXTERNAL_REFERENCE:
-    case DEOPT_POSITION:
+    case DEOPT_SCRIPT_OFFSET:
+    case DEOPT_INLINING_ID:
     case DEOPT_REASON:
     case DEOPT_ID:
     case CONST_POOL:
@@ -891,10 +876,10 @@ void RelocInfo::Verify(Isolate* isolate) {
     case DEBUG_BREAK_SLOT_AT_RETURN:
     case DEBUG_BREAK_SLOT_AT_CALL:
     case DEBUG_BREAK_SLOT_AT_TAIL_CALL:
-    case GENERATOR_CONTINUATION:
     case WASM_MEMORY_REFERENCE:
     case WASM_MEMORY_SIZE_REFERENCE:
     case WASM_GLOBAL_REFERENCE:
+    case WASM_FUNCTION_TABLE_SIZE_REFERENCE:
     case NONE32:
     case NONE64:
       break;
@@ -930,7 +915,7 @@ void ExternalReference::SetUp() {
   double_constants.min_int = kMinInt;
   double_constants.one_half = 0.5;
   double_constants.minus_one_half = -0.5;
-  double_constants.the_hole_nan = bit_cast<double>(kHoleNanInt64);
+  double_constants.the_hole_nan = kHoleNanInt64;
   double_constants.negative_infinity = -V8_INFINITY;
   double_constants.uint32_bias =
     static_cast<double>(static_cast<uint32_t>(0xFFFFFFFF)) + 1;
@@ -1211,6 +1196,12 @@ ExternalReference ExternalReference::f64_mod_wrapper_function(
   return ExternalReference(Redirect(isolate, FUNCTION_ADDR(f64_mod_wrapper)));
 }
 
+ExternalReference ExternalReference::wasm_call_trap_callback_for_testing(
+    Isolate* isolate) {
+  return ExternalReference(
+      Redirect(isolate, FUNCTION_ADDR(wasm::call_trap_callback_for_testing)));
+}
+
 ExternalReference ExternalReference::log_enter_external_function(
     Isolate* isolate) {
   return ExternalReference(
@@ -1223,19 +1214,6 @@ ExternalReference ExternalReference::log_leave_external_function(
   return ExternalReference(
       Redirect(isolate, FUNCTION_ADDR(Logger::LeaveExternal)));
 }
-
-
-ExternalReference ExternalReference::keyed_lookup_cache_keys(Isolate* isolate) {
-  return ExternalReference(isolate->keyed_lookup_cache()->keys_address());
-}
-
-
-ExternalReference ExternalReference::keyed_lookup_cache_field_offsets(
-    Isolate* isolate) {
-  return ExternalReference(
-      isolate->keyed_lookup_cache()->field_offsets_address());
-}
-
 
 ExternalReference ExternalReference::roots_array_start(Isolate* isolate) {
   return ExternalReference(isolate->heap()->roots_array_start());
@@ -1568,6 +1546,14 @@ ExternalReference ExternalReference::ieee754_tanh_function(Isolate* isolate) {
       Redirect(isolate, FUNCTION_ADDR(base::ieee754::tanh), BUILTIN_FP_CALL));
 }
 
+void* libc_memchr(void* string, int character, size_t search_length) {
+  return memchr(string, character, search_length);
+}
+
+ExternalReference ExternalReference::libc_memchr_function(Isolate* isolate) {
+  return ExternalReference(Redirect(isolate, FUNCTION_ADDR(libc_memchr)));
+}
+
 ExternalReference ExternalReference::page_flags(Page* page) {
   return ExternalReference(reinterpret_cast<Address>(page) +
                            MemoryChunk::kFlagsOffset);
@@ -1589,26 +1575,23 @@ ExternalReference ExternalReference::is_tail_call_elimination_enabled_address(
   return ExternalReference(isolate->is_tail_call_elimination_enabled_address());
 }
 
+ExternalReference ExternalReference::promise_hook_address(Isolate* isolate) {
+  return ExternalReference(isolate->promise_hook_address());
+}
+
 ExternalReference ExternalReference::debug_is_active_address(
     Isolate* isolate) {
   return ExternalReference(isolate->debug()->is_active_address());
 }
 
+ExternalReference ExternalReference::debug_hook_on_function_call_address(
+    Isolate* isolate) {
+  return ExternalReference(isolate->debug()->hook_on_function_call_address());
+}
 
 ExternalReference ExternalReference::debug_after_break_target_address(
     Isolate* isolate) {
   return ExternalReference(isolate->debug()->after_break_target_address());
-}
-
-
-ExternalReference ExternalReference::virtual_handler_register(
-    Isolate* isolate) {
-  return ExternalReference(isolate->virtual_handler_register_address());
-}
-
-
-ExternalReference ExternalReference::virtual_slot_register(Isolate* isolate) {
-  return ExternalReference(isolate->virtual_slot_register_address());
 }
 
 
@@ -1925,11 +1908,12 @@ int ConstantPoolBuilder::Emit(Assembler* assm) {
 
 // Platform specific but identical code for all the platforms.
 
-void Assembler::RecordDeoptReason(DeoptimizeReason reason, int raw_position,
-                                  int id) {
+void Assembler::RecordDeoptReason(DeoptimizeReason reason,
+                                  SourcePosition position, int id) {
   if (FLAG_trace_deopt || isolate()->is_profiling()) {
     EnsureSpace ensure_space(this);
-    RecordRelocInfo(RelocInfo::DEOPT_POSITION, raw_position);
+    RecordRelocInfo(RelocInfo::DEOPT_SCRIPT_OFFSET, position.ScriptOffset());
+    RecordRelocInfo(RelocInfo::DEOPT_INLINING_ID, position.InliningId());
     RecordRelocInfo(RelocInfo::DEOPT_REASON, static_cast<int>(reason));
     RecordRelocInfo(RelocInfo::DEOPT_ID, id);
   }
@@ -1941,12 +1925,6 @@ void Assembler::RecordComment(const char* msg) {
     EnsureSpace ensure_space(this);
     RecordRelocInfo(RelocInfo::COMMENT, reinterpret_cast<intptr_t>(msg));
   }
-}
-
-
-void Assembler::RecordGeneratorContinuation() {
-  EnsureSpace ensure_space(this);
-  RecordRelocInfo(RelocInfo::GENERATOR_CONTINUATION);
 }
 
 

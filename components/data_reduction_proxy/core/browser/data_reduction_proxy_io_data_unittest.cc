@@ -19,10 +19,12 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/testing_pref_service.h"
 #include "net/http/http_network_session.h"
 #include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 #include "net/proxy/proxy_info.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
@@ -99,10 +101,10 @@ class DataReductionProxyIODataTest : public testing::Test {
 
 TEST_F(DataReductionProxyIODataTest, TestConstruction) {
   std::unique_ptr<DataReductionProxyIOData> io_data(
-      new DataReductionProxyIOData(
-          Client::UNKNOWN, DataReductionProxyParams::kAllowed, net_log(),
-          task_runner(), task_runner(), false /* enabled */,
-          std::string() /* user_agent */, std::string() /* channel */));
+      new DataReductionProxyIOData(Client::UNKNOWN, 0, net_log(), task_runner(),
+                                   task_runner(), false /* enabled */,
+                                   std::string() /* user_agent */,
+                                   std::string() /* channel */));
 
   // Check that the SimpleURLRequestContextGetter uses vanilla HTTP.
   net::URLRequestContext* request_context =
@@ -148,9 +150,7 @@ TEST_F(DataReductionProxyIODataTest, TestResetBadProxyListOnDisableDataSaver) {
   net::TestURLRequestContext context(false);
   std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
-          .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                           DataReductionProxyParams::kFallbackAllowed |
-                           DataReductionProxyParams::kPromoAllowed)
+          .WithParamsFlags(DataReductionProxyParams::kPromoAllowed)
           .WithURLRequestContext(&context)
           .SkipSettingsInitialization()
           .Build();
@@ -166,13 +166,13 @@ TEST_F(DataReductionProxyIODataTest, TestResetBadProxyListOnDisableDataSaver) {
           ->proxy_service();
   net::ProxyInfo proxy_info;
   proxy_info.UseNamedProxy("http://foo2.com");
-  net::BoundNetLog bound_net_log;
+  net::NetLogWithSource net_log_with_source;
   const net::ProxyRetryInfoMap& bad_proxy_list =
       proxy_service->proxy_retry_info();
 
   // Simulate network error to add proxies to the bad proxy list.
   proxy_service->MarkProxiesAsBadUntil(proxy_info, base::TimeDelta::FromDays(1),
-                                       proxies, bound_net_log);
+                                       proxies, net_log_with_source);
   base::RunLoop().RunUntilIdle();
 
   // Verify that there are 2 proxies in the bad proxies list.
@@ -190,17 +190,18 @@ TEST_F(DataReductionProxyIODataTest, HoldbackConfiguresProxies) {
   net::TestURLRequestContext context(false);
   std::unique_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
-          .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                           DataReductionProxyParams::kFallbackAllowed |
-                           DataReductionProxyParams::kPromoAllowed |
+          .WithParamsFlags(DataReductionProxyParams::kPromoAllowed |
                            DataReductionProxyParams::kHoldback)
           .WithURLRequestContext(&context)
           .SkipSettingsInitialization()
           .Build();
 
   EXPECT_TRUE(drp_test_context->test_params()->proxies_for_http().size() > 0);
-  EXPECT_FALSE(
-      drp_test_context->test_params()->proxies_for_http().front().is_direct());
+  EXPECT_FALSE(drp_test_context->test_params()
+                   ->proxies_for_http()
+                   .front()
+                   .proxy_server()
+                   .is_direct());
 }
 
 }  // namespace data_reduction_proxy

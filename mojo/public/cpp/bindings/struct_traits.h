@@ -28,18 +28,17 @@ namespace mojo {
 //        wrapper type, or the following alternatives:
 //        - string:
 //          Value or reference of any type that has a StringTraits defined.
-//          Supported by default: base::StringPiece, std::string, mojo::String,
+//          Supported by default: base::StringPiece, std::string,
 //          WTF::String (in blink).
 //
 //        - array:
 //          Value or reference of any type that has an ArrayTraits defined.
-//          Supported by default: std::vector, CArray, mojo::Array, WTF::Vector
-//          (in blink), mojo::WTFArray (in blink).
+//          Supported by default: std::vector, CArray, WTF::Vector (in blink)
 //
 //        - map:
 //          Value or reference of any type that has a MapTraits defined.
-//          Supported by default: std::map, std::unordered_map, mojo::Map,
-//          WTF::HashMap (in blink), mojo::WTFMap (in blink).
+//          Supported by default: std::map, std::unordered_map,
+//          WTF::HashMap (in blink).
 //
 //        - struct:
 //          Value or reference of any type that has a StructTraits defined.
@@ -122,9 +121,9 @@ namespace mojo {
 // reference/value to the Mojo bindings for serialization:
 //    - if T is used in the "type_mappings" section of a typemap config file,
 //      you need to declare it as pass-by-value:
-//        type_mappings = [ "MojomType=T(move_only)" ]
+//        type_mappings = [ "MojomType=T[move_only]" ]
 //      or
-//        type_mappings = [ "MojomType=T(copyable_pass_by_value)" ]
+//        type_mappings = [ "MojomType=T[copyable_pass_by_value]" ]
 //
 //    - if another type U's StructTraits/UnionTraits has a getter for T, it
 //      needs to return non-const reference/value.

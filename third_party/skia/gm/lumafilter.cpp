@@ -6,6 +6,7 @@
  */
 
 #include "gm.h"
+#include "SkBlendModePriv.h"
 #include "SkCanvas.h"
 #include "SkGradientShader.h"
 #include "SkLumaColorFilter.h"
@@ -26,7 +27,7 @@ static void draw_label(SkCanvas* canvas, const char* label,
                      paint);
 }
 
-static void draw_scene(SkCanvas* canvas, const sk_sp<SkColorFilter>& filter, SkXfermode::Mode mode,
+static void draw_scene(SkCanvas* canvas, const sk_sp<SkColorFilter>& filter, SkBlendMode mode,
                        const sk_sp<SkShader>& s1, const sk_sp<SkShader>& s2) {
     SkPaint paint;
     paint.setAntiAlias(true);
@@ -53,7 +54,7 @@ static void draw_scene(SkCanvas* canvas, const sk_sp<SkColorFilter>& filter, SkX
     }
 
     SkPaint xferPaint;
-    xferPaint.setXfermodeMode(mode);
+    xferPaint.setBlendMode(mode);
     canvas->saveLayer(&bounds, &xferPaint);
 
     r = bounds;
@@ -101,13 +102,14 @@ protected:
     }
 
     void onDraw(SkCanvas* canvas) override {
-        SkXfermode::Mode modes[] = { SkXfermode::kSrcOver_Mode,
-                                     SkXfermode::kDstOver_Mode,
-                                     SkXfermode::kSrcATop_Mode,
-                                     SkXfermode::kDstATop_Mode,
-                                     SkXfermode::kSrcIn_Mode,
-                                     SkXfermode::kDstIn_Mode,
-                                   };
+        SkBlendMode modes[] = {
+            SkBlendMode::kSrcOver,
+            SkBlendMode::kDstOver,
+            SkBlendMode::kSrcATop,
+            SkBlendMode::kDstATop,
+            SkBlendMode::kSrcIn,
+            SkBlendMode::kDstIn,
+        };
         struct {
             const sk_sp<SkShader>& fShader1;
             const sk_sp<SkShader>& fShader2;
@@ -120,7 +122,7 @@ protected:
 
         SkScalar gridStep = kSize + 2 * kInset;
         for (size_t i = 0; i < SK_ARRAY_COUNT(modes); ++i) {
-            draw_label(canvas, SkXfermode::ModeName(modes[i]),
+            draw_label(canvas, SkBlendMode_Name(modes[i]),
                        SkPoint::Make(gridStep * (0.5f + i), 20));
         }
 

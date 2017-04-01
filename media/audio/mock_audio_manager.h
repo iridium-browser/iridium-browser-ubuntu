@@ -27,10 +27,11 @@ class MockAudioManager : public media::AudioManager {
 
   void ShowAudioInputSettings() override;
 
-  void GetAudioInputDeviceNames(media::AudioDeviceNames* device_names) override;
+  void GetAudioInputDeviceDescriptions(
+      media::AudioDeviceDescriptions* device_descriptions) override;
 
-  void GetAudioOutputDeviceNames(
-      media::AudioDeviceNames* device_names) override;
+  void GetAudioOutputDeviceDescriptions(
+      media::AudioDeviceDescriptions* device_descriptions) override;
 
   media::AudioOutputStream* MakeAudioOutputStream(
       const media::AudioParameters& params,
@@ -59,6 +60,8 @@ class MockAudioManager : public media::AudioManager {
 
   std::unique_ptr<AudioLog> CreateAudioLog(
       AudioLogFactory::AudioComponent component) override;
+
+  const char* GetName() override;
 
  protected:
   ~MockAudioManager() override;

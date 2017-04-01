@@ -43,9 +43,15 @@ def GenerateJavadoc(options, src_dir):
              '-Dlib.java.dir=' + lib_java_dir, '-Doverview=' + overview_file,
              'doc']
   stdout = build_utils.CheckOutput(javadoc_cmd, cwd=working_dir)
-  if " error: " in stdout or "warning" in stdout or "javadoc: error " in stdout:
-    build_utils.DeleteDirectory(output_dir)
-    raise build_utils.CalledProcessError(working_dir, javadoc_cmd, stdout)
+  for line in stdout.splitlines():
+    if " error: " in line or "javadoc: error " in line:
+      build_utils.DeleteDirectory(output_dir)
+      raise build_utils.CalledProcessError(working_dir, javadoc_cmd, stdout)
+    # TODO(crbug.com/655666): remove compiler  suppression warning once fixed.
+    if ("warning" in line and not line.endswith('warnings') and
+        not "the highest major version" in line):
+      build_utils.DeleteDirectory(output_dir)
+      raise build_utils.CalledProcessError(working_dir, javadoc_cmd, stdout)
 
 
 def main():
@@ -57,6 +63,7 @@ def main():
   parser.add_option('--overview-file', help='Path of the overview page')
   parser.add_option('--readme-file', help='Path of the README.md')
   parser.add_option('--lib-java-dir', help='Directory containing java libs')
+  parser.add_option('--stamp', help='Path to touch on success.')
 
   options, _ = parser.parse_args()
   # A temporary directory to put the output of cronet api source jar files.
@@ -72,12 +79,14 @@ def main():
 
   GenerateJavadoc(options, os.path.abspath(unzipped_jar_path))
 
+  if options.stamp:
+    build_utils.Touch(options.stamp)
   if options.depfile:
-    input_paths = []
+    assert options.stamp
+    deps = []
     for root, _, filenames in os.walk(options.input_dir):
-      input_paths.extend(os.path.join(root, f) for f in filenames)
-    build_utils.WriteDepfile(options.depfile,
-                             input_paths + build_utils.GetPythonDependencies())
+      deps.extend(os.path.join(root, f) for f in filenames)
+    build_utils.WriteDepfile(options.depfile, options.stamp, deps)
   # Clean up temporary output directory.
   build_utils.DeleteDirectory(unzipped_jar_path)
 

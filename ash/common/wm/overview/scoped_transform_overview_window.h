@@ -12,6 +12,8 @@
 #include "ash/common/wm/overview/overview_animation_type.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/events/event_handler.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/transform.h"
 
@@ -19,6 +21,10 @@ class SkRegion;
 
 namespace gfx {
 class Rect;
+}
+
+namespace views {
+class Widget;
 }
 
 namespace ash {
@@ -30,8 +36,9 @@ class WmWindow;
 // class allows transforming the windows with a helper to determine the best
 // fit in certain bounds. The window's state is restored on destruction of this
 // object.
-class ASH_EXPORT ScopedTransformOverviewWindow {
+class ASH_EXPORT ScopedTransformOverviewWindow : public ui::EventHandler {
  public:
+  class OverviewContentMask;
   using ScopedAnimationSettings =
       std::vector<std::unique_ptr<ScopedOverviewAnimationSettings>>;
 
@@ -57,13 +64,7 @@ class ASH_EXPORT ScopedTransformOverviewWindow {
                                             const gfx::Rect& dst_rect);
 
   explicit ScopedTransformOverviewWindow(WmWindow* window);
-  ~ScopedTransformOverviewWindow();
-
-  gfx::Transform get_overview_transform() const { return overview_transform_; }
-
-  void set_overview_transform(const gfx::Transform& transform) {
-    overview_transform_ = transform;
-  }
+  ~ScopedTransformOverviewWindow() override;
 
   // Starts an animation sequence which will use animation settings specified by
   // |animation_type|. The |animation_settings| container is populated with
@@ -90,12 +91,15 @@ class ASH_EXPORT ScopedTransformOverviewWindow {
   gfx::Rect GetTargetBoundsInScreen() const;
 
   // Calculates the bounds of a |window_| after being transformed to the
-  // selector's space. With Material Design those bounds are a union of all
-  // regular (normal and panel) windows in the |window_|'s transient hierarchy.
-  // The returned Rect is in virtual screen coordinates. When |hide_header| is
-  // true the returned bounds are adjusted to allow the original |window_|'s
-  // header to be hidden.
-  gfx::Rect GetTransformedBounds(bool hide_header) const;
+  // selector's space. Those bounds are a union of all regular (normal and
+  // panel) windows in the |window_|'s transient hierarchy. The returned Rect is
+  // in virtual screen coordinates. The returned bounds are adjusted to allow
+  // the original |window_|'s header to be hidden.
+  gfx::Rect GetTransformedBounds() const;
+
+  // Returns TOP_VIEW_COLOR property of |window_| unless there are transient
+  // ancestors in which case returns SK_ColorTRANSPARENT.
+  SkColor GetTopColor() const;
 
   // Returns TOP_VIEW_INSET property of |window_| unless there are transient
   // ancestors in which case returns 0.
@@ -103,10 +107,6 @@ class ASH_EXPORT ScopedTransformOverviewWindow {
 
   // Restores and animates the managed window to it's non overview mode state.
   void RestoreWindow();
-
-  // Forces the managed window to be shown (ie not hidden or minimized) when
-  // calling RestoreWindow().
-  void ShowWindowOnExit();
 
   // Informs the ScopedTransformOverviewWindow that the window being watched was
   // destroyed. This resets the internal window pointer.
@@ -116,40 +116,49 @@ class ASH_EXPORT ScopedTransformOverviewWindow {
   void PrepareForOverview();
 
   // Applies the |transform| to the overview window and all of its transient
-  // children. With Material Design creates a mask layer with the bottom edge
-  // using rounded corners of |radius|. When |use_mask| is set, hides the
-  // original window header and uses rounded rectangle mask which may be
-  // resource-intensive. When |use_shape| is set and |use_mask| is not, uses
-  // SetAlphaShape to mask the header.
-  void SetTransform(WmWindow* root_window,
-                    const gfx::Transform& transform,
-                    bool use_mask,
-                    bool use_shape,
-                    float radius);
+  // children.
+  void SetTransform(WmWindow* root_window, const gfx::Transform& transform);
 
   // Set's the opacity of the managed windows.
   void SetOpacity(float opacity);
+
+  // Hides the window header whose size is given in |TOP_VIEW_INSET|
+  // window property.
+  void HideHeader();
+
+  // Shows the window header that is hidden by HideHeader().
+  void ShowHeader();
+
+  // Creates/Deletes a mirror window for minimized windows.
+  void UpdateMirrorWindowForMinimizedState();
 
   WmWindow* window() const { return window_; }
 
   // Closes the transient root of the window managed by |this|.
   void Close();
 
+  // Returns the window used to show the content in overview mdoe.
+  // For minmiezd window, this will be a window that hosts mirrored layers.
+  WmWindow* GetOverviewWindow() const;
+
+  // Ensures that a window is visible by setting its opacity to 1.
+  void EnsureVisible();
+
+  // Returns the window created for minimized window, or nullptr
+  // if it does not exit.
+  WmWindow* GetOverviewWindowForMinimizedState() const;
+
+  // ui::EventHandler:
+  void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+
  private:
   friend class WindowSelectorTest;
-  class OverviewContentMask;
-
-  enum OriginalVisibility {
-    ORIGINALLY_VISIBLE,
-    ORIGINALLY_MINIMIZED,
-    ORIGINALLY_DOCKED_MINIMIZED,
-  };
-
-  // Shows the window if it was minimized.
-  void ShowWindowIfMinimized();
 
   // Closes the window managed by |this|.
   void CloseWidget();
+
+  void CreateMirrorWindowForMinimizedState();
 
   // Makes Close() execute synchronously when used in tests.
   static void SetImmediateCloseForTests();
@@ -157,19 +166,12 @@ class ASH_EXPORT ScopedTransformOverviewWindow {
   // A weak pointer to the real window in the overview.
   WmWindow* window_;
 
-  // Mask layer that hides the original window header.
-  std::unique_ptr<OverviewContentMask> mask_;
-
   // Original window shape, if it was set on a window.
   std::unique_ptr<SkRegion> original_window_shape_;
 
   // True after the |original_window_shape_| has been set or after it has
   // been determined that window shape was not originally set on the |window_|.
   bool determined_original_window_shape_;
-
-  // Original visibility of |window_| upon entering overview mode that needs to
-  // be restored unless the window gets selected.
-  OriginalVisibility original_visibility_;
 
   // Tracks if this window was ignored by the shelf.
   bool ignored_by_shelf_;
@@ -180,12 +182,11 @@ class ASH_EXPORT ScopedTransformOverviewWindow {
   // The original transform of the window before entering overview mode.
   gfx::Transform original_transform_;
 
-  // Keeps track of the original transform used when |this| has been positioned
-  // during SelectorItem layout.
-  gfx::Transform overview_transform_;
-
   // The original opacity of the window before entering overview mode.
   float original_opacity_;
+
+  // A window that holds the content for minimized window.
+  std::unique_ptr<views::Widget> minimized_widget_;
 
   base::WeakPtrFactory<ScopedTransformOverviewWindow> weak_ptr_factory_;
 

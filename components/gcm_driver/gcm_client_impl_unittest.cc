@@ -16,6 +16,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
@@ -279,10 +280,16 @@ class GCMClientImplTest : public testing::Test,
       const std::string& app_id,
       const std::string& message_id,
       const MCSClient::MessageSendStatus status);
+  void FailCheckin(net::HttpStatusCode response_code);
   void CompleteCheckin(uint64_t android_id,
                        uint64_t security_token,
                        const std::string& digest,
                        const std::map<std::string, std::string>& settings);
+  void CompleteCheckinImpl(uint64_t android_id,
+                           uint64_t security_token,
+                           const std::string& digest,
+                           const std::map<std::string, std::string>& settings,
+                           net::HttpStatusCode response_code);
   void CompleteRegistration(const std::string& registration_id);
   void CompleteUnregistration(const std::string& app_id);
   void VerifyPendingRequestFetcherDeleted();
@@ -315,6 +322,7 @@ class GCMClientImplTest : public testing::Test,
   void OnActivityRecorded() override {}
   void OnConnected(const net::IPEndPoint& ip_endpoint) override {}
   void OnDisconnected() override {}
+  void OnStoreReset() override {}
 
   GCMClientImpl* gcm_client() const { return gcm_client_.get(); }
   GCMClientImpl::State gcm_client_state() const {
@@ -364,14 +372,14 @@ class GCMClientImplTest : public testing::Test,
   }
 
   const base::FilePath& temp_directory_path() const {
-    return temp_directory_.path();
+    return temp_directory_.GetPath();
   }
 
   base::FilePath gcm_store_path() const {
     // Pass an non-existent directory as store path to match the exact
     // behavior in the production code. Currently GCMStoreImpl checks if
     // the directory exist or not to determine the store existence.
-    return temp_directory_.path().Append(FILE_PATH_LITERAL("GCM Store"));
+    return temp_directory_.GetPath().Append(FILE_PATH_LITERAL("GCM Store"));
   }
 
   int64_t CurrentTime();
@@ -456,11 +464,27 @@ void GCMClientImplTest::BuildGCMClient(base::TimeDelta clock_step) {
       new FakeGCMInternalsBuilder(clock_step))));
 }
 
+void GCMClientImplTest::FailCheckin(net::HttpStatusCode response_code) {
+  std::map<std::string, std::string> settings;
+  CompleteCheckinImpl(0, 0, GServicesSettings::CalculateDigest(settings),
+                      settings, response_code);
+}
+
 void GCMClientImplTest::CompleteCheckin(
     uint64_t android_id,
     uint64_t security_token,
     const std::string& digest,
     const std::map<std::string, std::string>& settings) {
+  CompleteCheckinImpl(android_id, security_token, digest, settings,
+                      net::HTTP_OK);
+}
+
+void GCMClientImplTest::CompleteCheckinImpl(
+    uint64_t android_id,
+    uint64_t security_token,
+    const std::string& digest,
+    const std::map<std::string, std::string>& settings,
+    net::HttpStatusCode response_code) {
   checkin_proto::AndroidCheckinResponse response;
   response.set_stats_ok(true);
   response.set_android_id(android_id);
@@ -485,7 +509,7 @@ void GCMClientImplTest::CompleteCheckin(
 
   net::TestURLFetcher* fetcher = url_fetcher_factory_.GetFetcherByID(0);
   ASSERT_TRUE(fetcher);
-  fetcher->set_response_code(net::HTTP_OK);
+  fetcher->set_response_code(response_code);
   fetcher->SetResponseString(response_string);
   fetcher->delegate()->OnURLFetchComplete(fetcher);
   // Give a chance for GCMStoreImpl::Backend to finish persisting data.
@@ -675,6 +699,50 @@ TEST_F(GCMClientImplTest, LoadingBusted) {
                       std::map<std::string, std::string>()));
 
   EXPECT_EQ(LOADING_COMPLETED, last_event());
+  EXPECT_EQ(kDeviceAndroidId2, mcs_client()->last_android_id());
+  EXPECT_EQ(kDeviceSecurityToken2, mcs_client()->last_security_token());
+}
+
+TEST_F(GCMClientImplTest, LoadingWithEmptyDirectory) {
+  // Close the GCM store.
+  gcm_client()->Stop();
+  PumpLoopUntilIdle();
+
+  // Make the store directory empty, to simulate a previous destroy store
+  // operation failing to delete the store directory.
+  ASSERT_TRUE(base::DeleteFile(gcm_store_path(), true /* recursive */));
+  ASSERT_TRUE(base::CreateDirectory(gcm_store_path()));
+
+  base::HistogramTester histogram_tester;
+
+  // Restart GCM client. The store should be considered to not exist.
+  BuildGCMClient(base::TimeDelta());
+  InitializeGCMClient();
+  gcm_client()->Start(GCMClient::DELAYED_START);
+  PumpLoopUntilIdle();
+  histogram_tester.ExpectUniqueSample("GCM.LoadStatus",
+                                      13 /* STORE_DOES_NOT_EXIST */, 1);
+  // Since the store does not exist, the database should not have been opened.
+  histogram_tester.ExpectTotalCount("GCM.Database.Open", 0);
+  // Without a store, DELAYED_START loading should only reach INITIALIZED state.
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
+
+  // The store directory should still exist (and be empty). If not, then the
+  // DELAYED_START load has probably reset the store, rather than leaving that
+  // to the next IMMEDIATE_START load as expected.
+  ASSERT_TRUE(base::DirectoryExists(gcm_store_path()));
+  ASSERT_FALSE(
+      base::PathExists(gcm_store_path().Append(FILE_PATH_LITERAL("CURRENT"))));
+
+  // IMMEDIATE_START loading should successfully create a new store despite the
+  // empty directory.
+  reset_last_event();
+  StartGCMClient();
+  ASSERT_NO_FATAL_FAILURE(
+      CompleteCheckin(kDeviceAndroidId2, kDeviceSecurityToken2, std::string(),
+                      std::map<std::string, std::string>()));
+  EXPECT_EQ(LOADING_COMPLETED, last_event());
+  EXPECT_EQ(GCMClientImpl::READY, gcm_client_state());
   EXPECT_EQ(kDeviceAndroidId2, mcs_client()->last_android_id());
   EXPECT_EQ(kDeviceSecurityToken2, mcs_client()->last_security_token());
 }
@@ -1167,6 +1235,26 @@ TEST_F(GCMClientImplCheckinTest, CheckinWhenAccountReplaced) {
   EXPECT_TRUE(device_checkin_info().accounts_set);
   EXPECT_EQ(MakeEmailToTokenMap(account_tokens),
             device_checkin_info().account_tokens);
+}
+
+TEST_F(GCMClientImplCheckinTest, ResetStoreWhenCheckinRejected) {
+  base::HistogramTester histogram_tester;
+  std::map<std::string, std::string> settings;
+  ASSERT_NO_FATAL_FAILURE(FailCheckin(net::HTTP_UNAUTHORIZED));
+  PumpLoopUntilIdle();
+
+  // Store should have been destroyed. Restart client and verify the initial
+  // checkin response is persisted.
+  BuildGCMClient(base::TimeDelta());
+  InitializeGCMClient();
+  StartGCMClient();
+  ASSERT_NO_FATAL_FAILURE(
+      CompleteCheckin(kDeviceAndroidId2, kDeviceSecurityToken2,
+                      GServicesSettings::CalculateDigest(settings), settings));
+
+  EXPECT_EQ(LOADING_COMPLETED, last_event());
+  EXPECT_EQ(kDeviceAndroidId2, mcs_client()->last_android_id());
+  EXPECT_EQ(kDeviceSecurityToken2, mcs_client()->last_security_token());
 }
 
 class GCMClientImplStartAndStopTest : public GCMClientImplTest {

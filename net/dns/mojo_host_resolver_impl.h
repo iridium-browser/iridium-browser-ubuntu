@@ -5,12 +5,13 @@
 #ifndef NET_DNS_MOJO_HOST_RESOLVER_IMPL_H_
 #define NET_DNS_MOJO_HOST_RESOLVER_IMPL_H_
 
-#include <set>
+#include <list>
+#include <memory>
 
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "net/interfaces/host_resolver_service.mojom.h"
-#include "net/log/net_log.h"
+#include "net/log/net_log_with_source.h"
 
 namespace net {
 
@@ -24,10 +25,11 @@ class HostResolver;
 class MojoHostResolverImpl {
  public:
   // |resolver| is expected to outlive |this|.
-  MojoHostResolverImpl(net::HostResolver* resolver, const BoundNetLog& net_log);
+  MojoHostResolverImpl(net::HostResolver* resolver,
+                       const NetLogWithSource& net_log);
   ~MojoHostResolverImpl();
 
-  void Resolve(interfaces::HostResolverRequestInfoPtr request_info,
+  void Resolve(std::unique_ptr<HostResolver::RequestInfo> request_info,
                interfaces::HostResolverRequestClientPtr client);
 
   bool request_in_progress() { return !pending_jobs_.empty(); }
@@ -35,18 +37,17 @@ class MojoHostResolverImpl {
  private:
   class Job;
 
-  // Removes |job| from the set of pending jobs, and deletes it.
-  void DeleteJob(Job* job);
+  // Removes |job| from the set of pending jobs.
+  void DeleteJob(std::list<Job>::iterator job);
 
   // Resolver for resolving incoming requests. Not owned.
   net::HostResolver* resolver_;
 
-  // The BoundNetLog to be passed to |resolver_| for all requests.
-  const BoundNetLog net_log_;
+  // The NetLogWithSource to be passed to |resolver_| for all requests.
+  const NetLogWithSource net_log_;
 
   // All pending jobs, so they can be cancelled when this service is destroyed.
-  // Owns all jobs.
-  std::set<Job*> pending_jobs_;
+  std::list<Job> pending_jobs_;
 
   base::ThreadChecker thread_checker_;
 

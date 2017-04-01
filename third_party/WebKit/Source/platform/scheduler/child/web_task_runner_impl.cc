@@ -14,25 +14,17 @@
 namespace blink {
 namespace scheduler {
 
-WebTaskRunnerImpl::WebTaskRunnerImpl(scoped_refptr<TaskQueue> task_queue)
-    : task_queue_(task_queue) {}
-
-WebTaskRunnerImpl::~WebTaskRunnerImpl() {}
-
-void WebTaskRunnerImpl::postTask(const blink::WebTraceLocation& location,
-                                 blink::WebTaskRunner::Task* task) {
-  task_queue_->PostTask(location,
-                        base::Bind(&WebTaskRunnerImpl::runTask,
-                                   base::Passed(base::WrapUnique(task))));
+RefPtr<WebTaskRunnerImpl> WebTaskRunnerImpl::create(
+    scoped_refptr<TaskQueue> task_queue) {
+  return adoptRef(new WebTaskRunnerImpl(std::move(task_queue)));
 }
 
-void WebTaskRunnerImpl::postDelayedTask(const blink::WebTraceLocation& location,
-                                        blink::WebTaskRunner::Task* task,
+void WebTaskRunnerImpl::postDelayedTask(const WebTraceLocation& location,
+                                        const base::Closure& task,
                                         double delayMs) {
-  DCHECK_GE(delayMs, 0.0);
-  task_queue_->PostDelayedTask(location,
-                               base::Bind(&WebTaskRunnerImpl::runTask,
-                                          base::Passed(base::WrapUnique(task))),
+  DCHECK_GE(delayMs, 0.0) << location.function_name() << " "
+                          << location.file_name();
+  task_queue_->PostDelayedTask(location, task,
                                base::TimeDelta::FromMillisecondsD(delayMs));
 }
 
@@ -49,6 +41,11 @@ double WebTaskRunnerImpl::monotonicallyIncreasingVirtualTimeSeconds() const {
          static_cast<double>(base::Time::kMicrosecondsPerSecond);
 }
 
+WebTaskRunnerImpl::WebTaskRunnerImpl(scoped_refptr<TaskQueue> task_queue)
+    : task_queue_(std::move(task_queue)) {}
+
+WebTaskRunnerImpl::~WebTaskRunnerImpl() {}
+
 base::TimeTicks WebTaskRunnerImpl::Now() const {
   TimeDomain* time_domain = task_queue_->GetTimeDomain();
   // It's possible task_queue_ has been Unregistered which can lead to a null
@@ -58,17 +55,8 @@ base::TimeTicks WebTaskRunnerImpl::Now() const {
   return time_domain->Now();
 }
 
-std::unique_ptr<blink::WebTaskRunner> WebTaskRunnerImpl::clone() {
-  return base::WrapUnique(new WebTaskRunnerImpl(task_queue_));
-}
-
-base::SingleThreadTaskRunner* WebTaskRunnerImpl::taskRunner() {
+base::SingleThreadTaskRunner* WebTaskRunnerImpl::toSingleThreadTaskRunner() {
   return task_queue_.get();
-}
-
-void WebTaskRunnerImpl::runTask(
-    std::unique_ptr<blink::WebTaskRunner::Task> task) {
-  task->run();
 }
 
 }  // namespace scheduler

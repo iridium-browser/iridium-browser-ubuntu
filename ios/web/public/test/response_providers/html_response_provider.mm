@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ios/web/public/test/response_providers/html_response_provider.h"
+#import "ios/web/public/test/response_providers/html_response_provider.h"
 
-#include "ios/web/public/test/response_providers/response_provider.h"
+#import "ios/web/public/test/response_providers/response_provider.h"
 #include "url/gurl.h"
 
 HtmlResponseProvider::HtmlResponseProvider()
@@ -12,6 +12,10 @@ HtmlResponseProvider::HtmlResponseProvider()
 
 HtmlResponseProvider::HtmlResponseProvider(
     const std::map<GURL, std::string>& responses)
+    : response_provider_impl_(new HtmlResponseProviderImpl(responses)) {}
+
+HtmlResponseProvider::HtmlResponseProvider(
+    const std::map<GURL, std::pair<std::string, std::string>>& responses)
     : response_provider_impl_(new HtmlResponseProviderImpl(responses)) {}
 
 HtmlResponseProvider::HtmlResponseProvider(

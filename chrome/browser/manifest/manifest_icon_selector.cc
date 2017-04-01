@@ -13,8 +13,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/mime_util/mime_util.h"
 #include "content/public/browser/web_contents.h"
-#include "ui/display/display.h"
-#include "ui/display/screen.h"
 
 using content::Manifest;
 
@@ -118,9 +116,8 @@ std::vector<Manifest::Icon> ManifestIconSelector::FilterIconsByType(
   std::vector<Manifest::Icon> result;
 
   for (size_t i = 0; i < icons.size(); ++i) {
-    if (icons[i].type.is_null() ||
-        mime_util::IsSupportedImageMimeType(
-            base::UTF16ToUTF8(icons[i].type.string()))) {
+    if (icons[i].type.empty() ||
+        mime_util::IsSupportedImageMimeType(base::UTF16ToUTF8(icons[i].type))) {
       result.push_back(icons[i]);
     }
   }
@@ -131,14 +128,9 @@ std::vector<Manifest::Icon> ManifestIconSelector::FilterIconsByType(
 // static
 GURL ManifestIconSelector::FindBestMatchingIcon(
     const std::vector<Manifest::Icon>& unfiltered_icons,
-    const int ideal_icon_size_in_dp,
-    const int minimum_icon_size_in_dp) {
-  DCHECK(minimum_icon_size_in_dp <= ideal_icon_size_in_dp);
-
-  const int ideal_icon_size_in_px =
-    ConvertIconSizeFromDpToPx(ideal_icon_size_in_dp);
-  const int minimum_icon_size_in_px =
-    ConvertIconSizeFromDpToPx(minimum_icon_size_in_dp);
+    const int ideal_icon_size_in_px,
+    const int minimum_icon_size_in_px) {
+  DCHECK(minimum_icon_size_in_px <= ideal_icon_size_in_px);
 
   std::vector<Manifest::Icon> icons =
       ManifestIconSelector::FilterIconsByType(unfiltered_icons);
@@ -149,11 +141,4 @@ GURL ManifestIconSelector::FindBestMatchingIcon(
   if (index == -1)
     return GURL();
   return icons[index].src;
-}
-
-// static
-int ManifestIconSelector::ConvertIconSizeFromDpToPx(int icon_size_in_dp) {
-  return static_cast<int>(round(
-      icon_size_in_dp *
-      display::Screen::GetScreen()->GetPrimaryDisplay().device_scale_factor()));
 }

@@ -12,12 +12,12 @@
 #include <vector>
 
 #include "ash/ash_export.h"
-#include "ash/display/display_manager.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host_observer.h"
+#include "ui/display/manager/display_manager.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
 
@@ -30,6 +30,7 @@ class ScreenPositionClient;
 
 namespace display {
 class Display;
+class ManagedDisplayInfo;
 }
 
 namespace ui {
@@ -38,8 +39,6 @@ class Reflector;
 
 namespace ash {
 class AshWindowTreeHost;
-class DisplayInfo;
-class RootWindowTransformer;
 
 namespace test {
 class MirrorWindowTestApi;
@@ -55,7 +54,8 @@ class ASH_EXPORT MirrorWindowController : public aura::WindowTreeHostObserver {
 
   // Updates the root window's bounds using |display_info|.
   // Creates the new root window if one doesn't exist.
-  void UpdateWindow(const std::vector<DisplayInfo>& display_info);
+  void UpdateWindow(
+      const std::vector<display::ManagedDisplayInfo>& display_info);
 
   // Same as above, but using existing display info
   // for the mirrored display.
@@ -96,7 +96,7 @@ class ASH_EXPORT MirrorWindowController : public aura::WindowTreeHostObserver {
   typedef std::map<int64_t, MirroringHostInfo*> MirroringHostInfoMap;
   MirroringHostInfoMap mirroring_host_info_map_;
 
-  DisplayManager::MultiDisplayMode multi_display_mode_;
+  display::DisplayManager::MultiDisplayMode multi_display_mode_;
 
   std::unique_ptr<aura::client::ScreenPositionClient> screen_position_client_;
 

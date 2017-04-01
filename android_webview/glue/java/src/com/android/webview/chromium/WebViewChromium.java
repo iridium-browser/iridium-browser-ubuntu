@@ -105,7 +105,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
     private final boolean mShouldDisableThreadChecking;
 
-    private static boolean sRecordWholeDocumentEnabledByApi = false;
+    private static boolean sRecordWholeDocumentEnabledByApi;
     static void enableSlowWholeDocumentDraw() {
         sRecordWholeDocumentEnabledByApi = true;
     }
@@ -114,6 +114,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     // init is ofter called right after and is NOT threadsafe.
     public WebViewChromium(WebViewChromiumFactoryProvider factory, WebView webView,
             WebView.PrivateAccess webViewPrivate, boolean shouldDisableThreadChecking) {
+        WebViewChromiumFactoryProvider.checkStorageIsNotDeviceProtected(webView.getContext());
         mWebView = webView;
         mWebViewPrivate = webViewPrivate;
         mHitTestResult = new WebView.HitTestResult();
@@ -173,8 +174,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         final boolean allowGeolocationOnInsecureOrigins =
                 mAppTargetSdkVersion <= Build.VERSION_CODES.M;
 
-        mContentsClientAdapter =
-                new WebViewContentsClientAdapter(mWebView, mContext, mFactory.getWebViewDelegate());
+        mContentsClientAdapter = mFactory.createWebViewContentsClientAdapter(mWebView, mContext);
         mWebSettings = new ContentSettingsAdapter(
                 new AwSettings(mContext, isAccessFromFileURLsGrantedByDefault,
                         areLegacyQuirksEnabled, allowEmptyDocumentPersistence,
@@ -372,7 +372,8 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return;
         }
-        mAwContents.setHttpAuthUsernamePassword(host, realm, username, password);
+        ((WebViewDatabaseAdapter) mFactory.getWebViewDatabase(mContext))
+                .setHttpAuthUsernamePassword(host, realm, username, password);
     }
 
     @Override
@@ -387,7 +388,8 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        return mAwContents.getHttpAuthUsernamePassword(host, realm);
+        return ((WebViewDatabaseAdapter) mFactory.getWebViewDatabase(mContext))
+                .getHttpAuthUsernamePassword(host, realm);
     }
 
     @Override
@@ -405,7 +407,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         // Make sure that we do not trigger any callbacks after destruction
         mContentsClientAdapter.setWebChromeClient(null);
         mContentsClientAdapter.setWebViewClient(null);
-        mContentsClientAdapter.setPictureListener(null);
+        mContentsClientAdapter.setPictureListener(null, true);
         mContentsClientAdapter.setFindListener(null);
         mContentsClientAdapter.setDownloadListener(null);
 
@@ -1233,6 +1235,11 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mContentsClientAdapter.setWebViewClient(client);
     }
 
+    // TODO(ntfschr): add @Override once the next Android is released (http://crbug.com/627248)
+    public WebViewClient getWebViewClient() {
+        return mContentsClientAdapter.getWebViewClient();
+    }
+
     @Override
     public void setDownloadListener(DownloadListener listener) {
         mContentsClientAdapter.setDownloadListener(listener);
@@ -1242,6 +1249,11 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     public void setWebChromeClient(WebChromeClient client) {
         mWebSettings.getAwSettings().setFullscreenSupported(doesSupportFullscreen(client));
         mContentsClientAdapter.setWebChromeClient(client);
+    }
+
+    // TODO(ntfschr): add @Override once the next Android is released (http://crbug.com/627248)
+    public WebChromeClient getWebChromeClient() {
+        return mContentsClientAdapter.getWebChromeClient();
     }
 
     /**
@@ -1293,9 +1305,9 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return;
         }
-        mContentsClientAdapter.setPictureListener(listener);
-        mAwContents.enableOnNewPicture(
-                listener != null, mAppTargetSdkVersion >= Build.VERSION_CODES.JELLY_BEAN_MR2);
+        boolean invalidateOnly = mAppTargetSdkVersion >= Build.VERSION_CODES.JELLY_BEAN_MR2;
+        mContentsClientAdapter.setPictureListener(listener, invalidateOnly);
+        mAwContents.enableOnNewPicture(listener != null, invalidateOnly);
     }
 
     @Override
@@ -1338,7 +1350,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        return WebMessagePortAdapter.fromAwMessagePorts(mAwContents.createMessageChannel());
+        return WebMessagePortAdapter.fromMessagePorts(mAwContents.createMessageChannel());
     }
 
     @Override
@@ -1354,7 +1366,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             return;
         }
         mAwContents.postMessageToFrame(null, message.getData(), targetOrigin.toString(),
-                WebMessagePortAdapter.toAwMessagePorts(message.getPorts()));
+                WebMessagePortAdapter.toMessagePorts(message.getPorts()));
     }
 
     @Override

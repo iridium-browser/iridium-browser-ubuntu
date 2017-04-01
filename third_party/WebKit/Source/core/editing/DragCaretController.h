@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009, 2010 Apple Inc. All rights
+ * reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,36 +27,49 @@
 #ifndef DragCaretController_h
 #define DragCaretController_h
 
+#include "core/dom/SynchronousMutationObserver.h"
 #include "core/editing/CaretBase.h"
+#include <memory>
 
 namespace blink {
 
-class DragCaretController final : public GarbageCollectedFinalized<DragCaretController> {
-    WTF_MAKE_NONCOPYABLE(DragCaretController);
-public:
-    static DragCaretController* create();
+class DragCaretController final
+    : public GarbageCollectedFinalized<DragCaretController>,
+      public SynchronousMutationObserver {
+  WTF_MAKE_NONCOPYABLE(DragCaretController);
+  USING_GARBAGE_COLLECTED_MIXIN(DragCaretController);
 
-    void paintDragCaret(LocalFrame*, GraphicsContext&, const LayoutPoint&) const;
+ public:
+  static DragCaretController* create();
 
-    bool hasCaretIn(const LayoutBlock&) const;
-    bool isContentRichlyEditable() const;
+  virtual ~DragCaretController();
 
-    bool hasCaret() const { return m_position.isNotNull(); }
-    const VisiblePosition& caretPosition() { return m_position; }
-    void setCaretPosition(const PositionWithAffinity&);
-    void clear() { setCaretPosition(PositionWithAffinity()); }
+  void paintDragCaret(LocalFrame*, GraphicsContext&, const LayoutPoint&) const;
 
-    void nodeWillBeRemoved(Node&);
+  bool hasCaretIn(const LayoutBlock&) const;
+  bool isContentRichlyEditable() const;
 
-    DECLARE_TRACE();
+  bool hasCaret() const { return m_position.isNotNull(); }
+  const PositionWithAffinity& caretPosition() { return m_position; }
+  void setCaretPosition(const PositionWithAffinity&);
+  void clear() { setCaretPosition(PositionWithAffinity()); }
 
-private:
-    DragCaretController();
+  DECLARE_TRACE();
 
-    VisiblePosition m_position;
-    const Member<CaretBase> m_caretBase;
+ private:
+  DragCaretController();
+
+  // Implementations of |SynchronousMutationObserver|
+  void nodeChildrenWillBeRemoved(ContainerNode&) final;
+  void nodeWillBeRemoved(Node&) final;
+
+  PositionWithAffinity m_position;
+  // caret rect in coords local to the layoutObject responsible for painting the
+  // caret
+  LayoutRect m_caretLocalRect;
+  const std::unique_ptr<CaretBase> m_caretBase;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // DragCaretController_h
+#endif  // DragCaretController_h

@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/aura/wm_window_aura.h"
-#include "ash/common/shell_window_ids.h"
+#include "ash/common/accessibility_delegate.h"
 #include "ash/common/wm/window_state.h"
 #include "ash/common/wm/wm_event.h"
 #include "ash/common/wm_shell.h"
+#include "ash/common/wm_window.h"
+#include "ash/public/cpp/shell_window_ids.h"
 #include "ash/wm/window_state_aura.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,9 +21,11 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_targeter.h"
 #include "ui/base/hit_test.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/events/base_event_utils.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/shadow.h"
 #include "ui/wm/core/shadow_controller.h"
@@ -123,8 +126,18 @@ TEST_F(ShellSurfaceTest, Minimize) {
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
 
+  // Minimizing can be performed before the surface is committed.
+  shell_surface->Minimize();
+  EXPECT_TRUE(shell_surface->GetWidget()->IsMinimized());
+
+  // Confirm that attaching and commiting doesn't reset the state.
   surface->Attach(buffer.get());
   surface->Commit();
+  EXPECT_TRUE(shell_surface->GetWidget()->IsMinimized());
+
+  shell_surface->Restore();
+  EXPECT_FALSE(shell_surface->GetWidget()->IsMinimized());
+
   shell_surface->Minimize();
   EXPECT_TRUE(shell_surface->GetWidget()->IsMinimized());
 }
@@ -167,12 +180,22 @@ TEST_F(ShellSurfaceTest, SetPinned) {
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
 
-  shell_surface->SetPinned(true);
+  shell_surface->SetPinned(true, /* trusted */ true);
   EXPECT_TRUE(
       ash::wm::GetWindowState(shell_surface->GetWidget()->GetNativeWindow())
           ->IsPinned());
 
-  shell_surface->SetPinned(false);
+  shell_surface->SetPinned(false, /* trusted */ true);
+  EXPECT_FALSE(
+      ash::wm::GetWindowState(shell_surface->GetWidget()->GetNativeWindow())
+          ->IsPinned());
+
+  shell_surface->SetPinned(true, /* trusted */ false);
+  EXPECT_TRUE(
+      ash::wm::GetWindowState(shell_surface->GetWidget()->GetNativeWindow())
+          ->IsPinned());
+
+  shell_surface->SetPinned(false, /* trusted */ false);
   EXPECT_FALSE(
       ash::wm::GetWindowState(shell_surface->GetWidget()->GetNativeWindow())
           ->IsPinned());
@@ -190,12 +213,14 @@ TEST_F(ShellSurfaceTest, SetApplicationId) {
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(new ShellSurface(surface.get()));
 
+  EXPECT_EQ(nullptr, shell_surface->GetWidget());
+  shell_surface->SetApplicationId("pre-widget-id");
+
   surface->Commit();
-  EXPECT_EQ("", ShellSurface::GetApplicationId(
-                    shell_surface->GetWidget()->GetNativeWindow()));
+  aura::Window* window = shell_surface->GetWidget()->GetNativeWindow();
+  EXPECT_EQ("pre-widget-id", ShellSurface::GetApplicationId(window));
   shell_surface->SetApplicationId("test");
-  EXPECT_EQ("test", ShellSurface::GetApplicationId(
-                        shell_surface->GetWidget()->GetNativeWindow()));
+  EXPECT_EQ("test", ShellSurface::GetApplicationId(window));
 }
 
 TEST_F(ShellSurfaceTest, Move) {
@@ -386,7 +411,7 @@ TEST_F(ShellSurfaceTest, ConfigureCallback) {
 TEST_F(ShellSurfaceTest, ModalWindow) {
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(
-      new ShellSurface(surface.get(), nullptr, gfx::Rect(), true,
+      new ShellSurface(surface.get(), nullptr, gfx::Rect(), true, false,
                        ash::kShellWindowId_SystemModalContainer));
   gfx::Size desktop_size(640, 480);
   std::unique_ptr<Buffer> desktop_buffer(
@@ -412,7 +437,7 @@ TEST_F(ShellSurfaceTest, ModalWindow) {
   EXPECT_FALSE(ash::WmShell::Get()->IsSystemModalWindowOpen());
 
   // Making the surface opaque shouldn't make it modal either.
-  child->SetBlendMode(SkXfermode::kSrc_Mode);
+  child->SetBlendMode(SkBlendMode::kSrc);
   child->Commit();
   surface->Commit();
   EXPECT_FALSE(ash::WmShell::Get()->IsSystemModalWindowOpen());
@@ -431,10 +456,50 @@ TEST_F(ShellSurfaceTest, ModalWindow) {
   EXPECT_FALSE(ash::WmShell::Get()->IsSystemModalWindowOpen());
 }
 
+TEST_F(ShellSurfaceTest, PopupWindow) {
+  Surface parent_surface;
+  ShellSurface parent(&parent_surface);
+  const gfx::Rect parent_bounds(100, 100, 300, 300);
+
+  Buffer parent_buffer(
+      exo_test_helper()->CreateGpuMemoryBuffer(parent_bounds.size()));
+  parent_surface.Attach(&parent_buffer);
+  parent_surface.Commit();
+
+  parent.GetWidget()->SetBounds(parent_bounds);
+
+  Display display;
+  Surface popup_surface;
+  const gfx::Rect popup_bounds(10, 10, 100, 100);
+  std::unique_ptr<ShellSurface> popup = display.CreatePopupShellSurface(
+      &popup_surface, &parent, popup_bounds.origin());
+
+  Buffer popup_buffer(
+      exo_test_helper()->CreateGpuMemoryBuffer(popup_bounds.size()));
+  popup_surface.Attach(&popup_buffer);
+  popup_surface.Commit();
+
+  // Popup bounds are relative to parent.
+  EXPECT_EQ(gfx::Rect(parent_bounds.origin() + popup_bounds.OffsetFromOrigin(),
+                      popup_bounds.size()),
+            popup->GetWidget()->GetWindowBoundsInScreen());
+
+  const gfx::Rect geometry(5, 5, 90, 90);
+  popup->SetGeometry(geometry);
+  popup_surface.Commit();
+
+  // Popup position is fixed, and geometry is relative to it.
+  EXPECT_EQ(gfx::Rect(parent_bounds.origin() +
+                      popup_bounds.OffsetFromOrigin() +
+                      geometry.OffsetFromOrigin(),
+                      geometry.size()),
+            popup->GetWidget()->GetWindowBoundsInScreen());
+}
+
 TEST_F(ShellSurfaceTest, Shadow) {
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(
-      new ShellSurface(surface.get(), nullptr, gfx::Rect(), true,
+      new ShellSurface(surface.get(), nullptr, gfx::Rect(), true, false,
                        ash::kShellWindowId_DefaultContainer));
   surface->Commit();
 
@@ -460,7 +525,8 @@ TEST_F(ShellSurfaceTest, Shadow) {
   EXPECT_FALSE(shadow->layer()->visible());
 
   // 3) Create a shadow.
-  shell_surface->SetRectangularShadow(gfx::Rect(10, 10, 100, 100));
+  shell_surface->SetRectangularShadow(true);
+  shell_surface->SetRectangularShadowContentBounds(gfx::Rect(10, 10, 100, 100));
   surface->Commit();
   EXPECT_TRUE(shadow->layer()->visible());
 
@@ -480,18 +546,18 @@ TEST_F(ShellSurfaceTest, Shadow) {
   window->SetBounds(gfx::Rect(10, 10, 100, 100));
   EXPECT_EQ(before, shadow->layer()->bounds());
 
-  // 5) Set empty content bounds should disable shadow.
-  shell_surface->SetRectangularShadow(gfx::Rect());
+  // 5) This should disable shadow.
+  shell_surface->SetRectangularShadow(false);
   surface->Commit();
 
-  EXPECT_EQ(wm::SHADOW_TYPE_NONE, wm::GetShadowType(window));
+  EXPECT_EQ(wm::ShadowElevation::NONE, wm::GetShadowElevation(window));
   EXPECT_FALSE(shadow->layer()->visible());
 
-  // 6) Setting non empty content bounds should enable shadow.
-  shell_surface->SetRectangularShadow(gfx::Rect(10, 10, 100, 100));
+  // 6) This should enable shadow.
+  shell_surface->SetRectangularShadow(true);
   surface->Commit();
 
-  EXPECT_EQ(wm::SHADOW_TYPE_RECTANGULAR, wm::GetShadowType(window));
+  EXPECT_EQ(wm::ShadowElevation::MEDIUM, wm::GetShadowElevation(window));
   EXPECT_TRUE(shadow->layer()->visible());
 }
 
@@ -499,7 +565,7 @@ TEST_F(ShellSurfaceTest, ShadowWithStateChange) {
   std::unique_ptr<Surface> surface(new Surface);
   // Set the bounds to disable auto managed mode.
   std::unique_ptr<ShellSurface> shell_surface(
-      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 480), true,
+      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 480), true, false,
                        ash::kShellWindowId_DefaultContainer));
 
   // Postion the widget at 10,10 so that we get non zero offset.
@@ -519,9 +585,10 @@ TEST_F(ShellSurfaceTest, ShadowWithStateChange) {
   aura::Window* window = widget->GetNativeWindow();
   wm::Shadow* shadow = wm::ShadowController::GetShadowForWindow(window);
 
-  shell_surface->SetRectangularShadow(shadow_bounds);
+  shell_surface->SetRectangularShadow(true);
+  shell_surface->SetRectangularShadowContentBounds(shadow_bounds);
   surface->Commit();
-  EXPECT_EQ(wm::SHADOW_TYPE_RECTANGULAR, wm::GetShadowType(window));
+  EXPECT_EQ(wm::ShadowElevation::MEDIUM, wm::GetShadowElevation(window));
 
   // Shadow overlay bounds.
   EXPECT_TRUE(shadow->layer()->visible());
@@ -536,7 +603,7 @@ TEST_F(ShellSurfaceTest, ShadowWithStateChange) {
   ASSERT_TRUE(widget->IsMaximized());
   EXPECT_FALSE(shadow->layer()->visible());
 
-  shell_surface->SetRectangularShadow(work_area);
+  shell_surface->SetRectangularShadowContentBounds(work_area);
   surface->Commit();
   EXPECT_FALSE(shadow->layer()->visible());
 
@@ -548,7 +615,7 @@ TEST_F(ShellSurfaceTest, ShadowWithStateChange) {
   EXPECT_EQ(shadow_in_maximized, shadow->layer()->parent()->bounds());
 
   // The bounds is updated.
-  shell_surface->SetRectangularShadow(shadow_bounds);
+  shell_surface->SetRectangularShadowContentBounds(shadow_bounds);
   surface->Commit();
   EXPECT_EQ(expected_shadow_bounds, shadow->layer()->parent()->bounds());
 }
@@ -557,7 +624,7 @@ TEST_F(ShellSurfaceTest, ShadowWithTransform) {
   std::unique_ptr<Surface> surface(new Surface);
   // Set the bounds to disable auto managed mode.
   std::unique_ptr<ShellSurface> shell_surface(
-      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 400), true,
+      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 400), true, false,
                        ash::kShellWindowId_DefaultContainer));
 
   // Postion the widget at 10,10 so that we get non zero offset.
@@ -576,7 +643,8 @@ TEST_F(ShellSurfaceTest, ShadowWithTransform) {
   gfx::Transform transform;
   transform.Translate(50, 50);
   window->SetTransform(transform);
-  shell_surface->SetRectangularShadow(shadow_bounds);
+  shell_surface->SetRectangularShadow(true);
+  shell_surface->SetRectangularShadowContentBounds(shadow_bounds);
   surface->Commit();
   EXPECT_TRUE(shadow->layer()->visible());
   EXPECT_EQ(gfx::Rect(-10, -10, 100, 100), shadow->layer()->parent()->bounds());
@@ -585,7 +653,7 @@ TEST_F(ShellSurfaceTest, ShadowWithTransform) {
 TEST_F(ShellSurfaceTest, ShadowStartMaximized) {
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(
-      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 480), true,
+      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 480), true, false,
                        ash::kShellWindowId_DefaultContainer));
   shell_surface->Maximize();
   views::Widget* widget = shell_surface->GetWidget();
@@ -595,13 +663,14 @@ TEST_F(ShellSurfaceTest, ShadowStartMaximized) {
   EXPECT_FALSE(wm::ShadowController::GetShadowForWindow(window));
 
   // Sending a shadow bounds in maximized state won't create a shaodw.
-  shell_surface->SetRectangularShadow(gfx::Rect(10, 10, 100, 100));
+  shell_surface->SetRectangularShadow(true);
+  shell_surface->SetRectangularShadowContentBounds(gfx::Rect(10, 10, 100, 100));
   surface->Commit();
 
   EXPECT_FALSE(wm::ShadowController::GetShadowForWindow(window));
   // Underlay should be created even without shadow.
-  ASSERT_TRUE(shell_surface->shadow_underlay_for_test());
-  EXPECT_TRUE(shell_surface->shadow_underlay_for_test()->IsVisible());
+  ASSERT_TRUE(shell_surface->shadow_underlay());
+  EXPECT_TRUE(shell_surface->shadow_underlay()->IsVisible());
 
   // Restore the window and make sure the shadow is created, visible and
   // has the latest bounds.
@@ -631,7 +700,7 @@ TEST_F(ShellSurfaceTest, ToggleFullscreen) {
 
   ash::wm::WMEvent event(ash::wm::WM_EVENT_TOGGLE_FULLSCREEN);
   ash::WmWindow* window =
-      ash::WmWindowAura::Get(shell_surface->GetWidget()->GetNativeWindow());
+      ash::WmWindow::Get(shell_surface->GetWidget()->GetNativeWindow());
 
   // Enter fullscreen mode.
   window->GetWindowState()->OnWMEvent(&event);
@@ -653,34 +722,111 @@ TEST_F(ShellSurfaceTest, ImmersiveFullscreenBackground) {
       new Buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size)));
   std::unique_ptr<Surface> surface(new Surface);
   std::unique_ptr<ShellSurface> shell_surface(
-      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 480), true,
+      new ShellSurface(surface.get(), nullptr, gfx::Rect(640, 480), true, false,
                        ash::kShellWindowId_DefaultContainer));
 
   surface->Attach(buffer.get());
 
   gfx::Rect shadow_bounds(10, 10, 100, 100);
-  shell_surface->SetRectangularShadow(shadow_bounds);
+  shell_surface->SetRectangularShadow(true);
+  shell_surface->SetRectangularShadowContentBounds(shadow_bounds);
   surface->Commit();
-  ASSERT_EQ(shadow_bounds, shell_surface->shadow_underlay_for_test()->bounds());
+  ASSERT_EQ(shadow_bounds, shell_surface->shadow_underlay()->bounds());
 
   ash::wm::WMEvent event(ash::wm::WM_EVENT_TOGGLE_FULLSCREEN);
   ash::WmWindow* window =
-      ash::WmWindowAura::Get(shell_surface->GetWidget()->GetNativeWindow());
+      ash::WmWindow::Get(shell_surface->GetWidget()->GetNativeWindow());
 
   // Enter immersive fullscreen mode. Shadow underlay is fullscreen.
   window->GetWindowState()->OnWMEvent(&event);
 
   EXPECT_EQ(display::Screen::GetScreen()->GetPrimaryDisplay().bounds(),
-            shell_surface->shadow_underlay_for_test()->bounds());
-  EXPECT_TRUE(shell_surface->shadow_underlay_for_test()->IsVisible());
-  EXPECT_EQ(1.f, shell_surface->shadow_underlay_for_test()->layer()->opacity());
+            shell_surface->shadow_underlay()->bounds());
+  EXPECT_TRUE(shell_surface->shadow_underlay()->IsVisible());
+  EXPECT_EQ(1.f, shell_surface->shadow_underlay()->layer()->opacity());
   EXPECT_NE(shell_surface->GetWidget()->GetWindowBoundsInScreen(),
-            shell_surface->shadow_underlay_for_test()->bounds());
+            shell_surface->shadow_underlay()->bounds());
 
   // Leave fullscreen mode. Shadow underlay is restored.
   window->GetWindowState()->OnWMEvent(&event);
-  EXPECT_TRUE(shell_surface->shadow_underlay_for_test()->IsVisible());
-  EXPECT_EQ(shadow_bounds, shell_surface->shadow_underlay_for_test()->bounds());
+  EXPECT_TRUE(shell_surface->shadow_underlay()->IsVisible());
+  EXPECT_EQ(shadow_bounds, shell_surface->shadow_underlay()->bounds());
+}
+
+TEST_F(ShellSurfaceTest, SpokenFeedbackFullscreenBackground) {
+  gfx::Size buffer_size(256, 256);
+  Buffer buffer(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
+  Surface surface;
+  ShellSurface shell_surface(&surface, nullptr, gfx::Rect(640, 480), true,
+                             false, ash::kShellWindowId_DefaultContainer);
+
+  surface.Attach(&buffer);
+
+  gfx::Rect shadow_bounds(10, 10, 100, 100);
+  shell_surface.SetRectangularShadow(true);
+  shell_surface.SetRectangularShadowContentBounds(shadow_bounds);
+  surface.Commit();
+  ASSERT_EQ(shadow_bounds, shell_surface.shadow_underlay()->bounds());
+
+  aura::Window* shell_window = shell_surface.GetWidget()->GetNativeWindow();
+  aura::WindowTargeter* targeter = static_cast<aura::WindowTargeter*>(
+      static_cast<ui::EventTarget*>(shell_window)->GetEventTargeter());
+
+  gfx::Point pt(300, 300);
+  ui::MouseEvent ev_out(ui::ET_MOUSE_PRESSED, pt, pt, ui::EventTimeForNow(),
+                        ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
+  gfx::Point pt2(250, 250);
+  ui::MouseEvent ev_in(ui::ET_MOUSE_PRESSED, pt2, pt2, ui::EventTimeForNow(),
+                       ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
+
+  EXPECT_FALSE(targeter->SubtreeShouldBeExploredForEvent(shell_window, ev_out));
+
+  // Enable spoken feedback.
+  ash::WmShell::Get()->accessibility_delegate()->ToggleSpokenFeedback(
+      ash::A11Y_NOTIFICATION_NONE);
+  shell_surface.OnAccessibilityModeChanged();
+
+  EXPECT_EQ(display::Screen::GetScreen()->GetPrimaryDisplay().bounds(),
+            shell_surface.shadow_underlay()->bounds());
+  EXPECT_TRUE(shell_surface.shadow_underlay()->IsVisible());
+  EXPECT_NE(shell_surface.GetWidget()->GetWindowBoundsInScreen(),
+            shell_surface.shadow_underlay()->bounds());
+
+  // Test event capture
+  EXPECT_TRUE(targeter->SubtreeShouldBeExploredForEvent(shell_window, ev_out));
+  EXPECT_EQ(shell_surface.shadow_underlay(),
+            static_cast<ui::EventTargeter*>(targeter)->FindTargetForEvent(
+                shell_window, &ev_out));
+  EXPECT_NE(shell_surface.shadow_underlay(),
+            static_cast<ui::EventTargeter*>(targeter)->FindTargetForEvent(
+                shell_window, &ev_in));
+
+  // Create a new surface
+  Buffer buffer2(exo_test_helper()->CreateGpuMemoryBuffer(buffer_size));
+  Surface surface2;
+  ShellSurface shell_surface2(&surface2, nullptr, gfx::Rect(640, 480), true,
+                              false, ash::kShellWindowId_DefaultContainer);
+  surface2.Attach(&buffer2);
+  shell_surface2.SetRectangularShadow(true);
+  shell_surface2.SetRectangularShadowContentBounds(shadow_bounds);
+  surface2.Commit();
+
+  // spoken-feedback was already on, so underlay should fill screen
+  EXPECT_EQ(display::Screen::GetScreen()->GetPrimaryDisplay().bounds(),
+            shell_surface2.shadow_underlay()->bounds());
+
+  // De-activated shell-surface should NOT have fullscreen underlay
+  EXPECT_EQ(shadow_bounds, shell_surface.shadow_underlay()->bounds());
+
+  // Disable spoken feedback. Shadow underlay is restored.
+  ash::WmShell::Get()->accessibility_delegate()->ToggleSpokenFeedback(
+      ash::A11Y_NOTIFICATION_NONE);
+  shell_surface.OnAccessibilityModeChanged();
+  shell_surface2.OnAccessibilityModeChanged();
+
+  EXPECT_TRUE(shell_surface.shadow_underlay()->IsVisible());
+  EXPECT_EQ(shadow_bounds, shell_surface.shadow_underlay()->bounds());
+  EXPECT_EQ(shadow_bounds, shell_surface2.shadow_underlay()->bounds());
 }
 
 }  // namespace

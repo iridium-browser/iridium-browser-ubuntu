@@ -7,8 +7,9 @@
 #include "base/mac/foundation_util.h"
 #include "base/mac/sdk_forward_declarations.h"
 #import "chrome/browser/ui/cocoa/image_button_cell.h"
+#include "chrome/browser/ui/cocoa/l10n_util.h"
 #include "chrome/browser/ui/cocoa/tabs/tab_view.h"
-#include "grit/theme_resources.h"
+#include "chrome/grit/theme_resources.h"
 #include "ui/base/cocoa/nsgraphics_context_additions.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -33,10 +34,6 @@ const CGFloat k20PercentAlpha = 0.2;
 const CGFloat k25PercentAlpha = 0.25;
 
 NSImage* GetMaskImageFromCell(NewTabButtonCell* aCell) {
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-    return bundle.GetNativeImageNamed(IDR_NEWTAB_BUTTON_MASK).ToNSImage();
-  }
   return [aCell imageForState:image_button_cell::kDefaultState view:nil];
 }
 
@@ -252,44 +249,6 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     return;
   }
 
-  // The old way of doing things.
-  if (!ui::MaterialDesignController::IsModeMaterial()) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-    NSImage* mask = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_MASK).ToNSImage();
-    NSImage* normal = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON).ToNSImage();
-    NSImage* hover = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_H).ToNSImage();
-    NSImage* pressed = rb.GetNativeImageNamed(IDR_NEWTAB_BUTTON_P).ToNSImage();
-
-    NSImage* foreground = ApplyMask(
-        theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND), mask);
-
-    [[self cell] setImage:Overlay(foreground, normal, 1.0)
-                    forButtonState:image_button_cell::kDefaultState];
-    [[self cell] setImage:Overlay(foreground, hover, 1.0)
-                    forButtonState:image_button_cell::kHoverState];
-    [[self cell] setImage:Overlay(foreground, pressed, 1.0)
-                    forButtonState:image_button_cell::kPressedState];
-
-    // IDR_THEME_TAB_BACKGROUND_INACTIVE is only used with the default theme.
-    if (theme->UsingSystemTheme()) {
-      const CGFloat alpha = tabs::kImageNoFocusAlpha;
-      NSImage* background = ApplyMask(
-          theme->GetNSImageNamed(IDR_THEME_TAB_BACKGROUND_INACTIVE), mask);
-      [[self cell] setImage:Overlay(background, normal, alpha)
-                      forButtonState:
-                          image_button_cell::kDefaultStateBackground];
-      [[self cell] setImage:Overlay(background, hover, alpha)
-                      forButtonState:image_button_cell::kHoverStateBackground];
-    } else {
-      [[self cell] setImage:nil
-                      forButtonState:
-                          image_button_cell::kDefaultStateBackground];
-      [[self cell] setImage:nil
-                      forButtonState:image_button_cell::kHoverStateBackground];
-    }
-    return;
-  }
-
   NSImage* mask = [self imageWithFillColor:[NSColor whiteColor]];
   NSImage* normal =
       [self imageForState:image_button_cell::kDefaultState theme:theme];
@@ -412,12 +371,16 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 
   [bezierPath closePath];
 
-  // The SVG path is flipped for some reason, so flip it back.
-  const CGFloat kSVGHeight = 32;
-  NSAffineTransformStruct flipStruct = { 1, 0, 0, -1, 0, kSVGHeight };
-  NSAffineTransform* flipTransform = [NSAffineTransform transform];
-  [flipTransform setTransformStruct:flipStruct];
-  [bezierPath transformUsingAffineTransform:flipTransform];
+  // The SVG path is flipped for some reason, so flip it back. However, in RTL,
+  // we'd need to flip it again below, so when in RTL mode just leave the flip
+  // out altogether.
+  if (!cocoa_l10n_util::ShouldDoExperimentalRTLLayout()) {
+    const CGFloat kSVGHeight = 32;
+    NSAffineTransformStruct flipStruct = {1, 0, 0, -1, 0, kSVGHeight};
+    NSAffineTransform* flipTransform = [NSAffineTransform transform];
+    [flipTransform setTransformStruct:flipStruct];
+    [bezierPath transformUsingAffineTransform:flipTransform];
+  }
 
   // The SVG data is for the 2x version so scale it down.
   NSAffineTransform* scaleTransform = [NSAffineTransform transform];

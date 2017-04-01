@@ -7,13 +7,12 @@
 # be found in the AUTHORS file in the root of the source tree.
 
 import("../../build/webrtc.gni")
-import("//testing/test.gni")
 
 # Note this target is missing an implementation for the video capture.
 # Targets must link with either 'video_capture' or
 # 'video_capture_internal_impl' depending on whether they want to
 # use the internal capturer.
-source_set("video_capture_module") {
+rtc_static_library("video_capture_module") {
   sources = [
     "device_info_impl.cc",
     "device_info_impl.h",
@@ -29,22 +28,19 @@ source_set("video_capture_module") {
 
   deps = [
     "../..:webrtc_common",
+    "../../base:rtc_base_approved",
     "../../common_video",
     "../../system_wrappers",
     "../utility",
   ]
 
-  configs += [ "../..:common_config" ]
-  public_configs = [ "../..:common_inherited_config" ]
-
-  if (is_clang) {
-    # Suppress warnings from Chrome's Clang plugins.
-    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  if (!build_with_chromium && is_clang) {
+    # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
+    suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
   }
 }
 
-source_set("video_capture") {
+rtc_static_library("video_capture") {
   sources = [
     "external/device_info_external.cc",
     "external/video_capture_external.cc",
@@ -52,22 +48,19 @@ source_set("video_capture") {
 
   deps = [
     ":video_capture_module",
+    "../../base:rtc_base_approved",
     "../../system_wrappers",
   ]
 
-  configs += [ "../..:common_config" ]
-  public_configs = [ "../..:common_inherited_config" ]
-
-  if (is_clang) {
-    # Suppress warnings from Chrome's Clang plugins.
-    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  if (!build_with_chromium && is_clang) {
+    # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
+    suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
   }
 }
 
 if (!build_with_chromium) {
   config("video_capture_internal_impl_config") {
-    if (is_ios) {
+    if (is_ios || is_mac) {
       libs = [
         "AVFoundation.framework",
         "CoreMedia.framework",
@@ -76,9 +69,30 @@ if (!build_with_chromium) {
     }
   }
 
-  source_set("video_capture_internal_impl") {
+  config("video_capture_internal_impl_warnings_config") {
+    if (is_win && is_clang) {
+      cflags = [
+        "-Wno-comment",
+        "-Wno-ignored-attributes",
+
+        # See https://bugs.chromium.org/p/webrtc/issues/detail?id=6269
+        # for -Wno-ignored-qualifiers
+        "-Wno-ignored-qualifiers",
+        "-Wno-microsoft-extra-qualification",
+        "-Wno-missing-braces",
+        "-Wno-overloaded-virtual",
+        "-Wno-reorder",
+        "-Wno-writable-strings",
+      ]
+    }
+  }
+
+  rtc_static_library("video_capture_internal_impl") {
+    configs += [ ":video_capture_internal_impl_warnings_config" ]
+
     deps = [
       ":video_capture_module",
+      "../../base:rtc_base_approved",
       "../../system_wrappers",
     ]
 
@@ -90,30 +104,6 @@ if (!build_with_chromium) {
         "linux/video_capture_linux.h",
       ]
       deps += [ "../..:webrtc_common" ]
-    }
-    if (is_mac) {
-      sources = [
-        "mac/qtkit/video_capture_qtkit.h",
-        "mac/qtkit/video_capture_qtkit.mm",
-        "mac/qtkit/video_capture_qtkit_info.h",
-        "mac/qtkit/video_capture_qtkit_info.mm",
-        "mac/qtkit/video_capture_qtkit_info_objc.h",
-        "mac/qtkit/video_capture_qtkit_info_objc.mm",
-        "mac/qtkit/video_capture_qtkit_objc.h",
-        "mac/qtkit/video_capture_qtkit_objc.mm",
-        "mac/qtkit/video_capture_qtkit_utility.h",
-        "mac/video_capture_mac.mm",
-      ]
-
-      libs = [
-        # For NSAlert in video_capture_qtkit_info_objc.mm.
-        "Cocoa.framework",
-
-        # For GetGestalt in video_capture_mac.mm.
-        "CoreServices.framework",
-        "CoreVideo.framework",
-        "QTKit.framework",
-      ]
     }
     if (is_win) {
       sources = [
@@ -136,16 +126,16 @@ if (!build_with_chromium) {
 
       deps += [ "//third_party/winsdk_samples" ]
     }
-    if (is_ios) {
+    if (is_ios || is_mac) {
       sources = [
-        "ios/device_info_ios.h",
-        "ios/device_info_ios.mm",
-        "ios/device_info_ios_objc.h",
-        "ios/device_info_ios_objc.mm",
-        "ios/rtc_video_capture_ios_objc.h",
-        "ios/rtc_video_capture_ios_objc.mm",
-        "ios/video_capture_ios.h",
-        "ios/video_capture_ios.mm",
+        "objc/device_info.h",
+        "objc/device_info.mm",
+        "objc/device_info_objc.h",
+        "objc/device_info_objc.mm",
+        "objc/rtc_video_capture_objc.h",
+        "objc/rtc_video_capture_objc.mm",
+        "objc/video_capture.h",
+        "objc/video_capture.mm",
       ]
 
       cflags = [
@@ -160,20 +150,15 @@ if (!build_with_chromium) {
 
     all_dependent_configs = [ ":video_capture_internal_impl_config" ]
 
-    configs += [ "../..:common_config" ]
-    public_configs = [ "../..:common_inherited_config" ]
-
-    if (is_clang) {
-      # Suppress warnings from Chrome's Clang plugins.
-      # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-      configs -= [ "//build/config/clang:find_bad_constructs" ]
+    if (!build_with_chromium && is_clang) {
+      # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
+      suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
     }
   }
 
   if (!is_android && rtc_include_tests) {
-    test("video_capture_tests") {
+    rtc_test("video_capture_tests") {
       sources = [
-        "test/video_capture_main_mac.mm",
         "test/video_capture_unittest.cc",
       ]
 
@@ -200,21 +185,19 @@ if (!build_with_chromium) {
       deps = [
         ":video_capture_internal_impl",
         ":video_capture_module",
+        "../../base:rtc_base_approved",
+        "../../common_video:common_video",
+        "../../system_wrappers:system_wrappers",
         "../../system_wrappers:system_wrappers_default",
         "../../test:video_test_common",
         "../utility",
         "//testing/gtest",
       ]
-      if (is_mac) {
-        deps += [ "//webrtc/test:test_support_main_threaded_mac" ]
-      } else {
-        deps += [ "//webrtc/test:test_support_main" ]
-      }
+      deps += [ "//webrtc/test:test_main" ]
 
-      if (is_clang) {
-        # Suppress warnings from Chrome's Clang plugins.
-        # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-        configs -= [ "//build/config/clang:find_bad_constructs" ]
+      if (!build_with_chromium && is_clang) {
+        # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
+        suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
       }
     }
   }

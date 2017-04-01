@@ -17,12 +17,15 @@
 #include "content/public/browser/notification_registrar.h"
 
 namespace browser_sync {
-class SyncedWindowDelegate;
 class SyncedWindowDelegateAndroid;
 }
 
 namespace content {
 class WebContents;
+}
+
+namespace sync_sessions {
+class SyncedWindowDelegate;
 }
 
 class Profile;
@@ -35,7 +38,7 @@ class TabModel : public content::NotificationObserver {
  public:
   virtual Profile* GetProfile() const;
   virtual bool IsOffTheRecord() const;
-  virtual browser_sync::SyncedWindowDelegate* GetSyncedWindowDelegate() const;
+  virtual sync_sessions::SyncedWindowDelegate* GetSyncedWindowDelegate() const;
   virtual SessionID::id_type GetSessionId() const;
   virtual const SessionID& SessionId() const;
   virtual sessions::LiveTabContext* GetLiveTabContext() const;
@@ -63,7 +66,7 @@ class TabModel : public content::NotificationObserver {
   virtual bool IsSessionRestoreInProgress() const = 0;
 
  protected:
-  explicit TabModel(Profile* profile);
+  explicit TabModel(Profile* profile, bool is_tabbed_activity);
   ~TabModel() override;
 
   // Instructs the TabModel to broadcast a notification that all tabs are now

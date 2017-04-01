@@ -68,6 +68,10 @@ class DomainReliabilityMonitorTest : public testing::Test {
     monitor_.SetDiscardUploads(false);
   }
 
+  ~DomainReliabilityMonitorTest() override {
+    monitor_.Shutdown();
+  }
+
   static RequestInfo MakeRequestInfo() {
     RequestInfo request;
     request.status = net::URLRequestStatus();
@@ -255,6 +259,22 @@ TEST_F(DomainReliabilityMonitorTest, AtLeastOneBakedInConfig) {
   DCHECK(kBakedInJsonConfigs[0] != nullptr);
 }
 
+// Make sure the monitor does log uploads, even though they have
+// LOAD_DO_NOT_SEND_COOKIES.
+TEST_F(DomainReliabilityMonitorTest, Upload) {
+  DomainReliabilityContext* context = CreateAndAddContext();
+
+  RequestInfo request = MakeRequestInfo();
+  request.url = GURL("http://example/");
+  request.load_flags =
+      net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES;
+  request.status = net::URLRequestStatus::FromError(net::ERR_CONNECTION_RESET);
+  request.upload_depth = 1;
+  OnRequestLegComplete(request);
+
+  EXPECT_EQ(1u, CountQueuedBeacons(context));
+}
+
 // Will fail when baked-in configs expire, as a reminder to update them.
 // (Contact juliatuttle@chromium.org if this starts failing.)
 TEST_F(DomainReliabilityMonitorTest, AddBakedInConfigs) {
@@ -269,10 +289,9 @@ TEST_F(DomainReliabilityMonitorTest, AddBakedInConfigs) {
     ++num_baked_in_configs;
 
   // Also count the Google configs stored in abbreviated form.
-  std::vector<DomainReliabilityConfig*> google_configs;
+  std::vector<std::unique_ptr<DomainReliabilityConfig>> google_configs;
   GetAllGoogleConfigs(&google_configs);
   size_t num_google_configs = google_configs.size();
-  base::STLDeleteElements(&google_configs);
 
   // The monitor should have contexts for all of the baked-in configs.
   EXPECT_EQ(num_baked_in_configs + num_google_configs,
@@ -327,7 +346,8 @@ TEST_F(DomainReliabilityMonitorTest, ClearBeaconsWithFilter) {
   // Delete the beacons for |origin1|.
   monitor_.ClearBrowsingData(
       CLEAR_BEACONS,
-      base::Bind(&GURL::operator==, base::Unretained(&origin1)));
+      base::Bind(static_cast<bool (*)(const GURL&, const GURL&)>(operator==),
+                 origin1));
 
   // Beacons for |context1| were cleared. Beacons for |context2| and
   // the contexts themselves were not.
@@ -361,7 +381,8 @@ TEST_F(DomainReliabilityMonitorTest, ClearContextsWithFilter) {
   // Delete the contexts for |origin1|.
   monitor_.ClearBrowsingData(
       CLEAR_CONTEXTS,
-      base::Bind(&GURL::operator==, base::Unretained(&origin1)));
+      base::Bind(static_cast<bool (*)(const GURL&, const GURL&)>(operator==),
+                 origin1));
 
   // Only one of the contexts should have been deleted.
   EXPECT_EQ(1u, monitor_.contexts_size_for_testing());

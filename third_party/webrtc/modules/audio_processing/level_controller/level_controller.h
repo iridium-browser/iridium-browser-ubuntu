@@ -38,12 +38,25 @@ class LevelController {
   void Process(AudioBuffer* audio);
   float GetLastGain() { return last_gain_; }
 
+  // TODO(peah): This method is a temporary solution as the the aim is to
+  // instead apply the config inside the constructor. Therefore this is likely
+  // to change.
+  void ApplyConfig(const AudioProcessing::Config::LevelController& config);
+  // Validates a config.
+  static bool Validate(const AudioProcessing::Config::LevelController& config);
+  // Dumps a config to a string.
+  static std::string ToString(
+      const AudioProcessing::Config::LevelController& config);
+
  private:
   class Metrics {
    public:
     Metrics() { Initialize(AudioProcessing::kSampleRate48kHz); }
     void Initialize(int sample_rate_hz);
-    void Update(float peak_level, float noise_level, float gain);
+    void Update(float long_term_peak_level,
+                float noise_level,
+                float gain,
+                float frame_peak_level);
 
    private:
     void Reset();
@@ -71,6 +84,8 @@ class LevelController {
   float dc_level_[2];
   float dc_forgetting_factor_;
   float last_gain_;
+  bool gain_jumpstart_ = false;
+  AudioProcessing::Config::LevelController config_;
 
   RTC_DISALLOW_COPY_AND_ASSIGN(LevelController);
 };

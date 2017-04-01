@@ -44,12 +44,14 @@ class ShellSurface : public SurfaceDelegate,
                      public views::View,
                      public ash::wm::WindowStateObserver,
                      public aura::WindowObserver,
-                     public WMHelper::ActivationObserver {
+                     public WMHelper::ActivationObserver,
+                     public WMHelper::AccessibilityObserver {
  public:
   ShellSurface(Surface* surface,
                ShellSurface* parent,
                const gfx::Rect& initial_bounds,
                bool activatable,
+               bool can_minimize,
                int container);
   explicit ShellSurface(Surface* surface);
   ~ShellSurface() override;
@@ -112,8 +114,8 @@ class ShellSurface : public SurfaceDelegate,
   // Set fullscreen state for shell surface.
   void SetFullscreen(bool fullscreen);
 
-  // Pins the shell surface.
-  void SetPinned(bool pinned);
+  // Pins the shell surface. |trusted| flag is ignored when |pinned| is false.
+  void SetPinned(bool pinned, bool trusted);
 
   // Set title for surface.
   void SetTitle(const base::string16& title);
@@ -123,11 +125,10 @@ class ShellSurface : public SurfaceDelegate,
 
   // Sets the application ID for the window. The application ID identifies the
   // general class of applications to which the window belongs.
-  static void SetApplicationId(aura::Window* window,
-                               std::string* application_id);
+  static void SetApplicationId(aura::Window* window, const std::string& id);
   static const std::string GetApplicationId(aura::Window* window);
 
-  // Set application id for surface.
+  // Set the application ID for the surface.
   void SetApplicationId(const std::string& application_id);
 
   // Start an interactive move of surface.
@@ -146,12 +147,18 @@ class ShellSurface : public SurfaceDelegate,
   // for the surface from the user's perspective.
   void SetGeometry(const gfx::Rect& geometry);
 
-  // Set the content bounds for the shadow. Empty bounds will delete
-  // the shadow.
-  void SetRectangularShadow(const gfx::Rect& content_bounds);
+  // Enable/disable rectangular shadow.
+  void SetRectangularShadow(bool enabled);
+
+  // Set the content bounds for the shadow. Shell surface geometry will be
+  // used if bounds are empty.
+  void SetRectangularShadowContentBounds(const gfx::Rect& content_bounds);
 
   // Set the pacity of the background for the window that has a shadow.
   void SetRectangularShadowBackgroundOpacity(float opacity);
+
+  // Enable/disable window frame.
+  void SetFrame(bool enabled);
 
   // Set scale factor for surface. The scale factor will be applied to surface
   // and all descendants.
@@ -159,6 +166,15 @@ class ShellSurface : public SurfaceDelegate,
 
   // Set top inset for surface.
   void SetTopInset(int height);
+
+  // Set origin in screen coordinate space.
+  void SetOrigin(const gfx::Point& origin);
+
+  // Set activatable state for surface.
+  void SetActivatable(bool activatable);
+
+  // Set container for surface.
+  void SetContainer(int container);
 
   // Sets the main surface for the window.
   static void SetMainSurface(aura::Window* window, Surface* surface);
@@ -193,6 +209,7 @@ class ShellSurface : public SurfaceDelegate,
 
   // Overridden from views::View:
   gfx::Size GetPreferredSize() const override;
+  gfx::Size GetMinimumSize() const override;
 
   // Overridden from ash::wm::WindowStateObserver:
   void OnPreWindowStateTypeChange(ash::wm::WindowState* window_state,
@@ -211,6 +228,9 @@ class ShellSurface : public SurfaceDelegate,
       aura::Window* gained_active,
       aura::Window* lost_active) override;
 
+  // Overridden from WMHelper::AccessibilityObserver:
+  void OnAccessibilityModeChanged() override;
+
   // Overridden from ui::EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
   void OnMouseEvent(ui::MouseEvent* event) override;
@@ -218,9 +238,7 @@ class ShellSurface : public SurfaceDelegate,
   // Overridden from ui::AcceleratorTarget:
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
-  const aura::Window* shadow_underlay_for_test() const {
-    return shadow_underlay_;
-  }
+  aura::Window* shadow_underlay() { return shadow_underlay_; }
 
  private:
   class ScopedConfigure;
@@ -267,10 +285,13 @@ class ShellSurface : public SurfaceDelegate,
   views::Widget* widget_ = nullptr;
   Surface* surface_;
   aura::Window* parent_;
-  const gfx::Rect initial_bounds_;
-  const bool activatable_;
-  // Container Window Id (see ash/common/shell_window_ids.h)
-  const int container_;
+  gfx::Rect initial_bounds_;
+  bool activatable_ = true;
+  const bool can_minimize_;
+  // Container Window Id (see ash/public/cpp/shell_window_ids.h)
+  int container_;
+  bool frame_enabled_ = false;
+  bool shadow_enabled_ = false;
   bool pending_show_widget_ = false;
   base::string16 title_;
   std::string application_id_;
@@ -291,13 +312,14 @@ class ShellSurface : public SurfaceDelegate,
   int pending_resize_component_ = HTCAPTION;
   aura::Window* shadow_overlay_ = nullptr;
   aura::Window* shadow_underlay_ = nullptr;
+  std::unique_ptr<ui::EventHandler> shadow_underlay_event_handler_;
   gfx::Rect shadow_content_bounds_;
+  float shadow_background_opacity_ = 1.0;
   std::deque<Config> pending_configs_;
   std::unique_ptr<ash::WindowResizer> resizer_;
   std::unique_ptr<ScopedAnimationsDisabled> scoped_animations_disabled_;
   int top_inset_height_ = 0;
   int pending_top_inset_height_ = 0;
-  float rectangular_shadow_background_opacity_ = 1.0;
 
   DISALLOW_COPY_AND_ASSIGN(ShellSurface);
 };

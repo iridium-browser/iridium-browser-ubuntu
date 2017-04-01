@@ -16,7 +16,7 @@ namespace skiagm {
 
 // Using gradients because GPU doesn't currently have an implementation of SkColorShader (duh!)
 static sk_sp<SkShader> make_color_shader(SkColor color) {
-    static const SkPoint kPts[] = {{0, 0}, {1, 1}};
+    constexpr SkPoint kPts[] = {{0, 0}, {1, 1}};
     SkColor colors[] = {color, color};
 
     return SkGradientShader::MakeLinear(kPts, colors, nullptr, 2, SkShader::kClamp_TileMode);
@@ -68,17 +68,17 @@ protected:
 
     void onDraw(SkCanvas* canvas) override {
         // size of rect for each test case
-        static const int kRectWidth  = 20;
-        static const int kRectHeight = 20;
+        constexpr int kRectWidth  = 20;
+        constexpr int kRectHeight = 20;
 
-        static const int kCheckSize  = 10;
+        constexpr int kCheckSize  = 10;
 
         if (!fBmpShader) {
             fBmpShader = make_bg_shader(kCheckSize);
         }
         SkPaint bgPaint;
         bgPaint.setShader(fBmpShader);
-        bgPaint.setXfermodeMode(SkXfermode::kSrc_Mode);
+        bgPaint.setBlendMode(SkBlendMode::kSrc);
 
         sk_sp<SkShader> shaders[] = {
             nullptr,                                   // use a paint color instead of a shader
@@ -99,26 +99,26 @@ protected:
         // used with shaders
         SkColor alphas[] = {0xFFFFFFFF, 0x80808080};
 
-        SkXfermode::Mode modes[]  = { // currently just doing the Modes expressible as Coeffs
-            SkXfermode::kClear_Mode,
-            SkXfermode::kSrc_Mode,
-            SkXfermode::kDst_Mode,
-            SkXfermode::kSrcOver_Mode,
-            SkXfermode::kDstOver_Mode,
-            SkXfermode::kSrcIn_Mode,
-            SkXfermode::kDstIn_Mode,
-            SkXfermode::kSrcOut_Mode,
-            SkXfermode::kDstOut_Mode,
-            SkXfermode::kSrcATop_Mode,
-            SkXfermode::kDstATop_Mode,
-            SkXfermode::kXor_Mode,
-            SkXfermode::kPlus_Mode,
-            SkXfermode::kModulate_Mode,
+        const SkBlendMode modes[]  = { // currently just doing the Modes expressible as Coeffs
+            SkBlendMode::kClear,
+            SkBlendMode::kSrc,
+            SkBlendMode::kDst,
+            SkBlendMode::kSrcOver,
+            SkBlendMode::kDstOver,
+            SkBlendMode::kSrcIn,
+            SkBlendMode::kDstIn,
+            SkBlendMode::kSrcOut,
+            SkBlendMode::kDstOut,
+            SkBlendMode::kSrcATop,
+            SkBlendMode::kDstATop,
+            SkBlendMode::kXor,
+            SkBlendMode::kPlus,
+            SkBlendMode::kModulate,
         };
 
         SkPaint paint;
         int idx = 0;
-        static const int kRectsPerRow = SkMax32(this->getISize().fWidth / kRectWidth, 1);
+        const int kRectsPerRow = SkMax32(this->getISize().fWidth / kRectWidth, 1);
         for (size_t cfm = 0; cfm < SK_ARRAY_COUNT(modes); ++cfm) {
             for (size_t cfc = 0; cfc < SK_ARRAY_COUNT(colors); ++cfc) {
                 paint.setColorFilter(SkColorFilter::MakeModeFilter(colors[cfc], modes[cfm]));

@@ -10,18 +10,17 @@
 namespace blink {
 namespace {
 
-#if ENABLE(ASSERT)
+#if DCHECK_IS_ON() && !defined(UNDEFINED_SANITIZER)
 
-TEST(DisplayItemClientTest, IsAlive)
-{
-    EXPECT_FALSE(reinterpret_cast<DisplayItemClient*>(0x12345678)->isAlive());
-    FakeDisplayItemClient* testClient = new FakeDisplayItemClient;
-    EXPECT_TRUE(testClient->isAlive());
-    delete testClient;
-    EXPECT_FALSE(testClient->isAlive());
+TEST(DisplayItemClientTest, IsAlive) {
+  EXPECT_FALSE(reinterpret_cast<DisplayItemClient*>(0x12345678)->isAlive());
+  FakeDisplayItemClient* testClient = new FakeDisplayItemClient;
+  EXPECT_TRUE(testClient->isAlive());
+  delete testClient;
+  EXPECT_FALSE(testClient->isAlive());
 }
 
-#endif // ENABLE(ASSERT)
+#endif
 
-} // namespace
-} // namespace blink
+}  // namespace
+}  // namespace blink

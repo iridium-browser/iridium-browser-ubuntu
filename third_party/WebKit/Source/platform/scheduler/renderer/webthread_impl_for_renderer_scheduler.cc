@@ -20,7 +20,8 @@ WebThreadImplForRendererScheduler::WebThreadImplForRendererScheduler(
       idle_task_runner_(scheduler->IdleTaskRunner()),
       scheduler_(scheduler),
       thread_id_(base::PlatformThread::CurrentId()),
-      web_task_runner_(new WebTaskRunnerImpl(scheduler->DefaultTaskRunner())) {}
+      web_task_runner_(
+          WebTaskRunnerImpl::create(scheduler->DefaultTaskRunner())) {}
 
 WebThreadImplForRendererScheduler::~WebThreadImplForRendererScheduler() {}
 
@@ -54,6 +55,16 @@ void WebThreadImplForRendererScheduler::AddTaskObserverInternal(
 void WebThreadImplForRendererScheduler::RemoveTaskObserverInternal(
     base::MessageLoop::TaskObserver* observer) {
   scheduler_->RemoveTaskObserver(observer);
+}
+
+void WebThreadImplForRendererScheduler::AddTaskTimeObserverInternal(
+    TaskTimeObserver* task_time_observer) {
+  scheduler_->AddTaskTimeObserver(task_time_observer);
+}
+
+void WebThreadImplForRendererScheduler::RemoveTaskTimeObserverInternal(
+    TaskTimeObserver* task_time_observer) {
+  scheduler_->RemoveTaskTimeObserver(task_time_observer);
 }
 
 }  // namespace scheduler

@@ -22,21 +22,10 @@
 class SkRegion;
 
 namespace content {
-class BrowserContext;
 class RenderViewHost;
-class WebContents;
-}
-
-namespace extensions {
-class Extension;
-}
-
-namespace ui {
-class MenuModel;
 }
 
 namespace views {
-class MenuRunner;
 class WebView;
 }
 
@@ -112,7 +101,6 @@ class NativeAppWindowViews : public extensions::NativeAppWindow,
   void DeleteDelegate() override;
   views::Widget* GetWidget() override;
   const views::Widget* GetWidget() const override;
-  views::View* GetContentsView() override;
   bool ShouldDescendIntoChildForEventHandling(
       gfx::NativeView child,
       const gfx::Point& location) override;

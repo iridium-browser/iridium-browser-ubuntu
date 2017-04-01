@@ -139,8 +139,6 @@ void vp9_idct8x8_add(const tran_low_t *input, uint8_t *dest, int stride,
 
   // The calculation can be simplified if there are not many non-zero dct
   // coefficients. Use eobs to decide what to do.
-  // TODO(yunqingwang): "eobs = 1" case is also handled in vp9_short_idct8x8_c.
-  // Combine that with code here.
   if (eob == 1)
     // DC only DCT coefficient
     vpx_idct8x8_1_add(input, dest, stride);
@@ -204,6 +202,7 @@ void vp9_iht16x16_add(TX_TYPE tx_type, const tran_low_t *input, uint8_t *dest,
 }
 
 #if CONFIG_VP9_HIGHBITDEPTH
+
 void vp9_highbd_iht4x4_16_add_c(const tran_low_t *input, uint8_t *dest8,
                                 int stride, int tx_type, int bd) {
   const highbd_transform_2d IHT_4[] = {
@@ -329,13 +328,11 @@ void vp9_highbd_idct8x8_add(const tran_low_t *input, uint8_t *dest, int stride,
 
   // The calculation can be simplified if there are not many non-zero dct
   // coefficients. Use eobs to decide what to do.
-  // TODO(yunqingwang): "eobs = 1" case is also handled in vp9_short_idct8x8_c.
-  // Combine that with code here.
   // DC only DCT coefficient
   if (eob == 1) {
     vpx_highbd_idct8x8_1_add(input, dest, stride, bd);
-  } else if (eob <= 10) {
-    vpx_highbd_idct8x8_10_add(input, dest, stride, bd);
+  } else if (eob <= 12) {
+    vpx_highbd_idct8x8_12_add(input, dest, stride, bd);
   } else {
     vpx_highbd_idct8x8_64_add(input, dest, stride, bd);
   }

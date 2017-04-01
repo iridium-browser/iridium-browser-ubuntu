@@ -92,15 +92,6 @@ PrintingContext::Result PrintingContextNoSystemDialog::UpdatePrinterSettings(
   return OK;
 }
 
-PrintingContext::Result PrintingContextNoSystemDialog::InitWithSettings(
-    const PrintSettings& settings) {
-  DCHECK(!in_print_job_);
-
-  settings_ = settings;
-
-  return OK;
-}
-
 PrintingContext::Result PrintingContextNoSystemDialog::NewDocument(
     const base::string16& document_name) {
   DCHECK(!in_print_job_);
@@ -147,7 +138,7 @@ void PrintingContextNoSystemDialog::ReleaseContext() {
   // Intentional No-op.
 }
 
-gfx::NativeDrawingContext PrintingContextNoSystemDialog::context() const {
+skia::NativeDrawingContext PrintingContextNoSystemDialog::context() const {
   // Intentional No-op.
   return nullptr;
 }

@@ -13,7 +13,6 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/timer/timer.h"
-#include "net/base/net_export.h"
 #include "net/socket/socket_test_util.h"
 #include "net/ssl/ssl_info.h"
 #include "net/websockets/websocket_event_interface.h"
@@ -25,6 +24,7 @@ namespace net {
 
 class HttpRequestHeaders;
 class HttpResponseHeaders;
+class URLRequest;
 class WebSocketStream;
 class WebSocketStreamRequest;
 struct WebSocketHandshakeRequestInfo;
@@ -76,6 +76,7 @@ class WebSocketStreamCreateTestBase {
   SSLInfo ssl_info_;
   bool ssl_fatal_;
   std::vector<std::unique_ptr<SSLSocketDataProvider>> ssl_data_;
+  URLRequest* url_request_;
 
   // This temporarily sets WebSocketEndpointLockManager unlock delay to zero
   // during tests.

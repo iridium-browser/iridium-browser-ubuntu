@@ -30,23 +30,20 @@ Polymer({
    */
   keyHandler_: null,
 
-  /** @override */
-  attached: function() {
-    this.keyHandler_ = this.handleKeyEvent_.bind(this);
-    window.addEventListener('keydown', this.keyHandler_);
-  },
-
-  /** @override */
-  detached: function() {
-    window.removeEventListener('keydown', this.keyHandler_);
-  },
-
   open: function() {
+    this.keyHandler_ = this.handleKeyEvent_.bind(this);
+    // We need to attach the event listener to |window|, not |this| so that
+    // changing focus does not prevent key events from occuring.
+    window.addEventListener('keydown', this.keyHandler_);
     this.comitted_ = false;
     this.$.dialog.showModal();
+    // Don't focus 'reset' by default. 'Tab' will focus 'OK'.
+    this.$$('#reset').blur();
   },
 
   close: function() {
+    window.removeEventListener('keydown', this.keyHandler_);
+
     this.displayId = '';  // Will trigger displayIdChanged_.
 
     if (this.$.dialog.open)
@@ -83,6 +80,8 @@ Polymer({
    * @private
    */
   handleKeyEvent_: function(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey)
+      return;
     switch (event.keyCode) {
       case 37:  // left arrow
         if (event.shiftKey)
@@ -109,6 +108,7 @@ Polymer({
           this.resize_(0, 1);
         break;
       default:
+        // Allow unhandled key events to propagate.
         return;
     }
     event.preventDefault();

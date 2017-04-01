@@ -5,12 +5,13 @@
 #include "components/spellcheck/renderer/spellcheck_provider.h"
 
 #include "base/command_line.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/spellcheck/common/spellcheck_marker.h"
 #include "components/spellcheck/common/spellcheck_messages.h"
 #include "components/spellcheck/common/spellcheck_result.h"
 #include "components/spellcheck/renderer/spellcheck.h"
 #include "components/spellcheck/renderer/spellcheck_language.h"
+#include "components/spellcheck/spellcheck_build_features.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -72,7 +73,7 @@ void SpellCheckProvider::RequestTextChecking(
   last_request_.clear();
   last_results_.assign(blink::WebVector<blink::WebTextCheckingResult>());
 
-#if defined(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   // Text check (unified request for grammar and spell check) is only
   // available for browser process, so we ask the system spellchecker
   // over IPC or return an empty result if the checker is not
@@ -94,11 +95,11 @@ void SpellCheckProvider::RequestTextChecking(
 bool SpellCheckProvider::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(SpellCheckProvider, message)
-#if !defined(USE_BROWSER_SPELLCHECKER)
+#if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
     IPC_MESSAGE_HANDLER(SpellCheckMsg_RespondSpellingService,
                         OnRespondSpellingService)
 #endif
-#if defined(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
     IPC_MESSAGE_HANDLER(SpellCheckMsg_AdvanceToNextMisspelling,
                         OnAdvanceToNextMisspelling)
     IPC_MESSAGE_HANDLER(SpellCheckMsg_RespondTextCheck, OnRespondTextCheck)
@@ -110,7 +111,7 @@ bool SpellCheckProvider::OnMessageReceived(const IPC::Message& message) {
 }
 
 void SpellCheckProvider::FocusedNodeChanged(const blink::WebNode& unused) {
-#if defined(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   WebLocalFrame* frame = render_view()->GetWebView()->focusedFrame();
   WebElement element = frame->document().isNull() ? WebElement() :
       frame->document().focusedElement();
@@ -121,7 +122,7 @@ void SpellCheckProvider::FocusedNodeChanged(const blink::WebNode& unused) {
 #endif  // USE_BROWSER_SPELLCHECKER
 }
 
-void SpellCheckProvider::spellCheck(
+void SpellCheckProvider::checkSpelling(
     const WebString& text,
     int& offset,
     int& length,
@@ -166,7 +167,7 @@ void SpellCheckProvider::cancelAllPendingRequests() {
 }
 
 void SpellCheckProvider::showSpellingUI(bool show) {
-#if defined(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   UMA_HISTOGRAM_BOOLEAN("SpellCheck.api.showUI", show);
   Send(new SpellCheckHostMsg_ShowSpellingPanel(routing_id(), show));
 #endif
@@ -178,13 +179,13 @@ bool SpellCheckProvider::isShowingSpellingUI() {
 
 void SpellCheckProvider::updateSpellingUIWithMisspelledWord(
     const WebString& word) {
-#if defined(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
   Send(new SpellCheckHostMsg_UpdateSpellingPanelWithMisspelledWord(routing_id(),
                                                                    word));
 #endif
 }
 
-#if !defined(USE_BROWSER_SPELLCHECKER)
+#if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
 void SpellCheckProvider::OnRespondSpellingService(
     int identifier,
     bool succeeded,
@@ -233,7 +234,7 @@ bool SpellCheckProvider::HasWordCharacters(
   return false;
 }
 
-#if defined(USE_BROWSER_SPELLCHECKER)
+#if BUILDFLAG(USE_BROWSER_SPELLCHECKER)
 void SpellCheckProvider::OnAdvanceToNextMisspelling() {
   if (!render_view()->GetWebView())
     return;
@@ -260,9 +261,9 @@ void SpellCheckProvider::OnRespondTextCheck(
                                          &textcheck_results);
   completion->didFinishCheckingText(textcheck_results);
 
-  // TODO(groby): Add request caching once OSX reports back original request.
-  // (cf. SpellCheckProvider::OnRespondSpellingService)
   // Cache the request and the converted results.
+  last_request_ = line;
+  last_results_.swap(textcheck_results);
 }
 
 void SpellCheckProvider::OnToggleSpellPanel(bool is_currently_visible) {
@@ -329,17 +330,10 @@ bool SpellCheckProvider::SatisfyRequestFromCache(
       if (start <= text_length && end <= text_length)
         ++result_size;
     }
-    if (result_size > 0) {
-      blink::WebVector<blink::WebTextCheckingResult> results(result_size);
-      for (size_t i = 0; i < result_size; ++i) {
-        results[i].decoration = last_results_[i].decoration;
-        results[i].location = last_results_[i].location;
-        results[i].length = last_results_[i].length;
-        results[i].replacement = last_results_[i].replacement;
-      }
-      completion->didFinishCheckingText(results);
-      return true;
-    }
+    blink::WebVector<blink::WebTextCheckingResult> results(last_results_.data(),
+                                                           result_size);
+    completion->didFinishCheckingText(results);
+    return true;
   }
 
   return false;

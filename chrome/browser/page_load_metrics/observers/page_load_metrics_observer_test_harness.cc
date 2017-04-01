@@ -8,11 +8,12 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "chrome/browser/page_load_metrics/page_load_metrics_embedder_interface.h"
 #include "chrome/common/page_load_metrics/page_load_metrics_messages.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/web_contents_tester.h"
-#include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/platform/WebInputEvent.h"
 
 namespace page_load_metrics {
 
@@ -24,10 +25,6 @@ class TestPageLoadMetricsEmbedderInterface
   explicit TestPageLoadMetricsEmbedderInterface(
       PageLoadMetricsObserverTestHarness* test)
       : test_(test) {}
-
-  bool IsPrerendering(content::WebContents* web_contents) override {
-    return false;
-  }
 
   bool IsNewTabPageUrl(const GURL& url) override { return false; }
 
@@ -89,10 +86,21 @@ void PageLoadMetricsObserverTestHarness::PopulateRequiredTimingFields(
   if (inout_timing->parse_start) {
     if (!inout_timing->parse_blocked_on_script_load_duration)
       inout_timing->parse_blocked_on_script_load_duration = base::TimeDelta();
+    if (!inout_timing->parse_blocked_on_script_execution_duration) {
+      inout_timing->parse_blocked_on_script_execution_duration =
+          base::TimeDelta();
+    }
     if (!inout_timing
-             ->parse_blocked_on_script_load_from_document_write_duration)
+             ->parse_blocked_on_script_load_from_document_write_duration) {
       inout_timing->parse_blocked_on_script_load_from_document_write_duration =
           base::TimeDelta();
+    }
+    if (!inout_timing
+             ->parse_blocked_on_script_execution_from_document_write_duration) {
+      inout_timing
+          ->parse_blocked_on_script_execution_from_document_write_duration =
+          base::TimeDelta();
+    }
   }
 }
 
@@ -102,7 +110,7 @@ void PageLoadMetricsObserverTestHarness::SetUp() {
   NavigateAndCommit(GURL("http://www.google.com"));
   observer_ = MetricsWebContentsObserver::CreateForWebContents(
       web_contents(),
-      base::WrapUnique(new TestPageLoadMetricsEmbedderInterface(this)));
+      base::MakeUnique<TestPageLoadMetricsEmbedderInterface>(this));
   web_contents()->WasShown();
 }
 

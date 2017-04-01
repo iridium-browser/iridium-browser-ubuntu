@@ -249,6 +249,9 @@ bool SkOpSpan::sortableTop(SkOpContour* contourHead) {
     }
     SkOpContour* contour = contourHead;
     do {
+        if (!contour->count()) {
+            continue;
+        }
         contour->rayCheck(hitBase, dir, &hitHead, &allocator);
     } while ((contour = contour->next()));
     // sort hits
@@ -346,7 +349,7 @@ bool SkOpSpan::sortableTop(SkOpContour* contourHead) {
 #endif
         }
         if (sumSet) {
-            if (this->globalState()->phase() == SkOpGlobalState::kFixWinding) {
+            if (this->globalState()->phase() == SkOpPhase::kFixWinding) {
                 hitSegment->contour()->setCcw(ccw);
             } else {
                 (void) hitSegment->markAndChaseWinding(span, span->next(), windSum, oppSum, nullptr);
@@ -381,18 +384,20 @@ SkOpSpan* SkOpSegment::findSortableTop(SkOpContour* contourHead) {
 }
 
 SkOpSpan* SkOpContour::findSortableTop(SkOpContour* contourHead) {
-    SkOpSegment* testSegment = &fHead;
     bool allDone = true;
-    do {
-        if (testSegment->done()) {
-            continue;
-        }
-        allDone = false;
-        SkOpSpan* result = testSegment->findSortableTop(contourHead);
-        if (result) {
-            return result;
-        }
-    } while ((testSegment = testSegment->next()));
+    if (fCount) {
+        SkOpSegment* testSegment = &fHead;
+        do {
+            if (testSegment->done()) {
+                continue;
+            }
+            allDone = false;
+            SkOpSpan* result = testSegment->findSortableTop(contourHead);
+            if (result) {
+                return result;
+            }
+        } while ((testSegment = testSegment->next()));
+    }
     if (allDone) {
       fDone = true;
     }

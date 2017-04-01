@@ -160,13 +160,13 @@ void GuestViewInternalCustomBindings::AttachGuest(
   // logical units.
   params->SetBoolean(guest_view::kElementSizeIsLogical, true);
 
-  linked_ptr<guest_view::GuestViewRequest> request(
+  std::unique_ptr<guest_view::GuestViewRequest> request(
       new guest_view::GuestViewAttachRequest(
           guest_view_container, guest_instance_id, std::move(params),
           args.Length() == 4 ? args[3].As<v8::Function>()
                              : v8::Local<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->IssueRequest(request);
+  guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
@@ -190,12 +190,12 @@ void GuestViewInternalCustomBindings::DetachGuest(
   if (!guest_view_container)
     return;
 
-  linked_ptr<guest_view::GuestViewRequest> request(
+  std::unique_ptr<guest_view::GuestViewRequest> request(
       new guest_view::GuestViewDetachRequest(
           guest_view_container, args.Length() == 2 ? args[1].As<v8::Function>()
                                                    : v8::Local<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->IssueRequest(request);
+  guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
@@ -249,8 +249,7 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
   // An element instance ID uniquely identifies an IframeGuestViewContainer
   // within a RenderView.
   auto* guest_view_container =
-      static_cast<guest_view::IframeGuestViewContainer*>(
-          guest_view::GuestViewContainer::FromID(element_instance_id));
+      guest_view::GuestViewContainer::FromID(element_instance_id);
   // This is the first time we hear about the |element_instance_id|.
   DCHECK(!guest_view_container);
   // The <webview> element's GC takes ownership of |guest_view_container|.
@@ -258,14 +257,14 @@ void GuestViewInternalCustomBindings::AttachIframeGuest(
       new guest_view::IframeGuestViewContainer(embedder_parent_frame);
   guest_view_container->SetElementInstanceID(element_instance_id);
 
-  linked_ptr<guest_view::GuestViewRequest> request(
+  std::unique_ptr<guest_view::GuestViewRequest> request(
       new guest_view::GuestViewAttachIframeRequest(
           guest_view_container, render_frame->GetRoutingID(), guest_instance_id,
           std::move(params), args.Length() == (num_required_params + 1)
                                  ? args[num_required_params].As<v8::Function>()
                                  : v8::Local<v8::Function>(),
           args.GetIsolate()));
-  guest_view_container->IssueRequest(request);
+  guest_view_container->IssueRequest(std::move(request));
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
@@ -382,8 +381,8 @@ void GuestViewInternalCustomBindings::RegisterElementResizeCallback(
   int element_instance_id = args[0]->Int32Value();
   // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
   // within a RenderView.
-  auto* guest_view_container = static_cast<ExtensionsGuestViewContainer*>(
-      guest_view::GuestViewContainer::FromID(element_instance_id));
+  auto* guest_view_container =
+      guest_view::GuestViewContainer::FromID(element_instance_id);
   if (!guest_view_container)
     return;
 
@@ -428,11 +427,14 @@ void GuestViewInternalCustomBindings::RegisterView(
 void GuestViewInternalCustomBindings::RunWithGesture(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   // Gesture is required to request fullscreen.
-  blink::WebScopedUserGesture user_gesture;
+  // TODO(devlin): All this needs to do is enter fullscreen. We should make this
+  // EnterFullscreen() and do it directly rather than having a generic "run with
+  // user gesture" function.
+  blink::WebScopedUserGesture user_gesture(context()->web_frame());
   CHECK_EQ(args.Length(), 1);
   CHECK(args[0]->IsFunction());
-  v8::Local<v8::Value> no_args;
-  context()->CallFunction(v8::Local<v8::Function>::Cast(args[0]), 0, &no_args);
+  context()->SafeCallFunction(
+      v8::Local<v8::Function>::Cast(args[0]), 0, nullptr);
 }
 
 }  // namespace extensions

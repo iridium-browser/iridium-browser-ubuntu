@@ -48,8 +48,9 @@ TEST_P(FtpDirectoryListingParserTest, Parse) {
   mock_current_time_exploded.day_of_month = 15;
   mock_current_time_exploded.hour = 12;
   mock_current_time_exploded.minute = 45;
-  base::Time mock_current_time(
-      base::Time::FromLocalExploded(mock_current_time_exploded));
+  base::Time mock_current_time;
+  EXPECT_TRUE(base::Time::FromUTCExploded(mock_current_time_exploded,
+                                          &mock_current_time));
 
   SCOPED_TRACE(base::StringPrintf("Test case: %s", param.name));
 
@@ -69,8 +70,8 @@ TEST_P(FtpDirectoryListingParserTest, Parse) {
       test_dir.AppendASCII(std::string(param.name) + ".expected"),
       &expected_listing));
 
-  std::vector<std::string> lines;
-  base::SplitStringUsingSubstr(expected_listing, "\r\n", &lines);
+  std::vector<std::string> lines = base::SplitStringUsingSubstr(
+      expected_listing, "\r\n", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
 
   // Special case for empty listings.
   if (lines.size() == 1 && lines[0].empty())
@@ -109,7 +110,7 @@ TEST_P(FtpDirectoryListingParserTest, Parse) {
     EXPECT_EQ(size, entry.size);
 
     base::Time::Exploded time_exploded;
-    entry.last_modified.LocalExplode(&time_exploded);
+    entry.last_modified.UTCExplode(&time_exploded);
     EXPECT_EQ(year, time_exploded.year);
     EXPECT_EQ(month, time_exploded.month);
     EXPECT_EQ(day_of_month, time_exploded.day_of_month);
@@ -157,6 +158,7 @@ const FtpTestParam kTestParams[] = {
     {"dir-listing-ls-31", OK},
     {"dir-listing-ls-32", OK},  // busybox
     {"dir-listing-ls-33", OK},
+    {"dir-listing-ls-34", OK},  // Broken encoding. Should not fail.
 
     {"dir-listing-netware-1", OK},
     {"dir-listing-netware-2", OK},

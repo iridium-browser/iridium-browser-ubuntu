@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/test/base/testing_profile.h"
@@ -33,8 +34,8 @@ class SyncStartupTrackerTest : public testing::Test {
       no_error_(GoogleServiceAuthError::NONE) {
   }
   void SetUp() override {
-    profile_.reset(new TestingProfile());
-    mock_pss_ = static_cast<ProfileSyncServiceMock*>(
+    profile_ = base::MakeUnique<TestingProfile>();
+    mock_pss_ = static_cast<browser_sync::ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
             profile_.get(), BuildMockProfileSyncService));
 
@@ -54,7 +55,7 @@ class SyncStartupTrackerTest : public testing::Test {
   void SetupNonInitializedPSS() {
     EXPECT_CALL(*mock_pss_, GetAuthError())
         .WillRepeatedly(ReturnRef(no_error_));
-    EXPECT_CALL(*mock_pss_, IsBackendInitialized())
+    EXPECT_CALL(*mock_pss_, IsEngineInitialized())
         .WillRepeatedly(Return(false));
     EXPECT_CALL(*mock_pss_, HasUnrecoverableError())
         .WillRepeatedly(Return(false));
@@ -64,12 +65,12 @@ class SyncStartupTrackerTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
   GoogleServiceAuthError no_error_;
   std::unique_ptr<TestingProfile> profile_;
-  ProfileSyncServiceMock* mock_pss_;
+  browser_sync::ProfileSyncServiceMock* mock_pss_;
   MockObserver observer_;
 };
 
 TEST_F(SyncStartupTrackerTest, SyncAlreadyInitialized) {
-  EXPECT_CALL(*mock_pss_, IsBackendInitialized()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_pss_, IsEngineInitialized()).WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, CanSyncStart()).WillRepeatedly(Return(true));
   EXPECT_CALL(observer_, SyncStartupCompleted());
   SyncStartupTracker tracker(profile_.get(), &observer_);
@@ -78,7 +79,7 @@ TEST_F(SyncStartupTrackerTest, SyncAlreadyInitialized) {
 TEST_F(SyncStartupTrackerTest, SyncNotSignedIn) {
   // Make sure that we get a SyncStartupFailed() callback if sync is not logged
   // in.
-  EXPECT_CALL(*mock_pss_, IsBackendInitialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, IsEngineInitialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, CanSyncStart()).WillRepeatedly(Return(false));
   EXPECT_CALL(observer_, SyncStartupFailed());
   SyncStartupTracker tracker(profile_.get(), &observer_);
@@ -87,7 +88,7 @@ TEST_F(SyncStartupTrackerTest, SyncNotSignedIn) {
 TEST_F(SyncStartupTrackerTest, SyncAuthError) {
   // Make sure that we get a SyncStartupFailed() callback if sync gets an auth
   // error.
-  EXPECT_CALL(*mock_pss_, IsBackendInitialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, IsEngineInitialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, CanSyncStart()).WillRepeatedly(Return(true));
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
@@ -104,7 +105,7 @@ TEST_F(SyncStartupTrackerTest, SyncDelayedInitialization) {
   SyncStartupTracker tracker(profile_.get(), &observer_);
   Mock::VerifyAndClearExpectations(&observer_);
   // Now, mark the PSS as initialized.
-  EXPECT_CALL(*mock_pss_, IsBackendInitialized()).WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_pss_, IsEngineInitialized()).WillRepeatedly(Return(true));
   EXPECT_CALL(observer_, SyncStartupCompleted());
   tracker.OnStateChanged();
 }
@@ -119,7 +120,7 @@ TEST_F(SyncStartupTrackerTest, SyncDelayedAuthError) {
   Mock::VerifyAndClearExpectations(mock_pss_);
 
   // Now, mark the PSS as having an auth error.
-  EXPECT_CALL(*mock_pss_, IsBackendInitialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, IsEngineInitialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, CanSyncStart()).WillRepeatedly(Return(true));
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
@@ -138,7 +139,7 @@ TEST_F(SyncStartupTrackerTest, SyncDelayedUnrecoverableError) {
   Mock::VerifyAndClearExpectations(mock_pss_);
 
   // Now, mark the PSS as having an unrecoverable error.
-  EXPECT_CALL(*mock_pss_, IsBackendInitialized()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*mock_pss_, IsEngineInitialized()).WillRepeatedly(Return(false));
   EXPECT_CALL(*mock_pss_, CanSyncStart()).WillRepeatedly(Return(true));
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);

@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
@@ -79,13 +80,15 @@ void RunExternalProtocolDialogWithDelegate(
 void LaunchUrlWithoutSecurityCheckWithDelegate(
     const GURL& url,
     int render_process_host_id,
-    int tab_contents_id,
+    int render_view_routing_id,
     ExternalProtocolHandler::Delegate* delegate) {
+  content::WebContents* web_contents = tab_util::GetWebContentsByID(
+      render_process_host_id, render_view_routing_id);
+
   if (!delegate) {
-    ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(
-        url, render_process_host_id, tab_contents_id);
+    ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(url, web_contents);
   } else {
-    delegate->LaunchUrlWithoutSecurityCheck(url);
+    delegate->LaunchUrlWithoutSecurityCheck(url, web_contents);
   }
 }
 
@@ -95,7 +98,7 @@ void LaunchUrlWithoutSecurityCheckWithDelegate(
 void OnDefaultProtocolClientWorkerFinished(
     const GURL& escaped_url,
     int render_process_host_id,
-    int tab_contents_id,
+    int render_view_routing_id,
     bool prompt_user,
     ui::PageTransition page_transition,
     bool has_user_gesture,
@@ -118,68 +121,17 @@ void OnDefaultProtocolClientWorkerFinished(
     // Ask the user if they want to allow the protocol. This will call
     // LaunchUrlWithoutSecurityCheck if the user decides to accept the
     // protocol.
-    RunExternalProtocolDialogWithDelegate(escaped_url, render_process_host_id,
-                                          tab_contents_id, page_transition,
-                                          has_user_gesture, delegate);
+    RunExternalProtocolDialogWithDelegate(
+        escaped_url, render_process_host_id, render_view_routing_id,
+        page_transition, has_user_gesture, delegate);
     return;
   }
 
   LaunchUrlWithoutSecurityCheckWithDelegate(escaped_url, render_process_host_id,
-                                            tab_contents_id, delegate);
+                                            render_view_routing_id, delegate);
 }
 
 }  // namespace
-
-// static
-void ExternalProtocolHandler::PrepopulateDictionary(
-    base::DictionaryValue* win_pref) {
-  static bool is_warm = false;
-  if (is_warm)
-    return;
-  is_warm = true;
-
-  static const char* const denied_schemes[] = {
-    "afp",
-    "data",
-    "disk",
-    "disks",
-    // ShellExecuting file:///C:/WINDOWS/system32/notepad.exe will simply
-    // execute the file specified!  Hopefully we won't see any "file" schemes
-    // because we think of file:// URLs as handled URLs, but better to be safe
-    // than to let an attacker format the user's hard drive.
-    "file",
-    "hcp",
-    "javascript",
-    "ms-help",
-    "nntp",
-    "shell",
-    "vbscript",
-    // view-source is a special case in chrome. When it comes through an
-    // iframe or a redirect, it looks like an external protocol, but we don't
-    // want to shellexecute it.
-    "view-source",
-    "vnd.ms.radio",
-  };
-
-  static const char* const allowed_schemes[] = {
-    "mailto",
-    "news",
-    "snews",
-  };
-
-  bool should_block;
-  for (size_t i = 0; i < arraysize(denied_schemes); ++i) {
-    if (!win_pref->GetBoolean(denied_schemes[i], &should_block)) {
-      win_pref->SetBoolean(denied_schemes[i], true);
-    }
-  }
-
-  for (size_t i = 0; i < arraysize(allowed_schemes); ++i) {
-    if (!win_pref->GetBoolean(allowed_schemes[i], &should_block)) {
-      win_pref->SetBoolean(allowed_schemes[i], false);
-    }
-  }
-}
 
 // static
 ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
@@ -235,7 +187,7 @@ void ExternalProtocolHandler::SetBlockState(const std::string& scheme,
 void ExternalProtocolHandler::LaunchUrlWithDelegate(
     const GURL& url,
     int render_process_host_id,
-    int tab_contents_id,
+    int render_view_routing_id,
     ui::PageTransition page_transition,
     bool has_user_gesture,
     Delegate* delegate) {
@@ -259,7 +211,7 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(
   // message loops.
   shell_integration::DefaultWebClientWorkerCallback callback = base::Bind(
       &OnDefaultProtocolClientWorkerFinished, url, render_process_host_id,
-      tab_contents_id, block_state == UNKNOWN, page_transition,
+      render_view_routing_id, block_state == UNKNOWN, page_transition,
       has_user_gesture, delegate);
 
   // Start the check process running. This will send tasks to the FILE thread
@@ -272,10 +224,9 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(
 // static
 void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(
     const GURL& url,
-    int render_process_host_id,
-    int tab_contents_id) {
-  content::WebContents* web_contents = tab_util::GetWebContentsByID(
-      render_process_host_id, tab_contents_id);
+    content::WebContents* web_contents) {
+  // |web_contents| is only passed in to find browser context. Do not assume
+  // that the external protocol request came from the main frame.
   if (!web_contents)
     return;
 
@@ -284,12 +235,69 @@ void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(
 }
 
 // static
-void ExternalProtocolHandler::RegisterPrefs(PrefRegistrySimple* registry) {
-  registry->RegisterDictionaryPref(prefs::kExcludedSchemes);
-}
-
-// static
 void ExternalProtocolHandler::PermitLaunchUrl() {
   DCHECK(base::MessageLoopForUI::IsCurrent());
   g_accept_requests = true;
+}
+
+// static
+void ExternalProtocolHandler::PrepopulateDictionary(
+    base::DictionaryValue* win_pref) {
+  static bool is_warm = false;
+  if (is_warm)
+    return;
+  is_warm = true;
+
+  static const char* const denied_schemes[] = {
+    "afp",
+    "data",
+    "disk",
+    "disks",
+    // ShellExecuting file:///C:/WINDOWS/system32/notepad.exe will simply
+    // execute the file specified!  Hopefully we won't see any "file" schemes
+    // because we think of file:// URLs as handled URLs, but better to be safe
+    // than to let an attacker format the user's hard drive.
+    "file",
+    "hcp",
+    "javascript",
+    "ms-help",
+    "nntp",
+    "shell",
+    "vbscript",
+    // view-source is a special case in chrome. When it comes through an
+    // iframe or a redirect, it looks like an external protocol, but we don't
+    // want to shellexecute it.
+    "view-source",
+    "vnd.ms.radio",
+  };
+
+  static const char* const allowed_schemes[] = {
+    "mailto",
+    "news",
+    "snews",
+  };
+
+  bool should_block;
+  for (size_t i = 0; i < arraysize(denied_schemes); ++i) {
+    if (!win_pref->GetBoolean(denied_schemes[i], &should_block)) {
+      win_pref->SetBoolean(denied_schemes[i], true);
+    }
+  }
+
+  for (size_t i = 0; i < arraysize(allowed_schemes); ++i) {
+    if (!win_pref->GetBoolean(allowed_schemes[i], &should_block)) {
+      win_pref->SetBoolean(allowed_schemes[i], false);
+    }
+  }
+}
+
+// static
+void ExternalProtocolHandler::RecordMetrics(bool selected) {
+  UMA_HISTOGRAM_BOOLEAN("BrowserDialogs.ExternalProtocol.RememberCheckbox",
+                        selected);
+}
+
+// static
+void ExternalProtocolHandler::RegisterPrefs(PrefRegistrySimple* registry) {
+  registry->RegisterDictionaryPref(prefs::kExcludedSchemes);
 }

@@ -19,9 +19,9 @@ import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.omaha.OmahaClient;
-import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 
@@ -34,7 +34,7 @@ public class ApplicationTestUtils {
     private static final String TAG = "ApplicationTestUtils";
     private static final float FLOAT_EPSILON = 0.001f;
 
-    private static PowerManager.WakeLock sWakeLock = null;
+    private static PowerManager.WakeLock sWakeLock;
 
     // TODO(jbudorick): fix deprecation warning crbug.com/537347
     @SuppressWarnings("deprecation")
@@ -75,7 +75,7 @@ public class ApplicationTestUtils {
      * The 'cache' directory is recreated as an empty directory.
      * @param context Target instrumentation context.
      */
-    public static void clearAppData(Context context) throws InterruptedException {
+    public static void clearAppData(Context context) {
         ApplicationData.clearAppData(context);
     }
 
@@ -99,7 +99,7 @@ public class ApplicationTestUtils {
     }
 
     /** Waits until Chrome is in the background. */
-    public static void waitUntilChromeInBackground() throws Exception {
+    public static void waitUntilChromeInBackground() {
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
@@ -111,7 +111,7 @@ public class ApplicationTestUtils {
     }
 
     /** Waits until Chrome is in the foreground. */
-    public static void waitUntilChromeInForeground() throws Exception {
+    public static void waitUntilChromeInForeground() {
         CriteriaHelper.pollInstrumentationThread(
                 Criteria.equals(ApplicationState.HAS_RUNNING_ACTIVITIES, new Callable<Integer>() {
                     @Override
@@ -158,14 +158,24 @@ public class ApplicationTestUtils {
     /** Finishes all tasks Chrome has listed in Android's Overview. */
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     public static void finishAllChromeTasks(final Context context) throws Exception {
-        // Close all of the tasks one by one.
-        ActivityManager activityManager =
-                (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-        for (ActivityManager.AppTask task : activityManager.getAppTasks()) {
-            task.finishAndRemoveTask();
-        }
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    // Close all of the tasks one by one.
+                    ActivityManager activityManager =
+                            (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                    for (ActivityManager.AppTask task : activityManager.getAppTasks()) {
+                        task.finishAndRemoveTask();
+                    }
+                } catch (Exception e) {
+                    // Ignore any exceptions the Android framework throws so that otherwise passing
+                    // tests don't fail during tear down. See crbug.com/653731.
+                }
+            }
+        });
 
-        CriteriaHelper.pollInstrumentationThread(Criteria.equals(0, new Callable<Integer>() {
+        CriteriaHelper.pollUiThread(Criteria.equals(0, new Callable<Integer>() {
             @Override
             public Integer call() {
                 return getNumChromeTasks(context);
@@ -185,7 +195,7 @@ public class ApplicationTestUtils {
      * See {@link #assertWaitForPageScaleFactorMatch(ChromeActivity,float,long)}.
      */
     public static void assertWaitForPageScaleFactorMatch(
-            final ChromeActivity activity, final float expectedScale) throws InterruptedException {
+            final ChromeActivity activity, final float expectedScale) {
         assertWaitForPageScaleFactorMatch(activity, expectedScale, false);
     }
 
@@ -197,7 +207,7 @@ public class ApplicationTestUtils {
      * the default seems to be 1.0f.
      */
     public static void assertWaitForPageScaleFactorMatch(final ChromeActivity activity,
-            final float expectedScale, boolean waitLongerForLoad) throws InterruptedException {
+            final float expectedScale, boolean waitLongerForLoad) {
         long waitTimeInMs = waitLongerForLoad ? 10000 : CriteriaHelper.DEFAULT_MAX_TIME_TO_POLL;
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override

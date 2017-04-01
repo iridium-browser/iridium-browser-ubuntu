@@ -24,6 +24,7 @@
 
 namespace {
 
+// TODO(rjkroege): Use the common TestScreen.
 class TestScreen : public display::Screen {
  public:
   TestScreen() : previous_screen_(display::Screen::GetScreen()) {
@@ -57,7 +58,7 @@ class TestScreen : public display::Screen {
 
   int GetNumDisplays() const override { return displays_.size(); }
 
-  std::vector<display::Display> GetAllDisplays() const override {
+  const std::vector<display::Display>& GetAllDisplays() const override {
     return displays_;
   }
 

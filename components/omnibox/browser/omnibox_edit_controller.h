@@ -14,10 +14,6 @@
 
 class ToolbarModel;
 
-namespace gfx {
-class Image;
-}
-
 class OmniboxEditController {
  public:
   virtual void OnAutocompleteAccept(const GURL& destination_url,
@@ -31,9 +27,6 @@ class OmniboxEditController {
   // of the views around the edit, including the text of the edit and the
   // status of any keyword- or hint-related state.
   virtual void OnChanged() = 0;
-
-  // Shows the URL.
-  virtual void ShowURL() = 0;
 
   virtual ToolbarModel* GetToolbarModel() = 0;
   virtual const ToolbarModel* GetToolbarModel() const = 0;

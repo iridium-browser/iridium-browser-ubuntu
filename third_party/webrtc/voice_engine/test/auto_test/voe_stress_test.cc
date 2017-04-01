@@ -25,7 +25,7 @@
 #include "webrtc/voice_engine/test/auto_test/voe_stress_test.h"
 
 #include "webrtc/system_wrappers/include/sleep.h"
-#include "webrtc/test/channel_transport/channel_transport.h"
+#include "webrtc/voice_engine/test/channel_transport/channel_transport.h"
 #include "webrtc/voice_engine/test/auto_test/voe_standard_test.h"
 #include "webrtc/voice_engine/test/auto_test/voe_test_defines.h"
 #include "webrtc/voice_engine/voice_engine_defines.h"  // defines build macros
@@ -149,7 +149,6 @@ int VoEStressTest::StartStopTest() {
   for (i = 0; i < numberOfLoops; ++i) {
     voice_channel_transport->SetSendDestination("127.0.0.1", 4800);
     voice_channel_transport->SetLocalReceiver(4800);
-    VALIDATE_STRESS(base->StartReceive(0));
     VALIDATE_STRESS(base->StartPlayout(0));
     VALIDATE_STRESS(base->StartSend(0));
     if (!(i % markInterval))
@@ -157,21 +156,18 @@ int VoEStressTest::StartStopTest() {
     SleepMs(loopSleep);
     VALIDATE_STRESS(base->StopSend(0));
     VALIDATE_STRESS(base->StopPlayout(0));
-    VALIDATE_STRESS(base->StopReceive(0));
   }
   ANL();
 
   VALIDATE_STRESS(voice_channel_transport->SetSendDestination("127.0.0.1",
                                                               4800));
   VALIDATE_STRESS(voice_channel_transport->SetLocalReceiver(4800));
-  VALIDATE_STRESS(base->StartReceive(0));
   VALIDATE_STRESS(base->StartPlayout(0));
   VALIDATE_STRESS(base->StartSend(0));
   printf("Verify that audio is good. \n");
   PAUSE_OR_SLEEP(20000);
   VALIDATE_STRESS(base->StopSend(0));
   VALIDATE_STRESS(base->StopPlayout(0));
-  VALIDATE_STRESS(base->StopReceive(0));
 
   ///////////// End test /////////////
 

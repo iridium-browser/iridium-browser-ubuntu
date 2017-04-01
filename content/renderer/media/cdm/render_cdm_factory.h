@@ -11,9 +11,9 @@
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "media/base/cdm_factory.h"
-#include "media/base/media_keys.h"
+#include "ppapi/features/features.h"
 
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
 #include "content/renderer/media/cdm/pepper_cdm_wrapper.h"
 #endif
 
@@ -25,21 +25,15 @@ struct CdmConfig;
 
 namespace content {
 
-#if defined(ENABLE_BROWSER_CDMS)
-class RendererCdmManager;
-#endif
-
 // CdmFactory implementation in content/renderer. This class is not thread safe
 // and should only be used on one thread.
 class RenderCdmFactory : public media::CdmFactory {
  public:
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
   explicit RenderCdmFactory(const CreatePepperCdmCB& create_pepper_cdm_cb);
-#elif defined(ENABLE_BROWSER_CDMS)
-  explicit RenderCdmFactory(RendererCdmManager* manager);
 #else
   RenderCdmFactory();
-#endif  // defined(ENABLE_PEPPER_CDMS)
+#endif  // BUILDFLAG(ENABLE_PEPPER_CDMS)
 
   ~RenderCdmFactory() override;
 
@@ -55,11 +49,8 @@ class RenderCdmFactory : public media::CdmFactory {
       const media::CdmCreatedCB& cdm_created_cb) override;
 
  private:
-#if defined(ENABLE_PEPPER_CDMS)
+#if BUILDFLAG(ENABLE_PEPPER_CDMS)
   CreatePepperCdmCB create_pepper_cdm_cb_;
-#elif defined(ENABLE_BROWSER_CDMS)
-  // The |manager_| is a per render frame object owned by RenderFrameImpl.
-  RendererCdmManager* manager_;
 #endif
 
   base::ThreadChecker thread_checker_;

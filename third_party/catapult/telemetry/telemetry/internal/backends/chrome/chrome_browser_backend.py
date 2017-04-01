@@ -8,7 +8,6 @@ import shlex
 import sys
 
 from telemetry.core import exceptions
-from telemetry.core import util
 from telemetry import decorators
 from telemetry.internal.backends import browser_backend
 from telemetry.internal.backends.chrome import extension_backend
@@ -18,6 +17,8 @@ from telemetry.internal.backends.chrome_inspector import devtools_client_backend
 from telemetry.internal.browser import user_agent
 from telemetry.internal.browser import web_contents
 from telemetry.testing import options_for_unittests
+
+import py_utils
 
 
 class ChromeBrowserBackend(browser_backend.BrowserBackend):
@@ -90,18 +91,10 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
         self.browser_options.browser_user_agent_type))
 
     extensions = [extension.local_path
-                  for extension in self._extensions_to_load
-                  if not extension.is_component]
+                  for extension in self._extensions_to_load]
     extension_str = ','.join(extensions)
     if len(extensions) > 0:
       args.append('--load-extension=%s' % extension_str)
-
-    component_extensions = [extension.local_path
-                            for extension in self._extensions_to_load
-                            if extension.is_component]
-    component_extension_str = ','.join(component_extensions)
-    if len(component_extensions) > 0:
-      args.append('--load-component-extension=%s' % component_extension_str)
 
     if self.browser_options.disable_component_extensions_with_background_pages:
       args.append('--disable-component-extensions-with-background-pages')
@@ -121,24 +114,16 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     return args
 
   def GetReplayBrowserStartupArgs(self):
-    network_backend = self.platform_backend.network_controller_backend
-    if not network_backend.is_replay_active:
-      return []
     replay_args = []
+    network_backend = self.platform_backend.network_controller_backend
+    if not network_backend.is_initialized:
+      return []
+    proxy_port = network_backend.forwarder.port_pair.remote_port
+    replay_args.append('--proxy-server=socks://localhost:%s' % proxy_port)
     if not network_backend.is_test_ca_installed:
       # Ignore certificate errors if the platform backend has not created
       # and installed a root certificate.
       replay_args.append('--ignore-certificate-errors')
-    # Force hostnames to resolve to the replay's host_ip.
-    replay_args.append('--host-resolver-rules=MAP * %s,EXCLUDE localhost' %
-                         network_backend.host_ip)
-    # Force the browser to send HTTP/HTTPS requests to fixed ports if they
-    # are not the standard HTTP/HTTPS ports.
-    device_ports = network_backend.wpr_device_ports
-    if device_ports.http != 80:
-      replay_args.append('--testing-fixed-http-port=%s' % device_ports.http)
-    if device_ports.https != 443:
-      replay_args.append('--testing-fixed-https-port=%s' % device_ports.https)
     return replay_args
 
   def HasBrowserFinishedLaunching(self):
@@ -162,8 +147,8 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     """ Wait for browser to come up. """
     try:
       timeout = self.browser_options.browser_startup_timeout
-      util.WaitFor(self.HasBrowserFinishedLaunching, timeout=timeout)
-    except (exceptions.TimeoutException, exceptions.ProcessGoneException) as e:
+      py_utils.WaitFor(self.HasBrowserFinishedLaunching, timeout=timeout)
+    except (py_utils.TimeoutException, exceptions.ProcessGoneException) as e:
       if not self.IsBrowserRunning():
         raise exceptions.BrowserGoneException(self.browser, e)
       raise exceptions.BrowserConnectionGoneException(self.browser, e)
@@ -177,8 +162,8 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     assert self._devtools_client, (
         'Waiting for extensions required devtool client to be initiated first')
     try:
-      util.WaitFor(self._AllExtensionsLoaded, timeout=60)
-    except exceptions.TimeoutException:
+      py_utils.WaitFor(self._AllExtensionsLoaded, timeout=60)
+    except py_utils.TimeoutException:
       logging.error('ExtensionsToLoad: ' +
           repr([e.extension_id for e in self._extensions_to_load]))
       logging.error('Extension list: ' +
@@ -189,6 +174,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     # Extension pages are loaded from an about:blank page,
     # so we need to check that the document URL is the extension
     # page in addition to the ready state.
+    # TODO(catapult:#3028): Fix interpolation of JavaScript values.
     extension_ready_js = """
         document.URL.lastIndexOf('chrome-extension://%s/', 0) == 0 &&
         (document.readyState == 'complete' ||

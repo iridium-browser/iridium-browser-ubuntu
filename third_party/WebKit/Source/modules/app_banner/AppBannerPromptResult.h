@@ -6,37 +6,39 @@
 #define AppBannerPromptResult_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "public/platform/modules/app_banner/WebAppBannerPromptResult.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class ScriptPromiseResolver;
+class AppBannerPromptResult final
+    : public GarbageCollectedFinalized<AppBannerPromptResult>,
+      public ScriptWrappable {
+  DEFINE_WRAPPERTYPEINFO();
+  WTF_MAKE_NONCOPYABLE(AppBannerPromptResult);
 
-class AppBannerPromptResult final : public GarbageCollectedFinalized<AppBannerPromptResult>, public ScriptWrappable {
-    DEFINE_WRAPPERTYPEINFO();
-    WTF_MAKE_NONCOPYABLE(AppBannerPromptResult);
-public:
-    static AppBannerPromptResult* create(const AtomicString& platform, WebAppBannerPromptResult::Outcome outcome)
-    {
-        return new AppBannerPromptResult(platform, outcome);
-    }
+ public:
+  enum class Outcome { Accepted, Dismissed };
 
-    virtual ~AppBannerPromptResult();
+  static AppBannerPromptResult* create(const String& platform,
+                                       Outcome outcome) {
+    return new AppBannerPromptResult(platform, outcome);
+  }
 
-    String platform() const { return m_platform; }
-    String outcome() const;
+  virtual ~AppBannerPromptResult();
 
-    DEFINE_INLINE_VIRTUAL_TRACE() { }
+  String platform() const { return m_platform; }
+  String outcome() const;
 
-private:
-    AppBannerPromptResult(const AtomicString& platform, WebAppBannerPromptResult::Outcome);
+  DEFINE_INLINE_VIRTUAL_TRACE() {}
 
-    String m_platform;
-    WebAppBannerPromptResult::Outcome m_outcome;
+ private:
+  AppBannerPromptResult(const String& platform, Outcome);
+
+  String m_platform;
+  Outcome m_outcome;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // AppBannerPromptResult_h
+#endif  // AppBannerPromptResult_h

@@ -9,9 +9,11 @@
 #define SkSVGRenderContext_DEFINED
 
 #include "SkPaint.h"
+#include "SkPath.h"
 #include "SkRect.h"
 #include "SkSize.h"
 #include "SkSVGAttribute.h"
+#include "SkSVGIDMapper.h"
 #include "SkTLazy.h"
 #include "SkTypes.h"
 
@@ -56,19 +58,30 @@ struct SkSVGPresentationContext {
 
 class SkSVGRenderContext {
 public:
-    SkSVGRenderContext(SkCanvas*, const SkSVGLengthContext&, const SkSVGPresentationContext&);
+    SkSVGRenderContext(SkCanvas*, const SkSVGIDMapper&, const SkSVGLengthContext&,
+                       const SkSVGPresentationContext&);
     SkSVGRenderContext(const SkSVGRenderContext&);
     ~SkSVGRenderContext();
 
     const SkSVGLengthContext& lengthContext() const { return *fLengthContext; }
     SkSVGLengthContext* writableLengthContext() { return fLengthContext.writable(); }
 
+    const SkSVGPresentationContext& presentationContext() const { return *fPresentationContext; }
+
     SkCanvas* canvas() const { return fCanvas; }
 
-    void applyPresentationAttributes(const SkSVGPresentationAttributes&);
+    enum ApplyFlags {
+        kLeaf = 1 << 0, // the target node doesn't have descendants
+    };
+    void applyPresentationAttributes(const SkSVGPresentationAttributes&, uint32_t flags);
+
+    const SkSVGNode* findNodeById(const SkString&) const;
 
     const SkPaint* fillPaint() const;
     const SkPaint* strokePaint() const;
+
+    // The local computed clip path (not inherited).
+    const SkPath* clipPath() const { return fClipPath.getMaybeNull(); }
 
 private:
     // Stack-only
@@ -76,12 +89,19 @@ private:
     void* operator new(size_t, void*)                        = delete;
     SkSVGRenderContext& operator=(const SkSVGRenderContext&) = delete;
 
+    void applyOpacity(SkScalar opacity, uint32_t flags);
+    void applyClip(const SkSVGClip&);
+
+    const SkSVGIDMapper&                          fIDMapper;
     SkTCopyOnFirstWrite<SkSVGLengthContext>       fLengthContext;
     SkTCopyOnFirstWrite<SkSVGPresentationContext> fPresentationContext;
     SkCanvas*                                     fCanvas;
     // The save count on 'fCanvas' at construction time.
     // A restoreToCount() will be issued on destruction.
     int                                           fCanvasSaveCount;
+
+    // clipPath, if present for the current context (not inherited).
+    SkTLazy<SkPath>                               fClipPath;
 };
 
 #endif // SkSVGRenderContext_DEFINED

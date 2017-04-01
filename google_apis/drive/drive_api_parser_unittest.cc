@@ -19,7 +19,7 @@ TEST(DriveAPIParserTest, AboutResourceParser) {
       test_util::LoadJSONFile("drive/about.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::Type::DICTIONARY, document->GetType());
   std::unique_ptr<AboutResource> resource(new AboutResource());
   EXPECT_TRUE(resource->Parse(*document));
 
@@ -36,7 +36,7 @@ TEST(DriveAPIParserTest, AppListParser) {
       test_util::LoadJSONFile("drive/applist.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::Type::DICTIONARY, document->GetType());
   std::unique_ptr<AppList> applist(new AppList);
   EXPECT_TRUE(applist->Parse(*document));
 
@@ -114,7 +114,7 @@ TEST(DriveAPIParserTest, FileListParser) {
       test_util::LoadJSONFile("drive/filelist.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::Type::DICTIONARY, document->GetType());
   std::unique_ptr<FileList> filelist(new FileList);
   EXPECT_TRUE(filelist->Parse(*document));
 
@@ -134,6 +134,7 @@ TEST(DriveAPIParserTest, FileListParser) {
   EXPECT_EQ("application/octet-stream", file1.mime_type());
 
   EXPECT_FALSE(file1.labels().is_trashed());
+  EXPECT_FALSE(file1.labels().is_starred());
   EXPECT_FALSE(file1.shared());
 
   EXPECT_EQ(640, file1.image_media_metadata().width());
@@ -171,6 +172,7 @@ TEST(DriveAPIParserTest, FileListParser) {
   EXPECT_EQ("application/vnd.google-apps.document", file2.mime_type());
 
   EXPECT_TRUE(file2.labels().is_trashed());
+  EXPECT_TRUE(file2.labels().is_starred());
   EXPECT_TRUE(file2.shared());
 
   EXPECT_EQ(-1, file2.image_media_metadata().width());
@@ -214,7 +216,7 @@ TEST(DriveAPIParserTest, ChangeListParser) {
       test_util::LoadJSONFile("drive/changelist.json");
   ASSERT_TRUE(document.get());
 
-  ASSERT_EQ(base::Value::TYPE_DICTIONARY, document->GetType());
+  ASSERT_EQ(base::Value::Type::DICTIONARY, document->GetType());
   std::unique_ptr<ChangeList> changelist(new ChangeList);
   EXPECT_TRUE(changelist->Parse(*document));
 

@@ -16,12 +16,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process/process.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/chromeos/arc/arc_process.h"
+#include "chrome/browser/chromeos/arc/process/arc_process.h"
 #include "chrome/browser/memory/tab_manager.h"
 #include "chrome/browser/memory/tab_stats.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chromeos/dbus/debug_daemon_client.h"
-#include "components/arc/arc_bridge_service.h"
 #include "components/arc/common/process.mojom.h"
 #include "components/arc/instance_holder.h"
 #include "content/public/browser/notification_observer.h"
@@ -47,11 +46,9 @@ enum class ProcessType {
 
 // The Chrome OS TabManagerDelegate is responsible for keeping the
 // renderers' scores up to date in /proc/<pid>/oom_score_adj.
-class TabManagerDelegate
-    : public arc::InstanceHolder<arc::mojom::ProcessInstance>::Observer,
-      public aura::client::ActivationChangeObserver,
-      public content::NotificationObserver,
-      public chrome::BrowserListObserver {
+class TabManagerDelegate : public aura::client::ActivationChangeObserver,
+                           public content::NotificationObserver,
+                           public chrome::BrowserListObserver {
  public:
   class MemoryStat;
 
@@ -63,10 +60,6 @@ class TabManagerDelegate
   ~TabManagerDelegate() override;
 
   void OnBrowserSetLastActive(Browser* browser) override;
-
-  // InstanceHolder<arc::mojom::ProcessInstance>::Observer overrides.
-  void OnInstanceReady() override;
-  void OnInstanceClosed() override;
 
   // aura::ActivationChangeObserver overrides.
   void OnWindowActivated(
@@ -104,7 +97,6 @@ class TabManagerDelegate
 
   class Candidate;
   class FocusedProcess;
-  class UmaReporter;
 
   friend std::ostream& operator<<(std::ostream& out,
                                   const Candidate& candidate);
@@ -175,14 +167,6 @@ class TabManagerDelegate
 
   // Util for getting system memory status.
   std::unique_ptr<TabManagerDelegate::MemoryStat> mem_stat_;
-
-  // Holds a weak pointer to arc::mojom::ProcessInstance.
-  arc::mojom::ProcessInstance* arc_process_instance_;
-  // Current ProcessInstance version.
-  int arc_process_instance_version_;
-
-  // Reports UMA histograms.
-  std::unique_ptr<UmaReporter> uma_;
 
   // Weak pointer factory used for posting tasks to other threads.
   base::WeakPtrFactory<TabManagerDelegate> weak_ptr_factory_;

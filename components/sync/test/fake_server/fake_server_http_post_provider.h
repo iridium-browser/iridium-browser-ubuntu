@@ -13,8 +13,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "components/sync/core/http_post_provider_factory.h"
-#include "components/sync/core/http_post_provider_interface.h"
+#include "components/sync/engine/net/http_post_provider_factory.h"
+#include "components/sync/engine/net/http_post_provider_interface.h"
 
 namespace fake_server {
 
@@ -88,6 +88,6 @@ class FakeServerHttpPostProviderFactory
   DISALLOW_COPY_AND_ASSIGN(FakeServerHttpPostProviderFactory);
 };
 
-}  //  namespace fake_server
+}  // namespace fake_server
 
 #endif  // COMPONENTS_SYNC_TEST_FAKE_SERVER_FAKE_SERVER_HTTP_POST_PROVIDER_H_

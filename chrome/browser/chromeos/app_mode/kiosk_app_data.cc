@@ -162,7 +162,7 @@ class KioskAppData::CrxLoader : public extensions::SandboxedUnpackerClient {
     scoped_refptr<extensions::SandboxedUnpacker> unpacker(
         new extensions::SandboxedUnpacker(
             extensions::Manifest::INTERNAL, extensions::Extension::NO_FLAGS,
-            temp_dir_.path(), task_runner_.get(), this));
+            temp_dir_.GetPath(), task_runner_.get(), this));
     unpacker->StartWithCrx(extensions::CRXFileInfo(crx_file_));
   }
 
@@ -171,7 +171,7 @@ class KioskAppData::CrxLoader : public extensions::SandboxedUnpackerClient {
 
     if (!temp_dir_.Delete()) {
       LOG(WARNING) << "Can not delete temp directory at "
-                   << temp_dir_.path().value();
+                   << temp_dir_.GetPath().value();
     }
 
     BrowserThread::PostTask(
@@ -662,8 +662,8 @@ void KioskAppData::OnWebstoreResponseParseSuccess(
                              &icon_url_string))
     return;
 
-  GURL icon_url = GURL(extension_urls::GetWebstoreLaunchURL()).Resolve(
-      icon_url_string);
+  GURL icon_url =
+      extension_urls::GetWebstoreLaunchURL().Resolve(icon_url_string);
   if (!icon_url.is_valid()) {
     LOG(ERROR) << "Webstore response error (icon url): "
                << ValueToString(*webstore_data);

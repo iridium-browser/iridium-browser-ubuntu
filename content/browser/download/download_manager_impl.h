@@ -29,7 +29,7 @@
 #include "content/public/browser/download_url_parameters.h"
 
 namespace net {
-class BoundNetLog;
+class NetLog;
 }
 
 namespace content {
@@ -37,6 +37,7 @@ class DownloadFileFactory;
 class DownloadItemFactory;
 class DownloadItemImpl;
 class DownloadRequestHandleInterface;
+class ResourceContext;
 
 class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
                                            private DownloadItemImplDelegate {
@@ -77,7 +78,6 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
       const base::Callback<bool(const GURL&)>& url_filter,
       base::Time remove_begin,
       base::Time remove_end) override;
-  int RemoveAllDownloads() override;
   void DownloadUrl(std::unique_ptr<DownloadUrlParameters> params) override;
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
@@ -120,12 +120,25 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
 
   void RemoveUrlDownloader(UrlDownloader* downloader);
 
+  // Helper function to initiate a download request. This function initiates
+  // the download using functionality provided by the
+  // ResourceDispatcherHostImpl::BeginURLRequest function. The function returns
+  // the result of the downoad operation. Please see the
+  // DownloadInterruptReason enum for information on possible return values.
+  static DownloadInterruptReason BeginDownloadRequest(
+      std::unique_ptr<net::URLRequest> url_request,
+      const Referrer& referrer,
+      ResourceContext* resource_context,
+      bool is_content_initiated,
+      int render_process_id,
+      int render_view_route_id,
+      int render_frame_route_id,
+      bool do_not_prompt_for_login);
+
  private:
   using DownloadSet = std::set<DownloadItem*>;
-  using DownloadMap = std::unordered_map<uint32_t, DownloadItemImpl*>;
   using DownloadGuidMap = std::unordered_map<std::string, DownloadItemImpl*>;
   using DownloadItemImplVector = std::vector<DownloadItemImpl*>;
-  using DownloadRemover = base::Callback<bool(const DownloadItemImpl*)>;
 
   // For testing.
   friend class DownloadManagerTest;
@@ -160,9 +173,6 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
   // observer.
   void OnFileExistenceChecked(uint32_t download_id, bool result);
 
-  // Remove all downloads for which |remover| returns true.
-  int RemoveDownloads(const DownloadRemover& remover);
-
   // Overridden from DownloadItemImplDelegate
   // (Note that |GetBrowserContext| are present in both interfaces.)
   void DetermineDownloadTarget(DownloadItemImpl* item,
@@ -173,6 +183,7 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
   bool ShouldOpenDownload(DownloadItemImpl* item,
                           const ShouldOpenDownloadCallback& callback) override;
   void CheckForFileRemoval(DownloadItemImpl* download_item) override;
+  std::string GetApplicationClientIdForFileScanning() const override;
   void ResumeInterruptedDownload(
       std::unique_ptr<content::DownloadUrlParameters> params,
       uint32_t id) override;
@@ -196,7 +207,7 @@ class CONTENT_EXPORT DownloadManagerImpl : public DownloadManager,
   // "save page as" downloads.
   // TODO(asanka): Remove this container in favor of downloads_by_guid_ as a
   // part of http://crbug.com/593020.
-  DownloadMap downloads_;
+  std::unordered_map<uint32_t, std::unique_ptr<DownloadItemImpl>> downloads_;
 
   // Same as the above, but maps from GUID to download item. Note that the
   // container is case sensitive. Hence the key needs to be normalized to

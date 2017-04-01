@@ -7,25 +7,22 @@
 
 #include "base/macros.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/WebKit/public/platform/modules/hyphenation/hyphenation.mojom.h"
 
 namespace hyphenation {
 
 class HyphenationImpl : public blink::mojom::Hyphenation {
  public:
+  HyphenationImpl();
+  ~HyphenationImpl() override;
+
   static void Create(blink::mojom::HyphenationRequest);
 
   // Hyphenation:
-  void OpenDictionary(const mojo::String& locale,
+  void OpenDictionary(const std::string& locale,
                       const OpenDictionaryCallback& callback) override;
 
  private:
-  explicit HyphenationImpl(blink::mojom::HyphenationRequest);
-  ~HyphenationImpl() override;
-
-  mojo::StrongBinding<blink::mojom::Hyphenation> binding_;
-
   DISALLOW_COPY_AND_ASSIGN(HyphenationImpl);
 };
 

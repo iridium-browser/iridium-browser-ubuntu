@@ -142,8 +142,21 @@ const int kBackendCount = kLast_GrBackend + 1;
 /**
  * Backend-specific 3D context handle
  *      GrGLInterface* for OpenGL. If NULL will use the default GL interface.
+ *      GrVkBackendContext* for Vulkan.
  */
 typedef intptr_t GrBackendContext;
+
+///////////////////////////////////////////////////////////////////////////////
+
+/**
+ * Used to control antialiasing in draw calls.
+ */
+enum class GrAA {
+    kYes,
+    kNo
+};
+
+static inline GrAA GrBoolToAA(bool aa) { return aa ? GrAA::kYes : GrAA::kNo; }
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -206,7 +219,7 @@ static inline int GrMaskFormatBytesPerPixel(GrMaskFormat format) {
 enum GrPixelConfig {
     kUnknown_GrPixelConfig,
     kAlpha_8_GrPixelConfig,
-    kIndex_8_GrPixelConfig,
+    kGray_8_GrPixelConfig,
     kRGB_565_GrPixelConfig,
     /**
      * Premultiplied
@@ -228,6 +241,10 @@ enum GrPixelConfig {
      * Premultiplied and sRGB. Byte order is b,g,r,a.
      */
     kSBGRA_8888_GrPixelConfig,
+    /**
+     * 8 bit signed integers per-channel. Byte order is b,g,r,a.
+     */
+    kRGBA_8888_sint_GrPixelConfig,
     /**
      * ETC1 Compressed Data
      */
@@ -279,10 +296,8 @@ static const int kGrPixelConfigCnt = kLast_GrPixelConfig + 1;
 #endif
 #if SK_PMCOLOR_BYTE_ORDER(B,G,R,A)
     static const GrPixelConfig kSkia8888_GrPixelConfig = kBGRA_8888_GrPixelConfig;
-    static const GrPixelConfig kSkiaGamma8888_GrPixelConfig = kSBGRA_8888_GrPixelConfig;
 #elif SK_PMCOLOR_BYTE_ORDER(R,G,B,A)
     static const GrPixelConfig kSkia8888_GrPixelConfig = kRGBA_8888_GrPixelConfig;
-    static const GrPixelConfig kSkiaGamma8888_GrPixelConfig = kSRGBA_8888_GrPixelConfig;
 #else
     #error "SK_*32_SHIFT values must correspond to GL_BGRA or GL_RGBA format."
 #endif
@@ -291,7 +306,6 @@ static const int kGrPixelConfigCnt = kLast_GrPixelConfig + 1;
 // representation.
 static inline bool GrPixelConfigIsCompressed(GrPixelConfig config) {
     switch (config) {
-        case kIndex_8_GrPixelConfig:
         case kETC1_GrPixelConfig:
         case kLATC_GrPixelConfig:
         case kR11_EAC_GrPixelConfig:
@@ -305,7 +319,6 @@ static inline bool GrPixelConfigIsCompressed(GrPixelConfig config) {
 /** If the pixel config is compressed, return an equivalent uncompressed format. */
 static inline GrPixelConfig GrMakePixelConfigUncompressed(GrPixelConfig config) {
     switch (config) {
-        case kIndex_8_GrPixelConfig:
         case kETC1_GrPixelConfig:
         case kASTC_12x12_GrPixelConfig:
             return kRGBA_8888_GrPixelConfig;
@@ -319,7 +332,7 @@ static inline GrPixelConfig GrMakePixelConfigUncompressed(GrPixelConfig config) 
 }
 
 // Returns true if the pixel config is 32 bits per pixel
-static inline bool GrPixelConfigIs8888(GrPixelConfig config) {
+static inline bool GrPixelConfigIs8888Unorm(GrPixelConfig config) {
     switch (config) {
         case kRGBA_8888_GrPixelConfig:
         case kBGRA_8888_GrPixelConfig:
@@ -364,6 +377,7 @@ static inline size_t GrBytesPerPixel(GrPixelConfig config) {
     SkASSERT(!GrPixelConfigIsCompressed(config));
     switch (config) {
         case kAlpha_8_GrPixelConfig:
+        case kGray_8_GrPixelConfig:
             return 1;
         case kRGB_565_GrPixelConfig:
         case kRGBA_4444_GrPixelConfig:
@@ -373,6 +387,7 @@ static inline size_t GrBytesPerPixel(GrPixelConfig config) {
         case kBGRA_8888_GrPixelConfig:
         case kSRGBA_8888_GrPixelConfig:
         case kSBGRA_8888_GrPixelConfig:
+        case kRGBA_8888_sint_GrPixelConfig:
             return 4;
         case kRGBA_half_GrPixelConfig:
             return 8;
@@ -387,6 +402,7 @@ static inline bool GrPixelConfigIsOpaque(GrPixelConfig config) {
     switch (config) {
         case kETC1_GrPixelConfig:
         case kRGB_565_GrPixelConfig:
+        case kGray_8_GrPixelConfig:
             return true;
         default:
             return false;
@@ -415,6 +431,10 @@ static inline bool GrPixelConfigIsFloatingPoint(GrPixelConfig config) {
         default:
             return false;
     }
+}
+
+static inline bool GrPixelConfigIsSint(GrPixelConfig config) {
+    return config == kRGBA_8888_sint_GrPixelConfig;
 }
 
 /**
@@ -569,6 +589,7 @@ struct GrBackendTextureDesc {
     /**
      * Handle to the 3D API object.
      * OpenGL: Texture ID.
+     * Vulkan: GrVkImageInfo*
      */
     GrBackendObject                 fTextureHandle;
 };
@@ -603,6 +624,7 @@ struct GrBackendRenderTargetDesc {
     /**
      * Handle to the 3D API object.
      * OpenGL: FBO ID
+     * Vulkan: GrVkImageInfo*
      */
     GrBackendObject                 fRenderTargetHandle;
 };
@@ -634,11 +656,8 @@ enum GrGLBackendState {
 static inline size_t GrCompressedFormatDataSize(GrPixelConfig config,
                                                 int width, int height) {
     SkASSERT(GrPixelConfigIsCompressed(config));
-    static const int kGrIndex8TableSize = 256 * 4; // 4 == sizeof(GrColor)
 
     switch (config) {
-        case kIndex_8_GrPixelConfig:
-            return width * height + kGrIndex8TableSize;
         case kR11_EAC_GrPixelConfig:
         case kLATC_GrPixelConfig:
         case kETC1_GrPixelConfig:

@@ -10,8 +10,8 @@ import datetime
 import itertools
 import random
 
-from chromite.cbuildbot import constants
-from chromite.cbuildbot import metadata_lib
+from chromite.lib import constants
+from chromite.lib import metadata_lib
 from chromite.cbuildbot import validation_pool
 from chromite.lib import fake_cidb
 from chromite.lib import clactions
@@ -23,30 +23,6 @@ class CLActionTest(cros_test_lib.TestCase):
 
   def runTest(self):
     pass
-
-
-class IntervalsTest(cros_test_lib.TestCase):
-  """Placeholder for clactions unit tests."""
-  # pylint: disable=protected-access
-
-  def testIntervals(self):
-    self.assertEqual([], clactions._IntersectIntervals([]))
-    self.assertEqual([(1, 2)], clactions._IntersectIntervals([[(1, 2)]]))
-
-    test_group_0 = [(1, 10)]
-    test_group_1 = [(2, 5), (7, 10)]
-    test_group_2 = [(2, 8), (9, 12)]
-    self.assertEqual(
-        [(2, 5), (7, 8), (9, 10)],
-        clactions._IntersectIntervals([test_group_0, test_group_1,
-                                       test_group_2])
-    )
-
-    test_group_0 = [(1, 3), (10, 12)]
-    test_group_1 = [(2, 5)]
-    self.assertEqual(
-        [(2, 3)],
-        clactions._IntersectIntervals([test_group_0, test_group_1]))
 
 
 class TestCLActionHistory(cros_test_lib.TestCase):
@@ -141,6 +117,75 @@ class TestCLActionHistory(cros_test_lib.TestCase):
     """Helper method to get a CL's pre-CQ status from fake_db."""
     action_history = self.fake_db.GetActionsForChanges([change])
     return clactions.GetCLPreCQStatus(change, action_history)
+
+  def testGetOldPreCQBuildActions(self):
+    """Test GetOldPreCQBuildActions."""
+    c1 = metadata_lib.GerritPatchTuple(1, 1, False)
+    c2 = metadata_lib.GerritPatchTuple(1, 2, False)
+    changes = [c1, c2]
+
+    build_id = self.fake_db.InsertBuild('n', 'w', 1, 'c', 'h')
+
+
+    a1 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='binhost-pre-cq',
+        timestamp=datetime.datetime.now() - datetime.timedelta(hours=5))
+    a2 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='binhost-pre-cq',
+        timestamp=datetime.datetime.now() - datetime.timedelta(hours=4),
+        buildbucket_id='1')
+    a3 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='binhost-pre-cq',
+        timestamp=datetime.datetime.now() - datetime.timedelta(hours=3),
+        buildbucket_id='2')
+    a4 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='pbinhost-pre-cq',
+        timestamp=datetime.datetime.now() - datetime.timedelta(hours=3),
+        buildbucket_id='3')
+    a5 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_CANCELLED,
+        reason='binhost-pre-cq',
+        timestamp=datetime.datetime.now() - datetime.timedelta(hours=3),
+        buildbucket_id='3')
+    a6 = clactions.CLAction.FromGerritPatchAndAction(
+        c1, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='binhost-pre-cq',
+        timestamp=datetime.datetime.now() - datetime.timedelta(hours=1),
+        buildbucket_id='4')
+    a7 = clactions.CLAction.FromGerritPatchAndAction(
+        c2, constants.CL_ACTION_TRYBOT_LAUNCHING,
+        reason='binhost-pre-cq',
+        timestamp=datetime.datetime.now(),
+        buildbucket_id='5')
+
+    cl_actions = [a1, a2, a3, a4, a5, a6, a7]
+
+    self.fake_db.InsertCLActions(build_id, cl_actions)
+    action_history = self.fake_db.GetActionsForChanges(changes)
+
+    timestamp = datetime.datetime.now() - datetime.timedelta(hours=2)
+    c1_old_actions = clactions.GetOldPreCQBuildActions(
+        c1, action_history, timestamp)
+    c2_old_actions = clactions.GetOldPreCQBuildActions(
+        c2, action_history, timestamp)
+    self.assertTrue(len(c1_old_actions) == 0)
+    self.assertTrue(len(c2_old_actions) == 1)
+    self.assertEqual([c.buildbucket_id for c in c2_old_actions],
+                     [a6.buildbucket_id])
+
+    c1_old_actions = clactions.GetOldPreCQBuildActions(
+        c1, action_history)
+    c2_old_actions = clactions.GetOldPreCQBuildActions(
+        c2, action_history)
+    self.assertTrue(len(c1_old_actions) == 0)
+    self.assertTrue(len(c2_old_actions) == 3)
+    self.assertEqual([c.buildbucket_id for c in c2_old_actions],
+                     [a2.buildbucket_id, a3.buildbucket_id,
+                      a6.buildbucket_id])
 
   def testGetRequeuedOrSpeculative(self):
     """Tests GetRequeuedOrSpeculative function."""
@@ -780,3 +825,25 @@ class TestCLActionHistoryRejections(cros_test_lib.TestCase):
     self.assertEqual({}, self.cl_action_stats.GetTrueRejections())
     self.assertEqual({self.cl1_patch1: [reject_action1]},
                      self.cl_action_stats.GetFalseRejections())
+
+
+class TestGerritChangeTuple(cros_test_lib.TestCase):
+  """Tests of basic GerritChangeTuple functionality."""
+
+  def testUnknownHostRaises(self):
+    with self.assertRaises(clactions.UnknownGerritHostError):
+      clactions.GerritChangeTuple.FromHostAndNumber('foobar-host', 1234)
+
+  def testKnownHosts(self):
+    self.assertEqual((31415, True),
+                     clactions.GerritChangeTuple.FromHostAndNumber(
+                         'gerrit-int.chromium.org', 31415))
+    self.assertEqual((31415, True),
+                     clactions.GerritChangeTuple.FromHostAndNumber(
+                         constants.INTERNAL_GERRIT_HOST, 31415))
+    self.assertEqual((31415, False),
+                     clactions.GerritChangeTuple.FromHostAndNumber(
+                         'gerrit.chromium.org', 31415))
+    self.assertEqual((31415, False),
+                     clactions.GerritChangeTuple.FromHostAndNumber(
+                         constants.EXTERNAL_GERRIT_HOST, 31415))

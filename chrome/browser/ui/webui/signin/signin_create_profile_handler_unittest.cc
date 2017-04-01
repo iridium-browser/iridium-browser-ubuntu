@@ -13,24 +13,26 @@
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/ui/webui/signin/signin_utils.h"
+#include "chrome/common/features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
-#include "components/sync/api/fake_sync_change_processor.h"
-#include "components/sync/api/sync_data.h"
-#include "components/sync/api/sync_error_factory_mock.h"
-#include "components/sync/core/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/model/attachments/attachment_service_proxy_for_test.h"
+#include "components/sync/model/fake_sync_change_processor.h"
+#include "components/sync/model/sync_data.h"
+#include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync/protocol/sync.pb.h"
-#include "components/syncable_prefs/testing_pref_service_syncable.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/test_web_ui.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/legacy/supervised_user_sync_service.h"
 #include "chrome/browser/supervised_user/legacy/supervised_user_sync_service_factory.h"
 #endif
@@ -51,7 +53,7 @@ const char kTestEmail2[] = "foo2@bar.com";
 
 const char kTestWebUIResponse[] = "cr.webUIListenerCallback";
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 const char kSupervisedUserId1[] = "test-supervised-id-1";
 const char kSupervisedUserId2[] = "test-supervised-id-2";
 
@@ -109,11 +111,8 @@ class TestSigninCreateProfileHandler : public SigninCreateProfileHandler {
     // Create the profile synchronously.
     Profile* profile = profile_manager_->CreateTestingProfile(
         kTestProfileName,
-        std::unique_ptr<syncable_prefs::TestingPrefServiceSyncable>(),
-        name,
-        0,
-        supervised_user_id,
-        TestingProfile::TestingFactories());
+        std::unique_ptr<sync_preferences::TestingPrefServiceSyncable>(), name,
+        0, supervised_user_id, TestingProfile::TestingFactories());
 
     // Set the flag used to track the state of the creation flow.
     profile_path_being_created_ = profile->GetPath();
@@ -132,6 +131,10 @@ class TestSigninCreateProfileHandler : public SigninCreateProfileHandler {
   MOCK_METHOD2(OpenNewWindowForProfile,
                void(Profile* profile, Profile::CreateStatus status));
 
+  // Mock this method so that we don't actually open the signin dialog during
+  // the test.
+  MOCK_METHOD1(OpenSigninDialogForProfile, void(Profile* profile));
+
   // We don't actually need to register supervised users in the test. Mock this
   // method to fake the registration part.
   MOCK_METHOD4(RegisterSupervisedUser,
@@ -140,7 +143,7 @@ class TestSigninCreateProfileHandler : public SigninCreateProfileHandler {
                     Profile* custodian_profile,
                     Profile* new_profile));
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
   // Calls the callback method to resume profile creation flow.
   void RealRegisterSupervisedUser(bool create_shortcut,
                                   const std::string& supervised_user_id,
@@ -180,11 +183,8 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
                                        BuildFakeSigninManagerBase));
     custodian_ = profile_manager_.get()->CreateTestingProfile(
         "custodian-profile",
-        std::unique_ptr<syncable_prefs::TestingPrefServiceSyncable>(),
-        base::UTF8ToUTF16("custodian-profile"),
-        0,
-        std::string(),
-        factories);
+        std::unique_ptr<sync_preferences::TestingPrefServiceSyncable>(),
+        base::UTF8ToUTF16("custodian-profile"), 0, std::string(), factories);
 
     // Authenticate the custodian profile.
     fake_signin_manager_ = static_cast<FakeSigninManagerForTesting*>(
@@ -192,7 +192,7 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
     fake_signin_manager_->SetAuthenticatedAccountInfo(kTestGaiaId1,
                                                       kTestEmail1);
 
-#if defined(ENABLE_SUPERVISED_USERS)
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
     // Add supervised users to the custodian profile.
     SupervisedUserSyncService* sync_service_ =
         SupervisedUserSyncServiceFactory::GetForProfile(custodian_);
@@ -216,9 +216,8 @@ class SigninCreateProfileHandlerTest : public BrowserWithTestWindowTest {
     // The second supervised user exists on the device.
     profile_manager()->CreateTestingProfile(
         kSupervisedUsername2,
-        std::unique_ptr<syncable_prefs::PrefServiceSyncable>(),
-        base::UTF8ToUTF16(kSupervisedUsername2),
-        0,
+        std::unique_ptr<sync_preferences::PrefServiceSyncable>(),
+        base::UTF8ToUTF16(kSupervisedUsername2), 0,
         kSupervisedUserId2,  // supervised_user_id
         TestingProfile::TestingFactories());
 
@@ -341,6 +340,9 @@ TEST_F(SigninCreateProfileHandlerTest, CreateProfile) {
   // Expect a new browser window for the new profile to be opened.
   EXPECT_CALL(*handler(), OpenNewWindowForProfile(_, _));
 
+  // Expect no signin dialog opened for the new profile.
+  EXPECT_CALL(*handler(), OpenSigninDialogForProfile(_)).Times(0);
+
   // Create a non-supervised profile.
   base::ListValue list_args;
   list_args.AppendString(kTestProfileName);
@@ -371,7 +373,58 @@ TEST_F(SigninCreateProfileHandlerTest, CreateProfile) {
   ASSERT_FALSE(is_supervised);
 }
 
-#if defined(ENABLE_SUPERVISED_USERS)
+TEST_F(SigninCreateProfileHandlerTest, CreateProfileWithForceSignin) {
+  g_browser_process->local_state()->SetBoolean(prefs::kForceBrowserSignin,
+                                               true);
+  ASSERT_TRUE(signin::IsForceSigninEnabled());
+
+  // Expect the call to create the profile.
+  EXPECT_CALL(*handler(), DoCreateProfile(_, _, _, _, _))
+      .WillOnce(Invoke(handler(),
+                       &TestSigninCreateProfileHandler::RealDoCreateProfile));
+
+  // Expect no calls to register a supervised user.
+  EXPECT_CALL(*handler(), RegisterSupervisedUser(_, _, _, _)).Times(0);
+
+  // Expect no new browser window for the new profile.
+  EXPECT_CALL(*handler(), OpenNewWindowForProfile(_, _)).Times(0);
+
+  // Expect a signin dialog opened for the new profile.
+  EXPECT_CALL(*handler(), OpenSigninDialogForProfile(_)).Times(1);
+
+  base::ListValue list_args;
+  list_args.AppendString(kTestProfileName);
+  list_args.AppendString(profiles::GetDefaultAvatarIconUrl(0));
+  list_args.AppendBoolean(false);  // create_shortcut
+  list_args.AppendBoolean(false);  // is_supervised
+  handler()->CreateProfile(&list_args);
+
+  // Expect a JS callbacks with the new profile information.
+  EXPECT_EQ(1U, web_ui()->call_data().size());
+
+  EXPECT_EQ(kTestWebUIResponse, web_ui()->call_data()[0]->function_name());
+
+  std::string callback_name;
+  ASSERT_TRUE(web_ui()->call_data()[0]->arg1()->GetAsString(&callback_name));
+  EXPECT_EQ("create-profile-success", callback_name);
+
+  const base::DictionaryValue* profile;
+  ASSERT_TRUE(web_ui()->call_data()[0]->arg2()->GetAsDictionary(&profile));
+  std::string profile_name;
+  ASSERT_TRUE(profile->GetString("name", &profile_name));
+  EXPECT_NE("", profile_name);
+  std::string profile_path;
+  ASSERT_TRUE(profile->GetString("filePath", &profile_path));
+  EXPECT_NE("", profile_path);
+  bool is_supervised;
+  ASSERT_TRUE(profile->GetBoolean("isSupervised", &is_supervised));
+  ASSERT_FALSE(is_supervised);
+  bool show_confirmation;
+  ASSERT_TRUE(profile->GetBoolean("showConfirmation", &show_confirmation));
+  ASSERT_FALSE(show_confirmation);
+}
+
+#if BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
 TEST_F(SigninCreateProfileHandlerTest, CreateSupervisedUser) {
   // Expect the call to create the profile.

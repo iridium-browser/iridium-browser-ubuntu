@@ -16,14 +16,9 @@
 
 class SkBitmap;
 
-namespace gpu {
-class GLInProcessContext;
-}
-
 namespace cc {
 class CopyOutputRequest;
 class CopyOutputResult;
-class LayerTreeHost;
 class PixelComparator;
 class SolidColorLayer;
 class TextureLayer;
@@ -41,10 +36,10 @@ class LayerTreePixelTest : public LayerTreeTest {
   ~LayerTreePixelTest() override;
 
   // LayerTreeTest overrides.
-  std::unique_ptr<TestDelegatingOutputSurface> CreateDelegatingOutputSurface(
+  std::unique_ptr<TestCompositorFrameSink> CreateCompositorFrameSink(
       scoped_refptr<ContextProvider> compositor_context_provider,
       scoped_refptr<ContextProvider> worker_context_provider) override;
-  std::unique_ptr<OutputSurface> CreateDisplayOutputSurface(
+  std::unique_ptr<OutputSurface> CreateDisplayOutputSurfaceOnThread(
       scoped_refptr<ContextProvider> compositor_context_provider) override;
 
   virtual std::unique_ptr<CopyOutputRequest> CreateCopyOutputRequest();

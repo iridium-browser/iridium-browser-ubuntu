@@ -7,7 +7,6 @@
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
 #include "components/history/core/browser/android/urls_sql_handler.h"
@@ -34,7 +33,7 @@ class VisitSQLHandlerTest : public testing::Test {
     // Get a temporary directory for the test DB files.
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath history_db_name =
-        temp_dir_.path().AppendASCII(kHistoryFilename);
+        temp_dir_.GetPath().AppendASCII(kHistoryFilename);
     ASSERT_EQ(sql::INIT_OK, history_db_.Init(history_db_name));
   }
 

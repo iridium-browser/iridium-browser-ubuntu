@@ -18,6 +18,7 @@
 #include "chrome/browser/themes/theme_properties.h"
 #include "components/url_formatter/elide_url.h"
 #include "components/url_formatter/url_formatter.h"
+#include "services/service_manager/runner/common/client_util.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/pathops/SkPathOps.h"
@@ -34,19 +35,19 @@
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/native_theme/native_theme.h"
-#include "ui/views/controls/scrollbar/native_scroll_bar.h"
+#include "ui/views/controls/scrollbar/scroll_bar_views.h"
 #include "ui/views/widget/root_view.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
 #if defined(USE_ASH)
-#include "ash/common/wm/window_state.h"
-#include "ash/wm/window_state_aura.h"
+#include "ash/common/wm/window_state.h"  // nogncheck
+#include "ash/wm/window_state_aura.h"  // nogncheck
 #endif
 
 #if defined(USE_AURA)
-#include "services/ui/public/cpp/property_type_converters.h"
-#include "services/ui/public/interfaces/window_manager.mojom.h"
+#include "services/ui/public/cpp/property_type_converters.h"  // nogncheck
+#include "services/ui/public/interfaces/window_manager.mojom.h"  // nogncheck
 #endif
 
 // The alpha and color of the bubble's shadow.
@@ -136,9 +137,8 @@ class StatusBubbleViews::StatusView : public views::View {
   };
 
   StatusView(views::Widget* popup,
-             const gfx::Size& popup_size_,
-             SkColor bubble_color,
-             SkColor bubble_text_color,
+             const gfx::Size& popup_size,
+             const ui::ThemeProvider* theme_provider,
              bool has_client_edge);
   ~StatusView() override;
 
@@ -201,8 +201,7 @@ class StatusBubbleViews::StatusView : public views::View {
 
   gfx::Size popup_size_;
 
-  const SkColor bubble_color_;
-  const SkColor bubble_text_color_;
+  const ui::ThemeProvider* theme_provider_;
   const bool has_client_edge_;
 
   base::WeakPtrFactory<StatusBubbleViews::StatusView> timer_factory_;
@@ -210,18 +209,17 @@ class StatusBubbleViews::StatusView : public views::View {
   DISALLOW_COPY_AND_ASSIGN(StatusView);
 };
 
-StatusBubbleViews::StatusView::StatusView(views::Widget* popup,
-                                          const gfx::Size& popup_size,
-                                          SkColor bubble_color,
-                                          SkColor bubble_text_color,
-                                          bool has_client_edge)
+StatusBubbleViews::StatusView::StatusView(
+    views::Widget* popup,
+    const gfx::Size& popup_size,
+    const ui::ThemeProvider* theme_provider,
+    bool has_client_edge)
     : state_(BUBBLE_HIDDEN),
       style_(STYLE_STANDARD),
       animation_(new StatusViewAnimation(this, 0, 0)),
       popup_(popup),
       popup_size_(popup_size),
-      bubble_color_(bubble_color),
-      bubble_text_color_(bubble_text_color),
+      theme_provider_(theme_provider),
       has_client_edge_(has_client_edge),
       timer_factory_(this) {}
 
@@ -470,7 +468,9 @@ void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
   SkPath fill_path;
   Op(path, stroke_path, kDifference_SkPathOp, &fill_path);
   paint.setStyle(SkPaint::kFill_Style);
-  paint.setColor(bubble_color_);
+  const SkColor bubble_color =
+      theme_provider_->GetColor(ThemeProperties::COLOR_TOOLBAR);
+  paint.setColor(bubble_color);
   canvas->sk_canvas()->drawPath(fill_path, paint);
 
   paint.setColor(kShadowColor);
@@ -487,11 +487,12 @@ void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
   text_rect.set_x(GetMirroredXForRect(text_rect));
 
   // Text color is the foreground tab text color at 60% alpha.
-  SkColor blended_text_color =
-      color_utils::AlphaBlend(bubble_text_color_, bubble_color_, 0x99);
+  SkColor blended_text_color = color_utils::AlphaBlend(
+      theme_provider_->GetColor(ThemeProperties::COLOR_TAB_TEXT), bubble_color,
+      0x99);
   canvas->DrawStringRect(
       text_, gfx::FontList(),
-      color_utils::GetReadableColor(blended_text_color, bubble_color_),
+      color_utils::GetReadableColor(blended_text_color, bubble_color),
       text_rect);
 }
 
@@ -502,7 +503,7 @@ StatusBubbleViews::StatusViewAnimation::StatusViewAnimation(
     StatusView* status_view,
     float opacity_start,
     float opacity_end)
-    : gfx::LinearAnimation(kFramerate, this),
+    : gfx::LinearAnimation(this, kFramerate),
       status_view_(status_view),
       opacity_start_(opacity_start),
       opacity_end_(opacity_end) {}
@@ -537,14 +538,12 @@ void StatusBubbleViews::StatusViewAnimation::AnimationEnded(
 class StatusBubbleViews::StatusViewExpander : public gfx::LinearAnimation,
                                               public gfx::AnimationDelegate {
  public:
-  StatusViewExpander(StatusBubbleViews* status_bubble,
-                     StatusView* status_view)
-      : gfx::LinearAnimation(kFramerate, this),
+  StatusViewExpander(StatusBubbleViews* status_bubble, StatusView* status_view)
+      : gfx::LinearAnimation(this, kFramerate),
         status_bubble_(status_bubble),
         status_view_(status_view),
         expansion_start_(0),
-        expansion_end_(0) {
-  }
+        expansion_end_(0) {}
 
   // Manage the expansion of the bubble.
   void StartExpansion(const base::string16& expanded_text,
@@ -636,12 +635,8 @@ void StatusBubbleViews::Init() {
     popup_.reset(new views::Widget);
     views::Widget* frame = base_view_->GetWidget();
     if (!view_) {
-      const ui::ThemeProvider* theme_provider = frame->GetThemeProvider();
-      view_ = new StatusView(
-          popup_.get(), size_,
-          theme_provider->GetColor(ThemeProperties::COLOR_TOOLBAR),
-          theme_provider->GetColor(ThemeProperties::COLOR_TAB_TEXT),
-          has_client_edge_);
+      view_ = new StatusView(popup_.get(), size_, frame->GetThemeProvider(),
+                             has_client_edge_);
     }
     if (!expand_view_.get())
       expand_view_.reset(new StatusViewExpander(this, view_));
@@ -669,8 +664,13 @@ void StatusBubbleViews::Init() {
     popup_->SetOpacity(0.f);
     popup_->SetContentsView(view_);
 #if defined(USE_ASH)
-    ash::wm::GetWindowState(popup_->GetNativeWindow())->
-        set_ignored_by_shelf(true);
+    // TODO: http://crbug.com/671729 convert to WindowProperty (and then can
+    // remove explicit kWindowIgnoredByShelf_Property above and make this ifdef
+    // USE_AURA).
+    if (!service_manager::ServiceManagerIsRemote()) {
+      ash::wm::GetWindowState(popup_->GetNativeWindow())
+          ->set_ignored_by_shelf(true);
+    }
 #endif
     RepositionPopup();
   }
@@ -942,9 +942,10 @@ int StatusBubbleViews::GetStandardStatusBubbleWidth() {
 
 int StatusBubbleViews::GetMaxStatusBubbleWidth() {
   const ui::NativeTheme* theme = base_view_->GetNativeTheme();
-  return static_cast<int>(std::max(0, base_view_->bounds().width() -
-      (kShadowThickness * 2) - kTextPositionX - kTextHorizPadding - 1 -
-      views::NativeScrollBar::GetVerticalScrollBarWidth(theme)));
+  return static_cast<int>(
+      std::max(0, base_view_->bounds().width() - (kShadowThickness * 2) -
+                      kTextPositionX - kTextHorizPadding - 1 -
+                      views::ScrollBarViews::GetVerticalScrollBarWidth(theme)));
 }
 
 void StatusBubbleViews::SetBubbleWidth(int width) {

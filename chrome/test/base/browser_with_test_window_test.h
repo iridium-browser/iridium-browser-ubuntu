@@ -31,6 +31,7 @@ class GURL;
 #if defined(OS_CHROMEOS)
 namespace ash {
 namespace test {
+class AshTestEnvironment;
 class AshTestHelper;
 }
 }
@@ -42,7 +43,6 @@ class ScopedViewsTestHelper;
 
 namespace content {
 class NavigationController;
-class WebContents;
 }
 
 // Base class for browser based unit tests. BrowserWithTestWindowTest creates a
@@ -61,7 +61,7 @@ class WebContents;
 //
 //   // This is equivalent to the above, and lets you test pending navigations.
 //   browser()->OpenURL(OpenURLParams(
-//       GURL("http://foo/2"), GURL(), CURRENT_TAB,
+//       GURL("http://foo/2"), GURL(), WindowOpenDisposition::CURRENT_TAB,
 //       ui::PAGE_TRANSITION_TYPED, false));
 //   CommitPendingLoad(controller);
 //
@@ -171,6 +171,7 @@ class BrowserWithTestWindowTest : public testing::Test {
   content::RenderViewHostTestEnabler rvh_test_enabler_;
 
 #if defined(OS_CHROMEOS)
+  std::unique_ptr<ash::test::AshTestEnvironment> ash_test_environment_;
   std::unique_ptr<ash::test::AshTestHelper> ash_test_helper_;
 #elif defined(TOOLKIT_VIEWS)
   std::unique_ptr<views::ScopedViewsTestHelper> views_test_helper_;

@@ -280,15 +280,6 @@ PrintingContext::Result PrintingContextChromeos::InitializeDevice(
   return OK;
 }
 
-PrintingContext::Result PrintingContextChromeos::InitWithSettings(
-    const PrintSettings& settings) {
-  DCHECK(!in_print_job_);
-
-  settings_ = settings;
-
-  return OK;
-}
-
 PrintingContext::Result PrintingContextChromeos::NewDocument(
     const base::string16& document_name) {
   DCHECK(!in_print_job_);
@@ -379,7 +370,7 @@ void PrintingContextChromeos::ReleaseContext() {
   printer_.reset();
 }
 
-gfx::NativeDrawingContext PrintingContextChromeos::context() const {
+skia::NativeDrawingContext PrintingContextChromeos::context() const {
   // Intentional No-op.
   return nullptr;
 }

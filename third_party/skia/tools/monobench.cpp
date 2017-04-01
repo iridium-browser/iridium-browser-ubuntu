@@ -6,14 +6,23 @@
  */
 
 #include "Benchmark.h"
+#include "OverwriteLine.h"
 #include "SkGraphics.h"
 #include "SkTaskGroup.h"
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <regex>
-#include <stdio.h>
+#include <stdlib.h>
 #include <string>
 #include <vector>
+
+
+#if defined(SK_BUILD_FOR_WIN32)
+static const char* kEllipsis = "...";
+#else
+static const char* kEllipsis = "…";
+#endif
 
 int main(int argc, char** argv) {
     SkGraphics::Init();
@@ -23,9 +32,9 @@ int main(int argc, char** argv) {
     using ns = std::chrono::duration<double, std::nano>;
 
     std::regex pattern;
-    if (argc > 1) {
-        pattern = argv[1];
-    }
+    int limit = 2147483647;
+    if (argc > 1) { pattern = argv[1]; }
+    if (argc > 2) { limit = atoi(argv[2]); }
 
     struct Bench {
         std::unique_ptr<Benchmark> b;
@@ -41,8 +50,14 @@ int main(int argc, char** argv) {
         if (std::regex_search(name, pattern) &&
                 bench->isSuitableFor(Benchmark::kNonRendering_Backend)) {
             bench->delayedSetup();
-            benches.emplace_back(Bench{std::move(bench), name, ns{1.0/0.0}});
+            benches.emplace_back(Bench{std::move(bench), name,
+                                       ns{std::numeric_limits<double>::infinity()}});
         }
+    }
+
+    if (benches.size() == 0) {
+        SkDebugf("No bench matched.\n");
+        return 1;
     }
 
     if (benches.size() > 1) {
@@ -56,7 +71,7 @@ int main(int argc, char** argv) {
         std::string prefix = benches[0].name.substr(0, common_prefix);
         if (common_prefix) {
             for (auto& bench : benches) {
-                bench.name.replace(0, common_prefix, "…");
+                bench.name.replace(0, common_prefix, kEllipsis);
             }
         }
 
@@ -70,15 +85,16 @@ int main(int argc, char** argv) {
         std::string suffix = benches[0].name.substr(benches[0].name.size() - common_suffix);
         if (common_suffix) {
             for (auto& bench : benches) {
-                bench.name.replace(bench.name.size() - common_suffix, common_suffix, "…");
+                bench.name.replace(bench.name.size() - common_suffix, common_suffix, kEllipsis);
             }
         }
 
-        printf("%s…%s\n", prefix.c_str(), suffix.c_str());
+        SkDebugf("%s%s%s\n", prefix.c_str(), kEllipsis, suffix.c_str());
     }
 
     int samples = 0;
-    for (;;) {
+    while (samples < limit) {
+        std::random_shuffle(benches.begin(), benches.end());
         for (auto& bench : benches) {
             for (int loops = 1; loops < 1000000000;) {
                 bench.b->preDraw(nullptr);
@@ -95,18 +111,24 @@ int main(int argc, char** argv) {
                 bench.best = std::min(bench.best, elapsed / loops);
                 samples++;
 
-                std::sort(benches.begin(), benches.end(), [](const Bench& a, const Bench& b) {
+                struct Result { const char* name; ns best; };
+                std::vector<Result> sorted(benches.size());
+                for (size_t i = 0; i < benches.size(); i++) {
+                    sorted[i].name = benches[i].name.c_str();
+                    sorted[i].best = benches[i].best;
+                }
+                std::sort(sorted.begin(), sorted.end(), [](const Result& a, const Result& b) {
                     return a.best < b.best;
                 });
-                printf("\r\033[K%d", samples);
-                for (auto& bench : benches) {
-                    if (benches.size() == 1) {
-                        printf("  %s %gns" , bench.name.c_str(), bench.best.count());
+
+                SkDebugf("%s%d", kSkOverwriteLine, samples);
+                for (auto& result : sorted) {
+                    if (sorted.size() == 1) {
+                        SkDebugf("  %s %gns" , result.name, result.best.count());
                     } else {
-                        printf("  %s %.3gx", bench.name.c_str(), bench.best / benches[0].best);
+                        SkDebugf("  %s %.3gx", result.name, result.best / sorted[0].best);
                     }
                 }
-                fflush(stdout);
                 break;
             }
         }

@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "base/numerics/safe_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/base/math_util.h"
 #include "cc/debug/traced_value.h"
@@ -22,6 +23,7 @@ Tile::Tile(TileManager* tile_manager,
            int source_frame_number,
            int flags)
     : tile_manager_(tile_manager),
+      tiling_(info.tiling),
       content_rect_(info.content_rect),
       enclosing_layer_rect_(info.enclosing_layer_rect),
       contents_scale_(info.contents_scale),
@@ -32,6 +34,7 @@ Tile::Tile(TileManager* tile_manager,
       tiling_j_index_(info.tiling_j_index),
       required_for_activation_(false),
       required_for_draw_(false),
+      is_solid_color_analysis_performed_(false),
       id_(tile_manager->GetUniqueTileId()),
       invalidated_id_(0),
       scheduled_priority_(0) {}
@@ -40,12 +43,13 @@ Tile::~Tile() {
   TRACE_EVENT_OBJECT_DELETED_WITH_ID(
       TRACE_DISABLED_BY_DEFAULT("cc.debug"),
       "cc::Tile", this);
+  tile_manager_->Release(this);
 }
 
 void Tile::AsValueInto(base::trace_event::TracedValue* value) const {
   TracedValue::MakeDictIntoImplicitSnapshotWithCategory(
       TRACE_DISABLED_BY_DEFAULT("cc.debug"), value, "cc::Tile", this);
-  value->SetDouble("contents_scale", contents_scale_);
+  value->SetDouble("contents_scale", contents_scale());
 
   MathUtil::AddToTracedValue("content_rect", content_rect_, value);
 
@@ -72,10 +76,6 @@ size_t Tile::GPUMemoryUsageInBytes() const {
         draw_info_.resource_->size(), draw_info_.resource_->format());
   }
   return 0;
-}
-
-void Tile::Deleter::operator()(Tile* tile) const {
-  tile->tile_manager_->Release(tile);
 }
 
 }  // namespace cc

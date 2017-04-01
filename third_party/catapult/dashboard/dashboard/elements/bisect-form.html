@@ -17,44 +17,53 @@ the bisect process after the user clicks on the bisect button.
 
 <dom-module is="bisect-form">
   <template>
+    <style>
+      form {
+        width: 550px;
+        padding-bottom: 10px;
+      }
 
+      #loading {
+        background-color: white;
+        height: 100%;
+        width: 100%;
+        position: absolute;
+        left: 0;
+        top: 0;
+        display: -webkit-flex;
+        display: flex;
+        -webkit-align-items: center;
+        align-items: center;
+        justify-content: center;
+        -webkit-justify-content: center;
+      }
+
+      select, input[type=text], input[type=number] {
+        border-radius: 1px;
+        border: 1px solid #d9d9d9;
+        border-top: 1px solid #c0c0c0;
+        font-size: 13px;
+        height: 25px;  /* 29 px total height incl padding + border */
+        width: 300px;
+        padding: 1px 2px;
+      }
+
+      paper-button[dialog-confirm] {
+        background: #4285f4;
+        color: #fff;
+      }
+
+      .error {
+        color: #dd4b39;
+      }
+
+      form tr td:first-of-type {
+        white-space: nowrap;
+      }
+    </style>
     <paper-dialog id="container" autoCloseDisabled="true">
       <!-- Styling for paper-dialog's children. -->
-      <style>
-        #loading {
-          background-color: white;
-          height: 100%;
-          width: 100%;
-          position: absolute;
-          left: 0;
-          top: 0;
-          display: -webkit-flex;
-          display: flex;
-          -webkit-align-items: center;
-          align-items: center;
-          justify-content: center;
-          -webkit-justify-content: center;
-        }
 
-        select, input[type=text], input[type=number] {
-          border-radius: 1px;
-          border: 1px solid #d9d9d9;
-          border-top: 1px solid #c0c0c0;
-          font-size: 13px;
-          height: 25px;  /* 29 px total height incl padding + border */
-          width: 300px;
-          padding: 1px 2px;
-        }
-
-        paper-button[dialog-confirm] {
-          background: #4285f4;
-          color: #fff;
-        }
-
-        .error {
-          color: #dd4b39;
-        }
-      </style>
 
       <form>
         <table>
@@ -73,10 +82,14 @@ the bisect process after the user clicks on the bisect button.
             <td>
               <select id="metric" value="{{metric::input}}">
                 <template is="dom-repeat" items="{{metricList}}" as="name">
-                <option value="{{name}}">{{name}}</option>
+                <option value="{{name}}" selected="{{computeIsSelected(name, metric)}}">{{name}}</option>
                 </template>
               </select>
             </td>
+          </tr>
+          <tr>
+            <td>Story filter:</td>
+            <td><input type="text" value="{{storyFilter::input}}"></td>
           </tr>
           <tr>
             <td>Bug ID:</td>
@@ -90,21 +103,20 @@ the bisect process after the user clicks on the bisect button.
             <td>Later revision:</td>
             <td><input type="text" value="{{laterRevision::input}}"></td>
           </tr>
-          <tr>
+          <tr hidden$="{{isNotReturnCode(BISECT_MODE)}}">
             <td>Repeat count:</td>
             <td><input type="number" min="1" max="100" value="{{REPEAT_COUNT::input}}"></td>
           </tr>
-          <tr>
+          <tr hidden$="{{isNotReturnCode(BISECT_MODE)}}">
             <td>Max time (min):</td>
             <td><input type="number" min="1" max="60" value="{{MAX_TIME_MINUTES::input}}"></td>
           </tr>
 
-          <template is="dom-if" if="{{canUseArchive}}">
+          <template is="dom-if" if="{{isAdmin}}">
             <tr>
-              <td>Use archive:</td>
+              <td>Launch on staging bots:</td>
               <td><input type="checkbox"
-                         on-change="{{onUseArchiveChange}}"
-                         checked="{{useArchive}}">
+                         checked="{{useStaging::change}}">
               </td>
             </tr>
           </template>
@@ -114,7 +126,6 @@ the bisect process after the user clicks on the bisect button.
             <td>
               <select type="text" value="{{BISECT_MODE::input}}">
                 <option value="mean">mean</option>
-                <option value="std_dev">std_dev</option>
                 <option value="return_code">return_code</option>
               </select>
               <p class="error" hidden$="{{isNotReturnCode(BISECT_MODE)}}">
@@ -126,21 +137,18 @@ the bisect process after the user clicks on the bisect button.
               </p>
             </td>
           </tr>
-          <tr>
-            <td>Bypass no-repro check:</td>
-            <td><input type="checkbox" checked="{{bypassNoRepro}}"></td>
-          </tr>
         </table>
+        <p><a href="http://www.chromium.org/developers/speed-infra/perf-try-bots-bisect-bots/config">
+          About the config parameters</a></p>
+
+        <p class="error">{{error}}</p>
+
+        <paper-button dialog-confirm raised autofocus disabled$="{{computeHasError(error)}}"
+                      on-click="onSendToTrybot">Start bisect</paper-button>
+        <paper-button dialog-dismiss raised>Close</paper-button>
       </form>
 
-      <p><a href="http://www.chromium.org/developers/speed-infra/perf-try-bots-bisect-bots/config">
-        About the config parameters</a></p>
 
-      <p class="error">{{error}}</p>
-
-      <paper-button dialog-confirm raised autofocus disabled$="{{computeHasError(error)}}"
-                    on-click="onSendToTrybot">Start bisect</paper-button>
-      <paper-button dialog-dismiss raised>Close</paper-button>
 
       <template is="dom-if" if="{{loading}}">
         <div id="loading">
@@ -201,6 +209,10 @@ the bisect process after the user clicks on the bisect button.
             notify: true,
             observer: 'laterRevisionChanged'
           },
+          useStaging: {
+            type: Boolean,
+            value: false,
+          },
           testPath: { notify: true },
           xsrfToken: { notify: true }
         },
@@ -209,17 +221,16 @@ the bisect process after the user clicks on the bisect button.
           return !!e;
         },
 
-        computeIsSelected: function(name, bot) {
-          return name == bot;
+        computeIsSelected: function(name, reference) {
+          return name == reference;
         },
 
         /**
          * Initializes and shows the bisect form.
          */
         show: function() {
-          this.canUseArchive = false,
-          this.bypassNoRepro = false,
-          this.useArchive = true,
+          this.isAdmin = false,
+          this.useStaging = false,
           this.loading = true;
           this.open();
           simple_xhr.send('/start_try_job',
@@ -233,11 +244,12 @@ the bisect process after the user clicks on the bisect button.
               this.botList = info['all_bots'];
               this.metric = info['default_metric'];
               this.metricList = info['all_metrics'];
-              this.canUseArchive = info['use_archive'];
+              this.storyFilter = info['story_filter'];
               this.email = info['email'];
               this.suite = info['suite'];
               this.master = info['master'];
               this.internalOnly = info['internal_only'];
+              this.isAdmin = info['is_admin'];
 
               this.loading = false;
             }.bind(this),
@@ -261,12 +273,12 @@ the bisect process after the user clicks on the bisect button.
               'bisect_bot': this.bot,
               'suite': this.suite,
               'metric': this.metric,
+              'story_filter': this.storyFilter,
               'good_revision': this.earlierRevision,
               'bad_revision': this.laterRevision,
               'repeat_count': this.REPEAT_COUNT,
               'max_time_minutes': this.MAX_TIME_MINUTES,
-              'use_archive': this.useArchive ? 'true' : '',
-              'bypass_no_repro_check': this.bypassNoRepro ? 'true' : '',
+              'use_staging_bot': this.useStaging ? 'true' : '',
               'master': this.master,
               'internal_only': this.internalOnly,
               'bisect_mode': this.BISECT_MODE,

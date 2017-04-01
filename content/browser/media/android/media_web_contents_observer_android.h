@@ -8,17 +8,19 @@
 #include <stdint.h>
 
 #include <memory>
+#include <unordered_map>
 
-#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/macros.h"
 #include "content/browser/media/media_web_contents_observer.h"
 #include "content/common/content_export.h"
 
+namespace media {
+enum class MediaContentType;
+}  // namespace media
+
 namespace content {
 
-class BrowserCdmManager;
 class BrowserMediaPlayerManager;
-class BrowserMediaSessionManager;
 class BrowserSurfaceViewManager;
 
 // This class adds Android specific extensions to the MediaWebContentsObserver.
@@ -37,16 +39,8 @@ class CONTENT_EXPORT MediaWebContentsObserverAndroid
   // returned pointer.
   BrowserMediaPlayerManager* GetMediaPlayerManager(
       RenderFrameHost* render_frame_host);
-  BrowserMediaSessionManager* GetMediaSessionManager(
-      RenderFrameHost* render_frame_host);
   BrowserSurfaceViewManager* GetSurfaceViewManager(
       RenderFrameHost* render_frame_host);
-
-  // Sets or overrides the BrowserMediaSessionManager for the given
-  // |render_frame_host|.
-  void SetMediaSessionManagerForTest(
-      RenderFrameHost* render_frame_host,
-      std::unique_ptr<BrowserMediaSessionManager> manager);
 
   // Called by the WebContents when a tab has been closed but may still be
   // available for "undo" -- indicates that all media players (even audio only
@@ -62,14 +56,10 @@ class CONTENT_EXPORT MediaWebContentsObserverAndroid
                    int delegate_id,
                    bool has_audio,
                    bool is_remote,
-                   base::TimeDelta duration);
+                   media::MediaContentType media_content_type);
 
   void DisconnectMediaSession(RenderFrameHost* render_frame_host,
                               int delegate_id);
-
-#if defined(VIDEO_HOLE)
-  void OnFrameInfoUpdated();
-#endif  // defined(VIDEO_HOLE)
 
   // MediaWebContentsObserver overrides.
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
@@ -82,32 +72,18 @@ class CONTENT_EXPORT MediaWebContentsObserverAndroid
   bool OnMediaPlayerMessageReceived(const IPC::Message& message,
                                     RenderFrameHost* render_frame_host);
 
-  bool OnMediaPlayerSetCdmMessageReceived(const IPC::Message& message,
-                                          RenderFrameHost* render_frame_host);
-
-  bool OnMediaSessionMessageReceived(const IPC::Message& message,
-                                     RenderFrameHost* render_frame_host);
-
   bool OnSurfaceViewManagerMessageReceived(const IPC::Message& message,
                                      RenderFrameHost* render_frame_host);
 
-  void OnSetCdm(RenderFrameHost* render_frame_host, int player_id, int cdm_id);
-
   // Map from RenderFrameHost* to BrowserMediaPlayerManager.
   using MediaPlayerManagerMap =
-      base::ScopedPtrHashMap<RenderFrameHost*,
-                             std::unique_ptr<BrowserMediaPlayerManager>>;
+      std::unordered_map<RenderFrameHost*,
+                         std::unique_ptr<BrowserMediaPlayerManager>>;
   MediaPlayerManagerMap media_player_managers_;
 
-  // Map from RenderFrameHost* to BrowserMediaSessionManager.
-  using MediaSessionManagerMap =
-      base::ScopedPtrHashMap<RenderFrameHost*,
-                             std::unique_ptr<BrowserMediaSessionManager>>;
-  MediaSessionManagerMap media_session_managers_;
-
   using SurfaceViewManagerMap =
-      base::ScopedPtrHashMap<RenderFrameHost*,
-                             std::unique_ptr<BrowserSurfaceViewManager>>;
+      std::unordered_map<RenderFrameHost*,
+                         std::unique_ptr<BrowserSurfaceViewManager>>;
   SurfaceViewManagerMap surface_view_managers_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaWebContentsObserverAndroid);

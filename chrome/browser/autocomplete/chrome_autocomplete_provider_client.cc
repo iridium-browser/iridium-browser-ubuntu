@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,22 +17,25 @@
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/sync_service_utils.h"
 #include "content/public/browser/notification_service.h"
+#include "extensions/features/features.h"
 
-#if defined(ENABLE_EXTENSIONS)
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/autocomplete/keyword_extensions_delegate_impl.h"
 #endif
 
@@ -44,7 +48,6 @@ const char* const kChromeSettingsSubPages[] = {
     chrome::kAutofillSubPage,
     chrome::kClearBrowserDataSubPage,
     chrome::kContentSettingsSubPage,
-    chrome::kContentSettingsExceptionsSubPage,
     chrome::kImportDataSubPage,
     chrome::kLanguageOptionsSubPage,
     chrome::kPasswordManagerSubPage,
@@ -141,17 +144,17 @@ ChromeAutocompleteProviderClient::GetShortcutsBackendIfExists() {
 std::unique_ptr<KeywordExtensionsDelegate>
 ChromeAutocompleteProviderClient::GetKeywordExtensionsDelegate(
     KeywordProvider* keyword_provider) {
-#if defined(ENABLE_EXTENSIONS)
-  return base::WrapUnique(
-      new KeywordExtensionsDelegateImpl(profile_, keyword_provider));
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  return base::MakeUnique<KeywordExtensionsDelegateImpl>(profile_,
+                                                         keyword_provider);
 #else
   return nullptr;
 #endif
 }
 
-PhysicalWebDataSource*
+physical_web::PhysicalWebDataSource*
 ChromeAutocompleteProviderClient::GetPhysicalWebDataSource() {
-  return nullptr;
+  return g_browser_process->GetPhysicalWebDataSource();
 }
 
 std::string ChromeAutocompleteProviderClient::GetAcceptLanguages() const {
@@ -182,6 +185,13 @@ std::vector<base::string16> ChromeAutocompleteProviderClient::GetBuiltinURLs() {
     builtins.push_back(settings +
                        base::ASCIIToUTF16(kChromeSettingsSubPages[i]));
   }
+
+  if (!base::FeatureList::IsEnabled(features::kMaterialDesignSettings)) {
+    builtins.push_back(
+        settings +
+        base::ASCIIToUTF16(
+            chrome::kDeprecatedOptionsContentSettingsExceptionsSubPage));
+  }
 #endif
 
   return builtins;
@@ -210,7 +220,7 @@ bool ChromeAutocompleteProviderClient::SearchSuggestEnabled() const {
 }
 
 bool ChromeAutocompleteProviderClient::TabSyncEnabledAndUnencrypted() const {
-  return sync_driver::IsTabSyncEnabledAndUnencrypted(
+  return syncer::IsTabSyncEnabledAndUnencrypted(
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_),
       profile_->GetPrefs());
 }

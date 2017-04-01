@@ -18,36 +18,62 @@
 Polymer({
   is: 'settings-reset-page',
 
+  behaviors: [settings.RouteObserverBehavior],
+
   properties: {
+// <if expr="chromeos">
+    /** @private */
+    showPowerwashDialog_: Boolean,
+// </if>
+
+    /** @private */
     allowPowerwash_: {
       type: Boolean,
       value: cr.isChromeOS ? loadTimeData.getBoolean('allowPowerwash') : false
     },
+
+    /** @private */
+    showResetProfileDialog_: {
+      type: Boolean,
+      value: false,
+    },
+  },
+
+  /**
+   * settings.RouteObserverBehavior
+   * @param {!settings.Route} route
+   * @protected
+   */
+  currentRouteChanged: function(route) {
+    this.showResetProfileDialog_ =
+        route == settings.Route.TRIGGERED_RESET_DIALOG ||
+        route == settings.Route.RESET_DIALOG;
   },
 
   /** @private */
   onShowResetProfileDialog_: function() {
-    this.showDialog_('settings-reset-profile-dialog');
+    settings.navigateTo(settings.Route.RESET_DIALOG,
+                        new URLSearchParams('origin=userclick'));
   },
 
   /** @private */
-  onShowPowerwashDialog_: function() {
-    this.showDialog_('settings-powerwash-dialog');
+  onResetProfileDialogClose_: function() {
+    settings.navigateToPreviousRoute();
   },
 
-
+// <if expr="chromeos">
   /**
-   * Creates and shows the specified dialog.
-   * @param {string} dialogName
+   * @param {!Event} e
    * @private
    */
-  showDialog_: function(dialogName) {
-    var dialog = document.createElement(dialogName);
-    this.shadowRoot.appendChild(dialog);
-    dialog.open();
-
-    dialog.addEventListener('close', function() {
-      dialog.remove();
-    });
+  onShowPowerwashDialog_: function(e) {
+    e.preventDefault();
+    this.showPowerwashDialog_ = true;
   },
+
+  /** @private */
+  onPowerwashDialogClose_: function() {
+    this.showPowerwashDialog_ = false;
+  },
+// </if>
 });

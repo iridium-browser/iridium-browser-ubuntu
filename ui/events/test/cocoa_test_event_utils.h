@@ -50,15 +50,17 @@ std::pair<NSEvent*, NSEvent*> MouseClickInView(NSView* view,
 std::pair<NSEvent*, NSEvent*> RightMouseClickInView(NSView* view,
                                                     NSUInteger clickCount);
 
-// Creates a test scroll event. Currently only events for a "real" mouse wheel
-// are supported (-hasPreciseScrollingDeltas is NO).  If |window| is nil,
-// |location| is assumed to be AppKit screen coordinates (origin in bottom left
-// of primary screen).
-// TODO(tapted): Add event phase arguments to support trackpad scrolls also.
+// Creates a test scroll event. |has_precise_deltas| determines the value of
+// -[NSEvent hasPreciseScrollingDeltas] - usually NO for a mouse wheel and YES
+// for a trackpad. If |window| is nil, |location| is assumed to be AppKit screen
+// coordinates (origin in bottom left of primary screen).
 NSEvent* TestScrollEvent(NSPoint location,
                          NSWindow* window,
                          CGFloat delta_x,
-                         CGFloat delta_y);
+                         CGFloat delta_y,
+                         bool has_precise_deltas,
+                         NSEventPhase event_phase,
+                         NSEventPhase momentum_phase);
 
 // Returns a key event with the given character.
 NSEvent* KeyEventWithCharacter(unichar c);
@@ -71,6 +73,13 @@ NSEvent* KeyEventWithKeyCode(unsigned short key_code,
                              unichar c,
                              NSEventType event_type,
                              NSUInteger modifiers);
+
+// Returns a key event for pressing or releasing a modifier key (aka
+// NSFlagsChanged). For example |key_code| == kVK_Shift with (|modifiers| &
+// NSShiftKeyMask) != 0 means Shift is pressed and |key_code| == kVK_Shift
+// with (|modifiers| & NSShiftKeyMask) == 0 means Shift is released.
+NSEvent* KeyEventWithModifierOnly(unsigned short key_code,
+                                  NSUInteger modifiers);
 
 // Returns a mouse enter event.
 NSEvent* EnterEvent();

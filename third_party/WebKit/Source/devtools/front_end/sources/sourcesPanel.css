@@ -55,14 +55,6 @@
     height: 28px;
 }
 
-.sources-editor-tabstrip-left {
-    width: 22px;
-}
-
-.sources-editor-tabstrip-right {
-    width: 36px;
-}
-
 .function-location-link {
     float: right;
     margin-left: 10px;
@@ -72,6 +64,10 @@
     position: relative;
     height: 14px;
     transform: rotate(-90deg);
+}
+
+.object-popover-container {
+    display: inline-block;
 }
 
 .function-popover-title {
@@ -106,25 +102,18 @@
     cursor: auto;
 }
 
-.callstack-info {
-    text-align: center;
-    font-style: italic;
-    padding: 6px;
-    color: #888;
-    pointer-events: none;
+.available-node-targets {
+    height: 22px;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    padding-left: 20px;
+    border-top: 1px solid #eee;
+    font-style: italic;
 }
 
-.callstack-info.status {
-    border-top: 1px solid rgb(189, 189, 189);
-    background-color: rgb(255, 255, 194);
-}
-
-.-theme-with-dark-background .callstack-info.status {
-    background-color: hsl(46, 98%, 22%);
-    color: #ccc;
+.available-node-targets > span {
+    margin-left: 5px;
 }
 
 .watch-expression-delete-button {
@@ -179,6 +168,14 @@
     white-space: nowrap;
     text-overflow: ellipsis ;
     overflow: hidden;
+}
+
+.watch-expression-error {
+    color: red;
+}
+
+.-theme-with-dark-background .watch-expression-error {
+    color: hsl(0, 100%, 65%);
 }
 
 .watch-expressions-separator {

@@ -28,9 +28,9 @@
 [
     Exposed=(Window,Worker),
 ] interface IDBObjectStore {
-    readonly attribute DOMString name;
+    [RaisesException=Setter] attribute DOMString name;
     [CallWith=ScriptState] readonly attribute any keyPath;
-    [Measure] readonly attribute DOMStringList indexNames;
+    readonly attribute DOMStringList indexNames;
     readonly attribute IDBTransaction transaction;
     readonly attribute boolean autoIncrement;
 
@@ -39,10 +39,11 @@
     [CallWith=ScriptState, ImplementedAs=deleteFunction, RaisesException] IDBRequest delete(any key);
     [CallWith=ScriptState, RaisesException] IDBRequest clear();
     [CallWith=ScriptState, RaisesException] IDBRequest get(any key);
+    [CallWith=ScriptState, RaisesException, RuntimeEnabled=IndexedDBExperimental] IDBRequest getKey(any key);
     // TODO(cmumford): 0xFFFFFFFF is not necessary. Remove once crbug.com/335871 is fixed.
-    [CallWith=ScriptState, RaisesException] IDBRequest getAll([Default=Undefined] optional any range, optional unsigned long maxCount = 0xFFFFFFFF);
+    [CallWith=ScriptState, RaisesException] IDBRequest getAll([Default=Undefined] optional any range, [EnforceRange] optional unsigned long maxCount = 0xFFFFFFFF);
     // TODO(cmumford): 0xFFFFFFFF is not necessary. Remove once crbug.com/335871 is fixed.
-    [CallWith=ScriptState, RaisesException] IDBRequest getAllKeys([Default=Undefined] optional any range, optional unsigned long maxCount = 0xFFFFFFFF);
+    [CallWith=ScriptState, RaisesException] IDBRequest getAllKeys([Default=Undefined] optional any range, [EnforceRange] optional unsigned long maxCount = 0xFFFFFFFF);
     [CallWith=ScriptState, RaisesException] IDBRequest count([Default=Undefined] optional any key);
     [CallWith=ScriptState, RaisesException] IDBRequest openCursor([Default=Undefined] optional any range, optional IDBCursorDirection direction = "next");
     [CallWith=ScriptState, RaisesException] IDBRequest openKeyCursor([Default=Undefined] optional any range, optional IDBCursorDirection direction = "next");

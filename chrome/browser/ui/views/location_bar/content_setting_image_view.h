@@ -30,8 +30,6 @@ class FontList;
 
 namespace views {
 class BubbleDialogDelegateView;
-class ImageView;
-class Label;
 }
 
 // The ContentSettingImageView displays an icon and optional text label for
@@ -41,21 +39,15 @@ class ContentSettingImageView : public IconLabelBubbleView,
                                 public gfx::AnimationDelegate,
                                 public views::WidgetObserver {
  public:
-  // ContentSettingImageView takes ownership of its |image_model|.
-  ContentSettingImageView(ContentSettingImageModel* image_model,
+  ContentSettingImageView(std::unique_ptr<ContentSettingImageModel> image_model,
                           LocationBarView* parent,
-                          const gfx::FontList& font_list,
-                          SkColor parent_background_color);
+                          const gfx::FontList& font_list);
   ~ContentSettingImageView() override;
 
   // Updates the decoration from the shown WebContents.
   void Update(content::WebContents* web_contents);
 
  private:
-  // Number of milliseconds spent animating open; also the time spent animating
-  // closed.
-  static const int kOpenTimeMS;
-
   // The total animation time, including open and close as well as an
   // intervening "stay open" period.
   static const int kAnimationDurationMS;
@@ -66,11 +58,12 @@ class ContentSettingImageView : public IconLabelBubbleView,
   bool OnMousePressed(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  bool GetTooltipText(const gfx::Point& p,
+                      base::string16* tooltip) const override;
   void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
-  bool ShouldShowInkDropForFocus() const override;
+  std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   SkColor GetTextColor() const override;
-  SkColor GetBorderColor() const override;
-  bool ShouldShowBackground() const override;
+  bool ShouldShowLabel() const override;
   double WidthMultiplier() const override;
   bool IsShrinking() const override;
   bool OnActivate(const ui::Event& event) override;

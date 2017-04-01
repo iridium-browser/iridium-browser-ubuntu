@@ -4,22 +4,19 @@
 
 #include "ui/arc/notification/arc_notification_manager.h"
 
+#include <memory>
+#include <utility>
+
 #include "ash/common/system/toast/toast_manager.h"
 #include "ash/common/wm_shell.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
-#include "mojo/common/common_type_converters.h"
+#include "base/strings/utf_string_conversions.h"
+#include "components/arc/arc_bridge_service.h"
 #include "ui/arc/notification/arc_custom_notification_item.h"
 #include "ui/arc/notification/arc_notification_item.h"
 
 namespace arc {
-
-namespace {
-
-// Min version to support Create/CloseNotificationWindow.
-constexpr int kMinVersionNotificationWindow = 7;
-
-}  // namespace
 
 ArcNotificationManager::ArcNotificationManager(ArcBridgeService* bridge_service,
                                                const AccountId& main_profile_id)
@@ -46,11 +43,8 @@ void ArcNotificationManager::OnInstanceReady() {
   DCHECK(!ready_);
 
   auto* notifications_instance =
-      arc_bridge_service()->notifications()->instance();
-  if (!notifications_instance) {
-    VLOG(2) << "Request to refresh app list when bridge service is not ready.";
-    return;
-  }
+      ARC_GET_INSTANCE_FOR_METHOD(arc_bridge_service()->notifications(), Init);
+  DCHECK(notifications_instance);
 
   notifications_instance->Init(binding_.CreateInterfacePtrAndBind());
   ready_ = true;
@@ -62,7 +56,7 @@ void ArcNotificationManager::OnInstanceClosed() {
     auto it = items_.begin();
     std::unique_ptr<ArcNotificationItem> item = std::move(it->second);
     items_.erase(it);
-    item->OnClosedFromAndroid(false /* by_user */);
+    item->OnClosedFromAndroid();
   }
   ready_ = false;
 }
@@ -88,11 +82,11 @@ void ArcNotificationManager::OnNotificationPosted(
     DCHECK(result.second);
     it = result.first;
   }
-  it->second->UpdateWithArcNotificationData(*data);
+  it->second->UpdateWithArcNotificationData(std::move(data));
 }
 
-void ArcNotificationManager::OnNotificationRemoved(const mojo::String& key) {
-  auto it = items_.find(key.get());
+void ArcNotificationManager::OnNotificationRemoved(const std::string& key) {
+  auto it = items_.find(key);
   if (it == items_.end()) {
     VLOG(3) << "Android requests to remove a notification (key: " << key
             << "), but it is already gone.";
@@ -101,7 +95,7 @@ void ArcNotificationManager::OnNotificationRemoved(const mojo::String& key) {
 
   std::unique_ptr<ArcNotificationItem> item = std::move(it->second);
   items_.erase(it);
-  item->OnClosedFromAndroid(true /* by_user */);
+  item->OnClosedFromAndroid();
 }
 
 void ArcNotificationManager::SendNotificationRemovedFromChrome(
@@ -118,8 +112,8 @@ void ArcNotificationManager::SendNotificationRemovedFromChrome(
   std::unique_ptr<ArcNotificationItem> item = std::move(it->second);
   items_.erase(it);
 
-  auto* notifications_instance =
-      arc_bridge_service()->notifications()->instance();
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
 
   // On shutdown, the ARC channel may quit earlier then notifications.
   if (!notifications_instance) {
@@ -140,8 +134,8 @@ void ArcNotificationManager::SendNotificationClickedOnChrome(
     return;
   }
 
-  auto* notifications_instance =
-      arc_bridge_service()->notifications()->instance();
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
 
   // On shutdown, the ARC channel may quit earlier then notifications.
   if (!notifications_instance) {
@@ -163,8 +157,8 @@ void ArcNotificationManager::SendNotificationButtonClickedOnChrome(
     return;
   }
 
-  auto* notifications_instance =
-      arc_bridge_service()->notifications()->instance();
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), SendNotificationEventToAndroid);
 
   // On shutdown, the ARC channel may quit earlier then notifications.
   if (!notifications_instance) {
@@ -173,7 +167,7 @@ void ArcNotificationManager::SendNotificationButtonClickedOnChrome(
     return;
   }
 
-  arc::mojom::ArcNotificationEvent command;
+  mojom::ArcNotificationEvent command;
   switch (button_index) {
     case 0:
       command = mojom::ArcNotificationEvent::BUTTON_1_CLICKED;
@@ -206,21 +200,10 @@ void ArcNotificationManager::CreateNotificationWindow(const std::string& key) {
     return;
   }
 
-  auto* notifications_instance =
-      arc_bridge_service()->notifications()->instance();
-  // On shutdown, the ARC channel may quit earlier then notifications.
-  if (!notifications_instance) {
-    VLOG(2) << "Request to create window for ARC Notification (key: " << key
-            << "), but the ARC channel has already gone.";
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), CreateNotificationWindow);
+  if (!notifications_instance)
     return;
-  }
-
-  if (arc_bridge_service()->notifications()->version() <
-      kMinVersionNotificationWindow) {
-    VLOG(2)
-        << "NotificationInstance does not support CreateNotificationWindow.";
-    return;
-  }
 
   notifications_instance->CreateNotificationWindow(key);
 }
@@ -232,28 +215,21 @@ void ArcNotificationManager::CloseNotificationWindow(const std::string& key) {
     return;
   }
 
-  auto* notifications_instance =
-      arc_bridge_service()->notifications()->instance();
-  // On shutdown, the ARC channel may quit earlier then notifications.
-  if (!notifications_instance) {
-    VLOG(2) << "Request to close window for ARC Notification (key: " << key
-            << "), but the ARC channel has already gone.";
+  auto* notifications_instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service()->notifications(), CloseNotificationWindow);
+  if (!notifications_instance)
     return;
-  }
-
-  if (arc_bridge_service()->notifications()->version() <
-      kMinVersionNotificationWindow) {
-    VLOG(2) << "NotificationInstance does not support CloseNotificationWindow.";
-    return;
-  }
 
   notifications_instance->CloseNotificationWindow(key);
 }
 
 void ArcNotificationManager::OnToastPosted(mojom::ArcToastDataPtr data) {
+  const base::string16 text16(
+      base::UTF8ToUTF16(data->text.has_value() ? *data->text : std::string()));
+  const base::string16 dismiss_text16(base::UTF8ToUTF16(
+      data->dismiss_text.has_value() ? *data->dismiss_text : std::string()));
   ash::WmShell::Get()->toast_manager()->Show(
-      ash::ToastData(data->id, data->text.To<base::string16>(), data->duration,
-                     data->dismiss_text.To<base::string16>()));
+      ash::ToastData(data->id, text16, data->duration, dismiss_text16));
 }
 
 void ArcNotificationManager::OnToastCancelled(mojom::ArcToastDataPtr data) {

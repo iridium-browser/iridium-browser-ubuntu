@@ -59,6 +59,10 @@ static const char kNoIdSpecifiedMessage[] =
 static const char kIdsDoNotMatchMessage[] =
     "a Play Store app URL and Play Store ID were specified in the manifest, "
     "but they do not match";
+static const char kUrlNotSupportedForWebApkMessage[] =
+    "a URL in the web manifest contains a username, password, or port";
+static const char kInIncognitoMessage[] =
+    "the page is loaded in an incognito window";
 
 }  // namespace
 
@@ -139,6 +143,12 @@ void LogErrorToConsole(content::WebContents* web_contents,
       break;
     case IDS_DO_NOT_MATCH:
       pattern = kIdsDoNotMatchMessage;
+      break;
+    case URL_NOT_SUPPORTED_FOR_WEBAPK:
+      pattern = kUrlNotSupportedForWebApkMessage;
+      break;
+    case IN_INCOGNITO:
+      pattern = kInIncognitoMessage;
       break;
   }
 

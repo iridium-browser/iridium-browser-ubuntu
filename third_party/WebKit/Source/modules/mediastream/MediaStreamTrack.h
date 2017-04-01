@@ -11,26 +11,25 @@
  *     notice, this list of conditions and the following disclaimer in the
  *     documentation and/or other materials provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * THIS SOFTWARE IS PROVIDED BY APPLE INC. AND ITS CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
  * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * DISCLAIMED. IN NO EVENT SHALL APPLE INC. OR ITS CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+ * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+ * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+ * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef MediaStreamTrack_h
 #define MediaStreamTrack_h
 
 #include "bindings/core/v8/ActiveScriptWrappable.h"
-#include "core/dom/ActiveDOMObject.h"
+#include "core/dom/ContextLifecycleObserver.h"
 #include "modules/EventTargetModules.h"
 #include "modules/ModulesExport.h"
-#include "modules/mediastream/SourceInfo.h"
 #include "platform/mediastream/MediaStreamDescriptor.h"
 #include "platform/mediastream/MediaStreamSource.h"
 #include "public/platform/WebMediaConstraints.h"
@@ -42,88 +41,91 @@ namespace blink {
 class AudioSourceProvider;
 class ExceptionState;
 class MediaTrackConstraints;
-class MediaStreamTrackSourcesCallback;
+class MediaStream;
 class MediaTrackSettings;
 
 class MODULES_EXPORT MediaStreamTrack
-    : public EventTargetWithInlineData
-    , public ActiveScriptWrappable
-    , public ActiveDOMObject
-    , public MediaStreamSource::Observer {
-    USING_GARBAGE_COLLECTED_MIXIN(MediaStreamTrack);
-    DEFINE_WRAPPERTYPEINFO();
-public:
-    static MediaStreamTrack* create(ExecutionContext*, MediaStreamComponent*);
-    ~MediaStreamTrack() override;
+    : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<MediaStreamTrack>,
+      public ContextLifecycleObserver,
+      public MediaStreamSource::Observer {
+  USING_GARBAGE_COLLECTED_MIXIN(MediaStreamTrack);
+  DEFINE_WRAPPERTYPEINFO();
 
-    String kind() const;
-    String id() const;
-    String label() const;
-    bool remote() const;
+ public:
+  static MediaStreamTrack* create(ExecutionContext*, MediaStreamComponent*);
+  ~MediaStreamTrack() override;
 
-    bool enabled() const;
-    void setEnabled(bool);
+  String kind() const;
+  String id() const;
+  String label() const;
+  bool remote() const;
 
-    bool muted() const;
+  bool enabled() const;
+  void setEnabled(bool);
 
-    String readyState() const;
+  bool muted() const;
 
-    static void getSources(ExecutionContext*, MediaStreamTrackSourcesCallback*, ExceptionState&);
-    void stopTrack(ExceptionState&);
-    virtual MediaStreamTrack* clone(ExecutionContext*);
+  String contentHint() const;
+  void setContentHint(const String&);
 
-    void getConstraints(MediaTrackConstraints&);
+  String readyState() const;
 
-    // This function is called when constrains have been successfully applied.
-    // Called from UserMediaRequest when it succeeds. It is not IDL-exposed.
-    void setConstraints(const WebMediaConstraints&);
+  void stopTrack(ExceptionState&);
+  virtual MediaStreamTrack* clone(ExecutionContext*);
 
-    void getSettings(MediaTrackSettings&);
+  void getConstraints(MediaTrackConstraints&);
 
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(mute);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(unmute);
-    DEFINE_ATTRIBUTE_EVENT_LISTENER(ended);
+  // This function is called when constrains have been successfully applied.
+  // Called from UserMediaRequest when it succeeds. It is not IDL-exposed.
+  void setConstraints(const WebMediaConstraints&);
 
-    MediaStreamComponent* component() { return m_component; }
-    bool ended() const;
+  void getSettings(MediaTrackSettings&);
 
-    void registerMediaStream(MediaStream*);
-    void unregisterMediaStream(MediaStream*);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(mute);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(unmute);
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(ended);
 
-    // EventTarget
-    const AtomicString& interfaceName() const override;
-    ExecutionContext* getExecutionContext() const override;
+  MediaStreamComponent* component() { return m_component; }
+  bool ended() const;
 
-    // ScriptWrappable
-    bool hasPendingActivity() const final;
+  void registerMediaStream(MediaStream*);
+  void unregisterMediaStream(MediaStream*);
 
-    // ActiveDOMObject
-    void stop() override;
+  // EventTarget
+  const AtomicString& interfaceName() const override;
+  ExecutionContext* getExecutionContext() const override;
 
-    std::unique_ptr<AudioSourceProvider> createWebAudioSource();
+  // ScriptWrappable
+  bool hasPendingActivity() const final;
 
-    DECLARE_VIRTUAL_TRACE();
+  // ContextLifecycleObserver
+  void contextDestroyed(ExecutionContext*) override;
 
-private:
-    friend class CanvasCaptureMediaStreamTrack;
+  std::unique_ptr<AudioSourceProvider> createWebAudioSource();
 
-    MediaStreamTrack(ExecutionContext*, MediaStreamComponent*);
+  DECLARE_VIRTUAL_TRACE();
 
-    // MediaStreamSourceObserver
-    void sourceChangedState() override;
+ private:
+  friend class CanvasCaptureMediaStreamTrack;
 
-    void propagateTrackEnded();
+  MediaStreamTrack(ExecutionContext*, MediaStreamComponent*);
 
-    MediaStreamSource::ReadyState m_readyState;
-    HeapHashSet<Member<MediaStream>> m_registeredMediaStreams;
-    bool m_isIteratingRegisteredMediaStreams;
-    bool m_stopped;
-    Member<MediaStreamComponent> m_component;
-    WebMediaConstraints m_constraints;
+  // MediaStreamSourceObserver
+  void sourceChangedState() override;
+
+  void propagateTrackEnded();
+
+  MediaStreamSource::ReadyState m_readyState;
+  HeapHashSet<Member<MediaStream>> m_registeredMediaStreams;
+  bool m_isIteratingRegisteredMediaStreams;
+  bool m_stopped;
+  Member<MediaStreamComponent> m_component;
+  WebMediaConstraints m_constraints;
 };
 
 typedef HeapVector<Member<MediaStreamTrack>> MediaStreamTrackVector;
 
-} // namespace blink
+}  // namespace blink
 
-#endif // MediaStreamTrack_h
+#endif  // MediaStreamTrack_h

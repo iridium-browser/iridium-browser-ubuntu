@@ -28,129 +28,107 @@
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeListsNodeData.h"
 #include "core/html/HTMLCollection.h"
-#include "core/html/HTMLFormControlsCollection.h"
 #include "core/html/HTMLLegendElement.h"
-#include "core/html/HTMLObjectElement.h"
 #include "core/layout/LayoutFieldset.h"
+#include "platform/EventDispatchForbiddenScope.h"
 #include "wtf/StdLibExtras.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
-inline HTMLFieldSetElement::HTMLFieldSetElement(Document& document, HTMLFormElement* form)
-    : HTMLFormControlElement(fieldsetTag, document, form)
-    , m_documentVersion(0)
-{
+inline HTMLFieldSetElement::HTMLFieldSetElement(Document& document)
+    : HTMLFormControlElement(fieldsetTag, document) {}
+
+HTMLFieldSetElement* HTMLFieldSetElement::create(Document& document) {
+  return new HTMLFieldSetElement(document);
 }
 
-HTMLFieldSetElement* HTMLFieldSetElement::create(Document& document, HTMLFormElement* form)
-{
-    return new HTMLFieldSetElement(document, form);
+bool HTMLFieldSetElement::matchesValidityPseudoClasses() const {
+  return true;
 }
 
-DEFINE_TRACE(HTMLFieldSetElement)
-{
-    visitor->trace(m_associatedElements);
-    HTMLFormControlElement::trace(visitor);
-}
-
-bool HTMLFieldSetElement::matchesValidityPseudoClasses() const
-{
-    return true;
-}
-
-bool HTMLFieldSetElement::isValidElement()
-{
-    const FormAssociatedElement::List& elements = associatedElements();
-    for (unsigned i = 0; i < elements.size(); ++i) {
-        if (elements[i]->isFormControlElement()) {
-            HTMLFormControlElement* control = toHTMLFormControlElement(elements[i].get());
-            if (!control->checkValidity(0, CheckValidityDispatchNoEvent))
-                return false;
-        }
+bool HTMLFieldSetElement::isValidElement() {
+  for (Element* element : *elements()) {
+    if (element->isFormControlElement()) {
+      if (!toHTMLFormControlElement(element)->checkValidity(
+              nullptr, CheckValidityDispatchNoEvent))
+        return false;
     }
-    return true;
+  }
+  return true;
 }
 
-bool HTMLFieldSetElement::isSubmittableElement()
-{
-    return false;
+bool HTMLFieldSetElement::isSubmittableElement() {
+  return false;
 }
 
-void HTMLFieldSetElement::invalidateDisabledStateUnder(Element& base)
-{
-    for (HTMLFormControlElement& element : Traversal<HTMLFormControlElement>::descendantsOf(base))
-        element.ancestorDisabledStateWasChanged();
-}
-
-void HTMLFieldSetElement::disabledAttributeChanged()
-{
-    // This element must be updated before the style of nodes in its subtree gets recalculated.
-    HTMLFormControlElement::disabledAttributeChanged();
-    invalidateDisabledStateUnder(*this);
-}
-
-void HTMLFieldSetElement::childrenChanged(const ChildrenChange& change)
-{
-    HTMLFormControlElement::childrenChanged(change);
-    for (HTMLLegendElement& legend : Traversal<HTMLLegendElement>::childrenOf(*this))
-        invalidateDisabledStateUnder(legend);
-}
-
-bool HTMLFieldSetElement::supportsFocus() const
-{
-    return HTMLElement::supportsFocus() && !isDisabledFormControl();
-}
-
-const AtomicString& HTMLFieldSetElement::formControlType() const
-{
-    DEFINE_STATIC_LOCAL(const AtomicString, fieldset, ("fieldset"));
-    return fieldset;
-}
-
-LayoutObject* HTMLFieldSetElement::createLayoutObject(const ComputedStyle&)
-{
-    return new LayoutFieldset(this);
-}
-
-HTMLLegendElement* HTMLFieldSetElement::legend() const
-{
-    return Traversal<HTMLLegendElement>::firstChild(*this);
-}
-
-HTMLFormControlsCollection* HTMLFieldSetElement::elements()
-{
-    return ensureCachedCollection<HTMLFormControlsCollection>(FormControls);
-}
-
-void HTMLFieldSetElement::refreshElementsIfNeeded() const
-{
-    uint64_t docVersion = document().domTreeVersion();
-    if (m_documentVersion == docVersion)
-        return;
-
-    m_documentVersion = docVersion;
-
-    m_associatedElements.clear();
-
-    for (HTMLElement& element : Traversal<HTMLElement>::descendantsOf(*this)) {
-        if (isHTMLObjectElement(element)) {
-            m_associatedElements.append(toHTMLObjectElement(&element));
-            continue;
-        }
-
-        if (!element.isFormControlElement())
-            continue;
-
-        m_associatedElements.append(toHTMLFormControlElement(&element));
+// Returns a disabled focused element if it's in descendants of |base|.
+Element*
+HTMLFieldSetElement::invalidateDescendantDisabledStateAndFindFocusedOne(
+    Element& base) {
+  Element* focusedElement = adjustedFocusedElementInTreeScope();
+  bool shouldBlur = false;
+  {
+    EventDispatchForbiddenScope eventForbidden;
+    for (HTMLFormControlElement& element :
+         Traversal<HTMLFormControlElement>::descendantsOf(base)) {
+      element.ancestorDisabledStateWasChanged();
+      if (focusedElement == &element && element.isDisabledFormControl())
+        shouldBlur = true;
     }
+  }
+  return shouldBlur ? focusedElement : nullptr;
 }
 
-const FormAssociatedElement::List& HTMLFieldSetElement::associatedElements() const
-{
-    refreshElementsIfNeeded();
-    return m_associatedElements;
+void HTMLFieldSetElement::disabledAttributeChanged() {
+  // This element must be updated before the style of nodes in its subtree gets
+  // recalculated.
+  HTMLFormControlElement::disabledAttributeChanged();
+  if (Element* focusedElement =
+          invalidateDescendantDisabledStateAndFindFocusedOne(*this))
+    focusedElement->blur();
 }
 
-} // namespace blink
+void HTMLFieldSetElement::childrenChanged(const ChildrenChange& change) {
+  HTMLFormControlElement::childrenChanged(change);
+  Element* focusedElement = nullptr;
+  {
+    EventDispatchForbiddenScope eventForbidden;
+    for (HTMLLegendElement& legend :
+         Traversal<HTMLLegendElement>::childrenOf(*this)) {
+      if (Element* element =
+              invalidateDescendantDisabledStateAndFindFocusedOne(legend))
+        focusedElement = element;
+    }
+  }
+  if (focusedElement)
+    focusedElement->blur();
+}
+
+bool HTMLFieldSetElement::supportsFocus() const {
+  return HTMLElement::supportsFocus() && !isDisabledFormControl();
+}
+
+const AtomicString& HTMLFieldSetElement::formControlType() const {
+  DEFINE_STATIC_LOCAL(const AtomicString, fieldset, ("fieldset"));
+  return fieldset;
+}
+
+LayoutObject* HTMLFieldSetElement::createLayoutObject(const ComputedStyle&) {
+  return new LayoutFieldset(this);
+}
+
+HTMLLegendElement* HTMLFieldSetElement::legend() const {
+  return Traversal<HTMLLegendElement>::firstChild(*this);
+}
+
+HTMLCollection* HTMLFieldSetElement::elements() {
+  return ensureCachedCollection<HTMLCollection>(FormControls);
+}
+
+int HTMLFieldSetElement::tabIndex() const {
+  return HTMLElement::tabIndex();
+}
+
+}  // namespace blink

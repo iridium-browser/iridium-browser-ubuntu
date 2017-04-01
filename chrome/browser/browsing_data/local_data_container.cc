@@ -5,7 +5,6 @@
 #include "chrome/browser/browsing_data/local_data_container.h"
 
 #include "base/bind.h"
-#include "base/memory/linked_ptr.h"
 #include "chrome/browser/browsing_data/browsing_data_channel_id_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_flash_lso_helper.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
@@ -15,30 +14,32 @@
 // LocalDataContainer, public:
 
 LocalDataContainer::LocalDataContainer(
-    BrowsingDataCookieHelper* cookie_helper,
-    BrowsingDataDatabaseHelper* database_helper,
-    BrowsingDataLocalStorageHelper* local_storage_helper,
-    BrowsingDataLocalStorageHelper* session_storage_helper,
-    BrowsingDataAppCacheHelper* appcache_helper,
-    BrowsingDataIndexedDBHelper* indexed_db_helper,
-    BrowsingDataFileSystemHelper* file_system_helper,
-    BrowsingDataQuotaHelper* quota_helper,
-    BrowsingDataChannelIDHelper* channel_id_helper,
-    BrowsingDataServiceWorkerHelper* service_worker_helper,
-    BrowsingDataCacheStorageHelper* cache_storage_helper,
-    BrowsingDataFlashLSOHelper* flash_lso_helper)
-    : appcache_helper_(appcache_helper),
-      cookie_helper_(cookie_helper),
-      database_helper_(database_helper),
-      local_storage_helper_(local_storage_helper),
-      session_storage_helper_(session_storage_helper),
-      indexed_db_helper_(indexed_db_helper),
-      file_system_helper_(file_system_helper),
-      quota_helper_(quota_helper),
-      channel_id_helper_(channel_id_helper),
-      service_worker_helper_(service_worker_helper),
-      cache_storage_helper_(cache_storage_helper),
-      flash_lso_helper_(flash_lso_helper),
+    scoped_refptr<BrowsingDataCookieHelper> cookie_helper,
+    scoped_refptr<BrowsingDataDatabaseHelper> database_helper,
+    scoped_refptr<BrowsingDataLocalStorageHelper> local_storage_helper,
+    scoped_refptr<BrowsingDataLocalStorageHelper> session_storage_helper,
+    scoped_refptr<BrowsingDataAppCacheHelper> appcache_helper,
+    scoped_refptr<BrowsingDataIndexedDBHelper> indexed_db_helper,
+    scoped_refptr<BrowsingDataFileSystemHelper> file_system_helper,
+    scoped_refptr<BrowsingDataQuotaHelper> quota_helper,
+    scoped_refptr<BrowsingDataChannelIDHelper> channel_id_helper,
+    scoped_refptr<BrowsingDataServiceWorkerHelper> service_worker_helper,
+    scoped_refptr<BrowsingDataCacheStorageHelper> cache_storage_helper,
+    scoped_refptr<BrowsingDataFlashLSOHelper> flash_lso_helper,
+    scoped_refptr<BrowsingDataMediaLicenseHelper> media_license_helper)
+    : appcache_helper_(std::move(appcache_helper)),
+      cookie_helper_(std::move(cookie_helper)),
+      database_helper_(std::move(database_helper)),
+      local_storage_helper_(std::move(local_storage_helper)),
+      session_storage_helper_(std::move(session_storage_helper)),
+      indexed_db_helper_(std::move(indexed_db_helper)),
+      file_system_helper_(std::move(file_system_helper)),
+      quota_helper_(std::move(quota_helper)),
+      channel_id_helper_(std::move(channel_id_helper)),
+      service_worker_helper_(std::move(service_worker_helper)),
+      cache_storage_helper_(std::move(cache_storage_helper)),
+      flash_lso_helper_(std::move(flash_lso_helper)),
+      media_license_helper_(std::move(media_license_helper)),
       weak_ptr_factory_(this) {}
 
 LocalDataContainer::~LocalDataContainer() {}
@@ -129,6 +130,13 @@ void LocalDataContainer::Init(CookiesTreeModel* model) {
     batches_started_++;
     flash_lso_helper_->StartFetching(
         base::Bind(&LocalDataContainer::OnFlashLSOInfoLoaded,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+
+  if (media_license_helper_.get()) {
+    batches_started_++;
+    media_license_helper_->StartFetching(
+        base::Bind(&LocalDataContainer::OnMediaLicenseInfoLoaded,
                    weak_ptr_factory_.GetWeakPtr()));
   }
 
@@ -233,4 +241,11 @@ void LocalDataContainer::OnFlashLSOInfoLoaded(
   flash_lso_domain_list_ = domains;
   DCHECK(model_);
   model_->PopulateFlashLSOInfo(this);
+}
+
+void LocalDataContainer::OnMediaLicenseInfoLoaded(
+    const MediaLicenseInfoList& media_license_info) {
+  media_license_info_list_ = media_license_info;
+  DCHECK(model_);
+  model_->PopulateMediaLicenseInfo(this);
 }

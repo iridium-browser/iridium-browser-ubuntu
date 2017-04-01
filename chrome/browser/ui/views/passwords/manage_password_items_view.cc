@@ -12,7 +12,6 @@
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
 #include "chrome/grit/generated_resources.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -272,9 +271,8 @@ ManagePasswordItemsView::ManagePasswordItemsView(
     : model_(manage_passwords_bubble_model) {
   int fixed_height = PasswordFormRow::GetFixedHeight(model_->state());
   for (const auto& password_form : *password_forms) {
-    if (!password_form.is_public_suffix_match)
-      password_forms_rows_.push_back(base::MakeUnique<PasswordFormRow>(
-          this, &password_form, fixed_height));
+    password_forms_rows_.push_back(base::MakeUnique<PasswordFormRow>(
+        this, &password_form, fixed_height));
   }
   AddRows();
 }

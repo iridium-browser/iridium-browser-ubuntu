@@ -18,7 +18,8 @@
 #include "base/time/default_tick_clock.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/udp/udp_server_socket.h"
+#include "net/log/net_log_source.h"
+#include "net/socket/udp_server_socket.h"
 
 namespace media {
 namespace cast {
@@ -738,7 +739,7 @@ class UDPProxyImpl : public UDPProxy {
  private:
   void Start(base::WaitableEvent* start_event,
              net::NetLog* net_log) {
-    socket_.reset(new net::UDPServerSocket(net_log, net::NetLog::Source()));
+    socket_.reset(new net::UDPServerSocket(net_log, net::NetLogSource()));
     BuildPipe(&to_dest_pipe_, new PacketSender(this, &destination_));
     BuildPipe(&from_dest_pipe_, new PacketSender(this, &return_address_));
     to_dest_pipe_->InitOnIOThread(base::ThreadTaskRunnerHandle::Get(),

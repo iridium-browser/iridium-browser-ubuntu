@@ -7,17 +7,17 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "crypto/hmac.h"
 #include "remoting/protocol/transport.h"
 #include "remoting/protocol/webrtc_data_stream_adapter.h"
-#include "remoting/protocol/webrtc_video_encoder_factory.h"
+#include "remoting/protocol/webrtc_dummy_video_encoder.h"
 #include "remoting/signaling/signal_strategy.h"
 #include "third_party/webrtc/api/peerconnectioninterface.h"
 
@@ -26,6 +26,7 @@ namespace protocol {
 
 class TransportContext;
 class MessagePipe;
+class WebrtcAudioModule;
 
 class WebrtcTransport : public Transport {
  public:
@@ -67,9 +68,10 @@ class WebrtcTransport : public Transport {
 
   webrtc::PeerConnectionInterface* peer_connection();
   webrtc::PeerConnectionFactoryInterface* peer_connection_factory();
-  remoting::WebrtcVideoEncoderFactory* video_encoder_factory() {
+  WebrtcDummyVideoEncoderFactory* video_encoder_factory() {
     return video_encoder_factory_;
   }
+  WebrtcAudioModule* audio_module();
 
   // Creates outgoing data channel. The channel is created in CONNECTING state.
   // The caller must wait for OnMessagePipeOpen() notification before sending
@@ -122,7 +124,6 @@ class WebrtcTransport : public Transport {
 
   base::ThreadChecker thread_checker_;
 
-  rtc::Thread* worker_thread_;
   scoped_refptr<TransportContext> transport_context_;
   EventHandler* event_handler_ = nullptr;
   SendTransportInfoCallback send_transport_info_callback_;
@@ -131,7 +132,7 @@ class WebrtcTransport : public Transport {
 
   std::unique_ptr<PeerConnectionWrapper> peer_connection_wrapper_;
 
-  remoting::WebrtcVideoEncoderFactory* video_encoder_factory_;
+  WebrtcDummyVideoEncoderFactory* video_encoder_factory_;
 
   bool negotiation_pending_ = false;
 
@@ -140,7 +141,8 @@ class WebrtcTransport : public Transport {
   std::unique_ptr<buzz::XmlElement> pending_transport_info_message_;
   base::OneShotTimer transport_info_timer_;
 
-  ScopedVector<webrtc::IceCandidateInterface> pending_incoming_candidates_;
+  std::vector<std::unique_ptr<webrtc::IceCandidateInterface>>
+      pending_incoming_candidates_;
 
   base::WeakPtrFactory<WebrtcTransport> weak_factory_;
 

@@ -12,9 +12,7 @@
 #include "components/test_runner/test_runner_export.h"
 
 namespace blink {
-class WebAppBannerClient;
 class WebAudioDevice;
-class WebFrame;
 class WebFrameClient;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
@@ -29,12 +27,12 @@ class WebView;
 
 namespace test_runner {
 
-class AppBannerClient;
 class TestInterfaces;
 class WebFrameTestClient;
 class WebFrameTestProxyBase;
 class WebTestDelegate;
 class WebViewTestProxyBase;
+class WebWidgetTestProxyBase;
 class WebTestRunner;
 class WebViewTestClient;
 class WebWidgetTestClient;
@@ -64,8 +62,6 @@ class TEST_RUNNER_EXPORT WebTestInterfaces {
 
   blink::WebAudioDevice* CreateAudioDevice(double sample_rate);
 
-  std::unique_ptr<blink::WebAppBannerClient> CreateAppBannerClient();
-
   TestInterfaces* GetTestInterfaces();
 
   // Creates a WebFrameClient implementation providing test behavior (i.e.
@@ -86,9 +82,9 @@ class TEST_RUNNER_EXPORT WebTestInterfaces {
   // Creates a WebWidgetClient implementation providing test behavior (i.e.
   // providing a mocked screen orientation).  The caller should guarantee that
   // the returned pointer won't be used beyond the lifetime of WebTestInterfaces
-  // and/or the lifetime of |web_view_test_proxy_base|.
+  // and/or the lifetime of |web_widget_test_proxy_base|.
   std::unique_ptr<WebWidgetTestClient> CreateWebWidgetTestClient(
-      WebViewTestProxyBase* web_view_test_proxy_base);
+      WebWidgetTestProxyBase* web_widget_test_proxy_base);
 
   // Gets a list of currently opened windows created by the current test.
   std::vector<blink::WebView*> GetWindowList();

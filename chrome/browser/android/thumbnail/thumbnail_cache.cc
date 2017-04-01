@@ -8,6 +8,7 @@
 #include <cmath>
 #include <utility>
 
+#include "base/android/application_status_listener.h"
 #include "base/android/path_utils.h"
 #include "base/big_endian.h"
 #include "base/files/file.h"
@@ -16,7 +17,7 @@
 #include "base/files/file_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/threading/worker_pool.h"
+#include "base/task_scheduler/post_task.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,7 +28,8 @@
 #include "third_party/skia/include/core/SkMallocPixelRef.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
 #include "ui/android/resources/ui_resource_provider.h"
-#include "ui/gfx/android/device_display_info.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
 namespace {
@@ -131,6 +133,8 @@ ThumbnailCache::ThumbnailCache(size_t default_cache_size,
       ui_resource_provider_(NULL),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  memory_pressure_.reset(new base::MemoryPressureListener(
+      base::Bind(&ThumbnailCache::OnMemoryPressure, base::Unretained(this))));
 }
 
 ThumbnailCache::~ThumbnailCache() {
@@ -375,12 +379,13 @@ void ThumbnailCache::CompressThumbnailIfNecessary(
   gfx::Size encoded_size = GetEncodedSize(
       raw_data_size, ui_resource_provider_->SupportsETC1NonPowerOfTwo());
 
-  base::WorkerPool::PostTask(FROM_HERE,
-                             base::Bind(&ThumbnailCache::CompressionTask,
-                                        bitmap,
-                                        encoded_size,
-                                        post_compression_task),
-                             true);
+  base::PostTaskWithTraits(
+      FROM_HERE, base::TaskTraits()
+                     .WithPriority(base::TaskPriority::BACKGROUND)
+                     .WithShutdownBehavior(
+                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN),
+      base::Bind(&ThumbnailCache::CompressionTask, bitmap, encoded_size,
+                 post_compression_task));
 }
 
 void ThumbnailCache::ReadNextThumbnail() {
@@ -445,8 +450,23 @@ void ThumbnailCache::RemoveFromReadQueue(TabId tab_id) {
 }
 
 void ThumbnailCache::OnUIResourcesWereEvicted() {
-  cache_.Clear();
-  approximation_cache_.Clear();
+  if (visible_ids_.empty()) {
+    cache_.Clear();
+    approximation_cache_.Clear();
+  } else {
+    TabId last_tab = visible_ids_.front();
+    std::unique_ptr<Thumbnail> thumbnail = cache_.Remove(last_tab);
+    cache_.Clear();
+    std::unique_ptr<Thumbnail> approximation =
+        approximation_cache_.Remove(last_tab);
+    approximation_cache_.Clear();
+
+    // Keep the thumbnail for app resume if it wasn't uploaded yet.
+    if (thumbnail.get() && !thumbnail->ui_resource_id())
+      cache_.Put(last_tab, std::move(thumbnail));
+    if (approximation.get() && !approximation->ui_resource_id())
+      approximation_cache_.Put(last_tab, std::move(approximation));
+  }
 }
 
 void ThumbnailCache::InvalidateCachedThumbnail(Thumbnail* thumbnail) {
@@ -613,7 +633,12 @@ void ThumbnailCache::PostCompressionTask(
     if (thumbnail->time_stamp() != time_stamp)
       return;
     thumbnail->SetCompressedBitmap(compressed_data, content_size);
-    thumbnail->CreateUIResource();
+    // Don't upload the texture if we are being paused/stopped because
+    // the context will go away anyways.
+    if (base::android::ApplicationStatusListener::GetState() ==
+        base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES) {
+      thumbnail->CreateUIResource();
+    }
   }
   WriteThumbnailIfNecessary(tab_id, std::move(compressed_data), scale,
                             content_size);
@@ -670,9 +695,9 @@ bool ReadFromFile(base::File& file,
   // Do some simple sanity check validation.  We can't have thumbnails larger
   // than the max display size of the screen.  We also can't have etc1 texture
   // data larger than the next power of 2 up from that.
-  gfx::DeviceDisplayInfo display_info;
-  int max_dimension = std::max(display_info.GetDisplayWidth(),
-                               display_info.GetDisplayHeight());
+  gfx::Size display_size =
+      display::Screen::GetScreen()->GetPrimaryDisplay().GetSizeInPixel();
+  int max_dimension = std::max(display_size.width(), display_size.height());
 
   if (content_width > max_dimension
       || content_height > max_dimension
@@ -752,11 +777,11 @@ void ThumbnailCache::ReadTask(
   }
 
   if (decompress) {
-    base::WorkerPool::PostTask(
+    base::PostTaskWithTraits(
         FROM_HERE,
+        base::TaskTraits().WithPriority(base::TaskPriority::BACKGROUND),
         base::Bind(post_read_task, std::move(compressed_data), scale,
-                   content_size),
-        true);
+                   content_size));
   } else {
     content::BrowserThread::PostTask(
         content::BrowserThread::UI,
@@ -804,8 +829,8 @@ void ThumbnailCache::PostReadTask(TabId tab_id,
 }
 
 void ThumbnailCache::NotifyObserversOfThumbnailRead(TabId tab_id) {
-  FOR_EACH_OBSERVER(
-      ThumbnailCacheObserver, observers_, OnFinishedThumbnailRead(tab_id));
+  for (ThumbnailCacheObserver& observer : observers_)
+    observer.OnFinishedThumbnailRead(tab_id);
 }
 
 void ThumbnailCache::RemoveOnMatchedTimeStamp(TabId tab_id,
@@ -908,4 +933,12 @@ std::pair<SkBitmap, float> ThumbnailCache::CreateApproximation(
   dst_bitmap.setImmutable();
 
   return std::make_pair(dst_bitmap, new_scale * scale);
+}
+
+void ThumbnailCache::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel level) {
+  if (level == base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
+    cache_.Clear();
+    approximation_cache_.Clear();
+  }
 }

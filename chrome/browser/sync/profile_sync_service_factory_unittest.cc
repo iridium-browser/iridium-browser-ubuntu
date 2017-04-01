@@ -7,19 +7,22 @@
 #include <stddef.h>
 
 #include <memory>
+#include <vector>
 
 #include "base/command_line.h"
 #include "build/build_config.h"
+#include "chrome/common/features.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
-#include "components/browser_sync/common/browser_sync_switches.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/driver/data_type_controller.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/app_list/app_list_switches.h"
 
-using sync_driver::DataTypeController;
+using browser_sync::ProfileSyncService;
+using syncer::DataTypeController;
 
 class ProfileSyncServiceFactoryTest : public testing::Test {
  protected:
@@ -32,7 +35,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     // Desktop types.
 #if !defined(OS_ANDROID)
     datatypes.push_back(syncer::APPS);
-#if defined(ENABLE_APP_LIST)
+#if BUILDFLAG(ENABLE_APP_LIST)
     if (app_list::switches::IsAppListSyncEnabled())
       datatypes.push_back(syncer::APP_LIST);
 #endif
@@ -49,7 +52,7 @@ class ProfileSyncServiceFactoryTest : public testing::Test {
     datatypes.push_back(syncer::THEMES);
     datatypes.push_back(syncer::SUPERVISED_USERS);
     datatypes.push_back(syncer::SUPERVISED_USER_SHARED_SETTINGS);
-#endif // !OS_ANDROID
+#endif  // !OS_ANDROID
 
     // Common types.
     datatypes.push_back(syncer::AUTOFILL);

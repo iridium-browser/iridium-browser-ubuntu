@@ -17,10 +17,11 @@ import argparse
 import glob
 import os
 import pwd
+import re
 import sys
 import urlparse
 
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.lib import cgroups
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
@@ -120,6 +121,7 @@ def FetchRemoteTarballs(storage_dir, urls, desc, allow_none=False):
   # pylint: disable=C0301,W0631
   # https://sourceforge.net/tracker/?func=detail&atid=100976&aid=3482927&group_id=976
   logging.notice('Downloading %s tarball...', desc)
+  status_re = re.compile(r'^HTTP/[0-9]+(\.[0-9]+)? 200')
   for url in urls:
     # http://www.logilab.org/ticket/8766
     # pylint: disable=E1101
@@ -136,9 +138,9 @@ def FetchRemoteTarballs(storage_dir, urls, desc, allow_none=False):
         redirect_stderr=True, print_cmd=False, debug_level=logging.NOTICE)
     successful = False
     for header in result.output.splitlines():
-      # We must walk the output to find the string '200 OK' for use cases where
+      # We must walk the output to find the 200 code for use cases where
       # a proxy is involved and may have pushed down the actual header.
-      if header.find('200 OK') != -1:
+      if status_re.match(header):
         successful = True
       elif header.lower().startswith('content-length:'):
         content_length = int(header.split(':', 1)[-1].strip())
@@ -671,7 +673,7 @@ def main(argv):
       for target in (sdk_cache, distfiles_cache):
         src = os.path.join(constants.SOURCE_ROOT, os.path.basename(target))
         if not os.path.exists(src):
-          osutils.SafeMakedirs(target)
+          osutils.SafeMakedirsNonRoot(target)
           continue
         lock.write_lock(
             "Upgrade to %r needed but chroot is locked; please exit "
@@ -682,7 +684,7 @@ def main(argv):
           # of us avoiding taking a write lock to do the src check.  If we
           # took a write lock for that check, it would effectively limit
           # all cros_sdk for a chroot to a single instance.
-          osutils.SafeMakedirs(target)
+          osutils.SafeMakedirsNonRoot(target)
         elif not os.path.exists(target):
           # Upgrade occurred, but a reversion, or something whacky
           # occurred writing to the old location.  Wipe and continue.

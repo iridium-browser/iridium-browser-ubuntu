@@ -13,17 +13,15 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/process.h"
 #include "base/process/process_info.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_version.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/win/chrome_process_finder.h"
@@ -283,16 +281,35 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcess() {
 
 ProcessSingleton::NotifyResult
 ProcessSingleton::NotifyOtherProcessOrCreate() {
-  ProcessSingleton::NotifyResult result = PROCESS_NONE;
-  if (!Create()) {
-    result = NotifyOtherProcess();
-    if (result == PROCESS_NONE)
-      result = PROFILE_IN_USE;
-  } else {
-    g_browser_process->platform_part()->PlatformSpecificCommandLineProcessing(
-        *base::CommandLine::ForCurrentProcess());
+  const base::TimeTicks begin_ticks = base::TimeTicks::Now();
+  for (int i = 0; i < 2; ++i) {
+    if (Create()) {
+      UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToCreate",
+                                 base::TimeTicks::Now() - begin_ticks);
+      return PROCESS_NONE;  // This is the single browser process.
+    }
+    ProcessSingleton::NotifyResult result = NotifyOtherProcess();
+    if (result == PROCESS_NOTIFIED || result == LOCK_ERROR) {
+      if (result == PROCESS_NOTIFIED) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToNotify",
+                                   base::TimeTicks::Now() - begin_ticks);
+      } else {
+        UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToFailure",
+                                   base::TimeTicks::Now() - begin_ticks);
+      }
+      // The single browser process was notified, the user chose not to
+      // terminate a hung browser, or the lock file could not be created.
+      // Nothing more to do.
+      return result;
+    }
+    DCHECK_EQ(PROCESS_NONE, result);
+    // The process could not be notified for some reason, or it was hung and
+    // terminated. Retry once if this is the first time; otherwise, fall through
+    // to report that the process must exit because the profile is in use.
   }
-  return result;
+  UMA_HISTOGRAM_MEDIUM_TIMES("Chrome.ProcessSingleton.TimeToFailure",
+                             base::TimeTicks::Now() - begin_ticks);
+  return PROFILE_IN_USE;
 }
 
 // Look for a Chrome instance that uses the same profile directory. If there

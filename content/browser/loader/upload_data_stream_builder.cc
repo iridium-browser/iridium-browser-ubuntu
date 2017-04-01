@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/single_thread_task_runner.h"
 #include "content/browser/fileapi/upload_file_system_file_element_reader.h"
 #include "content/common/resource_request_body_impl.h"
 #include "net/base/elements_upload_data_stream.h"
@@ -23,6 +24,10 @@
 #include "storage/browser/blob/blob_reader.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/upload_blob_element_reader.h"
+
+namespace base {
+class TaskRunner;
+}
 
 namespace disk_cache {
 class Entry;
@@ -88,20 +93,20 @@ std::unique_ptr<net::UploadDataStream> UploadDataStreamBuilder::Build(
     switch (element.type()) {
       case ResourceRequestBodyImpl::Element::TYPE_BYTES:
         element_readers.push_back(
-            base::WrapUnique(new BytesElementReader(body, element)));
+            base::MakeUnique<BytesElementReader>(body, element));
         break;
       case ResourceRequestBodyImpl::Element::TYPE_FILE:
-        element_readers.push_back(base::WrapUnique(
-            new FileElementReader(body, file_task_runner, element)));
+        element_readers.push_back(base::MakeUnique<FileElementReader>(
+            body, file_task_runner, element));
         break;
       case ResourceRequestBodyImpl::Element::TYPE_FILE_FILESYSTEM:
         // If |body| contains any filesystem URLs, the caller should have
         // supplied a FileSystemContext.
         DCHECK(file_system_context);
         element_readers.push_back(
-            base::WrapUnique(new content::UploadFileSystemFileElementReader(
+            base::MakeUnique<content::UploadFileSystemFileElementReader>(
                 file_system_context, element.filesystem_url(), element.offset(),
-                element.length(), element.expected_modification_time())));
+                element.length(), element.expected_modification_time()));
         break;
       case ResourceRequestBodyImpl::Element::TYPE_BLOB: {
         DCHECK_EQ(std::numeric_limits<uint64_t>::max(), element.length());
@@ -109,8 +114,8 @@ std::unique_ptr<net::UploadDataStream> UploadDataStreamBuilder::Build(
         std::unique_ptr<storage::BlobDataHandle> handle =
             blob_context->GetBlobDataFromUUID(element.blob_uuid());
         element_readers.push_back(
-            base::WrapUnique(new storage::UploadBlobElementReader(
-                std::move(handle), file_system_context, file_task_runner)));
+            base::MakeUnique<storage::UploadBlobElementReader>(
+                std::move(handle), file_system_context, file_task_runner));
         break;
       }
       case ResourceRequestBodyImpl::Element::TYPE_DISK_CACHE_ENTRY:
@@ -121,8 +126,8 @@ std::unique_ptr<net::UploadDataStream> UploadDataStreamBuilder::Build(
     }
   }
 
-  return base::WrapUnique(new net::ElementsUploadDataStream(
-      std::move(element_readers), body->identifier()));
+  return base::MakeUnique<net::ElementsUploadDataStream>(
+      std::move(element_readers), body->identifier());
 }
 
 }  // namespace content

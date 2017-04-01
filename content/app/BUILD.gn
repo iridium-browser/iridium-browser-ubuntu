@@ -4,6 +4,7 @@
 
 import("//build/config/chrome_build.gni")
 import("//build/config/features.gni")
+import("//ppapi/features/features.gni")
 
 # Implements "content_main" given the defines and visibility. On Windows this
 # is compiled with a different define for browser and child, but all code needs
@@ -26,8 +27,9 @@ template("implement_content_app") {
     "//content:sandbox_helper_win",
     "//content/public/common:common_sources",
     "//crypto",
-    "//services/shell/public/interfaces",
+    "//services/service_manager/public/interfaces",
     "//mojo/edk/system",
+    "//ppapi/features",
     "//third_party/WebKit/public:mojo_bindings",
     "//ui/base",
     "//ui/gfx",
@@ -49,8 +51,10 @@ template("implement_content_app") {
       "//content/child",
       "//device/bluetooth",
       "//device/gamepad",
-      "//device/geolocation:device_geolocation",
+      "//device/generic_sensor",
+      "//device/geolocation",
       "//device/power_save_blocker",
+      "//device/time_zone_monitor",
       "//device/usb",
       "//device/vibration",
       "//gpu",
@@ -113,7 +117,6 @@ template("implement_content_app") {
         "android/content_jni_onload.cc",
         "android/content_main.cc",
         "android/content_main.h",
-        "android/download_main.cc",
         "android/library_loader_hooks.cc",
         "android/library_loader_hooks.h",
       ]

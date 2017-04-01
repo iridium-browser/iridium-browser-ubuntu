@@ -7,10 +7,10 @@
 #include "xfa/fxfa/app/xfa_ffpath.h"
 
 #include "xfa/fxfa/app/xfa_ffdraw.h"
-#include "xfa/fxfa/include/xfa_ffapp.h"
-#include "xfa/fxfa/include/xfa_ffdoc.h"
-#include "xfa/fxfa/include/xfa_ffpageview.h"
-#include "xfa/fxfa/include/xfa_ffwidget.h"
+#include "xfa/fxfa/xfa_ffapp.h"
+#include "xfa/fxfa/xfa_ffdoc.h"
+#include "xfa/fxfa/xfa_ffpageview.h"
+#include "xfa/fxfa/xfa_ffwidget.h"
 #include "xfa/fxgraphics/cfx_color.h"
 #include "xfa/fxgraphics/cfx_path.h"
 
@@ -63,7 +63,7 @@ void CXFA_FFLine::RenderWidget(CFX_Graphics* pGS,
   FX_ARGB lineColor = 0xFF000000;
   int32_t iStrokeType = 0;
   FX_FLOAT fLineWidth = 1.0f;
-  FX_BOOL bSlope = lineObj.GetSlop();
+  bool bSlope = lineObj.GetSlop();
   int32_t iCap = 0;
   CXFA_Edge edge = lineObj.GetEdge();
   if (edge) {
@@ -95,7 +95,7 @@ void CXFA_FFLine::RenderWidget(CFX_Graphics* pGS,
   }
   CFX_Color color(lineColor);
   pGS->SaveGraphState();
-  pGS->SetLineWidth(fLineWidth, TRUE);
+  pGS->SetLineWidth(fLineWidth, true);
   XFA_StrokeTypeSetLineDash(pGS, iStrokeType, iCap);
   pGS->SetStrokeColor(&color);
   pGS->SetLineCap(XFA_LineCapToFXGE(iCap));

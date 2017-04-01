@@ -16,29 +16,29 @@ from systrace.tracing_agents import battor_trace_agent
 from systrace.tracing_agents import ftrace_agent
 
 
-AGENT_MODULES_ = [atrace_agent, atrace_from_file_agent,
+AGENT_MODULES = [atrace_agent, atrace_from_file_agent,
                  battor_trace_agent, ftrace_agent]
 
 
 class SystraceRunner(object):
-  def __init__(self, script_dir, options, categories):
+  def __init__(self, script_dir, options):
     """Constructor.
 
     Args:
         script_dir: Directory containing the trace viewer script
                     (systrace_trace_viewer.html)
-        options: List of command line options.
-        categories: List of trace categories to capture.
+        options: Object containing command line options.
     """
     # Parse command line arguments and create agents.
     self._script_dir = script_dir
     self._out_filename = options.output_file
-    agents = CreateAgents(options)
+    agents_with_config = tracing_controller.CreateAgentsWithConfig(
+        options, AGENT_MODULES)
+    controller_config = tracing_controller.GetControllerConfig(options)
 
     # Set up tracing controller.
-    self._tracing_controller = tracing_controller.TracingController(options,
-                                                                    categories,
-                                                                    agents)
+    self._tracing_controller = tracing_controller.TracingController(
+        agents_with_config, controller_config)
 
   def StartTracing(self):
     self._tracing_controller.StartTracing()
@@ -67,16 +67,3 @@ class SystraceRunner(object):
                   self._out_filename)
     print '\nWrote trace %s file: file://%s\n' % (('JSON' if write_json
                                                    else 'HTML'), result)
-
-def CreateAgents(options):
-  """Create tracing agents.
-
-  This function will determine which tracing agents are valid given the
-  options and create those agents.
-  Args:
-    options: The command-line options.
-  Returns:
-    The list of systrace agents.
-  """
-  result = [module.try_create_agent(options) for module in AGENT_MODULES_]
-  return [x for x in result if x]

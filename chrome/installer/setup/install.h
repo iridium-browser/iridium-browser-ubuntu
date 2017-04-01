@@ -7,14 +7,7 @@
 #ifndef CHROME_INSTALLER_SETUP_INSTALL_H_
 #define CHROME_INSTALLER_SETUP_INSTALL_H_
 
-#include <vector>
-
 #include "base/strings/string16.h"
-#include "base/version.h"
-#include "chrome/installer/util/installation_state.h"
-#include "chrome/installer/util/installer_state.h"
-#include "chrome/installer/util/master_preferences.h"
-#include "chrome/installer/util/product.h"
 #include "chrome/installer/util/util_constants.h"
 
 namespace base {
@@ -27,6 +20,7 @@ namespace installer {
 class InstallationState;
 class InstallerState;
 class MasterPreferences;
+class Product;
 
 enum InstallShortcutOperation {
   // Create all shortcuts (potentially skipping those explicitly stated not to
@@ -49,18 +43,6 @@ enum InstallShortcutLevel {
   // all-users version).
   ALL_USERS,
 };
-
-// Sets |new_target_path| as the new target path of all shortcuts in the
-// location specified by |shortcut_location| and |dist| which either:
-// - Point to a file rooted at |old_target_dir| whose name ends in
-//   |old_target_name_suffix|, or,
-// - Have an icon rooted at |old_target_dir|.
-void UpdatePerUserShortcutsInLocation(
-    const ShellUtil::ShortcutLocation shortcut_location,
-    BrowserDistribution* dist,
-    const base::FilePath& old_target_dir,
-    const base::FilePath& old_target_name_suffix,
-    const base::FilePath& new_target_path);
 
 // Escape |att_value| as per the XML AttValue production
 // (http://www.w3.org/TR/2008/REC-xml-20081126/#NT-AttValue) for a value in
@@ -128,6 +110,11 @@ InstallStatus InstallOrUpdateProduct(
     const base::FilePath& prefs_path,
     const installer::MasterPreferences& prefs,
     const base::Version& new_version);
+
+// Launches a process that deletes files that belong to old versions of Chrome.
+// |setup_path| is the path to the setup.exe executable to use.
+void LaunchDeleteOldVersionsProcess(const base::FilePath& setup_path,
+                                    const InstallerState& installer_state);
 
 // Performs installation-related tasks following an OS upgrade.
 // |chrome| The installed product (must be a browser).

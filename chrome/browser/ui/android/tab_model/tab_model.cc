@@ -10,7 +10,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/synced_window_delegate_android.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/toolbar/toolbar_model_impl.h"
 #include "content/public/browser/notification_service.h"
 
@@ -20,12 +20,12 @@ using content::NotificationService;
 // chrome/android/java/src/org/chromium/chrome/browser/tabmodel/TabList.java
 static int INVALID_TAB_INDEX = -1;
 
-TabModel::TabModel(Profile* profile)
-  : profile_(profile),
-    live_tab_context_(new AndroidLiveTabContext(this)),
-    synced_window_delegate_(
-        new browser_sync::SyncedWindowDelegateAndroid(this)) {
-
+TabModel::TabModel(Profile* profile, bool is_tabbed_activity)
+    : profile_(profile),
+      live_tab_context_(new AndroidLiveTabContext(this)),
+      synced_window_delegate_(
+          new browser_sync::SyncedWindowDelegateAndroid(this,
+                                                        is_tabbed_activity)) {
   if (profile) {
     // A normal Profile creates an OTR profile if it does not exist when
     // GetOffTheRecordProfile() is called, so we guard it with
@@ -57,7 +57,7 @@ bool TabModel::IsOffTheRecord() const {
   return is_off_the_record_;
 }
 
-browser_sync::SyncedWindowDelegate* TabModel::GetSyncedWindowDelegate() const {
+sync_sessions::SyncedWindowDelegate* TabModel::GetSyncedWindowDelegate() const {
   return synced_window_delegate_.get();
 }
 
@@ -69,7 +69,7 @@ const SessionID& TabModel::SessionId() const {
   return session_id_;
 }
 
-sessions::LiveTabContext* TabModel::GetLiveTabContext() const{
+sessions::LiveTabContext* TabModel::GetLiveTabContext() const {
   return live_tab_context_.get();
 }
 
@@ -82,7 +82,7 @@ content::WebContents* TabModel::GetActiveWebContents() const {
 
 void TabModel::BroadcastSessionRestoreComplete() {
   if (profile_) {
-    ProfileSyncService* sync_service =
+    browser_sync::ProfileSyncService* sync_service =
         ProfileSyncServiceFactory::GetForProfile(profile_);
     if (sync_service)
       sync_service->OnSessionRestoreComplete();

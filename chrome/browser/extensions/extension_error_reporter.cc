@@ -15,9 +15,9 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/simple_message_box.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/notification_types.h"
-#include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 ExtensionErrorReporter* ExtensionErrorReporter::instance_ = NULL;
@@ -60,9 +60,8 @@ void ExtensionErrorReporter::ReportLoadError(
       path_str.c_str(),
       error.c_str()));
   ReportError(message, be_noisy);
-  FOR_EACH_OBSERVER(Observer,
-                    observers_,
-                    OnLoadFailure(browser_context, extension_path, error));
+  for (auto& observer : observers_)
+    observer.OnLoadFailure(browser_context, extension_path, error);
 }
 
 void ExtensionErrorReporter::ReportError(const base::string16& message,

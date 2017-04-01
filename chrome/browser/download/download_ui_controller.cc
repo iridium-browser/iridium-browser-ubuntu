@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/callback.h"
-#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_item_model.h"
@@ -56,9 +55,6 @@ void AndroidUIControllerDelegate::OnNewDownloadReady(
   if (item->GetState() != content::DownloadItem::IN_PROGRESS)
     return;
 
-  // GET downloads without authentication are delegated to the Android
-  // DownloadManager. Chrome is responsible for the rest.  See
-  // InterceptDownloadResourceThrottle::ProcessDownloadRequest().
   DownloadControllerBase::Get()->OnDownloadStarted(item);
 }
 

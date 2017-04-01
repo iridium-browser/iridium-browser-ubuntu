@@ -12,64 +12,24 @@
 #include <utility>
 #include <vector>
 
-#include <openssl/bn.h>
-#include <openssl/ecdsa.h>
-#include <openssl/evp.h>
-#include <openssl/x509.h>
-
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/sequenced_task_runner.h"
 #include "crypto/openssl_util.h"
 #include "crypto/scoped_capi_types.h"
 #include "crypto/wincrypt_shim.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
-#include "net/ssl/scoped_openssl_types.h"
-#include "net/ssl/ssl_platform_key_task_runner.h"
+#include "net/ssl/ssl_platform_key_util.h"
 #include "net/ssl/ssl_private_key.h"
 #include "net/ssl/threaded_ssl_private_key.h"
+#include "third_party/boringssl/src/include/openssl/bn.h"
+#include "third_party/boringssl/src/include/openssl/ecdsa.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
+#include "third_party/boringssl/src/include/openssl/x509.h"
 
 namespace net {
 
 namespace {
-
-using NCryptFreeObjectFunc = SECURITY_STATUS(WINAPI*)(NCRYPT_HANDLE);
-using NCryptSignHashFunc = SECURITY_STATUS(WINAPI*)(NCRYPT_KEY_HANDLE,  // hKey
-                                                    VOID*,   // pPaddingInfo
-                                                    BYTE*,   // pbHashValue
-                                                    DWORD,   // cbHashValue
-                                                    BYTE*,   // pbSignature
-                                                    DWORD,   // cbSignature
-                                                    DWORD*,  // pcbResult
-                                                    DWORD);  // dwFlags
-
-class CNGFunctions {
- public:
-  CNGFunctions() : ncrypt_free_object_(nullptr), ncrypt_sign_hash_(nullptr) {
-    HMODULE ncrypt = GetModuleHandle(L"ncrypt.dll");
-    if (ncrypt != nullptr) {
-      ncrypt_free_object_ = reinterpret_cast<NCryptFreeObjectFunc>(
-          GetProcAddress(ncrypt, "NCryptFreeObject"));
-      ncrypt_sign_hash_ = reinterpret_cast<NCryptSignHashFunc>(
-          GetProcAddress(ncrypt, "NCryptSignHash"));
-    }
-  }
-
-  NCryptFreeObjectFunc ncrypt_free_object() const {
-    return ncrypt_free_object_;
-  }
-
-  NCryptSignHashFunc ncrypt_sign_hash() const { return ncrypt_sign_hash_; }
-
- private:
-  NCryptFreeObjectFunc ncrypt_free_object_;
-  NCryptSignHashFunc ncrypt_sign_hash_;
-};
-
-base::LazyInstance<CNGFunctions>::Leaky g_cng_functions =
-    LAZY_INSTANCE_INITIALIZER;
 
 class SSLPlatformKeyCAPI : public ThreadedSSLPrivateKey::Delegate {
  public:
@@ -172,9 +132,7 @@ class SSLPlatformKeyCNG : public ThreadedSSLPrivateKey::Delegate {
                     size_t max_length)
       : key_(key), type_(type), max_length_(max_length) {}
 
-  ~SSLPlatformKeyCNG() override {
-    g_cng_functions.Get().ncrypt_free_object()(key_);
-  }
+  ~SSLPlatformKeyCNG() override { NCryptFreeObject(key_); }
 
   SSLPrivateKey::Type GetType() override { return type_; }
 
@@ -230,7 +188,7 @@ class SSLPlatformKeyCNG : public ThreadedSSLPrivateKey::Delegate {
     }
 
     DWORD signature_len;
-    SECURITY_STATUS status = g_cng_functions.Get().ncrypt_sign_hash()(
+    SECURITY_STATUS status = NCryptSignHash(
         key_, padding_info,
         const_cast<BYTE*>(reinterpret_cast<const BYTE*>(input.data())),
         input.size(), nullptr, 0, &signature_len, flags);
@@ -239,7 +197,7 @@ class SSLPlatformKeyCNG : public ThreadedSSLPrivateKey::Delegate {
       return ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED;
     }
     signature->resize(signature_len);
-    status = g_cng_functions.Get().ncrypt_sign_hash()(
+    status = NCryptSignHash(
         key_, padding_info,
         const_cast<BYTE*>(reinterpret_cast<const BYTE*>(input.data())),
         input.size(), signature->data(), signature_len, &signature_len, flags);
@@ -251,7 +209,7 @@ class SSLPlatformKeyCNG : public ThreadedSSLPrivateKey::Delegate {
 
     // CNG emits raw ECDSA signatures, but BoringSSL expects a DER-encoded
     // ECDSA-Sig-Value.
-    if (type_ == SSLPrivateKey::Type::ECDSA) {
+    if (SSLPrivateKey::IsECDSAType(type_)) {
       if (signature->size() % 2 != 0) {
         LOG(ERROR) << "Bad signature length";
         return ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED;
@@ -259,7 +217,7 @@ class SSLPlatformKeyCNG : public ThreadedSSLPrivateKey::Delegate {
       size_t order_len = signature->size() / 2;
 
       // Convert the RAW ECDSA signature to a DER-encoded ECDSA-Sig-Value.
-      crypto::ScopedECDSA_SIG sig(ECDSA_SIG_new());
+      bssl::UniquePtr<ECDSA_SIG> sig(ECDSA_SIG_new());
       if (!sig || !BN_bin2bn(signature->data(), order_len, sig->r) ||
           !BN_bin2bn(signature->data() + order_len, order_len, sig->s)) {
         return ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED;
@@ -287,48 +245,16 @@ class SSLPlatformKeyCNG : public ThreadedSSLPrivateKey::Delegate {
   DISALLOW_COPY_AND_ASSIGN(SSLPlatformKeyCNG);
 };
 
-// Determines the key type and maximum signature length of |certificate|'s
-// public key.
-bool GetKeyInfo(const X509Certificate* certificate,
-                SSLPrivateKey::Type* out_type,
-                size_t* out_max_length) {
-  crypto::OpenSSLErrStackTracer tracker(FROM_HERE);
-
-  std::string der_encoded;
-  if (!X509Certificate::GetDEREncoded(certificate->os_cert_handle(),
-                                      &der_encoded))
-    return false;
-  const uint8_t* bytes = reinterpret_cast<const uint8_t*>(der_encoded.data());
-  ScopedX509 x509(d2i_X509(nullptr, &bytes, der_encoded.size()));
-  if (!x509)
-    return false;
-  crypto::ScopedEVP_PKEY key(X509_get_pubkey(x509.get()));
-  if (!key)
-    return false;
-  switch (EVP_PKEY_id(key.get())) {
-    case EVP_PKEY_RSA:
-      *out_type = SSLPrivateKey::Type::RSA;
-      break;
-    case EVP_PKEY_EC:
-      *out_type = SSLPrivateKey::Type::ECDSA;
-      break;
-    default:
-      return false;
-  }
-  *out_max_length = EVP_PKEY_size(key.get());
-  return true;
-}
-
 }  // namespace
 
 scoped_refptr<SSLPrivateKey> FetchClientCertPrivateKey(
-    X509Certificate* certificate) {
+    const X509Certificate* certificate) {
   // Rather than query the private key for metadata, extract the public key from
   // the certificate without using Windows APIs. CAPI and CNG do not
   // consistently work depending on the system. See https://crbug.com/468345.
   SSLPrivateKey::Type key_type;
   size_t max_length;
-  if (!GetKeyInfo(certificate, &key_type, &max_length))
+  if (!GetClientCertInfo(certificate, &key_type, &max_length))
     return nullptr;
 
   PCCERT_CONTEXT cert_context = certificate->os_cert_handle();

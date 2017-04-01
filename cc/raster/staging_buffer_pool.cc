@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -14,6 +15,11 @@
 #include "cc/debug/traced_value.h"
 #include "cc/resources/scoped_resource.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
+#include "ui/gfx/gpu_memory_buffer_tracing.h"
+
+using base::trace_event::MemoryAllocatorDump;
+using base::trace_event::MemoryAllocatorDumpGuid;
+using base::trace_event::MemoryDumpLevelOfDetail;
 
 namespace cc {
 namespace {
@@ -94,23 +100,21 @@ void StagingBuffer::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
   gfx::GpuMemoryBufferId buffer_id = gpu_memory_buffer->GetId();
   std::string buffer_dump_name =
       base::StringPrintf("cc/one_copy/staging_memory/buffer_%d", buffer_id.id);
-  base::trace_event::MemoryAllocatorDump* buffer_dump =
-      pmd->CreateAllocatorDump(buffer_dump_name);
+  MemoryAllocatorDump* buffer_dump = pmd->CreateAllocatorDump(buffer_dump_name);
 
   uint64_t buffer_size_in_bytes =
       ResourceUtil::UncheckedSizeInBytes<uint64_t>(size, format);
-  buffer_dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameSize,
-                         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+  buffer_dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                         MemoryAllocatorDump::kUnitsBytes,
                          buffer_size_in_bytes);
-  buffer_dump->AddScalar("free_size",
-                         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
+  buffer_dump->AddScalar("free_size", MemoryAllocatorDump::kUnitsBytes,
                          in_free_list ? buffer_size_in_bytes : 0);
 
   // Emit an ownership edge towards a global allocator dump node.
   const uint64_t tracing_process_id =
       base::trace_event::MemoryDumpManager::GetInstance()
           ->GetTracingProcessId();
-  base::trace_event::MemoryAllocatorDumpGuid shared_buffer_guid =
+  MemoryAllocatorDumpGuid shared_buffer_guid =
       gfx::GetGpuMemoryBufferGUIDForTracing(tracing_process_id, buffer_id);
   pmd->CreateSharedGlobalAllocatorDump(shared_buffer_guid);
 
@@ -141,6 +145,10 @@ StagingBufferPool::StagingBufferPool(base::SequencedTaskRunner* task_runner,
       this, "cc::StagingBufferPool", base::ThreadTaskRunnerHandle::Get());
   reduce_memory_usage_callback_ = base::Bind(
       &StagingBufferPool::ReduceMemoryUsage, weak_ptr_factory_.GetWeakPtr());
+
+  task_runner_->PostTask(
+      FROM_HERE, base::Bind(&StagingBufferPool::RegisterMemoryCoordinatorClient,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 StagingBufferPool::~StagingBufferPool() {
@@ -148,7 +156,15 @@ StagingBufferPool::~StagingBufferPool() {
       this);
 }
 
+void StagingBufferPool::RegisterMemoryCoordinatorClient() {
+  // Register this component with base::MemoryCoordinatorClientRegistry.
+  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
+}
+
 void StagingBufferPool::Shutdown() {
+  // Unregister this component with memory_coordinator::ClientRegistry.
+  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
+
   base::AutoLock lock(lock_);
   if (buffers_.empty())
     return;
@@ -173,16 +189,23 @@ bool StagingBufferPool::OnMemoryDump(
     base::trace_event::ProcessMemoryDump* pmd) {
   base::AutoLock lock(lock_);
 
-  for (const auto* buffer : buffers_) {
-    auto in_free_buffers =
-        std::find_if(free_buffers_.begin(), free_buffers_.end(),
-                     [buffer](const std::unique_ptr<StagingBuffer>& b) {
-                       return b.get() == buffer;
-                     });
-    buffer->OnMemoryDump(pmd, buffer->format,
-                         in_free_buffers != free_buffers_.end());
+  if (args.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND) {
+    std::string dump_name("cc/one_copy/staging_memory");
+    MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
+    dump->AddScalar(MemoryAllocatorDump::kNameSize,
+                    MemoryAllocatorDump::kUnitsBytes,
+                    staging_buffer_usage_in_bytes_);
+  } else {
+    for (const auto* buffer : buffers_) {
+      auto in_free_buffers =
+          std::find_if(free_buffers_.begin(), free_buffers_.end(),
+                       [buffer](const std::unique_ptr<StagingBuffer>& b) {
+                         return b.get() == buffer;
+                       });
+      buffer->OnMemoryDump(pmd, buffer->format,
+                           in_free_buffers != free_buffers_.end());
+    }
   }
-
   return true;
 }
 
@@ -406,6 +429,26 @@ void StagingBufferPool::ReleaseBuffersNotUsedSince(base::TimeTicks time) {
       RemoveStagingBuffer(busy_buffers_.front().get());
       busy_buffers_.pop_front();
     }
+  }
+}
+
+void StagingBufferPool::OnMemoryStateChange(base::MemoryState state) {
+  switch (state) {
+    case base::MemoryState::NORMAL:
+      // TODO(tasak): go back to normal state.
+      break;
+    case base::MemoryState::THROTTLED:
+      // TODO(tasak): make the limits of this component's caches smaller to
+      // save memory usage.
+      break;
+    case base::MemoryState::SUSPENDED: {
+      base::AutoLock lock(lock_);
+      // Release all buffers, regardless of how recently they were used.
+      ReleaseBuffersNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
+    } break;
+    case base::MemoryState::UNKNOWN:
+      // NOT_REACHED.
+      break;
   }
 }
 

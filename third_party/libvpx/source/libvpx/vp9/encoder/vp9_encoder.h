@@ -29,6 +29,7 @@
 #include "vp9/common/vp9_thread_common.h"
 #include "vp9/common/vp9_onyxc_int.h"
 
+#include "vp9/encoder/vp9_alt_ref_aq.h"
 #include "vp9/encoder/vp9_aq_cyclicrefresh.h"
 #include "vp9/encoder/vp9_context_tree.h"
 #include "vp9/encoder/vp9_encodemb.h"
@@ -116,6 +117,9 @@ typedef enum {
   COMPLEXITY_AQ = 2,
   CYCLIC_REFRESH_AQ = 3,
   EQUATOR360_AQ = 4,
+  // AQ based on lookahead temporal
+  // variance (only valid for altref frames)
+  LOOKAHEAD_AQ = 5,
   AQ_MODE_COUNT  // This should always be the last member of the enum
 } AQ_MODE;
 
@@ -178,6 +182,9 @@ typedef struct VP9EncoderConfig {
   int cq_level;
   AQ_MODE aq_mode;  // Adaptive Quantization mode
 
+  // Special handling of Adaptive Quantization for AltRef frames
+  int alt_ref_aq;
+
   // Internal frame size scaling.
   RESIZE_TYPE resize_mode;
   int scaled_frame_width;
@@ -230,7 +237,7 @@ typedef struct VP9EncoderConfig {
 
   int max_threads;
 
-  int target_level;
+  unsigned int target_level;
 
   vpx_fixed_buf_t two_pass_stats_in;
   struct vpx_codec_pkt_list *output_pkt_list;
@@ -260,14 +267,14 @@ typedef struct TileDataEnc {
   TileInfo tile_info;
   int thresh_freq_fact[BLOCK_SIZES][MAX_MODES];
   int mode_map[BLOCK_SIZES][MAX_MODES];
+  int m_search_count;
+  int ex_search_count;
 } TileDataEnc;
 
 typedef struct RD_COUNTS {
   vp9_coeff_count coef_counts[TX_SIZES][PLANE_TYPES];
   int64_t comp_pred_diff[REFERENCE_MODES];
   int64_t filter_diff[SWITCHABLE_FILTER_CONTEXTS];
-  int m_search_count;
-  int ex_search_count;
 } RD_COUNTS;
 
 typedef struct ThreadData {
@@ -334,6 +341,8 @@ typedef struct {
   uint8_t max_ref_frame_buffers;
 } Vp9LevelSpec;
 
+extern const Vp9LevelSpec vp9_level_defs[VP9_LEVELS];
+
 typedef struct {
   int64_t ts;  // timestamp
   uint32_t luma_samples;
@@ -360,6 +369,26 @@ typedef struct {
   Vp9LevelStats level_stats;
   Vp9LevelSpec level_spec;
 } Vp9LevelInfo;
+
+typedef enum {
+  BITRATE_TOO_LARGE = 0,
+  LUMA_PIC_SIZE_TOO_LARGE = 1,
+  LUMA_SAMPLE_RATE_TOO_LARGE = 2,
+  CPB_TOO_LARGE = 3,
+  COMPRESSION_RATIO_TOO_SMALL = 4,
+  TOO_MANY_COLUMN_TILE = 5,
+  ALTREF_DIST_TOO_SMALL = 6,
+  TOO_MANY_REF_BUFFER = 7,
+  TARGET_LEVEL_FAIL_IDS = 8
+} TARGET_LEVEL_FAIL_ID;
+
+typedef struct {
+  int8_t level_index;
+  uint8_t rc_config_updated;
+  uint8_t fail_flag;
+  int max_frame_size;   // in bits
+  double max_cpb_size;  // in bits
+} LevelConstraint;
 
 typedef struct VP9_COMP {
   QUANTS quants;
@@ -482,6 +511,10 @@ typedef struct VP9_COMP {
 
   YV12_BUFFER_CONFIG alt_ref_buffer;
 
+  // class responsible for adaptive
+  // quantization of altref frames
+  struct ALT_REF_AQ *alt_ref_aq;
+
 #if CONFIG_INTERNAL_STATS
   unsigned int mode_chosen_counts[MAX_MODES];
 
@@ -583,6 +616,8 @@ typedef struct VP9_COMP {
   int64_t vbp_thresholds[4];
   int64_t vbp_threshold_minmax;
   int64_t vbp_threshold_sad;
+  // Threshold used for partition copy
+  int64_t vbp_threshold_copy;
   BLOCK_SIZE vbp_bsize_min;
 
   // Multi-threading
@@ -590,9 +625,16 @@ typedef struct VP9_COMP {
   VPxWorker *workers;
   struct EncWorkerData *tile_thr_data;
   VP9LfSync lf_row_sync;
+  struct VP9BitstreamWorkerData *vp9_bitstream_worker_data;
 
   int keep_level_stats;
   Vp9LevelInfo level_info;
+
+  // Previous Partition Info
+  BLOCK_SIZE *prev_partition;
+  int8_t *prev_segment_id;
+
+  LevelConstraint level_constraint;
 } VP9_COMP;
 
 void vp9_initialize_enc(void);
@@ -724,7 +766,8 @@ static INLINE int is_one_pass_cbr_svc(const struct VP9_COMP *const cpi) {
 }
 
 static INLINE int is_altref_enabled(const VP9_COMP *const cpi) {
-  return cpi->oxcf.mode != REALTIME && cpi->oxcf.lag_in_frames > 0 &&
+  return !(cpi->oxcf.mode == REALTIME && cpi->oxcf.rc_mode == VPX_CBR) &&
+         cpi->oxcf.lag_in_frames > 0 &&
          (cpi->oxcf.enable_auto_arf &&
           (!is_two_pass_svc(cpi) ||
            cpi->oxcf.ss_enable_auto_arf[cpi->svc.spatial_layer_id]));
@@ -745,6 +788,14 @@ static INLINE int get_chessboard_index(const int frame_index) {
 
 static INLINE int *cond_cost_list(const struct VP9_COMP *cpi, int *cost_list) {
   return cpi->sf.mv.subpel_search_method != SUBPEL_TREE ? cost_list : NULL;
+}
+
+static INLINE int get_level_index(VP9_LEVEL level) {
+  int i;
+  for (i = 0; i < VP9_LEVELS; ++i) {
+    if (level == vp9_level_defs[i].level) return i;
+  }
+  return -1;
 }
 
 VP9_LEVEL vp9_get_level(const Vp9LevelSpec *const level_spec);

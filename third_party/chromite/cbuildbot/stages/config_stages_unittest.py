@@ -8,13 +8,14 @@ from __future__ import print_function
 
 from chromite.cbuildbot.stages import config_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
-from chromite.cbuildbot import constants
+from chromite.lib import constants
 from chromite.cbuildbot import repository
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_test_lib
 from chromite.lib import git
 
-class CheckTemplateStageTest(
-    generic_stages_unittest.AbstractStageTestCase):
+
+class CheckTemplateStageTest(generic_stages_unittest.AbstractStageTestCase):
   """Tests for CheckTemplateStage."""
 
   TOT_PATH = (config_stages.GS_GE_TEMPLATE_BUCKET +
@@ -34,6 +35,7 @@ class CheckTemplateStageTest(
   def ConstructStage(self):
     return config_stages.CheckTemplateStage(self._run)
 
+  @cros_test_lib.NetworkTest()
   def testBasic(self):
     stage = self.ConstructStage()
 
@@ -42,6 +44,7 @@ class CheckTemplateStageTest(
     stage.PerformStage()
     self.assertTrue(self.update_mock.call_count == 2)
 
+  @cros_test_lib.NetworkTest()
   def testSortAndGetReleasePaths(self):
     stage = self.ConstructStage()
 
@@ -51,8 +54,8 @@ class CheckTemplateStageTest(
     # Only self.R54_PATH is qualified.
     self.assertTrue(len(paths) == 1)
 
-class UpdateConfigStageTest(
-    generic_stages_unittest.AbstractStageTestCase):
+
+class UpdateConfigStageTest(generic_stages_unittest.AbstractStageTestCase):
   """Tests for UpdateConfigStage."""
 
   def setUp(self):

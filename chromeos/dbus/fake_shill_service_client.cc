@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
+#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -55,8 +55,6 @@ FakeShillServiceClient::FakeShillServiceClient() : weak_ptr_factory_(this) {
 }
 
 FakeShillServiceClient::~FakeShillServiceClient() {
-  base::STLDeleteContainerPairSecondPointers(observer_list_.begin(),
-                                             observer_list_.end());
 }
 
 
@@ -422,7 +420,7 @@ bool FakeShillServiceClient::SetServiceProperty(const std::string& service_path,
     provider->SetWithoutPathExpansion(key, value.DeepCopy());
     new_properties.SetWithoutPathExpansion(shill::kProviderProperty, provider);
     changed_property = shill::kProviderProperty;
-  } else if (value.GetType() == base::Value::TYPE_DICTIONARY) {
+  } else if (value.GetType() == base::Value::Type::DICTIONARY) {
     const base::DictionaryValue* new_dict = NULL;
     value.GetAsDictionary(&new_dict);
     CHECK(new_dict);
@@ -523,9 +521,8 @@ void FakeShillServiceClient::NotifyObserversPropertyChanged(
                << path << " : " << property;
     return;
   }
-  FOR_EACH_OBSERVER(ShillPropertyChangedObserver,
-                    GetObserverList(service_path),
-                    OnPropertyChanged(property, *value));
+  for (auto& observer : GetObserverList(service_path))
+    observer.OnPropertyChanged(property, *value);
 }
 
 base::DictionaryValue* FakeShillServiceClient::GetModifiableServiceProperties(
@@ -542,12 +539,11 @@ base::DictionaryValue* FakeShillServiceClient::GetModifiableServiceProperties(
 
 FakeShillServiceClient::PropertyObserverList&
 FakeShillServiceClient::GetObserverList(const dbus::ObjectPath& device_path) {
-  std::map<dbus::ObjectPath, PropertyObserverList*>::iterator iter =
-      observer_list_.find(device_path);
+  auto iter = observer_list_.find(device_path);
   if (iter != observer_list_.end())
     return *(iter->second);
   PropertyObserverList* observer_list = new PropertyObserverList();
-  observer_list_[device_path] = observer_list;
+  observer_list_[device_path] = base::WrapUnique(observer_list);
   return *observer_list;
 }
 

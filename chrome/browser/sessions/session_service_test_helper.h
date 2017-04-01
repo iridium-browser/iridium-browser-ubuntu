@@ -17,13 +17,8 @@
 
 class SessionService;
 
-namespace base {
-class RunLoop;
-}
-
 namespace sessions {
 class SerializedNavigationEntry;
-class SessionCommand;
 struct SessionTab;
 struct SessionWindow;
 }
@@ -53,8 +48,9 @@ class SessionServiceTestHelper {
       bool force_browser_not_alive_with_no_windows);
 
   // Reads the contents of the last session.
-  void ReadWindows(std::vector<sessions::SessionWindow*>* windows,
-                   SessionID::id_type* active_window_id);
+  void ReadWindows(
+      std::vector<std::unique_ptr<sessions::SessionWindow>>* windows,
+      SessionID::id_type* active_window_id);
 
   void AssertTabEquals(const SessionID& window_id,
                        const SessionID& tab_id,
@@ -73,7 +69,7 @@ class SessionServiceTestHelper {
       const sessions::SerializedNavigationEntry& actual);
 
   void AssertSingleWindowWithSingleTab(
-      const std::vector<sessions::SessionWindow*>& windows,
+      const std::vector<std::unique_ptr<sessions::SessionWindow>>& windows,
       size_t nav_count);
 
   void SetService(SessionService* service);

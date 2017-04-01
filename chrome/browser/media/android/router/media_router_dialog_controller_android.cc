@@ -44,9 +44,15 @@ void MediaRouterDialogControllerAndroid::OnSinkSelected(
     const JavaParamRef<jstring>& jsink_id) {
   std::unique_ptr<CreatePresentationConnectionRequest>
       create_connection_request = TakeCreateConnectionRequest();
+  if (!create_connection_request)
+    return;
+
   const PresentationRequest& presentation_request =
       create_connection_request->presentation_request();
-  const MediaSource::Id source_id = presentation_request.GetMediaSource().id();
+
+  // TODO(crbug.com/627655): Support multiple URLs.
+  const MediaSource::Id source_id =
+      presentation_request.GetMediaSources()[0].id();
   const GURL origin = presentation_request.frame_url().GetOrigin();
 
   std::vector<MediaRouteResponseCallback> route_response_callbacks;
@@ -85,7 +91,8 @@ void MediaRouterDialogControllerAndroid::OnDialogCancelled(
 void MediaRouterDialogControllerAndroid::CancelPresentationRequest() {
   std::unique_ptr<CreatePresentationConnectionRequest> request =
       TakeCreateConnectionRequest();
-  DCHECK(request);
+  if (!request)
+    return;
 
   request->InvokeErrorCallback(content::PresentationError(
       content::PRESENTATION_ERROR_SESSION_REQUEST_CANCELLED,
@@ -113,8 +120,11 @@ MediaRouterDialogControllerAndroid::~MediaRouterDialogControllerAndroid() {
 void MediaRouterDialogControllerAndroid::CreateMediaRouterDialog() {
   JNIEnv* env = base::android::AttachCurrentThread();
 
-  const MediaSource::Id source_id =
-      create_connection_request()->presentation_request().GetMediaSource().id();
+  // TODO(crbug.com/627655): Support multiple URLs.
+  const MediaSource::Id source_id = create_connection_request()
+                                        ->presentation_request()
+                                        .GetMediaSources()[0]
+                                        .id();
   ScopedJavaLocalRef<jstring> jsource_urn =
       base::android::ConvertUTF8ToJavaString(env, source_id);
 

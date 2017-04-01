@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef IOS_CRNET_CRNET_H_
+#define IOS_CRNET_CRNET_H_
+
 #import <Foundation/Foundation.h>
 
 // A block, that takes a request, and returns YES if the request should
@@ -36,11 +39,24 @@ __attribute__((visibility("default")))
 + (void)setSDCHEnabled:(BOOL)sdchEnabled
          withPrefStore:(NSString *)filename;
 
-// |userAgent| is expected to be of the form Product/Version.
-// Example: Foo/3.0.0.0
-//
+// Set partial UserAgent. This function is a deprecated shortcut for:
+//    [CrNet setUserAgent:userAgent partial:YES];
+// See the documentation for |setUserAgent| for details about the |userAgent|
+// argument.
 // This method only has any effect before |install| is called.
 + (void)setPartialUserAgent:(NSString *)userAgent;
+
+// |userAgent| is expected to be the user agent value sent to remote.
+// If |partial| is set to YES, then actual user agent value is based on device
+// model, OS version, and |userAgent| argument. For example "Foo/3.0.0.0" is
+// sent as "Mozilla/5.0 (iPhone; CPU iPhone OS 9_3 like Mac OS X)
+// AppleWebKit/601.1 (KHTML, like Gecko) Foo/3.0.0.0 Mobile/15G31
+// Safari/601.1.46".
+// If partial is set to NO, then |userAgent| value is complete value sent to
+// the remote. For Example: "Foo/3.0.0.0" is sent as "Foo/3.0.0.0".
+//
+// This method only has any effect before |install| is called.
++ (void)setUserAgent:(NSString*)userAgent partial:(bool)partial;
 
 // Set the block used to determine whether or not CrNet should handle the
 // request. If this is not set, CrNet will handle all requests.
@@ -119,3 +135,5 @@ __attribute__((visibility("default")))
 + (void)clearCacheWithCompletionCallback:(ClearCacheCallback)completionBlock;
 
 @end
+
+#endif  // IOS_CRNET_CRNET_H_

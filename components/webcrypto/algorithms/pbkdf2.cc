@@ -15,6 +15,7 @@
 #include "crypto/openssl_util.h"
 #include "third_party/WebKit/public/platform/WebCryptoAlgorithmParams.h"
 #include "third_party/WebKit/public/platform/WebCryptoKeyAlgorithm.h"
+#include "third_party/boringssl/src/include/openssl/evp.h"
 
 namespace webcrypto {
 
@@ -49,6 +50,9 @@ class Pbkdf2Implementation : public AlgorithmImplementation {
     Status status = CheckKeyCreationUsages(kAllKeyUsages, usages);
     if (status.IsError())
       return status;
+
+    if (extractable)
+      return Status::ErrorImportExtractableKdfKey();
 
     const blink::WebCryptoKeyAlgorithm key_algorithm =
         blink::WebCryptoKeyAlgorithm::createWithoutParams(
@@ -106,6 +110,14 @@ class Pbkdf2Implementation : public AlgorithmImplementation {
                                 blink::WebCryptoKeyUsageMask usages,
                                 const CryptoData& key_data,
                                 blink::WebCryptoKey* key) const override {
+    if (algorithm.paramsType() != blink::WebCryptoKeyAlgorithmParamsTypeNone ||
+        type != blink::WebCryptoKeyTypeSecret)
+      return Status::ErrorUnexpected();
+
+    // NOTE: Unlike ImportKeyRaw(), this does not enforce extractable==false.
+    // This is intentional. Although keys cannot currently be created with
+    // extractable==true, earlier implementations permitted this, so
+    // de-serialization by structured clone should not reject them.
     return CreateWebCryptoSecretKey(key_data, algorithm, extractable, usages,
                                     key);
   }

@@ -14,7 +14,7 @@
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "components/browser_sync/browser/profile_sync_service.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "components/image_fetcher/image_fetcher.h"
 #include "components/image_fetcher/image_fetcher_impl.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -27,7 +27,7 @@
 #include "components/suggestions/blacklist_store.h"
 #include "components/suggestions/image_manager.h"
 #include "components/suggestions/proto/suggestions.pb.h"
-#include "components/suggestions/suggestions_service.h"
+#include "components/suggestions/suggestions_service_impl.h"
 #include "components/suggestions/suggestions_store.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -71,7 +71,7 @@ KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
       SigninManagerFactory::GetForProfile(profile);
   ProfileOAuth2TokenService* token_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
-  ProfileSyncService* sync_service =
+  browser_sync::ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile);
 
   std::unique_ptr<SuggestionsStore> suggestions_store(
@@ -92,7 +92,7 @@ KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
   std::unique_ptr<ImageManager> thumbnail_manager(new ImageManager(
       std::move(image_fetcher), std::move(db), database_dir,
       BrowserThread::GetTaskRunnerForThread(BrowserThread::DB)));
-  return new SuggestionsService(
+  return new SuggestionsServiceImpl(
       signin_manager, token_service, sync_service, profile->GetRequestContext(),
       std::move(suggestions_store), std::move(thumbnail_manager),
       std::move(blacklist_store));
@@ -100,7 +100,7 @@ KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
 
 void SuggestionsServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  SuggestionsService::RegisterProfilePrefs(registry);
+  SuggestionsServiceImpl::RegisterProfilePrefs(registry);
 }
 
 }  // namespace suggestions

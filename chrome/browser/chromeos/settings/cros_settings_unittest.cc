@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -40,7 +40,6 @@ class CrosSettingsTest : public testing::Test {
 
   void TearDown() override {
     ASSERT_TRUE(expected_props_.empty());
-    base::STLDeleteValues(&expected_props_);
   }
 
   void FetchPref(const std::string& pref) {
@@ -52,8 +51,8 @@ class CrosSettingsTest : public testing::Test {
             settings_.PrepareTrustedValues(
                 base::Bind(&CrosSettingsTest::FetchPref,
                            weak_factory_.GetWeakPtr(), pref))) {
-      std::unique_ptr<base::Value> expected_value(
-          expected_props_.find(pref)->second);
+      std::unique_ptr<base::Value> expected_value =
+          std::move(expected_props_.find(pref)->second);
       const base::Value* pref_value = settings_.GetPref(pref);
       if (expected_value.get()) {
         ASSERT_TRUE(pref_value);
@@ -70,10 +69,9 @@ class CrosSettingsTest : public testing::Test {
     settings_.Set(pref_name, *value);
   }
 
-  void AddExpectation(const std::string& pref_name, base::Value* value) {
-    base::Value*& entry = expected_props_[pref_name];
-    delete entry;
-    entry = value;
+  void AddExpectation(const std::string& pref_name,
+                      std::unique_ptr<base::Value> value) {
+    expected_props_[pref_name] = std::move(value);
   }
 
   void PrepareEmptyPolicy(em::PolicyData* policy) {
@@ -99,22 +97,25 @@ class CrosSettingsTest : public testing::Test {
   ScopedDeviceSettingsTestHelper device_settings_test_helper_;
   CrosSettings settings_;
 
-  std::map<std::string, base::Value*> expected_props_;
+  std::map<std::string, std::unique_ptr<base::Value>> expected_props_;
 
   base::WeakPtrFactory<CrosSettingsTest> weak_factory_;
 };
 
 TEST_F(CrosSettingsTest, SetPref) {
   // Change to something that is not the default.
-  AddExpectation(kAccountsPrefAllowGuest, new base::FundamentalValue(false));
-  SetPref(kAccountsPrefAllowGuest, expected_props_[kAccountsPrefAllowGuest]);
+  AddExpectation(kAccountsPrefAllowGuest,
+                 base::MakeUnique<base::FundamentalValue>(false));
+  SetPref(kAccountsPrefAllowGuest,
+          expected_props_[kAccountsPrefAllowGuest].get());
   FetchPref(kAccountsPrefAllowGuest);
   ASSERT_TRUE(expected_props_.empty());
 }
 
 TEST_F(CrosSettingsTest, GetPref) {
   // We didn't change the default so look for it.
-  AddExpectation(kAccountsPrefAllowGuest, new base::FundamentalValue(true));
+  AddExpectation(kAccountsPrefAllowGuest,
+                 base::MakeUnique<base::FundamentalValue>(true));
   FetchPref(kAccountsPrefAllowGuest);
 }
 
@@ -122,20 +123,23 @@ TEST_F(CrosSettingsTest, SetWhitelist) {
   // Setting the whitelist should also switch the value of
   // kAccountsPrefAllowNewUser to false.
   base::ListValue whitelist;
-  whitelist.Append(new base::StringValue("me@owner"));
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(false));
-  AddExpectation(kAccountsPrefUsers, whitelist.DeepCopy());
+  whitelist.AppendString("me@owner");
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(false));
+  AddExpectation(kAccountsPrefUsers, whitelist.CreateDeepCopy());
   SetPref(kAccountsPrefUsers, &whitelist);
   FetchPref(kAccountsPrefAllowNewUser);
   FetchPref(kAccountsPrefUsers);
 }
 
 TEST_F(CrosSettingsTest, SetWhitelistWithListOps) {
-  base::ListValue* whitelist = new base::ListValue();
+  std::unique_ptr<base::ListValue> whitelist =
+      base::MakeUnique<base::ListValue>();
   base::StringValue hacky_user("h@xxor");
-  whitelist->Append(hacky_user.DeepCopy());
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(false));
-  AddExpectation(kAccountsPrefUsers, whitelist);
+  whitelist->Append(hacky_user.CreateDeepCopy());
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(false));
+  AddExpectation(kAccountsPrefUsers, std::move(whitelist));
   // Add some user to the whitelist.
   settings_.AppendToList(kAccountsPrefUsers, &hacky_user);
   FetchPref(kAccountsPrefAllowNewUser);
@@ -146,17 +150,18 @@ TEST_F(CrosSettingsTest, SetWhitelistWithListOps2) {
   base::ListValue whitelist;
   base::StringValue hacky_user("h@xxor");
   base::StringValue lamy_user("l@mer");
-  whitelist.Append(hacky_user.DeepCopy());
-  base::ListValue* expected_list = whitelist.DeepCopy();
-  whitelist.Append(lamy_user.DeepCopy());
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(false));
-  AddExpectation(kAccountsPrefUsers, whitelist.DeepCopy());
+  whitelist.Append(hacky_user.CreateDeepCopy());
+  std::unique_ptr<base::ListValue> expected_list = whitelist.CreateDeepCopy();
+  whitelist.Append(lamy_user.CreateDeepCopy());
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(false));
+  AddExpectation(kAccountsPrefUsers, whitelist.CreateDeepCopy());
   SetPref(kAccountsPrefUsers, &whitelist);
   FetchPref(kAccountsPrefAllowNewUser);
   FetchPref(kAccountsPrefUsers);
   ASSERT_TRUE(expected_props_.empty());
   // Now try to remove one element from that list.
-  AddExpectation(kAccountsPrefUsers, expected_list);
+  AddExpectation(kAccountsPrefUsers, std::move(expected_list));
   settings_.RemoveFromList(kAccountsPrefUsers, &lamy_user);
   FetchPref(kAccountsPrefAllowNewUser);
   FetchPref(kAccountsPrefUsers);
@@ -166,7 +171,8 @@ TEST_F(CrosSettingsTest, SetEmptyWhitelist) {
   // Setting the whitelist empty should switch the value of
   // kAccountsPrefAllowNewUser to true.
   base::ListValue whitelist;
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(true));
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(true));
   SetPref(kAccountsPrefUsers, &whitelist);
   FetchPref(kAccountsPrefAllowNewUser);
   FetchPref(kAccountsPrefUsers);
@@ -177,8 +183,9 @@ TEST_F(CrosSettingsTest, SetEmptyWhitelistAndNoNewUsers) {
   // new users allowed.
   base::ListValue whitelist;
   base::FundamentalValue disallow_new(false);
-  AddExpectation(kAccountsPrefUsers, whitelist.DeepCopy());
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(false));
+  AddExpectation(kAccountsPrefUsers, whitelist.CreateDeepCopy());
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(false));
   SetPref(kAccountsPrefUsers, &whitelist);
   SetPref(kAccountsPrefAllowNewUser, &disallow_new);
   FetchPref(kAccountsPrefAllowNewUser);
@@ -189,38 +196,40 @@ TEST_F(CrosSettingsTest, SetWhitelistAndNoNewUsers) {
   // Setting the whitelist should allow us to set kAccountsPrefAllowNewUser to
   // false (which is the implicit value too).
   base::ListValue whitelist;
-  whitelist.Append(new base::StringValue("me@owner"));
-  AddExpectation(kAccountsPrefUsers, whitelist.DeepCopy());
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(false));
+  whitelist.AppendString("me@owner");
+  AddExpectation(kAccountsPrefUsers, whitelist.CreateDeepCopy());
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(false));
   SetPref(kAccountsPrefUsers, &whitelist);
   SetPref(kAccountsPrefAllowNewUser,
-          expected_props_[kAccountsPrefAllowNewUser]);
+          expected_props_[kAccountsPrefAllowNewUser].get());
   FetchPref(kAccountsPrefAllowNewUser);
   FetchPref(kAccountsPrefUsers);
 }
 
 TEST_F(CrosSettingsTest, SetAllowNewUsers) {
   // Setting kAccountsPrefAllowNewUser to true with no whitelist should be ok.
-  AddExpectation(kAccountsPrefAllowNewUser, new base::FundamentalValue(true));
+  AddExpectation(kAccountsPrefAllowNewUser,
+                 base::MakeUnique<base::FundamentalValue>(true));
   SetPref(kAccountsPrefAllowNewUser,
-          expected_props_[kAccountsPrefAllowNewUser]);
+          expected_props_[kAccountsPrefAllowNewUser].get());
   FetchPref(kAccountsPrefAllowNewUser);
 }
 
 TEST_F(CrosSettingsTest, SetEphemeralUsersEnabled) {
   base::FundamentalValue ephemeral_users_enabled(true);
   AddExpectation(kAccountsPrefEphemeralUsersEnabled,
-                 new base::FundamentalValue(true));
+                 base::MakeUnique<base::FundamentalValue>(true));
   SetPref(kAccountsPrefEphemeralUsersEnabled, &ephemeral_users_enabled);
   FetchPref(kAccountsPrefEphemeralUsersEnabled);
 }
 
 TEST_F(CrosSettingsTest, FindEmailInList) {
   base::ListValue list;
-  list.Append(new base::StringValue("user@example.com"));
-  list.Append(new base::StringValue("nodomain"));
-  list.Append(new base::StringValue("with.dots@gmail.com"));
-  list.Append(new base::StringValue("Upper@example.com"));
+  list.AppendString("user@example.com");
+  list.AppendString("nodomain");
+  list.AppendString("with.dots@gmail.com");
+  list.AppendString("Upper@example.com");
 
   CrosSettings* cs = &settings_;
   cs->Set(kAccountsPrefUsers, list);
@@ -248,8 +257,8 @@ TEST_F(CrosSettingsTest, FindEmailInList) {
 
 TEST_F(CrosSettingsTest, FindEmailInListWildcard) {
   base::ListValue list;
-  list.Append(new base::StringValue("user@example.com"));
-  list.Append(new base::StringValue("*@example.com"));
+  list.AppendString("user@example.com");
+  list.AppendString("*@example.com");
 
   CrosSettings* cs = &settings_;
   cs->Set(kAccountsPrefUsers, list);

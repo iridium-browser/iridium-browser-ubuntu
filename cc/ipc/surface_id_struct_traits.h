@@ -5,24 +5,28 @@
 #ifndef CC_IPC_SURFACE_ID_STRUCT_TRAITS_H_
 #define CC_IPC_SURFACE_ID_STRUCT_TRAITS_H_
 
+#include "cc/ipc/frame_sink_id_struct_traits.h"
+#include "cc/ipc/local_frame_id_struct_traits.h"
+#include "cc/ipc/surface_id.mojom-shared.h"
+#include "cc/surfaces/frame_sink_id.h"
+#include "cc/surfaces/local_frame_id.h"
 #include "cc/surfaces/surface_id.h"
 
 namespace mojo {
 
-// This template is fully specialized as cc::mojom::SurfaceIdDataView and
-// as cc::mojom::blink::SurfaceIdDataView, in generated .mojom.h and
-// .mojom-blink.h respectively.
-template <typename T>
-struct StructTraits<T, cc::SurfaceId> {
-  static uint32_t client_id(const cc::SurfaceId& id) { return id.client_id(); }
+template <>
+struct StructTraits<cc::mojom::SurfaceIdDataView, cc::SurfaceId> {
+  static const cc::FrameSinkId& frame_sink_id(const cc::SurfaceId& id) {
+    return id.frame_sink_id();
+  }
 
-  static uint32_t local_id(const cc::SurfaceId& id) { return id.local_id(); }
+  static const cc::LocalFrameId& local_frame_id(const cc::SurfaceId& id) {
+    return id.local_frame_id();
+  }
 
-  static uint64_t nonce(const cc::SurfaceId& id) { return id.nonce(); }
-
-  static bool Read(T data, cc::SurfaceId* out) {
-    *out = cc::SurfaceId(data.client_id(), data.local_id(), data.nonce());
-    return true;
+  static bool Read(cc::mojom::SurfaceIdDataView data, cc::SurfaceId* out) {
+    return data.ReadFrameSinkId(&out->frame_sink_id_) &&
+           data.ReadLocalFrameId(&out->local_frame_id_);
   }
 };
 

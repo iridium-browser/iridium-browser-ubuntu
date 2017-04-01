@@ -17,7 +17,7 @@
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/render_pass.h"
 #include "cc/test/animation_test_common.h"
-#include "cc/test/fake_output_surface.h"
+#include "cc/test/fake_compositor_frame_sink.h"
 #include "cc/test/layer_tree_settings_for_testing.h"
 #include "cc/test/mock_occlusion_tracker.h"
 #include "cc/trees/layer_tree_host_common.h"
@@ -119,8 +119,12 @@ LayerTestCommon::LayerImplTest::LayerImplTest()
     : LayerImplTest(LayerTreeSettingsForTesting()) {}
 
 LayerTestCommon::LayerImplTest::LayerImplTest(const LayerTreeSettings& settings)
-    : output_surface_(FakeOutputSurface::CreateDelegating3d()),
-      host_(FakeLayerTreeHost::Create(&client_, &task_graph_runner_, settings)),
+    : compositor_frame_sink_(FakeCompositorFrameSink::Create3d()),
+      animation_host_(AnimationHost::CreateForTesting(ThreadInstance::MAIN)),
+      host_(FakeLayerTreeHost::Create(&client_,
+                                      &task_graph_runner_,
+                                      animation_host_.get(),
+                                      settings)),
       render_pass_(RenderPass::Create()),
       layer_impl_id_(2) {
   std::unique_ptr<LayerImpl> root =
@@ -128,22 +132,22 @@ LayerTestCommon::LayerImplTest::LayerImplTest(const LayerTreeSettings& settings)
   host_->host_impl()->active_tree()->SetRootLayerForTesting(std::move(root));
   root_layer_for_testing()->SetHasRenderSurface(true);
   host_->host_impl()->SetVisible(true);
-  EXPECT_TRUE(host_->host_impl()->InitializeRenderer(output_surface_.get()));
+  EXPECT_TRUE(
+      host_->host_impl()->InitializeRenderer(compositor_frame_sink_.get()));
 
   const int timeline_id = AnimationIdProvider::NextTimelineId();
   timeline_ = AnimationTimeline::Create(timeline_id);
-  host_->GetLayerTree()->animation_host()->AddAnimationTimeline(timeline_);
+  animation_host_->AddAnimationTimeline(timeline_);
   // Create impl-side instance.
-  host_->GetLayerTree()->animation_host()->PushPropertiesTo(
-      host_->host_impl()->animation_host());
+  animation_host_->PushPropertiesTo(host_->host_impl()->animation_host());
   timeline_impl_ =
       host_->host_impl()->animation_host()->GetTimelineById(timeline_id);
 }
 
 LayerTestCommon::LayerImplTest::~LayerImplTest() {
-  host_->GetLayerTree()->animation_host()->RemoveAnimationTimeline(timeline_);
+  animation_host_->RemoveAnimationTimeline(timeline_);
   timeline_ = nullptr;
-  host_->host_impl()->ReleaseOutputSurface();
+  host_->host_impl()->ReleaseCompositorFrameSink();
 }
 
 void LayerTestCommon::LayerImplTest::CalcDrawProps(
@@ -197,11 +201,10 @@ void LayerTestCommon::LayerImplTest::AppendSurfaceQuadsWithOcclusion(
   render_pass_->quad_list.clear();
   render_pass_->shared_quad_state_list.clear();
 
-  surface_impl->AppendQuads(
-      render_pass_.get(), gfx::Transform(),
+  surface_impl->set_occlusion_in_content_space(
       Occlusion(gfx::Transform(), SimpleEnclosedRegion(occluded),
-                SimpleEnclosedRegion()),
-      SK_ColorBLACK, 1.f, nullptr, &data, RenderPassId(1, 1));
+                SimpleEnclosedRegion()));
+  surface_impl->AppendQuads(render_pass_.get(), &data);
 }
 
 void EmptyCopyOutputCallback(std::unique_ptr<CopyOutputResult> result) {}

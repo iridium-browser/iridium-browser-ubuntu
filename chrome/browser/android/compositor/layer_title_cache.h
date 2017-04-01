@@ -18,14 +18,12 @@
 
 namespace cc {
 class Layer;
-class UIResourceLayer;
 }
 
 namespace ui {
 class ResourceManager;
 }
 
-namespace chrome {
 namespace android {
 
 class DecorationTitle;
@@ -75,7 +73,7 @@ class LayerTitleCache {
  private:
   virtual ~LayerTitleCache();
 
-  IDMap<DecorationTitle, IDMapOwnPointer> layer_cache_;
+  IDMap<std::unique_ptr<DecorationTitle>> layer_cache_;
 
   JavaObjectWeakGlobalRef weak_java_title_cache_;
   int fade_width_;
@@ -93,6 +91,5 @@ class LayerTitleCache {
 bool RegisterLayerTitleCache(JNIEnv* env);
 
 }  // namespace android
-}  // namespace chrome
 
 #endif  // CHROME_BROWSER_ANDROID_COMPOSITOR_LAYER_TITLE_CACHE_H_

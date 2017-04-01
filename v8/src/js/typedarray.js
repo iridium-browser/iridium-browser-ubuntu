@@ -19,7 +19,6 @@ var GetMethod;
 var GlobalArray = global.Array;
 var GlobalArrayBuffer = global.ArrayBuffer;
 var GlobalArrayBufferPrototype = GlobalArrayBuffer.prototype;
-var GlobalDataView = global.DataView;
 var GlobalObject = global.Object;
 var InnerArrayCopyWithin;
 var InnerArrayEvery;
@@ -35,7 +34,6 @@ var InnerArraySome;
 var InnerArraySort;
 var InnerArrayToLocaleString;
 var InternalArray = utils.InternalArray;
-var IsNaN;
 var MaxSimple;
 var MinSimple;
 var PackedArrayReverse;
@@ -43,7 +41,6 @@ var SpeciesConstructor;
 var ToPositiveInteger;
 var ToIndex;
 var iteratorSymbol = utils.ImportNow("iterator_symbol");
-var speciesSymbol = utils.ImportNow("species_symbol");
 var toStringTagSymbol = utils.ImportNow("to_string_tag_symbol");
 
 macro TYPED_ARRAYS(FUNCTION)
@@ -84,7 +81,6 @@ utils.Import(function(from) {
   InnerArraySome = from.InnerArraySome;
   InnerArraySort = from.InnerArraySort;
   InnerArrayToLocaleString = from.InnerArrayToLocaleString;
-  IsNaN = from.IsNaN;
   MaxSimple = from.MaxSimple;
   MinSimple = from.MinSimple;
   PackedArrayReverse = from.PackedArrayReverse;
@@ -263,7 +259,7 @@ function NAMEConstructor(arg1, arg2, arg3) {
       NAMEConstructByTypedArray(this, arg1);
     } else if (IS_RECEIVER(arg1)) {
       var iteratorFn = arg1[iteratorSymbol];
-      if (IS_UNDEFINED(iteratorFn) || iteratorFn === ArrayValues) {
+      if (IS_UNDEFINED(iteratorFn)) {
         NAMEConstructByArrayLike(this, arg1, arg1.length);
       } else {
         NAMEConstructByIterable(this, arg1, iteratorFn);
@@ -545,9 +541,9 @@ function TypedArrayComparefn(x, y) {
     return -1;
   } else if (x > y) {
     return 1;
-  } else if (IsNaN(x) && IsNaN(y)) {
-    return IsNaN(y) ? 0 : 1;
-  } else if (IsNaN(x)) {
+  } else if (NUMBER_IS_NAN(x) && NUMBER_IS_NAN(y)) {
+    return NUMBER_IS_NAN(y) ? 0 : 1;
+  } else if (NUMBER_IS_NAN(x)) {
     return 1;
   }
   return 0;
@@ -847,16 +843,7 @@ function TypedArrayFrom(source, mapfn, thisArg) {
 
 // TODO(bmeurer): Migrate this to a proper builtin.
 function TypedArrayConstructor() {
-  if (IS_UNDEFINED(new.target)) {
-    throw %make_type_error(kConstructorNonCallable, "TypedArray");
-  }
-  if (new.target === GlobalTypedArray) {
-    throw %make_type_error(kConstructAbstractClass, "TypedArray");
-  }
-}
-
-function TypedArraySpecies() {
-  return this;
+  throw %make_type_error(kConstructAbstractClass, "TypedArray");
 }
 
 // -------------------------------------------------------------------
@@ -866,7 +853,6 @@ utils.InstallFunctions(GlobalTypedArray, DONT_ENUM, [
   "from", TypedArrayFrom,
   "of", TypedArrayOf
 ]);
-utils.InstallGetter(GlobalTypedArray, speciesSymbol, TypedArraySpecies);
 utils.InstallGetter(GlobalTypedArray.prototype, toStringTagSymbol,
                     TypedArrayGetToStringTag);
 utils.InstallFunctions(GlobalTypedArray.prototype, DONT_ENUM, [
@@ -914,69 +900,5 @@ macro SETUP_TYPED_ARRAY(ARRAY_ID, NAME, ELEMENT_SIZE)
 endmacro
 
 TYPED_ARRAYS(SETUP_TYPED_ARRAY)
-
-// --------------------------- DataView -----------------------------
-
-macro DATA_VIEW_TYPES(FUNCTION)
-  FUNCTION(Int8)
-  FUNCTION(Uint8)
-  FUNCTION(Int16)
-  FUNCTION(Uint16)
-  FUNCTION(Int32)
-  FUNCTION(Uint32)
-  FUNCTION(Float32)
-  FUNCTION(Float64)
-endmacro
-
-
-macro DATA_VIEW_GETTER_SETTER(TYPENAME)
-function DataViewGetTYPENAMEJS(offset, little_endian) {
-  if (!IS_DATAVIEW(this)) {
-    throw %make_type_error(kIncompatibleMethodReceiver,
-                        'DataView.getTYPENAME', this);
-  }
-  offset = IS_UNDEFINED(offset) ? 0 : ToIndex(offset, kInvalidDataViewAccessorOffset);
-  return %DataViewGetTYPENAME(this, offset, !!little_endian);
-}
-%FunctionSetLength(DataViewGetTYPENAMEJS, 1);
-
-function DataViewSetTYPENAMEJS(offset, value, little_endian) {
-  if (!IS_DATAVIEW(this)) {
-    throw %make_type_error(kIncompatibleMethodReceiver,
-                        'DataView.setTYPENAME', this);
-  }
-  offset = IS_UNDEFINED(offset) ? 0 : ToIndex(offset, kInvalidDataViewAccessorOffset);
-  %DataViewSetTYPENAME(this, offset, TO_NUMBER(value), !!little_endian);
-}
-%FunctionSetLength(DataViewSetTYPENAMEJS, 2);
-endmacro
-
-DATA_VIEW_TYPES(DATA_VIEW_GETTER_SETTER)
-
-utils.InstallFunctions(GlobalDataView.prototype, DONT_ENUM, [
-  "getInt8", DataViewGetInt8JS,
-  "setInt8", DataViewSetInt8JS,
-
-  "getUint8", DataViewGetUint8JS,
-  "setUint8", DataViewSetUint8JS,
-
-  "getInt16", DataViewGetInt16JS,
-  "setInt16", DataViewSetInt16JS,
-
-  "getUint16", DataViewGetUint16JS,
-  "setUint16", DataViewSetUint16JS,
-
-  "getInt32", DataViewGetInt32JS,
-  "setInt32", DataViewSetInt32JS,
-
-  "getUint32", DataViewGetUint32JS,
-  "setUint32", DataViewSetUint32JS,
-
-  "getFloat32", DataViewGetFloat32JS,
-  "setFloat32", DataViewSetFloat32JS,
-
-  "getFloat64", DataViewGetFloat64JS,
-  "setFloat64", DataViewSetFloat64JS
-]);
 
 })

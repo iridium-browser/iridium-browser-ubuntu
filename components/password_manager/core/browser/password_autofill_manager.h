@@ -42,6 +42,7 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
                                    base::string16* body) override;
   bool RemoveSuggestion(const base::string16& value, int identifier) override;
   void ClearPreviewedForm() override;
+  bool IsCreditCardPopup() override;
 
   // Invoked when a password mapping is added.
   void OnAddPasswordFormMapping(
@@ -57,6 +58,12 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
                                  int options,
                                  const gfx::RectF& bounds);
 
+  // Handles a request from the renderer to show a popup with a warning
+  // indicating that the form is not secure, used when a password field
+  // is autofilled on a non-secure page load.
+  void OnShowNotSecureWarning(base::i18n::TextDirection text_direction,
+                              const gfx::RectF& bounds);
+
   // Called when main frame navigates. Not called for in-page navigations.
   void DidNavigateMainFrame();
 
@@ -65,6 +72,11 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
 
   // A public version of PreviewSuggestion(), only for use in tests.
   bool PreviewSuggestionForTest(int key, const base::string16& username);
+
+  // Only use in tests.
+  void set_autofill_client(autofill::AutofillClient* autofill_client) {
+    autofill_client_ = autofill_client;
+  }
 
  private:
   typedef std::map<int, autofill::PasswordFormFillData> LoginToPasswordInfoMap;
@@ -101,7 +113,11 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   // The driver that owns |this|.
   PasswordManagerDriver* password_manager_driver_;
 
-  autofill::AutofillClient* const autofill_client_;  // weak
+  // True if the Form-Not-Secure warning has been shown on the current
+  // navigation. Used for metrics.
+  bool did_show_form_not_secure_warning_ = false;
+
+  autofill::AutofillClient* autofill_client_;  // weak
 
   base::WeakPtrFactory<PasswordAutofillManager> weak_ptr_factory_;
 

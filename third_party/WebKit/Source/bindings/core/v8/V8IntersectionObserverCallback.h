@@ -5,7 +5,6 @@
 #ifndef V8IntersectionObserverCallback_h
 #define V8IntersectionObserverCallback_h
 
-#include "bindings/core/v8/ActiveDOMCallback.h"
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "core/CoreExport.h"
@@ -13,21 +12,27 @@
 
 namespace blink {
 
-class V8IntersectionObserverCallback final : public IntersectionObserverCallback, public ActiveDOMCallback {
-    USING_GARBAGE_COLLECTED_MIXIN(V8IntersectionObserverCallback);
-public:
-    CORE_EXPORT V8IntersectionObserverCallback(v8::Local<v8::Function>, v8::Local<v8::Object>, ScriptState*);
-    ~V8IntersectionObserverCallback() override;
+class V8IntersectionObserverCallback final
+    : public IntersectionObserverCallback {
+ public:
+  CORE_EXPORT V8IntersectionObserverCallback(v8::Local<v8::Function>,
+                                             v8::Local<v8::Object>,
+                                             ScriptState*);
+  ~V8IntersectionObserverCallback() override;
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-    void handleEvent(const HeapVector<Member<IntersectionObserverEntry>>&, IntersectionObserver&) override;
-    ExecutionContext* getExecutionContext() const override { return ContextLifecycleObserver::getExecutionContext(); }
-private:
+  void handleEvent(const HeapVector<Member<IntersectionObserverEntry>>&,
+                   IntersectionObserver&) override;
 
-    ScopedPersistent<v8::Function> m_callback;
-    RefPtr<ScriptState> m_scriptState;
+  ExecutionContext* getExecutionContext() const override {
+    return m_scriptState->getExecutionContext();
+  }
+
+ private:
+  ScopedPersistent<v8::Function> m_callback;
+  RefPtr<ScriptState> m_scriptState;
 };
 
-} // namespace blink
-#endif // V8IntersectionObserverCallback_h
+}  // namespace blink
+#endif  // V8IntersectionObserverCallback_h

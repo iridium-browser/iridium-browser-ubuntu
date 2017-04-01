@@ -7,6 +7,7 @@
 #include "base/callback_list.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/public/browser/content_browser_client.h"
@@ -20,7 +21,7 @@
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "device/battery/battery_monitor.mojom.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 
 // These tests run against a dummy implementation of the BatteryMonitor service.
 // That is, they verify that the service implementation is correctly exposed to
@@ -49,15 +50,15 @@ void UpdateBattery(const device::BatteryStatus& battery_status) {
 
 class FakeBatteryMonitor : public device::BatteryMonitor {
  public:
+  FakeBatteryMonitor() {}
+  ~FakeBatteryMonitor() override {}
+
   static void Create(mojo::InterfaceRequest<BatteryMonitor> request) {
-    new FakeBatteryMonitor(std::move(request));
+    mojo::MakeStrongBinding(base::MakeUnique<FakeBatteryMonitor>(),
+                            std::move(request));
   }
 
  private:
-  FakeBatteryMonitor(mojo::InterfaceRequest<BatteryMonitor> request)
-      : binding_(this, std::move(request)) {}
-  ~FakeBatteryMonitor() override {}
-
   void QueryNextStatus(const QueryNextStatusCallback& callback) override {
     // We don't expect overlapped calls to QueryNextStatus.
     DCHECK(callback_.is_null());
@@ -81,7 +82,6 @@ class FakeBatteryMonitor : public device::BatteryMonitor {
   }
 
   std::unique_ptr<BatteryUpdateSubscription> subscription_;
-  mojo::StrongBinding<BatteryMonitor> binding_;
   QueryNextStatusCallback callback_;
 };
 
@@ -90,7 +90,7 @@ class FakeBatteryMonitor : public device::BatteryMonitor {
 class TestContentBrowserClient : public ContentBrowserClient {
  public:
   void ExposeInterfacesToRenderer(
-      shell::InterfaceRegistry* registry,
+      service_manager::InterfaceRegistry* registry,
       RenderProcessHost* render_process_host) override {
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
         BrowserThread::GetTaskRunnerForThread(BrowserThread::UI);
@@ -109,10 +109,9 @@ class TestContentBrowserClient : public ContentBrowserClient {
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      FileDescriptorInfo* mappings,
-      std::map<int, base::MemoryMappedFile::Region>* regions) override {
+      FileDescriptorInfo* mappings) override {
     ShellContentBrowserClient::Get()->GetAdditionalMappedFilesForChildProcess(
-        command_line, child_process_id, mappings, regions);
+        command_line, child_process_id, mappings);
   }
 #endif  // defined(OS_ANDROID)
 };

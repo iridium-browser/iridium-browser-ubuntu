@@ -15,6 +15,7 @@
 #include "ui/views/border.h"
 
 class SkPath;
+class SkRRect;
 
 namespace gfx {
 class Path;
@@ -99,6 +100,8 @@ class VIEWS_EXPORT BubbleBorder : public Border {
     NO_SHADOW_OPAQUE_BORDER,
     BIG_SHADOW,
     SMALL_SHADOW,
+    // NO_ASSETS borders don't draw a stroke or a shadow. This is used for
+    // platforms that provide their own shadows.
     NO_ASSETS,
     SHADOW_COUNT,
   };
@@ -112,6 +115,7 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   };
 
   // The way the arrow should be painted.
+  // TODO(estade): Harmony doesn't use this enum; remove it.
   enum ArrowPaintType {
     // Fully render the arrow.
     PAINT_NORMAL,
@@ -182,7 +186,7 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   void set_arrow_offset(int offset) { arrow_offset_ = offset; }
 
   // Sets the way the arrow is actually painted.  Default is PAINT_NORMAL.
-  void set_paint_arrow(ArrowPaintType value) { arrow_paint_type_ = value; }
+  void set_paint_arrow(ArrowPaintType value);
 
   // Get the desired widget bounds (in screen coordinates) given the anchor rect
   // and bubble content size; calculated from shadow and arrow image dimensions.
@@ -228,6 +232,18 @@ class VIEWS_EXPORT BubbleBorder : public Border {
   void GetArrowPathFromArrowBounds(const gfx::Rect& arrow_bounds,
                                    SkPath* path) const;
   void DrawArrow(gfx::Canvas* canvas, const gfx::Rect& arrow_bounds) const;
+
+  // Returns the region within |view| representing the client area. This can be
+  // set as a canvas clip to ensure any fill or shadow from the border does not
+  // draw over the contents of the bubble.
+  SkRRect GetClientRect(const View& view) const;
+
+  // Paints an MD border. Ignores |shadow_|.
+  void PaintMd(const View& view, gfx::Canvas* canvas);
+
+  // Paint for the NO_ASSETS shadow type. This just paints transparent pixels
+  // to make the window shape based on insets and GetBorderCornerRadius().
+  void PaintNoAssets(const View& view, gfx::Canvas* canvas);
 
   internal::BorderImages* GetImagesForTest() const;
 

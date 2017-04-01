@@ -17,11 +17,15 @@
 #include "ios/chrome/browser/sync/ios_chrome_synced_tab_delegate.h"
 #include "ios/chrome/browser/tab_parenting_global_observer.h"
 
+#if !defined(__has_feature) || !__has_feature(objc_arc)
+#error "This file requires ARC support."
+#endif
+
 namespace {
 
-browser_sync::SyncedTabDelegate* GetSyncedTabDelegateFromWebState(
+sync_sessions::SyncedTabDelegate* GetSyncedTabDelegateFromWebState(
     web::WebState* web_state) {
-  browser_sync::SyncedTabDelegate* delegate =
+  sync_sessions::SyncedTabDelegate* delegate =
       IOSChromeSyncedTabDelegate::FromWebState(web_state);
   return delegate;
 }
@@ -89,7 +93,7 @@ void IOSChromeLocalSessionEventRouter::OnWebStateChange(
     web::WebState* web_state) {
   if (web_state->GetBrowserState() != browser_state_)
     return;
-  browser_sync::SyncedTabDelegate* tab =
+  sync_sessions::SyncedTabDelegate* tab =
       GetSyncedTabDelegateFromWebState(web_state);
   if (!tab)
     return;
@@ -112,7 +116,7 @@ void IOSChromeLocalSessionEventRouter::OnFaviconsChanged(
 }
 
 void IOSChromeLocalSessionEventRouter::StartRoutingTo(
-    browser_sync::LocalSessionEventHandler* handler) {
+    sync_sessions::LocalSessionEventHandler* handler) {
   DCHECK(!handler_);
   handler_ = handler;
 }

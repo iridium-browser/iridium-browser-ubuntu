@@ -29,6 +29,7 @@
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/compositor/compositor.h"
 
 #if defined(OS_ANDROID)
 #include "content/browser/renderer_host/context_provider_factory_impl_android.h"
@@ -70,7 +71,7 @@ class RenderWidgetHostViewGuestTest : public testing::Test {
     int32_t routing_id = process_host->GetNextRoutingID();
     widget_host_ =
         new RenderWidgetHostImpl(&delegate_, process_host, routing_id, false);
-    view_ = new RenderWidgetHostViewGuest(
+    view_ = RenderWidgetHostViewGuest::Create(
         widget_host_, NULL,
         (new TestRenderWidgetHostView(widget_host_))->GetWeakPtr());
   }
@@ -190,7 +191,7 @@ class RenderWidgetHostViewGuestSurfaceTest
     int32_t routing_id = process_host->GetNextRoutingID();
     widget_host_ =
         new RenderWidgetHostImpl(&delegate_, process_host, routing_id, false);
-    view_ = new RenderWidgetHostViewGuest(
+    view_ = RenderWidgetHostViewGuest::Create(
         widget_host_, browser_plugin_guest_,
         (new TestRenderWidgetHostView(widget_host_))->GetWeakPtr());
   }
@@ -212,9 +213,13 @@ class RenderWidgetHostViewGuestSurfaceTest
 #endif
   }
 
-  cc::SurfaceId surface_id() {
+  cc::SurfaceId GetSurfaceId() const {
     DCHECK(view_);
-    return static_cast<RenderWidgetHostViewChildFrame*>(view_)->surface_id_;
+    RenderWidgetHostViewChildFrame* rwhvcf =
+        static_cast<RenderWidgetHostViewChildFrame*>(view_);
+    if (!rwhvcf->local_frame_id_.is_valid())
+      return cc::SurfaceId();
+    return cc::SurfaceId(rwhvcf->frame_sink_id_, rwhvcf->local_frame_id_);
   }
 
  protected:
@@ -244,12 +249,10 @@ cc::CompositorFrame CreateDelegatedFrame(float scale_factor,
                                          const gfx::Rect& damage) {
   cc::CompositorFrame frame;
   frame.metadata.device_scale_factor = scale_factor;
-  frame.delegated_frame_data.reset(new cc::DelegatedFrameData);
 
   std::unique_ptr<cc::RenderPass> pass = cc::RenderPass::Create();
-  pass->SetNew(cc::RenderPassId(1, 1), gfx::Rect(size), damage,
-               gfx::Transform());
-  frame.delegated_frame_data->render_pass_list.push_back(std::move(pass));
+  pass->SetNew(1, gfx::Rect(size), damage, gfx::Transform());
+  frame.render_pass_list.push_back(std::move(pass));
   return frame;
 }
 }  // anonymous namespace
@@ -268,11 +271,12 @@ TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
   view_->OnSwapCompositorFrame(
       0, CreateDelegatedFrame(scale_factor, view_size, view_rect));
 
-  cc::SurfaceId id = surface_id();
-  if (!id.is_null()) {
+  cc::SurfaceId id = GetSurfaceId();
+  if (id.is_valid()) {
 #if !defined(OS_ANDROID)
     ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-    cc::SurfaceManager* manager = factory->GetSurfaceManager();
+    cc::SurfaceManager* manager =
+        factory->GetContextFactoryPrivate()->GetSurfaceManager();
     cc::Surface* surface = manager->GetSurfaceForId(id);
     EXPECT_TRUE(surface);
     // There should be a SurfaceSequence created by the RWHVGuest.
@@ -291,11 +295,12 @@ TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
   view_->OnSwapCompositorFrame(
       0, CreateDelegatedFrame(scale_factor, view_size, view_rect));
 
-  id = surface_id();
-  if (!id.is_null()) {
+  id = GetSurfaceId();
+  if (id.is_valid()) {
 #if !defined(OS_ANDROID)
     ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-    cc::SurfaceManager* manager = factory->GetSurfaceManager();
+    cc::SurfaceManager* manager =
+        factory->GetContextFactoryPrivate()->GetSurfaceManager();
     cc::Surface* surface = manager->GetSurfaceForId(id);
     EXPECT_TRUE(surface);
     // There should be a SurfaceSequence created by the RWHVGuest.
@@ -314,7 +319,7 @@ TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
 
   view_->OnSwapCompositorFrame(
       0, CreateDelegatedFrame(scale_factor, view_size, view_rect));
-  EXPECT_TRUE(surface_id().is_null());
+  EXPECT_FALSE(GetSurfaceId().is_valid());
 }
 
 }  // namespace content

@@ -69,24 +69,9 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
       MenuModelToValue(pending_menu_->menu_model());
   args->Set(webview::kContextMenuItems, items.release());
   args->SetInteger(webview::kRequestId, request_id);
-  web_view_guest()->DispatchEventToView(base::WrapUnique(
-      new GuestViewEvent(webview::kEventContextMenuShow, std::move(args))));
+  web_view_guest()->DispatchEventToView(base::MakeUnique<GuestViewEvent>(
+      webview::kEventContextMenuShow, std::move(args)));
   return true;
-}
-
-void ChromeWebViewGuestDelegate::OnDidInitialize() {
-#if defined(OS_CHROMEOS)
-  if (chrome::IsRunningInMash()) {
-    NOTIMPLEMENTED();
-    return;
-  }
-  chromeos::AccessibilityManager* accessibility_manager =
-      chromeos::AccessibilityManager::Get();
-  CHECK(accessibility_manager);
-  accessibility_subscription_ = accessibility_manager->RegisterCallback(
-      base::Bind(&ChromeWebViewGuestDelegate::OnAccessibilityStatusChanged,
-                 weak_ptr_factory_.GetWeakPtr()));
-#endif
 }
 
 // static
@@ -127,35 +112,6 @@ bool ChromeWebViewGuestDelegate::ShouldHandleFindRequestsForEmbedder() const {
          web_view_guest_->GetOwnerSiteURL().GetOrigin().spec() ==
              chrome::kChromeUIChromeSigninURL;
 }
-
-void ChromeWebViewGuestDelegate::InjectChromeVoxIfNeeded(
-    content::RenderViewHost* render_view_host) {
-#if defined(OS_CHROMEOS)
-  if (!chromevox_injected_) {
-    chromeos::AccessibilityManager* manager =
-        chromeos::AccessibilityManager::Get();
-    if (manager && manager->IsSpokenFeedbackEnabled()) {
-      manager->InjectChromeVox(render_view_host);
-      chromevox_injected_ = true;
-    }
-  }
-#endif
-}
-
-#if defined(OS_CHROMEOS)
-void ChromeWebViewGuestDelegate::OnAccessibilityStatusChanged(
-    const chromeos::AccessibilityStatusEventDetails& details) {
-  if (details.notification_type == chromeos::ACCESSIBILITY_MANAGER_SHUTDOWN) {
-    accessibility_subscription_.reset();
-  } else if (details.notification_type ==
-      chromeos::ACCESSIBILITY_TOGGLE_SPOKEN_FEEDBACK) {
-    if (details.enabled)
-      InjectChromeVoxIfNeeded(guest_web_contents()->GetRenderViewHost());
-    else
-      chromevox_injected_ = false;
-  }
-}
-#endif
 
 void ChromeWebViewGuestDelegate::SetContextMenuPosition(
     const gfx::Point& position) {

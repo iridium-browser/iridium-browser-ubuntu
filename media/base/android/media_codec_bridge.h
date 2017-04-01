@@ -21,6 +21,7 @@
 
 namespace media {
 
+class EncryptionScheme;
 struct SubsampleEntry;
 
 // These must be in sync with MediaCodecBridge.MEDIA_CODEC_XXX constants in
@@ -101,12 +102,13 @@ class MEDIA_EXPORT MediaCodecBridge {
       const std::string& key_id,
       const std::string& iv,
       const std::vector<SubsampleEntry>& subsamples,
+      const EncryptionScheme& encryption_scheme,
       base::TimeDelta presentation_time);
 
-  // Same QueueSecureInputBuffer overriden for the use with MediaSourcePlayer
-  // and MediaCodecPlayer.
-  // TODO(timav): remove this method and keep only the one above after we
-  // switch to the Spitzer pipeline.
+  // Same QueueSecureInputBuffer overriden for the use with
+  // AndroidVideoDecodeAccelerator and MediaCodecAudioDecoder. TODO(timav):
+  // remove this method and keep only the one above after we switch to the
+  // Spitzer pipeline.
   virtual MediaCodecStatus QueueSecureInputBuffer(
       int index,
       const uint8_t* data,
@@ -115,6 +117,7 @@ class MEDIA_EXPORT MediaCodecBridge {
       const std::vector<char>& iv,
       const SubsampleEntry* subsamples,
       int subsamples_size,
+      const EncryptionScheme& encryption_scheme,
       base::TimeDelta presentation_time) = 0;
 
   // Submits an empty buffer with a EOS (END OF STREAM) flag.

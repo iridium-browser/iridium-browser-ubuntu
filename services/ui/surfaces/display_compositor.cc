@@ -1,60 +1,151 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "services/ui/surfaces/display_compositor.h"
 
-#include "cc/output/copy_output_request.h"
-#include "cc/output/output_surface.h"
-#include "cc/output/renderer_settings.h"
+#include <utility>
+
+#include "base/memory/ptr_util.h"
+#include "base/threading/thread_task_runner_handle.h"
+#include "cc/output/in_process_context_provider.h"
 #include "cc/output/texture_mailbox_deleter.h"
-#include "cc/scheduler/begin_frame_source.h"
-#include "cc/scheduler/delay_based_time_source.h"
 #include "cc/surfaces/display.h"
 #include "cc/surfaces/display_scheduler.h"
-#include "services/ui/surfaces/direct_output_surface.h"
-#include "services/ui/surfaces/surfaces_context_provider.h"
+#include "cc/surfaces/surface.h"
+#include "gpu/command_buffer/client/shared_memory_limits.h"
+#include "gpu/ipc/gpu_in_process_thread_service.h"
+#include "mojo/public/cpp/bindings/strong_binding.h"
+#include "services/ui/surfaces/display_output_surface.h"
+#include "services/ui/surfaces/gpu_compositor_frame_sink.h"
 
 #if defined(USE_OZONE)
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "services/ui/surfaces/direct_output_surface_ozone.h"
+#include "services/ui/surfaces/display_output_surface_ozone.h"
 #endif
 
 namespace ui {
 
 DisplayCompositor::DisplayCompositor(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    gfx::AcceleratedWidget widget,
-    const scoped_refptr<SurfacesState>& surfaces_state)
-    : task_runner_(task_runner),
-      surfaces_state_(surfaces_state),
-      factory_(surfaces_state->manager(), this),
-      allocator_(surfaces_state->next_client_id()) {
-  surfaces_state_->manager()->RegisterSurfaceClientId(allocator_.client_id());
-  surfaces_state_->manager()->RegisterSurfaceFactoryClient(
-      allocator_.client_id(), this);
+    scoped_refptr<gpu::InProcessCommandBuffer::Service> gpu_service,
+    std::unique_ptr<gpu::GpuMemoryBufferManager> gpu_memory_buffer_manager,
+    gpu::ImageFactory* image_factory,
+    cc::mojom::DisplayCompositorRequest request,
+    cc::mojom::DisplayCompositorClientPtr client)
+    : manager_(cc::SurfaceManager::LifetimeType::REFERENCES),
+      reference_manager_(&manager_),
+      gpu_service_(std::move(gpu_service)),
+      gpu_memory_buffer_manager_(std::move(gpu_memory_buffer_manager)),
+      image_factory_(image_factory),
+      task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      client_(std::move(client)),
+      binding_(this, std::move(request)) {
+  manager_.AddObserver(this);
+}
 
-  scoped_refptr<SurfacesContextProvider> surfaces_context_provider(
-      new SurfacesContextProvider(widget));
-  // TODO(rjkroege): If there is something better to do than CHECK, add it.
-  CHECK(surfaces_context_provider->BindToCurrentThread());
+void DisplayCompositor::AddSurfaceReferences(
+    const std::vector<cc::SurfaceReference>& references) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  for (const auto& reference : references) {
+    reference_manager_->AddSurfaceReference(reference.parent_id(),
+                                            reference.child_id());
+  }
+}
 
-  std::unique_ptr<cc::SyntheticBeginFrameSource> synthetic_begin_frame_source(
+void DisplayCompositor::RemoveSurfaceReferences(
+    const std::vector<cc::SurfaceReference>& references) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  // TODO(kylechar): Each remove reference can trigger GC, it would be better if
+  // we GC only once if removing multiple references.
+  for (const auto& reference : references) {
+    reference_manager_->RemoveSurfaceReference(reference.parent_id(),
+                                               reference.child_id());
+  }
+}
+
+DisplayCompositor::~DisplayCompositor() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  manager_.RemoveObserver(this);
+}
+
+void DisplayCompositor::OnCompositorFrameSinkClientConnectionLost(
+    const cc::FrameSinkId& frame_sink_id,
+    bool destroy_compositor_frame_sink) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (destroy_compositor_frame_sink)
+    compositor_frame_sinks_.erase(frame_sink_id);
+  // TODO(fsamuel): Tell the display compositor host that the client connection
+  // has been lost so that it can drop its private connection and allow a new
+  // client instance to create a new CompositorFrameSink.
+}
+
+void DisplayCompositor::OnCompositorFrameSinkPrivateConnectionLost(
+    const cc::FrameSinkId& frame_sink_id,
+    bool destroy_compositor_frame_sink) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  if (destroy_compositor_frame_sink)
+    compositor_frame_sinks_.erase(frame_sink_id);
+}
+
+void DisplayCompositor::CreateDisplayCompositorFrameSink(
+    const cc::FrameSinkId& frame_sink_id,
+    gpu::SurfaceHandle surface_handle,
+    cc::mojom::MojoCompositorFrameSinkRequest request,
+    cc::mojom::MojoCompositorFrameSinkPrivateRequest private_request,
+    cc::mojom::MojoCompositorFrameSinkClientPtr client,
+    cc::mojom::DisplayPrivateRequest display_private_request) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_NE(surface_handle, gpu::kNullSurfaceHandle);
+  std::unique_ptr<cc::SyntheticBeginFrameSource> begin_frame_source(
       new cc::DelayBasedBeginFrameSource(
           base::MakeUnique<cc::DelayBasedTimeSource>(task_runner_.get())));
+  std::unique_ptr<cc::Display> display =
+      CreateDisplay(frame_sink_id, surface_handle, begin_frame_source.get());
+  CreateCompositorFrameSinkInternal(
+      frame_sink_id, surface_handle, std::move(display),
+      std::move(begin_frame_source), std::move(request),
+      std::move(private_request), std::move(client),
+      std::move(display_private_request));
+}
+
+void DisplayCompositor::CreateOffscreenCompositorFrameSink(
+    const cc::FrameSinkId& frame_sink_id,
+    cc::mojom::MojoCompositorFrameSinkRequest request,
+    cc::mojom::MojoCompositorFrameSinkPrivateRequest private_request,
+    cc::mojom::MojoCompositorFrameSinkClientPtr client) {
+  CreateCompositorFrameSinkInternal(frame_sink_id, gpu::kNullSurfaceHandle,
+                                    nullptr, nullptr, std::move(request),
+                                    std::move(private_request),
+                                    std::move(client), nullptr);
+}
+
+std::unique_ptr<cc::Display> DisplayCompositor::CreateDisplay(
+    const cc::FrameSinkId& frame_sink_id,
+    gpu::SurfaceHandle surface_handle,
+    cc::SyntheticBeginFrameSource* begin_frame_source) {
+  scoped_refptr<cc::InProcessContextProvider> context_provider =
+      new cc::InProcessContextProvider(
+          gpu_service_, surface_handle, gpu_memory_buffer_manager_.get(),
+          image_factory_, gpu::SharedMemoryLimits(),
+          nullptr /* shared_context */);
+
+  // TODO(rjkroege): If there is something better to do than CHECK, add it.
+  CHECK(context_provider->BindToCurrentThread());
 
   std::unique_ptr<cc::OutputSurface> display_output_surface;
-  if (surfaces_context_provider->ContextCapabilities().surfaceless) {
+  if (context_provider->ContextCapabilities().surfaceless) {
 #if defined(USE_OZONE)
-    display_output_surface = base::MakeUnique<DirectOutputSurfaceOzone>(
-        surfaces_context_provider, widget, synthetic_begin_frame_source.get(),
+    display_output_surface = base::MakeUnique<DisplayOutputSurfaceOzone>(
+        std::move(context_provider), surface_handle,
+        begin_frame_source, gpu_memory_buffer_manager_.get(),
         GL_TEXTURE_2D, GL_RGB);
 #else
     NOTREACHED();
 #endif
   } else {
-    display_output_surface = base::MakeUnique<DirectOutputSurface>(
-        surfaces_context_provider, synthetic_begin_frame_source.get());
+    display_output_surface = base::MakeUnique<DisplayOutputSurface>(
+        std::move(context_provider), begin_frame_source);
   }
 
   int max_frames_pending =
@@ -62,76 +153,50 @@ DisplayCompositor::DisplayCompositor(
   DCHECK_GT(max_frames_pending, 0);
 
   std::unique_ptr<cc::DisplayScheduler> scheduler(
-      new cc::DisplayScheduler(synthetic_begin_frame_source.get(),
-                               task_runner_.get(), max_frames_pending));
+      new cc::DisplayScheduler(task_runner_.get(), max_frames_pending));
 
-  display_.reset(new cc::Display(
-      nullptr /* bitmap_manager */, nullptr /* gpu_memory_buffer_manager */,
-      cc::RendererSettings(), std::move(synthetic_begin_frame_source),
+  return base::MakeUnique<cc::Display>(
+      nullptr /* bitmap_manager */, gpu_memory_buffer_manager_.get(),
+      cc::RendererSettings(), frame_sink_id, begin_frame_source,
       std::move(display_output_surface), std::move(scheduler),
-      base::MakeUnique<cc::TextureMailboxDeleter>(task_runner_.get())));
-  display_->Initialize(this, surfaces_state_->manager(),
-                       allocator_.client_id());
-  display_->SetVisible(true);
+      base::MakeUnique<cc::TextureMailboxDeleter>(task_runner_.get()));
 }
 
-DisplayCompositor::~DisplayCompositor() {
-  surfaces_state_->manager()->UnregisterSurfaceFactoryClient(
-      allocator_.client_id());
-  surfaces_state_->manager()->InvalidateSurfaceClientId(allocator_.client_id());
+void DisplayCompositor::CreateCompositorFrameSinkInternal(
+    const cc::FrameSinkId& frame_sink_id,
+    gpu::SurfaceHandle surface_handle,
+    std::unique_ptr<cc::Display> display,
+    std::unique_ptr<cc::SyntheticBeginFrameSource> begin_frame_source,
+    cc::mojom::MojoCompositorFrameSinkRequest request,
+    cc::mojom::MojoCompositorFrameSinkPrivateRequest private_request,
+    cc::mojom::MojoCompositorFrameSinkClientPtr client,
+    cc::mojom::DisplayPrivateRequest display_request) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  // We cannot create more than one CompositorFrameSink with a given
+  // |frame_sink_id|.
+  DCHECK_EQ(0u, compositor_frame_sinks_.count(frame_sink_id));
+
+  compositor_frame_sinks_[frame_sink_id] =
+      base::MakeUnique<GpuCompositorFrameSink>(
+          this, frame_sink_id, std::move(display),
+          std::move(begin_frame_source), std::move(request),
+          std::move(private_request), std::move(client),
+          std::move(display_request));
 }
 
-void DisplayCompositor::SubmitCompositorFrame(
-    cc::CompositorFrame frame,
-    const base::Callback<void()>& callback) {
-  gfx::Size frame_size =
-      frame.delegated_frame_data->render_pass_list.back()->output_rect.size();
-  if (frame_size.IsEmpty() || frame_size != display_size_) {
-    if (!surface_id_.is_null())
-      factory_.Destroy(surface_id_);
-    surface_id_ = allocator_.GenerateId();
-    factory_.Create(surface_id_);
-    display_size_ = frame_size;
-    display_->Resize(display_size_);
-  }
-  display_->SetSurfaceId(surface_id_, frame.metadata.device_scale_factor);
-  factory_.SubmitCompositorFrame(surface_id_, std::move(frame), callback);
+const cc::SurfaceId& DisplayCompositor::GetRootSurfaceId() const {
+  return reference_manager_->GetRootSurfaceId();
 }
 
-void DisplayCompositor::RequestCopyOfOutput(
-    std::unique_ptr<cc::CopyOutputRequest> output_request) {
-  factory_.RequestCopyOfSurface(surface_id_, std::move(output_request));
+void DisplayCompositor::OnSurfaceCreated(const cc::SurfaceInfo& surface_info) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_GT(surface_info.device_scale_factor(), 0.0f);
+
+  if (client_)
+    client_->OnSurfaceCreated(surface_info);
 }
 
-void DisplayCompositor::ReturnResources(
-    const cc::ReturnedResourceArray& resources) {
-  // TODO(fsamuel): Implement this.
-}
-
-void DisplayCompositor::SetBeginFrameSource(
-    cc::BeginFrameSource* begin_frame_source) {
-  // TODO(fsamuel): Implement this.
-}
-
-void DisplayCompositor::DisplayOutputSurfaceLost() {
-  // TODO(fsamuel): This looks like it would crash if a frame was in flight and
-  // will be submitted.
-  display_.reset();
-}
-
-void DisplayCompositor::DisplaySetMemoryPolicy(
-    const cc::ManagedMemoryPolicy& policy) {}
-
-void DisplayCompositor::DisplayWillDrawAndSwap(
-    bool will_draw_and_swap,
-    const cc::RenderPassList& render_passes) {
-  // This notification is not relevant to our client outside of tests.
-}
-
-void DisplayCompositor::DisplayDidDrawAndSwap() {
-  // This notification is not relevant to our client outside of tests. We
-  // unblock the client from the DrawCallback when the surface is going to
-  // be drawn.
-}
+void DisplayCompositor::OnSurfaceDamaged(const cc::SurfaceId& surface_id,
+                                         bool* changed) {}
 
 }  // namespace ui

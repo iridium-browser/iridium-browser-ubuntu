@@ -5,9 +5,10 @@
 // https://w3c.github.io/mediacapture-image/index.html#mediasettingsrange
 
 [
-    RuntimeEnabled=ImageCapture,
+    OriginTrialEnabled=ImageCapture,
 ] interface MediaSettingsRange {
-    readonly attribute unsigned long max;
-    readonly attribute unsigned long min;
-    readonly attribute unsigned long current;
+    readonly attribute double max;
+    readonly attribute double min;
+    readonly attribute double current;
+    readonly attribute double step;
 };

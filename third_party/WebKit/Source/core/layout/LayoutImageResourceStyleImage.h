@@ -3,7 +3,8 @@
  * Copyright (C) 1999 Antti Koivisto <koivisto@kde.org>
  * Copyright (C) 2006 Allan Sandfeld Jensen <kde@carewolf.com>
  * Copyright (C) 2006 Samuel Weinig <sam.weinig@gmail.com>
- * Copyright (C) 2004, 2005, 2006, 2007, 2009, 2010 Apple Inc. All rights reserved.
+ * Copyright (C) 2004, 2005, 2006, 2007, 2009, 2010 Apple Inc.
+ *               All rights reserved.
  * Copyright (C) 2010 Patrick Gansterer <paroga@paroga.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -35,31 +36,32 @@ namespace blink {
 class LayoutObject;
 
 class LayoutImageResourceStyleImage final : public LayoutImageResource {
-public:
-    ~LayoutImageResourceStyleImage() override;
+ public:
+  ~LayoutImageResourceStyleImage() override;
 
-    static LayoutImageResource* create(StyleImage* styleImage)
-    {
-        return new LayoutImageResourceStyleImage(styleImage);
-    }
-    void initialize(LayoutObject*) override;
-    void shutdown() override;
+  static LayoutImageResource* create(StyleImage* styleImage) {
+    return new LayoutImageResourceStyleImage(styleImage);
+  }
+  void initialize(LayoutObject*) override;
+  void shutdown() override;
 
-    bool hasImage() const override { return true; }
-    PassRefPtr<Image> image(const IntSize&, float) const override;
-    bool errorOccurred() const override { return m_styleImage->errorOccurred(); }
+  bool hasImage() const override { return true; }
+  PassRefPtr<Image> image(const IntSize&, float) const override;
+  bool errorOccurred() const override { return m_styleImage->errorOccurred(); }
 
-    bool imageHasRelativeSize() const override { return m_styleImage->imageHasRelativeSize(); }
-    LayoutSize imageSize(float multiplier) const override;
-    WrappedImagePtr imagePtr() const override { return m_styleImage->data(); }
+  bool imageHasRelativeSize() const override {
+    return m_styleImage->imageHasRelativeSize();
+  }
+  LayoutSize imageSize(float multiplier) const override;
+  WrappedImagePtr imagePtr() const override { return m_styleImage->data(); }
 
-    DECLARE_VIRTUAL_TRACE();
+  DECLARE_VIRTUAL_TRACE();
 
-private:
-    explicit LayoutImageResourceStyleImage(StyleImage*);
-    Member<StyleImage> m_styleImage;
+ private:
+  explicit LayoutImageResourceStyleImage(StyleImage*);
+  Member<StyleImage> m_styleImage;
 };
 
-} // namespace blink
+}  // namespace blink
 
-#endif // LayoutImageStyleImage_h
+#endif  // LayoutImageStyleImage_h

@@ -63,7 +63,7 @@ class VIEWS_EXPORT DialogDelegate : public ui::DialogModel,
   virtual View* CreateFootnoteView();
 
   // For Dialog boxes, if there is a "Cancel" button or no dialog button at all,
-  // this is called when the user presses the "Cancel" button or the Esc key.
+  // this is called when the user presses the "Cancel" button.
   // It can also be called on a close action if |Close| has not been
   // overridden. This function should return true if the window can be closed
   // after it returns, or false if it must remain open.
@@ -76,10 +76,11 @@ class VIEWS_EXPORT DialogDelegate : public ui::DialogModel,
   virtual bool Accept();
 
   // Called when the user closes the window without selecting an option,
-  // e.g. by pressing the close button on the window or using a window manager
-  // gesture. By default, this calls Accept() if the only button in the dialog
-  // is Accept, Cancel() otherwise. This function should return true if the
-  // window can be closed after it returns, or false if it must remain open.
+  // e.g. by pressing the close button on the window, pressing the Esc key, or
+  // using a window manager gesture. By default, this calls Accept() if the only
+  // button in the dialog is Accept, Cancel() otherwise. This function should
+  // return true if the window can be closed after it returns, or false if it
+  // must remain open.
   virtual bool Close();
 
   // Updates the properties and appearance of |button| which has been created
@@ -101,7 +102,11 @@ class VIEWS_EXPORT DialogDelegate : public ui::DialogModel,
   NonClientFrameView* CreateNonClientFrameView(Widget* widget) override;
 
   // Create a frame view using the new dialog style.
-  static NonClientFrameView* CreateDialogFrameView(Widget* widget);
+  // |content_margins|: margins between the content and the inside of the
+  // border, in pixels.
+  static NonClientFrameView* CreateDialogFrameView(
+      Widget* widget,
+      const gfx::Insets& content_margins);
 
   // Returns true if this particular dialog should use a Chrome-styled frame
   // like the one used for bubbles. The alternative is a more platform-native
@@ -140,7 +145,7 @@ class VIEWS_EXPORT DialogDelegateView : public DialogDelegate,
   View* GetContentsView() override;
 
   // Overridden from View:
-  void GetAccessibleState(ui::AXViewState* state) override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
 

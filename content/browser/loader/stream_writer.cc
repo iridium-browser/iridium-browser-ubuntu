@@ -5,9 +5,9 @@
 #include "content/browser/loader/stream_writer.h"
 
 #include "base/guid.h"
+#include "content/browser/loader/resource_controller.h"
 #include "content/browser/streams/stream.h"
 #include "content/browser/streams/stream_registry.h"
-#include "content/public/browser/resource_controller.h"
 #include "net/base/io_buffer.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -19,7 +19,7 @@ StreamWriter::StreamWriter() : controller_(nullptr), immediate_mode_(false) {
 
 StreamWriter::~StreamWriter() {
   if (stream_.get())
-    Finalize();
+    Finalize(0);
 }
 
 void StreamWriter::InitializeStream(StreamRegistry* registry,
@@ -67,9 +67,9 @@ void StreamWriter::OnReadCompleted(int bytes_read, bool* defer) {
     *defer = true;
 }
 
-void StreamWriter::Finalize() {
+void StreamWriter::Finalize(int status) {
   DCHECK(stream_.get());
-  stream_->Finalize();
+  stream_->Finalize(status);
   stream_->RemoveWriteObserver(this);
   stream_ = nullptr;
 }

@@ -10,14 +10,13 @@
 #define GrGLProgram_DEFINED
 
 #include "GrGLContext.h"
+#include "GrProgramDesc.h"
 #include "GrGLTexture.h"
 #include "GrGLProgramDataManager.h"
 #include "glsl/GrGLSLProgramDataManager.h"
-#include "glsl/GrGLSLProgramDesc.h"
 #include "glsl/GrGLSLUniformHandler.h"
 
 #include "SkString.h"
-#include "SkXfermode.h"
 
 #include "builders/GrGLProgramBuilder.h"
 
@@ -103,16 +102,17 @@ public:
     void generateMipmaps(const GrPrimitiveProcessor&, const GrPipeline&);
 
 protected:
-    typedef GrGLSLProgramDataManager::UniformHandle UniformHandle;
-    typedef GrGLProgramDataManager::UniformInfoArray UniformInfoArray;
-    typedef GrGLProgramDataManager::VaryingInfoArray VaryingInfoArray;
+    using UniformHandle    = GrGLSLProgramDataManager::UniformHandle ;
+    using UniformInfoArray = GrGLProgramDataManager::UniformInfoArray;
+    using VaryingInfoArray = GrGLProgramDataManager::VaryingInfoArray;
 
     GrGLProgram(GrGLGpu*,
                 const GrProgramDesc&,
                 const BuiltinUniformHandles&,
                 GrGLuint programID,
-                const UniformInfoArray&,
-                const SkTArray<GrGLSampler>&,
+                const UniformInfoArray& uniforms,
+                const UniformInfoArray& samplers,
+                const UniformInfoArray& imageStorages,
                 const VaryingInfoArray&, // used for NVPR only currently
                 GrGLSLPrimitiveProcessor* geometryProcessor,
                 GrGLSLXferProcessor* xferProcessor,
@@ -120,7 +120,6 @@ protected:
 
     // A helper to loop over effects, set the transforms (via subclass) and bind textures
     void setFragmentData(const GrPrimitiveProcessor&, const GrPipeline&, int* nextSamplerIdx);
-    void setTransformData(const GrPrimitiveProcessor&, const GrFragmentProcessor&, int index);
 
     // Helper for setData() that sets the view matrix and loads the render target height uniform
     void setRenderTargetState(const GrPrimitiveProcessor&, const GrPipeline&);
@@ -137,8 +136,8 @@ protected:
     GrGLuint fProgramID;
 
     // the installed effects
-    SkAutoTDelete<GrGLSLPrimitiveProcessor> fGeometryProcessor;
-    SkAutoTDelete<GrGLSLXferProcessor> fXferProcessor;
+    std::unique_ptr<GrGLSLPrimitiveProcessor> fGeometryProcessor;
+    std::unique_ptr<GrGLSLXferProcessor> fXferProcessor;
     GrGLSLFragProcs fFragmentProcessors;
 
     GrProgramDesc fDesc;

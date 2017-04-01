@@ -13,7 +13,6 @@
 #include "ash/common/system/tray/tray_details_view.h"
 #include "ash/common/system/tray/tray_image_item.h"
 #include "ash/common/system/tray/tray_notification_view.h"
-#include "ash/common/system/tray/view_click_listener.h"
 #include "base/macros.h"
 #include "ui/gfx/font.h"
 #include "ui/views/controls/button/button.h"
@@ -22,9 +21,13 @@ namespace chromeos {
 class TrayAccessibilityTest;
 }
 
+namespace gfx {
+struct VectorIcon;
+}
+
 namespace views {
 class Button;
-class ImageView;
+class CustomButton;
 class Label;
 class View;
 }
@@ -49,35 +52,45 @@ class AccessibilityPopupView : public TrayNotificationView {
   DISALLOW_COPY_AND_ASSIGN(AccessibilityPopupView);
 };
 
+// Create the detailed view of accessibility tray.
 class AccessibilityDetailedView : public TrayDetailsView,
-                                  public ViewClickListener,
-                                  public views::ButtonListener,
                                   public ShellObserver {
  public:
   AccessibilityDetailedView(SystemTrayItem* owner, LoginStatus login);
   ~AccessibilityDetailedView() override {}
 
  private:
+  // TrayDetailsView:
+  void HandleViewClicked(views::View* view) override;
+  void HandleButtonPressed(views::Button* sender,
+                           const ui::Event& event) override;
+  void CreateExtraTitleRowButtons() override;
+
+  // Launches the WebUI settings in a browser and closes the system menu.
+  void ShowSettings();
+
+  // Launches the a11y help article in a browser and closes the system menu.
+  void ShowHelp();
+
   // Add the accessibility feature list.
   void AppendAccessibilityList();
 
-  // Add help entries.
+  // Add help entries. Only used for non-MD.
   void AppendHelpEntries();
 
+  // Helper function to create entries in the detailed accessibility view. The
+  // |icon| parameter is used to create button icons for MD only.
   HoverHighlightView* AddScrollListItem(const base::string16& text,
                                         bool highlight,
-                                        bool checked);
-  // Overridden from ViewClickListener.
-  void OnViewClicked(views::View* sender) override;
-  // Overridden from ButtonListener.
-  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+                                        bool checked,
+                                        const gfx::VectorIcon& icon);
 
   views::View* spoken_feedback_view_;
   views::View* high_contrast_view_;
   views::View* screen_magnifier_view_;
   views::View* large_cursor_view_;
-  views::View* help_view_;
-  views::View* settings_view_;
+  views::CustomButton* help_view_;
+  views::CustomButton* settings_view_;
   views::View* autoclick_view_;
   views::View* virtual_keyboard_view_;
 

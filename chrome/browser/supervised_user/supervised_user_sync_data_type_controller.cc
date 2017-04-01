@@ -4,20 +4,19 @@
 
 #include "chrome/browser/supervised_user/supervised_user_sync_data_type_controller.h"
 
+#include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/public/browser/browser_thread.h"
 
 SupervisedUserSyncDataTypeController::SupervisedUserSyncDataTypeController(
     syncer::ModelType type,
-    const base::Closure& error_callback,
-    sync_driver::SyncClient* sync_client,
+    const base::Closure& dump_stack,
+    syncer::SyncClient* sync_client,
     Profile* profile)
-    : sync_driver::UIDataTypeController(
-          content::BrowserThread::GetTaskRunnerForThread(
-              content::BrowserThread::UI),
-          error_callback,
-          type,
-          sync_client),
+    : syncer::AsyncDirectoryTypeController(type,
+                                           dump_stack,
+                                           sync_client,
+                                           syncer::GROUP_UI,
+                                           base::ThreadTaskRunnerHandle::Get()),
       profile_(profile) {
   DCHECK(type == syncer::SUPERVISED_USERS ||
          type == syncer::SUPERVISED_USER_SETTINGS ||
@@ -28,6 +27,7 @@ SupervisedUserSyncDataTypeController::SupervisedUserSyncDataTypeController(
 SupervisedUserSyncDataTypeController::~SupervisedUserSyncDataTypeController() {}
 
 bool SupervisedUserSyncDataTypeController::ReadyForStart() const {
+  DCHECK(CalledOnValidThread());
   switch (type()) {
     case syncer::SUPERVISED_USERS:
       return !profile_->IsSupervised();

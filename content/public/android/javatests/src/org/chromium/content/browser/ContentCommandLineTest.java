@@ -4,7 +4,7 @@
 
 package org.chromium.content.browser;
 
-import android.test.suitebuilder.annotation.MediumTest;
+import android.support.test.filters.MediumTest;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.annotations.SuppressFBWarnings;
@@ -35,6 +35,7 @@ public class ContentCommandLineTest extends NativeLibraryTestBase {
 
     @Override
     public void setUp() throws Exception {
+        super.setUp();
         CommandLine.reset();
     }
 

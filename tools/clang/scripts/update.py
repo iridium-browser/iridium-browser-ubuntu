@@ -27,14 +27,14 @@ import zipfile
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://chromium.googlesource.com/chromium/src/+/master/docs/updating_clang.md
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION = '278861'
+CLANG_REVISION = '289944'
 
 use_head_revision = 'LLVM_FORCE_HEAD_REVISION' in os.environ
 if use_head_revision:
   CLANG_REVISION = 'HEAD'
 
 # This is incremented when pushing a new build of Clang at the same revision.
-CLANG_SUB_REVISION=1
+CLANG_SUB_REVISION=2
 
 PACKAGE_VERSION = "%s-%s" % (CLANG_REVISION, CLANG_SUB_REVISION)
 
@@ -167,14 +167,6 @@ def WriteStampFile(s, path=STAMP_FILE):
 
 def GetSvnRevision(svn_repo):
   """Returns current revision of the svn repo at svn_repo."""
-  if sys.platform == 'darwin':
-    # mac_files toolchain must be set for hermetic builds.
-    root = os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.dirname(__file__))))
-    sys.path.append(os.path.join(root, 'build'))
-    import mac_toolchain
-
-    mac_toolchain.SetToolchainEnvironment()
   svn_info = subprocess.check_output('svn info ' + svn_repo, shell=True)
   m = re.search(r'Revision: (\d+)', svn_info)
   return m.group(1)
@@ -299,17 +291,28 @@ def CreateChromeToolsShim():
 
 
 def DownloadHostGcc(args):
-  """Downloads gcc 4.8.2 and makes sure args.gcc_toolchain is set."""
+  """Downloads gcc 4.8.5 and makes sure args.gcc_toolchain is set."""
   if not sys.platform.startswith('linux') or args.gcc_toolchain:
     return
   # Unconditionally download a prebuilt gcc to guarantee the included libstdc++
   # works on Ubuntu Precise.
-  gcc_dir = os.path.join(LLVM_BUILD_TOOLS_DIR, 'gcc482precise')
+  gcc_dir = os.path.join(LLVM_BUILD_TOOLS_DIR, 'gcc485precise')
   if not os.path.exists(gcc_dir):
-    print 'Downloading pre-built GCC 4.8.2...'
+    print 'Downloading pre-built GCC 4.8.5...'
     DownloadAndUnpack(
-        CDS_URL + '/tools/gcc482precise.tgz', LLVM_BUILD_TOOLS_DIR)
+        CDS_URL + '/tools/gcc485precise.tgz', LLVM_BUILD_TOOLS_DIR)
   args.gcc_toolchain = gcc_dir
+
+
+def AddSvnToPathOnWin():
+  """Download svn.exe and add it to PATH."""
+  if sys.platform != 'win32':
+    return
+  svn_ver = 'svn-1.6.6-win'
+  svn_dir = os.path.join(LLVM_BUILD_TOOLS_DIR, svn_ver)
+  if not os.path.exists(svn_dir):
+    DownloadAndUnpack(CDS_URL + '/tools/%s.zip' % svn_ver, LLVM_BUILD_TOOLS_DIR)
+  os.environ['PATH'] = svn_dir + os.pathsep + os.environ.get('PATH', '')
 
 
 def AddCMakeToPath():
@@ -333,7 +336,7 @@ def AddGnuWinToPath():
     return
 
   gnuwin_dir = os.path.join(LLVM_BUILD_TOOLS_DIR, 'gnuwin')
-  GNUWIN_VERSION = '4'
+  GNUWIN_VERSION = '5'
   GNUWIN_STAMP = os.path.join(gnuwin_dir, 'stamp')
   if ReadStampFile(GNUWIN_STAMP) == GNUWIN_VERSION:
     print 'GNU Win tools already up to date.'
@@ -396,8 +399,7 @@ def UpdateClang(args):
 
   need_gold_plugin = 'LLVM_DOWNLOAD_GOLD_PLUGIN' in os.environ or (
       sys.platform.startswith('linux') and
-      'buildtype=Official' in os.environ.get('GYP_DEFINES', '') and
-      'branding=Chrome' in os.environ.get('GYP_DEFINES', ''))
+      'buildtype=Official' in os.environ.get('GYP_DEFINES', ''))
 
   if ReadStampFile() == PACKAGE_VERSION and not args.force_local_build:
     print 'Clang is already up to date.'
@@ -448,6 +450,7 @@ def UpdateClang(args):
     return 1
 
   DownloadHostGcc(args)
+  AddSvnToPathOnWin()
   AddCMakeToPath()
   AddGnuWinToPath()
 
@@ -457,6 +460,10 @@ def UpdateClang(args):
   Checkout('Clang', LLVM_REPO_URL + '/cfe/trunk', CLANG_DIR)
   if sys.platform == 'win32' or use_head_revision:
     Checkout('LLD', LLVM_REPO_URL + '/lld/trunk', LLD_DIR)
+  elif os.path.exists(LLD_DIR):
+    # In case someone sends a tryjob that temporary adds lld to the checkout,
+    # make sure it's not around on future builds.
+    RmTree(LLD_DIR)
   Checkout('compiler-rt', LLVM_REPO_URL + '/compiler-rt/trunk', COMPILER_RT_DIR)
   if sys.platform == 'darwin':
     # clang needs a libc++ checkout, else -stdlib=libc++ won't find includes
@@ -492,7 +499,6 @@ def UpdateClang(args):
                      '-DCMAKE_BUILD_TYPE=Release',
                      '-DLLVM_ENABLE_ASSERTIONS=ON',
                      '-DLLVM_ENABLE_THREADS=OFF',
-                     '-DLLVM_ENABLE_TIMESTAMPS=OFF',
                      # Statically link MSVCRT to avoid DLL dependencies.
                      '-DLLVM_USE_CRT_RELEASE=MT',
                      ]
@@ -626,6 +632,7 @@ def UpdateClang(args):
   cc_args = base_cmake_args if sys.platform != 'win32' else cmake_args
   if cc is not None:  cc_args.append('-DCMAKE_C_COMPILER=' + cc)
   if cxx is not None: cc_args.append('-DCMAKE_CXX_COMPILER=' + cxx)
+  chrome_tools = list(set(['plugins', 'blink_gc_plugin'] + args.extra_tools))
   cmake_args += base_cmake_args + [
       '-DLLVM_BINUTILS_INCDIR=' + binutils_incdir,
       '-DCMAKE_C_FLAGS=' + ' '.join(cflags),
@@ -638,7 +645,7 @@ def UpdateClang(args):
       # explicitly, https://crbug.com/622775
       '-DENABLE_LINKER_BUILD_ID=ON',
       '-DCHROMIUM_TOOLS_SRC=%s' % os.path.join(CHROMIUM_DIR, 'tools', 'clang'),
-      '-DCHROMIUM_TOOLS=%s' % ';'.join(args.tools)]
+      '-DCHROMIUM_TOOLS=%s' % ';'.join(chrome_tools)]
 
   EnsureDirExists(LLVM_BUILD_DIR)
   os.chdir(LLVM_BUILD_DIR)
@@ -656,7 +663,7 @@ def UpdateClang(args):
 
   RunCommand(['ninja'], msvc_arch='x64')
 
-  if args.tools:
+  if chrome_tools:
     # If any Chromium tools were built, install those now.
     RunCommand(['ninja', 'cr-install'], msvc_arch='x64')
 
@@ -686,6 +693,8 @@ def UpdateClang(args):
   compiler_rt_args = base_cmake_args + [
       '-DCMAKE_C_FLAGS=' + ' '.join(cflags),
       '-DCMAKE_CXX_FLAGS=' + ' '.join(cxxflags)]
+  if sys.platform == 'darwin':
+    compiler_rt_args += ['-DCOMPILER_RT_ENABLE_IOS=ON']
   if sys.platform != 'win32':
     compiler_rt_args += ['-DLLVM_CONFIG_PATH=' +
                          os.path.join(LLVM_BUILD_DIR, 'bin', 'llvm-config'),
@@ -754,21 +763,21 @@ def UpdateClang(args):
 
   if args.with_android:
     make_toolchain = os.path.join(
-        ANDROID_NDK_DIR, 'build', 'tools', 'make-standalone-toolchain.sh')
+        ANDROID_NDK_DIR, 'build', 'tools', 'make_standalone_toolchain.py')
     for target_arch in ['aarch64', 'arm', 'i686']:
       # Make standalone Android toolchain for target_arch.
       toolchain_dir = os.path.join(
           LLVM_BUILD_DIR, 'android-toolchain-' + target_arch)
       RunCommand([
           make_toolchain,
-          '--platform=android-' + ('21' if target_arch == 'aarch64' else '19'),
-          '--install-dir="%s"' % toolchain_dir,
-          '--system=linux-x86_64',
+          '--api=' + ('21' if target_arch == 'aarch64' else '19'),
+          '--force',
+          '--install-dir=%s' % toolchain_dir,
           '--stl=stlport',
-          '--toolchain=' + {
-              'aarch64': 'aarch64-linux-android-4.9',
-              'arm': 'arm-linux-androideabi-4.9',
-              'i686': 'x86-4.9',
+          '--arch=' + {
+              'aarch64': 'arm64',
+              'arm': 'arm',
+              'i686': 'x86',
           }[target_arch]])
       # Android NDK r9d copies a broken unwind.h into the toolchain, see
       # http://crbug.com/357890
@@ -837,9 +846,8 @@ def main():
                       help='print current clang version (e.g. x.y.z) and exit.')
   parser.add_argument('--run-tests', action='store_true',
                       help='run tests after building; only for local builds')
-  parser.add_argument('--tools', nargs='*',
-                      help='select which chrome tools to build',
-                      default=['plugins', 'blink_gc_plugin'])
+  parser.add_argument('--extra-tools', nargs='*', default=[],
+                      help='select additional chrome tools to build')
   parser.add_argument('--without-android', action='store_false',
                       help='don\'t build Android ASan runtime (linux only)',
                       dest='with_android',
@@ -871,6 +879,11 @@ def main():
     if re.search(r'\b(make_clang_dir)=', os.environ.get('GYP_DEFINES', '')):
       print 'Skipping Clang update (make_clang_dir= was set in GYP_DEFINES).'
       return 0
+
+  if use_head_revision:
+    # TODO(hans): Trunk was updated; remove after the next roll.
+    global VERSION
+    VERSION = '5.0.0'
 
   global CLANG_REVISION, PACKAGE_VERSION
   if args.print_revision:

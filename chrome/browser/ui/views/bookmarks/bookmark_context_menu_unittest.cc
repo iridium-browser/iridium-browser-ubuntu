@@ -133,7 +133,8 @@ TEST_F(BookmarkContextMenuTest, DeleteURL) {
 // Tests open all on a folder with a couple of bookmarks.
 TEST_F(BookmarkContextMenuTest, OpenAll) {
   const BookmarkNode* folder = model_->bookmark_bar_node()->GetChild(1);
-  chrome::OpenAll(NULL, &navigator_, folder, NEW_FOREGROUND_TAB, NULL);
+  chrome::OpenAll(NULL, &navigator_, folder,
+                  WindowOpenDisposition::NEW_FOREGROUND_TAB, NULL);
 
   // Should have navigated to F1's child but not F11's child.
   ASSERT_EQ(static_cast<size_t>(2), navigator_.urls_.size());
@@ -141,9 +142,10 @@ TEST_F(BookmarkContextMenuTest, OpenAll) {
 }
 
 // Tests open all on a folder with a couple of bookmarks in incognito window.
-TEST_F(BookmarkContextMenuTest, OpenAllIngonito) {
+TEST_F(BookmarkContextMenuTest, OpenAllIncognito) {
   const BookmarkNode* folder = model_->bookmark_bar_node()->GetChild(1);
-  chrome::OpenAll(NULL, &navigator_, folder, OFF_THE_RECORD, NULL);
+  chrome::OpenAll(NULL, &navigator_, folder,
+                  WindowOpenDisposition::OFF_THE_RECORD, profile_.get());
 
   // Should have navigated to only f1a but not f2a.
   ASSERT_EQ(static_cast<size_t>(1), navigator_.urls_.size());

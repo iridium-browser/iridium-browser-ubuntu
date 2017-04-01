@@ -5,12 +5,13 @@
 #ifndef NET_URL_REQUEST_REPORT_SENDER_H_
 #define NET_URL_REQUEST_REPORT_SENDER_H_
 
+#include <map>
 #include <memory>
-#include <set>
 #include <string>
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "net/base/net_export.h"
 #include "net/http/transport_security_state.h"
 #include "net/url_request/url_request.h"
 
@@ -29,6 +30,7 @@ class NET_EXPORT ReportSender
     : public URLRequest::Delegate,
       public TransportSecurityState::ReportSenderInterface {
  public:
+  using SuccessCallback = base::Callback<void()>;
   using ErrorCallback = base::Callback<void(const GURL&, int)>;
 
   // Represents whether or not to send cookies along with reports.
@@ -41,26 +43,17 @@ class NET_EXPORT ReportSender
   ReportSender(URLRequestContext* request_context,
                CookiesPreference cookies_preference);
 
-  // Constructs a ReportSender that sends reports with the
-  // given |request_context| and includes or excludes cookies based on
-  // |cookies_preference|. |request_context| must outlive the
-  // ReportSender. When sending a report results in an error,
-  // |error_callback| is called with the report URI and net error as
-  // arguments.
-  ReportSender(URLRequestContext* request_context,
-               CookiesPreference cookies_preference,
-               const ErrorCallback& error_callback);
-
   ~ReportSender() override;
 
   // TransportSecurityState::ReportSenderInterface implementation.
   void Send(const GURL& report_uri,
             base::StringPiece content_type,
-            base::StringPiece report) override;
-  void SetErrorCallback(const ErrorCallback& error_callback) override;
+            base::StringPiece report,
+            const SuccessCallback& success_callback,
+            const ErrorCallback& error_callback) override;
 
   // net::URLRequest::Delegate implementation.
-  void OnResponseStarted(URLRequest* request) override;
+  void OnResponseStarted(URLRequest* request, int net_error) override;
   void OnReadCompleted(URLRequest* request, int bytes_read) override;
 
  private:
@@ -68,11 +61,7 @@ class NET_EXPORT ReportSender
 
   CookiesPreference cookies_preference_;
 
-  // Owns the contained requests.
-  std::set<URLRequest*> inflight_requests_;
-
-  // Called when a sent report results in an error.
-  ErrorCallback error_callback_;
+  std::map<URLRequest*, std::unique_ptr<URLRequest>> inflight_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(ReportSender);
 };

@@ -8,14 +8,12 @@ Polymer({
   behaviors: [Polymer.IronA11yKeysBehavior],
 
   properties: {
-    selectedPage: {type: String, notify: true},
-
-    route: Object,
+    selectedPage: {
+      type: String,
+      notify: true,
+    },
 
     showFooter: Boolean,
-
-    // If true, the sidebar is contained within an app-drawer.
-    drawer: {type: Boolean, reflectToAttribute: true},
   },
 
   keyBindings: {
@@ -33,7 +31,9 @@ Polymer({
   /**
    * @private
    */
-  onSelectorActivate_: function() { this.fire('history-close-drawer'); },
+  onSelectorActivate_: function() {
+    this.fire('history-close-drawer');
+  },
 
   /**
    * Relocates the user to the clear browsing data section of the settings page.
@@ -44,12 +44,16 @@ Polymer({
     var browserService = md_history.BrowserService.getInstance();
     browserService.recordAction('InitClearBrowsingData');
     browserService.openClearBrowsingData();
+    /** @type {PaperRippleElement} */ (this.$['cbd-ripple']).upAction();
     e.preventDefault();
   },
 
   /**
-   * @param {Object} route
+   * Prevent clicks on sidebar items from navigating. These are only links for
+   * accessibility purposes, taps are handled separately by <iron-selector>.
    * @private
    */
-  getQueryString_: function(route) { return window.location.search; }
+  onItemClick_: function(e) {
+    e.preventDefault();
+  },
 });

@@ -8,27 +8,28 @@
 namespace blink {
 
 enum MessageSource {
-    XMLMessageSource,
-    JSMessageSource,
-    NetworkMessageSource,
-    ConsoleAPIMessageSource,
-    StorageMessageSource,
-    AppCacheMessageSource,
-    RenderingMessageSource,
-    SecurityMessageSource,
-    OtherMessageSource,
-    DeprecationMessageSource,
-    WorkerMessageSource
+  XMLMessageSource,
+  JSMessageSource,
+  NetworkMessageSource,
+  ConsoleAPIMessageSource,
+  StorageMessageSource,
+  AppCacheMessageSource,
+  RenderingMessageSource,
+  SecurityMessageSource,
+  OtherMessageSource,
+  DeprecationMessageSource,
+  WorkerMessageSource,
+  ViolationMessageSource,
+  InterventionMessageSource
 };
 
 enum MessageLevel {
-    DebugMessageLevel = 4,
-    LogMessageLevel = 1,
-    InfoMessageLevel = 5,
-    WarningMessageLevel = 2,
-    ErrorMessageLevel = 3
+  DebugMessageLevel = 4,
+  LogMessageLevel = 1,
+  InfoMessageLevel = 5,
+  WarningMessageLevel = 2,
+  ErrorMessageLevel = 3
 };
-
 }
 
-#endif // !defined(ConsoleTypes_h)
+#endif  // !defined(ConsoleTypes_h)

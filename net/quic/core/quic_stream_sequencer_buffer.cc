@@ -4,12 +4,12 @@
 
 #include "net/quic/core/quic_stream_sequencer_buffer.h"
 
-#include "base/logging.h"
-#include "base/strings/string_number_conversions.h"
-#include "net/quic/core/quic_bug_tracker.h"
+#include "base/format_macros.h"
 #include "net/quic/core/quic_flags.h"
+#include "net/quic/platform/api/quic_bug_tracker.h"
+#include "net/quic/platform/api/quic_logging.h"
+#include "net/quic/platform/api/quic_str_cat.h"
 
-using std::min;
 using std::string;
 
 namespace net {
@@ -19,15 +19,6 @@ namespace {
 // number of iterations needed to find the right gap to fill when a frame
 // arrives.
 const size_t kMaxNumGapsAllowed = 2 * kMaxPacketGap;
-
-}  // namespace
-
-namespace {
-
-string RangeDebugString(QuicStreamOffset start, QuicStreamOffset end) {
-  return std::string("[") + base::Uint64ToString(start) + ", " +
-         base::Uint64ToString(end) + ") ";
-}
 
 }  // namespace
 
@@ -47,18 +38,29 @@ QuicStreamSequencerBuffer::QuicStreamSequencerBuffer(size_t max_capacity_bytes)
       blocks_count_(
           ceil(static_cast<double>(max_capacity_bytes) / kBlockSizeBytes)),
       total_bytes_read_(0),
-      blocks_(blocks_count_) {
+      reduce_sequencer_buffer_memory_life_time_(
+          FLAGS_quic_reloadable_flag_quic_reduce_sequencer_buffer_memory_life_time),  // NOLINT
+      blocks_(reduce_sequencer_buffer_memory_life_time_
+                  ? nullptr
+                  : new BufferBlock*[blocks_count_]()),
+      destruction_indicator_(123456) {
+  CHECK_GT(blocks_count_, 1u)
+      << "blocks_count_ = " << blocks_count_
+      << ", max_buffer_capacity_bytes_ = " << max_buffer_capacity_bytes_;
   Clear();
 }
 
 QuicStreamSequencerBuffer::~QuicStreamSequencerBuffer() {
   Clear();
+  destruction_indicator_ = 654321;
 }
 
 void QuicStreamSequencerBuffer::Clear() {
-  for (size_t i = 0; i < blocks_count_; ++i) {
-    if (blocks_[i] != nullptr) {
-      RetireBlock(i);
+  if (!reduce_sequencer_buffer_memory_life_time_ || blocks_ != nullptr) {
+    for (size_t i = 0; i < blocks_count_; ++i) {
+      if (blocks_[i] != nullptr) {
+        RetireBlock(i);
+      }
     }
   }
   num_bytes_buffered_ = 0;
@@ -66,15 +68,19 @@ void QuicStreamSequencerBuffer::Clear() {
   // total_bytes_read_ has been consumed, and those after total_bytes_read_
   // has never arrived.
   gaps_ = std::list<Gap>(
-      1, Gap(total_bytes_read_, std::numeric_limits<QuicStreamOffset>::max())),
+      1, Gap(total_bytes_read_, std::numeric_limits<QuicStreamOffset>::max()));
   frame_arrival_time_map_.clear();
 }
 
-void QuicStreamSequencerBuffer::RetireBlock(size_t idx) {
-  DCHECK(blocks_[idx] != nullptr);
+bool QuicStreamSequencerBuffer::RetireBlock(size_t idx) {
+  if (blocks_[idx] == nullptr) {
+    QUIC_BUG << "Try to retire block twice";
+    return false;
+  }
   delete blocks_[idx];
   blocks_[idx] = nullptr;
-  DVLOG(1) << "Retired block with index: " << idx;
+  QUIC_DVLOG(1) << "Retired block with index: " << idx;
+  return true;
 }
 
 QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
@@ -83,6 +89,7 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
     QuicTime timestamp,
     size_t* const bytes_buffered,
     std::string* error_details) {
+  CHECK_EQ(destruction_indicator_, 123456) << "This object has been destructed";
   *bytes_buffered = 0;
   QuicStreamOffset offset = starting_offset;
   size_t size = data.size();
@@ -106,30 +113,30 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
   // and allow the caller of this method to handle the result.
   if (offset < current_gap->begin_offset &&
       offset + size <= current_gap->begin_offset) {
-    DVLOG(1) << "Duplicated data at offset: " << offset << " length: " << size;
+    QUIC_DVLOG(1) << "Duplicated data at offset: " << offset
+                  << " length: " << size;
     return QUIC_NO_ERROR;
   }
   if (offset < current_gap->begin_offset &&
       offset + size > current_gap->begin_offset) {
     // Beginning of new data overlaps data before current gap.
+    string prefix(data.data(), data.length() < 128 ? data.length() : 128);
     *error_details =
-        string("Beginning of received data overlaps with buffered data.\n") +
-        "New frame range " + RangeDebugString(offset, offset + size) +
-        " with first 128 bytes: " +
-        string(data.data(), data.length() < 128 ? data.length() : 128) +
-        "\nCurrently received frames: " + ReceivedFramesDebugString() +
-        "\nCurrent gaps: " + GapsDebugString();
+        QuicStrCat("Beginning of received data overlaps with buffered data.\n",
+                   "New frame range [", offset, ", ", offset + size,
+                   ") with first 128 bytes: ", prefix, "\n",
+                   "Currently received frames: ", GapsDebugString(), "\n",
+                   "Current gaps: ", ReceivedFramesDebugString());
     return QUIC_OVERLAPPING_STREAM_DATA;
   }
   if (offset + size > current_gap->end_offset) {
     // End of new data overlaps with data after current gap.
-    *error_details =
-        string("End of received data overlaps with buffered data.\n") +
-        "New frame range " + RangeDebugString(offset, offset + size) +
-        " with first 128 bytes: " +
-        string(data.data(), data.length() < 128 ? data.length() : 128) +
-        "\nCurrently received frames: " + ReceivedFramesDebugString() +
-        "\nCurrent gaps: " + GapsDebugString();
+    string prefix(data.data(), data.length() < 128 ? data.length() : 128);
+    *error_details = QuicStrCat(
+        "End of received data overlaps with buffered data.\nNew frame range [",
+        offset, ", ", offset + size, ") with first 128 bytes: ", prefix, "\n",
+        "Currently received frames: ", ReceivedFramesDebugString(), "\n",
+        "Current gaps: ", GapsDebugString());
     return QUIC_OVERLAPPING_STREAM_DATA;
   }
 
@@ -139,8 +146,7 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
     return QUIC_INTERNAL_ERROR;
   }
 
-  if (FLAGS_quic_limit_frame_gaps_in_buffer &&
-      current_gap->begin_offset != starting_offset &&
+  if (current_gap->begin_offset != starting_offset &&
       current_gap->end_offset != starting_offset + data.length() &&
       gaps_.size() >= kMaxNumGapsAllowed) {
     // This frame is going to create one more gap which exceeds max number of
@@ -169,15 +175,48 @@ QuicErrorCode QuicStreamSequencerBuffer::OnStreamData(
       bytes_avail = total_bytes_read_ + max_buffer_capacity_bytes_ - offset;
     }
 
+    if (reduce_sequencer_buffer_memory_life_time_ && blocks_ == nullptr) {
+      blocks_.reset(new BufferBlock*[blocks_count_]());
+      for (size_t i = 0; i < blocks_count_; ++i) {
+        blocks_[i] = nullptr;
+      }
+    }
+
+    if (write_block_num >= blocks_count_) {
+      *error_details = QuicStrCat(
+          "QuicStreamSequencerBuffer error: OnStreamData() exceed array bounds."
+          "write offset = ",
+          offset, " write_block_num = ", write_block_num,
+          " blocks_count_ = ", blocks_count_);
+      return QUIC_STREAM_SEQUENCER_INVALID_STATE;
+    }
+    if (blocks_ == nullptr) {
+      *error_details =
+          "QuicStreamSequencerBuffer error: OnStreamData() blocks_ is null";
+      return QUIC_STREAM_SEQUENCER_INVALID_STATE;
+    }
     if (blocks_[write_block_num] == nullptr) {
       // TODO(danzh): Investigate if using a freelist would improve performance.
       // Same as RetireBlock().
       blocks_[write_block_num] = new BufferBlock();
     }
 
-    const size_t bytes_to_copy = min<size_t>(bytes_avail, source_remaining);
+    const size_t bytes_to_copy =
+        std::min<size_t>(bytes_avail, source_remaining);
     char* dest = blocks_[write_block_num]->buffer + write_block_offset;
-    DVLOG(1) << "Write at offset: " << offset << " length: " << bytes_to_copy;
+    QUIC_DVLOG(1) << "Write at offset: " << offset
+                  << " length: " << bytes_to_copy;
+
+    if (dest == nullptr || source == nullptr) {
+      *error_details = QuicStrCat(
+          "QuicStreamSequencerBuffer error: OnStreamData()"
+          " dest == nullptr: ",
+          (dest == nullptr), " source == nullptr: ", (source == nullptr),
+          " Writing at offset ", offset, " Gaps: ", GapsDebugString(),
+          " Remaining frames: ", ReceivedFramesDebugString(),
+          " total_bytes_read_ = ", total_bytes_read_);
+      return QUIC_STREAM_SEQUENCER_INVALID_STATE;
+    }
     memcpy(dest, source, bytes_to_copy);
     source += bytes_to_copy;
     source_remaining -= bytes_to_copy;
@@ -225,46 +264,73 @@ inline void QuicStreamSequencerBuffer::UpdateGapList(
   }
 }
 
-size_t QuicStreamSequencerBuffer::Readv(const iovec* dest_iov,
-                                        size_t dest_count) {
-  size_t bytes_read = 0;
+QuicErrorCode QuicStreamSequencerBuffer::Readv(const iovec* dest_iov,
+                                               size_t dest_count,
+                                               size_t* bytes_read,
+                                               string* error_details) {
+  CHECK_EQ(destruction_indicator_, 123456) << "This object has been destructed";
+
+  *bytes_read = 0;
   for (size_t i = 0; i < dest_count && ReadableBytes() > 0; ++i) {
     char* dest = reinterpret_cast<char*>(dest_iov[i].iov_base);
+    CHECK_NE(dest, nullptr);
     size_t dest_remaining = dest_iov[i].iov_len;
     while (dest_remaining > 0 && ReadableBytes() > 0) {
       size_t block_idx = NextBlockToRead();
       size_t start_offset_in_block = ReadOffset();
       size_t block_capacity = GetBlockCapacity(block_idx);
-      size_t bytes_available_in_block =
-          min<size_t>(ReadableBytes(), block_capacity - start_offset_in_block);
+      size_t bytes_available_in_block = std::min<size_t>(
+          ReadableBytes(), block_capacity - start_offset_in_block);
       size_t bytes_to_copy =
-          min<size_t>(bytes_available_in_block, dest_remaining);
-      DCHECK_GT(bytes_to_copy, 0u);
-      DCHECK_NE(static_cast<BufferBlock*>(nullptr), blocks_[block_idx]);
+          std::min<size_t>(bytes_available_in_block, dest_remaining);
+      DCHECK_GT(bytes_to_copy, 0UL);
+      if (blocks_[block_idx] == nullptr || dest == nullptr) {
+        *error_details = QuicStrCat(
+            "QuicStreamSequencerBuffer error:"
+            " Readv() dest == nullptr: ",
+            (dest == nullptr), " blocks_[", block_idx,
+            "] == nullptr: ", (blocks_[block_idx] == nullptr),
+            " Gaps: ", GapsDebugString(),
+            " Remaining frames: ", ReceivedFramesDebugString(),
+            " total_bytes_read_ = ", total_bytes_read_);
+        return QUIC_STREAM_SEQUENCER_INVALID_STATE;
+      }
       memcpy(dest, blocks_[block_idx]->buffer + start_offset_in_block,
              bytes_to_copy);
       dest += bytes_to_copy;
       dest_remaining -= bytes_to_copy;
       num_bytes_buffered_ -= bytes_to_copy;
       total_bytes_read_ += bytes_to_copy;
-      bytes_read += bytes_to_copy;
+      *bytes_read += bytes_to_copy;
 
-      // Retire the block if all the data is read out
-      // and no other data is stored in this block.
+      // Retire the block if all the data is read out and no other data is
+      // stored in this block.
+      // In case of failing to retire a block which is ready to retire, return
+      // immediately.
       if (bytes_to_copy == bytes_available_in_block) {
-        RetireBlockIfEmpty(block_idx);
+        bool retire_successfully = RetireBlockIfEmpty(block_idx);
+        if (!retire_successfully) {
+          *error_details = QuicStrCat(
+              "QuicStreamSequencerBuffer error: fail to retire block ",
+              block_idx,
+              " as the block is already released, total_bytes_read_ = ",
+              total_bytes_read_, " Gaps: ", GapsDebugString());
+          return QUIC_STREAM_SEQUENCER_INVALID_STATE;
+        }
       }
     }
   }
 
-  if (bytes_read > 0) {
+  if (*bytes_read > 0) {
     UpdateFrameArrivalMap(total_bytes_read_);
   }
-  return bytes_read;
+  return QUIC_NO_ERROR;
 }
 
 int QuicStreamSequencerBuffer::GetReadableRegions(struct iovec* iov,
                                                   int iov_count) const {
+  CHECK_EQ(destruction_indicator_, 123456) << "This object has been destructed";
+
   DCHECK(iov != nullptr);
   DCHECK_GT(iov_count, 0);
 
@@ -284,15 +350,15 @@ int QuicStreamSequencerBuffer::GetReadableRegions(struct iovec* iov,
   if (start_block_idx == end_block_idx && ReadOffset() <= end_block_offset) {
     iov[0].iov_base = blocks_[start_block_idx]->buffer + ReadOffset();
     iov[0].iov_len = ReadableBytes();
-    DVLOG(1) << "Got only a single block with index: " << start_block_idx;
+    QUIC_DVLOG(1) << "Got only a single block with index: " << start_block_idx;
     return 1;
   }
 
   // Get first block
   iov[0].iov_base = blocks_[start_block_idx]->buffer + ReadOffset();
   iov[0].iov_len = GetBlockCapacity(start_block_idx) - ReadOffset();
-  DVLOG(1) << "Got first block " << start_block_idx << " with len "
-           << iov[0].iov_len;
+  QUIC_DVLOG(1) << "Got first block " << start_block_idx << " with len "
+                << iov[0].iov_len;
   DCHECK_GT(readable_offset_end + 1, total_bytes_read_ + iov[0].iov_len)
       << "there should be more available data";
 
@@ -305,7 +371,7 @@ int QuicStreamSequencerBuffer::GetReadableRegions(struct iovec* iov,
     DCHECK_NE(static_cast<BufferBlock*>(nullptr), blocks_[block_idx]);
     iov[iov_used].iov_base = blocks_[block_idx]->buffer;
     iov[iov_used].iov_len = GetBlockCapacity(block_idx);
-    DVLOG(1) << "Got block with index: " << block_idx;
+    QUIC_DVLOG(1) << "Got block with index: " << block_idx;
     ++iov_used;
     block_idx = (start_block_idx + iov_used) % blocks_count_;
   }
@@ -315,7 +381,7 @@ int QuicStreamSequencerBuffer::GetReadableRegions(struct iovec* iov,
     DCHECK_NE(static_cast<BufferBlock*>(nullptr), blocks_[block_idx]);
     iov[iov_used].iov_base = blocks_[end_block_idx]->buffer;
     iov[iov_used].iov_len = end_block_offset + 1;
-    DVLOG(1) << "Got last block with index: " << end_block_idx;
+    QUIC_DVLOG(1) << "Got last block with index: " << end_block_idx;
     ++iov_used;
   }
   return iov_used;
@@ -323,6 +389,8 @@ int QuicStreamSequencerBuffer::GetReadableRegions(struct iovec* iov,
 
 bool QuicStreamSequencerBuffer::GetReadableRegion(iovec* iov,
                                                   QuicTime* timestamp) const {
+  CHECK_EQ(destruction_indicator_, 123456) << "This object has been destructed";
+
   if (ReadableBytes() == 0) {
     iov[0].iov_base = nullptr;
     iov[0].iov_len = 0;
@@ -331,29 +399,29 @@ bool QuicStreamSequencerBuffer::GetReadableRegion(iovec* iov,
 
   size_t start_block_idx = NextBlockToRead();
   iov->iov_base = blocks_[start_block_idx]->buffer + ReadOffset();
-  size_t readable_bytes_in_block = min<size_t>(
+  size_t readable_bytes_in_block = std::min<size_t>(
       GetBlockCapacity(start_block_idx) - ReadOffset(), ReadableBytes());
   size_t region_len = 0;
   auto iter = frame_arrival_time_map_.begin();
   *timestamp = iter->second.timestamp;
-  DVLOG(1) << "Readable bytes in block: " << readable_bytes_in_block;
+  QUIC_DVLOG(1) << "Readable bytes in block: " << readable_bytes_in_block;
   for (; iter != frame_arrival_time_map_.end() &&
          region_len + iter->second.length <= readable_bytes_in_block;
        ++iter) {
     if (iter->second.timestamp != *timestamp) {
       // If reaches a frame arrive at another timestamp, stop expanding current
       // region.
-      DVLOG(1) << "Meet frame with different timestamp.";
+      QUIC_DVLOG(1) << "Meet frame with different timestamp.";
       break;
     }
     region_len += iter->second.length;
-    DVLOG(1) << "Added bytes to region: " << iter->second.length;
+    QUIC_DVLOG(1) << "Added bytes to region: " << iter->second.length;
   }
   if (iter == frame_arrival_time_map_.end() ||
       iter->second.timestamp == *timestamp) {
     // If encountered the end of readable bytes before reaching a different
     // timestamp.
-    DVLOG(1) << "Got all readable bytes in first block.";
+    QUIC_DVLOG(1) << "Got all readable bytes in first block.";
     region_len = readable_bytes_in_block;
   }
   iov->iov_len = region_len;
@@ -361,6 +429,8 @@ bool QuicStreamSequencerBuffer::GetReadableRegion(iovec* iov,
 }
 
 bool QuicStreamSequencerBuffer::MarkConsumed(size_t bytes_used) {
+  CHECK_EQ(destruction_indicator_, 123456) << "This object has been destructed";
+
   if (bytes_used > ReadableBytes()) {
     return false;
   }
@@ -368,9 +438,9 @@ bool QuicStreamSequencerBuffer::MarkConsumed(size_t bytes_used) {
   while (bytes_to_consume > 0) {
     size_t block_idx = NextBlockToRead();
     size_t offset_in_block = ReadOffset();
-    size_t bytes_available = min<size_t>(
+    size_t bytes_available = std::min<size_t>(
         ReadableBytes(), GetBlockCapacity(block_idx) - offset_in_block);
-    size_t bytes_read = min<size_t>(bytes_to_consume, bytes_available);
+    size_t bytes_read = std::min<size_t>(bytes_to_consume, bytes_available);
     total_bytes_read_ += bytes_read;
     num_bytes_buffered_ -= bytes_read;
     bytes_to_consume -= bytes_read;
@@ -391,6 +461,15 @@ size_t QuicStreamSequencerBuffer::FlushBufferedFrames() {
   total_bytes_read_ = gaps_.back().begin_offset;
   Clear();
   return total_bytes_read_ - prev_total_bytes_read;
+}
+
+void QuicStreamSequencerBuffer::ReleaseWholeBuffer() {
+  if (!reduce_sequencer_buffer_memory_life_time_) {
+    // Don't release buffer if flag is off.
+    return;
+  }
+  Clear();
+  blocks_.reset(nullptr);
 }
 
 size_t QuicStreamSequencerBuffer::ReadableBytes() const {
@@ -426,21 +505,20 @@ size_t QuicStreamSequencerBuffer::NextBlockToRead() const {
   return GetBlockIndex(total_bytes_read_);
 }
 
-void QuicStreamSequencerBuffer::RetireBlockIfEmpty(size_t block_index) {
+bool QuicStreamSequencerBuffer::RetireBlockIfEmpty(size_t block_index) {
   DCHECK(ReadableBytes() == 0 || GetInBlockOffset(total_bytes_read_) == 0)
       << "RetireBlockIfEmpty() should only be called when advancing to next "
          "block"
          " or a gap has been reached.";
   // If the whole buffer becomes empty, the last piece of data has been read.
   if (Empty()) {
-    RetireBlock(block_index);
-    return;
+    return RetireBlock(block_index);
   }
 
   // Check where the logical end of this buffer is.
   // Not empty if the end of circular buffer has been wrapped to this block.
   if (GetBlockIndex(gaps_.back().begin_offset - 1) == block_index) {
-    return;
+    return true;
   }
 
   // Read index remains in this block, which means a gap has been reached.
@@ -449,17 +527,13 @@ void QuicStreamSequencerBuffer::RetireBlockIfEmpty(size_t block_index) {
     DCHECK(first_gap.begin_offset == total_bytes_read_);
     // Check where the next piece data is.
     // Not empty if next piece of data is still in this chunk.
-    bool gap_extends_to_infinity =
-        (first_gap.end_offset == std::numeric_limits<QuicStreamOffset>::max());
     bool gap_ends_in_this_block =
         (GetBlockIndex(first_gap.end_offset) == block_index);
-    if ((!FLAGS_quic_sequencer_buffer_retire_block_in_time &&
-         !gap_extends_to_infinity) ||
-        gap_ends_in_this_block) {
-      return;
+    if (gap_ends_in_this_block) {
+      return true;
     }
   }
-  RetireBlock(block_index);
+  return RetireBlock(block_index);
 }
 
 bool QuicStreamSequencerBuffer::Empty() const {
@@ -486,16 +560,16 @@ void QuicStreamSequencerBuffer::UpdateFrameArrivalMap(QuicStreamOffset offset) {
   while (iter != next_frame) {
     auto erased = *iter;
     iter = frame_arrival_time_map_.erase(iter);
-    DVLOG(1) << "Removed FrameInfo with offset: " << erased.first
-             << " and length: " << erased.second.length;
+    QUIC_DVLOG(1) << "Removed FrameInfo with offset: " << erased.first
+                  << " and length: " << erased.second.length;
     if (erased.first + erased.second.length > offset) {
       // If last frame is partially read out, update this FrameInfo and insert
       // it back.
       auto updated = std::make_pair(
           offset, FrameInfo(erased.first + erased.second.length - offset,
                             erased.second.timestamp));
-      DVLOG(1) << "Inserted FrameInfo with offset: " << updated.first
-               << " and length: " << updated.second.length;
+      QUIC_DVLOG(1) << "Inserted FrameInfo with offset: " << updated.first
+                    << " and length: " << updated.second.length;
       frame_arrival_time_map_.insert(updated);
     }
   }
@@ -506,7 +580,8 @@ string QuicStreamSequencerBuffer::GapsDebugString() {
   for (const Gap& gap : gaps_) {
     QuicStreamOffset current_gap_begin = gap.begin_offset;
     QuicStreamOffset current_gap_end = gap.end_offset;
-    current_gaps_string += RangeDebugString(current_gap_begin, current_gap_end);
+    current_gaps_string.append(
+        QuicStrCat("[", current_gap_begin, ", ", current_gap_end, ") "));
   }
   return current_gaps_string;
 }
@@ -517,8 +592,9 @@ string QuicStreamSequencerBuffer::ReceivedFramesDebugString() {
     QuicStreamOffset current_frame_begin_offset = it.first;
     QuicStreamOffset current_frame_end_offset =
         it.second.length + current_frame_begin_offset;
-    current_frames_string +=
-        RangeDebugString(current_frame_begin_offset, current_frame_end_offset);
+    current_frames_string.append(QuicStrCat(
+        "[", current_frame_begin_offset, ", ", current_frame_end_offset,
+        ") receiving time ", it.second.timestamp.ToDebuggingValue()));
   }
   return current_frames_string;
 }

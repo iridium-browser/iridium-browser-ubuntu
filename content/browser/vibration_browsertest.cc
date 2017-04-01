@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
 #include "content/public/browser/render_frame_host.h"
@@ -18,7 +19,7 @@
 #include "content/shell/browser/shell.h"
 #include "device/vibration/vibration_manager.mojom.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "services/shell/public/cpp/interface_registry.h"
+#include "services/service_manager/public/cpp/interface_registry.h"
 
 // These tests run against a dummy implementation of the VibrationManager
 // service. That is, they verify that the service implementation is correctly
@@ -50,16 +51,15 @@ void ResetGlobalValues() {
 
 class FakeVibrationManager : public device::VibrationManager {
  public:
-  static void Create(mojo::InterfaceRequest<VibrationManager> request) {
-    new FakeVibrationManager(std::move(request));
+  FakeVibrationManager() {}
+  ~FakeVibrationManager() override {}
+
+  static void Create(device::VibrationManagerRequest request) {
+    mojo::MakeStrongBinding(base::MakeUnique<FakeVibrationManager>(),
+                            std::move(request));
   }
 
  private:
-  FakeVibrationManager(mojo::InterfaceRequest<VibrationManager> request)
-      : binding_(this, std::move(request)) {}
-
-  ~FakeVibrationManager() override {}
-
   void Vibrate(int64_t milliseconds, const VibrateCallback& callback) override {
     g_vibrate_milliseconds = milliseconds;
     callback.Run();
@@ -71,8 +71,6 @@ class FakeVibrationManager : public device::VibrationManager {
     callback.Run();
     g_wait_cancel_runner->Quit();
   }
-
-  mojo::StrongBinding<VibrationManager> binding_;
 };
 
 class VibrationTest : public ContentBrowserTest {

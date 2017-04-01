@@ -6,13 +6,14 @@
 #define CHROME_GPU_GPU_ARC_VIDEO_SERVICE_H_
 
 #include <memory>
+#include <vector>
 
 #include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "chrome/gpu/arc_video_accelerator.h"
 #include "components/arc/common/video_accelerator.mojom.h"
+#include "components/arc/video_accelerator/video_accelerator.h"
 #include "gpu/command_buffer/service/gpu_preferences.h"
-#include "mojo/public/cpp/bindings/strong_binding.h"
 
 namespace chromeos {
 namespace arc {
@@ -25,15 +26,8 @@ namespace arc {
 class GpuArcVideoService : public ::arc::mojom::VideoAcceleratorService,
                            public ArcVideoAccelerator::Client {
  public:
-  GpuArcVideoService(
-      ::arc::mojom::VideoAcceleratorServiceRequest request,
-      const gpu::GpuPreferences& gpu_preferences);
   explicit GpuArcVideoService(const gpu::GpuPreferences& gpu_preferences);
   ~GpuArcVideoService() override;
-
-  // Connects to VideoAcceleratorServiceClient.
-  // |request| specified the message pipe of client to use.
-  void Connect(::arc::mojom::VideoAcceleratorServiceClientRequest request);
 
  private:
   // ArcVideoAccelerator::Client implementation.
@@ -49,22 +43,15 @@ class GpuArcVideoService : public ::arc::mojom::VideoAcceleratorService,
   void Initialize(::arc::mojom::ArcVideoAcceleratorConfigPtr config,
                   ::arc::mojom::VideoAcceleratorServiceClientPtr client,
                   const InitializeCallback& callback) override;
-  void DeprecatedInitialize(
-      ::arc::mojom::ArcVideoAcceleratorConfigPtr config,
-      const DeprecatedInitializeCallback& callback) override;
   void BindSharedMemory(::arc::mojom::PortType port,
                         uint32_t index,
                         mojo::ScopedHandle ashmem_handle,
                         uint32_t offset,
                         uint32_t length) override;
-  void DeprecatedBindDmabuf(::arc::mojom::PortType port,
-                            uint32_t index,
-                            mojo::ScopedHandle dmabuf_handle,
-                            int32_t stride) override;
   void BindDmabuf(::arc::mojom::PortType port,
                   uint32_t index,
                   mojo::ScopedHandle dmabuf_handle,
-                  mojo::Array<::arc::mojom::ArcVideoAcceleratorDmabufPlanePtr>
+                  std::vector<::arc::ArcVideoAcceleratorDmabufPlane>
                       dmabuf_planes) override;
   void UseBuffer(::arc::mojom::PortType port,
                  uint32_t index,
@@ -80,10 +67,6 @@ class GpuArcVideoService : public ::arc::mojom::VideoAcceleratorService,
   gpu::GpuPreferences gpu_preferences_;
   std::unique_ptr<ArcVideoAccelerator> accelerator_;
   ::arc::mojom::VideoAcceleratorServiceClientPtr client_;
-
-  // Binding of arc::mojom::VideoAcceleratorService. It also takes ownership of
-  // |this|.
-  mojo::StrongBinding<::arc::mojom::VideoAcceleratorService> binding_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuArcVideoService);
 };
