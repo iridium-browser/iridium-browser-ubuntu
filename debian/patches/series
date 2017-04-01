@@ -44,5 +44,4 @@ set-rpath-on-chromium-executables.patch
 #fix-gn-bootstrap.patch
 fix-crashpad-build.patch
 iridium-manpage.patch
-iridium-fix-browserwindowtitleformat.patch
 iridium-welcomepage.patch
