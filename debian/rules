@@ -469,7 +469,7 @@ build-stamp-ffmpeg-%: configure-stamp-ffmpeg-%
 	@set -eux
 	$(NINJA) -v -C $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-$* third_party/ffmpeg
 	mkdir -p debian/tmp-$*/$(LIB_DIR)
-	cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-$*/libffmpeg.so $(CURDIR)/debian/tmp-$*/$(LIB_DIR)
+	#cp $(SRC_DIR)/out/$(BUILD_TYPE)-ffmpeg-$*/libffmpeg.so $(CURDIR)/debian/tmp-$*/$(LIB_DIR)
 	touch $@
 
 # These are (leading-slash-less) files that are created by upstream builder,
