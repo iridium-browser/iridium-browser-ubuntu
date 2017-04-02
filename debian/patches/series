@@ -47,3 +47,4 @@ iridium-manpage.patch
 iridium-welcomepage.patch
 iridium-fix-gn.patch
 iridium-fix-fpie.patch
+iridium-fix-vaapi-on-linux.diff
