@@ -45,3 +45,4 @@ set-rpath-on-chromium-executables.patch
 fix-crashpad-build.patch
 iridium-manpage.patch
 iridium-welcomepage.patch
+iridium-fix-gn.patch
