@@ -60,3 +60,4 @@ nacl-dont-use-icf.patch
 dont-assume-neon-exists.patch
 iridium-manpage.patch
 iridium-welcomepage.patch
+iridium-fix-gn.patch
