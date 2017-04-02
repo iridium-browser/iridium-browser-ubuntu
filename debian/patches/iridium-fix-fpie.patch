@@ -1,0 +1,14 @@
+Index: iridium-ubuntu-build/sandbox/linux/BUILD.gn
+===================================================================
+--- iridium-ubuntu-build.orig/sandbox/linux/BUILD.gn
++++ iridium-ubuntu-build/sandbox/linux/BUILD.gn
+@@ -278,7 +278,8 @@ if (is_linux) {
+ 
+     cflags = [
+       # For ULLONG_MAX
+-      "-std=gnu99 -fPIE",
++      "-std=gnu99",
++      "-fPIE",
+ 
+       # These files have a suspicious comparison.
+       # TODO fix this and re-enable this warning.
