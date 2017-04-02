@@ -49,3 +49,4 @@ revert-commit-cd95d725015aa.patch
 iridium-manpage.patch
 iridium-welcomepage.patch
 iridium-fix-gn.patch
+iridium-fix-fpie.patch
