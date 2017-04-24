@@ -101,6 +101,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
   ~ServiceWorkerURLRequestJob() override;
 
   const ResourceContext* resource_context() const { return resource_context_; }
+  bool did_navigation_preload() const { return did_navigation_preload_; }
 
   // Sets the response type.
   // When an in-flight request possibly needs CORS check, use
@@ -134,7 +135,6 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob : public net::URLRequestJob {
   bool GetMimeType(std::string* mime_type) const override;
   void GetResponseInfo(net::HttpResponseInfo* info) override;
   void GetLoadTimingInfo(net::LoadTimingInfo* load_timing_info) const override;
-  int GetResponseCode() const override;
   void SetExtraRequestHeaders(const net::HttpRequestHeaders& headers) override;
   int ReadRawData(net::IOBuffer* buf, int buf_size) override;
 

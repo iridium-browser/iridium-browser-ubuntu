@@ -8,6 +8,11 @@
   'variables': {
     'v8_code': 1,
     'unittests_sources': [  ### gcmole(all) ###
+      'api/access-check-unittest.cc',
+      'api/exception-unittest.cc',
+      'api/isolate-unittest.cc',
+      'api/remote-object-unittest.cc',
+      'api/v8-object-unittest.cc',
       'base/atomic-utils-unittest.cc',
       'base/bits-unittest.cc',
       'base/cpu-unittest.cc',
@@ -87,6 +92,7 @@
       'compiler-dispatcher/compiler-dispatcher-job-unittest.cc',
       'compiler-dispatcher/compiler-dispatcher-tracer-unittest.cc',
       'compiler-dispatcher/compiler-dispatcher-unittest.cc',
+      'compiler-dispatcher/optimizing-compile-dispatcher-unittest.cc',
       'counters-unittest.cc',
       'eh-frame-iterator-unittest.cc',
       'eh-frame-writer-unittest.cc',
@@ -118,6 +124,7 @@
       'heap/heap-unittest.cc',
       'heap/scavenge-job-unittest.cc',
       'heap/slot-set-unittest.cc',
+      'heap/unmapper-unittest.cc',
       'locked-queue-unittest.cc',
       'object-unittest.cc',
       'register-configuration-unittest.cc',
@@ -129,6 +136,7 @@
       'value-serializer-unittest.cc',
       'zone/segmentpool-unittest.cc',
       'zone/zone-chunk-list-unittest.cc',
+      'zone/zone-unittest.cc',
       'wasm/asm-types-unittest.cc',
       'wasm/control-transfer-unittest.cc',
       'wasm/decoder-unittest.cc',
@@ -139,6 +147,7 @@
       'wasm/switch-logic-unittest.cc',
       'wasm/wasm-macro-gen-unittest.cc',
       'wasm/wasm-module-builder-unittest.cc',
+      'wasm/wasm-opcodes-unittest.cc',
     ],
     'unittests_sources_arm': [  ### gcmole(arch:arm) ###
       'compiler/arm/instruction-selector-arm-unittest.cc',

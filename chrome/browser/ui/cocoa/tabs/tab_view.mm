@@ -10,6 +10,7 @@
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/cocoa/l10n_util.h"
 #import "chrome/browser/ui/cocoa/tabs/alert_indicator_button_cocoa.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
@@ -201,6 +202,8 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     base::scoped_nsobject<GTMFadeTruncatingTextFieldCell> labelCell(
         [[GTMFadeTruncatingTextFieldCell alloc] initTextCell:@"Label"]);
     [labelCell setControlSize:NSSmallControlSize];
+    if (cocoa_l10n_util::ShouldDoExperimentalRTLLayout())
+      [labelCell setAlignment:NSRightTextAlignment];
     [titleView_ setCell:labelCell];
     titleViewCell_ = labelCell;
 
@@ -613,6 +616,7 @@ CGFloat LineWidthFromContext(CGContextRef context) {
     return;
   [titleView_ setTextColor:titleColor];
   [self setNeedsDisplayInRect:[titleView_ frame]];
+  [self updateAppearance];
 }
 
 - (BOOL)titleHidden {
@@ -646,11 +650,11 @@ CGFloat LineWidthFromContext(CGContextRef context) {
 }
 
 - (void)accessibilityOptionsDidChange:(id)ignored {
-  [self updateLabelFont];
+  [self updateAppearance];
   [self setNeedsDisplay:YES];
 }
 
-- (void)updateLabelFont {
+- (void)updateAppearance {
   CGFloat fontSize = [titleViewCell_ font].pointSize;
   const ui::ThemeProvider* provider = [[self window] themeProvider];
   if (provider && provider->ShouldIncreaseContrast() && state_ == NSOnState) {
@@ -658,15 +662,16 @@ CGFloat LineWidthFromContext(CGContextRef context) {
   } else {
     [titleViewCell_ setFont:[NSFont systemFontOfSize:fontSize]];
   }
+
+  [closeButton_ setIconColor:[self iconColor]];
 }
 
 - (void)setState:(NSCellStateValue)state {
   if (state_ == state)
     return;
   state_ = state;
-  [self updateLabelFont];
+  [self updateAppearance];
   [self setNeedsDisplay:YES];
-  [closeButton_ setNeedsDisplay:YES];
 }
 
 - (void)setClosing:(BOOL)closing {

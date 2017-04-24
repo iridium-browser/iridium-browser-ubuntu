@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 source_set("autofill") {
+  configs += [ "//build/config/compiler:enable_arc" ]
   sources = [
     "autofill_client_ios.h",
     "autofill_client_ios.mm",
@@ -34,6 +35,7 @@ source_set("autofill") {
     "//ios/public/provider/chrome/browser",
     "//ios/third_party/material_components_ios",
     "//ios/third_party/material_roboto_font_loader_ios",
+    "//ios/web",
     "//ui/base",
   ]
   public_deps = [

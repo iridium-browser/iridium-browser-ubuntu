@@ -125,7 +125,6 @@
 #import "ios/chrome/browser/ui/util/top_view_controller.h"
 #import "ios/chrome/browser/ui/webui/chrome_web_ui_ios_controller_factory.h"
 #include "ios/chrome/browser/xcallback_parameters.h"
-#include "ios/chrome/grit/ios_strings.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #import "ios/net/crn_http_protocol_handler.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
@@ -147,7 +146,6 @@
 #include "mojo/edk/embedder/embedder.h"
 #import "net/base/mac/url_conversions.h"
 #include "net/url_request/url_request_context.h"
-#include "ui/base/l10n/l10n_util.h"
 
 namespace {
 
@@ -194,9 +192,6 @@ NSString* const kPurgeSnapshots = @"PurgeSnapshots";
 // Constants for deferring startup Spotlight bookmark indexing.
 NSString* const kStartSpotlightBookmarksIndexing =
     @"StartSpotlightBookmarksIndexing";
-
-// Constants for deferred initialization of dynamic application shortcut items.
-NSString* const kAddApplicationShortcutItems = @"AddApplicationShortcutItems";
 
 // Constants for deferred promo display.
 const NSTimeInterval kDisplayPromoDelay = 0.1;
@@ -263,12 +258,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   // Parameters received at startup time when the app is launched from another
   // app.
   base::scoped_nsobject<AppStartupParameters> _startupParameters;
-
-  // Whether Voice Search should be started upon tab switcher dismissal.
-  BOOL _startVoiceSearchAfterTabSwitcherDismissal;
-
-  // Whether the QR Scanner should be started upon tab switcher dismissal.
-  BOOL _startQRScannerAfterTabSwitcherDismissal;
 
   // Navigation View controller for the settings.
   base::scoped_nsobject<SettingsNavigationController>
@@ -377,6 +366,10 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 // switcher dismissal. It can only be YES if the QR Scanner experiment is
 // enabled.
 @property(nonatomic, readwrite) BOOL startQRScannerAfterTabSwitcherDismissal;
+// Whether the QR Scanner should be started upon tab switcher dismissal.
+@property(nonatomic, readwrite) BOOL startVoiceSearchAfterTabSwitcherDismissal;
+// Whether the omnibox should be focused upon tab switcher dismissal.
+@property(nonatomic, readwrite) BOOL startFocusOmniboxAfterTabSwitcherDismissal;
 
 // Activates browsing and enables web views if |enabled| is YES.
 // Disables browsing and purges web views if |enabled| is NO.
@@ -395,8 +388,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 - (void)showSyncSettings;
 // Shows the Save Passwords settings.
 - (void)showSavePasswordsSettings;
-// Shows the Physical Web settings UI.
-- (void)showPhysicalWebSettings;
 // Invokes the sign in flow with the specified authentication operation and
 // invokes |callback| when finished.
 - (void)showSignInWithOperation:(AuthenticationOperation)operation
@@ -541,8 +532,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 // Initializes the application to INITIALIZATION_STAGE_FOREGROUND, which is
 // needed when application runs in foreground.
 - (void)startUpBrowserForegroundInitialization;
-// Swaps the UI between Incognito and normal modes.
-- (void)swapBrowserModes;
 @end
 
 @implementation MainController
@@ -553,6 +542,12 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 @synthesize window = _window;
 @synthesize isPresentingFirstRunUI = _isPresentingFirstRunUI;
 @synthesize isColdStart = _isColdStart;
+@synthesize startVoiceSearchAfterTabSwitcherDismissal =
+    _startVoiceSearchAfterTabSwitcherDismissal;
+@synthesize startQRScannerAfterTabSwitcherDismissal =
+    _startQRScannerAfterTabSwitcherDismissal;
+@synthesize startFocusOmniboxAfterTabSwitcherDismissal =
+    _startFocusOmniboxAfterTabSwitcherDismissal;
 
 #pragma mark - Application lifecycle
 
@@ -827,17 +822,13 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 - (void)deleteIncognitoBrowserState {
   BOOL otrBVCIsCurrent = (self.currentBVC == self.otrBVC);
 
-  const BOOL isOnIPadWithTabSwitcherEnabled =
-      IsIPadIdiom() && experimental_flags::IsTabSwitcherEnabled();
-
   // If the current BVC is the otr BVC, then the user should be in the card
   // stack, this is not true for the iPad tab switcher.
-  DCHECK(isOnIPadWithTabSwitcherEnabled ||
-         (!otrBVCIsCurrent || _tabSwitcherIsActive));
+  DCHECK(IsIPadIdiom() || (!otrBVCIsCurrent || _tabSwitcherIsActive));
 
   // We always clear the otr tab model on iPad.
   // Notify the _tabSwitcherController that its otrBVC will be destroyed.
-  if (isOnIPadWithTabSwitcherEnabled || _tabSwitcherIsActive)
+  if (IsIPadIdiom() || _tabSwitcherIsActive)
     [_tabSwitcherController setOtrTabModel:nil];
 
   [_browserViewWrangler
@@ -849,7 +840,7 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 
   // Always set the new otr tab model on iPad with tab switcher enabled.
   // Notify the _tabSwitcherController with the new otrBVC.
-  if (isOnIPadWithTabSwitcherEnabled || _tabSwitcherIsActive)
+  if (IsIPadIdiom() || _tabSwitcherIsActive)
     [_tabSwitcherController setOtrTabModel:self.otrTabModel];
 }
 
@@ -943,15 +934,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 - (void)setSettingsNavigationController:
     (SettingsNavigationController*)settingsNavigationController {
   _settingsNavigationController.reset([settingsNavigationController retain]);
-}
-
-- (BOOL)startQRScannerAfterTabSwitcherDismissal {
-  return (experimental_flags::IsQRCodeReaderEnabled() &&
-          _startQRScannerAfterTabSwitcherDismissal);
-}
-
-- (void)setStartQRScannerAfterTabSwitcherDismissal:(BOOL)startQRScanner {
-  _startQRScannerAfterTabSwitcherDismissal = startQRScanner;
 }
 
 #pragma mark - StartupInformation implementation.
@@ -1212,7 +1194,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   [self scheduleDeleteDownloadsDirectory];
   [self scheduleStartupAttemptReset];
   [self scheduleFreeMemoryMonitoring];
-  [self scheduleAddApplicationShortcutItems];
   [self scheduleAppDistributionPings];
   [self scheduleCheckNativeApps];
 }
@@ -1241,34 +1222,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   };
   [[DeferredInitializationRunner sharedInstance]
       enqueueBlockNamed:kStartSpotlightBookmarksIndexing
-                  block:block];
-}
-
-- (void)scheduleAddApplicationShortcutItems {
-  ProceduralBlock block = ^{
-    if (experimental_flags::IsQRCodeReaderEnabled()) {
-      UIApplicationShortcutItem* qrScannerShortcutItem = [[
-          [UIApplicationShortcutItem alloc]
-               initWithType:@"OpenQRScanner"
-             localizedTitle:l10n_util::GetNSString(
-                                IDS_IOS_APPLICATION_SHORTCUT_QR_SCANNER_TITLE)
-          localizedSubtitle:nil
-                       icon:[UIApplicationShortcutIcon
-                                iconWithTemplateImageName:
-                                    @"quick_action_qr_scanner"]
-                   userInfo:nil] autorelease];
-      // Note: The following only affects dynamic shortcut items defined
-      // programmatically, and not static shortcut items set in the Info.plist
-      // file.
-      [[UIApplication sharedApplication]
-          setShortcutItems:@[ qrScannerShortcutItem ]];
-    } else {
-      [[UIApplication sharedApplication] setShortcutItems:nil];
-    }
-  };
-
-  [[DeferredInitializationRunner sharedInstance]
-      enqueueBlockNamed:kAddApplicationShortcutItems
                   block:block];
 }
 
@@ -1479,10 +1432,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
     case IDC_OPEN_URL:
       [self openUrl:base::mac::ObjCCast<OpenUrlCommand>(sender)];
       break;
-    case IDC_SWITCH_BROWSER_MODES:
-      DCHECK(IsIPadIdiom());
-      [self swapBrowserModes];
-      break;
     case IDC_OPTIONS:
       [self showSettings];
       break;
@@ -1516,16 +1465,12 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
     case IDC_SHOW_SAVE_PASSWORDS_SETTINGS:
       [self showSavePasswordsSettings];
       break;
-    case IDC_SHOW_PHYSICAL_WEB_SETTINGS:
-      [self showPhysicalWebSettings];
-      break;
     case IDC_SHOW_HISTORY:
       [self showHistory];
       break;
     case IDC_TOGGLE_TAB_SWITCHER:
       DCHECK(!_tabSwitcherIsActive);
-      if ((!IsIPadIdiom() || experimental_flags::IsTabSwitcherEnabled()) &&
-          !_isProcessingVoiceSearchCommand) {
+      if (!_isProcessingVoiceSearchCommand) {
         [self showTabSwitcher];
         _isProcessingTabSwitcherCommand = YES;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
@@ -1611,7 +1556,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
       self.currentBVC = [command inIncognito] ? self.otrBVC : self.mainBVC;
       [self.currentBVC webPageOrderedOpen:[command url]
                                  referrer:[command referrer]
-                               windowName:[command windowName]
                              inBackground:[command inBackground]
                                  appendTo:[command appendTo]];
     }];
@@ -1742,12 +1686,7 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   }
 
   if (IsIPadIdiom()) {
-    if (experimental_flags::IsTabSwitcherEnabled()) {
-      [self showTabSwitcher];
-    } else {
-      // Mode switch if not in regular mode.
-      [self swapBrowserModes];
-    }
+    [self showTabSwitcher];
   } else {
     self.currentBVC = self.mainBVC;
     if ([self.currentTabModel count] == 0U) {
@@ -1767,13 +1706,7 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
     return;
   }
 
-  if (IsIPadIdiom()) {
-    if (experimental_flags::IsTabSwitcherEnabled()) {
-      [self showTabSwitcher];
-    }
-  } else {
-    [self showTabSwitcher];
-  }
+  [self showTabSwitcher];
 }
 
 #pragma mark - Mode Switching
@@ -1815,17 +1748,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   return self.currentBVC.browserState;
 }
 
-- (void)swapBrowserModes {
-  if (self.mainBVC == self.currentBVC)
-    self.currentBVC = self.otrBVC;
-  else
-    self.currentBVC = self.mainBVC;
-  // Make sure there is at least one tab open.
-  if ([self shouldOpenNTPTabOnActivationOfTabModel:[self currentTabModel]])
-    [self.currentBVC newTab:nil];
-  [_browserViewWrangler updateModeToggle];
-}
-
 // NOTE: If you change this function, it may have an effect on the performance
 // of opening the stack view. Please make sure you also change the corresponding
 // code in StackViewControllerPerfTest::MainControllerShowTabSwitcher().
@@ -1844,8 +1766,7 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
     [currentTab setSnapshotCoalescingEnabled:NO];
   }));
 
-  if (experimental_flags::IsTabSwitcherEnabled())
-    [currentBVC prepareToEnterTabSwitcher:nil];
+  [currentBVC prepareToEnterTabSwitcher:nil];
 
   if (!_tabSwitcherController.get()) {
     if (IsIPadIdiom()) {
@@ -1871,7 +1792,7 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   }
   _tabSwitcherIsActive = YES;
   [_tabSwitcherController setDelegate:self];
-  if (IsIPadIdiom() && experimental_flags::IsTabSwitcherEnabled()) {
+  if (IsIPadIdiom()) {
     TabSwitcherTransitionContext* transitionContext =
         [TabSwitcherTransitionContext
             tabSwitcherTransitionContextWithCurrent:currentBVC
@@ -1954,7 +1875,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 }
 
 - (void)beginDismissingStackViewWithCurrentModel:(TabModel*)tabModel {
-  DCHECK(experimental_flags::IsTabSwitcherEnabled() || !IsIPadIdiom());
   DCHECK(tabModel == self.mainTabModel || tabModel == self.otrTabModel);
 
   _dismissingStackView = YES;
@@ -1967,7 +1887,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 }
 
 - (void)finishDismissingStackView {
-  DCHECK(!IsIPadIdiom() || experimental_flags::IsTabSwitcherEnabled());
   DCHECK_EQ(self.mainViewController.activeViewController,
             _tabSwitcherController.get());
 
@@ -1985,12 +1904,15 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 
   // Start Voice Search or QR Scanner now that they can be presented from the
   // current BVC.
-  if (_startVoiceSearchAfterTabSwitcherDismissal) {
-    _startVoiceSearchAfterTabSwitcherDismissal = NO;
+  if (self.startVoiceSearchAfterTabSwitcherDismissal) {
+    self.startVoiceSearchAfterTabSwitcherDismissal = NO;
     [self.currentBVC startVoiceSearch];
-  } else if ([self startQRScannerAfterTabSwitcherDismissal]) {
-    [self setStartQRScannerAfterTabSwitcherDismissal:NO];
+  } else if (self.startQRScannerAfterTabSwitcherDismissal) {
+    self.startQRScannerAfterTabSwitcherDismissal = NO;
     [self.currentBVC showQRScanner];
+  } else if (self.startFocusOmniboxAfterTabSwitcherDismissal) {
+    self.startFocusOmniboxAfterTabSwitcherDismissal = NO;
+    [self.currentBVC focusOmnibox];
   }
 
   [_tabSwitcherController setDelegate:nil];
@@ -2099,18 +2021,6 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
   _settingsNavigationController.reset([SettingsNavigationController
       newSavePasswordsController:_mainBrowserState
                         delegate:self]);
-  [[self topPresentedViewController]
-      presentViewController:_settingsNavigationController
-                   animated:YES
-                 completion:nil];
-}
-
-- (void)showPhysicalWebSettings {
-  if (_settingsNavigationController)
-    return;
-  _settingsNavigationController.reset([SettingsNavigationController
-      newPhysicalWebController:_mainBrowserState
-                      delegate:self]);
   [[self topPresentedViewController]
       presentViewController:_settingsNavigationController
                    animated:YES
@@ -2379,8 +2289,8 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
     if (_tabSwitcherIsActive || _dismissingStackView) {
       // Since VoiceSearch is presented by the BVC, it must be started after the
       // Tab Switcher dismissal completes and the BVC's view is in the
-      // hiararchy.
-      _startVoiceSearchAfterTabSwitcherDismissal = YES;
+      // hierarchy.
+      self.startVoiceSearchAfterTabSwitcherDismissal = YES;
     } else {
       // When starting the application from the Notification center,
       // ApplicationWillResignActive is sent just after startup.
@@ -2394,13 +2304,21 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
     if (_tabSwitcherIsActive || _dismissingStackView) {
       // QR Scanner is presented by the BVC, similarly to VoiceSearch. It must
       // also be started after the BVC's view is in the hierarchy.
-      [self setStartQRScannerAfterTabSwitcherDismissal:YES];
+      self.startQRScannerAfterTabSwitcherDismissal = YES;
     } else {
       // Start the QR Scanner asynchronously to prevent the application from
       // dismissing the modal view if QR Scanner is started from the
       // Notification center.
       dispatch_async(dispatch_get_main_queue(), ^{
         [self.currentBVC showQRScanner];
+      });
+    }
+  } else if ([_startupParameters launchFocusOmnibox]) {
+    if (_tabSwitcherIsActive || _dismissingStackView) {
+      self.startFocusOmniboxAfterTabSwitcherDismissal = YES;
+    } else {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [self.currentBVC focusOmnibox];
       });
     }
   }
@@ -2492,8 +2410,9 @@ enum class StackViewDismissalMode { NONE, NORMAL, INCOGNITO };
 
 - (NSMutableSet*)liveSessionsForTabModel:(TabModel*)tabModel {
   NSMutableSet* result = [NSMutableSet setWithCapacity:[tabModel count]];
-  for (size_t i = 0; i < [tabModel count]; ++i)
-    [result addObject:[[tabModel tabAtIndex:i] currentSessionID]];
+  for (Tab* tab in tabModel) {
+    [result addObject:tab.tabId];
+  }
   return result;
 }
 

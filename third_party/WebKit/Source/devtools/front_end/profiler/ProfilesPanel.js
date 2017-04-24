@@ -39,7 +39,7 @@ Profiler.ProfilesPanel = class extends UI.PanelWithSidebar {
     this.registerRequiredCSS('ui/panelEnablerView.css');
     this.registerRequiredCSS('profiler/heapProfiler.css');
     this.registerRequiredCSS('profiler/profilesPanel.css');
-    this.registerRequiredCSS('components/objectValue.css');
+    this.registerRequiredCSS('object_ui/objectValue.css');
 
     var mainContainer = new UI.VBox();
     this.splitWidget().setMainWidget(mainContainer);
@@ -48,6 +48,7 @@ Profiler.ProfilesPanel = class extends UI.PanelWithSidebar {
 
     this._sidebarTree = new UI.TreeOutlineInShadow();
     this._sidebarTree.registerRequiredCSS('profiler/profilesSidebarTree.css');
+    this._sidebarTree.element.classList.add('profiles-sidebar-tree-box');
     this.panelSidebarElement().appendChild(this._sidebarTree.element);
 
     this._sidebarTree.appendChild(this.profilesItemTreeElement);
@@ -60,7 +61,7 @@ Profiler.ProfilesPanel = class extends UI.PanelWithSidebar {
     this._toolbarElement = createElementWithClass('div', 'profiles-toolbar');
     mainContainer.element.insertBefore(this._toolbarElement, mainContainer.element.firstChild);
 
-    this.panelSidebarElement().classList.add('profiles-sidebar-tree-box');
+    this.panelSidebarElement().classList.add('profiles-tree-sidebar');
     var toolbarContainerLeft = createElementWithClass('div', 'profiles-toolbar');
     this.panelSidebarElement().insertBefore(toolbarContainerLeft, this.panelSidebarElement().firstChild);
     var toolbar = new UI.Toolbar('', toolbarContainerLeft);
@@ -79,9 +80,9 @@ Profiler.ProfilesPanel = class extends UI.PanelWithSidebar {
     this._profileViewToolbar = new UI.Toolbar('', this._toolbarElement);
 
     this._profileGroups = {};
-    this._launcherView = new Profiler.MultiProfileLauncherView(this);
+    this._launcherView = new Profiler.ProfileLauncherView(this);
     this._launcherView.addEventListener(
-        Profiler.MultiProfileLauncherView.Events.ProfileTypeSelected, this._onProfileTypeSelected, this);
+        Profiler.ProfileLauncherView.Events.ProfileTypeSelected, this._onProfileTypeSelected, this);
 
     this._profileToView = [];
     this._typeIdToSidebarSection = {};
@@ -452,6 +453,7 @@ Profiler.ProfileTypeSidebarSection = class extends UI.TreeElement {
     this._profileGroups = {};
     this.expand();
     this.hidden = true;
+    this.setCollapsible(false);
   }
 
   /**

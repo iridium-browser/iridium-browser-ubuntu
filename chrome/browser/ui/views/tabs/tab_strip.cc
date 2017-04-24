@@ -18,6 +18,7 @@
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "cc/paint/paint_flags.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -73,7 +74,6 @@
 #if defined(OS_WIN)
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/win/hwnd_util.h"
-#include "ui/views/widget/monitor_win.h"
 #include "ui/views/win/hwnd_util.h"
 #endif
 
@@ -401,18 +401,18 @@ void NewTabButton::OnPaint(gfx::Canvas* canvas) {
     canvas->sk_canvas()->clipPath(fill, SkClipOp::kDifference, true);
   // Now draw the stroke and shadow; the stroke will always be visible, while
   // the shadow will be affected by the clip we set above.
-  SkPaint paint;
-  paint.setAntiAlias(true);
+  cc::PaintFlags flags;
+  flags.setAntiAlias(true);
   const SkColor stroke_color = tab_strip_->GetToolbarTopSeparatorColor();
   const float alpha = SkColorGetA(stroke_color);
   const SkAlpha shadow_alpha =
       base::saturated_cast<SkAlpha>(std::round(2.1875f * alpha));
-  paint.setLooper(
+  flags.setLooper(
       CreateShadowDrawLooper(SkColorSetA(stroke_color, shadow_alpha)));
   const SkAlpha path_alpha = static_cast<SkAlpha>(
       std::round((pressed ? 0.875f : 0.609375f) * alpha));
-  paint.setColor(SkColorSetA(stroke_color, path_alpha));
-  canvas->DrawPath(stroke, paint);
+  flags.setColor(SkColorSetA(stroke_color, path_alpha));
+  canvas->DrawPath(stroke, flags);
 }
 
 bool NewTabButton::GetHitTestMask(gfx::Path* mask) const {
@@ -471,8 +471,8 @@ void NewTabButton::PaintFill(bool pressed,
                              gfx::Canvas* canvas) const {
   gfx::ScopedCanvas scoped_canvas(canvas);
   canvas->UndoDeviceScaleFactor();
-  SkPaint paint;
-  paint.setAntiAlias(true);
+  cc::PaintFlags flags;
+  flags.setAntiAlias(true);
 
   // For unpressed buttons, draw the fill and its shadow.
   if (!pressed) {
@@ -499,28 +499,28 @@ void NewTabButton::PaintFill(bool pressed,
       }
 
       const bool succeeded =
-          canvas->InitSkPaintForTiling(*tp->GetImageSkiaNamed(bg_id), x,
-                                       GetNewTabButtonTopOffset() + offset_y,
-                                       x_scale * scale, scale, 0, 0, &paint);
+          canvas->InitPaintFlagsForTiling(*tp->GetImageSkiaNamed(bg_id), x,
+                                          GetNewTabButtonTopOffset() + offset_y,
+                                          x_scale * scale, scale, 0, 0, &flags);
       DCHECK(succeeded);
     } else {
-      paint.setColor(tp->GetColor(ThemeProperties::COLOR_BACKGROUND_TAB));
+      flags.setColor(tp->GetColor(ThemeProperties::COLOR_BACKGROUND_TAB));
     }
     const SkColor stroke_color = tab_strip_->GetToolbarTopSeparatorColor();
     const SkAlpha alpha = static_cast<SkAlpha>(
         std::round(SkColorGetA(stroke_color) * 0.59375f));
-    SkPaint shadow_paint = paint;
-    shadow_paint.setLooper(
+    cc::PaintFlags shadow_flags = flags;
+    shadow_flags.setLooper(
         CreateShadowDrawLooper(SkColorSetA(stroke_color, alpha)));
-    canvas->DrawPath(fill, shadow_paint);
+    canvas->DrawPath(fill, shadow_flags);
   }
 
   // Draw a white highlight on hover.
   const SkAlpha hover_alpha = static_cast<SkAlpha>(
       hover_animation().CurrentValueBetween(0x00, 0x4D));
   if (hover_alpha != SK_AlphaTRANSPARENT) {
-    paint.setColor(SkColorSetA(SK_ColorWHITE, hover_alpha));
-    canvas->DrawPath(fill, paint);
+    flags.setColor(SkColorSetA(SK_ColorWHITE, hover_alpha));
+    canvas->DrawPath(fill, flags);
   }
 
   // Most states' opacities are adjusted using an opacity recorder in
@@ -528,8 +528,8 @@ void NewTabButton::PaintFill(bool pressed,
   // instead rendered using a dark overlay here.  Avoiding the use of the
   // opacity recorder keeps the stroke more visible in this state.
   if (pressed) {
-    paint.setColor(SkColorSetA(SK_ColorBLACK, 0x14));
-    canvas->DrawPath(fill, paint);
+    flags.setColor(SkColorSetA(SK_ColorBLACK, 0x14));
+    canvas->DrawPath(fill, flags);
   }
 }
 
@@ -593,8 +593,7 @@ TabStrip::TabStrip(TabStripController* controller)
       stacked_layout_(false),
       adjust_layout_(false),
       reset_to_shrink_on_exit_(false),
-      mouse_move_count_(0),
-      immersive_style_(false) {
+      mouse_move_count_(0) {
   Init();
   SetEventTargeter(
       std::unique_ptr<views::ViewTargeter>(new views::ViewTargeter(this)));
@@ -1018,12 +1017,6 @@ void TabStrip::SetBackgroundOffset(const gfx::Point& offset) {
   newtab_button_->set_background_offset(offset);
 }
 
-void TabStrip::SetImmersiveStyle(bool enable) {
-  if (immersive_style_ == enable)
-    return;
-  immersive_style_ = enable;
-}
-
 SkAlpha TabStrip::GetInactiveAlpha(bool for_new_tab_button) const {
 #if defined(USE_ASH)
   static const SkAlpha kInactiveTabAlphaAsh = 230;
@@ -1165,10 +1158,6 @@ void TabStrip::MaybeStartDrag(
     return;
   }
 
-  // Do not do any dragging of tabs when using the super short immersive style.
-  if (IsImmersiveStyle())
-    return;
-
   int model_index = GetModelIndexOfTab(tab);
   if (!IsValidModelIndex(model_index)) {
     CHECK(false);
@@ -1308,16 +1297,12 @@ bool TabStrip::ShouldPaintTab(
 bool TabStrip::CanPaintThrobberToLayer() const {
   // Disable layer-painting of throbbers if dragging, if any tab animation is in
   // progress, or if stacked tabs are enabled. Also disable in fullscreen: when
-  // "immersive" the tab strip could be sliding in or out while transitioning to
-  // or away from |immersive_style_| and, for other modes, there's no tab strip.
+  // "immersive" the tab strip could be sliding in or out; for other modes,
+  // there's no tab strip.
   const bool dragging = drag_controller_ && drag_controller_->started_drag();
   const views::Widget* widget = GetWidget();
   return widget && !touch_layout_ && !dragging && !IsAnimating() &&
          !widget->IsFullscreen();
-}
-
-bool TabStrip::IsImmersiveStyle() const {
-  return immersive_style_;
 }
 
 SkColor TabStrip::GetToolbarTopSeparatorColor() const {
@@ -1515,8 +1500,7 @@ gfx::Size TabStrip::GetPreferredSize() const {
         std::max(needed_tab_width, min_selected_width), largest_min_tab_width);
   }
   return gfx::Size(needed_tab_width + GetNewTabButtonWidth(),
-                   immersive_style_ ? Tab::GetImmersiveHeight()
-                                    : Tab::GetMinimumInactiveSize().height());
+                   Tab::GetMinimumInactiveSize().height());
 }
 
 void TabStrip::OnDragEntered(const DropTargetEvent& event) {
@@ -1614,11 +1598,6 @@ views::View* TabStrip::GetTooltipHandlerForPoint(const gfx::Point& point) {
       return ConvertPointToViewAndGetTooltipHandler(this, tab, point);
   }
   return this;
-}
-
-// static
-int TabStrip::GetImmersiveHeight() {
-  return Tab::GetImmersiveHeight();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

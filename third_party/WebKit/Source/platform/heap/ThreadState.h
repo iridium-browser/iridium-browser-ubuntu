@@ -33,7 +33,6 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/heap/BlinkGC.h"
-#include "platform/heap/BlinkGCInterruptor.h"
 #include "platform/heap/ThreadingTraits.h"
 #include "public/platform/WebThread.h"
 #include "wtf/AddressSanitizer.h"
@@ -54,13 +53,10 @@ class Isolate;
 namespace blink {
 
 class BasePage;
-class CallbackStack;
 class GarbageCollectedMixinConstructorMarker;
 class PersistentNode;
 class PersistentRegion;
 class BaseArena;
-class SafePointAwareMutexLocker;
-class SafePointBarrier;
 class ThreadHeap;
 class ThreadState;
 class Visitor;
@@ -162,14 +158,7 @@ class PLATFORM_EXPORT ThreadState {
     ThreadState* m_state;
   };
 
-  void lockThreadAttachMutex();
-  void unlockThreadAttachMutex();
-
-  bool isTerminating() { return m_isTerminating; }
-
   static void attachMainThread();
-  static void detachMainThread();
-  void cleanupMainThread();
 
   // Associate ThreadState object with the current thread. After this
   // call thread can start using the garbage collected heap infrastructure.
@@ -191,9 +180,7 @@ class PLATFORM_EXPORT ThreadState {
   static ThreadState* fromObject(const void*);
 
   bool isMainThread() const { return this == mainThreadState(); }
-#if DCHECK_IS_ON()
   bool checkThread() const { return m_thread == currentThread(); }
-#endif
 
   ThreadHeap& heap() const { return *m_heap; }
 
@@ -230,8 +217,9 @@ class PLATFORM_EXPORT ThreadState {
   //
   // 1) preGC() is called.
   // 2) ThreadHeap::collectGarbage() is called. This marks live objects.
-  // 3) postGC() is called. This does thread-local weak processing,
-  //    pre-finalization, eager sweeping and heap compaction.
+  // 3) postGC() is called. This does thread-local weak processing.
+  // 4) preSweep() is called. This does pre-finalization, eager sweeping and
+  //    heap compaction.
   // 4) Lazy sweeping sweeps heaps incrementally. completeSweep() may be called
   //    to complete the sweeping.
   // 5) postSweep() is called.
@@ -245,6 +233,7 @@ class PLATFORM_EXPORT ThreadState {
   void preGC();
   void postGC(BlinkGC::GCType);
   void completeSweep();
+  void preSweep(BlinkGC::GCType);
   void postSweep();
   // makeConsistentForMutator() drops marks from marked objects and rebuild
   // free lists. This is called after taking a snapshot and before resuming
@@ -255,9 +244,7 @@ class PLATFORM_EXPORT ThreadState {
 
   // Support for disallowing allocation. Mainly used for sanity
   // checks asserts.
-  bool isAllocationAllowed() const {
-    return !isAtSafePoint() && !m_noAllocationCount;
-  }
+  bool isAllocationAllowed() const { return !m_noAllocationCount; }
   void enterNoAllocationScope() { m_noAllocationCount++; }
   void leaveNoAllocationScope() { m_noAllocationCount--; }
   bool isWrapperTracingForbidden() { return isMixinInConstruction(); }
@@ -327,23 +314,17 @@ class PLATFORM_EXPORT ThreadState {
   //     safePoint() method;
   //   - use SafePointScope around long running loops that have no safePoint()
   //     invocation inside, such loops must not touch any heap object;
-  //   - register an BlinkGCInterruptor that can interrupt long running loops
-  //     that have no calls to safePoint and are not wrapped in a SafePointScope
-  //     (e.g. BlinkGCInterruptor for JavaScript code)
   //
-
   // Check if GC is requested by another thread and pause this thread if this is
   // the case.  Can only be called when current thread is in a consistent state.
   void safePoint(BlinkGC::StackState);
 
   // Mark current thread as running inside safepoint.
   void enterSafePoint(BlinkGC::StackState, void*);
-  void leaveSafePoint(SafePointAwareMutexLocker* = nullptr);
-  bool isAtSafePoint() const { return m_atSafePoint; }
-
-  void addInterruptor(std::unique_ptr<BlinkGCInterruptor>);
+  void leaveSafePoint();
 
   void recordStackEnd(intptr_t* endOfStack) { m_endOfStack = endOfStack; }
+  NO_SANITIZE_ADDRESS void copyStackUntilSafePointScope();
 
   // Get one of the heap structures for this thread.
   // The thread heap is split into multiple heap parts based on object types
@@ -392,15 +373,13 @@ class PLATFORM_EXPORT ThreadState {
     Vector<size_t> deadSize;
   };
 
-  void pushThreadLocalWeakCallback(void*, WeakCallback);
-  bool popAndInvokeThreadLocalWeakCallback(Visitor*);
-  void threadLocalWeakProcessing();
-
   size_t objectPayloadSizeForTesting();
 
   void shouldFlushHeapDoesNotContainCache() {
     m_shouldFlushHeapDoesNotContainCache = true;
   }
+
+  bool isAddressInHeapDoesNotContainCache(Address);
 
   void registerTraceDOMWrappers(
       v8::Isolate* isolate,
@@ -516,7 +495,6 @@ class PLATFORM_EXPORT ThreadState {
   BlinkGC::StackState stackState() const { return m_stackState; }
 
   void collectGarbage(BlinkGC::StackState, BlinkGC::GCType, BlinkGC::GCReason);
-  void collectGarbageForTerminatingThread();
   void collectAllGarbage();
 
   // Register the pre-finalizer for the |self| object. The class T must have
@@ -534,7 +512,7 @@ class PLATFORM_EXPORT ThreadState {
       DCHECK(!state->sweepForbidden());
       DCHECK(!state->m_orderedPreFinalizers.contains(
           PreFinalizer(self, T::invokePreFinalizer)));
-      state->m_orderedPreFinalizers.add(
+      state->m_orderedPreFinalizers.insert(
           PreFinalizer(self, T::invokePreFinalizer));
     }
   };
@@ -558,7 +536,6 @@ class PLATFORM_EXPORT ThreadState {
   ThreadState();
   ~ThreadState();
 
-  NO_SANITIZE_ADDRESS void copyStackUntilSafePointScope();
   void clearSafePointScopeMarker() {
     m_safePointStackCopy.clear();
     m_safePointScopeMarker = nullptr;
@@ -611,9 +588,7 @@ class PLATFORM_EXPORT ThreadState {
   void poisonAllHeaps();
 #endif
 
-  void cleanupPages();
-
-  void prepareForThreadStateTermination();
+  void removeAllPages();
 
   void invokePreFinalizers();
 
@@ -624,13 +599,6 @@ class PLATFORM_EXPORT ThreadState {
 
   void reportMemoryToV8();
 
-  // Should only be called under protection of threadAttachMutex().
-  const Vector<std::unique_ptr<BlinkGCInterruptor>>& interruptors() const {
-    return m_interruptors;
-  }
-
-  friend class SafePointAwareMutexLocker;
-  friend class SafePointBarrier;
   friend class SafePointScope;
 
   static WTF::ThreadSpecific<ThreadState*>* s_threadSpecific;
@@ -644,7 +612,7 @@ class PLATFORM_EXPORT ThreadState {
   // and lazily construct ThreadState in it using placement new.
   static uint8_t s_mainThreadStateStorage[];
 
-  ThreadHeap* m_heap;
+  std::unique_ptr<ThreadHeap> m_heap;
   ThreadIdentifier m_thread;
   std::unique_ptr<PersistentRegion> m_persistentRegion;
   BlinkGC::StackState m_stackState;
@@ -653,8 +621,6 @@ class PLATFORM_EXPORT ThreadState {
 
   void* m_safePointScopeMarker;
   Vector<Address> m_safePointStackCopy;
-  bool m_atSafePoint;
-  Vector<std::unique_ptr<BlinkGCInterruptor>> m_interruptors;
   bool m_sweepForbidden;
   size_t m_noAllocationCount;
   size_t m_gcForbiddenCount;
@@ -666,13 +632,10 @@ class PLATFORM_EXPORT ThreadState {
   size_t m_arenaAges[BlinkGC::NumberOfArenas];
   size_t m_currentArenaAges;
 
-  bool m_isTerminating;
   GarbageCollectedMixinConstructorMarker* m_gcMixinMarker;
 
   bool m_shouldFlushHeapDoesNotContainCache;
   GCState m_gcState;
-
-  std::unique_ptr<CallbackStack> m_threadLocalWeakCallbackStack;
 
   using PreFinalizerCallback = bool (*)(void*);
   using PreFinalizer = std::pair<void*, PreFinalizerCallback>;

@@ -36,9 +36,9 @@
 #include "core/frame/VisualViewport.h"
 #include "core/page/Page.h"
 #include "platform/testing/URLTestHelpers.h"
+#include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebURLLoaderMockFactory.h"
-#include "public/web/WebCache.h"
 #include "public/web/WebElement.h"
 #include "public/web/WebSettings.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -51,7 +51,7 @@ namespace blink {
 // These tests cover browser controls scrolling on main-thread.
 // The animation for completing a partial show/hide is done in compositor so
 // it is not covered here.
-class BrowserControlsTest : public testing::Test {
+class BrowserControlsTest : public ::testing::Test {
  public:
   BrowserControlsTest() : m_baseURL("http://www.test.com/") {
     registerMockedHttpURLLoad("large-div.html");
@@ -65,8 +65,9 @@ class BrowserControlsTest : public testing::Test {
   }
 
   ~BrowserControlsTest() override {
-    Platform::current()->getURLLoaderMockFactory()->unregisterAllURLs();
-    WebCache::clear();
+    Platform::current()
+        ->getURLLoaderMockFactory()
+        ->unregisterAllURLsAndClearMemoryCache();
   }
 
   WebViewImpl* initialize(const std::string& pageName = "large-div.html") {
@@ -93,14 +94,14 @@ class BrowserControlsTest : public testing::Test {
   }
 
   void registerMockedHttpURLLoad(const std::string& fileName) {
-    URLTestHelpers::registerMockedURLFromBaseURL(
-        WebString::fromUTF8(m_baseURL.c_str()),
-        WebString::fromUTF8(fileName.c_str()));
+    URLTestHelpers::registerMockedURLLoadFromBase(
+        WebString::fromUTF8(m_baseURL), testing::webTestDataPath(),
+        WebString::fromUTF8(fileName));
   }
 
-  WebGestureEvent generateEvent(WebInputEvent::Type type,
-                                int deltaX = 0,
-                                int deltaY = 0) {
+  WebCoalescedInputEvent generateEvent(WebInputEvent::Type type,
+                                       int deltaX = 0,
+                                       int deltaY = 0) {
     WebGestureEvent event(type, WebInputEvent::NoModifiers,
                           WebInputEvent::TimeStampForTesting);
     event.sourceDevice = WebGestureDeviceTouchscreen;
@@ -110,7 +111,7 @@ class BrowserControlsTest : public testing::Test {
       event.data.scrollUpdate.deltaX = deltaX;
       event.data.scrollUpdate.deltaY = deltaY;
     }
-    return event;
+    return WebCoalescedInputEvent(event);
   }
 
   void verticalScroll(float deltaY) {
@@ -1002,6 +1003,64 @@ TEST_F(BrowserControlsTest,
     EXPECT_EQ(expectedRootOffset, rootViewport->getScrollOffset().height());
 
     webView->handleInputEvent(generateEvent(WebInputEvent::GestureScrollEnd));
+  }
+}
+
+// Ensure that vh units are correct when browser controls are in a locked
+// state. That is, normally we need to add the browser controls height to vh
+// units since 100vh includes the browser controls even if they're hidden while
+// the ICB height does not. When the controls are locked hidden, the ICB size
+// is the full viewport height so there's no need to add the browser controls
+// height.  crbug.com/688738.
+TEST_F(BrowserControlsTest, MAYBE(ViewportUnitsWhenControlsLocked)) {
+  // Initialize with the browser controls showing.
+  WebViewImpl* webView = initialize("vh-height.html");
+  webView->resizeWithBrowserControls(WebSize(400, 300), 100.f, true);
+  webView->updateBrowserControlsState(WebBrowserControlsBoth,
+                                      WebBrowserControlsShown, false);
+  webView->browserControls().setShownRatio(1);
+  webView->updateAllLifecyclePhases();
+
+  ASSERT_EQ(100.f, webView->browserControls().contentOffset());
+  ASSERT_EQ(300, frame()->view()->layoutSize().height());
+
+  Element* absPos = getElementById(WebString::fromUTF8("abs"));
+  Element* fixedPos = getElementById(WebString::fromUTF8("fixed"));
+
+  // Lock the browser controls to hidden.
+  {
+    webView->updateBrowserControlsState(WebBrowserControlsHidden,
+                                        WebBrowserControlsHidden, false);
+    webView->resizeWithBrowserControls(WebSize(400, 400), 100.f, false);
+    webView->updateAllLifecyclePhases();
+
+    ASSERT_EQ(0.f, webView->browserControls().contentOffset());
+    ASSERT_EQ(400, frame()->view()->layoutSize().height());
+
+    // Make sure we're not adding the browser controls height to the vh units
+    // as when they're locked to hidden, the ICB fills the entire viewport
+    // already.
+    EXPECT_FLOAT_EQ(200.f, absPos->getBoundingClientRect()->height());
+    EXPECT_FLOAT_EQ(200.f, fixedPos->getBoundingClientRect()->height());
+    EXPECT_EQ(400, frame()->view()->viewportSizeForViewportUnits().height());
+  }
+
+  // Lock the browser controls to shown. This should cause the vh units to
+  // behave as usual by including the browser controls region in 100vh.
+  {
+    webView->updateBrowserControlsState(WebBrowserControlsShown,
+                                        WebBrowserControlsShown, false);
+    webView->resizeWithBrowserControls(WebSize(400, 300), 100.f, true);
+    webView->updateAllLifecyclePhases();
+
+    ASSERT_EQ(100.f, webView->browserControls().contentOffset());
+    ASSERT_EQ(300, frame()->view()->layoutSize().height());
+
+    // Make sure we're not adding the browser controls height to the vh units as
+    // when they're locked to hidden, the ICB fills the entire viewport already.
+    EXPECT_FLOAT_EQ(200.f, absPos->getBoundingClientRect()->height());
+    EXPECT_FLOAT_EQ(200.f, fixedPos->getBoundingClientRect()->height());
+    EXPECT_EQ(400, frame()->view()->viewportSizeForViewportUnits().height());
   }
 }
 

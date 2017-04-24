@@ -198,8 +198,12 @@ void DownloadController::AcquireFileAccessPermission(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(web_contents);
 
-  ui::ViewAndroid* view_android =
-      ViewAndroidHelper::FromWebContents(web_contents)->GetViewAndroid();
+  ViewAndroidHelper* view_helper =
+      ViewAndroidHelper::FromWebContents(web_contents);
+  if (!view_helper)
+    return;
+
+  ui::ViewAndroid* view_android = view_helper->GetViewAndroid();
   if (!view_android) {
     // ViewAndroid may have been gone away.
     BrowserThread::PostTask(
@@ -217,6 +221,61 @@ void DownloadController::AcquireFileAccessPermission(
       new DownloadControllerBase::AcquireFileAccessPermissionCallback(cb));
   ChromeDownloadDelegate::FromWebContents(web_contents)->
       RequestFileAccess(callback_id);
+}
+
+void DownloadController::CreateAndroidDownload(
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const DownloadInfo& info) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&DownloadController::StartAndroidDownload,
+                 base::Unretained(this),
+                 wc_getter, info));
+}
+
+void DownloadController::StartAndroidDownload(
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const DownloadInfo& info) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  WebContents* web_contents = wc_getter.Run();
+  if (!web_contents) {
+    // The view went away. Can't proceed.
+    LOG(ERROR) << "Tab closed, download failed on URL:" << info.url.spec();
+    return;
+  }
+
+  AcquireFileAccessPermission(
+      web_contents,
+      base::Bind(&DownloadController::StartAndroidDownloadInternal,
+                 base::Unretained(this), wc_getter, info));
+}
+
+void DownloadController::StartAndroidDownloadInternal(
+    const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
+    const DownloadInfo& info, bool allowed) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (!allowed)
+    return;
+
+  WebContents* web_contents = wc_getter.Run();
+  if (!web_contents) {
+    // The view went away. Can't proceed.
+    LOG(ERROR) << "Tab closed, download failed on URL:" << info.url.spec();
+    return;
+  }
+
+  base::string16 filename =
+      net::GetSuggestedFilename(info.url, info.content_disposition,
+                                std::string(),  // referrer_charset
+                                std::string(),  // suggested_name
+                                info.original_mime_type, default_file_name_);
+  ChromeDownloadDelegate::FromWebContents(web_contents)
+      ->EnqueueDownloadManagerRequest(info.url.spec(), info.user_agent,
+                                      filename, info.original_mime_type,
+                                      info.cookie, info.referer);
 }
 
 bool DownloadController::HasFileAccessPermission(

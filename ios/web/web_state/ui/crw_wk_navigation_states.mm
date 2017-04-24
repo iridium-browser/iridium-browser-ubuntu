@@ -69,9 +69,7 @@
 - (void)setState:(web::WKNavigationState)state
     forNavigation:(WKNavigation*)navigation {
   if (!navigation) {
-    // WKWebView may call WKNavigationDelegate callbacks with nil
-    // |WKNavigation|. TODO(crbug.com/677354): Remove this once WKWebView bug
-    // is fixed.
+    // WKWebView may call WKNavigationDelegate callbacks with nil.
     return;
   }
 
@@ -103,6 +101,15 @@
     }
   }
   return result;
+}
+
+- (web::WKNavigationState)lastAddedNavigationState {
+  CRWWKNavigationsStateRecord* lastAddedRecord = nil;
+  WKNavigation* lastAddedNavigation = [self lastAddedNavigation];
+  if (lastAddedNavigation)
+    lastAddedRecord = [_records objectForKey:lastAddedNavigation];
+
+  return lastAddedRecord.state;
 }
 
 @end

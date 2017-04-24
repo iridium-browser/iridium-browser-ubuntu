@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_CHROMEOS_APP_MODE_ARC_ARC_KIOSK_APP_SERVICE_H_
 
 #include "base/macros.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_launcher.h"
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_manager.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
@@ -33,10 +34,26 @@ class ArcKioskAppService
     : public KeyedService,
       public ArcAppListPrefs::Observer,
       public ArcKioskAppManager::ArcKioskAppManagerObserver,
-      public arc::ArcKioskBridge::Delegate {
+      public arc::ArcKioskBridge::Delegate,
+      public ArcKioskAppLauncher::Delegate {
  public:
+  class Delegate {
+   public:
+    Delegate() = default;
+    virtual void OnAppStarted() = 0;
+    virtual void OnAppWindowLaunched() = 0;
+
+   protected:
+    virtual ~Delegate() = default;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(Delegate);
+  };
+
   static ArcKioskAppService* Create(Profile* profile);
   static ArcKioskAppService* Get(content::BrowserContext* context);
+
+  void SetDelegate(Delegate* delegate);
 
   // KeyedService overrides
   void Shutdown() override;
@@ -59,6 +76,9 @@ class ArcKioskAppService
   void OnMaintenanceSessionCreated() override;
   void OnMaintenanceSessionFinished() override;
 
+  // ArcKioskAppLauncher::Delegate overrides
+  void OnAppWindowLaunched() override;
+
  private:
   explicit ArcKioskAppService(Profile* profile);
   ~ArcKioskAppService() override;
@@ -69,6 +89,7 @@ class ArcKioskAppService
 
   Profile* const profile_;
   bool maintenance_session_running_ = false;
+  base::OneShotTimer maintenance_timeout_timer_;
   ArcKioskAppManager* app_manager_;
   std::string app_id_;
   std::unique_ptr<ArcAppListPrefs::AppInfo> app_info_;
@@ -77,6 +98,8 @@ class ArcKioskAppService
   // Keeps track whether the app is already launched
   std::unique_ptr<ArcKioskAppLauncher> app_launcher_;
   std::unique_ptr<ArcKioskNotificationBlocker> notification_blocker_;
+  // Not owning the delegate, delegate removes itself in destructor
+  Delegate* delegate_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(ArcKioskAppService);
 };

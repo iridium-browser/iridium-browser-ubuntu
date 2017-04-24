@@ -26,7 +26,7 @@ class CONTENT_EXPORT MediaSessionServiceImpl
   static void Create(RenderFrameHost* render_frame_host,
                      blink::mojom::MediaSessionServiceRequest request);
   const blink::mojom::MediaSessionClientPtr& GetClient() { return client_; }
-  RenderFrameHost* GetRenderFrameHost() { return render_frame_host_; }
+  RenderFrameHost* GetRenderFrameHost();
 
   blink::mojom::MediaSessionPlaybackState playback_state() const {
     return playback_state_;
@@ -35,6 +35,8 @@ class CONTENT_EXPORT MediaSessionServiceImpl
   const std::set<blink::mojom::MediaSessionAction>& actions() const {
     return actions_;
   }
+
+  void DidFinishNavigation();
 
   // blink::mojom::MediaSessionService implementation.
   void SetClient(blink::mojom::MediaSessionClientPtr client) override;
@@ -53,7 +55,10 @@ class CONTENT_EXPORT MediaSessionServiceImpl
 
   void Bind(blink::mojom::MediaSessionServiceRequest request);
 
-  RenderFrameHost* render_frame_host_;
+  void ClearActions();
+
+  const int render_frame_process_id_;
+  const int render_frame_routing_id_;
 
   // RAII binding of |this| to an MediaSessionService interface request.
   // The binding is removed when binding_ is cleared or goes out of scope.

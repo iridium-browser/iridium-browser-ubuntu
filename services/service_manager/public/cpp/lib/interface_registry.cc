@@ -4,6 +4,7 @@
 
 #include "services/service_manager/public/cpp/interface_registry.h"
 
+#include <iterator>
 #include <sstream>
 
 #include "base/memory/ptr_util.h"
@@ -182,6 +183,13 @@ void InterfaceRegistry::AddConnectionLostClosure(
   connection_lost_closures_.push_back(connection_lost_closure);
 }
 
+void InterfaceRegistry::BindInterface(const std::string& name,
+                                      mojo::ScopedMessagePipeHandle handle) {
+  // NOTE: We don't expose GetInterface() publicly so as to avoid confusion
+  // with local and remote binding requests.
+  GetInterface(name, std::move(handle));
+}
+
 // mojom::InterfaceProvider:
 void InterfaceRegistry::GetInterface(const std::string& interface_name,
                                      mojo::ScopedMessagePipeHandle handle) {
@@ -206,7 +214,7 @@ void InterfaceRegistry::GetInterface(const std::string& interface_name,
 
       std::stringstream details;
       Serialize(&details);
-      LOG(WARNING) << details.str();
+      DVLOG(1) << details.str();
     }
   } else {
     std::stringstream error;
@@ -218,7 +226,7 @@ void InterfaceRegistry::GetInterface(const std::string& interface_name,
 
     std::stringstream details;
     Serialize(&details);
-    LOG(WARNING) << details.str();
+    DVLOG(1) << details.str();
   }
 }
 

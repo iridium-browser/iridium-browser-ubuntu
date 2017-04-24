@@ -5,6 +5,7 @@
 #include "chrome/browser/first_run/first_run.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/command_line.h"
@@ -54,7 +55,6 @@
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
-#include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -326,25 +326,6 @@ void ConvertStringVectorToGURLVector(
   std::transform(src.begin(), src.end(), ret->begin(), &UrlFromString);
 }
 
-bool IsOnWelcomePage(content::WebContents* contents) {
-  // We have to check both the GetURL() similar to the other checks below, but
-  // also the original request url because the welcome page we use is a
-  // redirect.
-  // TODO(crbug.com/651465): Remove this once kUseConsolidatedStartupFlow is on
-  // by default.
-  const GURL deprecated_welcome_page(
-      l10n_util::GetStringUTF8(IDS_WELCOME_PAGE_URL));
-  if (contents->GetURL() == deprecated_welcome_page ||
-      (contents->GetController().GetVisibleEntry() &&
-       contents->GetController().GetVisibleEntry()->GetOriginalRequestURL() ==
-           deprecated_welcome_page)) {
-    return true;
-  }
-
-  const GURL welcome_page(chrome::kChromeUIWelcomeURL);
-  return contents->GetURL().GetWithEmptyPath() == welcome_page;
-}
-
 // Show the first run search engine bubble at the first appropriate opportunity.
 // This bubble may be delayed by other UI, like global errors and sync promos.
 class FirstRunBubbleLauncher : public content::NotificationObserver {
@@ -416,7 +397,7 @@ void FirstRunBubbleLauncher::Observe(
                    gaia::IsGaiaSignonRealm(contents->GetURL().GetOrigin()) ||
                    contents->GetURL() ==
                        chrome::GetSettingsUrl(chrome::kSyncSetupSubPage) ||
-                   IsOnWelcomePage(contents))) {
+                   first_run::IsOnWelcomePage(contents))) {
     return;
   }
 
@@ -466,10 +447,11 @@ static base::LazyInstance<base::FilePath> master_prefs_path_for_testing
 // object if successful; otherwise, returns NULL.
 installer::MasterPreferences* LoadMasterPrefs() {
   base::FilePath master_prefs_path;
-  if (!master_prefs_path_for_testing.Get().empty())
+  if (!master_prefs_path_for_testing.Get().empty()) {
     master_prefs_path = master_prefs_path_for_testing.Get();
-  else
+  } else {
     master_prefs_path = base::FilePath(first_run::internal::MasterPrefsPath());
+  }
   if (master_prefs_path.empty())
     return NULL;
   installer::MasterPreferences* install_prefs =
@@ -512,9 +494,6 @@ void SetupMasterPrefsFromInstallPrefs(
     MasterPrefs* out_prefs) {
   ConvertStringVectorToGURLVector(
       install_prefs.GetFirstRunTabs(), &out_prefs->new_tabs);
-
-  install_prefs.GetInt(installer::master_preferences::kDistroPingDelay,
-                       &out_prefs->ping_delay);
 
   bool value = false;
   if (install_prefs.GetBool(
@@ -638,14 +617,12 @@ FirstRunState DetermineFirstRunState(bool has_sentinel,
 }  // namespace internal
 
 MasterPrefs::MasterPrefs()
-    : ping_delay(0),
-      homepage_defined(false),
+    : homepage_defined(false),
       do_import_items(0),
       dont_import_items(0),
       make_chrome_default_for_user(false),
       suppress_first_run_default_browser_prompt(false),
-      welcome_page_on_os_upgrade_enabled(true) {
-}
+      welcome_page_on_os_upgrade_enabled(true) {}
 
 MasterPrefs::~MasterPrefs() {}
 
@@ -679,16 +656,6 @@ void CreateSentinelIfNeeded() {
     internal::CreateSentinel();
 }
 
-std::string GetPingDelayPrefName() {
-  return base::StringPrintf("%s.%s",
-                            installer::master_preferences::kDistroDict,
-                            installer::master_preferences::kDistroPingDelay);
-}
-
-void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(GetPingDelayPrefName().c_str(), 0);
-}
-
 bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option) {
   PrefService* local_state = g_browser_process->local_state();
   if (!local_state)
@@ -711,6 +678,27 @@ bool ShouldShowWelcomePage() {
   bool retval = g_should_show_welcome_page;
   g_should_show_welcome_page = false;
   return retval;
+}
+
+bool IsOnWelcomePage(content::WebContents* contents) {
+  // We have to check both the GetURL() similar to the other checks below, but
+  // also the original request url because the welcome page we use is a
+  // redirect.
+  // TODO(crbug.com/651465): Remove this once kUseConsolidatedStartupFlow is on
+  // by default.
+  const GURL deprecated_welcome_page(
+      l10n_util::GetStringUTF8(IDS_WELCOME_PAGE_URL));
+  if (contents->GetURL() == deprecated_welcome_page ||
+      (contents->GetController().GetVisibleEntry() &&
+       contents->GetController().GetVisibleEntry()->GetOriginalRequestURL() ==
+           deprecated_welcome_page)) {
+    return true;
+  }
+
+  const GURL welcome_page(chrome::kChromeUIWelcomeURL);
+  const GURL welcome_page_win10(chrome::kChromeUIWelcomeWin10URL);
+  const GURL current = contents->GetURL().GetWithEmptyPath();
+  return current == welcome_page || current == welcome_page_win10;
 }
 
 void SetShouldDoPersonalDataManagerFirstRun() {
@@ -740,16 +728,21 @@ ProcessMasterPreferencesResult ProcessMasterPreferences(
   std::unique_ptr<installer::MasterPreferences> install_prefs(
       LoadMasterPrefs());
 
-  // Default value in case master preferences is missing or corrupt, or
-  // ping_delay is missing.
-  out_prefs->ping_delay = 90;
   if (install_prefs.get()) {
     if (!internal::ShowPostInstallEULAIfNeeded(install_prefs.get()))
       return EULA_EXIT_NOW;
 
+    std::unique_ptr<base::DictionaryValue> master_dictionary =
+        install_prefs->master_dictionary().CreateDeepCopy();
+    // The distribution dictionary (and any prefs below it) are never registered
+    // for use in Chrome's PrefService. Strip them from the master dictionary
+    // before mapping it to prefs.
+    master_dictionary->RemoveWithoutPathExpansion(
+        installer::master_preferences::kDistroDict, nullptr);
+
     if (!chrome_prefs::InitializePrefsFromMasterPrefs(
             profiles::GetDefaultProfileDir(user_data_dir),
-            install_prefs->master_dictionary())) {
+            std::move(master_dictionary))) {
       DLOG(ERROR) << "Failed to initialize from master_preferences.";
     }
 

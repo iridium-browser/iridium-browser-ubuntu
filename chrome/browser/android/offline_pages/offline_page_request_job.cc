@@ -11,6 +11,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/android/offline_pages/offline_page_model_factory.h"
 #include "chrome/browser/android/offline_pages/offline_page_tab_helper.h"
@@ -134,6 +135,14 @@ NetworkState GetNetworkState(net::URLRequest* request,
 
   if (net::NetworkChangeNotifier::IsOffline())
     return NetworkState::DISCONNECTED_NETWORK;
+
+  // If offline header contains a reason other than RELOAD, the offline page
+  // should be forced to load even when the network is connected.
+  if (offline_header.reason != OfflinePageHeader::Reason::NONE &&
+      offline_header.reason != OfflinePageHeader::Reason::RELOAD) {
+    return NetworkState::FORCE_OFFLINE_ON_CONNECTED_NETWORK;
+  }
+
   // Checks if previews are allowed, the network is slow, and the request is
   // allowed to be shown for previews.
   if (previews_decider &&
@@ -142,12 +151,8 @@ NetworkState GetNetworkState(net::URLRequest* request,
     return NetworkState::PROHIBITIVELY_SLOW_NETWORK;
   }
 
-  // If offline header contains a reason other than RELOAD, the offline page
-  // should be forced to load even when the network is connected.
-  return (offline_header.reason != OfflinePageHeader::Reason::NONE &&
-          offline_header.reason != OfflinePageHeader::Reason::RELOAD)
-             ? NetworkState::FORCE_OFFLINE_ON_CONNECTED_NETWORK
-             : NetworkState::CONNECTED_NETWORK;
+  // Otherwise, the network state is a good network.
+  return NetworkState::CONNECTED_NETWORK;
 }
 
 OfflinePageRequestJob::AggregatedRequestResult

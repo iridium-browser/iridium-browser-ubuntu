@@ -44,6 +44,7 @@ class MediaSessionImplVisibilityBrowserTest;
 class MediaSessionObserver;
 class MediaSessionPlayerObserver;
 class MediaSessionServiceImpl;
+class MediaSessionServiceImplBrowserTest;
 
 #if defined(OS_ANDROID)
 class MediaSessionAndroid;
@@ -84,9 +85,6 @@ class MediaSessionImpl : public MediaSession,
     return session_android_.get();
   }
 #endif  // defined(OS_ANDROID)
-
-  void AddObserver(MediaSessionObserver* observer);
-  void RemoveObserver(MediaSessionObserver* observer);
 
   void NotifyMediaSessionMetadataChange(
       const base::Optional<MediaMetadata>& metadata);
@@ -138,6 +136,9 @@ class MediaSessionImpl : public MediaSession,
   // recovered.
   CONTENT_EXPORT void StopDucking() override;
 
+  void AddObserver(MediaSessionObserver* observer) override;
+  void RemoveObserver(MediaSessionObserver* observer) override;
+
   // Returns if the session can be controlled by Resume() and Suspend calls
   // above.
   CONTENT_EXPORT bool IsControllable() const;
@@ -166,6 +167,8 @@ class MediaSessionImpl : public MediaSession,
 
   // WebContentsObserver implementation
   void WebContentsDestroyed() override;
+  void RenderFrameDeleted(RenderFrameHost* rfh) override;
+  void DidFinishNavigation(NavigationHandle* navigation_handle) override;
 
   // MediaSessionService-related methods
 
@@ -198,6 +201,7 @@ class MediaSessionImpl : public MediaSession,
   friend class content::AudioFocusManagerTest;
   friend class content::MediaSessionImplServiceRoutingTest;
   friend class content::MediaSessionImplStateObserver;
+  friend class content::MediaSessionServiceImplBrowserTest;
 
   CONTENT_EXPORT void SetDelegateForTests(
       std::unique_ptr<AudioFocusDelegate> delegate);
@@ -241,6 +245,9 @@ class MediaSessionImpl : public MediaSession,
   // delegate to abandon the audio focus.
   CONTENT_EXPORT void AbandonSystemAudioFocusIfNeeded();
 
+  // Notify all information that an observer needs to know when it's added.
+  void NotifyAddedObserver(MediaSessionObserver* observer);
+
   // Notifies observers about the state change of the media session.
   void NotifyAboutStateChange();
 
@@ -254,6 +261,10 @@ class MediaSessionImpl : public MediaSession,
   // Get the volume multiplier, which depends on whether the media session is
   // ducking.
   double GetVolumeMultiplier() const;
+
+  // Compute if the actual playback state is paused using both the
+  // MediaSessionService declared state and guessed state.
+  bool IsActuallyPaused() const;
 
   // Registers a MediaSessionImpl state change callback.
   CONTENT_EXPORT std::unique_ptr<base::CallbackList<void(State)>::Subscription>

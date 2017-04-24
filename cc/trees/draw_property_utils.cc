@@ -14,7 +14,6 @@
 #include "cc/layers/layer_impl.h"
 #include "cc/trees/clip_node.h"
 #include "cc/trees/effect_node.h"
-#include "cc/trees/layer_tree.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/property_tree.h"
 #include "cc/trees/property_tree_builder.h"
@@ -35,32 +34,13 @@ static bool IsRootLayer(const LayerImpl* layer) {
   return layer->layer_tree_impl()->IsRootLayer(layer);
 }
 
-#if DCHECK_IS_ON()
-static void ValidateRenderSurfaceForLayer(LayerImpl* layer) {
-  // This test verifies that there are no cases where a LayerImpl needs
-  // a render surface, but doesn't have one.
-  if (layer->has_render_surface())
-    return;
-
-  DCHECK(!IsRootLayer(layer)) << "layer: " << layer->id();
-  EffectNode* effect_node =
-      layer->layer_tree_impl()->property_trees()->effect_tree.Node(
-          layer->effect_tree_index());
-  if (effect_node->owning_layer_id != layer->id())
-    return;
-  DCHECK_EQ(effect_node->mask_layer_id, EffectTree::kInvalidNodeId)
-      << "layer: " << layer->id();
-  DCHECK(effect_node->filters.IsEmpty());
-  DCHECK(effect_node->background_filters.IsEmpty());
-}
-#endif
-
 static const EffectNode* ContentsTargetEffectNode(
     const int effect_tree_index,
     const EffectTree& effect_tree) {
   const EffectNode* effect_node = effect_tree.Node(effect_tree_index);
-  return effect_node->render_surface ? effect_node
-                                     : effect_tree.Node(effect_node->target_id);
+  return effect_tree.GetRenderSurface(effect_tree_index)
+             ? effect_node
+             : effect_tree.Node(effect_node->target_id);
 }
 
 bool ComputeClipRectInTargetSpace(const LayerImpl* layer,
@@ -97,8 +77,9 @@ bool ComputeClipRectInTargetSpace(const LayerImpl* layer,
       return false;
     }
   } else {
-    if (property_trees->ComputeTransformFromTarget(
+    if (property_trees->GetFromTarget(
             target_node_id, clip_node->target_effect_id, &clip_to_target)) {
+      PostConcatSurfaceContentsScale(target_effect_node, &clip_to_target);
       *clip_rect_in_target_space =
           MathUtil::ProjectClippedRect(clip_to_target, clip_from_clip_node);
     } else {
@@ -119,15 +100,12 @@ static ConditionalClip ComputeTargetRectInLocalSpace(
     int target_transform_id,
     int local_transform_id,
     const int target_effect_id) {
-  const EffectTree& effect_tree = property_trees->effect_tree;
   gfx::Transform target_to_local;
-  bool success = property_trees->ComputeTransformFromTarget(
+  bool success = property_trees->GetFromTarget(
       local_transform_id, target_effect_id, &target_to_local);
   if (!success)
     // If transform is not invertible, cannot apply clip.
     return ConditionalClip{false, gfx::RectF()};
-  const EffectNode* target_effect_node = effect_tree.Node(target_effect_id);
-  ConcatInverseSurfaceContentsScale(target_effect_node, &target_to_local);
 
   if (target_transform_id > local_transform_id)
     return ConditionalClip{true,  // is_clipped.
@@ -359,7 +337,7 @@ void CalculateClipRects(const std::vector<LayerImpl*>& visible_layer_list,
                         const PropertyTrees* property_trees,
                         bool non_root_surfaces_enabled) {
   const ClipTree& clip_tree = property_trees->clip_tree;
-  for (auto& layer : visible_layer_list) {
+  for (auto* layer : visible_layer_list) {
     const ClipNode* clip_node = clip_tree.Node(layer->clip_tree_index());
     bool layer_needs_clip_rect =
         non_root_surfaces_enabled
@@ -415,7 +393,7 @@ void CalculateVisibleRects(const LayerImplList& visible_layer_list,
   const EffectTree& effect_tree = property_trees->effect_tree;
   const TransformTree& transform_tree = property_trees->transform_tree;
   const ClipTree& clip_tree = property_trees->clip_tree;
-  for (auto& layer : visible_layer_list) {
+  for (auto* layer : visible_layer_list) {
     gfx::Size layer_bounds = layer->bounds();
 
     int effect_ancestor_with_copy_request =
@@ -563,23 +541,16 @@ void CalculateVisibleRects(const LayerImplList& visible_layer_list,
     }
 
     gfx::Transform target_to_layer;
-    if (transform_node->ancestors_are_invertible) {
-      property_trees->GetFromTarget(transform_node->id,
-                                    layer->render_target_effect_tree_index(),
-                                    &target_to_layer);
-    } else {
-      const EffectNode* target_effect_node =
-          ContentsTargetEffectNode(layer->effect_tree_index(), effect_tree);
-      bool success = property_trees->ComputeTransformFromTarget(
-          transform_node->id, target_effect_node->id, &target_to_layer);
-      if (!success) {
-        // An animated singular transform may become non-singular during the
-        // animation, so we still need to compute a visible rect. In this
-        // situation, we treat the entire layer as visible.
-        layer->set_visible_layer_rect(gfx::Rect(layer_bounds));
-        continue;
-      }
-      ConcatInverseSurfaceContentsScale(target_effect_node, &target_to_layer);
+    const EffectNode* target_effect_node =
+        ContentsTargetEffectNode(layer->effect_tree_index(), effect_tree);
+    bool success = property_trees->GetFromTarget(
+        transform_node->id, target_effect_node->id, &target_to_layer);
+    if (!success) {
+      // An animated singular transform may become non-singular during the
+      // animation, so we still need to compute a visible rect. In this
+      // situation, we treat the entire layer as visible.
+      layer->set_visible_layer_rect(gfx::Rect(layer_bounds));
+      continue;
     }
     gfx::Transform target_to_content;
     target_to_content.Translate(-layer->offset_to_transform_parent().x(),
@@ -716,21 +687,6 @@ void FindLayersThatNeedUpdates(LayerTreeImpl* layer_tree_impl,
   }
 }
 
-void UpdateRenderSurfaceForLayer(EffectTree* effect_tree,
-                                 bool non_root_surfaces_enabled,
-                                 LayerImpl* layer) {
-  if (!non_root_surfaces_enabled) {
-    layer->SetHasRenderSurface(IsRootLayer(layer));
-    return;
-  }
-
-  EffectNode* node = effect_tree->Node(layer->effect_tree_index());
-
-  if (node->owning_layer_id == layer->id() && node->has_render_surface)
-    layer->SetHasRenderSurface(true);
-  else
-    layer->SetHasRenderSurface(false);
-}
 }  // namespace
 
 template <typename LayerType>
@@ -765,12 +721,12 @@ bool LayerShouldBeSkipped(Layer* layer,
   return LayerShouldBeSkippedInternal(layer, transform_tree, effect_tree);
 }
 
-void FindLayersThatNeedUpdates(LayerTree* layer_tree,
+void FindLayersThatNeedUpdates(LayerTreeHost* layer_tree_host,
                                const PropertyTrees* property_trees,
                                LayerList* update_layer_list) {
   const TransformTree& transform_tree = property_trees->transform_tree;
   const EffectTree& effect_tree = property_trees->effect_tree;
-  for (auto* layer : *layer_tree) {
+  for (auto* layer : *layer_tree_host) {
     if (!IsRootLayer(layer) &&
         LayerShouldBeSkipped(layer, transform_tree, effect_tree))
       continue;
@@ -862,16 +818,12 @@ void ComputeClips(PropertyTrees* property_trees,
     if (parent_target_transform_node &&
         parent_target_transform_node->id != clip_node->target_transform_id &&
         non_root_surfaces_enabled) {
-      success &= property_trees->ComputeTransformFromTarget(
+      success &= property_trees->GetFromTarget(
           clip_node->target_transform_id, parent_clip_node->target_effect_id,
           &parent_to_current);
       const EffectNode* target_effect_node =
           effect_tree.Node(clip_node->target_effect_id);
       PostConcatSurfaceContentsScale(target_effect_node, &parent_to_current);
-      const EffectNode* parent_target_effect_node =
-          effect_tree.Node(parent_clip_node->target_effect_id);
-      ConcatInverseSurfaceContentsScale(parent_target_effect_node,
-                                        &parent_to_current);
       // If we can't compute a transform, it's because we had to use the inverse
       // of a singular transform. We won't draw in this case, so there's no need
       // to compute clips.
@@ -1012,9 +964,10 @@ void ComputeEffects(EffectTree* effect_tree) {
 static void ComputeClipsWithEffectTree(PropertyTrees* property_trees) {
   EffectTree* effect_tree = &property_trees->effect_tree;
   const ClipTree* clip_tree = &property_trees->clip_tree;
-  EffectNode* root_effect_node = effect_tree->Node(1);
+  EffectNode* root_effect_node =
+      effect_tree->Node(EffectTree::kContentsRootNodeId);
   const RenderSurfaceImpl* root_render_surface =
-      root_effect_node->render_surface;
+      effect_tree->GetRenderSurface(EffectTree::kContentsRootNodeId);
   gfx::Rect root_clip =
       gfx::ToEnclosingRect(clip_tree->Node(root_effect_node->clip_id)->clip);
   if (root_render_surface->is_clipped())
@@ -1031,7 +984,7 @@ static void ComputeClipsWithEffectTree(PropertyTrees* property_trees) {
         property_trees, include_viewport_clip, include_expanding_clips,
         effect_node->clip_id, target_node->id);
     gfx::RectF accumulated_clip = accumulated_clip_rect.clip_rect;
-    const RenderSurfaceImpl* render_surface = effect_node->render_surface;
+    const RenderSurfaceImpl* render_surface = effect_tree->GetRenderSurface(i);
     if (render_surface && render_surface->is_clipped()) {
       DCHECK(gfx::ToEnclosingRect(accumulated_clip) ==
              render_surface->clip_rect())
@@ -1081,19 +1034,26 @@ static void ComputeLayerClipRect(const PropertyTrees* property_trees,
       << gfx::ToEnclosingRect(clip_node->clip_in_target_space).ToString();
 }
 
-static void ComputeVisibleRectsInternal(
-    LayerImpl* root_layer,
-    PropertyTrees* property_trees,
-    bool can_render_to_separate_surface,
-    std::vector<LayerImpl*>* visible_layer_list) {
+void ComputeVisibleRects(LayerImpl* root_layer,
+                         PropertyTrees* property_trees,
+                         bool can_render_to_separate_surface,
+                         LayerImplList* visible_layer_list) {
+  bool render_surfaces_need_update = false;
   if (property_trees->non_root_surfaces_enabled !=
       can_render_to_separate_surface) {
     property_trees->non_root_surfaces_enabled = can_render_to_separate_surface;
     property_trees->transform_tree.set_needs_update(true);
+    render_surfaces_need_update = true;
   }
   if (property_trees->transform_tree.needs_update()) {
     property_trees->clip_tree.set_needs_update(true);
     property_trees->effect_tree.set_needs_update(true);
+  }
+
+  if (render_surfaces_need_update) {
+    property_trees->effect_tree.UpdateRenderSurfaces(
+        root_layer->layer_tree_impl(),
+        property_trees->non_root_surfaces_enabled);
   }
   UpdateRenderTarget(&property_trees->effect_tree,
                      property_trees->non_root_surfaces_enabled);
@@ -1161,30 +1121,6 @@ void VerifyClipTreeCalculations(const LayerImplList& layer_list,
     ComputeLayerClipRect(property_trees, layer);
 }
 
-void ComputeVisibleRects(LayerImpl* root_layer,
-                         PropertyTrees* property_trees,
-                         bool can_render_to_separate_surface,
-                         LayerImplList* visible_layer_list) {
-  for (auto* layer : *root_layer->layer_tree_impl()) {
-    UpdateRenderSurfaceForLayer(&property_trees->effect_tree,
-                                can_render_to_separate_surface, layer);
-    EffectNode* node =
-        property_trees->effect_tree.Node(layer->effect_tree_index());
-    if (node->owning_layer_id == layer->id()) {
-      node->render_surface = layer->render_surface();
-      if (node->render_surface)
-        node->render_surface->set_effect_tree_index(node->id);
-    }
-#if DCHECK_IS_ON()
-    if (can_render_to_separate_surface)
-      ValidateRenderSurfaceForLayer(layer);
-#endif
-  }
-  ComputeVisibleRectsInternal(root_layer, property_trees,
-                              can_render_to_separate_surface,
-                              visible_layer_list);
-}
-
 gfx::Rect ComputeLayerVisibleRectDynamic(const PropertyTrees* property_trees,
                                          const LayerImpl* layer) {
   int effect_ancestor_with_copy_request =
@@ -1230,7 +1166,7 @@ gfx::Rect ComputeLayerVisibleRectDynamic(const PropertyTrees* property_trees,
 
 void VerifyVisibleRectsCalculations(const LayerImplList& layer_list,
                                     const PropertyTrees* property_trees) {
-  for (auto layer : layer_list) {
+  for (auto* layer : layer_list) {
     gfx::Rect visible_rect_dynamic =
         ComputeLayerVisibleRectDynamic(property_trees, layer);
     DCHECK(layer->visible_layer_rect() == visible_rect_dynamic)

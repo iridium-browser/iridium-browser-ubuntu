@@ -27,8 +27,7 @@ struct PasswordForm;
 }
 
 namespace content {
-struct FrameNavigateParams;
-struct LoadCommittedDetails;
+class NavigationHandle;
 class RenderFrameHost;
 }
 
@@ -78,13 +77,13 @@ class ContentPasswordManagerDriver
   void GeneratePassword() override;
   void SendLoggingAvailability() override;
   void AllowToRunFormClassifier() override;
+  autofill::AutofillDriver* GetAutofillDriver() override;
 
   PasswordGenerationManager* GetPasswordGenerationManager() override;
   PasswordManager* GetPasswordManager() override;
   PasswordAutofillManager* GetPasswordAutofillManager() override;
 
-  void DidNavigateFrame(const content::LoadCommittedDetails& details,
-                        const content::FrameNavigateParams& params);
+  void DidNavigateFrame(content::NavigationHandle* navigation_handle);
 
   // autofill::mojom::PasswordManagerDriver:
   void PasswordFormsParsed(
@@ -106,7 +105,6 @@ class ContentPasswordManagerDriver
                                const gfx::RectF& bounds) override;
   void ShowNotSecureWarning(base::i18n::TextDirection text_direction,
                             const gfx::RectF& bounds) override;
-  void PasswordAutofillAgentConstructed() override;
   void RecordSavePasswordProgress(const std::string& log) override;
   void SaveGenerationFieldDetectedByClassifier(
       const autofill::PasswordForm& password_form,
@@ -130,6 +128,9 @@ class ContentPasswordManagerDriver
 
   const autofill::mojom::PasswordGenerationAgentPtr&
   GetPasswordGenerationAgent();
+
+  gfx::RectF TransformToRootCoordinates(
+      const gfx::RectF& bounds_in_frame_coordinates);
 
   content::RenderFrameHost* render_frame_host_;
   PasswordManagerClient* client_;

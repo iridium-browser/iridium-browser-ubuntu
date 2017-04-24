@@ -289,7 +289,7 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
  public:
   TestPasswordManagerClient()
       : driver_(new NiceMock<MockPasswordManagerDriver>) {
-    prefs_.registry()->RegisterBooleanPref(prefs::kPasswordManagerSavingEnabled,
+    prefs_.registry()->RegisterBooleanPref(prefs::kCredentialsEnableService,
                                            true);
   }
 
@@ -458,6 +458,8 @@ class PasswordFormManagerTest : public testing::Test {
     field.name = ASCIIToUTF16("NewPasswd");
     field.form_control_type = "password";
     observed_form()->form_data.fields.push_back(field);
+    autofill::FormFieldData empty_field;
+    observed_form()->form_data.fields.push_back(empty_field);
     if (has_confirmation_field) {
       field.label = ASCIIToUTF16("ConfPwd");
       field.name = ASCIIToUTF16("ConfPwd");
@@ -500,6 +502,7 @@ class PasswordFormManagerTest : public testing::Test {
     expected_types[observed_form_.username_element] = autofill::UNKNOWN_TYPE;
     expected_types[observed_form_.password_element] = autofill::PASSWORD;
     expected_types[observed_form_.new_password_element] = field_type;
+    expected_types[base::string16()] = autofill::UNKNOWN_TYPE;
 
     autofill::ServerFieldTypeSet expected_available_field_types;
     expected_available_field_types.insert(autofill::PASSWORD);
@@ -1577,16 +1580,15 @@ TEST_F(PasswordFormManagerTest, InvalidActionURLsDoNotMatch) {
   ASSERT_FALSE(invalid_action_form.action.is_empty());
   // Non-empty invalid action URLs should not match other actions.
   // First when the compared form has an invalid URL:
-  EXPECT_EQ(0, form_manager()->DoesManage(invalid_action_form) &
+  EXPECT_EQ(0, form_manager()->DoesManage(invalid_action_form, nullptr) &
                    PasswordFormManager::RESULT_ACTION_MATCH);
   // Then when the observed form has an invalid URL:
   PasswordForm valid_action_form(*observed_form());
   PasswordFormManager invalid_manager(
       password_manager(), client(), client()->driver(), invalid_action_form,
       base::MakeUnique<MockFormSaver>(), fake_form_fetcher());
-  EXPECT_EQ(0,
-            invalid_manager.DoesManage(valid_action_form) &
-                PasswordFormManager::RESULT_ACTION_MATCH);
+  EXPECT_EQ(0, invalid_manager.DoesManage(valid_action_form, nullptr) &
+                   PasswordFormManager::RESULT_ACTION_MATCH);
 }
 
 TEST_F(PasswordFormManagerTest, EmptyActionURLsDoNotMatchNonEmpty) {
@@ -1595,23 +1597,22 @@ TEST_F(PasswordFormManagerTest, EmptyActionURLsDoNotMatchNonEmpty) {
   ASSERT_FALSE(empty_action_form.action.is_valid());
   ASSERT_TRUE(empty_action_form.action.is_empty());
   // First when the compared form has an empty URL:
-  EXPECT_EQ(0, form_manager()->DoesManage(empty_action_form) &
+  EXPECT_EQ(0, form_manager()->DoesManage(empty_action_form, nullptr) &
                    PasswordFormManager::RESULT_ACTION_MATCH);
   // Then when the observed form has an empty URL:
   PasswordForm valid_action_form(*observed_form());
   PasswordFormManager empty_action_manager(
       password_manager(), client(), client()->driver(), empty_action_form,
       base::MakeUnique<MockFormSaver>(), fake_form_fetcher());
-  EXPECT_EQ(0,
-            empty_action_manager.DoesManage(valid_action_form) &
-                PasswordFormManager::RESULT_ACTION_MATCH);
+  EXPECT_EQ(0, empty_action_manager.DoesManage(valid_action_form, nullptr) &
+                   PasswordFormManager::RESULT_ACTION_MATCH);
 }
 
 TEST_F(PasswordFormManagerTest, NonHTMLFormsDoNotMatchHTMLForms) {
   ASSERT_EQ(PasswordForm::SCHEME_HTML, observed_form()->scheme);
   PasswordForm non_html_form(*observed_form());
   non_html_form.scheme = PasswordForm::SCHEME_DIGEST;
-  EXPECT_EQ(0, form_manager()->DoesManage(non_html_form) &
+  EXPECT_EQ(0, form_manager()->DoesManage(non_html_form, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 
   // The other way round: observing a non-HTML form, don't match a HTML form.
@@ -1619,7 +1620,7 @@ TEST_F(PasswordFormManagerTest, NonHTMLFormsDoNotMatchHTMLForms) {
   PasswordFormManager non_html_manager(
       password_manager(), client(), kNoDriver, non_html_form,
       base::MakeUnique<MockFormSaver>(), fake_form_fetcher());
-  EXPECT_EQ(0, non_html_manager.DoesManage(html_form) &
+  EXPECT_EQ(0, non_html_manager.DoesManage(html_form, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 }
 
@@ -1628,7 +1629,7 @@ TEST_F(PasswordFormManagerTest, OriginCheck_HostsMatchExactly) {
   PasswordForm form_longer_host(*observed_form());
   form_longer_host.origin = GURL("http://accounts.google.com.au/a/LoginAuth");
   // Check that accounts.google.com does not match accounts.google.com.au.
-  EXPECT_EQ(0, form_manager()->DoesManage(form_longer_host) &
+  EXPECT_EQ(0, form_manager()->DoesManage(form_longer_host, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 }
 
@@ -1637,7 +1638,7 @@ TEST_F(PasswordFormManagerTest, OriginCheck_MoreSecureSchemePathsMatchPrefix) {
   // HTTPS, then the compared form can extend the path.
   PasswordForm form_longer_path(*observed_form());
   form_longer_path.origin = GURL("https://accounts.google.com/a/LoginAuth/sec");
-  EXPECT_NE(0, form_manager()->DoesManage(form_longer_path) &
+  EXPECT_NE(0, form_manager()->DoesManage(form_longer_path, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 }
 
@@ -1648,7 +1649,7 @@ TEST_F(PasswordFormManagerTest,
   PasswordForm form_longer_path(*observed_form());
   form_longer_path.origin = GURL("http://accounts.google.com/a/LoginAuth/sec");
   // Check that /a/LoginAuth does not match /a/LoginAuth/more.
-  EXPECT_EQ(0, form_manager()->DoesManage(form_longer_path) &
+  EXPECT_EQ(0, form_manager()->DoesManage(form_longer_path, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 
   PasswordForm secure_observed_form(*observed_form());
@@ -1658,11 +1659,11 @@ TEST_F(PasswordFormManagerTest,
       base::MakeUnique<MockFormSaver>(), fake_form_fetcher());
   // Also for HTTPS in the observed form, and HTTP in the compared form, an
   // exact path match is expected.
-  EXPECT_EQ(0, secure_manager.DoesManage(form_longer_path) &
+  EXPECT_EQ(0, secure_manager.DoesManage(form_longer_path, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
   // Not even upgrade to HTTPS in the compared form should help.
   form_longer_path.origin = GURL("https://accounts.google.com/a/LoginAuth/sec");
-  EXPECT_EQ(0, secure_manager.DoesManage(form_longer_path) &
+  EXPECT_EQ(0, secure_manager.DoesManage(form_longer_path, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 }
 
@@ -1673,12 +1674,12 @@ TEST_F(PasswordFormManagerTest, OriginCheck_OnlyOriginsMatch) {
   different_html_attributes.password_element = ASCIIToUTF16("random_pass");
   different_html_attributes.username_element = ASCIIToUTF16("random_user");
 
-  EXPECT_EQ(0, form_manager()->DoesManage(different_html_attributes) &
+  EXPECT_EQ(0, form_manager()->DoesManage(different_html_attributes, nullptr) &
                    PasswordFormManager::RESULT_HTML_ATTRIBUTES_MATCH);
 
-  EXPECT_EQ(PasswordFormManager::RESULT_ORIGINS_MATCH,
-            form_manager()->DoesManage(different_html_attributes) &
-                PasswordFormManager::RESULT_ORIGINS_MATCH);
+  EXPECT_EQ(PasswordFormManager::RESULT_ORIGINS_OR_FRAMES_MATCH,
+            form_manager()->DoesManage(different_html_attributes, nullptr) &
+                PasswordFormManager::RESULT_ORIGINS_OR_FRAMES_MATCH);
 }
 
 // Test that if multiple credentials with the same username are stored, and the
@@ -2801,6 +2802,8 @@ TEST_F(PasswordFormManagerTest, ReportProcessingUpdate) {
       pending, PasswordFormManager::IGNORE_OTHER_POSSIBLE_USERNAMES);
 
   EXPECT_FALSE(form_manager()->IsNewLogin());
+  EXPECT_CALL(*client()->mock_driver()->mock_autofill_download_manager(),
+              StartUploadRequest(_, false, _, _, true));
 
   base::UserActionTester tester;
   EXPECT_EQ(0, tester.GetActionCount("PasswordManager_LoginFollowingAutofill"));
@@ -2863,6 +2866,36 @@ TEST_F(PasswordFormManagerTest, RemoveResultsWithWrongScheme_ObservingHTML) {
                 form_manager.best_matches().begin()->second->scheme);
     }
   }
+}
+
+// Ensure that DoesManage takes into consideration drivers when origins are
+// different.
+TEST_F(PasswordFormManagerTest, DoesManageDifferentOrigins) {
+  for (bool same_drivers : {false, true}) {
+    PasswordForm submitted_form(*observed_form());
+    observed_form()->origin = GURL("http://accounts.google.com/a/Login");
+    submitted_form.origin = GURL("http://accounts.google.com/signin");
+
+    EXPECT_NE(observed_form()->origin, submitted_form.origin);
+
+    NiceMock<MockPasswordManagerDriver> driver;
+    EXPECT_EQ(
+        same_drivers ? PasswordFormManager::RESULT_COMPLETE_MATCH
+                     : PasswordFormManager::RESULT_NO_MATCH,
+        form_manager()->DoesManage(
+            submitted_form, same_drivers ? client()->driver().get() : &driver));
+  }
+}
+
+// Ensure that DoesManage returns No match when signon realms are different.
+TEST_F(PasswordFormManagerTest, DoesManageDifferentSignonRealmSameDrivers) {
+  PasswordForm submitted_form(*observed_form());
+  observed_form()->signon_realm = "http://accounts.google.com";
+  submitted_form.signon_realm = "http://facebook.com";
+
+  EXPECT_EQ(
+      PasswordFormManager::RESULT_NO_MATCH,
+      form_manager()->DoesManage(submitted_form, client()->driver().get()));
 }
 
 }  // namespace password_manager

@@ -96,7 +96,7 @@ v8::Local<v8::Value> ToV8(const IDBKey* key,
 
   switch (key->getType()) {
     case IDBKey::InvalidType:
-    case IDBKey::MinType:
+    case IDBKey::TypeEnumMax:
       ASSERT_NOT_REACHED();
       return v8Undefined();
     case IDBKey::NumberType:
@@ -394,9 +394,8 @@ static v8::Local<v8::Value> deserializeIDBValueData(v8::Isolate* isolate,
   if (!value || value->isNull())
     return v8::Null(isolate);
 
-  const SharedBuffer* valueData = value->data();
   RefPtr<SerializedScriptValue> serializedValue =
-      SerializedScriptValue::create(valueData->data(), valueData->size());
+      value->createSerializedValue();
   return serializedValue->deserialize(isolate, nullptr, value->blobInfo());
 }
 

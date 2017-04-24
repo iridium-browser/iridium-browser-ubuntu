@@ -45,6 +45,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/install_static/install_details.h"
 #include "chrome/installer/setup/archive_patch_helper.h"
 #include "chrome/installer/setup/install.h"
 #include "chrome/installer/setup/install_worker.h"
@@ -52,6 +53,7 @@
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/persistent_histogram_storage.h"
 #include "chrome/installer/setup/setup_constants.h"
+#include "chrome/installer/setup/setup_install_details.h"
 #include "chrome/installer/setup/setup_singleton.h"
 #include "chrome/installer/setup/setup_util.h"
 #include "chrome/installer/setup/uninstall.h"
@@ -214,8 +216,8 @@ std::unique_ptr<installer::ArchivePatchHelper> CreateChromeArchiveHelper(
 
 // Returns the MSI product ID from the ClientState key that is populated for MSI
 // installs.  This property is encoded in a value name whose format is
-// "EnterpriseId<GUID>" where <GUID> is the MSI product id.  <GUID> is in the
-// format XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX.  The id will be returned if
+// "EnterpriseProduct<GUID>" where <GUID> is the MSI product id.  <GUID> is in
+// the format XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX.  The id will be returned if
 // found otherwise this method will return an empty string.
 //
 // This format is strange and its provenance is shrouded in mystery but it has
@@ -226,8 +228,8 @@ base::string16 FindMsiProductId(const InstallerState& installer_state,
   BrowserDistribution* dist = product.distribution();
   DCHECK(dist);
 
-  base::win::RegistryValueIterator value_iter(reg_root,
-                                              dist->GetStateKey().c_str());
+  base::win::RegistryValueIterator value_iter(
+      reg_root, dist->GetStateKey().c_str(), KEY_WOW64_32KEY);
   for (; value_iter.Valid(); ++value_iter) {
     base::string16 value_name(value_iter.Name());
     if (base::StartsWith(value_name, kMsiProductIdPrefix,
@@ -1340,6 +1342,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   const base::CommandLine& cmd_line = *base::CommandLine::ForCurrentProcess();
   VLOG(1) << "Command Line: " << cmd_line.GetCommandLineString();
 
+  InitializeInstallDetails(cmd_line, prefs);
+
   bool system_install = false;
   prefs.GetBool(installer::master_preferences::kSystemLevel, &system_install);
   VLOG(1) << "system install is " << system_install;
@@ -1386,17 +1390,23 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
     return installer::OS_ERROR;
   }
 
-  // Some command line options don't work with SxS install/uninstall
-  if (InstallUtil::IsChromeSxSProcess()) {
-    if (system_install ||
-        cmd_line.HasSwitch(installer::switches::kSelfDestruct) ||
-        cmd_line.HasSwitch(installer::switches::kMakeChromeDefault) ||
-        cmd_line.HasSwitch(installer::switches::kRegisterChromeBrowser) ||
-        cmd_line.HasSwitch(installer::switches::kRemoveChromeRegistration) ||
-        cmd_line.HasSwitch(installer::switches::kInactiveUserToast) ||
-        cmd_line.HasSwitch(installer::switches::kSystemLevelToast)) {
-      return installer::SXS_OPTION_NOT_SUPPORTED;
-    }
+  const install_static::InstallDetails& install_details =
+      install_static::InstallDetails::Get();
+  // Make sure system_level is supported if requested. For historical reasons,
+  // system-level installs have never been supported for Chrome canary (SxS).
+  // This is a brand-specific policy for this particular mode. In general,
+  // system-level installation of secondary install modes is fully supported.
+  if (system_install && !install_details.supports_system_level())
+    return installer::SXS_OPTION_NOT_SUPPORTED;
+  // Some command line options don't work with secondary installs.
+  if (!install_details.is_primary_mode() &&
+      (cmd_line.HasSwitch(installer::switches::kSelfDestruct) ||
+       cmd_line.HasSwitch(installer::switches::kMakeChromeDefault) ||
+       cmd_line.HasSwitch(installer::switches::kRegisterChromeBrowser) ||
+       cmd_line.HasSwitch(installer::switches::kRemoveChromeRegistration) ||
+       cmd_line.HasSwitch(installer::switches::kInactiveUserToast) ||
+       cmd_line.HasSwitch(installer::switches::kSystemLevelToast))) {
+    return installer::SXS_OPTION_NOT_SUPPORTED;
   }
 
   // Some command line options are no longer supported and must error out.

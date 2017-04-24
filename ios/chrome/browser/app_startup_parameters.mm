@@ -5,7 +5,6 @@
 #import "ios/chrome/browser/app_startup_parameters.h"
 
 #include "base/logging.h"
-#include "ios/chrome/browser/experimental_flags.h"
 #import "ios/chrome/browser/xcallback_parameters.h"
 #include "url/gurl.h"
 
@@ -15,14 +14,13 @@
 
 @implementation AppStartupParameters {
   GURL _externalURL;
-  BOOL _launchVoiceSearch;
-  BOOL _launchInIncognito;
-  BOOL _launchQRScanner;
 }
 
 @synthesize launchVoiceSearch = _launchVoiceSearch;
 @synthesize launchInIncognito = _launchInIncognito;
 @synthesize xCallbackParameters = _xCallbackParameters;
+@synthesize launchFocusOmnibox = _launchFocusOmnibox;
+@synthesize launchQRScanner = _launchQRScanner;
 
 - (const GURL&)externalURL {
   return _externalURL;
@@ -49,19 +47,27 @@
 }
 
 - (NSString*)description {
-  return [NSString stringWithFormat:@"ExternalURL: %s \nXCallbackParams: %@",
-                                    _externalURL.spec().c_str(),
-                                    _xCallbackParameters];
-}
+  NSMutableString* description = [NSMutableString
+      stringWithFormat:@"ExternalURL: %s \nXCallbackParams: %@",
+                       _externalURL.spec().c_str(), _xCallbackParameters];
 
-#pragma mark Property implementation.
+  if (self.launchQRScanner) {
+    [description appendString:@", should launch QR scanner"];
+  }
 
-- (BOOL)launchQRScanner {
-  return _launchQRScanner && experimental_flags::IsQRCodeReaderEnabled();
-}
+  if (self.launchInIncognito) {
+    [description appendString:@", should launch in incognito"];
+  }
 
-- (void)setLaunchQRScanner:(BOOL)launch {
-  _launchQRScanner = launch;
+  if (self.launchFocusOmnibox) {
+    [description appendString:@", should focus omnibox"];
+  }
+
+  if (self.launchVoiceSearch) {
+    [description appendString:@", should launch voice search"];
+  }
+
+  return description;
 }
 
 @end

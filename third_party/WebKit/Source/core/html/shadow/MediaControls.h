@@ -45,6 +45,7 @@ class CORE_EXPORT MediaControls final : public HTMLDivElement {
   HTMLMediaElement& mediaElement() const { return *m_mediaElement; }
 
   void reset();
+  void onControlsListUpdated();
 
   void show();
   void hide();
@@ -110,6 +111,13 @@ class CORE_EXPORT MediaControls final : public HTMLDivElement {
     refreshCastButtonVisibility();
   }
 
+  // TODO(mlamouri): this method is needed in order to notify the controls that
+  // the `mediaControlsEnabled` setting has changed.
+  void onMediaControlsEnabledChange() {
+    // There is no update because only the overlay is expected to change.
+    refreshCastButtonVisibilityWithoutUpdate();
+  }
+
   DECLARE_VIRTUAL_TRACE();
 
  private:
@@ -159,6 +167,8 @@ class CORE_EXPORT MediaControls final : public HTMLDivElement {
   bool containsRelatedTarget(Event*);
 
   // Methods called by MediaControlsMediaEventListener.
+  void onInsertedIntoDocument();
+  void onRemovedFromDocument();
   void onVolumeChange();
   void onFocusIn();
   void onTimeUpdate();

@@ -45,7 +45,6 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   // WebMediaPlayerDelegate implementation.
   bool IsFrameHidden() override;
   bool IsFrameClosed() override;
-  bool IsBackgroundVideoPlaybackUnlocked() override;
   int AddObserver(Observer* observer) override;
   void RemoveObserver(int player_id) override;
   void DidPlay(int player_id,
@@ -58,6 +57,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   bool IsIdle(int player_id) override;
   void ClearStaleFlag(int player_id) override;
   bool IsStale(int player_id) override;
+  void SetIsEffectivelyFullscreen(int player_id, bool is_fullscreen) override;
 
   // content::RenderFrameObserver overrides.
   void WasHidden() override;
@@ -83,6 +83,7 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   void OnMediaDelegatePlay(int player_id);
   void OnMediaDelegateSuspendAllMediaPlayers();
   void OnMediaDelegateVolumeMultiplierUpdate(int player_id, double multiplier);
+  void OnMediaDelegateBecamePersistentVideo(int player_id, bool value);
 
   // Schedules UpdateTask() to run soon.
   void ScheduleUpdateTask();
@@ -101,7 +102,6 @@ class CONTENT_EXPORT RendererWebMediaPlayerDelegate
   // autoplay logic in RenderFrameImpl.
   bool has_played_media_ = false;
 
-  bool background_video_allowed_ = false;
   bool is_frame_closed_ = false;
   bool is_frame_hidden_for_testing_ = false;
 

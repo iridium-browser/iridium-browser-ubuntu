@@ -11,6 +11,10 @@
 #include "build/build_config.h"
 #include "chrome/browser/browsing_data/browsing_data_remover_delegate.h"
 
+namespace content {
+class BrowsingDataFilterBuilder;
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowsingDataRemover is responsible for removing data related to browsing:
 // visits in url database, downloads, cookies ...
@@ -76,6 +80,7 @@ class BrowsingDataRemover {
     REMOVE_WEBAPP_DATA = 1 << 18,
 #endif
     REMOVE_DURABLE_PERMISSION = 1 << 19,
+    REMOVE_EXTERNAL_PROTOCOL_DATA = 1 << 20,
 
     // The following flag is used only in tests. In normal usage, hosted app
     // data is controlled by the REMOVE_COOKIES flag, applied to the
@@ -97,7 +102,8 @@ class BrowsingDataRemover {
                        REMOVE_WEBAPP_DATA |
 #endif
                        REMOVE_SITE_USAGE_DATA |
-                       REMOVE_DURABLE_PERMISSION,
+                       REMOVE_DURABLE_PERMISSION |
+                       REMOVE_EXTERNAL_PROTOCOL_DATA,
 
     // Datatypes protected by Important Sites.
     IMPORTANT_SITES_DATATYPES = REMOVE_SITE_DATA | REMOVE_CACHE,
@@ -177,7 +183,7 @@ class BrowsingDataRemover {
       const base::Time& delete_end,
       int remove_mask,
       int origin_type_mask,
-      std::unique_ptr<BrowsingDataFilterBuilder> filter_builder) = 0;
+      std::unique_ptr<content::BrowsingDataFilterBuilder> filter_builder) = 0;
 
   // A version of the above that in addition informs the |observer| when the
   // removal task is finished.
@@ -186,7 +192,7 @@ class BrowsingDataRemover {
       const base::Time& delete_end,
       int remove_mask,
       int origin_type_mask,
-      std::unique_ptr<BrowsingDataFilterBuilder> filter_builder,
+      std::unique_ptr<content::BrowsingDataFilterBuilder> filter_builder,
       Observer* observer) = 0;
 
   // Observers.

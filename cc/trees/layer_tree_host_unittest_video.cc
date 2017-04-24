@@ -34,8 +34,8 @@ class LayerTreeHostVideoTestSetNeedsDisplay
     root->AddChild(video);
     video_layer_id_ = video->id();
 
-    layer_tree()->SetRootLayer(root);
-    layer_tree()->SetDeviceScaleFactor(2.f);
+    layer_tree_host()->SetRootLayer(root);
+    layer_tree_host()->SetDeviceScaleFactor(2.f);
     LayerTreeHostVideoTest::SetupTree();
   }
 
@@ -48,9 +48,10 @@ class LayerTreeHostVideoTestSetNeedsDisplay
                                    LayerTreeHostImpl::FrameData* frame,
                                    DrawResult draw_result) override {
     LayerImpl* root_layer = host_impl->active_tree()->root_layer_for_testing();
-    RenderSurfaceImpl* root_surface = root_layer->render_surface();
-    gfx::Rect damage_rect =
-        root_surface->damage_tracker()->current_damage_rect();
+    RenderSurfaceImpl* root_surface = root_layer->GetRenderSurface();
+    gfx::Rect damage_rect;
+    EXPECT_TRUE(
+        root_surface->damage_tracker()->GetDamageRectIfValid(&damage_rect));
 
     switch (num_draws_) {
       case 0:

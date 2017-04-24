@@ -36,7 +36,7 @@ class TranslateInfoBarDelegate;
 
 namespace gfx {
 class Image;
-enum class VectorIconId;
+struct VectorIcon;
 }
 
 namespace infobars {
@@ -144,6 +144,8 @@ class InfoBarDelegate {
     GROUPED_PERMISSION_INFOBAR_DELEGATE_ANDROID = 70,
     OFFLINE_PAGE_INFOBAR_DELEGATE = 71,
     SEARCH_GEOLOCATION_DISCLOSURE_INFOBAR_DELEGATE = 72,
+    AUTOMATION_INFOBAR_DELEGATE = 73,
+    VR_SERVICES_UPGRADE_ANDROID = 74,
     TRACKING_ALERT_INFOBAR_DELEGATE = 9001,
   };
 
@@ -185,7 +187,7 @@ class InfoBarDelegate {
   // Returns the vector icon identifier to be shown for this InfoBar. This will
   // take precedence over GetIconId() (although typically only one of the two
   // should be defined for any given infobar).
-  virtual gfx::VectorIconId GetVectorIconId() const;
+  virtual const gfx::VectorIcon& GetVectorIcon() const;
 
   // Returns the icon to be shown for this InfoBar. If the returned Image is
   // empty, no icon is shown.

@@ -12,13 +12,12 @@
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browsing_data/browsing_data_filter_builder.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/browsing_data/registrable_domain_filter_builder.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/domain_reliability/service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/io_thread.h"
@@ -66,6 +65,7 @@
 #include "components/search_engines/template_url_service.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/translate/core/browser/language_model.h"
+#include "content/public/browser/browsing_data_filter_builder.h"
 #include "content/public/browser/plugin_data_remover.h"
 #include "content/public/browser/ssl_host_state_delegate.h"
 #include "content/public/browser/storage_partition.h"
@@ -115,6 +115,7 @@
 using base::UserMetricsAction;
 using content::BrowserContext;
 using content::BrowserThread;
+using content::BrowsingDataFilterBuilder;
 
 namespace {
 
@@ -397,7 +398,7 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
     // Therefore, clearing history for a small set of origins (WHITELIST) should
     // never delete any extension launch times, while clearing for almost all
     // origins (BLACKLIST) should always delete all of extension launch times.
-    if (filter_builder.mode() == BrowsingDataFilterBuilder::BLACKLIST) {
+    if (filter_builder.GetMode() == BrowsingDataFilterBuilder::BLACKLIST) {
       extensions::ExtensionPrefs* extension_prefs =
           extensions::ExtensionPrefs::Get(profile_);
       extension_prefs->ClearLastLaunchTimes();
@@ -654,7 +655,8 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
             CONTENT_SETTINGS_TYPE_APP_BANNER,
             base::Bind(&WebsiteSettingsFilterAdapter, filter));
 
-    PermissionDecisionAutoBlocker::RemoveCountsByUrl(profile_, filter);
+    PermissionDecisionAutoBlocker::GetForProfile(profile_)->RemoveCountsByUrl(
+        filter);
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -923,6 +925,11 @@ void ChromeBrowsingDataRemoverDelegate::RemoveEmbedderData(
   if (remove_mask & BrowsingDataRemover::REMOVE_WEBAPP_DATA)
     webapp_registry_->UnregisterWebappsForUrls(filter);
 #endif
+
+  //////////////////////////////////////////////////////////////////////////////
+  // Remove external protocol data.
+  if (remove_mask & BrowsingDataRemover::REMOVE_EXTERNAL_PROTOCOL_DATA)
+    ExternalProtocolHandler::ClearData(profile_);
 
   synchronous_clear_operations_.GetCompletionCallback().Run();
 }

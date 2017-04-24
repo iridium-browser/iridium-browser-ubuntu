@@ -11,7 +11,8 @@ namespace autofill {
 TestAutofillClient::TestAutofillClient()
     : token_service_(new FakeOAuth2TokenService()),
       identity_provider_(new FakeIdentityProvider(token_service_.get())),
-      rappor_service_(new rappor::TestRapporServiceImpl()) {}
+      rappor_service_(new rappor::TestRapporServiceImpl()),
+      form_origin_(GURL("https://example.test")) {}
 
 TestAutofillClient::~TestAutofillClient() {
 }
@@ -38,6 +39,10 @@ IdentityProvider* TestAutofillClient::GetIdentityProvider() {
 
 rappor::RapporServiceImpl* TestAutofillClient::GetRapporServiceImpl() {
   return rappor_service_.get();
+}
+
+ukm::UkmService* TestAutofillClient::GetUkmService() {
+  return ukm_service_test_harness_.test_ukm_service();
 }
 
 void TestAutofillClient::ShowAutofillSettings() {
@@ -115,9 +120,9 @@ void TestAutofillClient::DidFillOrPreviewField(
 void TestAutofillClient::OnFirstUserGestureObserved() {
 }
 
-bool TestAutofillClient::IsContextSecure(const GURL& form_origin) {
+bool TestAutofillClient::IsContextSecure() {
   // Simplified secure context check for tests.
-  return form_origin.SchemeIs("https");
+  return form_origin_.SchemeIs("https");
 }
 
 bool TestAutofillClient::ShouldShowSigninPromo() {

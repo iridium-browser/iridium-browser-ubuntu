@@ -27,13 +27,13 @@ public class DownloadSharedPreferenceEntry {
 
     public final int notificationId;
     public final boolean isOffTheRecord;  // Whether the download is public (non incognito).
-    public boolean canDownloadWhileMetered;
+    public final boolean canDownloadWhileMetered;
     public final String fileName;
     public final String downloadGuid;
     public final int itemType;
     // This can only be false for paused downloads. For downloads that are pending or in progress,
     // isAutoResumable should always be true.
-    public boolean isAutoResumable;
+    public final boolean isAutoResumable;
 
     static final DownloadSharedPreferenceEntry INVALID_ENTRY =
             new DownloadSharedPreferenceEntry(-1, false, false, null, "", ITEM_TYPE_DOWNLOAD,
@@ -157,6 +157,7 @@ public class DownloadSharedPreferenceEntry {
                 .setDownloadGuid(downloadGuid)
                 .setFileName(fileName)
                 .setIsOffTheRecord(isOffTheRecord)
+                .setBytesReceived(DownloadManagerService.UNKNOWN_BYTES_RECEIVED)
                 .build();
         return new DownloadItem(false, info);
     }

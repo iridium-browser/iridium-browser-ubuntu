@@ -187,7 +187,7 @@ static void CopyDictionaryToObjectElements(
                                             : SKIP_WRITE_BARRIER;
   Isolate* isolate = from->GetIsolate();
   for (int i = 0; i < copy_size; i++) {
-    int entry = from->FindEntry(i + from_start);
+    int entry = from->FindEntry(isolate, i + from_start);
     if (entry != SeededNumberDictionary::kNotFound) {
       Object* value = from->ValueAt(entry);
       DCHECK(!value->IsTheHole(isolate));
@@ -417,8 +417,9 @@ static void CopyDictionaryToDoubleElements(FixedArrayBase* from_base,
   if (to_start + copy_size > to_length) {
     copy_size = to_length - to_start;
   }
+  Isolate* isolate = from->GetIsolate();
   for (int i = 0; i < copy_size; i++) {
-    int entry = from->FindEntry(i + from_start);
+    int entry = from->FindEntry(isolate, i + from_start);
     if (entry != SeededNumberDictionary::kNotFound) {
       to->set(i + to_start, from->ValueAt(entry)->Number());
     } else {
@@ -1628,7 +1629,7 @@ class DictionaryElementsAccessor
     // Iterate through entire range, as accessing elements out of order is
     // observable
     for (uint32_t k = start_from; k < length; ++k) {
-      int entry = dictionary->FindEntry(k);
+      int entry = dictionary->FindEntry(isolate, k);
       if (entry == SeededNumberDictionary::kNotFound) {
         if (search_for_hole) return Just(true);
         continue;
@@ -1694,7 +1695,7 @@ class DictionaryElementsAccessor
     // Iterate through entire range, as accessing elements out of order is
     // observable.
     for (uint32_t k = start_from; k < length; ++k) {
-      int entry = dictionary->FindEntry(k);
+      int entry = dictionary->FindEntry(isolate, k);
       if (entry == SeededNumberDictionary::kNotFound) {
         continue;
       }
@@ -2637,9 +2638,9 @@ class FastDoubleElementsAccessor
     FixedArrayBase* elements_base = receiver->elements();
     Object* value = *search_value;
 
-    if (start_from >= length) return Just<int64_t>(-1);
-
     length = std::min(static_cast<uint32_t>(elements_base->length()), length);
+
+    if (start_from >= length) return Just<int64_t>(-1);
 
     if (!value->IsNumber()) {
       return Just<int64_t>(-1);
@@ -2765,10 +2766,14 @@ class TypedElementsAccessor
                : kMaxUInt32;
   }
 
+  static bool WasNeutered(JSObject* holder) {
+    JSArrayBufferView* view = JSArrayBufferView::cast(holder);
+    return view->WasNeutered();
+  }
+
   static uint32_t GetCapacityImpl(JSObject* holder,
                                   FixedArrayBase* backing_store) {
-    JSArrayBufferView* view = JSArrayBufferView::cast(holder);
-    if (view->WasNeutered()) return 0;
+    if (WasNeutered(holder)) return 0;
     return backing_store->length();
   }
 
@@ -2816,6 +2821,12 @@ class TypedElementsAccessor
                                        uint32_t start_from, uint32_t length) {
     DCHECK(JSObject::PrototypeHasNoElements(isolate, *receiver));
     DisallowHeapAllocation no_gc;
+
+    // TODO(caitp): return Just(false) here when implementing strict throwing on
+    // neutered views.
+    if (WasNeutered(*receiver)) {
+      return Just(value->IsUndefined(isolate) && length > start_from);
+    }
 
     BackingStore* elements = BackingStore::cast(receiver->elements());
     if (value->IsUndefined(isolate) &&
@@ -2865,6 +2876,8 @@ class TypedElementsAccessor
                                          uint32_t start_from, uint32_t length) {
     DCHECK(JSObject::PrototypeHasNoElements(isolate, *receiver));
     DisallowHeapAllocation no_gc;
+
+    if (WasNeutered(*receiver)) return Just<int64_t>(-1);
 
     BackingStore* elements = BackingStore::cast(receiver->elements());
     if (!value->IsNumber()) return Just<int64_t>(-1);

@@ -11,7 +11,6 @@
 #include <stdio.h>
 
 #include "webrtc/base/arraysize.h"
-#include "webrtc/base/common.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/media/base/streamparams.h"
 #include "webrtc/media/engine/constants.h"
@@ -231,8 +230,10 @@ std::vector<webrtc::VideoStream> GetSimulcastConfig(size_t max_streams,
       streams[s].max_framerate = max_framerate;
     }
 
-    width /= 2;
-    height /= 2;
+    if (!is_screencast) {
+      width /= 2;
+      height /= 2;
+    }
     if (s == 0)
       break;
   }
@@ -298,8 +299,7 @@ bool ScreenshareLayerConfig::FromFieldTrialGroup(
 }
 
 bool UseSimulcastScreenshare() {
-  return webrtc::field_trial::FindFullName(
-             kSimulcastScreenshareFieldTrialName) == "Enabled";
+  return webrtc::field_trial::IsEnabled(kSimulcastScreenshareFieldTrialName);
 }
 
 }  // namespace cricket

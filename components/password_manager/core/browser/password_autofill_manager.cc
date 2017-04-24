@@ -17,7 +17,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/autofill/core/browser/autofill_driver.h"
+#include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/suggestion.h"
@@ -29,7 +29,6 @@
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/security_state/core/security_state.h"
 #include "components/strings/grit/components_strings.h"
-#include "grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace password_manager {
@@ -72,6 +71,7 @@ void AppendSuggestionIfMatching(
     const base::string16& field_contents,
     const std::string& signon_realm,
     bool show_all,
+    bool is_password_field,
     std::vector<autofill::Suggestion>* suggestions) {
   base::string16 lower_suggestion = base::i18n::ToLower(field_suggestion);
   base::string16 lower_contents = base::i18n::ToLower(field_contents);
@@ -83,7 +83,9 @@ void AppendSuggestionIfMatching(
           lower_suggestion, lower_contents, true)) {
     autofill::Suggestion suggestion(ReplaceEmptyUsername(field_suggestion));
     suggestion.label = GetHumanReadableRealm(signon_realm);
-    suggestion.frontend_id = autofill::POPUP_ITEM_ID_PASSWORD_ENTRY;
+    suggestion.frontend_id = is_password_field
+                                 ? autofill::POPUP_ITEM_ID_PASSWORD_ENTRY
+                                 : autofill::POPUP_ITEM_ID_USERNAME_ENTRY;
     suggestion.match = prefix_matched_suggestion
                            ? autofill::Suggestion::PREFIX_MATCH
                            : autofill::Suggestion::SUBSTRING_MATCH;
@@ -97,19 +99,23 @@ void AppendSuggestionIfMatching(
 void GetSuggestions(const autofill::PasswordFormFillData& fill_data,
                     const base::string16& current_username,
                     std::vector<autofill::Suggestion>* suggestions,
-                    bool show_all) {
+                    bool show_all,
+                    bool is_password_field) {
   AppendSuggestionIfMatching(fill_data.username_field.value, current_username,
-                             fill_data.preferred_realm, show_all, suggestions);
+                             fill_data.preferred_realm, show_all,
+                             is_password_field, suggestions);
 
   for (const auto& login : fill_data.additional_logins) {
     AppendSuggestionIfMatching(login.first, current_username,
-                               login.second.realm, show_all, suggestions);
+                               login.second.realm, show_all, is_password_field,
+                               suggestions);
   }
 
   for (const auto& usernames : fill_data.other_possible_usernames) {
     for (size_t i = 0; i < usernames.second.size(); ++i) {
       AppendSuggestionIfMatching(usernames.second[i], current_username,
-                                 usernames.first.realm, show_all, suggestions);
+                                 usernames.first.realm, show_all,
+                                 is_password_field, suggestions);
     }
   }
 
@@ -132,8 +138,7 @@ PasswordAutofillManager::PasswordAutofillManager(
     autofill::AutofillClient* autofill_client)
     : password_manager_driver_(password_manager_driver),
       autofill_client_(autofill_client),
-      weak_ptr_factory_(this) {
-}
+      weak_ptr_factory_(this) {}
 
 PasswordAutofillManager::~PasswordAutofillManager() {
 }
@@ -194,7 +199,8 @@ void PasswordAutofillManager::OnShowPasswordSuggestions(
     return;
   }
   GetSuggestions(fill_data_it->second, typed_username, &suggestions,
-                 options & autofill::SHOW_ALL);
+                 (options & autofill::SHOW_ALL) != 0,
+                 (options & autofill::IS_PASSWORD_FIELD) != 0);
 
   form_data_key_ = key;
 
@@ -211,7 +217,7 @@ void PasswordAutofillManager::OnShowPasswordSuggestions(
   }
 
   GURL origin = (fill_data_it->second).origin;
-  bool is_context_secure = autofill_client_->IsContextSecure(origin) &&
+  bool is_context_secure = autofill_client_->IsContextSecure() &&
                            (!origin.is_valid() || !origin.SchemeIs("http"));
   if (!is_context_secure && security_state::IsHttpWarningInFormEnabled()) {
     std::string icon_str;
@@ -250,6 +256,16 @@ void PasswordAutofillManager::OnShowNotSecureWarning(
     base::i18n::TextDirection text_direction,
     const gfx::RectF& bounds) {
   DCHECK(security_state::IsHttpWarningInFormEnabled());
+  // TODO(estark): Other code paths in this file don't do null checks before
+  // using |autofill_client_|. It seems that these other code paths somehow
+  // short-circuit before dereferencing |autofill_client_| in cases where it's
+  // null; it would be good to understand why/how and make a firm decision about
+  // whether |autofill_client_| is allowed to be null. Ideally we would be able
+  // to get rid of such cases so that we can enable Form-Not-Secure warnings
+  // here in all cases. https://crbug.com/699217
+  if (!autofill_client_)
+    return;
+
   std::vector<autofill::Suggestion> suggestions;
   autofill::Suggestion http_warning_suggestion(
       l10n_util::GetStringUTF8(IDS_AUTOFILL_LOGIN_HTTP_WARNING_MESSAGE),
@@ -334,6 +350,10 @@ void PasswordAutofillManager::ClearPreviewedForm() {
 
 bool PasswordAutofillManager::IsCreditCardPopup() {
   return false;
+}
+
+autofill::AutofillDriver* PasswordAutofillManager::GetAutofillDriver() {
+  return password_manager_driver_->GetAutofillDriver();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

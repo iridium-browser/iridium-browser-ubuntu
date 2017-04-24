@@ -83,6 +83,10 @@ rappor::RapporServiceImpl* AwAutofillClient::GetRapporServiceImpl() {
   return nullptr;
 }
 
+ukm::UkmService* AwAutofillClient::GetUkmService() {
+  return nullptr;
+}
+
 autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
   return nullptr;
 }
@@ -185,12 +189,12 @@ void AwAutofillClient::OnFirstUserGestureObserved() {
   NOTIMPLEMENTED();
 }
 
-bool AwAutofillClient::IsContextSecure(const GURL& form_origin) {
+bool AwAutofillClient::IsContextSecure() {
   content::SSLStatus ssl_status;
   content::NavigationEntry* navigation_entry =
       web_contents_->GetController().GetLastCommittedEntry();
   if (!navigation_entry)
-     return false;
+    return false;
 
   ssl_status = navigation_entry->GetSSL();
   // Note: The implementation below is a copy of the one in

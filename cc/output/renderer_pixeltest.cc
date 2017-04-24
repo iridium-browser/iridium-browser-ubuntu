@@ -9,6 +9,8 @@
 #include "base/message_loop/message_loop.h"
 #include "cc/base/math_util.h"
 #include "cc/output/gl_renderer.h"
+#include "cc/paint/paint_canvas.h"
+#include "cc/paint/paint_flags.h"
 #include "cc/quads/draw_quad.h"
 #include "cc/quads/picture_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
@@ -98,10 +100,11 @@ void CreateTestRenderPassDrawQuad(const SharedQuadState* shared_state,
       render_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   quad->SetNew(shared_state, rect, rect, pass_id,
                0,                 // mask_resource_id
-               gfx::Vector2dF(),  // mask_uv_scale
+               gfx::RectF(),      // mask_uv_rect
                gfx::Size(),       // mask_texture_size
                gfx::Vector2dF(),  // filters scale
-               gfx::PointF());    // filter origin
+               gfx::PointF(),     // filter origin
+               gfx::RectF());     // tex_coord_rect
 }
 
 void CreateTestTwoColoredTextureDrawQuad(const gfx::Rect& rect,
@@ -152,6 +155,7 @@ void CreateTestTwoColoredTextureDrawQuad(const gfx::Rect& rect,
 
 void CreateTestTextureDrawQuad(const gfx::Rect& rect,
                                SkColor texel_color,
+                               float vertex_opacity[4],
                                SkColor background_color,
                                bool premultiplied_alpha,
                                const SharedQuadState* shared_state,
@@ -172,8 +176,6 @@ void CreateTestTextureDrawQuad(const gfx::Rect& rect,
   resource_provider->CopyToResource(
       resource, reinterpret_cast<uint8_t*>(&pixels.front()), rect.size());
 
-  float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-
   const gfx::PointF uv_top_left(0.0f, 0.0f);
   const gfx::PointF uv_bottom_right(1.0f, 1.0f);
   const bool flipped = false;
@@ -184,6 +186,19 @@ void CreateTestTextureDrawQuad(const gfx::Rect& rect,
                premultiplied_alpha, uv_top_left, uv_bottom_right,
                background_color, vertex_opacity, flipped, nearest_neighbor,
                false);
+}
+
+void CreateTestTextureDrawQuad(const gfx::Rect& rect,
+                               SkColor texel_color,
+                               SkColor background_color,
+                               bool premultiplied_alpha,
+                               const SharedQuadState* shared_state,
+                               ResourceProvider* resource_provider,
+                               RenderPass* render_pass) {
+  float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  CreateTestTextureDrawQuad(rect, texel_color, vertex_opacity, background_color,
+                            premultiplied_alpha, shared_state,
+                            resource_provider, render_pass);
 }
 
 void CreateTestYUVVideoDrawQuad_FromVideoFrame(
@@ -793,6 +808,41 @@ TYPED_TEST(RendererPixelTest, PremultipliedTextureWithBackground) {
       FuzzyPixelOffByOneComparator(true)));
 }
 
+TEST_F(GLRendererPixelTest,
+       PremultipliedTextureWithBackgroundAndVertexOpacity) {
+  gfx::Rect rect(this->device_viewport_size_);
+
+  int id = 1;
+  std::unique_ptr<RenderPass> pass = CreateTestRootRenderPass(id, rect);
+
+  SharedQuadState* texture_quad_state =
+      CreateTestSharedQuadState(gfx::Transform(), rect, pass.get());
+  texture_quad_state->opacity = 0.8f;
+
+  float vertex_opacity[4] = {1.f, 1.f, 0.f, 0.f};
+  CreateTestTextureDrawQuad(gfx::Rect(this->device_viewport_size_),
+                            SkColorSetARGB(204, 120, 255, 120),  // Texel color.
+                            vertex_opacity,
+                            SK_ColorGREEN,  // Background color.
+                            true,           // Premultiplied alpha.
+                            texture_quad_state, this->resource_provider_.get(),
+                            pass.get());
+
+  SharedQuadState* color_quad_state =
+      CreateTestSharedQuadState(gfx::Transform(), rect, pass.get());
+  SolidColorDrawQuad* color_quad =
+      pass->CreateAndAppendDrawQuad<SolidColorDrawQuad>();
+  color_quad->SetNew(color_quad_state, rect, rect, SK_ColorWHITE, false);
+
+  RenderPassList pass_list;
+  pass_list.push_back(std::move(pass));
+
+  EXPECT_TRUE(this->RunPixelTest(
+      &pass_list,
+      base::FilePath(FILE_PATH_LITERAL("green_alpha_vertex_opacity.png")),
+      FuzzyPixelOffByOneComparator(true)));
+}
+
 template <typename TypeParam>
 class IntersectingQuadPixelTest : public RendererPixelTest<TypeParam> {
  protected:
@@ -949,17 +999,17 @@ TYPED_TEST(IntersectingQuadSoftwareTest, PictureQuads) {
                        this->quad_rect_.width() / 2,
                        this->quad_rect_.height() / 2);
 
-  SkPaint black_paint;
-  black_paint.setColor(SK_ColorBLACK);
-  SkPaint blue_paint;
-  blue_paint.setColor(SK_ColorBLUE);
-  SkPaint green_paint;
-  green_paint.setColor(SK_ColorGREEN);
+  PaintFlags black_flags;
+  black_flags.setColor(SK_ColorBLACK);
+  PaintFlags blue_flags;
+  blue_flags.setColor(SK_ColorBLUE);
+  PaintFlags green_flags;
+  green_flags.setColor(SK_ColorGREEN);
 
   std::unique_ptr<FakeRecordingSource> blue_recording =
       FakeRecordingSource::CreateFilledRecordingSource(this->quad_rect_.size());
-  blue_recording->add_draw_rect_with_paint(outer_rect, black_paint);
-  blue_recording->add_draw_rect_with_paint(inner_rect, blue_paint);
+  blue_recording->add_draw_rect_with_flags(outer_rect, black_flags);
+  blue_recording->add_draw_rect_with_flags(inner_rect, blue_flags);
   blue_recording->Rerecord();
   scoped_refptr<FakeRasterSource> blue_raster_source =
       FakeRasterSource::CreateFromRecordingSource(blue_recording.get(), false);
@@ -974,8 +1024,8 @@ TYPED_TEST(IntersectingQuadSoftwareTest, PictureQuads) {
 
   std::unique_ptr<FakeRecordingSource> green_recording =
       FakeRecordingSource::CreateFilledRecordingSource(this->quad_rect_.size());
-  green_recording->add_draw_rect_with_paint(outer_rect, green_paint);
-  green_recording->add_draw_rect_with_paint(inner_rect, black_paint);
+  green_recording->add_draw_rect_with_flags(outer_rect, green_flags);
+  green_recording->add_draw_rect_with_flags(inner_rect, black_flags);
   green_recording->Rerecord();
   scoped_refptr<FakeRasterSource> green_raster_source =
       FakeRasterSource::CreateFromRecordingSource(green_recording.get(), false);
@@ -1537,8 +1587,8 @@ TYPED_TEST(RendererPixelTest, FastPassColorFilterAlpha) {
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
-                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
-                           gfx::Vector2dF(), gfx::PointF());
+                           child_pass_id, 0, gfx::RectF(), gfx::Size(),
+                           gfx::Vector2dF(), gfx::PointF(), gfx::RectF());
 
   RenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -1603,8 +1653,8 @@ TYPED_TEST(RendererPixelTest, FastPassSaturateFilter) {
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
-                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
-                           gfx::Vector2dF(), gfx::PointF());
+                           child_pass_id, 0, gfx::RectF(), gfx::Size(),
+                           gfx::Vector2dF(), gfx::PointF(), gfx::RectF());
 
   RenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -1669,8 +1719,8 @@ TYPED_TEST(RendererPixelTest, FastPassFilterChain) {
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
-                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
-                           gfx::Vector2dF(), gfx::PointF());
+                           child_pass_id, 0, gfx::RectF(), gfx::Size(),
+                           gfx::Vector2dF(), gfx::PointF(), gfx::RectF());
 
   RenderPassList pass_list;
   pass_list.push_back(std::move(child_pass));
@@ -1756,8 +1806,8 @@ TYPED_TEST(RendererPixelTest, FastPassColorFilterAlphaTranslation) {
   RenderPassDrawQuad* render_pass_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
   render_pass_quad->SetNew(pass_shared_state, pass_rect, pass_rect,
-                           child_pass_id, 0, gfx::Vector2dF(), gfx::Size(),
-                           gfx::Vector2dF(), gfx::PointF());
+                           child_pass_id, 0, gfx::RectF(), gfx::Size(),
+                           gfx::Vector2dF(), gfx::PointF(), gfx::RectF());
 
   RenderPassList pass_list;
 
@@ -1913,18 +1963,18 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
   SkBitmap bitmap;
   bitmap.allocPixels(
       SkImageInfo::MakeN32Premul(mask_rect.width(), mask_rect.height()));
-  SkCanvas canvas(bitmap);
-  SkPaint paint;
-  paint.setStyle(SkPaint::kStroke_Style);
-  paint.setStrokeWidth(SkIntToScalar(4));
-  paint.setColor(SK_ColorWHITE);
+  PaintCanvas canvas(bitmap);
+  PaintFlags flags;
+  flags.setStyle(PaintFlags::kStroke_Style);
+  flags.setStrokeWidth(SkIntToScalar(4));
+  flags.setColor(SK_ColorWHITE);
   canvas.clear(SK_ColorTRANSPARENT);
   gfx::Rect rect = mask_rect;
   while (!rect.IsEmpty()) {
     rect.Inset(6, 6, 4, 4);
     canvas.drawRect(
         SkRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height()),
-        paint);
+        flags);
     rect.Inset(6, 6, 4, 4);
   }
 
@@ -1949,13 +1999,15 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad) {
   // Set up a mask on the RenderPassDrawQuad.
   RenderPassDrawQuad* mask_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  mask_quad->SetNew(root_pass_shared_state, sub_rect, sub_rect, child_pass_id,
-                    mask_resource_id,
-                    gfx::Vector2dF(2.f / mask_rect.width(),
-                                   2.f / mask_rect.height()),  // mask_uv_scale
-                    gfx::Size(mask_rect.size()),  // mask_texture_size
-                    gfx::Vector2dF(),             // filters scale
-                    gfx::PointF());               // filter origin
+  mask_quad->SetNew(
+      root_pass_shared_state, sub_rect, sub_rect, child_pass_id,
+      mask_resource_id,
+      gfx::ScaleRect(gfx::RectF(sub_rect), 2.f / mask_rect.width(),
+                     2.f / mask_rect.height()),  // mask_uv_rect
+      gfx::Size(mask_rect.size()),               // mask_texture_size
+      gfx::Vector2dF(),                          // filters scale
+      gfx::PointF(),                             // filter origin
+      gfx::RectF());                             // tex_coord_rect
 
   // White background behind the masked render pass.
   SolidColorDrawQuad* white =
@@ -2006,18 +2058,18 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
   SkBitmap bitmap;
   bitmap.allocPixels(
       SkImageInfo::MakeN32Premul(mask_rect.width(), mask_rect.height()));
-  SkCanvas canvas(bitmap);
-  SkPaint paint;
-  paint.setStyle(SkPaint::kStroke_Style);
-  paint.setStrokeWidth(SkIntToScalar(4));
-  paint.setColor(SK_ColorWHITE);
+  PaintCanvas canvas(bitmap);
+  PaintFlags flags;
+  flags.setStyle(PaintFlags::kStroke_Style);
+  flags.setStrokeWidth(SkIntToScalar(4));
+  flags.setColor(SK_ColorWHITE);
   canvas.clear(SK_ColorTRANSPARENT);
   gfx::Rect rect = mask_rect;
   while (!rect.IsEmpty()) {
     rect.Inset(6, 6, 4, 4);
     canvas.drawRect(
         SkRect::MakeXYWH(rect.x(), rect.y(), rect.width(), rect.height()),
-        paint);
+        flags);
     rect.Inset(6, 6, 4, 4);
   }
 
@@ -2042,13 +2094,15 @@ TYPED_TEST(RendererPixelTest, RenderPassAndMaskWithPartialQuad2) {
   // Set up a mask on the RenderPassDrawQuad.
   RenderPassDrawQuad* mask_quad =
       root_pass->CreateAndAppendDrawQuad<RenderPassDrawQuad>();
-  mask_quad->SetNew(root_pass_shared_state, sub_rect, sub_rect, child_pass_id,
-                    mask_resource_id,
-                    gfx::Vector2dF(2.f / mask_rect.width(),
-                                   2.f / mask_rect.height()),  // mask_uv_scale
-                    gfx::Size(mask_rect.size()),  // mask_texture_size
-                    gfx::Vector2dF(),             // filters scale
-                    gfx::PointF());               // filter origin
+  mask_quad->SetNew(
+      root_pass_shared_state, sub_rect, sub_rect, child_pass_id,
+      mask_resource_id,
+      gfx::ScaleRect(gfx::RectF(sub_rect), 2.f / mask_rect.width(),
+                     2.f / mask_rect.height()),  // mask_uv_rect
+      gfx::Size(mask_rect.size()),               // mask_texture_size
+      gfx::Vector2dF(),                          // filters scale
+      gfx::PointF(),                             // filter origin
+      gfx::RectF());                             // tex_coord_rect
 
   // White background behind the masked render pass.
   SolidColorDrawQuad* white =
@@ -2105,10 +2159,11 @@ class RendererPixelTestWithBackgroundFilter
       filter_pass_quad->SetNew(shared_state, filter_pass_layer_rect_,
                                filter_pass_layer_rect_, filter_pass_id,
                                0,                           // mask_resource_id
-                               gfx::Vector2dF(),            // mask_uv_scale
+                               gfx::RectF(),                // mask_uv_rect
                                gfx::Size(),                 // mask_texture_size
                                gfx::Vector2dF(1.0f, 1.0f),  // filters_scale
-                               gfx::PointF());              // filters_origin
+                               gfx::PointF(),               // filters_origin
+                               gfx::RectF());               // tex_coord_rect
     }
 
     const int kColumnWidth = device_viewport_rect.width() / 3;
@@ -2499,12 +2554,12 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadIdentityScale) {
 
   std::unique_ptr<FakeRecordingSource> blue_recording =
       FakeRecordingSource::CreateFilledRecordingSource(blue_rect.size());
-  SkPaint red_paint;
-  red_paint.setColor(SK_ColorRED);
-  blue_recording->add_draw_rect_with_paint(blue_rect, red_paint);
-  SkPaint blue_paint;
-  blue_paint.setColor(SK_ColorBLUE);
-  blue_recording->add_draw_rect_with_paint(blue_clip_rect, blue_paint);
+  PaintFlags red_flags;
+  red_flags.setColor(SK_ColorRED);
+  blue_recording->add_draw_rect_with_flags(blue_rect, red_flags);
+  PaintFlags blue_flags;
+  blue_flags.setColor(SK_ColorBLUE);
+  blue_recording->add_draw_rect_with_flags(blue_clip_rect, blue_flags);
   blue_recording->Rerecord();
 
   scoped_refptr<FakeRasterSource> blue_raster_source =
@@ -2530,9 +2585,9 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadIdentityScale) {
   // One viewport-filling green quad.
   std::unique_ptr<FakeRecordingSource> green_recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
-  SkPaint green_paint;
-  green_paint.setColor(SK_ColorGREEN);
-  green_recording->add_draw_rect_with_paint(viewport, green_paint);
+  PaintFlags green_flags;
+  green_flags.setColor(SK_ColorGREEN);
+  green_recording->add_draw_rect_with_flags(viewport, green_flags);
   green_recording->Rerecord();
   scoped_refptr<FakeRasterSource> green_raster_source =
       FakeRasterSource::CreateFromRecordingSource(green_recording.get(), false);
@@ -2571,9 +2626,9 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadOpacity) {
   // One viewport-filling 0.5-opacity green quad.
   std::unique_ptr<FakeRecordingSource> green_recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
-  SkPaint green_paint;
-  green_paint.setColor(SK_ColorGREEN);
-  green_recording->add_draw_rect_with_paint(viewport, green_paint);
+  PaintFlags green_flags;
+  green_flags.setColor(SK_ColorGREEN);
+  green_recording->add_draw_rect_with_flags(viewport, green_flags);
   green_recording->Rerecord();
   scoped_refptr<FakeRasterSource> green_raster_source =
       FakeRasterSource::CreateFromRecordingSource(green_recording.get(), false);
@@ -2592,9 +2647,9 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadOpacity) {
   // One viewport-filling white quad.
   std::unique_ptr<FakeRecordingSource> white_recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
-  SkPaint white_paint;
-  white_paint.setColor(SK_ColorWHITE);
-  white_recording->add_draw_rect_with_paint(viewport, white_paint);
+  PaintFlags white_flags;
+  white_flags.setColor(SK_ColorWHITE);
+  white_recording->add_draw_rect_with_flags(viewport, white_flags);
   white_recording->Rerecord();
   scoped_refptr<FakeRasterSource> white_raster_source =
       FakeRasterSource::CreateFromRecordingSource(white_recording.get(), false);
@@ -2633,6 +2688,12 @@ bool IsSoftwareRenderer<SoftwareRendererWithExpandedViewport>() {
   return true;
 }
 
+void draw_point_color(SkCanvas* canvas, SkScalar x, SkScalar y, SkColor color) {
+  SkPaint paint;
+  paint.setColor(color);
+  canvas->drawPoint(x, y, paint);
+}
+
 // If we disable image filtering, then a 2x2 bitmap should appear as four
 // huge sharp squares.
 TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadDisableImageFiltering) {
@@ -2653,17 +2714,17 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadDisableImageFiltering) {
   sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(2, 2);
   ASSERT_NE(surface, nullptr);
   SkCanvas* canvas = surface->getCanvas();
-  canvas->drawPoint(0, 0, SK_ColorGREEN);
-  canvas->drawPoint(0, 1, SK_ColorBLUE);
-  canvas->drawPoint(1, 0, SK_ColorBLUE);
-  canvas->drawPoint(1, 1, SK_ColorGREEN);
+  draw_point_color(canvas, 0, 0, SK_ColorGREEN);
+  draw_point_color(canvas, 0, 1, SK_ColorBLUE);
+  draw_point_color(canvas, 1, 0, SK_ColorBLUE);
+  draw_point_color(canvas, 1, 1, SK_ColorGREEN);
 
   std::unique_ptr<FakeRecordingSource> recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
-  SkPaint paint;
-  paint.setFilterQuality(kLow_SkFilterQuality);
-  recording->add_draw_image_with_paint(surface->makeImageSnapshot(),
-                                       gfx::Point(), paint);
+  PaintFlags flags;
+  flags.setFilterQuality(kLow_SkFilterQuality);
+  recording->add_draw_image_with_flags(surface->makeImageSnapshot(),
+                                       gfx::Point(), flags);
   recording->Rerecord();
   scoped_refptr<FakeRasterSource> raster_source =
       FakeRasterSource::CreateFromRecordingSource(recording.get(), false);
@@ -2702,17 +2763,17 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadNearestNeighbor) {
   sk_sp<SkSurface> surface = SkSurface::MakeRasterN32Premul(2, 2);
   ASSERT_NE(surface, nullptr);
   SkCanvas* canvas = surface->getCanvas();
-  canvas->drawPoint(0, 0, SK_ColorGREEN);
-  canvas->drawPoint(0, 1, SK_ColorBLUE);
-  canvas->drawPoint(1, 0, SK_ColorBLUE);
-  canvas->drawPoint(1, 1, SK_ColorGREEN);
+  draw_point_color(canvas, 0, 0, SK_ColorGREEN);
+  draw_point_color(canvas, 0, 1, SK_ColorBLUE);
+  draw_point_color(canvas, 1, 0, SK_ColorBLUE);
+  draw_point_color(canvas, 1, 1, SK_ColorGREEN);
 
   std::unique_ptr<FakeRecordingSource> recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
-  SkPaint paint;
-  paint.setFilterQuality(kLow_SkFilterQuality);
-  recording->add_draw_image_with_paint(surface->makeImageSnapshot(),
-                                       gfx::Point(), paint);
+  PaintFlags flags;
+  flags.setFilterQuality(kLow_SkFilterQuality);
+  recording->add_draw_image_with_flags(surface->makeImageSnapshot(),
+                                       gfx::Point(), flags);
   recording->Rerecord();
   scoped_refptr<FakeRasterSource> raster_source =
       FakeRasterSource::CreateFromRecordingSource(recording.get(), false);
@@ -2746,10 +2807,10 @@ TYPED_TEST(RendererPixelTest, TileDrawQuadNearestNeighbor) {
   {
     SkAutoLockPixels lock(bitmap);
     SkCanvas canvas(bitmap);
-    canvas.drawPoint(0, 0, SK_ColorGREEN);
-    canvas.drawPoint(0, 1, SK_ColorBLUE);
-    canvas.drawPoint(1, 0, SK_ColorBLUE);
-    canvas.drawPoint(1, 1, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 0, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 1, SK_ColorBLUE);
+    draw_point_color(&canvas, 1, 0, SK_ColorBLUE);
+    draw_point_color(&canvas, 1, 1, SK_ColorGREEN);
   }
 
   gfx::Size tile_size(2, 2);
@@ -2797,10 +2858,10 @@ TYPED_TEST(SoftwareRendererPixelTest, TextureDrawQuadNearestNeighbor) {
   {
     SkAutoLockPixels lock(bitmap);
     SkCanvas canvas(bitmap);
-    canvas.drawPoint(0, 0, SK_ColorGREEN);
-    canvas.drawPoint(0, 1, SK_ColorBLUE);
-    canvas.drawPoint(1, 0, SK_ColorBLUE);
-    canvas.drawPoint(1, 1, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 0, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 1, SK_ColorBLUE);
+    draw_point_color(&canvas, 1, 0, SK_ColorBLUE);
+    draw_point_color(&canvas, 1, 1, SK_ColorGREEN);
   }
 
   gfx::Size tile_size(2, 2);
@@ -2849,10 +2910,10 @@ TYPED_TEST(SoftwareRendererPixelTest, TextureDrawQuadLinear) {
   {
     SkAutoLockPixels lock(bitmap);
     SkCanvas canvas(bitmap);
-    canvas.drawPoint(0, 0, SK_ColorGREEN);
-    canvas.drawPoint(0, 1, SK_ColorBLUE);
-    canvas.drawPoint(1, 0, SK_ColorBLUE);
-    canvas.drawPoint(1, 1, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 0, SK_ColorGREEN);
+    draw_point_color(&canvas, 0, 1, SK_ColorBLUE);
+    draw_point_color(&canvas, 1, 0, SK_ColorBLUE);
+    draw_point_color(&canvas, 1, 1, SK_ColorGREEN);
   }
 
   gfx::Size tile_size(2, 2);
@@ -2914,13 +2975,13 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
   std::unique_ptr<FakeRecordingSource> green_recording =
       FakeRecordingSource::CreateFilledRecordingSource(viewport.size());
 
-  SkPaint red_paint;
-  red_paint.setColor(SK_ColorRED);
-  green_recording->add_draw_rect_with_paint(viewport, red_paint);
-  SkPaint green_paint;
-  green_paint.setColor(SK_ColorGREEN);
-  green_recording->add_draw_rect_with_paint(green_rect1, green_paint);
-  green_recording->add_draw_rect_with_paint(green_rect2, green_paint);
+  PaintFlags red_flags;
+  red_flags.setColor(SK_ColorRED);
+  green_recording->add_draw_rect_with_flags(viewport, red_flags);
+  PaintFlags green_flags;
+  green_flags.setColor(SK_ColorGREEN);
+  green_recording->add_draw_rect_with_flags(green_rect1, green_flags);
+  green_recording->add_draw_rect_with_flags(green_rect2, green_flags);
   green_recording->Rerecord();
   scoped_refptr<FakeRasterSource> green_raster_source =
       FakeRasterSource::CreateFromRecordingSource(green_recording.get(), false);
@@ -2983,13 +3044,13 @@ TYPED_TEST(SoftwareRendererPixelTest, PictureDrawQuadNonIdentityScale) {
   Region outside(layer_rect);
   outside.Subtract(gfx::ToEnclosingRect(union_layer_rect));
   for (Region::Iterator iter(outside); iter.has_rect(); iter.next()) {
-    recording->add_draw_rect_with_paint(iter.rect(), red_paint);
+    recording->add_draw_rect_with_flags(iter.rect(), red_flags);
   }
 
-  SkPaint blue_paint;
-  blue_paint.setColor(SK_ColorBLUE);
-  recording->add_draw_rectf_with_paint(blue_layer_rect1, blue_paint);
-  recording->add_draw_rectf_with_paint(blue_layer_rect2, blue_paint);
+  PaintFlags blue_flags;
+  blue_flags.setColor(SK_ColorBLUE);
+  recording->add_draw_rectf_with_flags(blue_layer_rect1, blue_flags);
+  recording->add_draw_rectf_with_flags(blue_layer_rect2, blue_flags);
   recording->Rerecord();
   scoped_refptr<FakeRasterSource> raster_source =
       FakeRasterSource::CreateFromRecordingSource(recording.get(), false);

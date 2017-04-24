@@ -23,7 +23,10 @@
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/paint_vector_icon.h"
-#include "ui/gfx/vector_icons_public.h"
+
+#if !defined(OS_ANDROID)
+#include "components/toolbar/vector_icons.h"  // nogncheck
+#endif
 
 namespace autofill {
 
@@ -170,11 +173,12 @@ const gfx::FontList& AutofillPopupLayoutModel::GetValueFontListForRow(
     case POPUP_ITEM_ID_SCAN_CREDIT_CARD:
     case POPUP_ITEM_ID_SEPARATOR:
     case POPUP_ITEM_ID_HTTP_NOT_SECURE_WARNING_MESSAGE:
-      return normal_font_list_;
     case POPUP_ITEM_ID_TITLE:
+    case POPUP_ITEM_ID_PASSWORD_ENTRY:
+      return normal_font_list_;
     case POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY:
     case POPUP_ITEM_ID_DATALIST_ENTRY:
-    case POPUP_ITEM_ID_PASSWORD_ENTRY:
+    case POPUP_ITEM_ID_USERNAME_ENTRY:
       return bold_font_list_;
   }
   NOTREACHED();
@@ -208,16 +212,16 @@ gfx::ImageSkia AutofillPopupLayoutModel::GetIconImage(size_t index) const {
   std::vector<autofill::Suggestion> suggestions = delegate_->GetSuggestions();
   const base::string16& icon_str = suggestions[index].icon;
 
-  // For http warning message, get icon images from VectorIconId, which is the
+  // For http warning message, get icon images from VectorIcon, which is the
   // same as security indicator icons in location bar.
   if (suggestions[index].frontend_id ==
       POPUP_ITEM_ID_HTTP_NOT_SECURE_WARNING_MESSAGE) {
     if (icon_str == base::ASCIIToUTF16("httpWarning")) {
-      return gfx::CreateVectorIcon(gfx::VectorIconId::LOCATION_BAR_HTTP,
-                                   kHttpWarningIconWidth, gfx::kChromeIconGrey);
+      return gfx::CreateVectorIcon(toolbar::kHttpIcon, kHttpWarningIconWidth,
+                                   gfx::kChromeIconGrey);
     }
     DCHECK_EQ(icon_str, base::ASCIIToUTF16("httpsInvalid"));
-    return gfx::CreateVectorIcon(gfx::VectorIconId::LOCATION_BAR_HTTPS_INVALID,
+    return gfx::CreateVectorIcon(toolbar::kHttpsInvalidIcon,
                                  kHttpWarningIconWidth, gfx::kGoogleRed700);
   }
 

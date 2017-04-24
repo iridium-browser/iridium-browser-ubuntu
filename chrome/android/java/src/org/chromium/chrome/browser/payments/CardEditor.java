@@ -183,7 +183,8 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
             if (TextUtils.isEmpty(profile.getStreetAddress())) continue;
             mProfilesForBillingAddress.add(profile);
             Pair<Integer, Integer> editMessageResIds = AutofillAddress.getEditMessageAndTitleResIds(
-                    AutofillAddress.checkAddressCompletionStatus(profile));
+                    AutofillAddress.checkAddressCompletionStatus(
+                            profile, AutofillAddress.IGNORE_PHONE_COMPLETENESS_CHECK));
             if (editMessageResIds.first.intValue() != 0) {
                 mIncompleteProfilesForBillingAddress.put(
                         profile.getGUID(), editMessageResIds.first);
@@ -194,10 +195,12 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
         Collections.sort(mProfilesForBillingAddress, new Comparator<AutofillProfile>() {
             @Override
             public int compare(AutofillProfile a, AutofillProfile b) {
-                boolean isAComplete =
-                        AutofillAddress.checkAddressCompletionStatus(a) == AutofillAddress.COMPLETE;
-                boolean isBComplete =
-                        AutofillAddress.checkAddressCompletionStatus(b) == AutofillAddress.COMPLETE;
+                boolean isAComplete = AutofillAddress.checkAddressCompletionStatus(
+                                              a, AutofillAddress.NORMAL_COMPLETENESS_CHECK)
+                        == AutofillAddress.COMPLETE;
+                boolean isBComplete = AutofillAddress.checkAddressCompletionStatus(
+                                              b, AutofillAddress.NORMAL_COMPLETENESS_CHECK)
+                        == AutofillAddress.COMPLETE;
                 return ApiCompatibilityUtils.compareBoolean(isBComplete, isAComplete);
             }
         });
@@ -575,7 +578,7 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
         List<DropdownKeyValue> result = new ArrayList<>();
 
         Locale locale = Locale.getDefault();
-        SimpleDateFormat keyFormatter = new SimpleDateFormat("M", locale);
+        SimpleDateFormat keyFormatter = new SimpleDateFormat("MM", locale);
         SimpleDateFormat valueFormatter = new SimpleDateFormat("MMMM (MM)", locale);
 
         calendar.set(Calendar.DAY_OF_MONTH, 1);
@@ -675,15 +678,21 @@ public class CardEditor extends EditorBase<AutofillPaymentInstrument>
                     }
                     return;
                 }
+                assert isAddingNewAddress || isSelectingIncompleteAddress;
 
-                final AutofillAddress editAddress = isSelectingIncompleteAddress
-                        ? new AutofillAddress(mContext,
-                                  findTargetProfile(mProfilesForBillingAddress, eventData.first))
-                        : null;
+                AutofillProfile profile = isSelectingIncompleteAddress
+                        ? findTargetProfile(mProfilesForBillingAddress, eventData.first)
+                        : new AutofillProfile();
+                if (TextUtils.isEmpty(profile.getFullName())) {
+                    // Prefill card holder name as the billing address name.
+                    profile.setFullName(
+                            card.getIsLocal() ? mNameField.getValue().toString() : card.getName());
+                }
+                final AutofillAddress editAddress = new AutofillAddress(mContext, profile);
                 mAddressEditor.edit(editAddress, new Callback<AutofillAddress>() {
                     @Override
                     public void onResult(AutofillAddress billingAddress) {
-                        if (billingAddress == null || !billingAddress.isComplete()) {
+                        if (!billingAddress.isComplete()) {
                             // User cancelled out of the add or edit flow. Restore the selection
                             // to the card's billing address, if any, else clear the selection.
                             if (mBillingAddressField.getDropdownKeys().contains(

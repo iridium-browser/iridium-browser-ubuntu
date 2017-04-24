@@ -34,9 +34,9 @@
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/WindowProxy.h"
 #include "core/frame/LocalFrame.h"
+#include "v8/include/v8.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicString.h"
-#include <v8.h>
 
 namespace blink {
 
@@ -75,6 +75,12 @@ class LocalWindowProxy final : public WindowProxy {
   void createContext();
 
   void setSecurityToken(SecurityOrigin*);
+
+  // Triggers updates of objects that are associated with a Document:
+  // - the activity logger
+  // - the document DOM wrapper
+  // - the security origin
+  void updateDocumentInternal();
 
   // The JavaScript wrapper for the document object is cached on the global
   // object for fast access. UpdateDocumentProperty sets the wrapper

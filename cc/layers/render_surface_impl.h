@@ -36,7 +36,7 @@ struct AppendQuadsData;
 
 class CC_EXPORT RenderSurfaceImpl {
  public:
-  explicit RenderSurfaceImpl(LayerImpl* owning_layer);
+  RenderSurfaceImpl(LayerTreeImpl* layer_tree_impl, int stable_effect_id);
   virtual ~RenderSurfaceImpl();
 
   // Returns the RenderSurfaceImpl that this render surface contributes to. Root
@@ -143,6 +143,7 @@ class CC_EXPORT RenderSurfaceImpl {
   void NoteAncestorPropertyChanged();
 
   DamageTracker* damage_tracker() const { return damage_tracker_.get(); }
+  gfx::Rect GetDamageRect();
 
   int GetRenderPassId();
 

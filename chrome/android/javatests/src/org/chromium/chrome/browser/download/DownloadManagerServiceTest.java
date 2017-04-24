@@ -195,7 +195,7 @@ public class DownloadManagerServiceTest extends NativeLibraryTestBase {
         @Override
         public void onDownloadSucceeded(
                 DownloadInfo downloadInfo, int notificationId, long downloadId,
-                boolean canBeResolved) {
+                boolean canBeResolved, boolean usesAndroidDownloadManager) {
             mSucceeded = true;
         }
 
@@ -306,13 +306,29 @@ public class DownloadManagerServiceTest extends NativeLibraryTestBase {
         public void resumeDownload(DownloadItem item, boolean hasUserGesture) {
             mResumed = true;
         }
+
+        @Override
+        protected void scheduleUpdateIfNeeded() {
+            ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+                @Override
+                public void run() {
+                    DownloadManagerServiceForTest.super.scheduleUpdateIfNeeded();
+                }
+            });
+        }
     }
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        RecordHistogram.disableForTests();
+        RecordHistogram.setDisabledForTests(true);
         loadNativeLibraryAndInitBrowserProcess();
+    }
+
+    @Override
+    public void tearDown() throws Exception {
+        super.tearDown();
+        RecordHistogram.setDisabledForTests(false);
     }
 
     private static Handler getTestHandler() {

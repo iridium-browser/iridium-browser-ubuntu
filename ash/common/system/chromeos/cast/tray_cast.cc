@@ -15,7 +15,6 @@
 #include "ash/common/shelf/wm_shelf_util.h"
 #include "ash/common/system/chromeos/screen_security/screen_tray_item.h"
 #include "ash/common/system/tray/fixed_sized_image_view.h"
-#include "ash/common/system/tray/fixed_sized_scroll_view.h"
 #include "ash/common/system/tray/hover_highlight_view.h"
 #include "ash/common/system/tray/system_tray.h"
 #include "ash/common/system/tray/system_tray_delegate.h"
@@ -28,11 +27,11 @@
 #include "ash/common/wm_shell.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/interfaces/cast_config.mojom.h"
+#include "ash/resources/grit/ash_resources.h"
 #include "ash/resources/vector_icons/vector_icons.h"
+#include "ash/strings/grit/ash_strings.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
-#include "grit/ash_resources.h"
-#include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -43,6 +42,7 @@
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/scroll_view.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
 
@@ -80,16 +80,15 @@ namespace tray {
 // actually pick the cast receiver.
 class CastSelectDefaultView : public TrayItemMore {
  public:
-  CastSelectDefaultView(SystemTrayItem* owner, bool show_more);
+  explicit CastSelectDefaultView(SystemTrayItem* owner);
   ~CastSelectDefaultView() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CastSelectDefaultView);
 };
 
-CastSelectDefaultView::CastSelectDefaultView(SystemTrayItem* owner,
-                                             bool show_more)
-    : TrayItemMore(owner, show_more) {
+CastSelectDefaultView::CastSelectDefaultView(SystemTrayItem* owner)
+    : TrayItemMore(owner) {
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   // Update the image and label.
@@ -160,7 +159,9 @@ void CastCastView::UpdateLabel(
     const mojom::CastSinkPtr& sink = i->sink;
     const mojom::CastRoutePtr& route = i->route;
 
-    if (!route->id.empty()) {
+    // We only want to display casts that came from this machine, since on a
+    // busy network many other people could be casting.
+    if (!route->id.empty() && route->is_local_source) {
       displayed_route_ = route.Clone();
 
       // We want to display different labels inside of the title depending on
@@ -170,27 +171,34 @@ void CastCastView::UpdateLabel(
         case ash::mojom::ContentSource::UNKNOWN:
           label()->SetText(
               l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_CAST_CAST_UNKNOWN));
+          stop_button()->SetAccessibleName(l10n_util::GetStringUTF16(
+              IDS_ASH_STATUS_TRAY_CAST_CAST_UNKNOWN_ACCESSIBILITY_STOP));
           break;
         case ash::mojom::ContentSource::TAB:
           label()->SetText(ElideString(l10n_util::GetStringFUTF16(
               IDS_ASH_STATUS_TRAY_CAST_CAST_TAB,
               base::UTF8ToUTF16(route->title), base::UTF8ToUTF16(sink->name))));
+          stop_button()->SetAccessibleName(
+              ElideString(l10n_util::GetStringFUTF16(
+                  IDS_ASH_STATUS_TRAY_CAST_CAST_TAB_ACCESSIBILITY_STOP,
+                  base::UTF8ToUTF16(route->title),
+                  base::UTF8ToUTF16(sink->name))));
           break;
         case ash::mojom::ContentSource::DESKTOP:
           label()->SetText(ElideString(
               l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_CAST_CAST_DESKTOP,
                                          base::UTF8ToUTF16(sink->name))));
+          stop_button()->SetAccessibleName(
+              ElideString(l10n_util::GetStringFUTF16(
+                  IDS_ASH_STATUS_TRAY_CAST_CAST_DESKTOP_ACCESSIBILITY_STOP,
+                  base::UTF8ToUTF16(sink->name))));
           break;
       }
 
       PreferredSizeChanged();
       Layout();
-
-      // If this machine is the source of the activity, then we want to display
-      // it over any other activity. There can be multiple activities if other
-      // devices on the network are casting at the same time.
-      if (route->is_local_source)
-        break;
+      // Only need to update labels once.
+      break;
     }
   }
 }
@@ -206,7 +214,7 @@ void CastCastView::ButtonPressed(views::Button* sender,
 class CastDuplexView : public views::View {
  public:
   CastDuplexView(SystemTrayItem* owner,
-                 bool show_more,
+                 bool enabled,
                  const std::vector<mojom::SinkAndRoutePtr>& sinks_routes);
   ~CastDuplexView() override;
 
@@ -234,9 +242,10 @@ class CastDuplexView : public views::View {
 
 CastDuplexView::CastDuplexView(
     SystemTrayItem* owner,
-    bool show_more,
+    bool enabled,
     const std::vector<mojom::SinkAndRoutePtr>& sinks_routes) {
-  select_view_ = new CastSelectDefaultView(owner, show_more);
+  select_view_ = new CastSelectDefaultView(owner);
+  select_view_->SetEnabled(enabled);
   cast_view_ = new CastCastView();
   cast_view_->UpdateLabel(sinks_routes);
   SetLayoutManager(new views::FillLayout());
@@ -411,7 +420,7 @@ void CastDetailedView::UpdateReceiverListFromCachedData() {
   }
 
   scroll_content()->SizeToPreferredSize();
-  static_cast<views::View*>(scroller())->Layout();
+  scroller()->Layout();
 }
 
 views::View* CastDetailedView::AddToReceiverList(
@@ -547,11 +556,8 @@ void TrayCast::UpdatePrimaryView() {
 }
 
 bool TrayCast::HasActiveRoute() {
-  if (is_mirror_casting_)
-    return true;
-
   for (const auto& sr : sinks_and_routes_) {
-    if (!sr->route->title.empty())
+    if (!sr->route->title.empty() && sr->route->is_local_source)
       return true;
   }
 

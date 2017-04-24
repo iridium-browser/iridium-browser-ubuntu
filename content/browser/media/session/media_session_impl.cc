@@ -12,6 +12,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/media_session.h"
 #include "content/public/browser/media_session_observer.h"
+#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "media/base/media_content_type.h"
 
@@ -110,12 +111,37 @@ void MediaSessionImpl::WebContentsDestroyed() {
   AbandonSystemAudioFocusIfNeeded();
 }
 
+void MediaSessionImpl::RenderFrameDeleted(RenderFrameHost* rfh) {
+  if (services_.count(rfh))
+    OnServiceDestroyed(services_[rfh]);
+}
+
+void MediaSessionImpl::DidFinishNavigation(
+    NavigationHandle* navigation_handle) {
+  if (!navigation_handle->HasCommitted() || navigation_handle->IsSamePage())
+    return;
+
+  RenderFrameHost* rfh = navigation_handle->GetRenderFrameHost();
+  if (services_.count(rfh))
+    services_[rfh]->DidFinishNavigation();
+}
+
 void MediaSessionImpl::AddObserver(MediaSessionObserver* observer) {
   observers_.AddObserver(observer);
+  NotifyAddedObserver(observer);
 }
 
 void MediaSessionImpl::RemoveObserver(MediaSessionObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void MediaSessionImpl::NotifyAddedObserver(MediaSessionObserver* observer) {
+  observer->MediaSessionMetadataChanged(
+      routed_service_ ? routed_service_->metadata() : base::nullopt);
+  observer->MediaSessionActionsChanged(
+      routed_service_ ? routed_service_->actions()
+                      : std::set<blink::mojom::MediaSessionAction>());
+  observer->MediaSessionStateChanged(IsControllable(), IsActuallyPaused());
 }
 
 void MediaSessionImpl::NotifyMediaSessionMetadataChange(
@@ -371,6 +397,15 @@ bool MediaSessionImpl::IsControllable() const {
          one_shot_players_.empty();
 }
 
+bool MediaSessionImpl::IsActuallyPaused() const {
+  if (routed_service_ && routed_service_->playback_state() ==
+                             blink::mojom::MediaSessionPlaybackState::PLAYING) {
+    return false;
+  }
+
+  return !IsActive();
+}
+
 bool MediaSessionImpl::HasPepper() const {
   return !pepper_players_.empty();
 }
@@ -511,21 +546,11 @@ void MediaSessionImpl::AbandonSystemAudioFocusIfNeeded() {
 }
 
 void MediaSessionImpl::NotifyAboutStateChange() {
-  bool is_actually_suspended = IsSuspended();
-  // Compute the actual playback state using both the MediaSessionService state
-  // and real state.
-  //
-  // TODO(zqzhang): Maybe also compute for IsControllable()? See
-  // https://crbug.com/674983
-  if (routed_service_ &&
-      routed_service_->playback_state() ==
-          blink::mojom::MediaSessionPlaybackState::PLAYING) {
-    is_actually_suspended = false;
-  }
-
   media_session_state_listeners_.Notify(audio_focus_state_);
+
+  bool is_actually_paused = IsActuallyPaused();
   for (auto& observer : observers_)
-    observer.MediaSessionStateChanged(IsControllable(), is_actually_suspended);
+    observer.MediaSessionStateChanged(IsControllable(), is_actually_paused);
 }
 
 void MediaSessionImpl::SetAudioFocusState(State audio_focus_state) {
@@ -574,7 +599,11 @@ bool MediaSessionImpl::AddOneShotPlayer(MediaSessionPlayerObserver* observer,
 // MediaSessionService-related methods
 
 void MediaSessionImpl::OnServiceCreated(MediaSessionServiceImpl* service) {
-  services_[service->GetRenderFrameHost()] = service;
+  RenderFrameHost* rfh = service->GetRenderFrameHost();
+  if (!rfh)
+    return;
+
+  services_[rfh] = service;
   UpdateRoutedService();
 }
 
@@ -611,6 +640,38 @@ void MediaSessionImpl::OnMediaSessionActionsChanged(
 
 void MediaSessionImpl::DidReceiveAction(
     blink::mojom::MediaSessionAction action) {
+  // Pause all players in non-routed frames if the action is PAUSE.
+  //
+  // This is the default PAUSE action handler per Media Session API spec. The
+  // reason for pausing all players in all other sessions is to avoid the
+  // players in other frames keep the session active so that the UI will always
+  // show the pause button but it does not pause anything (as the routed frame
+  // already pauses when responding to the PAUSE action while other frames does
+  // not).
+  //
+  // TODO(zqzhang): Currently, this might not work well on desktop as Pepper and
+  // OneShot players are not really suspended, so that the session is still
+  // active after this. See https://crbug.com/619084 and
+  // https://crbug.com/596516.
+  if (blink::mojom::MediaSessionAction::PAUSE == action) {
+    RenderFrameHost* rfh_of_routed_service =
+        routed_service_ ? routed_service_->GetRenderFrameHost() : nullptr;
+    for (const auto& player : normal_players_) {
+      if (player.observer->GetRenderFrameHost() != rfh_of_routed_service)
+        player.observer->OnSuspend(player.player_id);
+    }
+    for (const auto& player : pepper_players_) {
+      if (player.observer->GetRenderFrameHost() != rfh_of_routed_service) {
+        player.observer->OnSetVolumeMultiplier(player.player_id,
+                                               kDuckingVolumeMultiplier);
+      }
+    }
+    for (const auto& player : one_shot_players_) {
+      if (player.observer->GetRenderFrameHost() != rfh_of_routed_service)
+        player.observer->OnSuspend(player.player_id);
+    }
+  }
+
   if (!routed_service_)
     return;
 

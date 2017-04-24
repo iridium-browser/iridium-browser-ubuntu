@@ -11,11 +11,12 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string16.h"
-#include "media/audio/audio_manager.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/base/ime/input_method_base.h"
 #include "ui/base/ime/text_input_client.h"
+#include "ui/base/ime/text_input_flags.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
@@ -49,7 +50,11 @@ bool g_accessibility_keyboard_enabled = false;
 
 bool g_hotrod_keyboard_enabled = false;
 
+bool g_keyboard_restricted = false;
+
 bool g_touch_keyboard_enabled = false;
+
+bool g_overscroll_enabled_with_accessibility_keyboard = false;
 
 keyboard::KeyboardState g_requested_keyboard_state =
     keyboard::KEYBOARD_STATE_AUTO;
@@ -142,8 +147,10 @@ bool IsKeyboardOverscrollEnabled() {
 
   // Users of the accessibility on-screen keyboard are likely to be using mouse
   // input, which may interfere with overscrolling.
-  if (g_accessibility_keyboard_enabled)
+  if (g_accessibility_keyboard_enabled &&
+      !g_overscroll_enabled_with_accessibility_keyboard) {
     return false;
+  }
 
   // If overscroll enabled override is set, use it instead. Currently
   // login / out-of-box disable keyboard overscroll. http://crbug.com/363635
@@ -172,6 +179,14 @@ bool IsInputViewEnabled() {
       switches::kDisableInputView);
 }
 
+void SetKeyboardRestricted(bool restricted) {
+  g_keyboard_restricted = restricted;
+}
+
+bool GetKeyboardRestricted() {
+  return g_keyboard_restricted;
+}
+
 bool IsExperimentalInputViewEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableExperimentalInputViewFeatures);
@@ -198,9 +213,9 @@ bool IsSmartDeployEnabled() {
 }
 
 bool IsVoiceInputEnabled() {
-  return media::AudioManager::Get()->HasAudioInputDevices() &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableVoiceInput);
+  return !g_keyboard_restricted &&
+         !base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kDisableVoiceInput);
 }
 
 bool InsertText(const base::string16& text) {
@@ -369,7 +384,7 @@ void MarkKeyboardLoadFinished() {
   if (!logged) {
     // Log the delta only once.
     UMA_HISTOGRAM_TIMES(
-        "VirtualKeyboard.FirstLoadTime",
+        "VirtualKeyboard.InitLatency.FirstLoad",
         base::Time::Now() - g_keyboard_load_time_start.Get());
     logged = true;
   }
@@ -380,6 +395,10 @@ void LogKeyboardControlEvent(KeyboardControlEvent event) {
       "VirtualKeyboard.KeyboardControlEvent",
       event,
       keyboard::KEYBOARD_CONTROL_MAX);
+}
+
+void SetOverscrollEnabledWithAccessibilityKeyboard(bool enabled) {
+  g_overscroll_enabled_with_accessibility_keyboard = enabled;
 }
 
 }  // namespace keyboard

@@ -5,6 +5,12 @@
 #ifndef CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_METRICS_H_
 #define CHROME_BROWSER_ANDROID_WEBAPK_WEBAPK_METRICS_H_
 
+namespace base {
+class TimeDelta;
+}
+
+enum class GooglePlayInstallState;
+
 namespace webapk {
 
 // Keep these enums up to date with tools/metrics/histograms/histograms.xml.
@@ -52,10 +58,19 @@ enum UserAction {
   USER_ACTION_MAX,
 };
 
+void TrackInstallDuration(base::TimeDelta delta);
 void TrackInstallEvent(InstallEvent event);
 void TrackInstallSource(InstallSource event);
 void TrackInstallInfoBarShown(InfoBarShown event);
 void TrackUserAction(UserAction event);
+
+// On web app and WebAPK installation records whether a WebAPK could be
+// installed via the Google Play flow. If not, records why the WebAPK could not
+// be installed via the Google Play flow (and a web app was added to the
+// homescreen instead).
+// Warning: This metric is recorded whenever a site is added to the homescreeen
+// as a web app, not just for sites with a WebAPK compatible Web Manifest.
+void TrackGooglePlayInstallState(GooglePlayInstallState state);
 
 };  // namespace webapk
 

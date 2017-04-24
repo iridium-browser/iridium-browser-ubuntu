@@ -4,7 +4,10 @@
 
 package org.chromium.chrome.browser.payments;
 
+import static java.util.Arrays.asList;
+
 import android.os.Handler;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CheckBox;
@@ -32,6 +35,7 @@ import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.test.util.DOMUtils;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.payments.mojom.PaymentDetailsModifier;
 import org.chromium.payments.mojom.PaymentItem;
 import org.chromium.payments.mojom.PaymentMethodData;
 
@@ -179,7 +183,7 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
     protected void clickNodeAndWait(String nodeId, CallbackHelper helper)
             throws InterruptedException, ExecutionException, TimeoutException {
         int callCount = helper.getCallCount();
-        DOMUtils.clickNode(this, mViewCoreRef.get(), nodeId);
+        DOMUtils.clickNode(mViewCoreRef.get(), nodeId);
         helper.waitForCallback(callCount);
     }
 
@@ -273,6 +277,21 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
             @Override
             public void run() {
                 mUI.getEditorView().findViewById(resourceId).performClick();
+            }
+        });
+        helper.waitForCallback(callCount);
+    }
+
+    protected void clickAndroidBackButtonInEditorAndWait(CallbackHelper helper)
+            throws InterruptedException, TimeoutException {
+        int callCount = helper.getCallCount();
+        ThreadUtils.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                mUI.getEditorView().dispatchKeyEvent(
+                        new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_BACK));
+                mUI.getEditorView().dispatchKeyEvent(
+                        new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_BACK));
             }
         });
         helper.waitForCallback(callCount);
@@ -418,6 +437,28 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
             public void run() {
                 ((OptionSection) mUI.getPaymentMethodSectionForTest())
                         .getOptionLabelsForTest(suggestionIndex)
+                        .performClick();
+            }
+        });
+        helper.waitForCallback(callCount);
+    }
+
+    /**
+     *  Clicks on the edit icon corresponding to the payment method suggestion at the specified
+     *  |suggestionIndex|.
+     */
+    protected void clickOnPaymentMethodSuggestionEditIconAndWait(
+            final int suggestionIndex, CallbackHelper helper)
+            throws ExecutionException, TimeoutException, InterruptedException {
+        assert (suggestionIndex < getNumberOfPaymentInstruments());
+
+        int callCount = helper.getCallCount();
+        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+            @Override
+            public void run() {
+                ((OptionSection) mUI.getPaymentMethodSectionForTest())
+                        .getOptionRowAtIndex(suggestionIndex)
+                        .getEditIconForTest()
                         .performClick();
             }
         });
@@ -817,10 +858,9 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
      *                           or HAVE_INSTRUMENTS.
      * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
      *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
-     * @return The installed payment app.
      */
-    protected TestPay installPaymentApp(final int instrumentPresence, final int responseSpeed) {
-        return installPaymentApp("https://bobpay.com", instrumentPresence, responseSpeed);
+    protected void installPaymentApp(int instrumentPresence, int responseSpeed) {
+        installPaymentApp("https://bobpay.com", instrumentPresence, responseSpeed);
     }
 
     /**
@@ -831,11 +871,9 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
      *                           or HAVE_INSTRUMENTS.
      * @param responseSpeed      How quickly the app will respond to "get instruments" query. Either
      *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
-     * @return The installed payment app.
      */
-    protected TestPay installPaymentApp(final String methodName, final int instrumentPresence,
-            final int responseSpeed) {
-        return installPaymentApp(methodName, instrumentPresence, responseSpeed, IMMEDIATE_CREATION);
+    protected void installPaymentApp(String methodName, int instrumentPresence, int responseSpeed) {
+        installPaymentApp(methodName, instrumentPresence, responseSpeed, IMMEDIATE_CREATION);
     }
 
     /**
@@ -848,15 +886,19 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
      *                           IMMEDIATE_RESPONSE or DELAYED_RESPONSE.
      * @param creationSpeed      How quickly the app factory will create this app. Either
      *                           IMMEDIATE_CREATION or DELAYED_CREATION.
-     * @return The installed payment app.
      */
-    protected TestPay installPaymentApp(final String methodName, final int instrumentPresence,
-            final int responseSpeed, final int creationSpeed) {
-        final TestPay app = new TestPay(methodName, instrumentPresence, responseSpeed);
+    protected void installPaymentApp(
+            String methodName, int instrumentPresence, int responseSpeed, int creationSpeed) {
+        installPaymentApp(asList(methodName), instrumentPresence, responseSpeed, creationSpeed);
+    }
+
+    protected void installPaymentApp(final List<String> appMethodNames,
+            final int instrumentPresence, final int responseSpeed, final int creationSpeed) {
         PaymentAppFactory.getInstance().addAdditionalFactory(new PaymentAppFactoryAddition() {
             @Override
             public void create(WebContents webContents, Set<String> methodNames,
                     final PaymentAppFactory.PaymentAppCreatedCallback callback) {
+                final TestPay app = new TestPay(appMethodNames, instrumentPresence, responseSpeed);
                 if (creationSpeed == IMMEDIATE_CREATION) {
                     callback.onPaymentAppCreated(app);
                     callback.onAllPaymentAppsCreated();
@@ -871,25 +913,24 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
                 }
             }
         });
-        return app;
     }
 
     /** A payment app implementation for test. */
     protected static class TestPay implements PaymentApp {
-        private final String mMethodName;
+        private final List<String> mMethodNames;
         private final int mInstrumentPresence;
         private final int mResponseSpeed;
         private InstrumentsCallback mCallback;
 
-        TestPay(String methodName, int instrumentPresence, int responseSpeed) {
-            mMethodName = methodName;
+        TestPay(List<String> methodNames, int instrumentPresence, int responseSpeed) {
+            mMethodNames = methodNames;
             mInstrumentPresence = instrumentPresence;
             mResponseSpeed = responseSpeed;
         }
 
         @Override
         public void getInstruments(Map<String, PaymentMethodData> methodData, String origin,
-                InstrumentsCallback instrumentsCallback) {
+                byte[][] certificateChain, InstrumentsCallback instrumentsCallback) {
             mCallback = instrumentsCallback;
             respond();
         }
@@ -897,7 +938,10 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         void respond() {
             final List<PaymentInstrument> instruments = new ArrayList<>();
             if (mInstrumentPresence == HAVE_INSTRUMENTS) {
-                instruments.add(new TestPayInstrument(mMethodName));
+                for (String methodName : mMethodNames) {
+                    instruments.add(
+                            new TestPayInstrument(getAppIdentifier(), methodName, methodName));
+                }
             }
             Runnable instrumentsReady = new Runnable() {
                 @Override
@@ -916,19 +960,21 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         @Override
         public Set<String> getAppMethodNames() {
             Set<String> methodNames = new HashSet<>();
-            methodNames.add(mMethodName);
+            methodNames.addAll(mMethodNames);
             return methodNames;
         }
 
         @Override
         public boolean supportsMethodsAndData(Map<String, PaymentMethodData> methodsAndData) {
             assert methodsAndData != null;
-            return methodsAndData.containsKey(mMethodName);
+            Set<String> methodNames = new HashSet<>(methodsAndData.keySet());
+            methodNames.retainAll(getAppMethodNames());
+            return !methodNames.isEmpty();
         }
 
         @Override
         public String getAppIdentifier() {
-            return mMethodName;
+            return TestPay.this.toString();
         }
     }
 
@@ -936,8 +982,8 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
     private static class TestPayInstrument extends PaymentInstrument {
         private final String mMethodName;
 
-        TestPayInstrument(String methodName) {
-            super(methodName, "Test Pay", null, null);
+        TestPayInstrument(String appId, String methodName, String label) {
+            super(appId + methodName, label, null, null);
             mMethodName = methodName;
         }
 
@@ -949,8 +995,9 @@ abstract class PaymentRequestTestBase extends ChromeActivityTestCaseBase<ChromeT
         }
 
         @Override
-        public void invokePaymentApp(String merchantName, String origin, PaymentItem total,
-                List<PaymentItem> cart, Map<String, PaymentMethodData> methodData,
+        public void invokePaymentApp(String merchantName, String origin, byte[][] certificateChain,
+                Map<String, PaymentMethodData> methodData, PaymentItem total,
+                List<PaymentItem> displayItems, Map<String, PaymentDetailsModifier> modifiers,
                 InstrumentDetailsCallback detailsCallback) {
             detailsCallback.onInstrumentDetailsReady(
                     mMethodName, "{\"transaction\": 1337}");

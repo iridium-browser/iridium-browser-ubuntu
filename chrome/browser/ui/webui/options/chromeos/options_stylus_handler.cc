@@ -9,6 +9,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/events/devices/input_device_manager.h"
 
 namespace chromeos {
 namespace options {
@@ -24,9 +25,11 @@ constexpr char kAppPreferredKey[] = "preferred";
 
 OptionsStylusHandler::OptionsStylusHandler() : weak_ptr_factory_(this) {
   NoteTakingHelper::Get()->AddObserver(this);
+  ui::InputDeviceManager::GetInstance()->AddObserver(this);
 }
 
 OptionsStylusHandler::~OptionsStylusHandler() {
+  ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
   NoteTakingHelper::Get()->RemoveObserver(this);
 }
 
@@ -48,7 +51,7 @@ void OptionsStylusHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_SETTINGS_STYLUS_ENABLE_STYLUS_TOOLS));
   localized_strings->SetString(
       "stylusFindMoreApps",
-      l10n_util::GetStringUTF16(IDS_SETTINGS_STYLUS_FIND_MORE_APPS));
+      l10n_util::GetStringUTF16(IDS_SETTINGS_STYLUS_FIND_MORE_APPS_PRIMARY));
   localized_strings->SetString(
       "stylusNoteTakingApp",
       l10n_util::GetStringUTF16(IDS_OPTIONS_STYLUS_NOTE_TAKING_APP_LABEL));
@@ -60,9 +63,6 @@ void OptionsStylusHandler::GetLocalizedValues(
       "stylusNoteTakingAppWaitingForAndroid",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_STYLUS_NOTE_TAKING_APP_WAITING_FOR_ANDROID));
-
-  localized_strings->SetBoolean("showStylusSettings",
-                                ash::IsPaletteFeatureEnabled());
 }
 
 void OptionsStylusHandler::InitializePage() {
@@ -74,10 +74,32 @@ void OptionsStylusHandler::RegisterMessages() {
       "setPreferredNoteTakingApp",
       base::Bind(&OptionsStylusHandler::SetPreferredNoteTakingApp,
                  weak_ptr_factory_.GetWeakPtr()));
+  web_ui()->RegisterMessageCallback(
+      "requestStylusHardwareState",
+      base::Bind(&OptionsStylusHandler::RequestStylusHardwareState,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OptionsStylusHandler::OnAvailableNoteTakingAppsUpdated() {
   UpdateNoteTakingApps();
+}
+
+void OptionsStylusHandler::OnDeviceListsComplete() {
+  SendHasStylus();
+}
+
+void OptionsStylusHandler::RequestStylusHardwareState(
+    const base::ListValue* args) {
+  if (ui::InputDeviceManager::GetInstance()->AreDeviceListsComplete())
+    SendHasStylus();
+}
+
+void OptionsStylusHandler::SendHasStylus() {
+  DCHECK(ui::InputDeviceManager::GetInstance()->AreDeviceListsComplete());
+
+  web_ui()->CallJavascriptFunctionUnsafe(
+      "BrowserOptions.setStylusInputStatus",
+      base::Value(ash::palette_utils::HasStylusInput()));
 }
 
 void OptionsStylusHandler::UpdateNoteTakingApps() {
@@ -105,9 +127,9 @@ void OptionsStylusHandler::UpdateNoteTakingApps() {
     }
   }
 
-  web_ui()->CallJavascriptFunctionUnsafe(
-      "StylusOverlay.updateNoteTakingApps", apps_list,
-      base::FundamentalValue(waiting_for_android));
+  web_ui()->CallJavascriptFunctionUnsafe("StylusOverlay.updateNoteTakingApps",
+                                         apps_list,
+                                         base::Value(waiting_for_android));
 }
 
 void OptionsStylusHandler::SetPreferredNoteTakingApp(

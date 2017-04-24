@@ -37,6 +37,7 @@ class BrowserNonClientFrameViewMus : public BrowserNonClientFrameView,
   int GetThemeBackgroundXInset() const override;
   void UpdateThrobber(bool running) override;
   views::View* GetProfileSwitcherView() const override;
+  void UpdateClientArea() override;
 
   // views::NonClientFrameView:
   gfx::Rect GetBoundsForClientView() const override;
@@ -65,9 +66,6 @@ class BrowserNonClientFrameViewMus : public BrowserNonClientFrameView,
   void UpdateProfileIcons() override;
 
  private:
-  // Resets the client area of the WindowTreeHostMus.
-  void UpdateClientArea();
-
   // TabStripObserver:
   void TabStripMaxXChanged(TabStrip* tab_strip) override;
   void TabStripDeleted(TabStrip* tab_strip) override;
@@ -78,11 +76,6 @@ class BrowserNonClientFrameViewMus : public BrowserNonClientFrameView,
   // Distance between the right edge of the NonClientFrameView and the tab
   // strip.
   int GetTabStripRightInset() const;
-
-  // Returns true if we should use a super short header with light bars instead
-  // of regular tabs. This header is used in immersive fullscreen when the
-  // top-of-window views are not revealed.
-  bool UseImmersiveLightbarHeaderStyle() const;
 
   // Returns true if the header should be painted so that it looks the same as
   // the header used for packaged apps. Packaged apps use a different color
@@ -98,10 +91,6 @@ class BrowserNonClientFrameViewMus : public BrowserNonClientFrameView,
   // Returns true if there is anything to paint. Some fullscreen windows do not
   // need their frames painted.
   bool ShouldPaint() const;
-
-  // Paints the header background when the frame is in immersive fullscreen and
-  // tab light bar is visible.
-  void PaintImmersiveLightbarStyleHeader(gfx::Canvas* canvas);
 
   void PaintToolbarBackground(gfx::Canvas* canvas);
 

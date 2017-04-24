@@ -32,6 +32,7 @@
 #include "core/dom/TaskRunnerHelper.h"
 #include "core/events/MouseEvent.h"
 #include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLVideoElement.h"
 #include "core/html/shadow/MediaControlsMediaEventListener.h"
@@ -67,12 +68,33 @@ static bool shouldShowFullscreenButton(const HTMLMediaElement& mediaElement) {
   if (!Fullscreen::fullscreenEnabled(mediaElement.document()))
     return false;
 
+  if (mediaElement.controlsList()->shouldHideFullscreen()) {
+    UseCounter::count(mediaElement.document(),
+                      UseCounter::HTMLMediaElementControlsListNoFullscreen);
+    return false;
+  }
+
   return true;
 }
 
 static bool shouldShowCastButton(HTMLMediaElement& mediaElement) {
-  return !mediaElement.fastHasAttribute(HTMLNames::disableremoteplaybackAttr) &&
-         mediaElement.hasRemoteRoutes();
+  if (mediaElement.fastHasAttribute(HTMLNames::disableremoteplaybackAttr))
+    return false;
+
+  // Explicitly do not show cast button when the mediaControlsEnabled setting is
+  // false to make sure the overlay does not appear.
+  Document& document = mediaElement.document();
+  if (document.settings() && !document.settings()->getMediaControlsEnabled())
+    return false;
+
+  // The page disabled the button via the attribute.
+  if (mediaElement.controlsList()->shouldHideRemotePlayback()) {
+    UseCounter::count(mediaElement.document(),
+                      UseCounter::HTMLMediaElementControlsListNoRemotePlayback);
+    return false;
+  }
+
+  return mediaElement.hasRemoteRoutes();
 }
 
 static bool preferHiddenVolumeControls(const Document& document) {
@@ -361,6 +383,12 @@ void MediaControls::reset() {
   onVolumeChange();
   onTextTracksAddedOrRemoved();
 
+  onControlsListUpdated();
+}
+
+void MediaControls::onControlsListUpdated() {
+  BatchedControlUpdate batch(this);
+
   m_fullscreenButton->setIsWanted(shouldShowFullscreenButton(mediaElement()));
 
   refreshCastButtonVisibilityWithoutUpdate();
@@ -633,7 +661,6 @@ void MediaControls::defaultEventHandler(Event* event) {
     // When we get a mouse move, show the media controls, and start a timer
     // that will hide the media controls after a 3 seconds without a mouse move.
     makeOpaque();
-    refreshCastButtonVisibility();
     if (shouldHideMediaControls(IgnoreVideoHover))
       startHideMediaControlsTimer();
     return;
@@ -679,6 +706,27 @@ bool MediaControls::containsRelatedTarget(Event* event) {
   if (!relatedTarget)
     return false;
   return contains(relatedTarget->toNode());
+}
+
+void MediaControls::onInsertedIntoDocument() {
+  // TODO(mlamouri): we should show the controls instead of having
+  // HTMLMediaElement do it.
+
+  // m_windowEventListener doesn't need to be re-attached as it's only needed
+  // when a menu is visible.
+  m_mediaEventListener->attach();
+  if (m_orientationLockDelegate)
+    m_orientationLockDelegate->attach();
+}
+
+void MediaControls::onRemovedFromDocument() {
+  // TODO(mlamouri): we hide show the controls instead of having
+  // HTMLMediaElement do it.
+
+  m_windowEventListener->stop();
+  m_mediaEventListener->detach();
+  if (m_orientationLockDelegate)
+    m_orientationLockDelegate->detach();
 }
 
 void MediaControls::onVolumeChange() {
@@ -823,27 +871,9 @@ void MediaControls::computeWhichControlsFit() {
       m_durationDisplay.get(),
   };
 
-  int usedWidth = 0;
-
   // TODO(mlamouri): we need a more dynamic way to find out the width of an
   // element.
   const int sliderMargin = 36;  // Sliders have 18px margin on each side.
-
-  // Assume that all controls require 48px, unless we can get the computed
-  // style for the play button.  Since the play button or overflow is always
-  // shown, one of the two buttons should be available the first time we're
-  // called after layout.  This will
-  // also be the first time we have m_panelWidth!=0, so it won't matter if
-  // we get this wrong before that.
-  int minimumWidth = 48;
-  if (m_playButton->layoutObject() && m_playButton->layoutObject()->style()) {
-    const ComputedStyle* style = m_playButton->layoutObject()->style();
-    minimumWidth = ceil(style->width().pixels() / style->effectiveZoom());
-  } else if (m_overflowMenu->layoutObject() &&
-             m_overflowMenu->layoutObject()->style()) {
-    const ComputedStyle* style = m_overflowMenu->layoutObject()->style();
-    minimumWidth = ceil(style->width().pixels() / style->effectiveZoom());
-  }
 
   if (!m_panelWidth) {
     // No layout yet -- hide everything, then make them show up later.
@@ -857,12 +887,27 @@ void MediaControls::computeWhichControlsFit() {
     return;
   }
 
+  // Assume that all controls require 48px, unless we can get the computed
+  // style for a button. The minimumWidth is recorded and re-use for future
+  // MediaControls instances and future calls to this method given that at the
+  // moment the controls button width is per plataform.
+  // TODO(mlamouri): improve the mechanism without bandaid.
+  static int minimumWidth = 48;
+  if (m_playButton->layoutObject() && m_playButton->layoutObject()->style()) {
+    const ComputedStyle* style = m_playButton->layoutObject()->style();
+    minimumWidth = ceil(style->width().pixels() / style->effectiveZoom());
+  } else if (m_overflowMenu->layoutObject() &&
+             m_overflowMenu->layoutObject()->style()) {
+    const ComputedStyle* style = m_overflowMenu->layoutObject()->style();
+    minimumWidth = ceil(style->width().pixels() / style->effectiveZoom());
+  }
+
   // Insert an overflow menu. However, if we see that the overflow menu
   // doesn't end up containing at least two elements, we will not display it
   // but instead make place for the first element that was dropped.
   m_overflowMenu->setDoesFit(true);
   m_overflowMenu->setIsWanted(true);
-  usedWidth = minimumWidth;
+  int usedWidth = minimumWidth;
 
   std::list<MediaControlElement*> overflowElements;
   MediaControlElement* firstDisplacedElement = nullptr;

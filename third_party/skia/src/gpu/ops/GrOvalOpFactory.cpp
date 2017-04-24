@@ -9,7 +9,6 @@
 
 #include "GrDrawOpTest.h"
 #include "GrGeometryProcessor.h"
-#include "GrInvariantOutput.h"
 #include "GrOpFlushState.h"
 #include "GrProcessor.h"
 #include "GrResourceProvider.h"
@@ -246,11 +245,13 @@ private:
 
 GR_DEFINE_GEOMETRY_PROCESSOR_TEST(CircleGeometryProcessor);
 
+#if GR_TEST_UTILS
 sk_sp<GrGeometryProcessor> CircleGeometryProcessor::TestCreate(GrProcessorTestData* d) {
     return sk_sp<GrGeometryProcessor>(new CircleGeometryProcessor(
             d->fRandom->nextBool(), d->fRandom->nextBool(), d->fRandom->nextBool(),
             d->fRandom->nextBool(), GrTest::TestMatrix(d->fRandom)));
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -382,10 +383,12 @@ private:
 
 GR_DEFINE_GEOMETRY_PROCESSOR_TEST(EllipseGeometryProcessor);
 
+#if GR_TEST_UTILS
 sk_sp<GrGeometryProcessor> EllipseGeometryProcessor::TestCreate(GrProcessorTestData* d) {
     return sk_sp<GrGeometryProcessor>(
             new EllipseGeometryProcessor(d->fRandom->nextBool(), GrTest::TestMatrix(d->fRandom)));
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -548,10 +551,12 @@ private:
 
 GR_DEFINE_GEOMETRY_PROCESSOR_TEST(DIEllipseGeometryProcessor);
 
+#if GR_TEST_UTILS
 sk_sp<GrGeometryProcessor> DIEllipseGeometryProcessor::TestCreate(GrProcessorTestData* d) {
     return sk_sp<GrGeometryProcessor>(new DIEllipseGeometryProcessor(
             GrTest::TestMatrix(d->fRandom), (DIEllipseStyle)(d->fRandom->nextRangeU(0, 2))));
 }
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -800,9 +805,9 @@ public:
 private:
     CircleOp() : INHERITED(ClassID()) {}
 
-    void getPipelineAnalysisInput(GrPipelineAnalysisDrawOpInput* input) const override {
-        input->pipelineColorInput()->setKnownFourComponents(fGeoData[0].fColor);
-        input->pipelineCoverageInput()->setUnknownSingleComponent();
+    void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs* input) const override {
+        input->colorInput()->setToConstant(fGeoData[0].fColor);
+        input->coverageInput()->setToUnknown();
     }
 
     void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
@@ -1097,6 +1102,12 @@ private:
 
     bool onCombineIfPossible(GrOp* t, const GrCaps& caps) override {
         CircleOp* that = t->cast<CircleOp>();
+
+        // can only represent 65535 unique vertices with 16-bit indices
+        if (fVertCount + that->fVertCount > 65536) {
+            return false;
+        }
+
         if (!GrPipeline::CanCombine(*this->pipeline(), this->bounds(), *that->pipeline(),
                                     that->bounds(), caps)) {
             return false;
@@ -1245,9 +1256,9 @@ public:
 private:
     EllipseOp() : INHERITED(ClassID()) {}
 
-    void getPipelineAnalysisInput(GrPipelineAnalysisDrawOpInput* input) const override {
-        input->pipelineColorInput()->setKnownFourComponents(fGeoData[0].fColor);
-        input->pipelineCoverageInput()->setUnknownSingleComponent();
+    void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs* input) const override {
+        input->colorInput()->setToConstant(fGeoData[0].fColor);
+        input->coverageInput()->setToUnknown();
     }
 
     void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
@@ -1459,9 +1470,9 @@ public:
 private:
     DIEllipseOp() : INHERITED(ClassID()) {}
 
-    void getPipelineAnalysisInput(GrPipelineAnalysisDrawOpInput* input) const override {
-        input->pipelineColorInput()->setKnownFourComponents(fGeoData[0].fColor);
-        input->pipelineCoverageInput()->setUnknownSingleComponent();
+    void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs* input) const override {
+        input->colorInput()->setToConstant(fGeoData[0].fColor);
+        input->coverageInput()->setToUnknown();
     }
 
     void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
@@ -1774,9 +1785,9 @@ public:
     }
 
 private:
-    void getPipelineAnalysisInput(GrPipelineAnalysisDrawOpInput* input) const override {
-        input->pipelineColorInput()->setKnownFourComponents(fGeoData[0].fColor);
-        input->pipelineCoverageInput()->setUnknownSingleComponent();
+    void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs* input) const override {
+        input->colorInput()->setToConstant(fGeoData[0].fColor);
+        input->coverageInput()->setToUnknown();
     }
 
     void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
@@ -1988,6 +1999,12 @@ private:
 
     bool onCombineIfPossible(GrOp* t, const GrCaps& caps) override {
         CircularRRectOp* that = t->cast<CircularRRectOp>();
+
+        // can only represent 65535 unique vertices with 16-bit indices
+        if (fVertCount + that->fVertCount > 65536) {
+            return false;
+        }
+
         if (!GrPipeline::CanCombine(*this->pipeline(), this->bounds(), *that->pipeline(),
                                     that->bounds(), caps)) {
             return false;
@@ -2130,9 +2147,9 @@ public:
 private:
     EllipticalRRectOp() : INHERITED(ClassID()) {}
 
-    void getPipelineAnalysisInput(GrPipelineAnalysisDrawOpInput* input) const override {
-        input->pipelineColorInput()->setKnownFourComponents(fGeoData[0].fColor);
-        input->pipelineCoverageInput()->setUnknownSingleComponent();
+    void getFragmentProcessorAnalysisInputs(FragmentProcessorAnalysisInputs* input) const override {
+        input->colorInput()->setToConstant(fGeoData[0].fColor);
+        input->coverageInput()->setToUnknown();
     }
 
     void applyPipelineOptimizations(const GrPipelineOptimizations& optimizations) override {
@@ -2365,14 +2382,14 @@ std::unique_ptr<GrDrawOp> GrOvalOpFactory::MakeOvalOp(GrColor color,
         return CircleOp::Make(color, viewMatrix, center, width / 2.f, GrStyle(stroke, nullptr));
     }
 
-    // if we have shader derivative support, render as device-independent
-    if (shaderCaps->shaderDerivativeSupport()) {
-        return DIEllipseOp::Make(color, viewMatrix, oval, stroke);
-    }
-
-    // otherwise axis-aligned ellipses only
+    // prefer the device space ellipse op for batchability
     if (viewMatrix.rectStaysRect()) {
         return EllipseOp::Make(color, viewMatrix, oval, stroke);
+    }
+
+    // Otherwise, if we have shader derivative support, render as device-independent
+    if (shaderCaps->shaderDerivativeSupport()) {
+        return DIEllipseOp::Make(color, viewMatrix, oval, stroke);
     }
 
     return nullptr;
@@ -2402,7 +2419,7 @@ std::unique_ptr<GrDrawOp> GrOvalOpFactory::MakeArcOp(GrColor color, const SkMatr
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#ifdef GR_TEST_UTILS
+#if GR_TEST_UTILS
 
 DRAW_OP_TEST_DEFINE(CircleOp) {
     do {

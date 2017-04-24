@@ -36,6 +36,8 @@ import org.chromium.base.SysUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.blink.mojom.MediaSessionAction;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.AppHooks;
+import org.chromium.chrome.browser.notifications.ChromeNotificationBuilder;
 import org.chromium.chrome.browser.notifications.NotificationConstants;
 import org.chromium.content_public.common.MediaMetadata;
 
@@ -84,7 +86,7 @@ public class MediaNotificationManager {
 
     private SparseArray<MediaButtonInfo> mActionToButtonInfo;
 
-    private NotificationCompat.Builder mNotificationBuilder;
+    private ChromeNotificationBuilder mNotificationBuilder;
 
     private Bitmap mDefaultNotificationLargeIcon;
 
@@ -188,9 +190,15 @@ public class MediaNotificationManager {
             MediaNotificationManager manager = getManager();
             if (manager == null || manager.mMediaNotificationInfo == null) return false;
 
-            manager.onServiceStarted(this);
-
-            processAction(intent, manager);
+            if (intent.getAction() == null) {
+                // The intent comes from {@link startService()} or
+                // {@link startForegroundService}.
+                manager.onServiceStarted(this);
+            } else {
+                // The intent comes from the notification. In this case, {@link onServiceStarted()}
+                // does need to be called.
+                processAction(intent, manager);
+            }
             return true;
         }
 
@@ -373,9 +381,8 @@ public class MediaNotificationManager {
     }
 
     private PendingIntent createPendingIntent(String action) {
-        assert mService != null;
-        Intent intent = createIntent(mService).setAction(action);
-        return PendingIntent.getService(mService, 0, intent, PendingIntent.FLAG_CANCEL_CURRENT);
+        Intent intent = createIntent(mContext).setAction(action);
+        return PendingIntent.getService(mContext, 0, intent, PendingIntent.FLAG_CANCEL_CURRENT);
     }
 
     private String getButtonReceiverClassName() {
@@ -408,7 +415,8 @@ public class MediaNotificationManager {
     /**
      * Shows the notification with media controls with the specified media info. Replaces/updates
      * the current notification if already showing. Does nothing if |mediaNotificationInfo| hasn't
-     * changed from the last one.
+     * changed from the last one. If |mediaNotificationInfo.isPaused| is true and the tabId
+     * mismatches |mMediaNotificationInfo.isPaused|, it is also no-op.
      *
      * @param applicationContext context to create the notification with
      * @param notificationInfo information to show in the notification
@@ -538,12 +546,20 @@ public class MediaNotificationManager {
 
     @VisibleForTesting
     @Nullable
-    static NotificationCompat.Builder getNotificationBuilderForTesting(
-            int notificationId) {
+    static ChromeNotificationBuilder getNotificationBuilderForTesting(int notificationId) {
         MediaNotificationManager manager = getManager(notificationId);
         if (manager == null) return null;
 
         return manager.mNotificationBuilder;
+    }
+
+    @VisibleForTesting
+    @Nullable
+    static MediaNotificationInfo getMediaNotificationInfoForTesting(
+            int notificationId) {
+        MediaNotificationManager manager = getManager(notificationId);
+
+        return (manager == null) ? null : manager.mMediaNotificationInfo;
     }
 
     private static boolean isRunningN() {
@@ -576,26 +592,26 @@ public class MediaNotificationManager {
         mActionToButtonInfo = new SparseArray<>();
 
         mActionToButtonInfo.put(MediaSessionAction.PLAY,
-                new MediaButtonInfo(R.drawable.ic_media_control_play, R.string.accessibility_play,
-                        ListenerService.ACTION_PLAY));
+                new MediaButtonInfo(R.drawable.ic_play_arrow_white_36dp,
+                        R.string.accessibility_play, ListenerService.ACTION_PLAY));
         mActionToButtonInfo.put(MediaSessionAction.PAUSE,
-                new MediaButtonInfo(R.drawable.ic_media_control_pause, R.string.accessibility_pause,
+                new MediaButtonInfo(R.drawable.ic_pause_white_36dp, R.string.accessibility_pause,
                         ListenerService.ACTION_PAUSE));
         mActionToButtonInfo.put(CUSTOM_MEDIA_SESSION_ACTION_STOP,
-                new MediaButtonInfo(R.drawable.ic_media_control_stop, R.string.accessibility_stop,
+                new MediaButtonInfo(R.drawable.ic_stop_white_36dp, R.string.accessibility_stop,
                         ListenerService.ACTION_STOP));
         mActionToButtonInfo.put(MediaSessionAction.PREVIOUS_TRACK,
-                new MediaButtonInfo(R.drawable.ic_media_control_skip_previous,
+                new MediaButtonInfo(R.drawable.ic_skip_previous_white_36dp,
                         R.string.accessibility_previous_track,
                         ListenerService.ACTION_PREVIOUS_TRACK));
         mActionToButtonInfo.put(MediaSessionAction.NEXT_TRACK,
-                new MediaButtonInfo(R.drawable.ic_media_control_skip_next,
+                new MediaButtonInfo(R.drawable.ic_skip_next_white_36dp,
                         R.string.accessibility_next_track, ListenerService.ACTION_NEXT_TRACK));
         mActionToButtonInfo.put(MediaSessionAction.SEEK_FORWARD,
-                new MediaButtonInfo(R.drawable.ic_media_control_fast_forward,
+                new MediaButtonInfo(R.drawable.ic_fast_forward_white_36dp,
                         R.string.accessibility_seek_forward, ListenerService.ACTION_SEEK_FORWARD));
         mActionToButtonInfo.put(MediaSessionAction.SEEK_BACKWARD,
-                new MediaButtonInfo(R.drawable.ic_media_control_fast_rewind,
+                new MediaButtonInfo(R.drawable.ic_fast_rewind_white_36dp,
                         R.string.accessibility_seek_backward,
                         ListenerService.ACTION_SEEK_BACKWARD));
     }
@@ -606,6 +622,8 @@ public class MediaNotificationManager {
      * @param service the service that was started
      */
     private void onServiceStarted(ListenerService service) {
+        if (mService == service) return;
+
         mService = service;
         updateNotification();
     }
@@ -614,15 +632,8 @@ public class MediaNotificationManager {
      * Handles the service destruction destruction.
      */
     private void onServiceDestroyed() {
-        // Service already detached
-        if (mService == null) return;
-        // Notification is not showing
-        if (mMediaNotificationInfo == null) return;
-
-        clear(mMediaNotificationInfo.id);
-
-        mNotificationBuilder = null;
         mService = null;
+        if (mMediaNotificationInfo != null) clear(mMediaNotificationInfo.id);
     }
 
     private void onPlay(int actionSource) {
@@ -645,10 +656,26 @@ public class MediaNotificationManager {
 
     private void showNotification(MediaNotificationInfo mediaNotificationInfo) {
         if (mediaNotificationInfo.equals(mMediaNotificationInfo)) return;
+        if (mediaNotificationInfo.isPaused && mMediaNotificationInfo != null
+                && mediaNotificationInfo.tabId != mMediaNotificationInfo.tabId) {
+            return;
+        }
 
         mMediaNotificationInfo = mediaNotificationInfo;
-        mContext.startService(createIntent(mContext));
 
+        // If there's no pending service start request, don't try to start service. If there is a
+        // pending service start request but the service haven't started yet, only update the
+        // |mMediaNotificationInfo|. The service will update the notification later once it's
+        // started.
+        if (mService == null && mediaNotificationInfo.isPaused) return;
+
+        if (mService == null) {
+            updateMediaSession();
+            updateNotificationBuilder();
+            AppHooks.get().startForegroundService(createIntent(mContext));
+        } else {
+            mService.startService(createIntent(mContext));
+        }
         updateNotification();
     }
 
@@ -664,8 +691,11 @@ public class MediaNotificationManager {
             mMediaSession.release();
             mMediaSession = null;
         }
-        mContext.stopService(createIntent(mContext));
+        if (mService != null) {
+            mContext.stopService(createIntent(mContext));
+        }
         mMediaNotificationInfo = null;
+        mNotificationBuilder = null;
     }
 
     private void hideNotification(int tabId) {
@@ -706,8 +736,31 @@ public class MediaNotificationManager {
         if (mMediaNotificationInfo == null) return;
 
         updateMediaSession();
+        updateNotificationBuilder();
 
-        mNotificationBuilder = new NotificationCompat.Builder(mContext);
+        Notification notification = mNotificationBuilder.build();
+
+        // We keep the service as a foreground service while the media is playing. When it is not,
+        // the service isn't stopped but is no longer in foreground, thus at a lower priority.
+        // While the service is in foreground, the associated notification can't be swipped away.
+        // Moving it back to background allows the user to remove the notification.
+        if (mMediaNotificationInfo.supportsSwipeAway() && mMediaNotificationInfo.isPaused) {
+            mService.stopForeground(false /* removeNotification */);
+
+            NotificationManagerCompat manager = NotificationManagerCompat.from(mContext);
+            manager.notify(mMediaNotificationInfo.id, notification);
+        } else {
+            mService.startForeground(mMediaNotificationInfo.id, notification);
+        }
+    }
+
+    private void updateNotificationBuilder() {
+        mNotificationBuilder = AppHooks.get().createChromeNotificationBuilder(
+                true /* preferCompat */, NotificationConstants.CATEGORY_ID_BROWSER,
+                mContext.getString(org.chromium.chrome.R.string.notification_category_browser),
+                NotificationConstants.CATEGORY_GROUP_ID_GENERAL,
+                mContext.getString(
+                        org.chromium.chrome.R.string.notification_category_group_general));
         setMediaStyleLayoutForNotificationBuilder(mNotificationBuilder);
 
         mNotificationBuilder.setSmallIcon(mMediaNotificationInfo.notificationSmallIcon);
@@ -734,21 +787,6 @@ public class MediaNotificationManager {
         mNotificationBuilder.setVisibility(
                 mMediaNotificationInfo.isPrivate ? NotificationCompat.VISIBILITY_PRIVATE
                                                  : NotificationCompat.VISIBILITY_PUBLIC);
-
-        Notification notification = mNotificationBuilder.build();
-
-        // We keep the service as a foreground service while the media is playing. When it is not,
-        // the service isn't stopped but is no longer in foreground, thus at a lower priority.
-        // While the service is in foreground, the associated notification can't be swipped away.
-        // Moving it back to background allows the user to remove the notification.
-        if (mMediaNotificationInfo.supportsSwipeAway() && mMediaNotificationInfo.isPaused) {
-            mService.stopForeground(false /* removeNotification */);
-
-            NotificationManagerCompat manager = NotificationManagerCompat.from(mContext);
-            manager.notify(mMediaNotificationInfo.id, notification);
-        } else {
-            mService.startForeground(mMediaNotificationInfo.id, notification);
-        }
     }
 
     private void updateMediaSession() {
@@ -839,7 +877,7 @@ public class MediaNotificationManager {
         mMediaSession.setActive(true);
     }
 
-    private void setMediaStyleLayoutForNotificationBuilder(NotificationCompat.Builder builder) {
+    private void setMediaStyleLayoutForNotificationBuilder(ChromeNotificationBuilder builder) {
         setMediaStyleNotificationText(builder);
         if (!mMediaNotificationInfo.supportsPlayPause()) {
             builder.setLargeIcon(null);
@@ -862,7 +900,7 @@ public class MediaNotificationManager {
         addNotificationButtons(builder);
     }
 
-    private void addNotificationButtons(NotificationCompat.Builder builder) {
+    private void addNotificationButtons(ChromeNotificationBuilder builder) {
         Set<Integer> actions = new HashSet<>();
 
         // TODO(zqzhang): handle other actions when play/pause is not supported? See
@@ -893,15 +931,8 @@ public class MediaNotificationManager {
 
         // Only apply MediaStyle when NotificationInfo supports play/pause.
         if (mMediaNotificationInfo.supportsPlayPause()) {
-            NotificationCompat.MediaStyle style = new NotificationCompat.MediaStyle();
-            style.setMediaSession(mMediaSession.getSessionToken());
-
-            int[] compactViewActionIndices = computeCompactViewActionIndices(bigViewActions);
-
-            style.setShowActionsInCompactView(compactViewActionIndices);
-            style.setCancelButtonIntent(createPendingIntent(ListenerService.ACTION_CANCEL));
-            style.setShowCancelButton(true);
-            builder.setStyle(style);
+            builder.setMediaStyle(mMediaSession, computeCompactViewActionIndices(bigViewActions),
+                    createPendingIntent(ListenerService.ACTION_CANCEL), true);
         }
     }
 
@@ -912,7 +943,7 @@ public class MediaNotificationManager {
         return bitmapDrawable.getBitmap();
     }
 
-    private void setMediaStyleNotificationText(NotificationCompat.Builder builder) {
+    private void setMediaStyleNotificationText(ChromeNotificationBuilder builder) {
         builder.setContentTitle(mMediaNotificationInfo.metadata.getTitle());
         String artistAndAlbumText = getArtistAndAlbumText(mMediaNotificationInfo.metadata);
         if (isRunningN() || !artistAndAlbumText.isEmpty()) {

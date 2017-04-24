@@ -25,6 +25,7 @@
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/editing/InputMethodController.h"
+#include "core/input/InputDeviceCapabilities.h"
 #include "platform/WindowsKeyboardCodes.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebInputEvent.h"
@@ -94,9 +95,11 @@ KeyboardEvent::KeyboardEvent(const WebKeyboardEvent& key,
           true,
           domWindow,
           0,
-          static_cast<PlatformEvent::Modifiers>(key.modifiers()),
+          static_cast<WebInputEvent::Modifiers>(key.modifiers()),
           TimeTicks::FromSeconds(key.timeStampSeconds()),
-          InputDeviceCapabilities::doesntFireTouchEventsSourceCapabilities()),
+          domWindow
+              ? domWindow->getInputDeviceCapabilities()->firesTouchEvents(false)
+              : nullptr),
       m_keyEvent(WTF::makeUnique<WebKeyboardEvent>(key)),
       // TODO(crbug.com/482880): Fix this initialization to lazy initialization.
       m_code(Platform::current()->domCodeStringFromEnum(key.domCode)),
@@ -114,7 +117,7 @@ KeyboardEvent::KeyboardEvent(const AtomicString& eventType,
       m_location(initializer.location()),
       m_isComposing(initializer.isComposing()) {
   if (initializer.repeat())
-    m_modifiers |= PlatformEvent::IsAutoRepeat;
+    m_modifiers |= WebInputEvent::IsAutoRepeat;
   initLocationModifiers(initializer.location());
 }
 
@@ -193,13 +196,13 @@ int KeyboardEvent::which() const {
 void KeyboardEvent::initLocationModifiers(unsigned location) {
   switch (location) {
     case KeyboardEvent::kDomKeyLocationNumpad:
-      m_modifiers |= PlatformEvent::IsKeyPad;
+      m_modifiers |= WebInputEvent::IsKeyPad;
       break;
     case KeyboardEvent::kDomKeyLocationLeft:
-      m_modifiers |= PlatformEvent::IsLeft;
+      m_modifiers |= WebInputEvent::IsLeft;
       break;
     case KeyboardEvent::kDomKeyLocationRight:
-      m_modifiers |= PlatformEvent::IsRight;
+      m_modifiers |= WebInputEvent::IsRight;
       break;
   }
 }

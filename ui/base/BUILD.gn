@@ -67,6 +67,8 @@ component("base") {
     "accelerators/platform_accelerator_cocoa.mm",
     "android/ui_base_jni_registrar.cc",
     "android/ui_base_jni_registrar.h",
+    "class_property.cc",
+    "class_property.h",
     "clipboard/clipboard_android.cc",
     "clipboard/clipboard_android.h",
     "clipboard/clipboard_mac.h",
@@ -227,6 +229,9 @@ component("base") {
     "nine_image_painter_factory.h",
     "page_transition_types.cc",
     "page_transition_types.h",
+    "platform_window_defaults.cc",
+    "platform_window_defaults.h",
+    "property_data.h",
     "resource/resource_bundle.cc",
     "resource/resource_bundle.h",
     "resource/resource_bundle_android.cc",
@@ -662,6 +667,8 @@ static_library("test_support") {
     sources += [
       "test/ios/keyboard_appearance_listener.h",
       "test/ios/keyboard_appearance_listener.mm",
+      "test/ios/ui_image_test_utils.h",
+      "test/ios/ui_image_test_utils.mm",
       "test/ios/ui_view_test_utils.h",
       "test/ios/ui_view_test_utils.mm",
     ]
@@ -743,6 +750,7 @@ bundle_data("ui_base_unittests_bundle_data") {
 
 test("ui_base_unittests") {
   sources = [
+    "class_property_unittest.cc",
     "clipboard/clipboard_mac_unittest.mm",
     "clipboard/clipboard_util_mac_unittest.mm",
     "l10n/l10n_util_mac_unittest.mm",
@@ -778,7 +786,10 @@ test("ui_base_unittests") {
   if (is_ios) {
     # Compile this Mac file on iOS as well.
     set_sources_assignment_filter([])
-    sources += [ "l10n/l10n_util_mac_unittest.mm" ]
+    sources += [
+      "l10n/l10n_util_mac_unittest.mm",
+      "test/ios/ui_image_test_utils_unittest.mm",
+    ]
     set_sources_assignment_filter(sources_assignment_filter)
   } else {  # !is_ios
     sources += [

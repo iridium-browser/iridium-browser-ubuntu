@@ -16,7 +16,7 @@ class HTMLVideoElement;
 
 // MediaControlsOrientationLockDelegate is implementing the orientation lock
 // feature when a <video> is fullscreen. It is meant to be created by
-// `MediaControls` when the feature apply. Once created, it will use events to
+// `MediaControls` when the feature applies. Once created, it will use events to
 // change state.
 //
 // The different states of the class are:
@@ -42,6 +42,15 @@ class CORE_EXPORT MediaControlsOrientationLockDelegate final
     : public EventListener {
  public:
   explicit MediaControlsOrientationLockDelegate(HTMLVideoElement&);
+
+  // Called by MediaControls when the HTMLMediaElement is added to a document
+  // document. All event listeners should be added.
+  void attach();
+
+  // Called by MediaControls when the HTMLMediaElement is no longer in the
+  // document. All event listeners should be removed in order to prepare the
+  // object to be garbage collected.
+  void detach();
 
   // EventListener implementation.
   bool operator==(const EventListener&) const override;

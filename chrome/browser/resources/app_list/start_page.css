@@ -18,7 +18,7 @@ body {
 }
 
 #default_logo {
-  background-image: url(../../../../ui/webui/resources/images/google_logo.svg);
+  background-image: url(../../../../ui/webui/resources/images/iridium_text.svg);
   background-repeat: no-repeat;
   height: 92px;
   margin: auto;

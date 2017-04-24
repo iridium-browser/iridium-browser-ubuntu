@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/ash/chrome_new_window_client.h"
 
 #include "ash/content/keyboard_overlay/keyboard_overlay_view.h"
+#include "ash/public/interfaces/constants.mojom.h"
 #include "base/macros.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
 #include "chrome/browser/extensions/api/terminal/terminal_extension_helper.h"
@@ -12,7 +13,6 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
-#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -33,6 +33,7 @@
 #include "extensions/common/constants.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/wm/public/activation_client.h"
 
 namespace {
 
@@ -44,15 +45,27 @@ void RestoreTabUsingProfile(Profile* profile) {
 
 }  // namespace
 
+// static
+Browser* ChromeNewWindowClient::GetActiveBrowser() {
+  Browser* browser = BrowserList::GetInstance()->GetLastActive();
+  if (browser) {
+    aura::Window* window = browser->window()->GetNativeWindow();
+    aura::client::ActivationClient* client =
+        aura::client::GetActivationClient(window->GetRootWindow());
+    if (client->GetActiveWindow() == window)
+      return browser;
+  }
+  return nullptr;
+}
+
 ChromeNewWindowClient::ChromeNewWindowClient() : binding_(this) {
   service_manager::Connector* connector =
       content::ServiceManagerConnection::GetForProcess()->GetConnector();
-  connector->BindInterface(ash_util::GetAshServiceName(),
-                           &new_window_controller_);
+  connector->BindInterface(ash::mojom::kServiceName, &new_window_controller_);
 
   // Register this object as the client interface implementation.
   ash::mojom::NewWindowClientAssociatedPtrInfo ptr_info;
-  binding_.Bind(&ptr_info, new_window_controller_.associated_group());
+  binding_.Bind(&ptr_info);
   new_window_controller_->SetClient(std::move(ptr_info));
 }
 
@@ -102,7 +115,7 @@ class ChromeNewWindowClient::TabRestoreHelper
 };
 
 void ChromeNewWindowClient::NewTab() {
-  Browser* browser = BrowserList::GetInstance()->GetLastActive();
+  Browser* browser = GetActiveBrowser();
   if (browser && browser->is_type_tabbed()) {
     chrome::NewTab(browser);
     return;
@@ -120,7 +133,7 @@ void ChromeNewWindowClient::NewTab() {
 }
 
 void ChromeNewWindowClient::NewWindow(bool is_incognito) {
-  Browser* browser = BrowserList::GetInstance()->GetLastActive();
+  Browser* browser = GetActiveBrowser();
   Profile* profile = (browser && browser->profile())
                          ? browser->profile()->GetOriginalProfile()
                          : ProfileManager::GetActiveUserProfile();
@@ -173,8 +186,8 @@ void ChromeNewWindowClient::RestoreTab() {
     return;
   }
 
-  Browser* browser = BrowserList::GetInstance()->GetLastActive();
-  Profile* profile = browser ? browser->profile() : NULL;
+  Browser* browser = GetActiveBrowser();
+  Profile* profile = browser ? browser->profile() : nullptr;
   if (!profile)
     profile = ProfileManager::GetActiveUserProfile();
   if (profile->IsOffTheRecord())
@@ -201,9 +214,9 @@ void ChromeNewWindowClient::ShowKeyboardOverlay() {
 }
 
 void ChromeNewWindowClient::ShowTaskManager() {
-  chrome::OpenTaskManager(NULL);
+  chrome::OpenTaskManager(nullptr);
 }
 
 void ChromeNewWindowClient::OpenFeedbackPage() {
-  chrome::OpenFeedbackDialog(BrowserList::GetInstance()->GetLastActive());
+  chrome::OpenFeedbackDialog(GetActiveBrowser());
 }

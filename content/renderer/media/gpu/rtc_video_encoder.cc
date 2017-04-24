@@ -6,11 +6,13 @@
 
 #include <string.h>
 
+#include <memory>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/rand_util.h"
@@ -41,6 +43,8 @@ media::VideoCodecProfile WebRTCVideoCodecToVideoCodecProfile(
   switch (type) {
     case webrtc::kVideoCodecVP8:
       return media::VP8PROFILE_ANY;
+    case webrtc::kVideoCodecVP9:
+      return media::VP9PROFILE_MIN;
     case webrtc::kVideoCodecH264:
       // TODO(magjed): WebRTC is only using Baseline profile for now. Update
       // once http://crbug/webrtc/6337 is fixed.
@@ -220,8 +224,8 @@ class RTCVideoEncoder::Impl
   gfx::Size input_visible_size_;
 
   // Shared memory buffers for input/output with the VEA.
-  ScopedVector<base::SharedMemory> input_buffers_;
-  ScopedVector<base::SharedMemory> output_buffers_;
+  std::vector<std::unique_ptr<base::SharedMemory>> input_buffers_;
+  std::vector<std::unique_ptr<base::SharedMemory>> output_buffers_;
 
   // Input buffers ready to be filled with input from Encode().  As a LIFO since
   // we don't care about ordering.
@@ -233,6 +237,10 @@ class RTCVideoEncoder::Impl
 
   // 15 bits running index of the VP8 frames. See VP8 RTP spec for details.
   uint16_t picture_id_;
+
+  // |capture_time_ms_| field of the last returned webrtc::EncodedImage from
+  // BitstreamBufferReady().
+  int64_t last_capture_time_ms_;
 
   // webrtc::VideoEncoder encode complete callback.
   webrtc::EncodedImageCallback* encoded_image_callback_;
@@ -261,6 +269,7 @@ RTCVideoEncoder::Impl::Impl(media::GpuVideoAcceleratorFactories* gpu_factories,
       input_next_frame_(NULL),
       input_next_frame_keyframe_(false),
       output_buffers_free_count_(0),
+      last_capture_time_ms_(-1),
       encoded_image_callback_(nullptr),
       video_codec_type_(video_codec_type),
       status_(WEBRTC_VIDEO_CODEC_UNINITIALIZED) {
@@ -419,7 +428,7 @@ void RTCVideoEncoder::Impl::RequireBitstreamBuffers(
                         media::VideoEncodeAccelerator::kPlatformFailureError);
       return;
     }
-    input_buffers_.push_back(shm.release());
+    input_buffers_.push_back(std::move(shm));
     input_buffers_free_.push_back(i);
   }
 
@@ -431,7 +440,7 @@ void RTCVideoEncoder::Impl::RequireBitstreamBuffers(
                         media::VideoEncodeAccelerator::kPlatformFailureError);
       return;
     }
-    output_buffers_.push_back(shm.release());
+    output_buffers_.push_back(std::move(shm));
   }
 
   // Immediately provide all output buffers to the VEA.
@@ -461,7 +470,8 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(int32_t bitstream_buffer_id,
                       media::VideoEncodeAccelerator::kPlatformFailureError);
     return;
   }
-  base::SharedMemory* output_buffer = output_buffers_[bitstream_buffer_id];
+  base::SharedMemory* output_buffer =
+      output_buffers_[bitstream_buffer_id].get();
   if (payload_size > output_buffer->mapped_size()) {
     LogAndNotifyError(FROM_HERE, "invalid payload_size",
                       media::VideoEncodeAccelerator::kPlatformFailureError);
@@ -469,21 +479,22 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(int32_t bitstream_buffer_id,
   }
   output_buffers_free_count_--;
 
-  // Derive the capture time (in ms) and RTP timestamp (in 90KHz ticks).
-  int64_t capture_time_us, capture_time_ms;
-  uint32_t rtp_timestamp;
+  // Derive the capture time in ms from system clock. Make sure that it is
+  // greater than the last.
+  const int64_t capture_time_us = rtc::TimeMicros();
+  int64_t capture_time_ms =
+      capture_time_us / base::Time::kMicrosecondsPerMillisecond;
+  capture_time_ms = std::max(capture_time_ms, last_capture_time_ms_ + 1);
+  last_capture_time_ms_ = capture_time_ms;
 
-  if (!timestamp.is_zero()) {
-    capture_time_us = timestamp.InMicroseconds();;
-    capture_time_ms = timestamp.InMilliseconds();
-  } else {
-    // Fallback to the current time if encoder does not provide timestamp.
-    capture_time_us = rtc::TimeMicros();
-    capture_time_ms = capture_time_us / base::Time::kMicrosecondsPerMillisecond;
-  }
-  // RTP timestamp can wrap around. Get the lower 32 bits.
-  rtp_timestamp = static_cast<uint32_t>(
-      capture_time_us * 90 / base::Time::kMicrosecondsPerMillisecond);
+  // Fallback to the current time if encoder does not provide timestamp.
+  const int64_t encoder_time_us =
+      timestamp.is_zero() ? capture_time_us : timestamp.InMicroseconds();
+
+  // Derive the RTP timestamp (in 90KHz ticks).  It can wrap around, get the
+  // lower 32 bits.
+  const uint32_t rtp_timestamp = static_cast<uint32_t>(
+      encoder_time_us * 90 / base::Time::kMicrosecondsPerMillisecond);
 
   webrtc::EncodedImage image(
       reinterpret_cast<uint8_t*>(output_buffer->memory()), payload_size,
@@ -571,7 +582,7 @@ void RTCVideoEncoder::Impl::EncodeOneFrame() {
     const base::TimeDelta timestamp =
         frame ? frame->timestamp()
               : base::TimeDelta::FromMilliseconds(next_frame->ntp_time_ms());
-    base::SharedMemory* input_buffer = input_buffers_[index];
+    base::SharedMemory* input_buffer = input_buffers_[index].get();
     frame = media::VideoFrame::WrapExternalSharedMemory(
         media::PIXEL_FORMAT_I420, input_frame_coded_size_,
         gfx::Rect(input_visible_size_), input_visible_size_,

@@ -2198,12 +2198,6 @@ void LCodeGen::DoBranch(LBranch* instr) {
         __ j(equal, instr->TrueLabel(chunk_));
       }
 
-      if (expected & ToBooleanHint::kSimdValue) {
-        // SIMD value -> true.
-        __ CmpInstanceType(map, SIMD128_VALUE_TYPE);
-        __ j(equal, instr->TrueLabel(chunk_));
-      }
-
       if (expected & ToBooleanHint::kHeapNumber) {
         // heap number -> false iff +0, -0, or NaN.
         Label not_heap_number;
@@ -2648,13 +2642,36 @@ void LCodeGen::DoLoadContextSlot(LLoadContextSlot* instr) {
   Register context = ToRegister(instr->context());
   Register result = ToRegister(instr->result());
   __ mov(result, ContextOperand(context, instr->slot_index()));
+
+  if (instr->hydrogen()->RequiresHoleCheck()) {
+    __ cmp(result, factory()->the_hole_value());
+    if (instr->hydrogen()->DeoptimizesOnHole()) {
+      DeoptimizeIf(equal, instr, DeoptimizeReason::kHole);
+    } else {
+      Label is_not_hole;
+      __ j(not_equal, &is_not_hole, Label::kNear);
+      __ mov(result, factory()->undefined_value());
+      __ bind(&is_not_hole);
+    }
+  }
 }
 
 
 void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
   Register context = ToRegister(instr->context());
   Register value = ToRegister(instr->value());
+
+  Label skip_assignment;
+
   Operand target = ContextOperand(context, instr->slot_index());
+  if (instr->hydrogen()->RequiresHoleCheck()) {
+    __ cmp(target, factory()->the_hole_value());
+    if (instr->hydrogen()->DeoptimizesOnHole()) {
+      DeoptimizeIf(equal, instr, DeoptimizeReason::kHole);
+    } else {
+      __ j(not_equal, &skip_assignment, Label::kNear);
+    }
+  }
 
   __ mov(target, value);
   if (instr->hydrogen()->NeedsWriteBarrier()) {
@@ -2666,6 +2683,8 @@ void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
     __ RecordWriteContextSlot(context, offset, value, temp, kSaveFPRegs,
                               EMIT_REMEMBERED_SET, check_needed);
   }
+
+  __ bind(&skip_assignment);
 }
 
 
@@ -4921,6 +4940,15 @@ void LCodeGen::DoCheckValue(LCheckValue* instr) {
 
 
 void LCodeGen::DoDeferredInstanceMigration(LCheckMaps* instr, Register object) {
+  Label deopt, done;
+  // If the map is not deprecated the migration attempt does not make sense.
+  __ push(object);
+  __ mov(object, FieldOperand(object, HeapObject::kMapOffset));
+  __ test(FieldOperand(object, Map::kBitField3Offset),
+          Immediate(Map::Deprecated::kMask));
+  __ pop(object);
+  __ j(zero, &deopt);
+
   {
     PushSafepointRegistersScope scope(this);
     __ push(object);
@@ -4931,7 +4959,12 @@ void LCodeGen::DoDeferredInstanceMigration(LCheckMaps* instr, Register object) {
 
     __ test(eax, Immediate(kSmiTagMask));
   }
-  DeoptimizeIf(zero, instr, DeoptimizeReason::kInstanceMigrationFailed);
+  __ j(not_zero, &done);
+
+  __ bind(&deopt);
+  DeoptimizeIf(no_condition, instr, DeoptimizeReason::kInstanceMigrationFailed);
+
+  __ bind(&done);
 }
 
 
@@ -5366,17 +5399,6 @@ Condition LCodeGen::EmitTypeofIs(LTypeofIsAndBranch* instr, Register input) {
     __ test_b(FieldOperand(input, Map::kBitFieldOffset),
               Immediate((1 << Map::kIsCallable) | (1 << Map::kIsUndetectable)));
     final_branch_condition = zero;
-
-// clang-format off
-#define SIMD128_TYPE(TYPE, Type, type, lane_count, lane_type)         \
-  } else if (String::Equals(type_name, factory()->type##_string())) { \
-    __ JumpIfSmi(input, false_label, false_distance);                 \
-    __ cmp(FieldOperand(input, HeapObject::kMapOffset),               \
-           factory()->type##_map());                                  \
-    final_branch_condition = equal;
-  SIMD128_TYPES(SIMD128_TYPE)
-#undef SIMD128_TYPE
-    // clang-format on
 
   } else {
     __ jmp(false_label, false_distance);

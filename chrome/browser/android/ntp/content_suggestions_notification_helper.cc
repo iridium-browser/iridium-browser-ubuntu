@@ -22,6 +22,9 @@
 #include "ui/gfx/image/image_skia.h"
 
 using base::android::JavaParamRef;
+using params::ntp_snippets::kNotificationsFeature;
+using params::ntp_snippets::kNotificationsIgnoredLimitParam;
+using params::ntp_snippets::kNotificationsIgnoredDefaultLimit;
 
 namespace ntp_snippets {
 
@@ -32,9 +35,8 @@ bool IsDisabledForProfile(Profile* profile) {
   int current =
       prefs->GetInteger(prefs::kContentSuggestionsConsecutiveIgnoredPrefName);
   int limit = variations::GetVariationParamByFeatureAsInt(
-      kContentSuggestionsNotificationsFeature,
-      kContentSuggestionsNotificationsIgnoredLimitParam,
-      kContentSuggestionsNotificationsIgnoredDefaultLimit);
+      kNotificationsFeature, kNotificationsIgnoredLimitParam,
+      kNotificationsIgnoredDefaultLimit);
   return current >= limit;
 }
 
@@ -46,15 +48,16 @@ bool ContentSuggestionsNotificationHelper::SendNotification(
     const base::string16& title,
     const base::string16& text,
     const gfx::Image& image,
-    base::Time timeout_at) {
+    base::Time timeout_at,
+    int priority) {
   JNIEnv* env = base::android::AttachCurrentThread();
   SkBitmap skimage = image.AsImageSkia().GetRepresentation(1.0f).sk_bitmap();
   if (skimage.empty())
     return false;
 
-  jint timeout_at_millis = timeout_at.ToJavaTime();
+  jlong timeout_at_millis = timeout_at.ToJavaTime();
   if (timeout_at == base::Time::Max()) {
-    timeout_at_millis = std::numeric_limits<jint>::max();
+    timeout_at_millis = std::numeric_limits<jlong>::max();
   }
 
   if (Java_ContentSuggestionsNotificationHelper_showNotification(
@@ -63,7 +66,7 @@ bool ContentSuggestionsNotificationHelper::SendNotification(
           base::android::ConvertUTF8ToJavaString(env, url.spec()),
           base::android::ConvertUTF16ToJavaString(env, title),
           base::android::ConvertUTF16ToJavaString(env, text),
-          gfx::ConvertToJavaBitmap(&skimage), timeout_at_millis)) {
+          gfx::ConvertToJavaBitmap(&skimage), timeout_at_millis, priority)) {
     DVLOG(1) << "Displayed notification for " << id;
     return true;
   } else {

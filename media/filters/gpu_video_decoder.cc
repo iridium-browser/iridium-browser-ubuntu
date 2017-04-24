@@ -29,15 +29,12 @@
 #include "media/base/pipeline_status.h"
 #include "media/base/surface_manager.h"
 #include "media/base/video_decoder_config.h"
+#include "media/media_features.h"
 #include "media/renderers/gpu_video_accelerator_factories.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
-#if defined(USE_PROPRIETARY_CODECS)
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
 #include "media/formats/mp4/box_definitions.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "base/android/build_info.h"
 #endif
 
 namespace media {
@@ -47,7 +44,7 @@ namespace {
 // be on the beefy side.
 static const size_t kSharedMemorySegmentBytes = 100 << 10;
 
-#if defined(OS_ANDROID) && defined(USE_PROPRIETARY_CODECS)
+#if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
 // Extract the SPS and PPS lists from |extra_data|. Each SPS and PPS is prefixed
 // with 0x0001, the Annex B framing bytes. The out parameters are not modified
 // on failure.
@@ -218,18 +215,6 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
       base::Bind(&ReportGpuVideoDecoderInitializeStatusToUMAAndRunCB,
                  BindToCurrentLoop(init_cb), media_log_);
 
-  bool requires_restart_for_external_output_surface = false;
-#if !defined(OS_ANDROID)
-  if (config.is_encrypted()) {
-    DVLOG(1) << "Encrypted stream not supported.";
-    bound_init_cb.Run(false);
-    return;
-  }
-#else
-  requires_restart_for_external_output_surface =
-      base::android::BuildInfo::GetInstance()->sdk_int() < 23;
-#endif
-
   bool previously_initialized = config_.IsValidConfig();
   DVLOG(1) << (previously_initialized ? "Reinitializing" : "Initializing")
            << " GVD with config: " << config.AsHumanReadableString();
@@ -251,6 +236,14 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   VideoDecodeAccelerator::Capabilities capabilities =
       factories_->GetVideoDecodeAcceleratorCapabilities();
+  if (config.is_encrypted() &&
+      !(capabilities.flags &
+        VideoDecodeAccelerator::Capabilities::SUPPORTS_ENCRYPTED_STREAMS)) {
+    DVLOG(1) << "Encrypted stream not supported.";
+    bound_init_cb.Run(false);
+    return;
+  }
+
   if (!IsProfileSupported(capabilities, config.profile(), config.coded_size(),
                           config.is_encrypted())) {
     DVLOG(1) << "Unsupported profile " << GetProfileName(config.profile())
@@ -311,10 +304,14 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   init_cb_ = bound_init_cb;
 
-  const bool supports_external_output_surface =
-      (capabilities.flags & VideoDecodeAccelerator::Capabilities::
-                                SUPPORTS_EXTERNAL_OUTPUT_SURFACE) != 0;
+  const bool supports_external_output_surface = !!(
+      capabilities.flags &
+      VideoDecodeAccelerator::Capabilities::SUPPORTS_EXTERNAL_OUTPUT_SURFACE);
   if (supports_external_output_surface && !request_surface_cb_.is_null()) {
+    const bool requires_restart_for_external_output_surface =
+        !(capabilities.flags & VideoDecodeAccelerator::Capabilities::
+                                   SUPPORTS_SET_EXTERNAL_OUTPUT_SURFACE);
+
     // If we have a surface request callback we should call it and complete
     // initialization with the returned surface.
     request_surface_cb_.Run(
@@ -364,8 +361,9 @@ void GpuVideoDecoder::CompleteInitialization(int surface_id) {
   vda_config.encryption_scheme = config_.encryption_scheme();
   vda_config.is_deferred_initialization_allowed = true;
   vda_config.initial_expected_coded_size = config_.coded_size();
+  vda_config.color_space = config_.color_space_info();
 
-#if defined(OS_ANDROID) && defined(USE_PROPRIETARY_CODECS)
+#if defined(OS_ANDROID) && BUILDFLAG(USE_PROPRIETARY_CODECS)
   // We pass the SPS and PPS on Android because it lets us initialize
   // MediaCodec more reliably (http://crbug.com/649185).
   if (config_.codec() == kCodecH264)
@@ -900,13 +898,11 @@ bool GpuVideoDecoder::IsProfileSupported(
     bool is_encrypted) {
   DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
   for (const auto& supported_profile : capabilities.supported_profiles) {
-    if (profile == supported_profile.profile) {
-      if (supported_profile.encrypted_only && !is_encrypted)
-        continue;
-
-      return IsCodedSizeSupported(coded_size,
-                                  supported_profile.min_resolution,
-                                  supported_profile.max_resolution);
+    if (profile == supported_profile.profile &&
+        !(supported_profile.encrypted_only && !is_encrypted) &&
+        IsCodedSizeSupported(coded_size, supported_profile.min_resolution,
+                             supported_profile.max_resolution)) {
+      return true;
     }
   }
   return false;

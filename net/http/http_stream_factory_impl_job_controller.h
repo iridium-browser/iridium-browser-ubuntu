@@ -6,6 +6,7 @@
 #define NET_HTTP_HTTP_STREAM_FACTORY_IMPL_JOB_CONTROLLER_H_
 
 #include "net/base/host_port_pair.h"
+#include "net/base/privacy_mode.h"
 #include "net/http/http_stream_factory_impl_job.h"
 #include "net/http/http_stream_factory_impl_request.h"
 
@@ -21,7 +22,9 @@ class HttpStreamFactoryImpl::JobController
   JobController(HttpStreamFactoryImpl* factory,
                 HttpStreamRequest::Delegate* delegate,
                 HttpNetworkSession* session,
-                JobFactory* job_factory);
+                JobFactory* job_factory,
+                const HttpRequestInfo& request_info,
+                bool is_preconnect);
 
   ~JobController() override;
 
@@ -40,7 +43,7 @@ class HttpStreamFactoryImpl::JobController
                  HttpStreamRequest::Delegate* delegate,
                  WebSocketHandshakeStreamBase::CreateHelper*
                      websocket_handshake_stream_create_helper,
-                 const NetLogWithSource& net_log,
+                 const NetLogWithSource& source_net_log,
                  HttpStreamRequest::StreamType stream_type,
                  RequestPriority priority,
                  const SSLConfig& server_ssl_config,
@@ -62,7 +65,7 @@ class HttpStreamFactoryImpl::JobController
 
   // Called to resume the HttpStream creation process when necessary
   // Proxy authentication credentials are collected.
-  int RestartTunnelWithProxyAuth(const AuthCredentials& credentials) override;
+  int RestartTunnelWithProxyAuth() override;
 
   // Called when the priority of transaction changes.
   void SetPriority(RequestPriority priority) override;
@@ -160,6 +163,7 @@ class HttpStreamFactoryImpl::JobController
 
   // Remove session from the SpdySessionRequestMap.
   void RemoveRequestFromSpdySessionRequestMapForJob(Job* job) override;
+
   const NetLogWithSource* GetNetLog(Job* job) const override;
 
   void MaybeSetWaitTimeForMainJob(const base::TimeDelta& delay) override;
@@ -168,6 +172,15 @@ class HttpStreamFactoryImpl::JobController
   websocket_handshake_stream_create_helper() override;
 
   bool is_preconnect() const { return is_preconnect_; }
+
+  // Returns true if |this| has a pending main job that is not completed.
+  bool HasPendingMainJob() const;
+
+  // Returns true if |this| has a pending alternative job that is not completed.
+  bool HasPendingAltJob() const;
+
+  // Returns the estimated memory usage in bytes.
+  size_t EstimateMemoryUsage() const;
 
  private:
   friend class JobControllerPeer;
@@ -178,8 +191,7 @@ class HttpStreamFactoryImpl::JobController
                   const SSLConfig& server_ssl_config,
                   const SSLConfig& proxy_ssl_config,
                   HttpStreamRequest::Delegate* delegate,
-                  HttpStreamRequest::StreamType stream_type,
-                  const NetLogWithSource& net_log);
+                  HttpStreamRequest::StreamType stream_type);
 
   // Attaches |job| to |request_|. Does not mean that |request_| will use |job|.
   void AttachJob(Job* job);
@@ -205,8 +217,9 @@ class HttpStreamFactoryImpl::JobController
                            NextProto negotiated_protocol,
                            bool using_spdy);
 
-  // Must be called when |alternative_job_| fails.
-  void OnAlternativeJobFailed(Job* job);
+  // Must be called when the alternative job fails. |net_error| is the net error
+  // of the failed alternative job.
+  void OnAlternativeJobFailed(int net_error);
 
   // Called to report to http_server_properties to mark alternative service
   // broken.
@@ -218,6 +231,10 @@ class HttpStreamFactoryImpl::JobController
   // |alternative_job_| has failed or |main_job_wait_time_| elapsed.
   void MaybeResumeMainJob(Job* job, const base::TimeDelta& delay);
 
+  // Posts a task to resume the main job after |delay|.
+  void ResumeMainJobLater(const base::TimeDelta& delay);
+
+  // Resumes the main job immediately.
   void ResumeMainJob();
 
   // Returns true if QUIC is whitelisted for |host|.
@@ -269,7 +286,7 @@ class HttpStreamFactoryImpl::JobController
   HttpStreamRequest::Delegate* const delegate_;
 
   // True if this JobController is used to preconnect streams.
-  bool is_preconnect_;
+  const bool is_preconnect_;
 
   // |main_job_| is a job waiting to see if |alternative_job_| can reuse a
   // connection. If |alternative_job_| is unable to do so, |this| will notify
@@ -277,9 +294,8 @@ class HttpStreamFactoryImpl::JobController
   std::unique_ptr<Job> main_job_;
   std::unique_ptr<Job> alternative_job_;
 
-  // True if |alternative_job_| uses alternative service/proxy server and it
-  // fails.
-  bool alternative_job_failed_;
+  // Net error code of the failed alternative job. Set to OK by default.
+  int alternative_job_net_error_;
 
   // Either and only one of these records failed alternative service/proxy
   // server that |alternative_job_| uses.
@@ -292,6 +308,10 @@ class HttpStreamFactoryImpl::JobController
   // True if the main job has to wait for the alternative job: i.e., the main
   // job must not create a connection until it is resumed.
   bool main_job_is_blocked_;
+
+  // True if the main job was blocked and has been resumed in ResumeMainJob().
+  bool main_job_is_resumed_;
+
   // Waiting time for the main job before it is resumed.
   base::TimeDelta main_job_wait_time_;
 
@@ -301,6 +321,11 @@ class HttpStreamFactoryImpl::JobController
 
   // True if an alternative proxy server job can be started to fetch |request_|.
   bool can_start_alternative_proxy_job_;
+
+  // Privacy mode that should be used for fetching the resource.
+  PrivacyMode privacy_mode_;
+
+  const NetLogWithSource net_log_;
 
   base::WeakPtrFactory<JobController> ptr_factory_;
 };

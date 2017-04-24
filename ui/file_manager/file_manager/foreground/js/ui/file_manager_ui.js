@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 
 /**
- * The root of the file manager's view managing the DOM of Files.app.
+ * The root of the file manager's view managing the DOM of the Files app.
  *
  * @param {!ProvidersModel} providersModel Model for providers.
- * @param {!HTMLElement} element Top level element of Files.app.
+ * @param {!HTMLElement} element Top level element of the Files app.
  * @param {!LaunchParam} launchParam Launch param.
  * @constructor
  * @struct
@@ -21,7 +21,7 @@ function FileManagerUI(providersModel, element, launchParam) {
   cr.ui.dialogs.BaseDialog.CANCEL_LABEL = str('CANCEL_LABEL');
 
   /**
-   * Top level element of Files.app.
+   * Top level element of the Files app.
    * @type {!HTMLElement}
    */
   this.element = element;
@@ -32,6 +32,16 @@ function FileManagerUI(providersModel, element, launchParam) {
    * @private
    */
   this.dialogType_ = launchParam.type;
+
+  /**
+   * <hr> elements in cr.ui.Menu.
+   * This is a workaround for crbug.com/689255. This member variable is just for
+   * keeping explicit reference to decorated <hr>s to prevent GC from collecting
+   * <hr> wrappers, and not used anywhere.
+   * TODO(fukino): Remove this member variable once the root cause is fixed.
+   * @private {!Array<!Element>}
+   */
+  this.separators_ = [].slice.call(document.querySelectorAll('cr-menu > hr'));
 
   /**
    * Error dialog.
@@ -283,7 +293,7 @@ function FileManagerUI(providersModel, element, launchParam) {
   // Initialize attributes.
   this.element.setAttribute('type', this.dialogType_);
 
-  // Hack: make menuitems focusable. Since the menuitems in Files.app is not
+  // Hack: make menuitems focusable. Since the menuitems in the Files app is not
   // button so it doesn't have a tabfocus in nature. It prevents Chromevox from
   // speeaching because the opened menu is closed when the non-focusable object
   // tries to get the focus.

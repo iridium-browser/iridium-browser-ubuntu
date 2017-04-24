@@ -31,6 +31,7 @@
 #ifndef RTCPeerConnection_h
 #define RTCPeerConnection_h
 
+#include <memory>
 #include "bindings/core/v8/ActiveScriptWrappable.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "core/dom/SuspendableObject.h"
@@ -39,10 +40,10 @@
 #include "modules/mediastream/MediaStream.h"
 #include "modules/peerconnection/RTCIceCandidate.h"
 #include "platform/AsyncMethodRunner.h"
+#include "platform/WebFrameScheduler.h"
 #include "public/platform/WebMediaConstraints.h"
 #include "public/platform/WebRTCPeerConnectionHandler.h"
 #include "public/platform/WebRTCPeerConnectionHandlerClient.h"
-#include <memory>
 
 namespace blink {
 class ExceptionState;
@@ -108,10 +109,7 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
 
   String signalingState() const;
 
-  void updateIce(ExecutionContext*,
-                 const RTCConfiguration&,
-                 const Dictionary&,
-                 ExceptionState&);
+  void setConfiguration(ScriptState*, const RTCConfiguration&, ExceptionState&);
 
   // Certificate management
   // http://w3c.github.io/webrtc-pc/#sec.cert-mgmt
@@ -137,7 +135,7 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
 
   MediaStream* getStreamById(const String& streamId);
 
-  void addStream(ExecutionContext*,
+  void addStream(ScriptState*,
                  MediaStream*,
                  const Dictionary& mediaConstraints,
                  ExceptionState&);
@@ -149,7 +147,7 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
                          MediaStreamTrack* selector = nullptr);
   ScriptPromise getStats(ScriptState*);
 
-  RTCDataChannel* createDataChannel(ExecutionContext*,
+  RTCDataChannel* createDataChannel(ScriptState*,
                                     String label,
                                     const Dictionary& dataChannelDict,
                                     ExceptionState&);
@@ -252,6 +250,11 @@ class RTCPeerConnection final : public EventTargetWithInlineData,
 
   Member<AsyncMethodRunner<RTCPeerConnection>> m_dispatchScheduledEventRunner;
   HeapVector<Member<EventWrapper>> m_scheduledEvents;
+
+  // This handle notifies scheduler about an active connection associated
+  // with a frame. Handle should be destroyed when connection is closed.
+  std::unique_ptr<WebFrameScheduler::ActiveConnectionHandle>
+      m_connectionHandleForScheduler;
 
   bool m_stopped;
   bool m_closed;

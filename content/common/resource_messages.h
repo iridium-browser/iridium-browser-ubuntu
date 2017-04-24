@@ -130,8 +130,8 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::FetchCredentialsMode,
 IPC_ENUM_TRAITS_MAX_VALUE(content::FetchRedirectMode,
                           content::FetchRedirectMode::LAST)
 
-IPC_ENUM_TRAITS_MAX_VALUE(content::SkipServiceWorker,
-                          content::SkipServiceWorker::LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(content::ServiceWorkerMode,
+                          content::ServiceWorkerMode::LAST)
 
 IPC_ENUM_TRAITS_MAX_VALUE(net::EffectiveConnectionType,
                           net::EFFECTIVE_CONNECTION_TYPE_LAST - 1)
@@ -181,6 +181,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(service_worker_ready_time)
   IPC_STRUCT_TRAITS_MEMBER(is_in_cache_storage)
   IPC_STRUCT_TRAITS_MEMBER(cache_storage_cache_name)
+  IPC_STRUCT_TRAITS_MEMBER(did_service_worker_navigation_preload)
   IPC_STRUCT_TRAITS_MEMBER(previews_state)
   IPC_STRUCT_TRAITS_MEMBER(effective_connection_type)
   IPC_STRUCT_TRAITS_MEMBER(certificate)
@@ -229,7 +230,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::ResourceRequest)
   IPC_STRUCT_TRAITS_MEMBER(should_reset_appcache)
   IPC_STRUCT_TRAITS_MEMBER(service_worker_provider_id)
   IPC_STRUCT_TRAITS_MEMBER(originated_from_service_worker)
-  IPC_STRUCT_TRAITS_MEMBER(skip_service_worker)
+  IPC_STRUCT_TRAITS_MEMBER(service_worker_mode)
   IPC_STRUCT_TRAITS_MEMBER(fetch_request_mode)
   IPC_STRUCT_TRAITS_MEMBER(fetch_credentials_mode)
   IPC_STRUCT_TRAITS_MEMBER(fetch_redirect_mode)

@@ -44,6 +44,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/blacklist.h"
 #include "chrome/browser/extensions/chrome_app_sorting.h"
+#include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/default_apps.h"
@@ -256,6 +257,19 @@ size_t GetExternalInstallBubbleCount(ExtensionService* service) {
   for (auto* error : errors)
     bubble_count += error->alert_type() == ExternalInstallError::BUBBLE_ALERT;
   return bubble_count;
+}
+
+scoped_refptr<Extension> CreateExtension(const base::string16& name,
+                                         const base::FilePath& path,
+                                         Manifest::Location location) {
+  base::DictionaryValue manifest;
+  manifest.SetString(extensions::manifest_keys::kVersion, "1.0.0.0");
+  manifest.SetString(extensions::manifest_keys::kName, name);
+  std::string error;
+  scoped_refptr<Extension> extension =
+      Extension::Create(path, location, manifest, Extension::NO_FLAGS, &error);
+  EXPECT_TRUE(extension.get() != nullptr) << error;
+  return extension;
 }
 
 }  // namespace
@@ -726,7 +740,7 @@ class ExtensionServiceTest
     msg += " = ";
     msg += base::IntToString(value);
 
-    SetPref(extension_id, pref_path, new base::FundamentalValue(value), msg);
+    SetPref(extension_id, pref_path, new base::Value(value), msg);
   }
 
   void SetPrefBool(const std::string& extension_id,
@@ -737,7 +751,7 @@ class ExtensionServiceTest
     msg += " = ";
     msg += (value ? "true" : "false");
 
-    SetPref(extension_id, pref_path, new base::FundamentalValue(value), msg);
+    SetPref(extension_id, pref_path, new base::Value(value), msg);
   }
 
   void ClearPref(const std::string& extension_id,
@@ -2667,7 +2681,6 @@ TEST_F(ExtensionServiceTest, LoadExtensionsWithPlugins) {
 
   InitPluginService();
   InitializeEmptyExtensionService();
-  service()->set_show_extensions_prompts(true);
 
   // Start by canceling any install prompts.
   std::unique_ptr<extensions::ScopedTestDialogAutoConfirm> auto_confirm(
@@ -6408,6 +6421,36 @@ TEST_F(ExtensionServiceTest, ExternalInstallInitiallyDisabled) {
   EXPECT_TRUE(service()->IsExtensionEnabled(page_action));
 }
 
+// As for components, only external component extensions can be disabled.
+TEST_F(ExtensionServiceTest, DisablingComponentExtensions) {
+  InitializeEmptyExtensionService();
+  service_->Init();
+
+  scoped_refptr<Extension> external_component_extension = CreateExtension(
+      base::ASCIIToUTF16("external_component_extension"),
+      base::FilePath(FILE_PATH_LITERAL("//external_component_extension")),
+      Manifest::EXTERNAL_COMPONENT);
+  service_->AddExtension(external_component_extension.get());
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(
+      external_component_extension->id()));
+  service_->DisableExtension(external_component_extension->id(),
+                             extensions::Extension::DISABLE_USER_ACTION);
+  EXPECT_TRUE(registry()->disabled_extensions().Contains(
+      external_component_extension->id()));
+
+  scoped_refptr<Extension> component_extension = CreateExtension(
+      base::ASCIIToUTF16("component_extension"),
+      base::FilePath(FILE_PATH_LITERAL("//component_extension")),
+      Manifest::COMPONENT);
+  service_->AddExtension(component_extension.get());
+  EXPECT_TRUE(
+      registry()->enabled_extensions().Contains(component_extension->id()));
+  service_->DisableExtension(component_extension->id(),
+                             extensions::Extension::DISABLE_USER_ACTION);
+  EXPECT_FALSE(
+      registry()->disabled_extensions().Contains(component_extension->id()));
+}
+
 // Test that installing multiple external extensions works.
 // Flaky on windows; http://crbug.com/295757 .
 // Causes race conditions with an in-process utility thread, so disable under
@@ -7097,4 +7140,66 @@ TEST_F(ExtensionServiceTest, CorruptExtensionUpdate) {
 
   EXPECT_FALSE(registry()->disabled_extensions().Contains(id));
   EXPECT_FALSE(prefs->HasDisableReason(id, Extension::DISABLE_CORRUPTED));
+}
+
+// Try re-enabling a reloading extension. Regression test for crbug.com/676815.
+TEST_F(ExtensionServiceTest, ReloadAndReEnableExtension) {
+  InitializeEmptyExtensionService();
+
+  // Add an extension in an unpacked location.
+  scoped_refptr<const Extension> extension =
+      extensions::ChromeTestExtensionLoader(profile()).
+          LoadExtension(data_dir().AppendASCII("simple_with_file"));
+  const std::string kExtensionId = extension->id();
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(extensions::Manifest::IsUnpackedLocation(extension->location()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(kExtensionId));
+
+  // Begin the reload process.
+  service()->ReloadExtension(extension->id());
+  EXPECT_TRUE(registry()->disabled_extensions().Contains(kExtensionId));
+
+  // While the extension is reloading, try to re-enable it. This is the flow
+  // that could happen if, e.g., the user hit the enable toggle in the
+  // chrome://extensions page while it was reloading.
+  service()->GrantPermissionsAndEnableExtension(extension.get());
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(kExtensionId));
+
+  // Wait for the reload to complete. This previously crashed (see
+  // crbug.com/676815).
+  base::RunLoop().RunUntilIdle();
+  // The extension should be enabled again...
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(kExtensionId));
+  // ...and should have reloaded (for ease, we just compare the extension
+  // objects).
+  EXPECT_NE(extension, registry()->enabled_extensions().GetByID(kExtensionId));
+}
+
+// Test reloading a shared module. Regression test for crbug.com/676815.
+TEST_F(ExtensionServiceTest, ReloadSharedModule) {
+  InitializeEmptyExtensionService();
+
+  // Add a shared module and an extension that depends on it (the latter is
+  // important to ensure we don't remove the unused shared module).
+  scoped_refptr<const Extension> shared_module =
+      extensions::ChromeTestExtensionLoader(profile()).LoadExtension(
+          data_dir().AppendASCII("api_test/shared_module/shared"));
+  scoped_refptr<const Extension> dependent =
+      extensions::ChromeTestExtensionLoader(profile()).LoadExtension(
+          data_dir().AppendASCII("api_test/shared_module/import_pass"));
+  ASSERT_TRUE(shared_module);
+  ASSERT_TRUE(dependent);
+  const std::string kExtensionId = shared_module->id();
+  ASSERT_TRUE(
+      extensions::Manifest::IsUnpackedLocation(shared_module->location()));
+  ASSERT_EQ(extensions::Manifest::TYPE_SHARED_MODULE,
+            shared_module->manifest()->type());
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(kExtensionId));
+
+  // Reload the extension and wait for it to complete. This previously crashed
+  // (see crbug.com/676815).
+  service()->ReloadExtension(kExtensionId);
+  base::RunLoop().RunUntilIdle();
+  // The shared module should be enabled.
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(kExtensionId));
 }

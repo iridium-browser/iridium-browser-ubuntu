@@ -20,25 +20,17 @@ using base::android::JavaParamRef;
 using base::android::ScopedJavaGlobalRef;
 using base::android::AttachCurrentThread;
 
-namespace {
+SupervisedUserContentProvider::UrlFilterObserver::UrlFilterObserver(
+    JNIEnv* env,
+    const ScopedJavaGlobalRef<jobject>& java_content_provider)
+    : java_content_provider_(java_content_provider) {}
 
-class UrlFilterObserver : public SupervisedUserURLFilter::Observer {
- public:
-  UrlFilterObserver(JNIEnv* env,
-                    const ScopedJavaGlobalRef<jobject>& java_content_provider)
-      : java_content_provider_(java_content_provider) {}
+SupervisedUserContentProvider::UrlFilterObserver::~UrlFilterObserver() {}
 
-  virtual ~UrlFilterObserver() {}
-
- private:
-  void OnSiteListUpdated() override {
-    Java_SupervisedUserContentProvider_onSupervisedUserFilterUpdated(
-        AttachCurrentThread(), java_content_provider_);
-  }
-  ScopedJavaGlobalRef<jobject> java_content_provider_;
-};
-
-}  // namespace
+void SupervisedUserContentProvider::UrlFilterObserver::OnURLFilterChanged() {
+  Java_SupervisedUserContentProvider_onSupervisedUserFilterUpdated(
+      AttachCurrentThread(), java_content_provider_);
+}
 
 static jlong CreateSupervisedUserContentProvider(
     JNIEnv* env,
@@ -52,17 +44,22 @@ SupervisedUserContentProvider::SupervisedUserContentProvider(
     const JavaParamRef<jobject>& caller)
     : profile_(ProfileManager::GetLastUsedProfile()),
       java_content_provider_(env, caller),
+      url_filter_observer_(new UrlFilterObserver(env, java_content_provider_)),
       weak_factory_(this) {
   if (profile_->IsSupervised()) {
     SupervisedUserService* supervised_user_service =
         SupervisedUserServiceFactory::GetForProfile(profile_);
-    SupervisedUserURLFilter* url_filter =
-        supervised_user_service->GetURLFilterForUIThread();
-    url_filter->AddObserver(new UrlFilterObserver(env, java_content_provider_));
+    supervised_user_service->AddObserver(url_filter_observer_.get());
   }
 }
 
-SupervisedUserContentProvider::~SupervisedUserContentProvider() {}
+SupervisedUserContentProvider::~SupervisedUserContentProvider() {
+  if (profile_->IsSupervised()) {
+    SupervisedUserService* supervised_user_service =
+        SupervisedUserServiceFactory::GetForProfile(profile_);
+    supervised_user_service->RemoveObserver(url_filter_observer_.get());
+  }
+}
 
 void SupervisedUserContentProvider::ShouldProceed(
     JNIEnv* env,
@@ -70,8 +67,12 @@ void SupervisedUserContentProvider::ShouldProceed(
     const JavaParamRef<jobject>& query_result_jobj,
     const JavaParamRef<jstring>& url) {
   if (!profile_->IsSupervised()) {
-    // User isn't supervised
-    Java_SupervisedUserQueryReply_onQueryComplete(env, query_result_jobj);
+    // User isn't supervised, this can only happen if Chrome isn't signed in,
+    // in which case all requests should be rejected
+    Java_SupervisedUserQueryReply_onQueryFailed(
+        AttachCurrentThread(), query_result_jobj,
+        supervised_user_error_page::NOT_SIGNED_IN, false, true, nullptr,
+        nullptr, nullptr, nullptr, nullptr, nullptr);
     return;
   }
   SupervisedUserService* supervised_user_service =

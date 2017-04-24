@@ -135,6 +135,8 @@ class CC_EXPORT PictureLayerTiling {
     all_tiles_done_ = all_tiles_done;
   }
 
+  WhichTree tree() const { return tree_; }
+
   void VerifyNoTileNeedsRaster() const {
 #if DCHECK_IS_ON()
     for (const auto& tile_pair : tiles_) {
@@ -157,8 +159,10 @@ class CC_EXPORT PictureLayerTiling {
   }
 
   void UpdateAllRequiredStateForTesting() {
-    for (const auto& key_tile_pair : tiles_)
-      UpdateRequiredStatesOnTile(key_tile_pair.second.get());
+    for (const auto& key_tile_pair : tiles_) {
+      Tile* tile = key_tile_pair.second.get();
+      UpdateRequiredStatesOnTile(tile);
+    }
   }
   std::map<const Tile*, PrioritizedTile>
   UpdateAndGetAllPrioritizedTilesForTesting() const;
@@ -245,6 +249,8 @@ class CC_EXPORT PictureLayerTiling {
   void AsValueInto(base::trace_event::TracedValue* array) const;
   size_t GPUMemoryUsageInBytes() const;
 
+  void UpdateRequiredStatesOnTile(Tile* tile) const;
+
  protected:
   friend class CoverageIterator;
   friend class PrioritizedTile;
@@ -288,7 +294,6 @@ class CC_EXPORT PictureLayerTiling {
   Tile::CreateInfo CreateInfoForTile(int i, int j) const;
   bool ShouldCreateTileAt(const Tile::CreateInfo& info) const;
   bool IsTileOccluded(const Tile* tile) const;
-  void UpdateRequiredStatesOnTile(Tile* tile) const;
   PrioritizedTile MakePrioritizedTile(
       Tile* tile,
       PriorityRectType priority_rect_type) const;

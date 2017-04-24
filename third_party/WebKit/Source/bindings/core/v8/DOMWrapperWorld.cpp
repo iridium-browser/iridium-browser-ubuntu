@@ -141,8 +141,9 @@ void DOMWrapperWorld::markWrappersInAllWorlds(
   // Handle marking in per-worker wrapper worlds.
   if (!isMainThread()) {
     DCHECK(ThreadState::current()->isolate());
-    if (workerWorld()) {
-      DOMDataStore& dataStore = workerWorld()->domDataStore();
+    DOMWrapperWorld* worker = workerWorld();
+    if (worker) {
+      DOMDataStore& dataStore = worker->domDataStore();
       if (dataStore.containsWrapper(scriptWrappable)) {
         dataStore.markWrapper(scriptWrappable);
       }
@@ -161,35 +162,10 @@ void DOMWrapperWorld::markWrappersInAllWorlds(
   }
 }
 
-void DOMWrapperWorld::setWrapperReferencesInAllWorlds(
-    const v8::Persistent<v8::Object>& parent,
-    ScriptWrappable* scriptWrappable,
-    v8::Isolate* isolate) {
-  if (!scriptWrappable)
-    return;
-  // Marking for the main world
-  if (scriptWrappable->containsWrapper())
-    scriptWrappable->setReference(parent, isolate);
-  if (!isMainThread())
-    return;
-  WorldMap& isolatedWorlds = isolatedWorldMap();
-  for (auto& world : isolatedWorlds.values()) {
-    DOMDataStore& dataStore = world->domDataStore();
-    if (dataStore.containsWrapper(scriptWrappable)) {
-      // Marking for the isolated worlds
-      dataStore.setReference(parent, scriptWrappable, isolate);
-    }
-  }
-}
-
 DOMWrapperWorld::~DOMWrapperWorld() {
   ASSERT(!isMainWorld());
 
   dispose();
-
-  if (m_worldId == WorkerWorldId) {
-    workerWorld() = nullptr;
-  }
 
   if (!isIsolatedWorld())
     return;
@@ -209,6 +185,8 @@ DOMWrapperWorld::~DOMWrapperWorld() {
 void DOMWrapperWorld::dispose() {
   m_domObjectHolders.clear();
   m_domDataStore.reset();
+  if (isWorkerWorld())
+    workerWorld() = nullptr;
 }
 
 #if DCHECK_IS_ON()
@@ -223,7 +201,7 @@ PassRefPtr<DOMWrapperWorld> DOMWrapperWorld::ensureIsolatedWorld(
   ASSERT(isIsolatedWorldId(worldId));
 
   WorldMap& map = isolatedWorldMap();
-  WorldMap::AddResult result = map.add(worldId, nullptr);
+  WorldMap::AddResult result = map.insert(worldId, nullptr);
   RefPtr<DOMWrapperWorld> world = result.storedValue->value;
   if (world) {
     ASSERT(world->worldId() == worldId);
@@ -269,7 +247,7 @@ static IsolatedWorldHumanReadableNameMap& isolatedWorldHumanReadableNames() {
 
 String DOMWrapperWorld::isolatedWorldHumanReadableName() {
   ASSERT(this->isIsolatedWorld());
-  return isolatedWorldHumanReadableNames().get(worldId());
+  return isolatedWorldHumanReadableNames().at(worldId());
 }
 
 void DOMWrapperWorld::setIsolatedWorldHumanReadableName(
@@ -322,13 +300,13 @@ void DOMWrapperWorld::registerDOMObjectHolderInternal(
   ASSERT(!m_domObjectHolders.contains(holderBase.get()));
   holderBase->setWorld(this);
   holderBase->setWeak(&DOMWrapperWorld::weakCallbackForDOMObjectHolder);
-  m_domObjectHolders.add(std::move(holderBase));
+  m_domObjectHolders.insert(std::move(holderBase));
 }
 
 void DOMWrapperWorld::unregisterDOMObjectHolder(
     DOMObjectHolderBase* holderBase) {
   ASSERT(m_domObjectHolders.contains(holderBase));
-  m_domObjectHolders.remove(holderBase);
+  m_domObjectHolders.erase(holderBase);
 }
 
 void DOMWrapperWorld::weakCallbackForDOMObjectHolder(

@@ -198,6 +198,14 @@ void BrowserGpuChannelHostFactory::EstablishRequest::Cancel() {
   finished_ = true;
 }
 
+void BrowserGpuChannelHostFactory::CloseChannel() {
+  DCHECK(instance_);
+  if (instance_->gpu_channel_) {
+    instance_->gpu_channel_->DestroyChannel();
+    instance_->gpu_channel_ = nullptr;
+  }
+}
+
 bool BrowserGpuChannelHostFactory::CanUseForTesting() {
   return GpuDataManager::GetInstance()->GpuAccessAllowed(NULL);
 }
@@ -245,8 +253,6 @@ BrowserGpuChannelHostFactory::~BrowserGpuChannelHostFactory() {
   DCHECK(IsMainThread());
   if (pending_request_.get())
     pending_request_->Cancel();
-  for (size_t n = 0; n < established_callbacks_.size(); n++)
-    established_callbacks_[n].Run(nullptr);
   shutdown_event_->Signal();
   if (gpu_channel_) {
     gpu_channel_->DestroyChannel();

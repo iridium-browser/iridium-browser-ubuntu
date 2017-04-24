@@ -24,7 +24,7 @@
 #include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/common/autofill_util.h"
-#include "grit/components_strings.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace autofill {
@@ -216,7 +216,8 @@ void AutofillExternalDelegate::DidAcceptSuggestion(const base::string16& value,
   } else if (identifier == POPUP_ITEM_ID_CLEAR_FORM) {
     // User selected 'Clear form'.
     driver_->RendererShouldClearFilledForm();
-  } else if (identifier == POPUP_ITEM_ID_PASSWORD_ENTRY) {
+  } else if (identifier == POPUP_ITEM_ID_PASSWORD_ENTRY ||
+             identifier == POPUP_ITEM_ID_USERNAME_ENTRY) {
     NOTREACHED();  // Should be handled elsewhere.
   } else if (identifier == POPUP_ITEM_ID_DATALIST_ENTRY) {
     driver_->RendererShouldAcceptDataListSuggestion(value);
@@ -282,6 +283,10 @@ void AutofillExternalDelegate::ClearPreviewedForm() {
 
 bool AutofillExternalDelegate::IsCreditCardPopup() {
   return is_credit_card_popup_;
+}
+
+AutofillDriver* AutofillExternalDelegate::GetAutofillDriver() {
+  return driver_;
 }
 
 void AutofillExternalDelegate::Reset() {

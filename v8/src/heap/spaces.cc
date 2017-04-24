@@ -9,11 +9,15 @@
 #include "src/base/bits.h"
 #include "src/base/platform/platform.h"
 #include "src/base/platform/semaphore.h"
+#include "src/counters.h"
 #include "src/full-codegen/full-codegen.h"
 #include "src/heap/array-buffer-tracker.h"
+#include "src/heap/incremental-marking.h"
+#include "src/heap/mark-compact.h"
 #include "src/heap/slot-set.h"
 #include "src/macro-assembler.h"
 #include "src/msan.h"
+#include "src/objects-inl.h"
 #include "src/snapshot/snapshot.h"
 #include "src/v8.h"
 
@@ -335,7 +339,7 @@ class MemoryAllocator::Unmapper::UnmapFreeMemoryTask : public v8::Task {
  private:
   // v8::Task overrides.
   void Run() override {
-    unmapper_->PerformFreeMemoryOnQueuedChunks();
+    unmapper_->PerformFreeMemoryOnQueuedChunks<FreeMode::kUncommitPooled>();
     unmapper_->pending_unmapping_tasks_semaphore_.Signal();
   }
 
@@ -350,7 +354,7 @@ void MemoryAllocator::Unmapper::FreeQueuedChunks() {
         new UnmapFreeMemoryTask(this), v8::Platform::kShortRunningTask);
     concurrent_unmapping_tasks_active_++;
   } else {
-    PerformFreeMemoryOnQueuedChunks();
+    PerformFreeMemoryOnQueuedChunks<FreeMode::kUncommitPooled>();
   }
 }
 
@@ -364,6 +368,7 @@ bool MemoryAllocator::Unmapper::WaitUntilCompleted() {
   return waited;
 }
 
+template <MemoryAllocator::Unmapper::FreeMode mode>
 void MemoryAllocator::Unmapper::PerformFreeMemoryOnQueuedChunks() {
   MemoryChunk* chunk = nullptr;
   // Regular chunks.
@@ -371,6 +376,14 @@ void MemoryAllocator::Unmapper::PerformFreeMemoryOnQueuedChunks() {
     bool pooled = chunk->IsFlagSet(MemoryChunk::POOLED);
     allocator_->PerformFreeMemory(chunk);
     if (pooled) AddMemoryChunkSafe<kPooled>(chunk);
+  }
+  if (mode == MemoryAllocator::Unmapper::FreeMode::kReleasePooled) {
+    // The previous loop uncommitted any pages marked as pooled and added them
+    // to the pooled list. In case of kReleasePooled we need to free them
+    // though.
+    while ((chunk = GetMemoryChunkSafe<kPooled>()) != nullptr) {
+      allocator_->Free<MemoryAllocator::kAlreadyPooled>(chunk);
+    }
   }
   // Non-regular chunks.
   while ((chunk = GetMemoryChunkSafe<kNonRegular>()) != nullptr) {
@@ -382,7 +395,10 @@ void MemoryAllocator::Unmapper::TearDown() {
   WaitUntilCompleted();
   ReconsiderDelayedChunks();
   CHECK(delayed_regular_chunks_.empty());
-  PerformFreeMemoryOnQueuedChunks();
+  PerformFreeMemoryOnQueuedChunks<FreeMode::kReleasePooled>();
+  for (int i = 0; i < kNumberOfChunkQueues; i++) {
+    DCHECK(chunks_[i].empty());
+  }
 }
 
 void MemoryAllocator::Unmapper::ReconsiderDelayedChunks() {
@@ -780,7 +796,7 @@ void Page::ResetFreeListStatistics() {
 
 size_t Page::AvailableInFreeList() {
   size_t sum = 0;
-  ForAllFreeListCategories([this, &sum](FreeListCategory* category) {
+  ForAllFreeListCategories([&sum](FreeListCategory* category) {
     sum += category->available();
   });
   return sum;
@@ -909,6 +925,11 @@ void MemoryAllocator::Free(MemoryChunk* chunk) {
       PreFreeMemory(chunk);
       PerformFreeMemory(chunk);
       break;
+    case kAlreadyPooled:
+      // Pooled pages cannot be touched anymore as their memory is uncommitted.
+      FreeMemory(chunk->address(), static_cast<size_t>(MemoryChunk::kPageSize),
+                 Executability::NOT_EXECUTABLE);
+      break;
     case kPooledAndQueue:
       DCHECK_EQ(chunk->size(), static_cast<size_t>(MemoryChunk::kPageSize));
       DCHECK_EQ(chunk->executable(), NOT_EXECUTABLE);
@@ -919,12 +940,13 @@ void MemoryAllocator::Free(MemoryChunk* chunk) {
       // The chunks added to this queue will be freed by a concurrent thread.
       unmapper()->AddMemoryChunkSafe(chunk);
       break;
-    default:
-      UNREACHABLE();
   }
 }
 
 template void MemoryAllocator::Free<MemoryAllocator::kFull>(MemoryChunk* chunk);
+
+template void MemoryAllocator::Free<MemoryAllocator::kAlreadyPooled>(
+    MemoryChunk* chunk);
 
 template void MemoryAllocator::Free<MemoryAllocator::kPreFreeAndQueue>(
     MemoryChunk* chunk);
@@ -1459,7 +1481,7 @@ void PagedSpace::Verify(ObjectVisitor* visitor) {
       // All the interior pointers should be contained in the heap.
       int size = object->Size();
       object->IterateBody(map->instance_type(), size, visitor);
-      if (Marking::IsBlack(ObjectMarking::MarkBitFrom(object))) {
+      if (ObjectMarking::IsBlack(object)) {
         black_size += size;
       }
 
@@ -1584,6 +1606,9 @@ bool SemiSpace::EnsureCurrentCapacity() {
         // Make sure we don't overtake the actual top pointer.
         CHECK_NE(to_remove, current_page_);
         to_remove->Unlink();
+        // Clear new space flags to avoid this page being treated as a new
+        // space page that is potentially being swept.
+        to_remove->SetFlags(0, Page::kIsInNewSpaceMask);
         heap()->memory_allocator()->Free<MemoryAllocator::kPooledAndQueue>(
             to_remove);
       }
@@ -2636,7 +2661,7 @@ HeapObject* FreeList::Allocate(size_t size_in_bytes) {
 size_t FreeList::EvictFreeListItems(Page* page) {
   size_t sum = 0;
   page->ForAllFreeListCategories(
-      [this, &sum, page](FreeListCategory* category) {
+      [this, &sum](FreeListCategory* category) {
         DCHECK_EQ(this, category->owner());
         sum += category->available();
         RemoveCategory(category);
@@ -2990,7 +3015,8 @@ AllocationResult LargeObjectSpace::AllocateRaw(int object_size,
   AllocationStep(object->address(), object_size);
 
   if (heap()->incremental_marking()->black_allocation()) {
-    Marking::MarkBlack(ObjectMarking::MarkBitFrom(object));
+    // We cannot use ObjectMarking here as the object still lacks a size.
+    Marking::WhiteToBlack(ObjectMarking::MarkBitFrom(object));
     MemoryChunk::IncrementLiveBytes(object, object_size);
   }
   return object;
@@ -3039,9 +3065,8 @@ void LargeObjectSpace::ClearMarkingStateOfLiveObjects() {
   LargePage* current = first_page_;
   while (current != NULL) {
     HeapObject* object = current->GetObject();
-    MarkBit mark_bit = ObjectMarking::MarkBitFrom(object);
-    DCHECK(Marking::IsBlack(mark_bit));
-    Marking::BlackToWhite(mark_bit);
+    DCHECK(ObjectMarking::IsBlack(object));
+    ObjectMarking::ClearMarkBit(object);
     Page::FromAddress(object->address())->ResetProgressBar();
     Page::FromAddress(object->address())->ResetLiveBytes();
     current = current->next_page();
@@ -3086,9 +3111,8 @@ void LargeObjectSpace::FreeUnmarkedObjects() {
   LargePage* current = first_page_;
   while (current != NULL) {
     HeapObject* object = current->GetObject();
-    MarkBit mark_bit = ObjectMarking::MarkBitFrom(object);
-    DCHECK(!Marking::IsGrey(mark_bit));
-    if (Marking::IsBlack(mark_bit)) {
+    DCHECK(!ObjectMarking::IsGrey(object));
+    if (ObjectMarking::IsBlack(object)) {
       Address free_start;
       if ((free_start = current->GetAddressToShrink()) != 0) {
         // TODO(hpayer): Perform partial free concurrently.
@@ -3156,11 +3180,13 @@ void LargeObjectSpace::Verify() {
 
     // We have only code, sequential strings, external strings
     // (sequential strings that have been morphed into external
-    // strings), fixed arrays, byte arrays, and constant pool arrays in the
-    // large object space.
+    // strings), thin strings (sequential strings that have been
+    // morphed into thin strings), fixed arrays, byte arrays, and
+    // constant pool arrays in the large object space.
     CHECK(object->IsAbstractCode() || object->IsSeqString() ||
-          object->IsExternalString() || object->IsFixedArray() ||
-          object->IsFixedDoubleArray() || object->IsByteArray());
+          object->IsExternalString() || object->IsThinString() ||
+          object->IsFixedArray() || object->IsFixedDoubleArray() ||
+          object->IsByteArray());
 
     // The object itself should look OK.
     object->ObjectVerify();
@@ -3221,7 +3247,7 @@ void Page::Print() {
   unsigned mark_size = 0;
   for (HeapObject* object = objects.Next(); object != NULL;
        object = objects.Next()) {
-    bool is_marked = Marking::IsBlackOrGrey(ObjectMarking::MarkBitFrom(object));
+    bool is_marked = ObjectMarking::IsBlackOrGrey(object);
     PrintF(" %c ", (is_marked ? '!' : ' '));  // Indent a little.
     if (is_marked) {
       mark_size += object->Size();

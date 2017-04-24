@@ -309,7 +309,7 @@ bool LCodeGen::GenerateJumpTable() {
     // building, install a special marker there instead.
     DCHECK(info()->IsStub());
     __ mov(MemOperand(esp, 2 * kPointerSize),
-           Immediate(Smi::FromInt(StackFrame::STUB)));
+           Immediate(StackFrame::TypeToMarker(StackFrame::STUB)));
 
     /* stack layout
        3: old ebp
@@ -346,7 +346,7 @@ bool LCodeGen::GenerateDeferredCode() {
         frame_is_built_ = true;
         // Build the frame in such a way that esi isn't trashed.
         __ push(ebp);  // Caller's frame pointer.
-        __ push(Immediate(Smi::FromInt(StackFrame::STUB)));
+        __ push(Immediate(StackFrame::TypeToMarker(StackFrame::STUB)));
         __ lea(ebp, Operand(esp, TypedFrameConstants::kFixedFrameSizeFromFp));
         Comment(";;; Deferred code");
       }
@@ -1927,12 +1927,6 @@ void LCodeGen::DoBranch(LBranch* instr) {
         __ j(equal, instr->TrueLabel(chunk_));
       }
 
-      if (expected & ToBooleanHint::kSimdValue) {
-        // SIMD value -> true.
-        __ CmpInstanceType(map, SIMD128_VALUE_TYPE);
-        __ j(equal, instr->TrueLabel(chunk_));
-      }
-
       if (expected & ToBooleanHint::kHeapNumber) {
         // heap number -> false iff +0, -0, or NaN.
         Label not_heap_number;
@@ -2364,13 +2358,36 @@ void LCodeGen::DoLoadContextSlot(LLoadContextSlot* instr) {
   Register context = ToRegister(instr->context());
   Register result = ToRegister(instr->result());
   __ mov(result, ContextOperand(context, instr->slot_index()));
+
+  if (instr->hydrogen()->RequiresHoleCheck()) {
+    __ cmp(result, factory()->the_hole_value());
+    if (instr->hydrogen()->DeoptimizesOnHole()) {
+      DeoptimizeIf(equal, instr, DeoptimizeReason::kHole);
+    } else {
+      Label is_not_hole;
+      __ j(not_equal, &is_not_hole, Label::kNear);
+      __ mov(result, factory()->undefined_value());
+      __ bind(&is_not_hole);
+    }
+  }
 }
 
 
 void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
   Register context = ToRegister(instr->context());
   Register value = ToRegister(instr->value());
+
+  Label skip_assignment;
+
   Operand target = ContextOperand(context, instr->slot_index());
+  if (instr->hydrogen()->RequiresHoleCheck()) {
+    __ cmp(target, factory()->the_hole_value());
+    if (instr->hydrogen()->DeoptimizesOnHole()) {
+      DeoptimizeIf(equal, instr, DeoptimizeReason::kHole);
+    } else {
+      __ j(not_equal, &skip_assignment, Label::kNear);
+    }
+  }
 
   __ mov(target, value);
   if (instr->hydrogen()->NeedsWriteBarrier()) {
@@ -2387,6 +2404,8 @@ void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
                               EMIT_REMEMBERED_SET,
                               check_needed);
   }
+
+  __ bind(&skip_assignment);
 }
 
 
@@ -2671,7 +2690,7 @@ void LCodeGen::DoArgumentsElements(LArgumentsElements* instr) {
     __ mov(result,
            Operand(result, CommonFrameConstants::kContextOrFrameTypeOffset));
     __ cmp(Operand(result),
-           Immediate(Smi::FromInt(StackFrame::ARGUMENTS_ADAPTOR)));
+           Immediate(StackFrame::TypeToMarker(StackFrame::ARGUMENTS_ADAPTOR)));
     __ j(equal, &adapted, Label::kNear);
 
     // No arguments adaptor frame.
@@ -3373,7 +3392,7 @@ void LCodeGen::PrepareForTailCall(const ParameterCount& actual,
   Label no_arguments_adaptor, formal_parameter_count_loaded;
   __ mov(scratch2, Operand(ebp, StandardFrameConstants::kCallerFPOffset));
   __ cmp(Operand(scratch2, StandardFrameConstants::kContextOffset),
-         Immediate(Smi::FromInt(StackFrame::ARGUMENTS_ADAPTOR)));
+         Immediate(StackFrame::TypeToMarker(StackFrame::ARGUMENTS_ADAPTOR)));
   __ j(not_equal, &no_arguments_adaptor, Label::kNear);
 
   // Drop current frame and load arguments count from arguments adaptor frame.
@@ -3834,13 +3853,18 @@ void LCodeGen::DoDeferredMaybeGrowElements(LMaybeGrowElements* instr) {
       if (Smi::IsValid(int_key)) {
         __ mov(ebx, Immediate(Smi::FromInt(int_key)));
       } else {
-        // We should never get here at runtime because there is a smi check on
-        // the key before this point.
-        __ int3();
+        Abort(kArrayIndexConstantValueTooBig);
       }
     } else {
+      Label is_smi;
       __ Move(ebx, ToRegister(key));
       __ SmiTag(ebx);
+      // Deopt if the key is outside Smi range. The stub expects Smi and would
+      // bump the elements into dictionary mode (and trigger a deopt) anyways.
+      __ j(no_overflow, &is_smi);
+      __ PopSafepointRegisters();
+      DeoptimizeIf(no_condition, instr, DeoptimizeReason::kOverflow);
+      __ bind(&is_smi);
     }
 
     GrowArrayElementsStub stub(isolate(), instr->hydrogen()->kind());
@@ -4518,6 +4542,15 @@ void LCodeGen::DoCheckValue(LCheckValue* instr) {
 
 
 void LCodeGen::DoDeferredInstanceMigration(LCheckMaps* instr, Register object) {
+  Label deopt, done;
+  // If the map is not deprecated the migration attempt does not make sense.
+  __ push(object);
+  __ mov(object, FieldOperand(object, HeapObject::kMapOffset));
+  __ test(FieldOperand(object, Map::kBitField3Offset),
+          Immediate(Map::Deprecated::kMask));
+  __ pop(object);
+  __ j(zero, &deopt);
+
   {
     PushSafepointRegistersScope scope(this);
     __ push(object);
@@ -4528,7 +4561,12 @@ void LCodeGen::DoDeferredInstanceMigration(LCheckMaps* instr, Register object) {
 
     __ test(eax, Immediate(kSmiTagMask));
   }
-  DeoptimizeIf(zero, instr, DeoptimizeReason::kInstanceMigrationFailed);
+  __ j(not_zero, &done);
+
+  __ bind(&deopt);
+  DeoptimizeIf(no_condition, instr, DeoptimizeReason::kInstanceMigrationFailed);
+
+  __ bind(&done);
 }
 
 
@@ -4869,18 +4907,6 @@ Condition LCodeGen::EmitTypeofIs(LTypeofIsAndBranch* instr, Register input) {
     __ test_b(FieldOperand(input, Map::kBitFieldOffset),
               Immediate((1 << Map::kIsCallable) | (1 << Map::kIsUndetectable)));
     final_branch_condition = zero;
-
-// clang-format off
-#define SIMD128_TYPE(TYPE, Type, type, lane_count, lane_type)         \
-  } else if (String::Equals(type_name, factory()->type##_string())) { \
-    __ JumpIfSmi(input, false_label, false_distance);                 \
-    __ cmp(FieldOperand(input, HeapObject::kMapOffset),               \
-           factory()->type##_map());                                  \
-    final_branch_condition = equal;
-  SIMD128_TYPES(SIMD128_TYPE)
-#undef SIMD128_TYPE
-    // clang-format on
-
   } else {
     __ jmp(false_label, false_distance);
   }

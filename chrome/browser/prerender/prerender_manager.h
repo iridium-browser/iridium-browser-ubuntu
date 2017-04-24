@@ -140,7 +140,7 @@ class PrerenderManager : public content::NotificationObserver,
 
   // Adds a prerender from an external request that will prerender even on
   // cellular networks as long as the user setting for prerendering is ON.
-  std::unique_ptr<PrerenderHandle> AddPrerenderOnCellularFromExternalRequest(
+  std::unique_ptr<PrerenderHandle> AddForcedPrerenderFromExternalRequest(
       const GURL& url,
       const content::Referrer& referrer,
       content::SessionStorageNamespace* session_storage_namespace,
@@ -241,9 +241,11 @@ class PrerenderManager : public content::NotificationObserver,
                                            bool was_hidden,
                                            base::TimeTicks ticks);
 
-  static PrerenderManagerMode GetMode();
+  static PrerenderManagerMode GetMode(Origin origin);
   static void SetMode(PrerenderManagerMode mode);
-  static bool IsPrerenderingPossible();
+  static void SetOmniboxMode(PrerenderManagerMode mode);
+  static void SetInstantMode(PrerenderManagerMode mode);
+  static bool IsAnyPrerenderingPossible();
   static bool IsNoStatePrefetch(Origin origin);
   static bool IsSimpleLoadExperiment(Origin origin);
 
@@ -607,6 +609,8 @@ class PrerenderManager : public content::NotificationObserver,
   std::unique_ptr<PrerenderContents::Factory> prerender_contents_factory_;
 
   static PrerenderManagerMode mode_;
+  static PrerenderManagerMode instant_mode_;
+  static PrerenderManagerMode omnibox_mode_;
 
   // A count of how many prerenders we do per session. Initialized to 0 then
   // incremented and emitted to a histogram on each successful prerender.

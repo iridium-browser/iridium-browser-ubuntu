@@ -254,10 +254,10 @@ public class MediaSessionTabHelper implements MediaImageCallback {
         }
 
         cleanupMediaSessionObserver();
+        mMediaImageManager.setWebContents(webContents);
         if (mediaSession != null) {
             mMediaSessionObserver = createMediaSessionObserver(mediaSession);
         }
-        mMediaImageManager.setWebContents(webContents);
     }
 
     private void cleanupMediaSessionObserver() {
@@ -284,11 +284,13 @@ public class MediaSessionTabHelper implements MediaImageCallback {
         }
 
         @Override
-        public void onDidNavigateMainFrame(Tab tab, String url, String baseUrl,
-                boolean isNavigationToDifferentPage, boolean isFragmentNavigation, int statusCode) {
+        public void onDidFinishNavigation(Tab tab, String url, boolean isInMainFrame,
+                boolean isErrorPage, boolean hasCommitted, boolean isSamePage,
+                boolean isFragmentNavigation, Integer pageTransition, int errorCode,
+                int httpStatusCode) {
             assert tab == mTab;
 
-            if (!isNavigationToDifferentPage) return;
+            if (!hasCommitted || !isInMainFrame || isSamePage) return;
 
             String origin = mTab.getUrl();
             try {
@@ -298,7 +300,6 @@ public class MediaSessionTabHelper implements MediaImageCallback {
                                 + "Using the full URL instead.");
             }
 
-            if (mOrigin != null && mOrigin.equals(origin)) return;
             mOrigin = origin;
             mFavicon = null;
             mPageMediaImage = null;
@@ -309,6 +310,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
             // {@link #onTitleUpdated()}. The following assignment is to keep |mCurrentMetadata| up
             // to date as |mPageMetadata| may have changed.
             mCurrentMetadata = getMetadata();
+            mMediaSessionActions = null;
 
             if (isNotificationHiddingOrHidden()) return;
 
@@ -316,6 +318,7 @@ public class MediaSessionTabHelper implements MediaImageCallback {
             mNotificationInfoBuilder.setNotificationLargeIcon(mFavicon);
             mNotificationInfoBuilder.setMediaSessionImage(mPageMediaImage);
             mNotificationInfoBuilder.setMetadata(mCurrentMetadata);
+            mNotificationInfoBuilder.setMediaSessionActions(mMediaSessionActions);
             showNotification();
         }
 

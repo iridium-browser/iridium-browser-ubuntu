@@ -118,7 +118,7 @@ class DownloadProtectionService {
   // delivered asynchronously via the given callback.  This method must be
   // called on the UI thread, and the callback will also be invoked on the UI
   // thread.  Pre-condition: !info.download_url_chain.empty().
-  virtual void CheckDownloadUrl(const content::DownloadItem& item,
+  virtual void CheckDownloadUrl(content::DownloadItem* item,
                                 const CheckDownloadCallback& callback);
 
   // Returns true iff the download specified by |info| should be scanned by
@@ -223,6 +223,7 @@ class DownloadProtectionService {
  private:
   class CheckClientDownloadRequest;
   class PPAPIDownloadRequest;
+  friend class DownloadUrlSBClient;
   friend class DownloadProtectionServiceTest;
   friend class DownloadDangerPromptTest;
 
@@ -295,23 +296,23 @@ class DownloadProtectionService {
   // Returns the URL that will be used for download requests.
   static GURL GetDownloadRequestUrl();
 
-  // If kDownloadAttribution feature is enabled, identify and add referrer chain
-  // info of a download to ClientDownloadRequest proto. This function also
-  // records UMA stats of download attribution result.
-  void AddReferrerChainToClientDownloadRequest(
+  // If kDownloadAttribution feature is enabled, identify referrer chain info of
+  // a download. This function also records UMA stats of download attribution
+  // result.
+  std::unique_ptr<ReferrerChain> IdentifyReferrerChain(
     const GURL& download_url,
-    content::WebContents* web_contents,
-    ClientDownloadRequest* out_request);
+    content::WebContents* web_contents);
 
   // If kDownloadAttribution feature is enabled, identify referrer chain of the
   // PPAPI download based on the frame URL where the download is initiated.
   // Then add referrer chain info to ClientDownloadRequest proto. This function
   // also records UMA stats of download attribution result.
   void AddReferrerChainToPPAPIClientDownloadRequest(
-    const GURL& initiating_frame_url,
-    int tab_id,
-    bool has_user_gesture,
-    ClientDownloadRequest* out_request);
+      const GURL& initiating_frame_url,
+      const GURL& initiating_main_frame_url,
+      int tab_id,
+      bool has_user_gesture,
+      ClientDownloadRequest* out_request);
 
   // These pointers may be NULL if SafeBrowsing is disabled.
   scoped_refptr<SafeBrowsingUIManager> ui_manager_;

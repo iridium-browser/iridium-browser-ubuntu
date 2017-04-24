@@ -82,6 +82,8 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   static bool insertParagraphSeparatorInQuotedContent(Document&);
   static void closeTyping(LocalFrame*);
 
+  static TypingCommand* lastTypingCommandIfStillOpenForTyping(LocalFrame*);
+
   void insertText(const String& text, bool selectInsertedText, EditingState*);
   void insertTextRunWithoutNewlines(const String& text,
                                     bool selectInsertedText,
@@ -95,10 +97,8 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   void setCompositionType(TextCompositionType type) {
     m_compositionType = type;
   }
-  static void adjustSelectionAfterIncrementalInsertion(TypingCommand*,
-                                                       LocalFrame*,
-                                                       const size_t start,
-                                                       const size_t end);
+  void adjustSelectionAfterIncrementalInsertion(LocalFrame*,
+                                                const size_t textLength);
 
   ETypingCommand commandTypeOfOpenCommand() const { return m_commandType; }
   TextCompositionType compositionType() const { return m_compositionType; }
@@ -137,8 +137,6 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   bool isOpenForMoreTyping() const { return m_openForMoreTyping; }
   void closeTyping() { m_openForMoreTyping = false; }
 
-  static TypingCommand* lastTypingCommandIfStillOpenForTyping(LocalFrame*);
-
   void doApply(EditingState*) override;
   InputEvent::InputType inputType() const override;
   bool isTypingCommand() const override;
@@ -146,7 +144,6 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   void setShouldRetainAutocorrectionIndicator(bool retain) override {
     m_shouldRetainAutocorrectionIndicator = retain;
   }
-  bool shouldStopCaretBlinking() const override { return true; }
   void setShouldPreventSpellChecking(bool prevent) {
     m_shouldPreventSpellChecking = prevent;
   }
@@ -183,6 +180,7 @@ class CORE_EXPORT TypingCommand final : public CompositeEditCommand {
   bool m_shouldPreventSpellChecking;
 
   bool m_isIncrementalInsertion;
+  size_t m_selectionStart;
 };
 
 DEFINE_TYPE_CASTS(TypingCommand,

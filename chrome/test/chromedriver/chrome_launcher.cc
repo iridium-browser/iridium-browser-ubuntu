@@ -62,32 +62,29 @@
 namespace {
 
 const char* const kCommonSwitches[] = {
-  "disable-infobars",
-  "disable-popup-blocking",
-  "ignore-certificate-errors",
-  "metrics-recording-only",
+    "disable-popup-blocking", "enable-automation", "ignore-certificate-errors",
+    "metrics-recording-only",
 };
 
 const char* const kDesktopSwitches[] = {
-  "disable-hang-monitor",
-  "disable-prompt-on-repost",
-  "disable-sync",
-  "no-first-run",
-  "disable-background-networking",
-  "disable-web-resources",
-  "safebrowsing-disable-auto-update",
-  "disable-client-side-phishing-detection",
-  "disable-default-apps",
-  "enable-logging",
-  "log-level=0",
-  "password-store=basic",
-  "use-mock-keychain",
-  "test-type=webdriver",
+    "disable-hang-monitor",
+    "disable-prompt-on-repost",
+    "disable-sync",
+    "no-first-run",
+    "disable-background-networking",
+    "disable-web-resources",
+    "safebrowsing-disable-auto-update",
+    "disable-client-side-phishing-detection",
+    "disable-default-apps",
+    "enable-logging",
+    "log-level=0",
+    "password-store=basic",
+    "use-mock-keychain",
+    "test-type=webdriver",
 };
 
 const char* const kAndroidSwitches[] = {
-  "disable-fre",
-  "enable-remote-debugging",
+    "disable-fre", "enable-remote-debugging",
 };
 
 #if defined(OS_LINUX)
@@ -778,20 +775,25 @@ Status ProcessExtensions(const std::vector<std::string>& extensions,
     Status status = UnpackAutomationExtension(temp_dir, &automation_extension);
     if (status.IsError())
       return status;
-#if defined(OS_WIN) || defined(OS_MACOSX)
-    // On Chrome for Windows and Mac, a "Disable developer mode extensions"
-    // dialog appears for the automation extension. Suppress this by loading
-    // it as a component extension.
-    UpdateExtensionSwitch(switches, "load-component-extension",
-                          automation_extension.value());
-#else
     if (switches->HasSwitch("disable-extensions")) {
+      UpdateExtensionSwitch(switches, "disable-extensions-except",
+                            automation_extension.value());
+      // TODO(samuong): Stop using --load-component-extension when ChromeDriver
+      // stops supporting Chrome 56. For backwards compatibility, Chrome 57 and
+      // 58 interprets --load-component-extension as --load-extension.
       UpdateExtensionSwitch(switches, "load-component-extension",
                             automation_extension.value());
     } else {
+#if defined(OS_WIN) || defined(OS_MACOSX)
+      // On Chrome 56 for Windows and Mac, a "Disable developer
+      // mode extensions" dialog appears for the automation extension. Suppress
+      // this by loading it as a component extension.
+      UpdateExtensionSwitch(switches, "load-component-extension",
+                            automation_extension.value());
+#else
       extension_paths.push_back(automation_extension.value());
-    }
 #endif
+    }
   }
 
   if (extension_paths.size()) {

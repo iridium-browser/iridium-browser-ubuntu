@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/instant_service.h"
+#include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
 #include "chrome/common/render_messages.h"
 #include "components/search/search.h"
@@ -19,55 +21,65 @@
 
 namespace {
 
-bool IsRenderedInInstantProcess(content::WebContents* web_contents) {
-  // TODO(tibell): Instead of rejecting messages check at connection time if we
-  // want to talk to the render frame or not. Later, in an out-of-process iframe
-  // world, the IsRenderedInInstantProcess check will have to be done, as it's
-  // based on the RenderView.
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  return search::IsRenderedInInstantProcess(web_contents, profile);
+bool IsInInstantProcess(content::RenderFrameHost* render_frame) {
+  content::RenderProcessHost* process_host = render_frame->GetProcess();
+  const InstantService* instant_service = InstantServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(process_host->GetBrowserContext()));
+  if (!instant_service)
+    return false;
+
+  return instant_service->IsInstantProcess(process_host->GetID());
 }
 
 class SearchBoxClientFactoryImpl
-    : public SearchIPCRouter::SearchBoxClientFactory {
+    : public SearchIPCRouter::SearchBoxClientFactory,
+      public chrome::mojom::EmbeddedSearchConnector {
  public:
-  // The |web_contents| must outlive this object.
-  explicit SearchBoxClientFactoryImpl(content::WebContents* web_contents)
-      : web_contents_(web_contents),
-        last_connected_rfh_(
-            std::make_pair(content::ChildProcessHost::kInvalidUniqueID,
-                           MSG_ROUTING_NONE)) {}
-  chrome::mojom::SearchBox* GetSearchBox() override;
+  // |web_contents| and |binding| must outlive this object.
+  SearchBoxClientFactoryImpl(
+      content::WebContents* web_contents,
+      mojo::AssociatedBinding<chrome::mojom::Instant>* binding)
+      : client_binding_(binding), factory_bindings_(web_contents, this) {
+    DCHECK(web_contents);
+    DCHECK(binding);
+    // Before we are connected to a frame we throw away all messages.
+    mojo::GetIsolatedProxy(&search_box_);
+  }
+
+  chrome::mojom::SearchBox* GetSearchBox() override {
+    return search_box_.get();
+  }
 
  private:
-  content::WebContents* web_contents_;
+  void Connect(chrome::mojom::InstantAssociatedRequest request,
+               chrome::mojom::SearchBoxAssociatedPtrInfo client) override;
+
+  // An interface used to push updates to the frame that connected to us. Before
+  // we've been connected to a frame, messages sent on this interface go into
+  // the void.
   chrome::mojom::SearchBoxAssociatedPtr search_box_;
 
-  // The proccess ID and routing ID of the last connected main frame. May be
-  // (ChildProcessHost::kInvalidUniqueID, MSG_ROUTING_NONE) if we haven't
-  // connected yet.
-  std::pair<int, int> last_connected_rfh_;
+  // Used to bind incoming interface requests to the implementation, which lives
+  // in SearchIPCRouter.
+  mojo::AssociatedBinding<chrome::mojom::Instant>* client_binding_;
+
+  // Binding used to listen to connection requests.
+  content::WebContentsFrameBindingSet<chrome::mojom::EmbeddedSearchConnector>
+      factory_bindings_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchBoxClientFactoryImpl);
 };
 
-chrome::mojom::SearchBox* SearchBoxClientFactoryImpl::GetSearchBox() {
-  content::RenderFrameHost* frame = web_contents_->GetMainFrame();
-  auto id = std::make_pair(frame->GetProcess()->GetID(), frame->GetRoutingID());
-  // Avoid reconnecting repeatedly to the same RenderFrameHost for performance
-  // reasons.
-  if (id != last_connected_rfh_) {
-    if (IsRenderedInInstantProcess(web_contents_)) {
-      frame->GetRemoteAssociatedInterfaces()->GetInterface(&search_box_);
-    } else {
-      // Renderer is not an instant process. We'll create a connection that
-      // drops all messages.
-      mojo::GetIsolatedProxy(&search_box_);
-    }
-    last_connected_rfh_ = id;
+void SearchBoxClientFactoryImpl::Connect(
+    chrome::mojom::InstantAssociatedRequest request,
+    chrome::mojom::SearchBoxAssociatedPtrInfo client) {
+  content::RenderFrameHost* frame = factory_bindings_.GetCurrentTargetFrame();
+  const bool is_main_frame = frame->GetParent() == nullptr;
+  if (!IsInInstantProcess(frame) || !is_main_frame) {
+    return;
   }
-  return search_box_.get();
+  client_binding_->Bind(std::move(request));
+  search_box_.Bind(std::move(client));
 }
 
 }  // namespace
@@ -80,14 +92,15 @@ SearchIPCRouter::SearchIPCRouter(content::WebContents* web_contents,
       policy_(std::move(policy)),
       commit_counter_(0),
       is_active_tab_(false),
-      bindings_(web_contents, this),
-      search_box_client_factory_(new SearchBoxClientFactoryImpl(web_contents)) {
+      binding_(this),
+      search_box_client_factory_(
+          new SearchBoxClientFactoryImpl(web_contents, &binding_)) {
   DCHECK(web_contents);
   DCHECK(delegate);
   DCHECK(policy_.get());
 }
 
-SearchIPCRouter::~SearchIPCRouter() {}
+SearchIPCRouter::~SearchIPCRouter() = default;
 
 void SearchIPCRouter::OnNavigationEntryCommitted() {
   ++commit_counter_;
@@ -171,8 +184,6 @@ void SearchIPCRouter::OnTabDeactivated() {
 
 void SearchIPCRouter::InstantSupportDetermined(int page_seq_no,
                                                bool instant_support) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -180,8 +191,6 @@ void SearchIPCRouter::InstantSupportDetermined(int page_seq_no,
 }
 
 void SearchIPCRouter::FocusOmnibox(int page_seq_no, OmniboxFocusState state) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -192,10 +201,7 @@ void SearchIPCRouter::FocusOmnibox(int page_seq_no, OmniboxFocusState state) {
   delegate_->FocusOmnibox(state);
 }
 
-void SearchIPCRouter::SearchBoxDeleteMostVisitedItem(int page_seq_no,
-                                                     const GURL& url) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
+void SearchIPCRouter::DeleteMostVisitedItem(int page_seq_no, const GURL& url) {
   if (page_seq_no != commit_counter_)
     return;
 
@@ -206,10 +212,8 @@ void SearchIPCRouter::SearchBoxDeleteMostVisitedItem(int page_seq_no,
   delegate_->OnDeleteMostVisitedItem(url);
 }
 
-void SearchIPCRouter::SearchBoxUndoMostVisitedDeletion(int page_seq_no,
-                                                       const GURL& url) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
+void SearchIPCRouter::UndoMostVisitedDeletion(int page_seq_no,
+                                              const GURL& url) {
   if (page_seq_no != commit_counter_)
     return;
 
@@ -220,9 +224,7 @@ void SearchIPCRouter::SearchBoxUndoMostVisitedDeletion(int page_seq_no,
   delegate_->OnUndoMostVisitedDeletion(url);
 }
 
-void SearchIPCRouter::SearchBoxUndoAllMostVisitedDeletions(int page_seq_no) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
+void SearchIPCRouter::UndoAllMostVisitedDeletions(int page_seq_no) {
   if (page_seq_no != commit_counter_)
     return;
 
@@ -236,8 +238,6 @@ void SearchIPCRouter::SearchBoxUndoAllMostVisitedDeletions(int page_seq_no) {
 void SearchIPCRouter::LogEvent(int page_seq_no,
                                NTPLoggingEventType event,
                                base::TimeDelta time) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -252,8 +252,6 @@ void SearchIPCRouter::LogMostVisitedImpression(
     int page_seq_no,
     int position,
     ntp_tiles::NTPTileSource tile_source) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -269,8 +267,6 @@ void SearchIPCRouter::LogMostVisitedNavigation(
     int page_seq_no,
     int position,
     ntp_tiles::NTPTileSource tile_source) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -284,8 +280,6 @@ void SearchIPCRouter::LogMostVisitedNavigation(
 
 void SearchIPCRouter::PasteAndOpenDropdown(int page_seq_no,
                                            const base::string16& text) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -298,8 +292,6 @@ void SearchIPCRouter::PasteAndOpenDropdown(int page_seq_no,
 
 void SearchIPCRouter::ChromeIdentityCheck(int page_seq_no,
                                           const base::string16& identity) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 
@@ -311,8 +303,6 @@ void SearchIPCRouter::ChromeIdentityCheck(int page_seq_no,
 }
 
 void SearchIPCRouter::HistorySyncCheck(int page_seq_no) {
-  if (!IsRenderedInInstantProcess(web_contents()))
-    return;
   if (page_seq_no != commit_counter_)
     return;
 

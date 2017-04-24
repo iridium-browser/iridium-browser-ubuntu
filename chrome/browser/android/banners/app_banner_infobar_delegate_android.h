@@ -16,6 +16,10 @@
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "ui/gfx/image/image.h"
 
+namespace base {
+class ElapsedTimer;
+}
+
 namespace content {
 class WebContents;
 }
@@ -24,6 +28,7 @@ namespace infobars {
 class InfoBarManager;
 }
 
+enum class WebApkInstallResult;
 struct ShortcutInfo;
 
 namespace banners {
@@ -121,8 +126,12 @@ class AppBannerInfoBarDelegateAndroid : public ConfirmInfoBarDelegate {
   // A2HS menu item. Otherwise returns true.
   bool TriggeredFromBanner() const;
   void SendBannerAccepted();
-  void OnWebApkInstallFinished(bool success,
+  void OnWebApkInstallFinished(WebApkInstallResult result,
                                const std::string& webapk_package_name);
+
+  // Called when a WebAPK install fails.
+  void OnWebApkInstallFailed(WebApkInstallResult result);
+
   void TrackWebApkInstallationDismissEvents(InstallState install_state);
 
   // ConfirmInfoBarDelegate:
@@ -155,6 +164,9 @@ class AppBannerInfoBarDelegateAndroid : public ConfirmInfoBarDelegate {
 
   // Indicates the current state of a WebAPK installation.
   InstallState install_state_;
+
+  // Tracks how long it takes to install a WebAPK.
+  std::unique_ptr<base::ElapsedTimer> timer_;
 
   // Indicates the way in which a WebAPK (if applicable) is installed: from the
   // menu or from an app banner.

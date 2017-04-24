@@ -411,7 +411,6 @@ void QuicConnectionLogger::OnFrameAddedToPacket(const QuicFrame& frame) {
 
 void QuicConnectionLogger::OnPacketSent(
     const SerializedPacket& serialized_packet,
-    QuicPathId /* original_path_id */,
     QuicPacketNumber original_packet_number,
     TransmissionType transmission_type,
     QuicTime sent_time) {
@@ -687,7 +686,8 @@ void QuicConnectionLogger::OnRttChanged(QuicTime::Delta rtt) const {
     return;
 
   int64_t microseconds = rtt.ToMicroseconds();
-  if (microseconds != 0) {
+  if (microseconds != 0 &&
+      socket_performance_watcher_->ShouldNotifyUpdatedRTT()) {
     socket_performance_watcher_->OnUpdatedRTTAvailable(
         base::TimeDelta::FromMicroseconds(rtt.ToMicroseconds()));
   }

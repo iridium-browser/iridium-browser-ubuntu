@@ -38,6 +38,9 @@ bool LaunchApp(content::BrowserContext* context,
 bool LaunchAndroidSettingsApp(content::BrowserContext* context,
                               int event_flags);
 
+// Launch Play Store app.
+bool LaunchPlayStoreWithUrl(const std::string& url);
+
 // Launch an app with given layout and let the system decides how big and where
 // to place it.
 bool LaunchApp(content::BrowserContext* context,
@@ -72,7 +75,7 @@ bool CanHandleResolution(content::BrowserContext* context,
 // Uninstalls the package in ARC.
 void UninstallPackage(const std::string& package_name);
 
-// Uninstalls Arc app or removes shortcut.
+// Uninstalls ARC app or removes shortcut.
 void UninstallArcApp(const std::string& app_id, Profile* profile);
 
 // Removes cached app shortcut icon in ARC.

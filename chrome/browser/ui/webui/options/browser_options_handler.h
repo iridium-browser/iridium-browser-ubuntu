@@ -83,7 +83,7 @@ class BrowserOptionsHandler
   void Uninitialize() override;
 
   // syncer::SyncServiceObserver implementation.
-  void OnStateChanged() override;
+  void OnStateChanged(syncer::SyncService* sync) override;
 
   // SigninManagerBase::Observer implementation.
   void GoogleSigninSucceeded(const std::string& account_id,
@@ -340,6 +340,9 @@ class BrowserOptionsHandler
 
   // Called to show Android apps settings.
   void ShowAndroidAppsSettings(const base::ListValue* args);
+
+  // Called to show apps based on a url for the Play Store.
+  void ShowPlayStoreApps(const base::ListValue* args);
 
   // Called to show TalkBack settings.
   void ShowAccessibilityTalkBackSettings(const base::ListValue *args);

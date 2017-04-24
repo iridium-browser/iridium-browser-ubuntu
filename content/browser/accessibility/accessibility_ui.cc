@@ -81,9 +81,7 @@ std::unique_ptr<base::DictionaryValue> BuildTargetDescriptor(
   target_data->SetString(kNameField, net::EscapeForHTML(name));
   target_data->SetInteger(kPidField, base::GetProcId(handle));
   target_data->SetString(kFaviconUrlField, favicon_url.spec());
-  target_data->SetBoolean(
-      kAccessibilityModeField,
-      0 != (accessibility_mode & ACCESSIBILITY_MODE_FLAG_WEB_CONTENTS));
+  target_data->SetInteger(kAccessibilityModeField, accessibility_mode);
   return target_data;
 }
 
@@ -221,9 +219,11 @@ void AccessibilityUI::ToggleAccessibility(const base::ListValue* args) {
   std::string route_id_str;
   int process_id;
   int route_id;
-  CHECK_EQ(2U, args->GetSize());
+  int mode;
+  CHECK_EQ(3U, args->GetSize());
   CHECK(args->GetString(0, &process_id_str));
   CHECK(args->GetString(1, &route_id_str));
+  CHECK(args->GetInteger(2, &mode));
   CHECK(base::StringToInt(process_id_str, &process_id));
   CHECK(base::StringToInt(route_id_str, &route_id));
 
@@ -232,13 +232,11 @@ void AccessibilityUI::ToggleAccessibility(const base::ListValue* args) {
     return;
   auto* web_contents =
       static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(rvh));
-  AccessibilityMode mode = web_contents->GetAccessibilityMode();
-  if ((mode & ACCESSIBILITY_MODE_COMPLETE) != ACCESSIBILITY_MODE_COMPLETE) {
-    web_contents->AddAccessibilityMode(ACCESSIBILITY_MODE_COMPLETE);
-  } else {
-    web_contents->SetAccessibilityMode(
-        BrowserAccessibilityStateImpl::GetInstance()->accessibility_mode());
-  }
+  AccessibilityMode current_mode = web_contents->GetAccessibilityMode();
+  // Flip the bits represented by |mode|. See accessibility_mode_enums.h for
+  // values.
+  current_mode ^= mode;
+  web_contents->SetAccessibilityMode(current_mode);
 }
 
 void AccessibilityUI::SetGlobalFlag(const base::ListValue* args) {
@@ -320,6 +318,10 @@ void AccessibilityUI::RequestAccessibilityTree(const base::ListValue* args) {
   std::unique_ptr<base::DictionaryValue> result(BuildTargetDescriptor(rvh));
   auto* web_contents =
       static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(rvh));
+  // No matter the state of the current web_contents, we want to force the mode
+  // because we are about to show the accessibility tree
+  web_contents->SetAccessibilityMode(ACCESSIBILITY_MODE_FLAG_NATIVE_APIS |
+                                     ACCESSIBILITY_MODE_FLAG_WEB_CONTENTS);
   std::unique_ptr<AccessibilityTreeFormatter> formatter;
   if (g_show_internal_accessibility_tree)
     formatter.reset(new AccessibilityTreeFormatterBlink());
@@ -331,9 +333,10 @@ void AccessibilityUI::RequestAccessibilityTree(const base::ListValue* args) {
       base::ASCIIToUTF16("*"),
       AccessibilityTreeFormatter::Filter::ALLOW));
   formatter->SetFilters(filters);
-  formatter->FormatAccessibilityTree(
-      web_contents->GetRootBrowserAccessibilityManager()->GetRoot(),
-      &accessibility_contents_utf16);
+  auto* ax_mgr = web_contents->GetOrCreateRootBrowserAccessibilityManager();
+  DCHECK(ax_mgr);
+  formatter->FormatAccessibilityTree(ax_mgr->GetRoot(),
+                                     &accessibility_contents_utf16);
   result->Set("tree",
               new base::StringValue(
                   base::UTF16ToUTF8(accessibility_contents_utf16)));

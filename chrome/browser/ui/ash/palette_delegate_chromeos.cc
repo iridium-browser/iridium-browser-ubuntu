@@ -6,7 +6,6 @@
 
 #include "ash/accelerators/accelerator_controller_delegate_aura.h"
 #include "ash/common/system/chromeos/palette/palette_utils.h"
-#include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/screenshot_delegate.h"
 #include "ash/shell.h"
 #include "ash/utility/screenshot_controller.h"
@@ -22,29 +21,17 @@
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
-#include "ui/events/devices/input_device_manager.h"
 
 namespace chromeos {
-
-// static
-std::unique_ptr<PaletteDelegateChromeOS> PaletteDelegateChromeOS::Create() {
-  if (!ash::IsPaletteFeatureEnabled())
-    return nullptr;
-  return base::WrapUnique(new PaletteDelegateChromeOS());
-}
 
 PaletteDelegateChromeOS::PaletteDelegateChromeOS() : weak_factory_(this) {
   registrar_.Add(this, chrome::NOTIFICATION_SESSION_STARTED,
                  content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                  content::NotificationService::AllSources());
-
-  ui::InputDeviceManager::GetInstance()->AddObserver(this);
 }
 
-PaletteDelegateChromeOS::~PaletteDelegateChromeOS() {
-  ui::InputDeviceManager::GetInstance()->RemoveObserver(this);
-}
+PaletteDelegateChromeOS::~PaletteDelegateChromeOS() {}
 
 std::unique_ptr<PaletteDelegateChromeOS::EnableListenerSubscription>
 PaletteDelegateChromeOS::AddPaletteEnableListener(
@@ -69,11 +56,9 @@ bool PaletteDelegateChromeOS::HasNoteApp() {
   return chromeos::NoteTakingHelper::Get()->IsAppAvailable(profile_);
 }
 
-void PaletteDelegateChromeOS::ActiveUserChanged(const AccountId& account_id) {
-  const user_manager::User* user =
-      user_manager::UserManager::Get()->FindUser(account_id);
-  Profile* profile = ProfileHelper::Get()->GetProfileByUser(user);
-  SetProfile(profile);
+void PaletteDelegateChromeOS::ActiveUserChanged(
+    const user_manager::User* active_user) {
+  SetProfile(ProfileHelper::Get()->GetProfileByUser(active_user));
 }
 
 void PaletteDelegateChromeOS::Observe(
@@ -86,9 +71,9 @@ void PaletteDelegateChromeOS::Observe(
       SetProfile(ProfileManager::GetActiveUserProfile());
 
       // Add a session state observer to be able to monitor session changes.
-      if (!session_state_observer_.get() && ash::Shell::HasInstance()) {
+      if (!session_state_observer_.get()) {
         session_state_observer_.reset(
-            new ash::ScopedSessionStateObserver(this));
+            new user_manager::ScopedUserSessionStateObserver(this));
       }
       break;
     case chrome::NOTIFICATION_PROFILE_DESTROYED: {
@@ -132,17 +117,6 @@ void PaletteDelegateChromeOS::OnPartialScreenshotDone(
     then.Run();
 }
 
-void PaletteDelegateChromeOS::SetPartialMagnifierState(bool enabled) {
-  ash::PartialMagnificationController* controller =
-      ash::Shell::GetInstance()->partial_magnification_controller();
-  controller->SetEnabled(enabled);
-}
-
-void PaletteDelegateChromeOS::SetStylusStateChangedCallback(
-    const OnStylusStateChangedCallback& on_stylus_state_changed) {
-  on_stylus_state_changed_ = on_stylus_state_changed;
-}
-
 bool PaletteDelegateChromeOS::ShouldAutoOpenPalette() {
   if (!profile_)
     return false;
@@ -183,7 +157,4 @@ void PaletteDelegateChromeOS::CancelPartialScreenshot() {
   ash::Shell::GetInstance()->screenshot_controller()->CancelScreenshotSession();
 }
 
-void PaletteDelegateChromeOS::OnStylusStateChanged(ui::StylusState state) {
-  on_stylus_state_changed_.Run(state);
-}
 }  // namespace chromeos

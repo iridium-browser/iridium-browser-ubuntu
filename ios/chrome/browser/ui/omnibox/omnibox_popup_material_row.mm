@@ -34,8 +34,8 @@ const CGFloat kAppendButtonSize = 48.0;
 
 @synthesize textTruncatingLabel = _textTruncatingLabel;
 @synthesize detailTruncatingLabel = _detailTruncatingLabel;
+@synthesize detailAnswerLabel = _detailAnswerLabel;
 @synthesize appendButton = _appendButton;
-@synthesize physicalWebButton = _physicalWebButton;
 @synthesize answerImageView = _answerImageView;
 @synthesize imageView = _imageView;
 @synthesize rowHeight = _rowHeight;
@@ -67,17 +67,20 @@ const CGFloat kAppendButtonSize = 48.0;
     _detailTruncatingLabel.userInteractionEnabled = NO;
     [self addSubview:_detailTruncatingLabel];
 
+    // Answers use a UILabel with NSLineBreakByTruncatingTail to produce a
+    // truncation with an ellipse instead of fading on multi-line text.
+    _detailAnswerLabel = [[UILabel alloc] initWithFrame:CGRectZero];
+    _detailAnswerLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    _detailAnswerLabel.userInteractionEnabled = NO;
+    _detailAnswerLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self addSubview:_detailAnswerLabel];
+
     _appendButton = [[UIButton buttonWithType:UIButtonTypeCustom] retain];
     [_appendButton setContentMode:UIViewContentModeRight];
     [self updateAppendButtonImages];
     // TODO(justincohen): Consider using the UITableViewCell's accessory view.
     // The current implementation is from before using a UITableViewCell.
     [self addSubview:_appendButton];
-
-    _physicalWebButton = [[UIButton buttonWithType:UIButtonTypeCustom] retain];
-    [_physicalWebButton setContentMode:UIViewContentModeRight];
-    [self updatePhysicalWebImage];
-    [self addSubview:_physicalWebButton];
 
     // Leading icon is only displayed on iPad.
     if (IsIPadIdiom()) {
@@ -117,7 +120,6 @@ const CGFloat kAppendButtonSize = 48.0;
       CGRectGetWidth(self.bounds), floor((_rowHeight - kAppendButtonSize) / 2),
       kAppendButtonSize, kAppendButtonSize);
   _appendButton.frame = LayoutRectGetRect(trailingAccessoryLayout);
-  _physicalWebButton.frame = LayoutRectGetRect(trailingAccessoryLayout);
 }
 
 - (void)updateLeadingImage:(int)imageID {
@@ -166,22 +168,14 @@ const CGFloat kAppendButtonSize = 48.0;
                  forState:UIControlStateHighlighted];
 }
 
-- (void)updatePhysicalWebImage {
-  UIImage* physicalWebImage = NativeImage(IDR_IOS_OMNIBOX_PHYSICAL_WEB);
-  [_physicalWebButton setImage:physicalWebImage forState:UIControlStateNormal];
-
-  UIImage* physicalWebImageSelected =
-      NativeImage(IDR_IOS_OMNIBOX_PHYSICAL_WEB_HIGHLIGHTED);
-  [_physicalWebButton setImage:physicalWebImageSelected
-                      forState:UIControlStateHighlighted];
-}
-
 - (NSString*)accessibilityLabel {
   return _textTruncatingLabel.attributedText.string;
 }
 
 - (NSString*)accessibilityValue {
-  return _detailTruncatingLabel.attributedText.string;
+  return _detailTruncatingLabel.hidden
+             ? _detailAnswerLabel.attributedText.string
+             : _detailTruncatingLabel.attributedText.string;
 }
 
 @end

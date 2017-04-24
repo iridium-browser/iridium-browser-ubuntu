@@ -30,7 +30,7 @@
 
 #include "bindings/core/v8/LocalWindowProxy.h"
 
-#include "bindings/core/v8/ConditionalFeatures.h"
+#include "bindings/core/v8/ConditionalFeaturesForCore.h"
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ToV8.h"
@@ -43,12 +43,12 @@
 #include "bindings/core/v8/V8Window.h"
 #include "core/dom/Modulator.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/LocalFrameClient.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/DocumentNameCollection.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/inspector/MainThreadDebugger.h"
 #include "core/loader/FrameLoader.h"
-#include "core/loader/FrameLoaderClient.h"
 #include "core/origin_trials/OriginTrialContext.h"
 #include "platform/Histogram.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -56,8 +56,9 @@
 #include "platform/heap/Handle.h"
 #include "platform/instrumentation/tracing/TraceEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "platform/weborigin/SecurityViolationReportingPolicy.h"
+#include "v8/include/v8.h"
 #include "wtf/Assertions.h"
-#include <v8.h>
 
 namespace blink {
 
@@ -101,13 +102,13 @@ void LocalWindowProxy::initialize() {
 
   SecurityOrigin* origin = 0;
   if (m_world->isMainWorld()) {
-    // ActivityLogger for main world is updated within updateDocument().
-    updateDocument();
+    // ActivityLogger for main world is updated within updateDocumentInternal().
+    updateDocumentInternal();
     origin = frame()->document()->getSecurityOrigin();
     // FIXME: Can this be removed when CSP moves to browser?
     ContentSecurityPolicy* csp = frame()->document()->contentSecurityPolicy();
     context->AllowCodeGenerationFromStrings(
-        csp->allowEval(0, ContentSecurityPolicy::SuppressReport));
+        csp->allowEval(0, SecurityViolationReportingPolicy::SuppressReporting));
     context->SetErrorMessageForCodeGenerationFromStrings(
         v8String(isolate(), csp->evalDisabledErrorMessage()));
   } else {
@@ -242,12 +243,22 @@ void LocalWindowProxy::updateDocument() {
   // to update. The update is done when the window proxy gets initialized later.
   if (m_lifecycle == Lifecycle::ContextUninitialized)
     return;
-  // TODO(yukishiino): Is it okay to not update document when the context
-  // is detached? It's not trivial to fix this because udpateDocumentProperty
-  // requires a not-yet-detached context to instantiate a document wrapper.
-  if (m_lifecycle == Lifecycle::ContextDetached)
-    return;
 
+  // If this WindowProxy was previously initialized, reinitialize it now to
+  // preserve JS object identity. Otherwise, extant references to the
+  // WindowProxy will be broken.
+  if (m_lifecycle == Lifecycle::ContextDetached) {
+    initialize();
+    DCHECK_EQ(Lifecycle::ContextInitialized, m_lifecycle);
+    // Initialization internally updates the document properties, so just
+    // return afterwards.
+    return;
+  }
+
+  updateDocumentInternal();
+}
+
+void LocalWindowProxy::updateDocumentInternal() {
   updateActivityLogger();
   updateDocumentProperty();
   updateSecurityOrigin(frame()->document()->getSecurityOrigin());

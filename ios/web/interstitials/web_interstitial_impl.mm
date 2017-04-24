@@ -64,7 +64,7 @@ void WebInterstitialImpl::Show() {
     // SessionController usage here.
     CRWSessionController* sessionController =
         navigation_manager_->GetSessionController();
-    [sessionController addTransientEntryWithURL:url_];
+    [sessionController addTransientItemWithURL:url_];
 
     // Give delegates a chance to set some states on the navigation item.
     GetDelegate()->OverrideItem(navigation_manager_->GetTransientItem());
@@ -90,8 +90,11 @@ void WebInterstitialImpl::DontProceed() {
 
   GetDelegate()->OnDontProceed();
 
-  // Reload last committed entry.
-  nav_manager->Reload(true /* check_for_repost */);
+  NSUserDefaults* user_defaults = [NSUserDefaults standardUserDefaults];
+  if (![user_defaults boolForKey:@"PendingIndexNavigationDisabled"]) {
+    // Reload last committed entry.
+    nav_manager->Reload(true /* check_for_repost */);
+  }
 
   delete this;
 }

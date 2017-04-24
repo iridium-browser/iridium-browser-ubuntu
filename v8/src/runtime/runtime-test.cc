@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "src/arguments.h"
+#include "src/assembler-inl.h"
 #include "src/compiler-dispatcher/optimizing-compile-dispatcher.h"
 #include "src/compiler.h"
 #include "src/deoptimizer.h"
@@ -18,6 +19,45 @@
 #include "src/snapshot/natives.h"
 #include "src/wasm/wasm-module.h"
 #include "src/wasm/wasm-objects.h"
+
+namespace {
+struct WasmCompileControls {
+  uint32_t MaxWasmBufferSize = std::numeric_limits<uint32_t>::max();
+  bool AllowAnySizeForAsync = true;
+};
+
+// We need per-isolate controls, because we sometimes run tests in multiple
+// isolates
+// concurrently.
+// To avoid upsetting the static initializer count, we lazy initialize this.
+v8::base::LazyInstance<std::map<v8::Isolate*, WasmCompileControls>>::type
+    g_PerIsolateWasmControls = LAZY_INSTANCE_INITIALIZER;
+
+bool IsWasmCompileAllowed(v8::Isolate* isolate, v8::Local<v8::Value> value,
+                          bool is_async) {
+  DCHECK_GT(g_PerIsolateWasmControls.Get().count(isolate), 0);
+  const WasmCompileControls& ctrls = g_PerIsolateWasmControls.Get().at(isolate);
+  return (is_async && ctrls.AllowAnySizeForAsync) ||
+         (v8::Local<v8::ArrayBuffer>::Cast(value)->ByteLength() <=
+          ctrls.MaxWasmBufferSize);
+}
+
+// Use the compile controls for instantiation, too
+bool IsWasmInstantiateAllowed(v8::Isolate* isolate,
+                              v8::Local<v8::Value> module_or_bytes,
+                              v8::MaybeLocal<v8::Value> ffi, bool is_async) {
+  DCHECK_GT(g_PerIsolateWasmControls.Get().count(isolate), 0);
+  const WasmCompileControls& ctrls = g_PerIsolateWasmControls.Get().at(isolate);
+  if (is_async && ctrls.AllowAnySizeForAsync) return true;
+  if (!module_or_bytes->IsWebAssemblyCompiledModule()) {
+    return IsWasmCompileAllowed(isolate, module_or_bytes, is_async);
+  }
+  v8::Local<v8::WasmCompiledModule> module =
+      v8::Local<v8::WasmCompiledModule>::Cast(module_or_bytes);
+  return static_cast<uint32_t>(module->GetWasmWireBytes()->Length()) <=
+         ctrls.MaxWasmBufferSize;
+}
+}  // namespace
 
 namespace v8 {
 namespace internal {
@@ -236,21 +276,28 @@ RUNTIME_FUNCTION(Runtime_NeverOptimizeFunction) {
   return isolate->heap()->undefined_value();
 }
 
-
 RUNTIME_FUNCTION(Runtime_GetOptimizationStatus) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1 || args.length() == 2);
+  int status = 0;
   if (!isolate->use_crankshaft()) {
-    return Smi::FromInt(4);  // 4 == "never".
+    status |= static_cast<int>(OptimizationStatus::kNeverOptimize);
+  }
+  if (FLAG_always_opt || FLAG_prepare_always_opt) {
+    status |= static_cast<int>(OptimizationStatus::kAlwaysOptimize);
+  }
+  if (FLAG_deopt_every_n_times) {
+    status |= static_cast<int>(OptimizationStatus::kMaybeDeopted);
   }
 
   // This function is used by fuzzers to get coverage for optimizations
   // in compiler. Ignore calls on non-function objects to avoid runtime errors.
   CONVERT_ARG_HANDLE_CHECKED(Object, function_object, 0);
   if (!function_object->IsJSFunction()) {
-    return isolate->heap()->undefined_value();
+    return Smi::FromInt(status);
   }
   Handle<JSFunction> function = Handle<JSFunction>::cast(function_object);
+  status |= static_cast<int>(OptimizationStatus::kIsFunction);
 
   bool sync_with_compiler_thread = true;
   if (args.length() == 2) {
@@ -269,22 +316,16 @@ RUNTIME_FUNCTION(Runtime_GetOptimizationStatus) {
       base::OS::Sleep(base::TimeDelta::FromMilliseconds(50));
     }
   }
-  if (FLAG_always_opt || FLAG_prepare_always_opt) {
-    // With --always-opt, optimization status expectations might not
-    // match up, so just return a sentinel.
-    return Smi::FromInt(3);  // 3 == "always".
-  }
-  if (FLAG_deopt_every_n_times) {
-    return Smi::FromInt(6);  // 6 == "maybe deopted".
-  }
-  if (function->IsOptimized() && function->code()->is_turbofanned()) {
-    return Smi::FromInt(7);  // 7 == "TurboFan compiler".
+  if (function->IsOptimized()) {
+    status |= static_cast<int>(OptimizationStatus::kOptimized);
+    if (function->code()->is_turbofanned()) {
+      status |= static_cast<int>(OptimizationStatus::kTurboFanned);
+    }
   }
   if (function->IsInterpreted()) {
-    return Smi::FromInt(8);  // 8 == "Interpreted".
+    status |= static_cast<int>(OptimizationStatus::kInterpreted);
   }
-  return function->IsOptimized() ? Smi::FromInt(1)   // 1 == "yes".
-                                 : Smi::FromInt(2);  // 2 == "no".
+  return Smi::FromInt(status);
 }
 
 
@@ -353,7 +394,7 @@ RUNTIME_FUNCTION(Runtime_GetCallable) {
   return *Utils::OpenHandle(*instance);
 }
 
-RUNTIME_FUNCTION(Runtime_ClearFunctionTypeFeedback) {
+RUNTIME_FUNCTION(Runtime_ClearFunctionFeedback) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
@@ -426,6 +467,26 @@ RUNTIME_FUNCTION(Runtime_CheckWasmWrapperElision) {
   }
   CHECK_LE(count, 1);
   return isolate->heap()->ToBoolean(count == 1);
+}
+
+RUNTIME_FUNCTION(Runtime_SetWasmCompileControls) {
+  HandleScope scope(isolate);
+  v8::Isolate* v8_isolate = reinterpret_cast<v8::Isolate*>(isolate);
+  CHECK(args.length() == 2);
+  CONVERT_ARG_HANDLE_CHECKED(Smi, block_size, 0);
+  CONVERT_BOOLEAN_ARG_CHECKED(allow_async, 1);
+  WasmCompileControls& ctrl = (*g_PerIsolateWasmControls.Pointer())[v8_isolate];
+  ctrl.AllowAnySizeForAsync = allow_async;
+  ctrl.MaxWasmBufferSize = static_cast<uint32_t>(block_size->value());
+  isolate->set_allow_wasm_compile_callback(IsWasmCompileAllowed);
+  return isolate->heap()->undefined_value();
+}
+
+RUNTIME_FUNCTION(Runtime_SetWasmInstantiateControls) {
+  HandleScope scope(isolate);
+  CHECK(args.length() == 0);
+  isolate->set_allow_wasm_instantiate_callback(IsWasmInstantiateAllowed);
+  return isolate->heap()->undefined_value();
 }
 
 RUNTIME_FUNCTION(Runtime_NotifyContextDisposed) {

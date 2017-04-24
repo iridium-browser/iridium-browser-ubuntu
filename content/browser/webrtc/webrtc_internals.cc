@@ -19,6 +19,7 @@
 #include "content/public/browser/web_contents.h"
 #include "device/power_save_blocker/power_save_blocker.h"
 #include "ipc/ipc_platform_file.h"
+#include "media/audio/audio_manager.h"
 #include "media/media_features.h"
 
 #if defined(OS_WIN)
@@ -323,13 +324,22 @@ void WebRTCInternals::DisableAudioDebugRecordings() {
 
   // Tear down the dialog since the user has unchecked the audio debug
   // recordings box.
-  select_file_dialog_ = NULL;
+  select_file_dialog_ = nullptr;
 
   for (RenderProcessHost::iterator i(
            content::RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
     i.GetCurrentValue()->DisableAudioDebugRecordings();
   }
+
+  // It's safe to get the AudioManager pointer here. That pointer is invalidated
+  // on the UI thread, which we're on.
+  // AudioManager is deleted on the audio thread, and the AudioManager outlives
+  // this object, so it's safe to post unretained to the audio thread.
+  media::AudioManager* audio_manager = media::AudioManager::Get();
+  audio_manager->GetTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&media::AudioManager::DisableOutputDebugRecording,
+                            base::Unretained(audio_manager)));
 #endif
 }
 
@@ -400,10 +410,11 @@ void WebRTCInternals::SendUpdate(const char* command,
   }
 }
 
-void WebRTCInternals::RenderProcessHostDestroyed(RenderProcessHost* host) {
+void WebRTCInternals::RenderProcessExited(RenderProcessHost* host,
+                                          base::TerminationStatus status,
+                                          int exit_code) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   OnRendererExit(host->GetID());
-
   render_process_id_set_.erase(host->GetID());
   host->RemoveObserver(this);
 }
@@ -458,6 +469,7 @@ void WebRTCInternals::OnRendererExit(int render_process_id) {
         update->SetInteger("pid", pid);
         SendUpdate("removePeerConnection", std::move(update));
       }
+      MaybeClosePeerConnection(record);
       peer_connection_data_.Remove(i, NULL);
     }
   }
@@ -491,12 +503,23 @@ void WebRTCInternals::EnableAudioDebugRecordingsOnAllRenderProcessHosts() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   audio_debug_recordings_ = true;
+
   for (RenderProcessHost::iterator i(
            content::RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
     i.GetCurrentValue()->EnableAudioDebugRecordings(
         audio_debug_recordings_file_path_);
   }
+
+  // It's safe to get the AudioManager pointer here. That pointer is invalidated
+  // on the UI thread, which we're on.
+  // AudioManager is deleted on the audio thread, and the AudioManager outlives
+  // this object, so it's safe to post unretained to the audio thread.
+  media::AudioManager* audio_manager = media::AudioManager::Get();
+  audio_manager->GetTaskRunner()->PostTask(
+      FROM_HERE, base::Bind(&media::AudioManager::EnableOutputDebugRecording,
+                            base::Unretained(audio_manager),
+                            audio_debug_recordings_file_path_));
 }
 
 void WebRTCInternals::EnableEventLogRecordingsOnAllRenderProcessHosts() {

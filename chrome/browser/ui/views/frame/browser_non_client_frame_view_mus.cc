@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/views/frame/browser_header_painter_ash.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
+#include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/profiles/profile_indicator_icon.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
@@ -134,11 +135,6 @@ gfx::Rect BrowserNonClientFrameViewMus::GetBoundsForTabStrip(
   if (!tabstrip)
     return gfx::Rect();
 
-  // When the tab strip is painted in the immersive fullscreen light bar style,
-  // the caption buttons and the avatar button are not visible. However, their
-  // bounds are still used to compute the tab strip bounds so that the tabs have
-  // the same horizontal position when the tab strip is painted in the immersive
-  // light bar style as when the top-of-window views are revealed.
   int left_inset = GetTabStripLeftInset();
   int right_inset = GetTabStripRightInset();
   return gfx::Rect(left_inset, GetTopInset(false),
@@ -147,8 +143,17 @@ gfx::Rect BrowserNonClientFrameViewMus::GetBoundsForTabStrip(
 }
 
 int BrowserNonClientFrameViewMus::GetTopInset(bool restored) const {
-  if (!ShouldPaint() || UseImmersiveLightbarHeaderStyle())
+  if (!ShouldPaint()) {
+    // When immersive fullscreen unrevealed, tabstrip is offscreen with normal
+    // tapstrip bounds, the top inset should reach this topmost edge.
+    const ImmersiveModeController* const immersive_controller =
+        browser_view()->immersive_mode_controller();
+    if (immersive_controller->IsEnabled() &&
+        !immersive_controller->IsRevealed()) {
+      return (-1) * browser_view()->GetTabStripHeight();
+    }
     return 0;
+  }
 
   if (browser_view()->IsTabStripVisible()) {
     return ((frame()->IsMaximized() || frame()->IsFullscreen()) && !restored)
@@ -180,6 +185,52 @@ views::View* BrowserNonClientFrameViewMus::GetProfileSwitcherView() const {
 #else
   return nullptr;
 #endif
+}
+
+void BrowserNonClientFrameViewMus::UpdateClientArea() {
+  std::vector<gfx::Rect> additional_client_area;
+  int top_container_offset = 0;
+  ImmersiveModeController* immersive_mode_controller =
+      browser_view()->immersive_mode_controller();
+  // Frame decorations (the non-client area) are visible if not in immersive
+  // mode, or in immersive mode *and* the reveal widget is showing.
+  const bool show_frame_decorations = !immersive_mode_controller->IsEnabled() ||
+                                      immersive_mode_controller->IsRevealed();
+  if (browser_view()->IsTabStripVisible() && show_frame_decorations) {
+    gfx::Rect tab_strip_bounds(GetBoundsForTabStrip(tab_strip_));
+    if (!tab_strip_bounds.IsEmpty() && tab_strip_->max_x()) {
+      tab_strip_bounds.set_width(tab_strip_->max_x());
+      if (immersive_mode_controller->IsEnabled()) {
+        top_container_offset =
+            immersive_mode_controller->GetTopContainerVerticalOffset(
+                browser_view()->top_container()->size());
+        tab_strip_bounds.set_y(tab_strip_bounds.y() + top_container_offset);
+        tab_strip_bounds.Intersect(gfx::Rect(size()));
+      }
+      additional_client_area.push_back(tab_strip_bounds);
+    }
+  }
+  aura::WindowTreeHostMus* window_tree_host_mus =
+      static_cast<aura::WindowTreeHostMus*>(
+          GetWidget()->GetNativeWindow()->GetHost());
+  if (show_frame_decorations) {
+    window_tree_host_mus->SetClientArea(
+        views::WindowManagerFrameValues::instance().normal_insets,
+        additional_client_area);
+    views::Widget* reveal_widget = immersive_mode_controller->GetRevealWidget();
+    if (reveal_widget) {
+      // In immersive mode the reveal widget needs the same client area as
+      // the Browser widget. This way mus targets the window manager (ash) for
+      // clicks in the frame decoration.
+      static_cast<aura::WindowTreeHostMus*>(
+          reveal_widget->GetNativeWindow()->GetHost())
+          ->SetClientArea(
+              views::WindowManagerFrameValues::instance().normal_insets,
+              additional_client_area);
+    }
+  } else {
+    window_tree_host_mus->SetClientArea(gfx::Insets(), additional_client_area);
+  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -248,13 +299,6 @@ void BrowserNonClientFrameViewMus::SizeConstraintsChanged() {}
 void BrowserNonClientFrameViewMus::OnPaint(gfx::Canvas* canvas) {
   if (!ShouldPaint())
     return;
-
-  // TODO(sky): get immersive mode working.
-
-  if (UseImmersiveLightbarHeaderStyle()) {
-    PaintImmersiveLightbarStyleHeader(canvas);
-    return;
-  }
 
   if (browser_view()->IsToolbarVisible())
     PaintToolbarBackground(canvas);
@@ -336,21 +380,6 @@ void BrowserNonClientFrameViewMus::UpdateProfileIcons() {
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserNonClientFrameViewMus, private:
 
-void BrowserNonClientFrameViewMus::UpdateClientArea() {
-  std::vector<gfx::Rect> additional_client_area;
-  if (tab_strip_) {
-    gfx::Rect tab_strip_bounds(GetBoundsForTabStrip(tab_strip_));
-    if (!tab_strip_bounds.IsEmpty() && tab_strip_->max_x()) {
-      tab_strip_bounds.set_width(tab_strip_->max_x());
-      additional_client_area.push_back(tab_strip_bounds);
-    }
-  }
-  static_cast<aura::WindowTreeHostMus*>(
-      GetWidget()->GetNativeWindow()->GetHost())
-      ->SetClientArea(views::WindowManagerFrameValues::instance().normal_insets,
-                      additional_client_area);
-}
-
 void BrowserNonClientFrameViewMus::TabStripMaxXChanged(TabStrip* tab_strip) {
   UpdateClientArea();
 }
@@ -384,14 +413,6 @@ int BrowserNonClientFrameViewMus::GetTabStripRightInset() const {
   return right_inset;
 }
 
-bool BrowserNonClientFrameViewMus::UseImmersiveLightbarHeaderStyle() const {
-  ImmersiveModeController* immersive_controller =
-      browser_view()->immersive_mode_controller();
-  return immersive_controller->IsEnabled() &&
-         !immersive_controller->IsRevealed() &&
-         browser_view()->IsTabStripVisible();
-}
-
 bool BrowserNonClientFrameViewMus::UsePackagedAppHeaderStyle() const {
   // Use for non tabbed trusted source windows, e.g. Settings, as well as apps.
   const Browser* const browser = browser_view()->browser();
@@ -409,17 +430,12 @@ void BrowserNonClientFrameViewMus::LayoutIncognitoButton() {
   int avatar_bottom = GetTopInset(false) + browser_view()->GetTabStripHeight() -
                       kAvatarIconPadding;
   int avatar_y = avatar_bottom - incognito_icon.height();
-
-  // Hide the incognito icon in immersive fullscreen when the tab light bar is
-  // visible because the header is too short for the icognito icon to be
-  // recognizable.
-  bool avatar_visible = !UseImmersiveLightbarHeaderStyle();
-  int avatar_height = avatar_visible ? incognito_icon.height() : 0;
+  int avatar_height = incognito_icon.height();
 
   gfx::Rect avatar_bounds(kAvatarIconPadding, avatar_y, incognito_icon.width(),
                           avatar_height);
   profile_indicator_icon()->SetBoundsRect(avatar_bounds);
-  profile_indicator_icon()->SetVisible(avatar_visible);
+  profile_indicator_icon()->SetVisible(true);
 }
 
 void BrowserNonClientFrameViewMus::LayoutProfileSwitcher() {
@@ -435,18 +451,13 @@ bool BrowserNonClientFrameViewMus::ShouldPaint() const {
   if (!frame()->IsFullscreen())
     return true;
 
-  // We need to paint when in immersive fullscreen and either:
-  // - The top-of-window views are revealed.
-  // - The lightbar style tabstrip is visible.
+  // We need to paint when the top-of-window views are revealed in immersive
+  // fullscreen.
   ImmersiveModeController* immersive_mode_controller =
       browser_view()->immersive_mode_controller();
   return immersive_mode_controller->IsEnabled() &&
-         (immersive_mode_controller->IsRevealed() ||
-          UseImmersiveLightbarHeaderStyle());
+         immersive_mode_controller->IsRevealed();
 }
-
-void BrowserNonClientFrameViewMus::PaintImmersiveLightbarStyleHeader(
-    gfx::Canvas* canvas) {}
 
 void BrowserNonClientFrameViewMus::PaintToolbarBackground(gfx::Canvas* canvas) {
   gfx::Rect toolbar_bounds(browser_view()->GetToolbarBounds());

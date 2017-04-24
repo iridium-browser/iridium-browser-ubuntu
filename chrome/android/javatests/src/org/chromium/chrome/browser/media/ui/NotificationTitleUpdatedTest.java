@@ -36,7 +36,8 @@ import org.chromium.net.test.EmbeddedTestServer;
 @RetryOnFailure
 public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<ChromeActivity> {
     private static final int NOTIFICATION_ID = R.id.media_playback_notification;
-    private static final String SIMPLE_PAGE_URL = "/simple_page.html";
+    private static final String TEST_PAGE_URL_1 = "/content/test/data/media/session/title1.html";
+    private static final String TEST_PAGE_URL_2 = "/content/test/data/media/session/title2.html";
 
     private Tab mTab;
     private EmbeddedTestServer mTestServer;
@@ -67,11 +68,23 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
     }
 
     @SmallTest
-    public void testSessionStatePaused() {
+    public void testSessionStatePausedAfterPlaying() {
+        simulateMediaSessionStateChanged(mTab, true, false);
         simulateMediaSessionStateChanged(mTab, true, true);
         assertTitleMatches("title1");
         simulateUpdateTitle(mTab, "title2");
         assertTitleMatches("title2");
+    }
+
+    @SmallTest
+    public void testSessionStateNewlyPaused() {
+        simulateMediaSessionStateChanged(mTab, true, true);
+        getInstrumentation().waitForIdleSync();
+        assertNull(MediaNotificationManager.getNotificationBuilderForTesting(NOTIFICATION_ID));
+
+        simulateUpdateTitle(mTab, "title2");
+        getInstrumentation().waitForIdleSync();
+        assertNull(MediaNotificationManager.getNotificationBuilderForTesting(NOTIFICATION_ID));
     }
 
     @SmallTest
@@ -103,8 +116,8 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
      * Test if a notification accepts the title update from another tab, using the following steps:
      *   1. set the title of mTab, start the media session, a notification should show up;
      *   2. stop the media session of mTab, the notification shall hide;
-     *   3. create newTab, set the title of mTab, start the media session of mTab,
-     *      a notification should show up;
+     *   3. create newTab, start the media session of newTab, a notification should show up,
+     *      set the title of newTab, the notification title should match newTab;
      *   4. change the title of newTab and then mTab to different names,
      *      the notification should have the title of newTab.
      */
@@ -124,6 +137,32 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
         assertTitleMatches("title3");
     }
 
+    /**
+     * Test for the notification should not update for a paused tab if it mismatches the current tab
+     * id:
+     *   1. set the title of mTab, start the media session, a notification should show up;
+     *   2. create newTab, start the media session of newTab, a notification should show up,
+     *      set the title of newTab, the notification will match the title;
+     *   3. stop the media session of mTab, and change its title, the notification should not
+     *      change.
+     */
+    @SmallTest
+    @Restriction({ChromeRestriction.RESTRICTION_TYPE_PHONE, RESTRICTION_TYPE_NON_LOW_END_DEVICE})
+    public void testPreferLastActiveTab() throws Throwable {
+        simulateMediaSessionStateChanged(mTab, true, false);
+        assertTitleMatches("title1");
+
+        Tab newTab = loadUrlInNewTab("about:blank");
+        assertNotNull(newTab);
+
+        simulateMediaSessionStateChanged(newTab, true, false);
+        simulateUpdateTitle(newTab, "title3");
+
+        simulateMediaSessionStateChanged(mTab, false, false);
+        simulateUpdateTitle(mTab, "title2");
+        assertTitleMatches("title3");
+    }
+
     @SmallTest
     public void testMediaMetadataResetsAfterNavigation() throws Throwable {
         loadUrl("about:blank");
@@ -137,14 +176,28 @@ public class NotificationTitleUpdatedTest extends ChromeActivityTestCaseBase<Chr
     }
 
     @SmallTest
-    public void testMediaMetadataPersistsAfterInPageNavigation() throws Throwable {
+    public void testMediaMetadataResetsAfterSameOriginNavigation() throws Throwable {
         ensureTestServer();
-        loadUrl(mTestServer.getURL(SIMPLE_PAGE_URL));
+        loadUrl(mTestServer.getURL(TEST_PAGE_URL_1));
         simulateMediaSessionStateChanged(mTab, true, false);
         simulateMediaSessionMetadataChanged(mTab, new MediaMetadata("title2", "", ""));
         assertTitleMatches("title2");
 
-        loadUrl(mTestServer.getURL(SIMPLE_PAGE_URL + "#some-anchor"));
+        loadUrl(mTestServer.getURL(TEST_PAGE_URL_2));
+        simulateUpdateTitle(mTab, "title3");
+        assertTitleMatches("title3");
+    }
+
+    @SmallTest
+    public void testMediaMetadataPersistsAfterSamePageNavigation() throws Throwable {
+        ensureTestServer();
+        loadUrl(mTestServer.getURL(TEST_PAGE_URL_1));
+        simulateMediaSessionStateChanged(mTab, true, false);
+        simulateMediaSessionMetadataChanged(mTab, new MediaMetadata("title2", "", ""));
+        assertTitleMatches("title2");
+
+        NotificationTestUtils.simulateSamePageNavigation(
+                getInstrumentation(), mTab, mTestServer.getURL(TEST_PAGE_URL_1));
         assertTitleMatches("title2");
     }
 

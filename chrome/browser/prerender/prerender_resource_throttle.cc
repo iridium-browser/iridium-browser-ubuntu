@@ -90,6 +90,7 @@ PrerenderResourceThrottle::PrerenderResourceThrottle(net::URLRequest* request)
 PrerenderResourceThrottle::~PrerenderResourceThrottle() {}
 
 void PrerenderResourceThrottle::WillStartRequest(bool* defer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   const content::ResourceRequestInfo* info =
       content::ResourceRequestInfo::ForRequest(request_);
   *defer = true;
@@ -104,6 +105,7 @@ void PrerenderResourceThrottle::WillStartRequest(bool* defer) {
 void PrerenderResourceThrottle::WillRedirectRequest(
     const net::RedirectInfo& redirect_info,
     bool* defer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   const content::ResourceRequestInfo* info =
       content::ResourceRequestInfo::ForRequest(request_);
   *defer = true;
@@ -119,6 +121,7 @@ void PrerenderResourceThrottle::WillRedirectRequest(
 }
 
 void PrerenderResourceThrottle::WillProcessResponse(bool* defer) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   const content::ResourceRequestInfo* info =
       content::ResourceRequestInfo::ForRequest(request_);
   if (!info)
@@ -141,6 +144,7 @@ const char* PrerenderResourceThrottle::GetNameForLogging() const {
 }
 
 void PrerenderResourceThrottle::ResumeHandler() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   request_->SetLoadFlags(request_->load_flags() | load_flags_);
   Resume();
 }
@@ -153,6 +157,7 @@ void PrerenderResourceThrottle::WillStartRequestOnUI(
     const GURL& url,
     const ResourceRequestInfo::WebContentsGetter& web_contents_getter,
     scoped_refptr<PrerenderThrottleInfo> prerender_throttle_info) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   bool cancel = false;
   PrerenderContents* prerender_contents =
       PrerenderContentsFromGetter(web_contents_getter);
@@ -179,13 +184,18 @@ void PrerenderResourceThrottle::WillStartRequestOnUI(
       cancel = true;
     } else if (!PrerenderManager::DoesSubresourceURLHaveValidScheme(url) &&
                resource_type != content::RESOURCE_TYPE_MAIN_FRAME) {
-      // Destroying the prerender for unsupported scheme only for non-main
-      // resource to allow chrome://crash to actually crash in the
-      // *RendererCrash tests instead of being intercepted here. The unsupported
-      // scheme for the main resource is checked in WillRedirectRequestOnUI()
-      // and PrerenderContents::CheckURL(). See http://crbug.com/673771.
-      prerender_contents->Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
-      ReportUnsupportedPrerenderScheme(url);
+      // For ORIGIN_OFFLINE, simply cancel this invalid request and continue.
+      // For other origins, fail the prerender here.
+      if (prerender_contents->origin() != ORIGIN_OFFLINE) {
+        // Destroying the prerender for unsupported scheme only for non-main
+        // resource to allow chrome://crash to actually crash in the
+        // *RendererCrash tests instead of being intercepted here. The
+        // unsupported
+        // scheme for the main resource is checked in WillRedirectRequestOnUI()
+        // and PrerenderContents::CheckURL(). See http://crbug.com/673771.
+        prerender_contents->Destroy(FINAL_STATUS_UNSUPPORTED_SCHEME);
+        ReportUnsupportedPrerenderScheme(url);
+      }
       cancel = true;
 #if defined(OS_ANDROID)
     } else if (resource_type == content::RESOURCE_TYPE_FAVICON) {
@@ -213,6 +223,7 @@ void PrerenderResourceThrottle::WillRedirectRequestOnUI(
     bool is_no_store,
     const GURL& new_url,
     const ResourceRequestInfo::WebContentsGetter& web_contents_getter) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   bool cancel = false;
   PrerenderContents* prerender_contents =
       PrerenderContentsFromGetter(web_contents_getter);
@@ -256,6 +267,7 @@ void PrerenderResourceThrottle::WillProcessResponseOnUI(
     bool is_no_store,
     int redirect_count,
     scoped_refptr<PrerenderThrottleInfo> prerender_throttle_info) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(prerender_throttle_info);
   if (!prerender_throttle_info->manager())
     return;
@@ -273,12 +285,14 @@ void PrerenderResourceThrottle::WillProcessResponseOnUI(
 // static
 PrerenderContents* PrerenderResourceThrottle::PrerenderContentsFromGetter(
     const ResourceRequestInfo::WebContentsGetter& web_contents_getter) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (g_prerender_contents_for_testing)
     return g_prerender_contents_for_testing;
   return PrerenderContents::FromWebContents(web_contents_getter.Run());
 }
 
 void PrerenderResourceThrottle::SetPrerenderMode(PrerenderMode mode) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   load_flags_ = (mode == PREFETCH_ONLY) ? net::LOAD_PREFETCH : net::LOAD_NORMAL;
 }
 

@@ -94,9 +94,13 @@ class FakeWebMediaPlayerDelegate
     return false;
   }
 
+  void SetIsEffectivelyFullscreen(int delegate_id,
+                                  bool is_fullscreen) override {
+    EXPECT_EQ(delegate_id_, delegate_id);
+  }
+
   bool IsFrameHidden() override { return is_hidden_; }
   bool IsFrameClosed() override { return false; }
-  bool IsBackgroundVideoPlaybackUnlocked() override { return false; }
 
   void set_hidden(bool is_hidden) { is_hidden_ = is_hidden; }
 
@@ -398,7 +402,7 @@ class WebMediaPlayerMSTest
         player_(new WebMediaPlayerMS(
             nullptr,
             this,
-            delegate_.AsWeakPtr(),
+            &delegate_,
             new media::MediaLog(),
             std::unique_ptr<MediaStreamRendererFactory>(render_factory_),
             message_loop_.task_runner(),
@@ -408,6 +412,7 @@ class WebMediaPlayerMSTest
             nullptr,
             blink::WebString(),
             blink::WebSecurityOrigin())),
+        web_layer_set_(false),
         rendering_(false),
         background_rendering_(false) {}
   ~WebMediaPlayerMSTest() override {
@@ -452,6 +457,7 @@ class WebMediaPlayerMSTest
   void disconnectedFromRemoteDevice() override {}
   void cancelledRemotePlaybackRequest() override {}
   void remotePlaybackStarted() override {}
+  void onBecamePersistentVideo(bool) override {}
   bool isAutoplayingMuted() override { return false; }
   void requestReload(const blink::WebURL& newUrl) override {}
   bool hasSelectedVideoTrack() override { return false; }
@@ -493,6 +499,7 @@ class WebMediaPlayerMSTest
   // rendering.
   void RenderFrame();
 
+  bool web_layer_set_;
   bool rendering_;
   bool background_rendering_;
 };
@@ -540,6 +547,11 @@ void WebMediaPlayerMSTest::readyStateChanged() {
 }
 
 void WebMediaPlayerMSTest::setWebLayer(blink::WebLayer* layer) {
+  // Make sure that the old layer is still alive, see http://crbug.com/705448.
+  if (web_layer_set_)
+    EXPECT_TRUE(web_layer_ != nullptr);
+  web_layer_set_ = layer ? true : false;
+
   web_layer_ = layer;
   if (layer)
     compositor_->SetVideoFrameProviderClient(this);

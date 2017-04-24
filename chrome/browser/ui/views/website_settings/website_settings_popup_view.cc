@@ -46,7 +46,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/border.h"
-#include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/controls/image_view.h"
@@ -109,6 +108,16 @@ const int LINK_SITE_SETTINGS = 1341;
 // bubble (e.g. +3). Use +1 to obtain a smaller font.
 constexpr int kSummaryFontSizeDelta = 1;
 
+// Adds a ColumnSet on |layout| with a single View column and padding columns
+// on either side of it with |margin| width.
+void AddColumnWithSideMargin(views::GridLayout* layout, int margin, int id) {
+  views::ColumnSet* column_set = layout->AddColumnSet(id);
+  column_set->AddPaddingColumn(0, margin);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
+                        views::GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(0, margin);
+}
+
 }  // namespace
 
 // |PopupHeaderView| is the UI element (view) that represents the header of the
@@ -116,8 +125,9 @@ constexpr int kSummaryFontSizeDelta = 1;
 // identity check and the name of the site's identity.
 class PopupHeaderView : public views::View {
  public:
-  explicit PopupHeaderView(views::ButtonListener* button_listener,
-                           views::StyledLabelListener* styled_label_listener);
+  PopupHeaderView(views::ButtonListener* button_listener,
+                  views::StyledLabelListener* styled_label_listener,
+                  int side_margin);
   ~PopupHeaderView() override;
 
   // Sets the security summary for the current page.
@@ -159,8 +169,6 @@ class InternalPageInfoPopupView : public views::BubbleDialogDelegateView {
   ~InternalPageInfoPopupView() override;
 
   // views::BubbleDialogDelegateView:
-  views::NonClientFrameView* CreateNonClientFrameView(
-      views::Widget* widget) override;
   void OnWidgetDestroying(views::Widget* widget) override;
   int GetDialogButtons() const override;
 
@@ -179,7 +187,8 @@ class InternalPageInfoPopupView : public views::BubbleDialogDelegateView {
 
 PopupHeaderView::PopupHeaderView(
     views::ButtonListener* button_listener,
-    views::StyledLabelListener* styled_label_listener)
+    views::StyledLabelListener* styled_label_listener,
+    int side_margin)
     : styled_label_listener_(styled_label_listener),
       details_label_(nullptr),
       reset_decisions_label_container_(nullptr),
@@ -188,11 +197,7 @@ PopupHeaderView::PopupHeaderView(
   SetLayoutManager(layout);
 
   const int label_column_status = 1;
-  views::ColumnSet* column_set_status =
-      layout->AddColumnSet(label_column_status);
-  column_set_status->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL,
-                               1, views::GridLayout::USE_PREF, 0, 0);
-
+  AddColumnWithSideMargin(layout, side_margin, label_column_status);
   layout->AddPaddingRow(0, kHeaderLabelSpacing);
 
   layout->StartRow(0, label_column_status);
@@ -318,16 +323,6 @@ InternalPageInfoPopupView::InternalPageInfoPopupView(
 InternalPageInfoPopupView::~InternalPageInfoPopupView() {
 }
 
-views::NonClientFrameView* InternalPageInfoPopupView::CreateNonClientFrameView(
-    views::Widget* widget) {
-  views::BubbleFrameView* frame = static_cast<views::BubbleFrameView*>(
-      BubbleDialogDelegateView::CreateNonClientFrameView(widget));
-  // Padding around icon + half of icon width.
-  frame->bubble_border()->set_arrow_offset(
-      kSpacing + 8 + frame->bubble_border()->GetBorderThickness());
-  return frame;
-}
-
 void InternalPageInfoPopupView::OnWidgetDestroying(views::Widget* widget) {
   g_shown_popup_type = WebsiteSettingsPopupView::POPUP_NONE;
 }
@@ -402,8 +397,21 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
   set_anchor_view_insets(gfx::Insets(
       GetLayoutConstant(LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET), 0));
 
+  // Capture the default bubble margin, and move it to the Layout classes. This
+  // is necessary so that the views::Separator can extend the full width of the
+  // bubble.
+  const int side_margin = margins().left();
+  DCHECK_EQ(margins().left(), margins().right());
+
+  // Also remove the top margin from the client area so there is less space
+  // below the dialog title.
+  set_margins(gfx::Insets(0, 0, margins().bottom(), 0));
+
   views::GridLayout* layout = new views::GridLayout(this);
   SetLayoutManager(layout);
+
+  // Use a single ColumnSet here. Otherwise the preferred width doesn't properly
+  // propagate up to the dialog width.
   const int content_column = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(content_column);
   column_set->AddColumn(views::GridLayout::FILL,
@@ -413,29 +421,25 @@ WebsiteSettingsPopupView::WebsiteSettingsPopupView(
                         0,
                         0);
 
-  header_ = new PopupHeaderView(this, this);
+  header_ = new PopupHeaderView(this, this, side_margin);
   layout->StartRow(1, content_column);
   layout->AddView(header_);
 
   layout->StartRow(0, content_column);
-  separator_ = new views::Separator(views::Separator::HORIZONTAL);
+  separator_ = new views::Separator();
   layout->AddView(separator_);
 
   layout->AddPaddingRow(1, kHeaderMarginBottom);
   layout->StartRow(1, content_column);
 
-  site_settings_view_ = CreateSiteSettingsView();
+  site_settings_view_ = CreateSiteSettingsView(side_margin);
   layout->AddView(site_settings_view_);
 
-  // Remove the top margin from the client area so there is less space below the
-  // dialog title.
-  set_margins(
-      gfx::Insets(0, margins().left(), margins().bottom(), margins().right()));
   if (!ui::MaterialDesignController::IsSecondaryUiMaterial()) {
     // In non-material, titles are inset from the dialog margin. Ensure the
     // horizontal insets match.
-    set_title_margins(gfx::Insets(views::kPanelVertMargin, margins().left(), 0,
-                                  margins().right()));
+    set_title_margins(
+        gfx::Insets(views::kPanelVertMargin, side_margin, 0, side_margin));
   }
   views::BubbleDialogDelegateView::CreateBubble(this);
 
@@ -681,10 +685,10 @@ void WebsiteSettingsPopupView::SetIdentityInfo(
   SizeToContents();
 }
 
-views::View* WebsiteSettingsPopupView::CreateSiteSettingsView() {
+views::View* WebsiteSettingsPopupView::CreateSiteSettingsView(int side_margin) {
   views::View* site_settings_view = new views::View();
   views::BoxLayout* box_layout =
-      new views::BoxLayout(views::BoxLayout::kVertical, 0, 0, 0);
+      new views::BoxLayout(views::BoxLayout::kVertical, side_margin, 0, 0);
   site_settings_view->SetLayoutManager(box_layout);
   box_layout->set_cross_axis_alignment(
       views::BoxLayout::CROSS_AXIS_ALIGNMENT_STRETCH);

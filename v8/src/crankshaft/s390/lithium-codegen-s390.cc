@@ -275,7 +275,8 @@ bool LCodeGen::GenerateDeferredCode() {
         DCHECK(!frame_is_built_);
         DCHECK(info()->IsStub());
         frame_is_built_ = true;
-        __ LoadSmiLiteral(scratch0(), Smi::FromInt(StackFrame::STUB));
+        __ Load(scratch0(),
+                Operand(StackFrame::TypeToMarker(StackFrame::STUB)));
         __ PushCommonFrame(scratch0());
         Comment(";;; Deferred code");
       }
@@ -344,7 +345,7 @@ bool LCodeGen::GenerateJumpTable() {
       // have a function pointer to install in the stack frame that we're
       // building, install a special marker there instead.
       DCHECK(info()->IsStub());
-      __ LoadSmiLiteral(ip, Smi::FromInt(StackFrame::STUB));
+      __ Load(ip, Operand(StackFrame::TypeToMarker(StackFrame::STUB)));
       __ push(ip);
       DCHECK(info()->IsStub());
     }
@@ -1287,8 +1288,12 @@ void LCodeGen::DoFlooringDivI(LFlooringDivI* instr) {
   __ bge(&done, Label::kNear);
 
   // If there is no remainder then we are done.
-  __ lr(scratch, result);
-  __ msr(scratch, divisor);
+  if (CpuFeatures::IsSupported(MISC_INSTR_EXT2)) {
+    __ msrkc(scratch, result, divisor);
+  } else {
+    __ lr(scratch, result);
+    __ msr(scratch, divisor);
+  }
   __ Cmp32(dividend, scratch);
   __ beq(&done, Label::kNear);
 
@@ -1419,36 +1424,48 @@ void LCodeGen::DoMulI(LMulI* instr) {
     Register right = ToRegister(right_op);
 
     if (can_overflow) {
+      if (CpuFeatures::IsSupported(MISC_INSTR_EXT2)) {
+        // result = left * right.
+        if (instr->hydrogen()->representation().IsSmi()) {
+          __ SmiUntag(scratch, right);
+          __ MulPWithCondition(result, left, scratch);
+        } else {
+          __ msrkc(result, left, right);
+          __ LoadW(result, result);
+        }
+        DeoptimizeIf(overflow, instr, DeoptimizeReason::kOverflow);
+      } else {
 #if V8_TARGET_ARCH_S390X
-      // result = left * right.
-      if (instr->hydrogen()->representation().IsSmi()) {
-        __ SmiUntag(result, left);
-        __ SmiUntag(scratch, right);
-        __ msgr(result, scratch);
-      } else {
-        __ LoadRR(result, left);
-        __ msgr(result, right);
-      }
-      __ TestIfInt32(result, r0);
-      DeoptimizeIf(ne, instr, DeoptimizeReason::kOverflow);
-      if (instr->hydrogen()->representation().IsSmi()) {
-        __ SmiTag(result);
-      }
+        // result = left * right.
+        if (instr->hydrogen()->representation().IsSmi()) {
+          __ SmiUntag(result, left);
+          __ SmiUntag(scratch, right);
+          __ msgr(result, scratch);
+        } else {
+          __ LoadRR(result, left);
+          __ msgr(result, right);
+        }
+        __ TestIfInt32(result, r0);
+        DeoptimizeIf(ne, instr, DeoptimizeReason::kOverflow);
+        if (instr->hydrogen()->representation().IsSmi()) {
+          __ SmiTag(result);
+        }
 #else
-      // r0:scratch = scratch * right
-      if (instr->hydrogen()->representation().IsSmi()) {
-        __ SmiUntag(scratch, left);
-        __ mr_z(r0, right);
-        __ LoadRR(result, scratch);
-      } else {
         // r0:scratch = scratch * right
-        __ LoadRR(scratch, left);
-        __ mr_z(r0, right);
-        __ LoadRR(result, scratch);
-      }
-      __ TestIfInt32(r0, result, scratch);
-      DeoptimizeIf(ne, instr, DeoptimizeReason::kOverflow);
+        if (instr->hydrogen()->representation().IsSmi()) {
+          __ SmiUntag(scratch, left);
+          __ mr_z(r0, right);
+          __ LoadRR(result, scratch);
+        } else {
+          // r0:scratch = scratch * right
+          __ LoadRR(scratch, left);
+          __ mr_z(r0, right);
+          __ LoadRR(result, scratch);
+        }
+        __ TestIfInt32(r0, result, scratch);
+        DeoptimizeIf(ne, instr, DeoptimizeReason::kOverflow);
 #endif
+      }
     } else {
       if (instr->hydrogen()->representation().IsSmi()) {
         __ SmiUntag(result, left);
@@ -1682,10 +1699,17 @@ void LCodeGen::DoSubI(LSubI* instr) {
 #endif
 
   if (right->IsConstantOperand()) {
-    if (!isInteger || !checkOverflow)
+    if (!isInteger || !checkOverflow) {
       __ SubP(ToRegister(result), ToRegister(left), ToOperand(right));
-    else
-      __ Sub32(ToRegister(result), ToRegister(left), ToOperand(right));
+    } else {
+      // -(MinInt) will overflow
+      if (ToInteger32(LConstantOperand::cast(right)) == kMinInt) {
+        __ Load(scratch0(), ToOperand(right));
+        __ Sub32(ToRegister(result), ToRegister(left), scratch0());
+      } else {
+        __ Sub32(ToRegister(result), ToRegister(left), ToOperand(right));
+      }
+    }
   } else if (right->IsRegister()) {
     if (!isInteger)
       __ SubP(ToRegister(result), ToRegister(left), ToRegister(right));
@@ -2186,13 +2210,6 @@ void LCodeGen::DoBranch(LBranch* instr) {
         __ beq(instr->TrueLabel(chunk_));
       }
 
-      if (expected & ToBooleanHint::kSimdValue) {
-        // SIMD value -> true.
-        Label not_simd;
-        __ CompareInstanceType(map, ip, SIMD128_VALUE_TYPE);
-        __ beq(instr->TrueLabel(chunk_));
-      }
-
       if (expected & ToBooleanHint::kHeapNumber) {
         // heap number -> false iff +0, -0, or NaN.
         Label not_heap_number;
@@ -2634,6 +2651,17 @@ void LCodeGen::DoLoadContextSlot(LLoadContextSlot* instr) {
   Register context = ToRegister(instr->context());
   Register result = ToRegister(instr->result());
   __ LoadP(result, ContextMemOperand(context, instr->slot_index()));
+  if (instr->hydrogen()->RequiresHoleCheck()) {
+    __ CompareRoot(result, Heap::kTheHoleValueRootIndex);
+    if (instr->hydrogen()->DeoptimizesOnHole()) {
+      DeoptimizeIf(eq, instr, DeoptimizeReason::kHole);
+    } else {
+      Label skip;
+      __ bne(&skip, Label::kNear);
+      __ mov(result, Operand(factory()->undefined_value()));
+      __ bind(&skip);
+    }
+  }
 }
 
 void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
@@ -2641,6 +2669,18 @@ void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
   Register value = ToRegister(instr->value());
   Register scratch = scratch0();
   MemOperand target = ContextMemOperand(context, instr->slot_index());
+
+  Label skip_assignment;
+
+  if (instr->hydrogen()->RequiresHoleCheck()) {
+    __ LoadP(scratch, target);
+    __ CompareRoot(scratch, Heap::kTheHoleValueRootIndex);
+    if (instr->hydrogen()->DeoptimizesOnHole()) {
+      DeoptimizeIf(eq, instr, DeoptimizeReason::kHole);
+    } else {
+      __ bne(&skip_assignment);
+    }
+  }
 
   __ StoreP(value, target);
   if (instr->hydrogen()->NeedsWriteBarrier()) {
@@ -2651,6 +2691,8 @@ void LCodeGen::DoStoreContextSlot(LStoreContextSlot* instr) {
                               GetLinkRegisterState(), kSaveFPRegs,
                               EMIT_REMEMBERED_SET, check_needed);
   }
+
+  __ bind(&skip_assignment);
 }
 
 void LCodeGen::DoLoadNamedField(LLoadNamedField* instr) {
@@ -3054,8 +3096,8 @@ void LCodeGen::DoArgumentsElements(LArgumentsElements* instr) {
     __ LoadP(
         result,
         MemOperand(scratch, CommonFrameConstants::kContextOrFrameTypeOffset));
-    __ LoadSmiLiteral(r0, Smi::FromInt(StackFrame::ARGUMENTS_ADAPTOR));
-    __ CmpP(result, r0);
+    __ CmpP(result,
+            Operand(StackFrame::TypeToMarker(StackFrame::ARGUMENTS_ADAPTOR)));
 
     // Result is the frame pointer for the frame if not adapted and for the real
     // frame below the adaptor frame if adapted.
@@ -3632,7 +3674,8 @@ void LCodeGen::PrepareForTailCall(const ParameterCount& actual,
   __ LoadP(scratch2, MemOperand(fp, StandardFrameConstants::kCallerFPOffset));
   __ LoadP(scratch3,
            MemOperand(scratch2, StandardFrameConstants::kContextOffset));
-  __ CmpSmiLiteral(scratch3, Smi::FromInt(StackFrame::ARGUMENTS_ADAPTOR), r0);
+  __ CmpP(scratch3,
+          Operand(StackFrame::TypeToMarker(StackFrame::ARGUMENTS_ADAPTOR)));
   __ bne(&no_arguments_adaptor);
 
   // Drop current frame and load arguments count from arguments adaptor frame.
@@ -4251,12 +4294,21 @@ void LCodeGen::DoDeferredMaybeGrowElements(LMaybeGrowElements* instr) {
       if (Smi::IsValid(int_key)) {
         __ LoadSmiLiteral(r5, Smi::FromInt(int_key));
       } else {
-        // We should never get here at runtime because there is a smi check on
-        // the key before this point.
-        __ stop("expected smi");
+        Abort(kArrayIndexConstantValueTooBig);
       }
     } else {
+      Label is_smi;
+#if V8_TARGET_ARCH_S390X
       __ SmiTag(r5, ToRegister(key));
+#else
+      // Deopt if the key is outside Smi range. The stub expects Smi and would
+      // bump the elements into dictionary mode (and trigger a deopt) anyways.
+      __ Add32(r5, ToRegister(key), ToRegister(key));
+      __ b(nooverflow, &is_smi);
+      __ PopSafepointRegisters();
+      DeoptimizeIf(al, instr, DeoptimizeReason::kOverflow, cr0);
+      __ bind(&is_smi);
+#endif
     }
 
     GrowArrayElementsStub stub(isolate(), instr->hydrogen()->kind());
@@ -4955,6 +5007,13 @@ void LCodeGen::DoCheckValue(LCheckValue* instr) {
 
 void LCodeGen::DoDeferredInstanceMigration(LCheckMaps* instr, Register object) {
   Register temp = ToRegister(instr->temp());
+  Label deopt, done;
+  // If the map is not deprecated the migration attempt does not make sense.
+  __ LoadP(temp, FieldMemOperand(object, HeapObject::kMapOffset));
+  __ LoadlW(temp, FieldMemOperand(temp, Map::kBitField3Offset));
+  __ TestBitMask(temp, Map::Deprecated::kMask, r0);
+  __ beq(&deopt);
+
   {
     PushSafepointRegistersScope scope(this);
     __ push(object);
@@ -4965,7 +5024,13 @@ void LCodeGen::DoDeferredInstanceMigration(LCheckMaps* instr, Register object) {
     __ StoreToSafepointRegisterSlot(r2, temp);
   }
   __ TestIfSmi(temp);
-  DeoptimizeIf(eq, instr, DeoptimizeReason::kInstanceMigrationFailed, cr0);
+  __ bne(&done);
+
+  __ bind(&deopt);
+  // In case of "al" condition the operand is not used so just pass cr0 there.
+  DeoptimizeIf(al, instr, DeoptimizeReason::kInstanceMigrationFailed, cr0);
+
+  __ bind(&done);
 }
 
 void LCodeGen::DoCheckMaps(LCheckMaps* instr) {
@@ -5313,17 +5378,6 @@ Condition LCodeGen::EmitTypeofIs(Label* true_label, Label* false_label,
             Operand((1 << Map::kIsCallable) | (1 << Map::kIsUndetectable)));
     __ CmpP(r0, Operand::Zero());
     final_branch_condition = eq;
-
-// clang-format off
-#define SIMD128_TYPE(TYPE, Type, type, lane_count, lane_type)        \
-  } else if (String::Equals(type_name, factory->type##_string())) {  \
-    __ JumpIfSmi(input, false_label);                                \
-    __ LoadP(scratch, FieldMemOperand(input, HeapObject::kMapOffset)); \
-    __ CompareRoot(scratch, Heap::k##Type##MapRootIndex);            \
-    final_branch_condition = eq;
-  SIMD128_TYPES(SIMD128_TYPE)
-#undef SIMD128_TYPE
-    // clang-format on
 
   } else {
     __ b(false_label);

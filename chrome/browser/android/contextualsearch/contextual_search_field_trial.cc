@@ -21,6 +21,8 @@ const char kContextualSearchIcingSurroundingSizeParamName[] =
 const char kContextualSearchSendURLDisabledParamName[] = "disable_send_url";
 const char kContextualSearchDecodeMentionsDisabledParamName[] =
     "disable_decode_mentions";
+const char kContextualCardsVersionParamName[] = "contextual_cards_version";
+
 // The default size of the content surrounding the selection to gather, allowing
 // room for other parameters.
 const int kContextualSearchDefaultContentSize = 1536;
@@ -42,8 +44,8 @@ ContextualSearchFieldTrial::ContextualSearchFieldTrial()
       is_send_base_page_url_disabled_(false),
       is_decode_mentions_disabled_cached_(false),
       is_decode_mentions_disabled_(false),
-      is_contextual_cards_bar_integration_enabled_cached_(false),
-      is_contextual_cards_bar_integration_enabled_(false) {}
+      is_contextual_cards_version_cached_(false),
+      contextual_cards_version_(0) {}
 
 ContextualSearchFieldTrial::~ContextualSearchFieldTrial() {}
 
@@ -83,11 +85,10 @@ bool ContextualSearchFieldTrial::IsDecodeMentionsDisabled() {
                          &is_decode_mentions_disabled_);
 }
 
-bool ContextualSearchFieldTrial::IsContextualCardsBarIntegrationEnabled() {
-  return GetBooleanParam(
-      switches::kEnableContextualSearchContextualCardsBarIntegration,
-      &is_contextual_cards_bar_integration_enabled_cached_,
-      &is_contextual_cards_bar_integration_enabled_);
+int ContextualSearchFieldTrial::GetContextualCardsVersion() {
+  return GetIntParamValueOrDefault(kContextualCardsVersionParamName, 0,
+                                   &is_contextual_cards_version_cached_,
+                                   &contextual_cards_version_);
 }
 
 bool ContextualSearchFieldTrial::GetBooleanParam(const std::string& name,

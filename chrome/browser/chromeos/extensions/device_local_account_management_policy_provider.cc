@@ -131,6 +131,11 @@ const char* const kSafeManifestEntries[] = {
     // Special-cased in IsSafeForPublicSession().
     // emk::kApp,
 
+    // Not a real manifest entry (doesn't show up in code search). All legacy
+    // ARC apps have this dictionary (data is stuffed there to be consumed by
+    // the ARC runtime).
+    "arc_metadata",
+
     // Documented in https://developer.chrome.com/extensions/manifest but not
     // implemented anywhere.  Still, a lot of apps use it.
     "author",
@@ -560,9 +565,10 @@ const char* const kSafePermissionStrings[] = {
     // icon and won't extract any data.
     "notifications",
 
-    // Captures page content, so block. Alternatively: Allow, but either (1)
-    // prompt user or (2) return blank content.
-    // "pageCapture",
+    // User is prompted (allow/deny) when an extension requests pageCapture for
+    // the first time in a session. The request is made via
+    // chrome.pageCapture.saveAsMHTML call.
+    "pageCapture",
 
     // Allows to use machine crypto keys - these would be provisioned by the
     // admin anyways.
@@ -683,11 +689,11 @@ const char* const kSafePermissionStrings[] = {
 // Some permissions take the form of a dictionary.  See |kSafePermissionStrings|
 // for permission strings (and for more documentation).
 const char* const kSafePermissionDicts[] = {
-    // TBD
-    // "fileSystem",
-
-    // Just another type of connectivity.
+    // Dictionary forms of the above permission strings.
+    "fileSystem",
+    "mediaGalleries",
     "socket",
+    "usbDevices",
 };
 
 // List of safe entries for the "app" dict in manifest.

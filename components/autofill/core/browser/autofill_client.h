@@ -17,7 +17,6 @@
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 
-class GURL;
 class IdentityProvider;
 class PrefService;
 
@@ -35,6 +34,10 @@ class RapporServiceImpl;
 
 namespace syncer {
 class SyncService;
+}
+
+namespace ukm {
+class UkmService;
 }
 
 namespace autofill {
@@ -105,6 +108,9 @@ class AutofillClient {
 
   // Gets the RapporServiceImpl associated with the client (for metrics).
   virtual rappor::RapporServiceImpl* GetRapporServiceImpl() = 0;
+
+  // Gets the UKM service assiciated with this client (for metrics).
+  virtual ukm::UkmService* GetUkmService() = 0;
 
   // Causes the Autofill settings UI to be shown.
   virtual void ShowAutofillSettings() = 0;
@@ -181,7 +187,7 @@ class AutofillClient {
   virtual void OnFirstUserGestureObserved() = 0;
 
   // If the context is secure.
-  virtual bool IsContextSecure(const GURL& form_origin) = 0;
+  virtual bool IsContextSecure() = 0;
 
   // Whether it is appropriate to show a signin promo for this user.
   virtual bool ShouldShowSigninPromo() = 0;

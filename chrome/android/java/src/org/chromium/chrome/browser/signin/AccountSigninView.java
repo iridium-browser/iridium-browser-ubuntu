@@ -124,6 +124,7 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
     private ImageView mSigninAccountImage;
     private TextView mSigninAccountName;
     private TextView mSigninAccountEmail;
+    private TextView mSigninPersonalizeServiceDescription;
     private TextView mSigninSettingsControl;
 
     public AccountSigninView(Context context, AttributeSet attrs) {
@@ -182,6 +183,8 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
         mSigninAccountImage = (ImageView) findViewById(R.id.signin_account_image);
         mSigninAccountName = (TextView) findViewById(R.id.signin_account_name);
         mSigninAccountEmail = (TextView) findViewById(R.id.signin_account_email);
+        mSigninPersonalizeServiceDescription =
+                (TextView) findViewById(R.id.signin_personalize_service_description);
         mSigninSettingsControl = (TextView) findViewById(R.id.signin_settings_control);
         // For the spans to be clickable.
         mSigninSettingsControl.setMovementMethod(LinkMovementMethod.getInstance());
@@ -430,6 +433,10 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
                 RecordUserAction.record("Signin_Signin_WithAdvancedSyncSettings");
             }
         };
+        if (mIsChildAccount) {
+            mSigninPersonalizeServiceDescription.setText(
+                    R.string.sync_confirmation_personalize_services_body_child_account);
+        }
         mSigninSettingsControl.setText(
                 SpanApplier.applySpans(getSettingsControlDescription(mIsChildAccount),
                         new SpanInfo(SETTINGS_LINK_OPEN, SETTINGS_LINK_CLOSE, settingsSpan)));
@@ -580,8 +587,8 @@ public class AccountSigninView extends FrameLayout implements ProfileDownloader.
 
     private String getSettingsControlDescription(boolean childAccount) {
         if (childAccount) {
-            return getResources().getString(R.string.signin_signed_in_settings_description) + '\n'
-                    + getResources().getString(R.string.signin_signed_in_description_uca_addendum);
+            return getResources().getString(
+                    R.string.signin_signed_in_settings_description_child_account);
         } else {
             return getResources().getString(R.string.signin_signed_in_settings_description);
         }

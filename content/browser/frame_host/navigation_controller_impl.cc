@@ -39,7 +39,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
@@ -721,16 +720,14 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
       // Update the FTN ID to use below in case we found a named frame.
       frame_tree_node_id = node->frame_tree_node_id();
 
-      // In --site-per-process, create an identical NavigationEntry with a
-      // new FrameNavigationEntry for the target subframe.
-      if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
-        entry = GetLastCommittedEntry()->Clone();
-        entry->AddOrUpdateFrameEntry(
-            node, -1, -1, nullptr,
-            static_cast<SiteInstanceImpl*>(params.source_site_instance.get()),
-            params.url, params.referrer, params.redirect_chain, PageState(),
-            "GET", -1);
-      }
+      // Create an identical NavigationEntry with a new FrameNavigationEntry for
+      // the target subframe.
+      entry = GetLastCommittedEntry()->Clone();
+      entry->AddOrUpdateFrameEntry(
+          node, -1, -1, nullptr,
+          static_cast<SiteInstanceImpl*>(params.source_site_instance.get()),
+          params.url, params.referrer, params.redirect_chain, PageState(),
+          "GET", -1);
     }
   }
 
@@ -818,10 +815,12 @@ bool NavigationControllerImpl::RendererDidNavigate(
 
   // If there is a pending entry at this point, it should have a SiteInstance,
   // except for restored entries.
+  bool was_restored = false;
   DCHECK(pending_entry_index_ == -1 || pending_entry_->site_instance() ||
          pending_entry_->restore_type() != RestoreType::NONE);
   if (pending_entry_ && pending_entry_->restore_type() != RestoreType::NONE) {
     pending_entry_->set_restore_type(RestoreType::NONE);
+    was_restored = true;
   }
 
   // The renderer tells us whether the navigation replaces the current entry.
@@ -856,7 +855,7 @@ bool NavigationControllerImpl::RendererDidNavigate(
     case NAVIGATION_TYPE_EXISTING_PAGE:
       details->did_replace_entry = details->is_in_page;
       RendererDidNavigateToExistingPage(rfh, params, details->is_in_page,
-                                        navigation_handle);
+                                        was_restored, navigation_handle);
       break;
     case NAVIGATION_TYPE_SAME_PAGE:
       RendererDidNavigateToSamePage(rfh, params, navigation_handle);
@@ -867,11 +866,10 @@ bool NavigationControllerImpl::RendererDidNavigate(
       break;
     case NAVIGATION_TYPE_AUTO_SUBFRAME:
       if (!RendererDidNavigateAutoSubframe(rfh, params)) {
-        // In UseSubframeNavigationEntries mode, we won't send a notification
-        // about auto-subframe PageState during UpdateStateForFrame, since it
-        // looks like nothing has changed.  Send it here at commit time instead.
-        if (SiteIsolationPolicy::UseSubframeNavigationEntries())
-          NotifyEntryChanged(GetLastCommittedEntry());
+        // We don't send a notification about auto-subframe PageState during
+        // UpdateStateForFrame, since it looks like nothing has changed.  Send
+        // it here at commit time instead.
+        NotifyEntryChanged(GetLastCommittedEntry());
         return false;
       }
       break;
@@ -905,28 +903,19 @@ bool NavigationControllerImpl::RendererDidNavigate(
 
   // All committed entries should have nonempty content state so WebKit doesn't
   // get confused when we go back to them (see the function for details).
-  if (!params.page_state.IsValid()) {
-    // Temporarily generate a minidump to diagnose https://crbug.com/568703.
-    base::debug::DumpWithoutCrashing();
-    NOTREACHED() << "Shouldn't see an empty PageState at commit.";
-  }
+  DCHECK(params.page_state.IsValid()) << "Shouldn't see an empty PageState.";
   NavigationEntryImpl* active_entry = GetLastCommittedEntry();
   active_entry->SetTimestamp(timestamp);
   active_entry->SetHttpStatusCode(params.http_status_code);
 
   FrameNavigationEntry* frame_entry =
       active_entry->GetFrameEntry(rfh->frame_tree_node());
-  if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
-    // Update the frame-specific PageState and RedirectChain
-    // We may not find a frame_entry in some cases; ignore the PageState if so.
-    // TODO(creis): Remove the "if" once https://crbug.com/522193 is fixed.
-    if (frame_entry) {
-      frame_entry->SetPageState(params.page_state);
-      frame_entry->set_redirect_chain(params.redirects);
-    }
-  } else {
-    active_entry->SetPageState(params.page_state);
-    active_entry->SetRedirectChain(params.redirects);
+  // Update the frame-specific PageState and RedirectChain
+  // We may not find a frame_entry in some cases; ignore the PageState if so.
+  // TODO(creis): Remove the "if" once https://crbug.com/522193 is fixed.
+  if (frame_entry) {
+    frame_entry->SetPageState(params.page_state);
+    frame_entry->set_redirect_chain(params.redirects);
   }
 
   // Use histogram to track memory impact of redirect chain because it's now
@@ -1107,6 +1096,12 @@ void NavigationControllerImpl::RendererDidNavigateToNewPage(
     new_entry = GetLastCommittedEntry()->CloneAndReplace(
         frame_entry, true, rfh->frame_tree_node(),
         delegate_->GetFrameTree()->root());
+    if (new_entry->GetURL().GetOrigin() != params.url.GetOrigin()) {
+      // TODO(jam): we had one report of this with a URL that was redirecting to
+      // only tildes. Until we understand that better, don't copy the cert in
+      // this case.
+      new_entry->GetSSL() = SSLStatus();
+    }
 
     // We expect |frame_entry| to be owned by |new_entry|.  This should never
     // fail, because it's the main frame.
@@ -1204,6 +1199,7 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
     RenderFrameHostImpl* rfh,
     const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
     bool is_in_page,
+    bool was_restored,
     NavigationHandleImpl* handle) {
   // We should only get here for main frame navigations.
   DCHECK(!rfh->GetParent());
@@ -1217,16 +1213,30 @@ void NavigationControllerImpl::RendererDidNavigateToExistingPage(
     // meanwhile and no new page was created. We are stuck at the last committed
     // entry.
     entry = GetLastCommittedEntry();
+    // If this is an in-page navigation, then there's no SSLStatus in the
+    // NavigationHandle so don't overwrite the existing entry's SSLStatus.
+    if (!is_in_page)
+      entry->GetSSL() = handle->ssl_status();
   } else if (params.nav_entry_id) {
     // This is a browser-initiated navigation (back/forward/reload).
     entry = GetEntryWithUniqueID(params.nav_entry_id);
 
-    // Needed for the restore case, where the serialized NavigationEntry doesn't
-    // have the SSL state. Note that for in-page navigation, there's no
-    // SSLStatus in the NavigationHandle so don't overwrite the existing entry's
-    // SSLStatus.
-    if (!is_in_page)
+    if (is_in_page) {
+      // There's no SSLStatus in the NavigationHandle for in-page navigations,
+      // so normally we leave |entry|'s SSLStatus as is. However if this was a
+      // restored in-page navigation entry, then it won't have an SSLStatus. So
+      // we need to copy over the SSLStatus from the entry that navigated it.
+      NavigationEntryImpl* last_entry = GetLastCommittedEntry();
+      if (entry->GetURL().GetOrigin() == last_entry->GetURL().GetOrigin() &&
+          last_entry->GetSSL().initialized && !entry->GetSSL().initialized &&
+          was_restored) {
+        entry->GetSSL() = last_entry->GetSSL();
+      }
+    } else {
+      // When restoring a tab, the serialized NavigationEntry doesn't have the
+      // SSL state.
       entry->GetSSL() = handle->ssl_status();
+    }
   } else {
     // This is renderer-initiated. The only kinds of renderer-initated
     // navigations that are EXISTING_PAGE are reloads and location.replace,
@@ -1343,24 +1353,20 @@ void NavigationControllerImpl::RendererDidNavigateNewSubframe(
   DCHECK(GetLastCommittedEntry()) << "ClassifyNavigation should guarantee "
                                   << "that a last committed entry exists.";
 
-  std::unique_ptr<NavigationEntryImpl> new_entry;
-  if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
-    // Make sure we don't leak frame_entry if new_entry doesn't take ownership.
-    scoped_refptr<FrameNavigationEntry> frame_entry(new FrameNavigationEntry(
-        params.frame_unique_name, params.item_sequence_number,
-        params.document_sequence_number, rfh->GetSiteInstance(), nullptr,
-        params.url, params.referrer, params.method, params.post_id));
-    new_entry = GetLastCommittedEntry()->CloneAndReplace(
-        frame_entry.get(), is_in_page, rfh->frame_tree_node(),
-        delegate_->GetFrameTree()->root());
+  // Make sure we don't leak frame_entry if new_entry doesn't take ownership.
+  scoped_refptr<FrameNavigationEntry> frame_entry(new FrameNavigationEntry(
+      params.frame_unique_name, params.item_sequence_number,
+      params.document_sequence_number, rfh->GetSiteInstance(), nullptr,
+      params.url, params.referrer, params.method, params.post_id));
+  std::unique_ptr<NavigationEntryImpl> new_entry =
+      GetLastCommittedEntry()->CloneAndReplace(
+          frame_entry.get(), is_in_page, rfh->frame_tree_node(),
+          delegate_->GetFrameTree()->root());
 
-    // TODO(creis): Update this to add the frame_entry if we can't find the one
-    // to replace, which can happen due to a unique name change.  See
-    // https://crbug.com/607205.  For now, frame_entry will be deleted when it
-    // goes out of scope if it doesn't get used.
-  } else {
-    new_entry = GetLastCommittedEntry()->Clone();
-  }
+  // TODO(creis): Update this to add the frame_entry if we can't find the one
+  // to replace, which can happen due to a unique name change.  See
+  // https://crbug.com/607205.  For now, frame_entry will be deleted when it
+  // goes out of scope if it doesn't get used.
 
   InsertOrReplaceEntry(std::move(new_entry), replace_entry);
 }
@@ -1413,16 +1419,14 @@ bool NavigationControllerImpl::RendererDidNavigateAutoSubframe(
     }
   }
 
-  if (SiteIsolationPolicy::UseSubframeNavigationEntries()) {
-    // This may be a "new auto" case where we add a new FrameNavigationEntry, or
-    // it may be a "history auto" case where we update an existing one.
-    NavigationEntryImpl* last_committed = GetLastCommittedEntry();
-    last_committed->AddOrUpdateFrameEntry(
-        rfh->frame_tree_node(), params.item_sequence_number,
-        params.document_sequence_number, rfh->GetSiteInstance(), nullptr,
-        params.url, params.referrer, params.redirects, params.page_state,
-        params.method, params.post_id);
-  }
+  // This may be a "new auto" case where we add a new FrameNavigationEntry, or
+  // it may be a "history auto" case where we update an existing one.
+  NavigationEntryImpl* last_committed = GetLastCommittedEntry();
+  last_committed->AddOrUpdateFrameEntry(
+      rfh->frame_tree_node(), params.item_sequence_number,
+      params.document_sequence_number, rfh->GetSiteInstance(), nullptr,
+      params.url, params.referrer, params.redirects, params.page_state,
+      params.method, params.post_id);
 
   return send_commit_notification;
 }
@@ -1896,23 +1900,8 @@ bool NavigationControllerImpl::NavigateToPendingEntryInternal(
   DCHECK(pending_entry_);
   FrameTreeNode* root = delegate_->GetFrameTree()->root();
 
-  // In default Chrome, there are no subframe FrameNavigationEntries.  Either
-  // navigate the main frame or use the main frame's FrameNavigationEntry to
-  // tell the indicated frame where to go.
-  if (!SiteIsolationPolicy::UseSubframeNavigationEntries()) {
-    FrameNavigationEntry* frame_entry = GetPendingEntry()->GetFrameEntry(root);
-    FrameTreeNode* frame = root;
-    int ftn_id = GetPendingEntry()->frame_tree_node_id();
-    if (ftn_id != -1) {
-      frame = delegate_->GetFrameTree()->FindByID(ftn_id);
-      DCHECK(frame);
-    }
-    return frame->navigator()->NavigateToPendingEntry(frame, *frame_entry,
-                                                      reload_type, false);
-  }
-
-  // In --site-per-process, we compare FrameNavigationEntries to see which
-  // frames in the tree need to be navigated.
+  // Compare FrameNavigationEntries to see which frames in the tree need to be
+  // navigated.
   FrameLoadVector same_document_loads;
   FrameLoadVector different_document_loads;
   if (GetLastCommittedEntry()) {

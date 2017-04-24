@@ -100,7 +100,7 @@ bool Animation::ShouldRenderRichAnimation() {
 // static
 bool Animation::ScrollAnimationsEnabledBySystem() {
   // Defined in platform specific files for Windows and OSX.
-  return true;
+  return false;
 }
 #endif
 

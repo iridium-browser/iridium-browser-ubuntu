@@ -20,8 +20,8 @@ class CommandLine;
 class FilePath;
 }
 
-namespace user_prefs {
-class PrefRegistrySyncable;
+namespace content {
+class WebContents;
 }
 
 // This namespace contains the chrome first-run installation actions needed to
@@ -71,7 +71,6 @@ struct MasterPrefs {
   // remove items from here which are being stored temporarily only to be later
   // dumped into local_state. Also see related TODO in chrome_browser_main.cc.
 
-  int ping_delay;
   bool homepage_defined;
   int do_import_items;
   int dont_import_items;
@@ -112,12 +111,6 @@ bool IsMetricsReportingOptIn();
 // (http://crbug.com/264694).
 void CreateSentinelIfNeeded();
 
-// Get RLZ ping delay pref name.
-std::string GetPingDelayPrefName();
-
-// Register user preferences used by the MasterPrefs structure.
-void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-
 // Sets the kShowFirstRunBubbleOption local state pref so that the browser
 // shows the bubble once the main message loop gets going (or refrains from
 // showing the bubble, if |show_bubble| is not FIRST_RUN_BUBBLE_SHOW).
@@ -135,6 +128,9 @@ void SetShouldShowWelcomePage();
 // This will return true only once: The first time it is called after
 // SetShouldShowWelcomePage() is called.
 bool ShouldShowWelcomePage();
+
+// Returns true if |contents| hosts one of the welcome pages.
+bool IsOnWelcomePage(content::WebContents* contents);
 
 // Iterates over the given tabs, replacing "magic words" designated for
 // use in Master Preferences files with corresponding URLs.

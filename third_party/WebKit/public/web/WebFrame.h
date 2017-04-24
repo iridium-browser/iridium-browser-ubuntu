@@ -112,7 +112,7 @@ class WebFrame {
   // This method closes and deletes the WebFrame. This is typically called by
   // the embedder in response to a frame detached callback to the WebFrame
   // client.
-  virtual void close() = 0;
+  virtual void close();
 
   // Called by the embedder when it needs to detach the subtree rooted at this
   // frame.
@@ -349,12 +349,6 @@ class WebFrame {
   // the referrer for a HTTP request).
   virtual void setReferrerForRequest(WebURLRequest&, const WebURL&) = 0;
 
-  // Called to associate the WebURLRequest with this frame.  The request
-  // will be modified to inherit parameters that allow it to be loaded.
-  // This method ends up triggering WebFrameClient::willSendRequest.
-  // DEPRECATED: Please use createAssociatedURLLoader instead.
-  virtual void dispatchWillSendRequest(WebURLRequest&) = 0;
-
   // Returns an AssociatedURLLoader that is associated with this frame.  The
   // loader will, for example, be cancelled when WebFrame::stopLoading is
   // called.
@@ -439,9 +433,6 @@ class WebFrame {
   bool inShadowTree() const { return m_scope == WebTreeScopeType::Shadow; }
 
   static void traceFrames(Visitor*, WebFrame*);
-  static void traceFrames(InlinedGlobalMarkingVisitor, WebFrame*);
-  void clearWeakFrames(Visitor*);
-  void clearWeakFrames(InlinedGlobalMarkingVisitor);
 #endif
 
  protected:
@@ -460,15 +451,6 @@ class WebFrame {
   friend class WebFrameTest;
 
   static void traceFrame(Visitor*, WebFrame*);
-  static void traceFrame(InlinedGlobalMarkingVisitor, WebFrame*);
-  static bool isFrameAlive(const WebFrame*);
-
-  template <typename VisitorDispatcher>
-  static void traceFramesImpl(VisitorDispatcher, WebFrame*);
-  template <typename VisitorDispatcher>
-  void clearWeakFramesImpl(VisitorDispatcher);
-  template <typename VisitorDispatcher>
-  static void traceFrameImpl(VisitorDispatcher, WebFrame*);
 #endif
 
   const WebTreeScopeType m_scope;

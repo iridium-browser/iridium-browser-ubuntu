@@ -74,6 +74,21 @@ void AutoplayUmaHelper::onAutoplayInitiated(AutoplaySource source) {
     audioHistogram.count(static_cast<int>(m_source));
   }
 
+  // Record the child frame and top-level frame URLs for autoplay muted videos
+  // by attribute.
+  if (m_element->isHTMLVideoElement() && m_element->muted()) {
+    if (source == AutoplaySource::Attribute) {
+      Platform::current()->recordRapporURL(
+          "Media.Video.Autoplay.Muted.Attribute.Frame",
+          m_element->document().url());
+    } else {
+      DCHECK(source == AutoplaySource::Method);
+      Platform::current()->recordRapporURL(
+          "Media.Video.Autoplay.Muted.PlayMethod.Frame",
+          m_element->document().url());
+    }
+  }
+
   // Record if it will be blocked by Data Saver or Autoplay setting.
   if (m_element->isHTMLVideoElement() && m_element->muted() &&
       RuntimeEnabledFeatures::autoplayMutedVideosEnabled()) {
@@ -307,13 +322,7 @@ void AutoplayUmaHelper::maybeStopRecordingMutedVideoOffscreenDuration() {
       std::min<int64_t>(m_mutedVideoAutoplayOffscreenDurationMS,
                         std::numeric_limits<int32_t>::max()));
 
-  if (m_source == AutoplaySource::Attribute) {
-    DEFINE_STATIC_LOCAL(
-        CustomCountHistogram, durationHistogram,
-        ("Media.Video.Autoplay.Muted.Attribute.OffscreenDuration", 1,
-         maxOffscreenDurationUmaMS, offscreenDurationUmaBucketCount));
-    durationHistogram.count(boundedTime);
-  } else {
+  if (m_source == AutoplaySource::Method) {
     DEFINE_STATIC_LOCAL(
         CustomCountHistogram, durationHistogram,
         ("Media.Video.Autoplay.Muted.PlayMethod.OffscreenDuration", 1,

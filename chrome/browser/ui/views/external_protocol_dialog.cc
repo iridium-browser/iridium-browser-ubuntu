@@ -15,6 +15,7 @@
 #include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/ui_features.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/widget/widget.h"
@@ -30,6 +31,9 @@ const int kMessageWidth = 400;
 ///////////////////////////////////////////////////////////////////////////////
 // ExternalProtocolHandler
 
+#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
+// This should be kept in sync with RunExternalProtocolDialogViews in
+// external_protocol_dialog_views_mac.mm.
 // static
 void ExternalProtocolHandler::RunExternalProtocolDialog(
     const GURL& url, int render_process_host_id, int routing_id,
@@ -46,6 +50,7 @@ void ExternalProtocolHandler::RunExternalProtocolDialog(
   new ExternalProtocolDialog(std::move(delegate), render_process_host_id,
                              routing_id);
 }
+#endif  // !OS_MACOSX || MAC_VIEWS_BROWSER
 
 ///////////////////////////////////////////////////////////////////////////////
 // ExternalProtocolDialog
@@ -74,11 +79,12 @@ void ExternalProtocolDialog::DeleteDelegate() {
 }
 
 bool ExternalProtocolDialog::Cancel() {
-  delegate_->DoCancel(delegate_->url(),
-                      message_box_view_->IsCheckBoxSelected());
+  bool is_checked = message_box_view_->IsCheckBoxSelected();
+  delegate_->DoCancel(delegate_->url(), is_checked);
 
-  ExternalProtocolHandler::RecordMetrics(
-      message_box_view_->IsCheckBoxSelected());
+  ExternalProtocolHandler::RecordCheckboxStateMetrics(is_checked);
+  ExternalProtocolHandler::RecordHandleStateMetrics(
+      is_checked, ExternalProtocolHandler::BLOCK);
 
   // Returning true closes the dialog.
   return true;
@@ -91,11 +97,12 @@ bool ExternalProtocolDialog::Accept() {
   UMA_HISTOGRAM_LONG_TIMES("clickjacking.launch_url",
                            base::TimeTicks::Now() - creation_time_);
 
-  ExternalProtocolHandler::RecordMetrics(
-      message_box_view_->IsCheckBoxSelected());
+  bool is_checked = message_box_view_->IsCheckBoxSelected();
+  ExternalProtocolHandler::RecordCheckboxStateMetrics(is_checked);
+  ExternalProtocolHandler::RecordHandleStateMetrics(
+      is_checked, ExternalProtocolHandler::DONT_BLOCK);
 
-  delegate_->DoAccept(delegate_->url(),
-                      message_box_view_->IsCheckBoxSelected());
+  delegate_->DoAccept(delegate_->url(), is_checked);
 
   // Returning true closes the dialog.
   return true;

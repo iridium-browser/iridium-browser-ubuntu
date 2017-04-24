@@ -24,14 +24,17 @@ namespace {
 // browser_theme_pack.cc.
 
 const SkColor kDefaultColorFrame = SkColorSetRGB(0xCC, 0xCC, 0xCC);
+const SkColor kDefaultColorFrameInactive = SkColorSetRGB(0xF5, 0xF5, 0xF5);
 
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorFrameIncognito =
     SkColorSetARGB(0xE6, 0x14, 0x16, 0x18);
-const SkColor kDefaultColorFrameIncognitoInactiveMac =
+const SkColor kDefaultColorFrameIncognitoInactive =
     SkColorSetRGB(0x1E, 0x1E, 0x1E);
 #else
 const SkColor kDefaultColorFrameIncognito = SkColorSetRGB(0x28, 0x2B, 0x2D);
+const SkColor kDefaultColorFrameIncognitoInactive =
+    SkColorSetRGB(0x38, 0x3B, 0x3D);
 #endif
 
 const SkColor kDefaultColorToolbar = SkColorSetRGB(0xF2, 0xF2, 0xF2);
@@ -66,18 +69,15 @@ const SkColor kDefaultColorNTPLink = SkColorSetRGB(0x06, 0x37, 0x74);
 #endif  // OS_WIN
 
 const SkColor kDefaultColorNTPHeader = SkColorSetRGB(0x96, 0x96, 0x96);
-const SkColor kDefaultColorNTPSection = SkColorSetRGB(0xE5, 0xE5, 0xE5);
-constexpr SkColor kDefaultColorNTPSectionText = SK_ColorBLACK;
-const SkColor kDefaultColorNTPSectionLink = SkColorSetRGB(0x06, 0x37, 0x74);
 constexpr SkColor kDefaultColorButtonBackground = SK_ColorTRANSPARENT;
 
 // Default tints.
 constexpr color_utils::HSL kDefaultTintButtons = {-1, -1, -1};
 constexpr color_utils::HSL kDefaultTintButtonsIncognito = {-1, -1, 0.85};
 constexpr color_utils::HSL kDefaultTintFrame = {-1, -1, -1};
-constexpr color_utils::HSL kDefaultTintFrameInactive = {-1, -1, 0.9};
+constexpr color_utils::HSL kDefaultTintFrameInactive = {-1, -1, 0.75};
 constexpr color_utils::HSL kDefaultTintFrameIncognito = {-1, 0.2, 0.35};
-constexpr color_utils::HSL kDefaultTintFrameIncognitoInactive = {-1, 0.2, 0.87};
+constexpr color_utils::HSL kDefaultTintFrameIncognitoInactive = {-1, 0.3, 0.6};
 constexpr color_utils::HSL kDefaultTintBackgroundTab = {-1, -1, 0.75};
 
 // ----------------------------------------------------------------------------
@@ -131,10 +131,6 @@ constexpr char kTilingNoRepeat[] = "no-repeat";
 constexpr char kTilingRepeatX[] = "repeat-x";
 constexpr char kTilingRepeatY[] = "repeat-y";
 constexpr char kTilingRepeat[] = "repeat";
-
-SkColor TintForUnderline(SkColor input) {
-  return SkColorSetA(input, SkColorGetA(input) / 3);
-}
 
 }  // namespace
 
@@ -228,13 +224,8 @@ SkColor ThemeProperties::GetDefaultColor(int id, bool otr) {
     case COLOR_FRAME:
       return otr ? kDefaultColorFrameIncognito : kDefaultColorFrame;
     case COLOR_FRAME_INACTIVE:
-#if defined(OS_MACOSX)
-      if (otr)
-        return kDefaultColorFrameIncognitoInactiveMac;
-#endif
-      return color_utils::HSLShift(
-          GetDefaultColor(ThemeProperties::COLOR_FRAME, otr),
-          GetDefaultTint(ThemeProperties::TINT_FRAME_INACTIVE, false));
+      return otr ? kDefaultColorFrameIncognitoInactive
+                 : kDefaultColorFrameInactive;
     case COLOR_TOOLBAR:
       return otr ? kDefaultColorToolbarIncognito : kDefaultColorToolbar;
     case COLOR_TAB_TEXT:
@@ -249,18 +240,8 @@ SkColor ThemeProperties::GetDefaultColor(int id, bool otr) {
       return kDefaultColorNTPText;
     case COLOR_NTP_LINK:
       return kDefaultColorNTPLink;
-    case COLOR_NTP_LINK_UNDERLINE:
-      return TintForUnderline(kDefaultColorNTPLink);
     case COLOR_NTP_HEADER:
       return kDefaultColorNTPHeader;
-    case COLOR_NTP_SECTION:
-      return kDefaultColorNTPSection;
-    case COLOR_NTP_SECTION_TEXT:
-      return kDefaultColorNTPSectionText;
-    case COLOR_NTP_SECTION_LINK:
-      return kDefaultColorNTPSectionLink;
-    case COLOR_NTP_SECTION_LINK_UNDERLINE:
-      return TintForUnderline(kDefaultColorNTPSectionLink);
     case COLOR_BUTTON_BACKGROUND:
       return kDefaultColorButtonBackground;
 

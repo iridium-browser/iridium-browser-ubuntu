@@ -44,9 +44,6 @@ class PaletteDelegateImpl : public PaletteDelegate {
   }
   void CreateNote() override {}
   bool HasNoteApp() override { return false; }
-  void SetPartialMagnifierState(bool enabled) override {}
-  void SetStylusStateChangedCallback(
-      const OnStylusStateChangedCallback& on_stylus_state_changed) override {}
   bool ShouldAutoOpenPalette() override { return false; }
   bool ShouldShowPalette() override { return false; }
   void TakeScreenshot() override {}
@@ -105,7 +102,7 @@ class SessionStateDelegateImpl : public SessionStateDelegate {
     return gfx::ImageSkia();
   }
   void SwitchActiveUser(const AccountId& account_id) override {}
-  void CycleActiveUser(CycleUser cycle_user) override {}
+  void CycleActiveUser(CycleUserDirection direction) override {}
   bool IsMultiProfileAllowedByPrimaryUserPolicy() const override {
     return true;
   }
@@ -166,8 +163,7 @@ keyboard::KeyboardUI* ShellDelegateImpl::CreateKeyboardUI() {
 void ShellDelegateImpl::OpenUrlFromArc(const GURL& url) {}
 
 ShelfDelegate* ShellDelegateImpl::CreateShelfDelegate(ShelfModel* model) {
-  shelf_delegate_ = new test::TestShelfDelegate(model);
-  return shelf_delegate_;
+  return new test::TestShelfDelegate();
 }
 
 SystemTrayDelegate* ShellDelegateImpl::CreateSystemTrayDelegate() {

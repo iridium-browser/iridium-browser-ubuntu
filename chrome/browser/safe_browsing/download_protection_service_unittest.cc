@@ -395,9 +395,11 @@ class DownloadProtectionServiceTest : public testing::Test {
   void PrepareResponse(net::FakeURLFetcherFactory* factory,
                        ClientDownloadResponse::Verdict verdict,
                        net::HttpStatusCode response_code,
-                       net::URLRequestStatus::Status status) {
+                       net::URLRequestStatus::Status status,
+                       bool upload_requested = false) {
     ClientDownloadResponse response;
     response.set_verdict(verdict);
+    response.set_upload(upload_requested);
     factory->SetFakeResponse(
         DownloadProtectionService::GetDownloadRequestUrl(),
         response.SerializeAsString(),
@@ -1041,11 +1043,11 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
               MatchDownloadWhitelistUrl(_))
       .WillRepeatedly(Return(false));
   EXPECT_CALL(*binary_feature_extractor_.get(), CheckSignature(tmp_path_, _))
-      .Times(7);
+      .Times(8);
   EXPECT_CALL(*binary_feature_extractor_.get(),
               ExtractImageFeatures(
                   tmp_path_, BinaryFeatureExtractor::kDefaultOptions, _, _))
-      .Times(7);
+      .Times(8);
   std::string feedback_ping;
   std::string feedback_response;
   ClientDownloadResponse expected_response;
@@ -1079,9 +1081,10 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
   }
   {
     // If the response is dangerous the result should also be marked as
-    // dangerous.
+    // dangerous, and should not upload if not requested.
     PrepareResponse(&factory, ClientDownloadResponse::DANGEROUS, net::HTTP_OK,
-                    net::URLRequestStatus::SUCCESS);
+                    net::URLRequestStatus::SUCCESS,
+                    false /* upload_requested */);
     RunLoop run_loop;
     download_service_->CheckClientDownload(
         &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
@@ -1094,9 +1097,27 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
     ClearClientDownloadRequest();
   }
   {
+    // If the response is dangerous and the server requests an upload,
+    // we should upload.
+    PrepareResponse(&factory, ClientDownloadResponse::DANGEROUS, net::HTTP_OK,
+                    net::URLRequestStatus::SUCCESS,
+                    true /* upload_requested */);
+    RunLoop run_loop;
+    download_service_->CheckClientDownload(
+        &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                          base::Unretained(this), run_loop.QuitClosure()));
+    run_loop.Run();
+    EXPECT_TRUE(DownloadFeedbackService::GetPingsForDownloadForTesting(
+        item, &feedback_ping, &feedback_response));
+    EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
+    EXPECT_TRUE(HasClientDownloadRequest());
+    ClearClientDownloadRequest();
+  }
+  {
     // If the response is uncommon the result should also be marked as uncommon.
     PrepareResponse(&factory, ClientDownloadResponse::UNCOMMON, net::HTTP_OK,
-                    net::URLRequestStatus::SUCCESS);
+                    net::URLRequestStatus::SUCCESS,
+                    true /* upload_requested */);
     RunLoop run_loop;
     download_service_->CheckClientDownload(
         &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
@@ -1109,6 +1130,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
     EXPECT_TRUE(decoded_request.ParseFromString(feedback_ping));
     EXPECT_EQ(url_chain_.back().spec(), decoded_request.url());
     expected_response.set_verdict(ClientDownloadResponse::UNCOMMON);
+    expected_response.set_upload(true);
     EXPECT_EQ(expected_response.SerializeAsString(), feedback_response);
     EXPECT_TRUE(HasClientDownloadRequest());
     ClearClientDownloadRequest();
@@ -1117,7 +1139,8 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
     // If the response is dangerous_host the result should also be marked as
     // dangerous_host.
     PrepareResponse(&factory, ClientDownloadResponse::DANGEROUS_HOST,
-                    net::HTTP_OK, net::URLRequestStatus::SUCCESS);
+                    net::HTTP_OK, net::URLRequestStatus::SUCCESS,
+                    true /* upload_requested */);
     RunLoop run_loop;
     download_service_->CheckClientDownload(
         &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
@@ -1127,6 +1150,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
     EXPECT_TRUE(DownloadFeedbackService::GetPingsForDownloadForTesting(
         item, &feedback_ping, &feedback_response));
     expected_response.set_verdict(ClientDownloadResponse::DANGEROUS_HOST);
+    expected_response.set_upload(true);
     EXPECT_EQ(expected_response.SerializeAsString(), feedback_response);
     EXPECT_TRUE(HasClientDownloadRequest());
     ClearClientDownloadRequest();
@@ -1724,6 +1748,7 @@ TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
   std::string hash = "hash";
 
   content::MockDownloadItem item;
+  EXPECT_CALL(item, GetURL()).WillRepeatedly(ReturnRef(url_chain.back()));
   EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
   EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
   EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
@@ -1737,8 +1762,8 @@ TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
         .WillOnce(Return(true));
     RunLoop run_loop;
     download_service_->CheckDownloadUrl(
-        item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                         base::Unretained(this), run_loop.QuitClosure()));
+        &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                          base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
     Mock::VerifyAndClearExpectations(sb_service_.get());
@@ -1750,8 +1775,8 @@ TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
             DoAll(CheckDownloadUrlDone(SB_THREAT_TYPE_SAFE), Return(false)));
     RunLoop run_loop;
     download_service_->CheckDownloadUrl(
-        item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                         base::Unretained(this), run_loop.QuitClosure()));
+        &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                          base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
     Mock::VerifyAndClearExpectations(sb_service_.get());
@@ -1763,8 +1788,8 @@ TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
                         Return(false)));
     RunLoop run_loop;
     download_service_->CheckDownloadUrl(
-        item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                         base::Unretained(this), run_loop.QuitClosure()));
+        &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                          base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
     Mock::VerifyAndClearExpectations(sb_service_.get());
@@ -1776,8 +1801,8 @@ TEST_F(DownloadProtectionServiceTest, TestCheckDownloadUrl) {
                         Return(false)));
     RunLoop run_loop;
     download_service_->CheckDownloadUrl(
-        item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                         base::Unretained(this), run_loop.QuitClosure()));
+        &item, base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
+                          base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   }

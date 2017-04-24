@@ -8,6 +8,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "components/safe_browsing_db/v4_protocol_manager_util.h"
@@ -77,10 +78,9 @@ typedef std::vector<ListInfo> ListInfos;
 class V4DatabaseFactory {
  public:
   virtual ~V4DatabaseFactory() {}
-  virtual V4Database* CreateV4Database(
+  virtual std::unique_ptr<V4Database> Create(
       const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
-      const base::FilePath& base_dir_path,
-      const ListInfos& list_infos) = 0;
+      std::unique_ptr<StoreMap> store_map);
 };
 
 // The on-disk databases are shared among all profiles, as it doesn't contain
@@ -100,7 +100,7 @@ class V4Database {
       const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
       const base::FilePath& base_path,
       const ListInfos& list_infos,
-      NewDatabaseReadyCallback callback);
+      NewDatabaseReadyCallback new_db_callback);
 
   // Destroys the provided v4_database on its task_runner since this may be a
   // long operation.
@@ -152,7 +152,9 @@ class V4Database {
              std::unique_ptr<StoreMap> store_map);
 
  private:
+  friend class V4DatabaseFactory;
   friend class V4DatabaseTest;
+  friend class V4SafeBrowsingServiceTest;
   FRIEND_TEST_ALL_PREFIXES(V4DatabaseTest, TestSetupDatabaseWithFakeStores);
   FRIEND_TEST_ALL_PREFIXES(V4DatabaseTest,
                            TestSetupDatabaseWithFakeStoresFailsReset);
@@ -161,12 +163,6 @@ class V4Database {
   FRIEND_TEST_ALL_PREFIXES(V4DatabaseTest, TestApplyUpdateWithEmptyUpdate);
   FRIEND_TEST_ALL_PREFIXES(V4DatabaseTest, TestApplyUpdateWithInvalidUpdate);
   FRIEND_TEST_ALL_PREFIXES(V4DatabaseTest, TestSomeStoresMatchFullHash);
-
-  // Makes the passed |factory| the factory used to instantiate a V4Store. Only
-  // for tests.
-  static void RegisterStoreFactoryForTest(V4StoreFactory* factory) {
-    factory_ = factory;
-  }
 
   // Factory method to create a V4Database. When the database creation is
   // complete, it calls the NewDatabaseReadyCallback on |callback_task_runner|.
@@ -177,6 +173,16 @@ class V4Database {
       const scoped_refptr<base::SingleThreadTaskRunner>& callback_task_runner,
       NewDatabaseReadyCallback callback,
       const base::TimeTicks create_start_time);
+
+  // Makes the passed |factory| the factory used to instantiate a V4Database.
+  // Only for tests.
+  static void RegisterDatabaseFactoryForTest(
+      std::unique_ptr<V4DatabaseFactory> factory);
+
+  // Makes the passed |factory| the factory used to instantiate a V4Store. Only
+  // for tests.
+  static void RegisterStoreFactoryForTest(
+      std::unique_ptr<V4StoreFactory> factory);
 
   // Callback called when a new store has been created and is ready to be used.
   // This method updates the store_map_ to point to the new store, which causes
@@ -189,21 +195,30 @@ class V4Database {
       const scoped_refptr<base::SingleThreadTaskRunner>& callback_task_runner,
       DatabaseReadyForUpdatesCallback db_ready_for_updates_callback);
 
-  const scoped_refptr<base::SequencedTaskRunner> db_task_runner_;
-
+ protected:
   // Map of ListIdentifier to the V4Store.
   const std::unique_ptr<StoreMap> store_map_;
 
+ private:
+  const scoped_refptr<base::SequencedTaskRunner> db_task_runner_;
+
   DatabaseUpdatedCallback db_updated_callback_;
 
+  // The factory that controls the creation of the V4Database object.
+  static V4DatabaseFactory* db_factory_;
+
   // The factory that controls the creation of V4Store objects.
-  static V4StoreFactory* factory_;
+  static V4StoreFactory* store_factory_;
 
   // The number of stores for which the update request is pending. When this
   // goes down to 0, that indicates that the database has updated all the stores
   // that needed updating and is ready for the next update. It should only be
   // accessed on the IO thread.
   int pending_store_updates_;
+
+  // Only meant to be dereferenced and invalidated on the IO thread and hence
+  // named. For details, see the comment at the top of weak_ptr.h
+  base::WeakPtrFactory<V4Database> weak_factory_on_io_;
 
   DISALLOW_COPY_AND_ASSIGN(V4Database);
 };

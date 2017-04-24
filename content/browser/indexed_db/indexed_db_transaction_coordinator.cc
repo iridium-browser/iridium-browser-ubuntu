@@ -9,6 +9,15 @@
 #include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h"
 
 namespace content {
+namespace {
+
+// Only this many transactions can be active at any time before they are queued.
+// Limited to prevent transaction trashing which can consume a ton of RAM. Ten
+// is chosen to reduce performance regressions.
+// TODO(dmurph): crbug.com/693260 Create better scheduling or limits.
+static const size_t kMaxStartedTransactions = 10;
+
+}  // namespace
 
 IndexedDBTransactionCoordinator::IndexedDBTransactionCoordinator() {}
 
@@ -97,7 +106,7 @@ void IndexedDBTransactionCoordinator::ProcessQueuedTransactions() {
   // data. ("Version change" transactions are exclusive, but handled by the
   // connection sequencing in IndexedDBDatabase.)
   std::set<int64_t> locked_scope;
-  for (const auto& transaction : started_transactions_) {
+  for (auto* transaction : started_transactions_) {
     if (transaction->mode() == blink::WebIDBTransactionModeReadWrite) {
       // Started read/write transactions have exclusive access to the object
       // stores within their scopes.
@@ -146,6 +155,9 @@ static bool DoSetsIntersect(const std::set<T>& set1,
 bool IndexedDBTransactionCoordinator::CanStartTransaction(
     IndexedDBTransaction* const transaction,
     const std::set<int64_t>& locked_scope) const {
+  if (started_transactions_.size() >= kMaxStartedTransactions) {
+    return false;
+  }
   DCHECK(queued_transactions_.count(transaction));
   switch (transaction->mode()) {
     case blink::WebIDBTransactionModeVersionChange:

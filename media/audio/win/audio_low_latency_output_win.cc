@@ -38,26 +38,6 @@ AUDCLNT_SHAREMODE WASAPIAudioOutputStream::GetShareMode() {
   return AUDCLNT_SHAREMODE_SHARED;
 }
 
-// static
-int WASAPIAudioOutputStream::HardwareSampleRate(const std::string& device_id) {
-  WAVEFORMATPCMEX format;
-  ScopedComPtr<IAudioClient> client;
-  if (device_id.empty()) {
-    client = CoreAudioUtil::CreateDefaultClient(eRender, eConsole);
-  } else {
-    ScopedComPtr<IMMDevice> device(CoreAudioUtil::CreateDevice(device_id));
-    if (!device.get())
-      return 0;
-    client = CoreAudioUtil::CreateClient(device.get());
-  }
-
-  if (!client.get() ||
-      FAILED(CoreAudioUtil::GetSharedModeMixFormat(client.get(), &format)))
-    return 0;
-
-  return static_cast<int>(format.Format.nSamplesPerSec);
-}
-
 WASAPIAudioOutputStream::WASAPIAudioOutputStream(AudioManagerWin* manager,
                                                  const std::string& device_id,
                                                  const AudioParameters& params,
@@ -436,11 +416,16 @@ void WASAPIAudioOutputStream::Run() {
   }
 
   if (playing && error) {
+    LOG(ERROR) << "WASAPI rendering failed.";
+
     // Stop audio rendering since something has gone wrong in our main thread
     // loop. Note that, we are still in a "started" state, hence a Stop() call
     // is required to join the thread properly.
     audio_client_->Stop();
-    PLOG(ERROR) << "WASAPI rendering failed.";
+
+    // Notify clients that something has gone wrong and that this stream should
+    // be destroyed instead of reused in the future.
+    source_->OnError(this);
   }
 
   // Disable MMCSS.

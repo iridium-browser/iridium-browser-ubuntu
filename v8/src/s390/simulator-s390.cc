@@ -985,6 +985,7 @@ void Simulator::EvalTableInit() {
   EvalTable[SAR] = &Simulator::Evaluate_SAR;
   EvalTable[EAR] = &Simulator::Evaluate_EAR;
   EvalTable[MSR] = &Simulator::Evaluate_MSR;
+  EvalTable[MSRKC] = &Simulator::Evaluate_MSRKC;
   EvalTable[MVST] = &Simulator::Evaluate_MVST;
   EvalTable[CUSE] = &Simulator::Evaluate_CUSE;
   EvalTable[SRST] = &Simulator::Evaluate_SRST;
@@ -1158,6 +1159,7 @@ void Simulator::EvalTableInit() {
   EvalTable[ALGR] = &Simulator::Evaluate_ALGR;
   EvalTable[SLGR] = &Simulator::Evaluate_SLGR;
   EvalTable[MSGR] = &Simulator::Evaluate_MSGR;
+  EvalTable[MSGRKC] = &Simulator::Evaluate_MSGRKC;
   EvalTable[DSGR] = &Simulator::Evaluate_DSGR;
   EvalTable[LRVGR] = &Simulator::Evaluate_LRVGR;
   EvalTable[LPGFR] = &Simulator::Evaluate_LPGFR;
@@ -1845,6 +1847,11 @@ void Simulator::WriteDW(intptr_t addr, int64_t value) {
  */
 double Simulator::ReadDouble(intptr_t addr) {
   double* ptr = reinterpret_cast<double*>(addr);
+  return *ptr;
+}
+
+float Simulator::ReadFloat(intptr_t addr) {
+  float* ptr = reinterpret_cast<float*>(addr);
   return *ptr;
 }
 
@@ -6606,15 +6613,16 @@ EVALUATE(LCR) {
   DCHECK_OPCODE(LCR);
   DECODE_RR_INSTRUCTION(r1, r2);
   int32_t r2_val = get_low_register<int32_t>(r2);
-  r2_val = ~r2_val;
-  r2_val = r2_val + 1;
-  set_low_register(r1, r2_val);
+  int32_t result = 0;
+  bool isOF = false;
+  isOF = __builtin_ssub_overflow(0, r2_val, &result);
+  set_low_register(r1, result);
   SetS390ConditionCode<int32_t>(r2_val, 0);
   // Checks for overflow where r2_val = -2147483648.
   // Cannot do int comparison due to GCC 4.8 bug on x86.
   // Detect INT_MIN alternatively, as it is the only value where both
   // original and result are negative due to overflow.
-  if (r2_val == (static_cast<int32_t>(1) << 31)) {
+  if (isOF) {
     SetS390OverflowCode(true);
   }
   return length;
@@ -8471,6 +8479,21 @@ EVALUATE(MSR) {
   return length;
 }
 
+EVALUATE(MSRKC) {
+  DCHECK_OPCODE(MSRKC);
+  DECODE_RRF_A_INSTRUCTION(r1, r2, r3);
+  int32_t r2_val = get_low_register<int32_t>(r2);
+  int32_t r3_val = get_low_register<int32_t>(r3);
+  int64_t result64 =
+      static_cast<int64_t>(r2_val) * static_cast<int64_t>(r3_val);
+  int32_t result32 = static_cast<int32_t>(result64);
+  bool isOF = (static_cast<int64_t>(result32) != result64);
+  SetS390ConditionCode<int32_t>(result32, 0);
+  SetS390OverflowCode(isOF);
+  set_low_register(r1, result32);
+  return length;
+}
+
 EVALUATE(MVST) {
   UNIMPLEMENTED();
   USE(instr);
@@ -9950,12 +9973,16 @@ EVALUATE(LCGR) {
   DCHECK_OPCODE(LCGR);
   DECODE_RRE_INSTRUCTION(r1, r2);
   int64_t r2_val = get_register(r2);
-  r2_val = ~r2_val;
-  r2_val = r2_val + 1;
-  set_register(r1, r2_val);
-  SetS390ConditionCode<int64_t>(r2_val, 0);
-  // if the input is INT_MIN, loading its compliment would be overflowing
-  if (r2_val == (static_cast<int64_t>(1) << 63)) {
+  int64_t result = 0;
+  bool isOF = false;
+#ifdef V8_TARGET_ARCH_S390X
+  isOF = __builtin_ssubl_overflow(0L, r2_val, &result);
+#else
+  isOF = __builtin_ssubll_overflow(0L, r2_val, &result);
+#endif
+  set_register(r1, result);
+  SetS390ConditionCode<int64_t>(result, 0);
+  if (isOF) {
     SetS390OverflowCode(true);
   }
   return length;
@@ -9993,6 +10020,20 @@ EVALUATE(MSGR) {
   int64_t r1_val = get_register(r1);
   int64_t r2_val = get_register(r2);
   set_register(r1, r1_val * r2_val);
+  return length;
+}
+
+EVALUATE(MSGRKC) {
+  DCHECK_OPCODE(MSGRKC);
+  DECODE_RRF_A_INSTRUCTION(r1, r2, r3);
+  int64_t r2_val = get_register(r2);
+  int64_t r3_val = get_register(r3);
+  volatile int64_t result64 = r2_val * r3_val;
+  bool isOF = ((r2_val == -1 && result64 == (static_cast<int64_t>(1L) << 63)) ||
+               (r2_val != 0 && result64 / r2_val != r3_val));
+  SetS390ConditionCode<int64_t>(result64, 0);
+  SetS390OverflowCode(isOF);
+  set_register(r1, result64);
   return length;
 }
 
@@ -10117,15 +10158,26 @@ EVALUATE(SLGFR) {
 }
 
 EVALUATE(MSGFR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(MSGFR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  int64_t r1_val = get_register(r1);
+  int64_t r2_val = static_cast<int64_t>(get_low_register<int32_t>(r2));
+  int64_t product = r1_val * r2_val;
+  set_register(r1, product);
+  return length;
 }
 
 EVALUATE(DSGFR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(DSGFR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  DCHECK(r1 % 2 == 0);
+  int64_t r1_val = get_register(r1 + 1);
+  int64_t r2_val = static_cast<int64_t>(get_low_register<int32_t>(r2));
+  int64_t quotient = r1_val / r2_val;
+  int64_t remainder = r1_val % r2_val;
+  set_register(r1, remainder);
+  set_register(r1 + 1, quotient);
+  return length;
 }
 
 EVALUATE(KMAC) {
@@ -10201,9 +10253,13 @@ EVALUATE(KMC) {
 }
 
 EVALUATE(CGFR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(CGFR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  // Compare (64)
+  int64_t r1_val = get_register(r1);
+  int64_t r2_val = static_cast<int64_t>(get_low_register<int32_t>(r2));
+  SetS390ConditionCode<int64_t>(r1_val, r2_val);
+  return length;
 }
 
 EVALUATE(KIMD) {
@@ -10352,9 +10408,13 @@ EVALUATE(FLOGR) {
 }
 
 EVALUATE(LLGCR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(LLGCR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  uint64_t r2_val = get_low_register<uint64_t>(r2);
+  r2_val <<= 56;
+  r2_val >>= 56;
+  set_register(r1, r2_val);
+  return length;
 }
 
 EVALUATE(LLGHR) {
@@ -10432,9 +10492,13 @@ EVALUATE(TROO) {
 }
 
 EVALUATE(LLCR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(LLCR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  uint32_t r2_val = get_low_register<uint32_t>(r2);
+  r2_val <<= 24;
+  r2_val >>= 24;
+  set_low_register(r1, r2_val);
+  return length;
 }
 
 EVALUATE(LLHR) {
@@ -11031,15 +11095,34 @@ EVALUATE(SLGF) {
 }
 
 EVALUATE(MSGF) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(MSGF);
+  DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
+  int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+  int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+  intptr_t d2_val = d2;
+  int64_t mem_val =
+      static_cast<int64_t>(ReadW(b2_val + d2_val + x2_val, instr));
+  int64_t r1_val = get_register(r1);
+  int64_t product = r1_val * mem_val;
+  set_register(r1, product);
+  return length;
 }
 
 EVALUATE(DSGF) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(DSGF);
+  DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
+  DCHECK(r1 % 2 == 0);
+  int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+  int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+  intptr_t d2_val = d2;
+  int64_t mem_val =
+      static_cast<int64_t>(ReadW(b2_val + d2_val + x2_val, instr));
+  int64_t r1_val = get_register(r1 + 1);
+  int64_t quotient = r1_val / mem_val;
+  int64_t remainder = r1_val % mem_val;
+  set_register(r1, remainder);
+  set_register(r1 + 1, quotient);
+  return length;
 }
 
 EVALUATE(LRVG) {
@@ -11598,9 +11681,20 @@ EVALUATE(ML) {
 }
 
 EVALUATE(DL) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(DL);
+  DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
+  int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+  int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+  DCHECK(r1 % 2 == 0);
+  uint32_t mem_val = ReadWU(b2_val + x2_val + d2, instr);
+  uint32_t r1_val = get_low_register<uint32_t>(r1 + 1);
+  uint64_t quotient =
+      static_cast<uint64_t>(r1_val) / static_cast<uint64_t>(mem_val);
+  uint64_t remainder =
+      static_cast<uint64_t>(r1_val) % static_cast<uint64_t>(mem_val);
+  set_low_register(r1, remainder);
+  set_low_register(r1 + 1, quotient);
+  return length;
 }
 
 EVALUATE(ALC) {
@@ -12458,9 +12552,16 @@ EVALUATE(KEB) {
 }
 
 EVALUATE(CEB) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(CEB);
+
+  DECODE_RXE_INSTRUCTION(r1, b2, x2, d2);
+  int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+  int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+  intptr_t d2_val = d2;
+  float r1_val = get_float32_from_d_register(r1);
+  float fval = ReadFloat(b2_val + x2_val + d2_val);
+  SetS390ConditionCode<float>(r1_val, fval);
+  return length;
 }
 
 EVALUATE(AEB) {
