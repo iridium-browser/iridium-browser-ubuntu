@@ -1,0 +1,27 @@
+{
+    "dependencies": [
+        "platform",
+        "cm_headless"
+    ],
+    "scripts": [
+        "../cm_web_modes/css.js",
+        "../cm_web_modes/xml.js",
+        "ESTreeWalker.js",
+        "FormatterWorker.js",
+        "acorn/acorn.js",
+        "CSSFormatter.js",
+        "AcornTokenizer.js",
+        "JavaScriptFormatter.js",
+        "FormattedContentBuilder.js",
+        "CSSRuleParser.js",
+        "HTMLFormatter.js",
+        "IdentityFormatter.js",
+        "JavaScriptOutline.js",
+        "RelaxedJSONParser.js"
+    ],
+    "skip_compilation": [
+        "acorn/acorn.js",
+        "../cm_web_modes/css.js",
+        "../cm_web_modes/xml.js"
+    ]
+}

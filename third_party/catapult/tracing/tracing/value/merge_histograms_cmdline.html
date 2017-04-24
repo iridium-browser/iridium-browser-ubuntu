@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<!--
+Copyright 2016 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/base/xhr.html">
+<link rel="import" href="/tracing/value/histogram_set.html">
+
+<script>
+'use strict';
+
+// TODO(benjhayden): Test after MergedTelemetryInfo.
+
+function findGrouping(key) {
+  for (let grouping of Object.values(tr.v.HistogramSet.GROUPINGS)) {
+    if (grouping.key === key) {
+      return grouping;
+    }
+  }
+  return new tr.v.HistogramGrouping(key,
+      tr.v.d.TelemetryInfo.makeStoryGroupingKeyLabelGetter(key));
+}
+
+function findMergeable(hist, candidates) {
+  for (let candidate of candidates) {
+    if (candidate.canAddHistogram(hist)) return candidate;
+  }
+  return undefined;
+}
+
+function mergeLeafHistograms(groupedHistograms, mergedHistograms) {
+  for (let [name, histograms] of groupedHistograms) {
+    if (histograms instanceof Map) {
+      mergeLeafHistograms(histograms, mergedHistograms);
+      continue;
+    }
+
+    if (histograms.length === 1) {
+      mergedHistograms.addHistogram(histograms[0]);
+      continue;
+    }
+
+    // Merge Histograms in this leaf array and return the merged Histograms to
+    // mergedHistograms.
+    // If it isn't possible to merge all Histograms in |histograms| together,
+    // then merge them into as few merged Histograms as possible.
+    let merged = [histograms.shift().clone()];
+    for (let hist of histograms) {
+      let candidate = findMergeable(hist, merged);
+      if (candidate !== undefined) {
+        candidate.addHistogram(hist);
+        continue;
+      }
+      merged.push(hist.clone());
+    }
+    for (let hist of merged) {
+      mergedHistograms.addHistogram(hist);
+    }
+  }
+}
+
+function stripInternalDiagnostics(mergedHistograms) {
+  for (let hist of mergedHistograms) {
+    hist.diagnostics.delete(tr.v.MERGED_FROM_DIAGNOSTIC_KEY);
+    hist.diagnostics.delete(tr.v.MERGED_TO_DIAGNOSTIC_KEY);
+    hist.diagnostics.delete(tr.v.d.GroupingPath.NAME);
+  }
+}
+
+if (tr.isHeadless) {
+  let histograms = new tr.v.HistogramSet();
+  histograms.importDicts(JSON.parse(tr.b.getSync('file://' + sys.argv[1])));
+  let groupingKeys = sys.argv.slice(2);
+  let groupings = groupingKeys.map(findGrouping);
+  let groupedHistograms = histograms.groupHistogramsRecursively(groupings);
+  let mergedHistograms = new tr.v.HistogramSet();
+  mergeLeafHistograms(groupedHistograms, mergedHistograms);
+  mergedHistograms.deduplicateDiagnostics();
+  mergedHistograms.mergeRelationships();
+  stripInternalDiagnostics(mergedHistograms);
+  console.log(JSON.stringify(mergedHistograms.asDicts()));
+}
+</script>

@@ -1,0 +1,90 @@
+<link rel="import" href="chrome://resources/cr_elements/cr_slider/cr_slider.html">
+<link rel="import" href="chrome://resources/html/polymer.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-radio-button/paper-radio-button.html">
+<link rel="import" href="../controls/settings_radio_group.html">
+<link rel="import" href="../controls/settings_toggle_button.html">
+<link rel="import" href="device_page_browser_proxy.html">
+<link rel="import" href="../settings_shared_css.html">
+
+<dom-module id="settings-pointers">
+  <template>
+    <style include="settings-shared">
+      h2 {
+        -webkit-padding-start: var(--settings-box-row-padding);
+      }
+
+      /* Indent layout elements under .subsection, using margin instead of
+       * padding so the borders line up. */
+      .subsection > .settings-box {
+        margin: 0 var(--settings-box-row-indent);
+        padding: 0;
+      }
+
+      .subsection > .list-frame {
+        -webkit-margin-start: var(--settings-indent-width);
+      }
+    </style>
+    <div id="mouse" hidden$="[[!hasMouse]]"
+        class$="[[getSubsectionClass_(hasMouse, hasTouchpad)]]">
+      <!-- Subsection title only appears if both mouse and touchpad exist. -->
+      <h2 hidden$="[[!hasTouchpad]]">$i18n{mouseTitle}</h2>
+      <div class="settings-box first">
+        <settings-toggle-button class="start"
+            pref="{{prefs.settings.mouse.primary_right}}"
+            label="$i18n{mouseSwapButtons}">
+        </settings-toggle-button>
+      </div>
+      <div class="settings-box">
+        <div class="start" id="mouseSpeedLabel">$i18n{mouseSpeed}</div>
+        <cr-slider value="{{prefs.settings.mouse.sensitivity2.value}}"
+            tick-values="[[sensitivityValues_]]"
+            aria-labelledby="mouseSpeedLabel"
+            label-min="$i18n{pointerSlow}"
+            label-max="$i18n{pointerFast}">
+        </cr-slider>
+      </div>
+    </div>
+    <div id="touchpad" hidden$="[[!hasTouchpad]]"
+        class$="[[getSubsectionClass_(hasMouse, hasTouchpad)]]">
+      <!-- Subsection title only appears if both mouse and touchpad exist. -->
+      <h2 hidden$="[[!hasMouse]]">$i18n{touchpadTitle}</h2>
+      <div class="settings-box block first">
+        <settings-toggle-button id="enableTapToClick"
+            pref="{{prefs.settings.touchpad.enable_tap_to_click}}"
+            label="$i18n{touchpadTapToClickEnabledLabel}">
+        </settings-toggle-button>
+        <settings-toggle-button id="enableTapDragging"
+            pref="{{prefs.settings.touchpad.enable_tap_dragging}}"
+            label="$i18n{tapDraggingLabel}">
+        </settings-toggle-button>
+      </div>
+      <div class="settings-box">
+        <div class="start" id="touchpadSpeedLabel">$i18n{touchpadSpeed}</div>
+          <cr-slider id="touchpadSensitivity"
+              value="{{prefs.settings.touchpad.sensitivity2.value}}"
+              tick-values="[[sensitivityValues_]]"
+              aria-labelledby="touchpadSpeedLabel"
+              label-min="$i18n{pointerSlow}"
+              label-max="$i18n{pointerFast}">
+          </cr-slider>
+      </div>
+      <div class="settings-box">$i18n{scrollLabel}</div>
+      <div class="list-frame">
+        <settings-radio-group pref="{{prefs.settings.touchpad.natural_scroll}}">
+          <paper-radio-button name="false">
+            $i18n{traditionalScrollLabel}
+          </paper-radio-button>
+          <paper-radio-button name="true">
+            $i18n{naturalScrollLabel}
+            <a href="$i18n{naturalScrollLearnMoreLink}" target="_blank"
+                on-tap="onLearnMoreLinkActivated_"
+                on-keydown="onLearnMoreLinkActivated_">
+              $i18n{naturalScrollLearnMore}
+            </a>
+          </paper-radio-button>
+        </settings-radio-group>
+      </div>
+    </div>
+  </template>
+  <script src="pointers.js"></script>
+</dom-module>

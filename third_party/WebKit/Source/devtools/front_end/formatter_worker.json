@@ -1,0 +1,10 @@
+{
+    "modules": [
+        { "name": "platform", "type": "autostart" },
+        { "name": "cm_headless", "type": "autostart" },
+        { "name": "formatter_worker", "type": "autostart" },
+        { "name": "gonzales", "type": "remote" }
+    ],
+
+    "has_html": false
+}

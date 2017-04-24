@@ -1,0 +1,69 @@
+# Copyright 2016 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//services/service_manager/public/cpp/service.gni")
+import("//services/service_manager/public/service_manifest.gni")
+
+if (is_android) {
+  import("//build/config/android/rules.gni")
+}
+
+source_set("lib") {
+  sources = [
+    "device_service.cc",
+    "device_service.h",
+  ]
+
+  deps = [
+    "//base",
+    "//services/device/fingerprint",
+    "//services/device/power_monitor",
+    "//services/device/time_zone_monitor",
+    "//services/service_manager/public/cpp",
+  ]
+
+  if (is_android) {
+    sources += [
+      "//services/device/android/register_jni.cc",
+      "//services/device/android/register_jni.h",
+    ]
+  }
+}
+
+source_set("tests") {
+  testonly = true
+
+  sources = [
+    "power_monitor/power_monitor_message_broadcaster_unittest.cc",
+    "public/cpp/power_monitor/power_monitor_broadcast_source_unittest.cc",
+  ]
+
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//mojo/public/cpp/bindings",
+    "//services/device/power_monitor",
+    "//services/device/public/cpp/power_monitor",
+    "//testing/gtest",
+  ]
+
+  if (is_chromeos) {
+    sources += [ "fingerprint/fingerprint_chromeos_unittest.cc" ]
+    deps += [ "//services/device/fingerprint" ]
+  }
+}
+
+service_manifest("manifest") {
+  name = "device"
+  source = "manifest.json"
+}
+
+if (is_android) {
+  android_library("java") {
+    java_files = [ "time_zone_monitor/android/java/src/org/chromium/device/time_zone_monitor/TimeZoneMonitor.java" ]
+    deps = [
+      "//base:base_java",
+    ]
+  }
+}

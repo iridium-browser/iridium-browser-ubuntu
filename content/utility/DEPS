@@ -1,0 +1,9 @@
+include_rules = [
+  "+components/scheduler/child",
+  "+content/child",
+  "+content/public/utility",
+  "+services/service_manager",
+  "+services/service_manager",
+  "+services/shape_detection",
+  "+sandbox/win/src",
+]

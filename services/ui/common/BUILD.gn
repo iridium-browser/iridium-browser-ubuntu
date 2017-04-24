@@ -1,0 +1,90 @@
+# Copyright 2015 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/ui.gni")
+import("//services/service_manager/public/service_manifest.gni")
+import("//testing/test.gni")
+
+source_set("mus_common") {
+  sources = [
+    "accelerator_util.cc",
+    "accelerator_util.h",
+    "switches.cc",
+    "switches.h",
+    "transient_window_utils.h",
+    "types.h",
+    "util.h",
+  ]
+
+  deps = [
+    "//gpu/command_buffer/client",
+    "//gpu/config",
+    "//gpu/ipc/client",
+    "//gpu/ipc/common:command_buffer_traits",
+    "//ipc:ipc",
+    "//services/service_manager/public/cpp",
+    "//ui/events:events",
+    "//ui/gfx/ipc/geometry",
+  ]
+
+  public_deps = [
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/system",
+    "//services/ui/public/interfaces",
+    "//ui/base",
+  ]
+}
+
+# GPU related code used by the server-side components (e.g. window server
+# process, display compositor in the gpu process).
+source_set("server_gpu") {
+  sources = [
+    "server_gpu_memory_buffer_manager.cc",
+    "server_gpu_memory_buffer_manager.h",
+  ]
+
+  deps = [
+    "//gpu/ipc/client",
+  ]
+
+  public_deps = [
+    "//gpu/command_buffer/client",
+    "//gpu/ipc/common",
+    "//gpu/ipc/host",
+    "//services/ui/gpu/interfaces",
+    "//ui/gfx",
+  ]
+}
+
+source_set("run_all_service_tests") {
+  testonly = true
+
+  sources = [
+    "run_all_service_tests.cc",
+  ]
+
+  deps = [
+    "//base/test:test_support",
+    "//mojo/edk/system",
+  ]
+
+  if (use_ozone) {
+    deps += [ "//ui/ozone" ]
+  }
+}
+
+source_set("task_runner_test_base") {
+  testonly = true
+
+  sources = [
+    "task_runner_test_base.cc",
+    "task_runner_test_base.h",
+  ]
+
+  deps = [
+    "//base",
+    "//base/test:test_support",
+    "//testing/gtest",
+  ]
+}

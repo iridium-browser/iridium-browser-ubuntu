@@ -1,0 +1,255 @@
+<link rel="import" href="chrome://resources/html/assert.html">
+<link rel="import" href="chrome://resources/html/cr.html">
+<link rel="import" href="chrome://resources/html/i18n_behavior.html">
+<link rel="import" href="chrome://resources/html/load_time_data.html">
+<link rel="import" href="chrome://resources/html/polymer.html">
+<link rel="import" href="chrome://extensions/icons.html">
+<link rel="import" href="chrome://extensions/item_source.html">
+<link rel="import" href="chrome://extensions/strings.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/iron-icons.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/communication-icons.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
+
+<dom-module id="extensions-item">
+  <style include="iron-flex"></style>
+  <template>
+    <style>
+      [hidden] {
+        display: none !important;
+      }
+
+      #icon-wrapper {
+        align-self: flex-start;
+        display: flex;
+        padding: 6px;
+      }
+
+      #icon {
+        height: 36px;
+        width: 36px;
+      }
+
+      #card {
+        @apply(--shadow-elevation-2dp);
+        background: white;
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+        height: 160px;
+        width: 400px;
+      }
+
+      #card.dev-mode {
+        height: 208px;
+      }
+
+      #card.disabled {
+        opacity: 0.6;
+      }
+
+      #main {
+        display: flex;
+        flex-grow: 1;
+        padding: 16px 20px 17px;
+      }
+
+      #content {
+        -webkit-margin-start: 24px;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+      }
+
+      #name-and-version {
+        line-height: 15px;
+        margin-bottom: 4px;
+      }
+
+      #name {
+        -webkit-margin-end: 8px;
+        color: #333;
+      }
+
+      #description,
+      #warnings {
+        flex-grow: 1;
+        margin-bottom: 8px;
+      }
+
+      #description,
+      #version,
+      #extension-id,
+      #inspect-views,
+      #button-strip {
+        color: var(--paper-grey-600);
+      }
+
+      #description,
+      #extension-id,
+      #inspect-views {
+        line-height: 20px;
+      }
+
+      #inspect-views paper-button {
+        color: var(--google-blue-700);
+        height: 20px;
+        padding: 0;
+        text-transform: none;
+      }
+
+      #button-strip {
+        -webkit-padding-end: 4px;
+        -webkit-padding-start: 20px;
+        border-top: 1px solid var(--paper-grey-400);
+        box-sizing: border-box;
+        height: 48px;
+        padding-bottom: 8px;
+        padding-top: 8px;
+      }
+
+      #source-indicator {
+        -webkit-margin-start: 30px;
+        margin-top: 30px;
+        position: absolute;
+      }
+
+      #source-indicator iron-icon {
+        height: 22px;
+        width: 22px;
+      }
+
+      #source-indicator-text {
+        -webkit-margin-start: 11px;  /* To align with the center of the icon. */
+        background: black;
+        border-radius: 2px;
+        color: white;
+        display: none;
+        margin-top: 8px;
+        opacity: 0.6;
+        padding: 8px 12px;
+        position: absolute;
+        transform: translateX(-50%);  /* Move back 50% of width so that the
+                                         text and icon share an x-center. */
+      }
+
+      #source-indicator:hover #source-indicator-text {
+        display: block;
+      }
+
+      paper-button,
+      paper-toggle-button {
+        cursor: pointer;
+      }
+
+      #button-strip paper-button {
+        align-items: center;
+        display: flex;
+        margin: 0 4px;
+        min-height: 32px;
+        padding: 0 12px;
+        text-transform: uppercase;
+      }
+
+      .action-button {
+        color: var(--google-blue-500);
+      }
+
+      #warnings {
+        color: var(--google-red-700);
+      }
+
+      #blacklisted-warning:empty {
+        display: none;
+      }
+    </style>
+    <div id="card" class$="[[computeClasses_(data.state, inDevMode)]]">
+      <div id="main">
+        <template is="dom-if"
+            if="[[computeSourceIndicatorIcon_(data.*)]]">
+          <div id="source-indicator">
+            <iron-icon icon="[[computeSourceIndicatorIcon_(data.*)]]">
+            </iron-icon>
+            <div id="source-indicator-text">
+              [[computeSourceIndicatorText_(data.*)]]
+            </div>
+          </div>
+        </template>
+        <div id="icon-wrapper">
+          <img alt="" id="icon" src="[[data.iconUrl]]">
+        </div>
+        <div id="content">
+          <div id="name-and-version" class="layout horizontal center">
+            <div id="name">[[data.name]]</div>
+            <template is="dom-if" if="[[inDevMode]]">
+              <span id="version">[[data.version]]</span>
+            </template>
+          </div>
+          <div id="description" hidden$="[[hasWarnings_(data.*)]]">
+            [[data.description]]
+          </div>
+          <div id="warnings" hidden$="[[!hasWarnings_(data.*)]]">
+            <div id="suspicious-warning"
+                 hidden$="[[!data.disableReasons.suspiciousInstall]]">
+              $i18n{itemSuspiciousInstall}
+            </div>
+            <div id="corrupted-warning"
+                hidden$="[[!data.disableReasons.corruptInstall]]">
+              $i18n{itemCorruptInstall}
+            </div>
+            <div id="blacklisted-warning"><!-- No whitespace
+              -->[[data.blacklistText]]<!-- so we can use :empty in css.
+           --></div>
+          </div>
+          <template is="dom-if" if="[[inDevMode]]">
+            <div id="extension-id">[[data.id]]</div>
+            <template is="dom-if"
+                if="[[!computeInspectViewsHidden_(data.views)]]">
+              <div id="inspect-views">
+                <span>$i18n{itemInspectViews}</span>
+                <paper-button on-tap="onInspectTap_">
+                  [[computeFirstInspectLabel_(data.views)]]
+                </paper-button>
+                <paper-button
+                    hidden$="[[computeExtraViewsHidden_(data.views)]]"
+                    on-tap="onExtraInspectTap_">
+                  [[computeExtraInspectLabel_(data.views)]]
+                </paper-button>
+              </div>
+            </template>
+          </template>
+        </div>
+      </div>
+      <div id="button-strip" class="layout horizontal">
+        <div class="layout flex horizontal center">
+          <paper-button id="details-button" on-tap="onDetailsTap_">
+            $i18n{itemDetails}
+          </paper-button>
+          <paper-button id="remove-button" on-tap="onRemoveTap_">
+            $i18n{itemRemove}
+          </paper-button>
+          <paper-button id="errors-button" on-tap="onErrorsTap_"
+              hidden$="[[computeErrorsHidden_(data.*)]]">
+            $i18n{itemErrors}
+          </paper-button>
+        </div>
+        <paper-button id="repair-button" class="action-button"
+            on-tap="onRepairTap_"
+            hidden$="[[!data.disableReasons.corruptInstall]]">
+          $i18n{itemRepair}
+        </paper-button>
+        <paper-button id="reload-button" on-tap="onReloadTap_"
+            class="action-button"
+            hidden$="[[!isTerminated_(data.state)]]">
+          $i18n{itemReload}
+        </paper-button>
+        <paper-toggle-button id="enable-toggle" class="action-button"
+            checked="[[isEnabled_(data.state)]]" on-change="onEnableChange_"
+            hidden$="[[!showEnableToggle_(data.*)]]">
+        </paper-toggle-button>
+      </div>
+    </div>
+  </template>
+  <script src="chrome://extensions/item.js"></script>
+</dom-module>

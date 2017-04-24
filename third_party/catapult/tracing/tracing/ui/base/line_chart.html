@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/ui/base/chart_base_2d_brushable_x.html">
+
+<script>
+'use strict';
+
+tr.exportTo('tr.ui.b', function() {
+  var LineChart = tr.ui.b.define('line-chart', tr.ui.b.ChartBase2DBrushX);
+
+  LineChart.prototype = {
+    __proto__: tr.ui.b.ChartBase2DBrushX.prototype,
+
+    get defaultGraphWidth() {
+      return 20 * this.data_.length;
+    },
+
+    get defaultGraphHeight() {
+      return 100;
+    },
+
+    updateDataContents_(dataSel) {
+      dataSel.selectAll('*').remove();
+      var dataBySeriesKey = this.getDataBySeriesKey_();
+      var seriesKeys = [...this.seriesByKey_.keys()];
+      var pathsSel = dataSel.selectAll('path').data(seriesKeys);
+      pathsSel.enter()
+          .append('path')
+          .style('fill', 'none')
+          .style('stroke-width', '1.5px')
+          .style('stroke', key => this.getDataSeries(key).color)
+          .attr('d', key => {
+            var line = d3.svg.line()
+                .x(d => this.xScale_(d.x))
+                .y(d => this.yScale_(this.dataRange.clamp(d[key])));
+            return line(dataBySeriesKey[key]);
+          });
+      pathsSel.exit().remove();
+    }
+  };
+
+  return {
+    LineChart,
+  };
+});
+</script>

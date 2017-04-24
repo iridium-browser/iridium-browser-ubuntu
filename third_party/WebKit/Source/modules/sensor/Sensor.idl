@@ -1,0 +1,30 @@
+// Copyright 2016 The Chromium Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
+
+// Specification at:
+// https://w3c.github.io/sensors/#sensor0
+
+enum SensorState {
+  "unconnected",
+  "activating",
+  "activated",
+  "idle",
+  "errored"
+};
+
+[
+    ActiveScriptWrappable,
+    DependentLifetime,
+    RuntimeEnabled=Sensor,
+] interface Sensor : EventTarget {
+    readonly attribute SensorState state;
+    [CallWith=ScriptState] readonly attribute DOMHighResTimeStamp? timestamp;
+
+    [MeasureAs=GenericSensorStart] void start();
+    [MeasureAs=GenericSensorStop] void stop();
+
+    attribute EventHandler onerror;
+    attribute EventHandler onchange;
+    attribute EventHandler onactivate;
+};

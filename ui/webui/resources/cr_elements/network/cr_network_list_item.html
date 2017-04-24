@@ -1,0 +1,123 @@
+<link rel="import" href="chrome://resources/cr_elements/icons.html">
+<link rel="import" href="chrome://resources/html/polymer.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/classes/iron-flex-layout.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
+<link rel="import" href="chrome://resources/cr_elements/network/cr_network_icon.html">
+<link rel="import" href="chrome://resources/cr_elements/network/cr_onc_types.html">
+<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_network_behavior.html">
+<link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_network_indicator.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
+
+<dom-module id="cr-network-list-item">
+  <template>
+    <style include="cr-shared-style">
+      :host {
+        display: inline-block;
+        outline: none;
+      }
+
+      #divDetail {
+        display: flex;
+        flex: 1 0 auto;
+        flex-direction: row;
+      }
+
+      #divOuter {
+        -webkit-margin-after: 4px;
+        -webkit-margin-before: 4px;
+        -webkit-margin-end: 12px;
+        -webkit-margin-start: 4px;
+        align-items: center;
+        border-style: none;
+        display: flex;
+        flex-direction: row;
+        min-height: 32px;
+      }
+
+      #divText {
+        -webkit-padding-end: 8px;
+        display: flex;
+        flex: 1 0 auto;
+        flex-direction: column;
+        justify-content: center;
+      }
+
+      #itemName {
+        -webkit-margin-start: 8px;
+        font-size: inherit;
+      }
+
+      #itemName[connected] {
+        font-weight: bold;
+      }
+
+      #networkStateText {
+        -webkit-margin-start: 8px;
+        color: var(--paper-grey-600);
+        font-size: inherit;
+        font-weight: 400;
+      }
+
+      #networkStateText[connected] {
+        color: var(--google-green-500);
+      }
+
+      #subpageDiv {
+        -webkit-border-start: var(--cr-separator-line);
+        -webkit-padding-start: 4px;
+      }
+
+      #subpageDiv > button {
+        margin: -8px 0;
+      }
+
+      iron-icon {
+        height: 24px;
+        width: 24px;
+      }
+
+      cr-network-icon,
+      iron-icon {
+        -webkit-padding-end: 8px;
+      }
+
+      cr-policy-network-indicator {
+        padding: 0 var(--cr-icon-padding);
+      }
+    </style>
+    <div id="divOuter" actionable$="[[isListItem]]">
+      <template is="dom-if" if="[[networkState]]">
+        <cr-network-icon is-list-item="[[isListItem]]"
+            network-state="[[networkState]]">
+        </cr-network-icon>
+      </template>
+      <template is="dom-if" if="[[item.polymerIcon]]">
+        <iron-icon icon="[[item.polymerIcon]]"></iron-icon>
+      </template>
+      <div id="divText" class="layout horizontal flex">
+        <div id="itemName" connected$="[[isConnected_(networkState)]]">
+          [[itemName]]
+        </div>
+        <div id="networkStateText"
+            hidden$="[[!isStateTextVisible_(networkState, isListItem)]]"
+            connected$="[[isStateTextConnected_(networkState, isListItem)]]">
+          [[getNetworkStateText_(networkState, isListItem)]]
+        </div>
+      </div>
+      <template is="dom-if" if="[[isPolicySource(networkState.Source)]]">
+        <cr-policy-network-indicator
+            indicator-type="[[getIndicatorTypeForSource(networkState.Source)]]">
+        </cr-policy-network-indicator>
+      </template>
+      <template is="dom-if"
+          if="[[isSubpageButtonVisible_(networkState, showButtons)]]">
+        <div id="subpageDiv" class="layout horizontal">
+          <button class="subpage-arrow" is="paper-icon-button-light"
+              on-tap="fireShowDetails_" tabindex$="[[tabindex]]">
+          </button>
+        </div>
+      </template>
+    </div>
+  </template>
+  <script src="cr_network_list_item.js"></script>
+</dom-module>

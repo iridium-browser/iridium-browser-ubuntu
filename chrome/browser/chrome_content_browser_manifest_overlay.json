@@ -1,0 +1,62 @@
+{
+  "name": "content_browser",
+  "display_name": "Chrome",
+  "interface_provider_specs": {
+    "service_manager:connector": {
+      "provides": {
+        "renderer": [
+          "autofill::mojom::AutofillDriver",
+          "autofill::mojom::PasswordManagerDriver",
+          "chrome::mojom::NetBenchmarking",
+          "chrome::mojom::FieldTrialRecorder",
+          "extensions::StashService",
+          "metrics::mojom::LeakDetector",
+          "mojom::ModuleEventSink",
+          "rappor::mojom::RapporRecorder",
+          "startup_metric_utils::mojom::StartupMetricHost",
+          "translate::mojom::ContentTranslateDriver"
+        ],
+        "gpu": [
+          "metrics::mojom::CallStackProfileCollector"
+        ],
+        "ime:ime_driver": []
+      },
+      "requires": {
+        "accessibility_autoclick": [ "ash:autoclick" ],
+        "ash": [ "ash" ],
+        "image_decoder": [ "decode" ],
+        "nacl_broker": [ "browser" ],
+        "nacl_loader": [ "browser" ],
+        "preferences": [ "preferences_manager" ],
+        "ui": [ "display_controller", "ime_registrar" ]
+      }
+    },
+    "navigation:frame": {
+      "provides": {
+        "renderer": [
+          "autofill::mojom::AutofillDriver",
+          "autofill::mojom::PasswordManagerDriver",
+          "blink::mojom::ShareService",
+          "bluetooth::mojom::AdapterFactory",
+          "chrome::mojom::PrerenderCanceler",
+          "device::usb::ChooserService",
+          "device::usb::DeviceManager",
+          "contextual_search::mojom::ContextualSearchJsApiService",
+          "dom_distiller::mojom::DistillabilityService",
+          "dom_distiller::mojom::DistillerJavaScriptService",
+          "extensions::KeepAlive",
+          "extensions::mime_handler::MimeHandlerService",
+          "media_router::mojom::MediaRouter",
+          "password_manager::mojom::CredentialManager",
+          "translate::mojom::ContentTranslateDriver",
+
+          // TODO(beng): These should be moved to a separate capability.
+          "mojom::OmniboxPageHandler",
+          "mojom::PluginsPageHandler",
+          "mojom::SiteEngagementUIHandler",
+          "mojom::UsbInternalsPageHandler"
+        ]
+      }
+    }
+  }
+}

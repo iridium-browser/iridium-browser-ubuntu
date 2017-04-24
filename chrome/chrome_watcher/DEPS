@@ -1,0 +1,8 @@
+include_rules = [
+  "+base",
+  "+chrome/install_static",
+  "+components/browser_watcher",
+  "+components/crash",
+  "+components/memory_pressure",
+  "+testing/gtest",
+]

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/core/test_utils.html">
+<link rel="import" href="/tracing/model/kernel.html">
+<link rel="import" href="/tracing/model/model.html">
+
+<script>
+'use strict';
+
+tr.b.unittest.testSuite(function() {
+  function newModel(events, callback) {
+    return tr.c.TestUtils.newModelWithEvents([events], {
+      shiftWorldToZero: false,
+      pruneContainers: false,
+      customizeModelCallback: callback
+    });
+  }
+
+  test('kernelStableId', function() {
+    var model = newModel([]);
+    assert.equal(model.kernel.stableId, 'Kernel');
+  });
+
+  test('kernelTimeShifting', function() {
+    var m = newModel([]);
+    var ctr = m.kernel.getOrCreateCounter('cat', 'ctr');
+    var series = new tr.model.CounterSeries('a', 0);
+    series.addCounterSample(100, 5);
+    series.addCounterSample(200, 5);
+    ctr.addSeries(series);
+
+    m.kernel.shiftTimestampsForward(2);
+
+    assert.equal(ctr.series[0].samples[0].timestamp, 102);
+    assert.equal(ctr.series[0].samples[1].timestamp, 202);
+  });
+});
+</script>
+

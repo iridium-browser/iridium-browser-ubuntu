@@ -1,0 +1,101 @@
+# Copyright 2016 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/nacl/config.gni")
+import("//chrome/common/features.gni")
+import("//services/catalog/public/tools/catalog.gni")
+import("//services/service_manager/public/service_manifest.gni")
+
+assert(enable_package_mash_services)
+
+source_set("mash") {
+  sources = [
+    "mash_runner.cc",
+    "mash_runner.h",
+  ]
+  deps = [
+    ":chrome_mash_catalog",
+    "//base:i18n",
+    "//chrome/common:constants",
+    "//components/tracing:startup_tracing",
+    "//content/public/common",
+    "//mash/common",
+    "//mash/package",
+    "//mash/quick_launch/public/interfaces:constants",
+    "//services/catalog/public/interfaces",
+    "//services/service_manager",
+    "//services/service_manager/background:lib",
+    "//services/service_manager/public/cpp",
+    "//services/service_manager/public/cpp/standalone_service",
+    "//services/service_manager/public/interfaces",
+    "//services/service_manager/runner:init",
+    "//services/service_manager/runner/common",
+    "//services/service_manager/runner/host:lib",
+    "//services/service_manager/standalone",
+    "//services/ui/public/interfaces:constants",
+    "//url",
+  ]
+
+  if (is_chromeos) {
+    deps += [ "//ash/resources" ]
+  }
+
+  if (is_posix) {
+    deps += [ "//chrome/app:shutdown_signal_handlers" ]
+  }
+
+  if (is_linux && !is_android) {
+    deps += [ "//components/font_service:lib" ]
+  }
+}
+
+service_manifest("mash_manifest") {
+  name = "chrome_mash"
+  source = "chrome_mash_manifest.json"
+  packaged_services = [
+    "//ash/autoclick/mus:manifest",
+    "//ash/touch_hud/mus:manifest",
+    "//mash/catalog_viewer:manifest",
+    "//mash/quick_launch:manifest",
+    "//mash/task_viewer:manifest",
+    "//services/ui:manifest",
+    "//services/ui/ime/test_ime_driver:manifest",
+  ]
+
+  if (is_chromeos) {
+    packaged_services += [ "//ash/mus:manifest" ]
+  }
+
+  if (is_linux && !is_android) {
+    packaged_services += [ "//components/font_service:manifest" ]
+  }
+
+  if (enable_nacl) {
+    packaged_services += [ "//components/nacl/loader:nacl_loader_manifest" ]
+    if (is_win && target_cpu == "x86") {
+      packaged_services += [ "//components/nacl/broker:nacl_broker_manifest" ]
+    }
+  }
+}
+
+catalog("catalog") {
+  embedded_services = [ ":mash_manifest" ]
+  catalog_deps = [ "//chrome/app:catalog_for_mash" ]
+  standalone_services = [
+    "//mash/example/views_examples:manifest",
+    "//mash/simple_wm:manifest",
+  ]
+}
+
+catalog_cpp_source("chrome_mash_catalog") {
+  catalog = ":catalog"
+  generated_function_name = "CreateChromeMashCatalog"
+}
+
+source_set("mash_service_overrides") {
+  testonly = true
+  data = [
+    "mash_service_overrides.json",
+  ]
+}

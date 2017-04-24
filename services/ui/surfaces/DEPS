@@ -1,0 +1,11 @@
+include_rules = [
+  "+cc",
+  "+components/display_compositor",
+  "+components/gpu",
+  "+gpu",
+  "+services/service_manager",
+  "+mojo/common",
+  "+mojo/converters",
+  "+mojo/public",
+  "+ui/display/types",
+]

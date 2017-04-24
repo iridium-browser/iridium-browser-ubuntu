@@ -1,0 +1,42 @@
+# Copyright 2015 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//chromecast/chromecast.gni")
+import("//testing/test.gni")
+
+group("media") {
+  public_deps = [
+    "//chromecast/media/audio",
+    "//chromecast/media/base",
+    "//chromecast/media/cdm",
+    "//chromecast/media/cma",
+  ]
+}
+
+test("cast_media_unittests") {
+  sources = [
+    "audio/cast_audio_mixer_unittest.cc",
+    "audio/cast_audio_output_stream_unittest.cc",
+    "base/media_resource_tracker_unittest.cc",
+    "base/supported_codec_profile_levels_memo_unittest.cc",
+    "test/run_all_unittests.cc",
+  ]
+
+  deps = [
+    ":media",
+    "//base",
+    "//base/test:test_support",
+    "//chromecast/base",
+    "//chromecast/base/metrics:test_support",
+    "//chromecast/public",
+    "//media",
+    "//media/base:test_support",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
+
+  if (!is_android) {
+    deps += [ "//chromecast/media/cma:unittests" ]
+  }
+}

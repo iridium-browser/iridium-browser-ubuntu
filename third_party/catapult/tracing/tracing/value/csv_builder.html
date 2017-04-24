@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<!--
+Copyright 2016 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/tracing/value/histogram.html">
+
+<script>
+'use strict';
+tr.exportTo('tr.v', function() {
+  const CSV_ITERATION_INFO_NAMES = [
+    'benchmarkName',
+    'benchmarkStartString',
+    'label',
+    'osVersion',
+    'productVersion',
+    'storyDisplayName',
+    'storyUrl',
+    'storysetRepeatCounter',
+  ];
+
+  class CSVBuilder {
+    /**
+     * @param {!tr.v.HistogramSet} histograms
+     */
+    constructor(histograms) {
+      this.histograms_ = histograms;
+      this.table_ = [];
+      this.statisticsNames_ = new Set();
+      this.iterationInfoNames_ = new Set();
+      this.storyGroupingKeys_ = new Set();
+    }
+
+    build() {
+      this.prepare_();
+      this.buildHeader_();
+
+      for (let hist of this.histograms_) {
+        let row = [hist.name, hist.unit.unitString];
+        this.table_.push(row);
+
+        let stats = hist.statisticsScalars;
+        for (let name of this.statisticsNames_) {
+          row.push(stats.has(name) ? stats.get(name).value : '');
+        }
+
+        let iteration = tr.v.d.TelemetryInfo.getFromHistogram(hist);
+
+        for (let name of this.iterationInfoNames_) {
+          if (iteration === undefined ||
+              iteration[name] === undefined) {
+            row.push('');
+          } else {
+            row.push(iteration[name]);
+          }
+        }
+
+        for (let key of this.storyGroupingKeys_) {
+          if (iteration === undefined ||
+              iteration.storyGroupingKeys.get(key) === undefined) {
+            row.push('');
+          } else {
+            row.push(iteration.storyGroupingKeys.get(key));
+          }
+        }
+      }
+    }
+
+    prepare_() {
+      for (let hist of this.histograms_) {
+        for (let [name, option] of hist.summaryOptions) {
+          if (name === 'percentile') {
+            for (let percent of option) {
+              this.statisticsNames_.add('pct_' + tr.v.percentToString(percent));
+            }
+          } else if (option) {
+            this.statisticsNames_.add(name);
+          }
+        }
+
+        let iteration = tr.v.d.TelemetryInfo.getFromHistogram(hist);
+        if (iteration === undefined) continue;
+
+        for (let name of CSV_ITERATION_INFO_NAMES) {
+          if (iteration[name]) {
+            this.iterationInfoNames_.add(name);
+          }
+        }
+        for (let [key, value] of iteration.storyGroupingKeys) {
+          this.storyGroupingKeys_.add(key);
+        }
+      }
+    }
+
+    buildHeader_() {
+      let header = ['name', 'unit'];
+      for (let name of this.statisticsNames_) {
+        header.push(name);
+      }
+      for (let name of this.iterationInfoNames_) {
+        header.push(name);
+      }
+      for (let key of this.storyGroupingKeys_) {
+        header.push(key);
+      }
+      this.table_.push(header);
+    }
+
+    toString() {
+      let str = '';
+      for (let row of this.table_) {
+        for (let i = 0; i < row.length; ++i) {
+          if (i > 0) {
+            str += ',';
+          }
+          let cell = '' + row[i];
+          if (cell.indexOf(',') >= 0 || cell.indexOf('"') >= 0) {
+            cell = '"' + cell.replace(/"/g, '""') + '"';
+          }
+          str += cell;
+        }
+        str += '\n';
+      }
+      return str;
+    }
+  }
+
+  return {
+    CSVBuilder,
+  };
+});
+</script>

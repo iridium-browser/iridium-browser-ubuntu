@@ -1,0 +1,34 @@
+# Copyright 2016 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//third_party/WebKit/Source/modules/modules.gni")
+
+blink_modules_sources("sensor") {
+  sources = [
+    "Accelerometer.cpp",
+    "Accelerometer.h",
+    "AmbientLightSensor.cpp",
+    "AmbientLightSensor.h",
+    "Gyroscope.cpp",
+    "Gyroscope.h",
+    "Magnetometer.cpp",
+    "Magnetometer.h",
+    "Sensor.cpp",
+    "Sensor.h",
+    "SensorErrorEvent.cpp",
+    "SensorErrorEvent.h",
+    "SensorProviderProxy.cpp",
+    "SensorProviderProxy.h",
+    "SensorProxy.cpp",
+    "SensorProxy.h",
+    "SensorReadingUpdater.cpp",
+    "SensorReadingUpdater.h",
+  ]
+
+  deps = [
+    "//device/base/synchronization",
+    "//device/generic_sensor/public/cpp",
+    "//device/generic_sensor/public/interfaces:interfaces_blink",
+  ]
+}

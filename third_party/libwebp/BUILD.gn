@@ -1,0 +1,305 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//build/config/arm.gni")
+import("//build/config/sanitizers/sanitizers.gni")
+
+config("libwebp_config") {
+  include_dirs = [ "." ]
+}
+
+set_opt_level =
+    !is_debug && is_posix && (current_cpu == "arm" || current_cpu == "arm64")
+
+use_dsp_neon =
+    current_cpu == "arm64" || (current_cpu == "arm" && arm_version >= 7 &&
+                               (arm_use_neon || arm_optionally_use_neon))
+
+static_library("libwebp_dec") {
+  sources = [
+    "dec/alpha_dec.c",
+    "dec/buffer_dec.c",
+    "dec/frame_dec.c",
+    "dec/idec_dec.c",
+    "dec/io_dec.c",
+    "dec/quant_dec.c",
+    "dec/tree_dec.c",
+    "dec/vp8_dec.c",
+    "dec/vp8l_dec.c",
+    "dec/webp_dec.c",
+  ]
+
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (set_opt_level) {
+    configs -= [ "//build/config/compiler:default_optimization" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  deps = [
+    ":libwebp_dsp",
+    ":libwebp_utils",
+  ]
+  all_dependent_configs = [ ":libwebp_config" ]
+  if (use_dsp_neon) {
+    deps += [ ":libwebp_dsp_neon" ]
+  }
+}
+
+static_library("libwebp_demux") {
+  sources = [
+    "demux/demux.c",
+  ]
+  all_dependent_configs = [ ":libwebp_config" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  deps = [
+    ":libwebp_utils",
+  ]
+}
+
+static_library("libwebp_dsp") {
+  sources = [
+    "dsp/alpha_processing.c",
+    "dsp/alpha_processing_mips_dsp_r2.c",
+    "dsp/argb.c",
+    "dsp/argb_mips_dsp_r2.c",
+    "dsp/cost.c",
+    "dsp/cost_mips32.c",
+    "dsp/cost_mips_dsp_r2.c",
+    "dsp/cpu.c",
+    "dsp/dec.c",
+    "dsp/dec_clip_tables.c",
+    "dsp/dec_mips32.c",
+    "dsp/dec_mips_dsp_r2.c",
+    "dsp/dec_msa.c",
+    "dsp/enc.c",
+    "dsp/enc_avx2.c",
+    "dsp/enc_mips32.c",
+    "dsp/enc_mips_dsp_r2.c",
+    "dsp/enc_msa.c",
+    "dsp/filters.c",
+    "dsp/filters_mips_dsp_r2.c",
+    "dsp/filters_msa.c",
+    "dsp/lossless.c",
+    "dsp/lossless_enc.c",
+    "dsp/lossless_enc_mips32.c",
+    "dsp/lossless_enc_mips_dsp_r2.c",
+    "dsp/lossless_enc_msa.c",
+    "dsp/lossless_mips_dsp_r2.c",
+    "dsp/lossless_msa.c",
+    "dsp/rescaler.c",
+    "dsp/rescaler_mips32.c",
+    "dsp/rescaler_mips_dsp_r2.c",
+    "dsp/rescaler_msa.c",
+    "dsp/upsampling.c",
+    "dsp/upsampling_mips_dsp_r2.c",
+    "dsp/upsampling_msa.c",
+    "dsp/yuv.c",
+    "dsp/yuv_mips32.c",
+    "dsp/yuv_mips_dsp_r2.c",
+  ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (set_opt_level) {
+    configs -= [ "//build/config/compiler:default_optimization" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  all_dependent_configs = [ ":libwebp_config" ]
+  deps = [
+    ":libwebp_dsp_sse2",
+    ":libwebp_dsp_sse41",
+    ":libwebp_utils",
+  ]
+  if (is_android) {
+    deps += [ "//third_party/android_tools:cpu_features" ]
+
+    configs -= [ "//build/config/android:default_cygprofile_instrumentation" ]
+    configs += [ "//build/config/android:no_cygprofile_instrumentation" ]
+  }
+  if (current_cpu == "x86" || current_cpu == "x64") {
+    defines = [
+      "WEBP_HAVE_SSE2",
+      "WEBP_HAVE_SSE41",
+    ]
+  }
+}
+
+static_library("libwebp_dsp_sse41") {
+  sources = [
+    "dsp/alpha_processing_sse41.c",
+    "dsp/dec_sse41.c",
+    "dsp/enc_sse41.c",
+    "dsp/lossless_enc_sse41.c",
+  ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (set_opt_level) {
+    configs -= [ "//build/config/compiler:default_optimization" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  all_dependent_configs = [ ":libwebp_config" ]
+  if (!is_msan) {
+    if ((current_cpu == "x86" || current_cpu == "x64") &&
+        (!is_win || is_clang)) {
+      cflags = [ "-msse4.1" ]
+    }
+  }
+}
+
+static_library("libwebp_dsp_sse2") {
+  sources = [
+    "dsp/alpha_processing_sse2.c",
+    "dsp/argb_sse2.c",
+    "dsp/cost_sse2.c",
+    "dsp/dec_sse2.c",
+    "dsp/enc_sse2.c",
+    "dsp/filters_sse2.c",
+    "dsp/lossless_enc_sse2.c",
+    "dsp/lossless_sse2.c",
+    "dsp/rescaler_sse2.c",
+    "dsp/upsampling_sse2.c",
+    "dsp/yuv_sse2.c",
+  ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (set_opt_level) {
+    configs -= [ "//build/config/compiler:default_optimization" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  all_dependent_configs = [ ":libwebp_config" ]
+  if (!is_msan) {
+    if ((current_cpu == "x86" || current_cpu == "x64") &&
+        (!is_win || is_clang)) {
+      cflags = [ "-msse2" ]
+    }
+  }
+}
+
+if (use_dsp_neon) {
+  static_library("libwebp_dsp_neon") {
+    sources = [
+      "dsp/alpha_processing_neon.c",
+      "dsp/dec_neon.c",
+      "dsp/enc_neon.c",
+      "dsp/filters_neon.c",
+      "dsp/lossless_enc_neon.c",
+      "dsp/lossless_neon.c",
+      "dsp/rescaler_neon.c",
+      "dsp/upsampling_neon.c",
+    ]
+
+    include_dirs = [ "." ]
+
+    if (set_opt_level) {
+      configs -= [ "//build/config/compiler:default_optimization" ]
+      configs += [ "//build/config/compiler:optimize_max" ]
+    }
+
+    if (current_cpu == "arm") {
+      # behavior similar to *.c.neon in an Android.mk
+      configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
+      cflags = [ "-mfpu=neon" ]
+    } else if (current_cpu == "arm64" && !is_clang) {
+      # avoid an ICE with gcc-4.9: b/15574841
+      cflags = [ "-frename-registers" ]
+    }
+
+    if (is_android) {
+      configs -= [ "//build/config/android:default_cygprofile_instrumentation" ]
+      configs += [ "//build/config/android:no_cygprofile_instrumentation" ]
+    }
+  }
+}  # use_dsp_neon
+
+static_library("libwebp_enc") {
+  sources = [
+    "enc/alpha_enc.c",
+    "enc/analysis_enc.c",
+    "enc/backward_references_enc.c",
+    "enc/config_enc.c",
+    "enc/cost_enc.c",
+    "enc/delta_palettization_enc.c",
+    "enc/filter_enc.c",
+    "enc/frame_enc.c",
+    "enc/histogram_enc.c",
+    "enc/iterator_enc.c",
+    "enc/near_lossless_enc.c",
+    "enc/picture_csp_enc.c",
+    "enc/picture_enc.c",
+    "enc/picture_psnr_enc.c",
+    "enc/picture_rescale_enc.c",
+    "enc/picture_tools_enc.c",
+    "enc/predictor_enc.c",
+    "enc/quant_enc.c",
+    "enc/syntax_enc.c",
+    "enc/token_enc.c",
+    "enc/tree_enc.c",
+    "enc/vp8l_enc.c",
+    "enc/webp_enc.c",
+  ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (set_opt_level) {
+    configs -= [ "//build/config/compiler:default_optimization" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  all_dependent_configs = [ ":libwebp_config" ]
+
+  deps = [
+    ":libwebp_utils",
+  ]
+}
+
+config("libwebp_utils_warnings") {
+  if (is_clang) {
+    # See https://code.google.com/p/webp/issues/detail?id=253.
+    cflags = [ "-Wno-incompatible-pointer-types" ]
+  }
+}
+
+static_library("libwebp_utils") {
+  sources = [
+    "utils/bit_reader_utils.c",
+    "utils/bit_writer_utils.c",
+    "utils/color_cache_utils.c",
+    "utils/filters_utils.c",
+    "utils/huffman_encode_utils.c",
+    "utils/huffman_utils.c",
+    "utils/quant_levels_dec_utils.c",
+    "utils/quant_levels_utils.c",
+    "utils/random_utils.c",
+    "utils/rescaler_utils.c",
+    "utils/thread_utils.c",
+    "utils/utils.c",
+  ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (set_opt_level) {
+    configs -= [ "//build/config/compiler:default_optimization" ]
+    configs += [ "//build/config/compiler:optimize_max" ]
+  }
+
+  all_dependent_configs = [ ":libwebp_config" ]
+
+  public_configs = [ ":libwebp_utils_warnings" ]
+}
+
+group("libwebp") {
+  deps = [
+    ":libwebp_dec",
+    ":libwebp_demux",
+    ":libwebp_dsp",
+    ":libwebp_enc",
+    ":libwebp_utils",
+  ]
+  public_configs = [ ":libwebp_config" ]
+  if (use_dsp_neon) {
+    deps += [ ":libwebp_dsp_neon" ]
+  }
+}
