@@ -1,5 +1,4 @@
 #gyp-make-generator-reenabled
-iridium-elf-productname.patch
 title-bar-default-system.patch-v35
 #third-party-cookies-off-by-default.patch
 #search-credit.patch
@@ -45,6 +44,3 @@ set-rpath-on-chromium-executables.patch
 fix-crashpad-build.patch
 iridium-manpage.patch
 iridium-welcomepage.patch
-iridium-fix-gn.patch
-iridium-fix-fpie.patch
-iridium-fix-vaapi-on-linux.diff
