@@ -249,7 +249,6 @@ ifneq ($(DEB_HOST_ARCH),$(DEB_BUILD_ARCH))
 $(note Cross compiling for $(DEB_HOST_ARCH), from this $(DEB_BUILD_ARCH))
 CROSS_BUILD = PKG_CONFIG_PATH=/usr/lib/$(DEB_HOST_MULTIARCH)/pkgconfig:/usr/$(DEB_HOST_MULTIARCH)/lib/pkgconfig CXX=$(DEB_HOST_GNU_TYPE)-$(CXX)
 else
-<<<<<<< HEAD
 #ifneq (,$(filter 14.04%,$(UBUNTU_DIST)))
 CROSS_BUILD = CC=$(shell which gcc) CXX=$(shell which g++)
 GN_DEFINES += is_clang=false
